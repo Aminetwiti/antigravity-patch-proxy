@@ -130,6 +130,41 @@ async function resolveGoogleIp(hostname: string): Promise<string> {
   });
 }
 
+// ─── Safe Response Helpers ─────────────────────────────────────────────────
+// Guard flag pattern to prevent ERR_HTTP_HEADERS_SENT when timeout and
+// upstream response race. Returns true if the operation succeeded, false if
+// the response was already terminated.
+
+function safeWriteHead(
+  res: http.ServerResponse,
+  status: number,
+  headers?: Record<string, string>,
+): boolean {
+  if (res.headersSent || res.writableEnded) {
+    return false;
+  }
+  try {
+    res.writeHead(status, headers);
+    return true;
+  } catch (err) {
+    log.warn('[Proxy] safeWriteHead failed:', (err as Error).message);
+    return false;
+  }
+}
+
+function safeEnd(res: http.ServerResponse, data?: string | Buffer): boolean {
+  if (res.writableEnded) {
+    return false;
+  }
+  try {
+    res.end(data);
+    return true;
+  } catch (err) {
+    log.warn('[Proxy] safeEnd failed:', (err as Error).message);
+    return false;
+  }
+}
+
 // ─── Model Helpers ────────────────────────────────────────────────────────
 
 // generateModelPlaceholderId and toSlug are now in ./proxy/idGenerator.ts (re-exported above)
@@ -173,23 +208,16 @@ async function proxyToGoogle(req: http.IncomingMessage, res: http.ServerResponse
   };
 
   // Guard flag to prevent ERR_HTTP_HEADERS_SENT when timeout and response race
-  let responseWritten = false;
-  const safeWriteHead = (status: number, headers?: Record<string, string>): boolean => {
-    if (responseWritten || res.headersSent || res.writableEnded) {
-      return false;
-    }
-    responseWritten = true;
-    res.writeHead(status, headers);
-    return true;
-  };
+  const safeHead = (status: number, headers?: Record<string, string>): boolean =>
+    safeWriteHead(res, status, headers);
 
   const proxyReq = https.request(parsedUrl, options, (proxyRes) => {
     // P0-5: Timeout for Google proxy requests (60s)
     proxyReq.setTimeout(60_000, () => {
       log.error('[Proxy] Google proxy request timed out after 60s');
       proxyReq.destroy();
-      if (safeWriteHead(504, { 'Content-Type': 'application/json' })) {
-        res.end(JSON.stringify({ error: { message: 'Google API request timed out' } }));
+      if (safeHead(504, { 'Content-Type': 'application/json' })) {
+        safeEnd(res, JSON.stringify({ error: { message: 'Google API request timed out' } }));
       }
     });
 
@@ -197,7 +225,10 @@ async function proxyToGoogle(req: http.IncomingMessage, res: http.ServerResponse
       const responseChunks: Buffer[] = [];
       proxyRes.on('data', (chunk) => responseChunks.push(chunk));
       proxyRes.on('end', () => {
-        if (responseWritten || res.headersSent || res.writableEnded) return;
+        if (res.headersSent || res.writableEnded) {
+          log.debug('[Proxy] Skipping buffered modify: response already terminated');
+          return;
+        }
         const fullResBody = Buffer.concat(responseChunks);
         let text: string;
         const encoding = proxyRes.headers['content-encoding'];
@@ -236,7 +267,7 @@ async function proxyToGoogle(req: http.IncomingMessage, res: http.ServerResponse
         }
       });
     } else {
-      if (safeWriteHead(proxyRes.statusCode || 200, proxyRes.headers as Record<string, string>)) {
+      if (safeHead(proxyRes.statusCode || 200, proxyRes.headers as Record<string, string>)) {
         proxyRes.pipe(res);
       }
     }
@@ -244,8 +275,8 @@ async function proxyToGoogle(req: http.IncomingMessage, res: http.ServerResponse
 
   proxyReq.on('error', (err) => {
     log.error('[Proxy] Google Forwarding Error:', err);
-    if (safeWriteHead(500, { 'Content-Type': 'application/json' })) {
-      res.end(JSON.stringify({ error: { message: 'Proxy forwarding failed: ' + err.message } }));
+    if (safeWriteHead(res, 500, { 'Content-Type': 'application/json' })) {
+      safeEnd(res, JSON.stringify({ error: { message: 'Proxy forwarding failed: ' + err.message } }));
     }
   });
 
@@ -640,25 +671,35 @@ function handleGetAvailableModelsProxy(
   };
 
   const lsReq = client.request(options, (lsRes) => {
+    let lsResErrored = false;
+    lsRes.on('error', (err) => {
+      lsResErrored = true;
+      log.error('[Proxy] LS error for GetAvailableModels:', err.message);
+      if (!res.headersSent && !res.writableEnded) {
+        safeWriteHead(res, 502);
+        safeEnd(res);
+      }
+    });
+
     const chunks: Buffer[] = [];
     lsRes.on('data', (chunk: Buffer) => chunks.push(chunk));
     lsRes.on('end', () => {
+      // Guard: timeout or error may have already terminated the response
+      if (lsResErrored || res.headersSent || res.writableEnded) {
+        log.debug('[Proxy] GetAvailableModels: skipping end handler (response terminated)');
+        return;
+      }
       const responseBuf = Buffer.concat(chunks);
       const customModels = loadCustomModels();
       const { buffer: modifiedBuf } = injectCustomModelsIntoResponse(responseBuf, customModels);
 
-      res.writeHead(lsRes.statusCode || 200, {
-        'Content-Type': 'application/grpc-web+proto',
-        'Content-Length': String(modifiedBuf.length),
-      });
-      res.end(modifiedBuf);
-    });
-
-    lsRes.on('error', (err) => {
-      log.error('[Proxy] LS error for GetAvailableModels:', err.message);
-      if (!res.headersSent) {
-        res.writeHead(502);
-        res.end();
+      if (
+        safeWriteHead(res, lsRes.statusCode || 200, {
+          'Content-Type': 'application/grpc-web+proto',
+          'Content-Length': String(modifiedBuf.length),
+        })
+      ) {
+        safeEnd(res, modifiedBuf);
       }
     });
   });
@@ -666,17 +707,17 @@ function handleGetAvailableModelsProxy(
   lsReq.setTimeout(30_000, () => {
     log.error('[Proxy] GetAvailableModels forward timed out');
     lsReq.destroy();
-    if (!res.headersSent) {
-      res.writeHead(504);
-      res.end();
+    if (!res.headersSent && !res.writableEnded) {
+      safeWriteHead(res, 504);
+      safeEnd(res);
     }
   });
 
   lsReq.on('error', (err) => {
     log.error('[Proxy] GetAvailableModels forward error:', err.message);
-    if (!res.headersSent) {
-      res.writeHead(502);
-      res.end();
+    if (!res.headersSent && !res.writableEnded) {
+      safeWriteHead(res, 502);
+      safeEnd(res);
     }
   });
 
@@ -794,11 +835,17 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
       };
 
       const googleReq = https.request(parsedUrl, fwdOptions, (googleRes) => {
+        let googleResErrored = false;
+        googleRes.on('error', (err) => {
+          googleResErrored = true;
+          log.error('[Proxy] fetchAvailableModels upstream error:', err.message);
+        });
+
         // P0-5: Timeout for fetchAvailableModels forward request (30s)
         googleReq.setTimeout(30_000, () => {
           log.error('[Proxy] fetchAvailableModels forward request timed out');
           googleReq.destroy();
-          if (!res.headersSent) {
+          if (!res.headersSent && !res.writableEnded) {
             const customModels = loadCustomModels();
             const mappedCustom: Record<string, unknown> = {};
             customModels.forEach((m) => {
@@ -812,14 +859,19 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
                 modelProvider: 'MODEL_PROVIDER_GOOGLE',
               };
             });
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ models: mappedCustom }));
+            safeWriteHead(res, 200, { 'Content-Type': 'application/json' });
+            safeEnd(res, JSON.stringify({ models: mappedCustom }));
           }
         });
 
         let googleBody = '';
         googleRes.on('data', (chunk) => (googleBody += chunk));
         googleRes.on('end', () => {
+          // Guard: timeout or upstream error may have already terminated the response
+          if (googleResErrored || res.headersSent || res.writableEnded) {
+            log.debug('[Proxy] fetchAvailableModels: skipping end handler (response terminated)');
+            return;
+          }
           try {
             log.info(
               `[Proxy] fetchAvailableModels response status: ${googleRes.statusCode}, body length: ${googleBody.length}`,
@@ -968,10 +1020,11 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
               }
             }
 
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(googleJson));
+            safeWriteHead(res, 200, { 'Content-Type': 'application/json' });
+            safeEnd(res, JSON.stringify(googleJson));
           } catch (err) {
             log.error('[Proxy] Parsing fetchAvailableModels failed, returning custom models:', err);
+            if (res.headersSent || res.writableEnded) return;
             const customModels = loadCustomModels();
             const mappedCustom: Record<string, unknown> = {};
             customModels.forEach((m) => {
@@ -985,29 +1038,31 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
                 modelProvider: 'MODEL_PROVIDER_GOOGLE',
               };
             });
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ models: mappedCustom }));
+            safeWriteHead(res, 200, { 'Content-Type': 'application/json' });
+            safeEnd(res, JSON.stringify({ models: mappedCustom }));
           }
         });
       });
 
       googleReq.on('error', (err) => {
         log.error('[Proxy] Forwarding fetchAvailableModels failed:', err);
-        const customModels = loadCustomModels();
-        const mappedCustom: Record<string, unknown> = {};
-        customModels.forEach((m) => {
-          const slug = toSlug(m);
-          mappedCustom[slug] = {
-            displayName: m.displayName,
-            maxTokens: 1048576,
-            maxOutputTokens: 4096,
-            model: generateModelPlaceholderId(m),
-            apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
-            modelProvider: 'MODEL_PROVIDER_GOOGLE',
-          };
-        });
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ models: mappedCustom }));
+        if (!res.headersSent && !res.writableEnded) {
+          const customModels = loadCustomModels();
+          const mappedCustom: Record<string, unknown> = {};
+          customModels.forEach((m) => {
+            const slug = toSlug(m);
+            mappedCustom[slug] = {
+              displayName: m.displayName,
+              maxTokens: 1048576,
+              maxOutputTokens: 4096,
+              model: generateModelPlaceholderId(m),
+              apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
+              modelProvider: 'MODEL_PROVIDER_GOOGLE',
+            };
+          });
+          safeWriteHead(res, 200, { 'Content-Type': 'application/json' });
+          safeEnd(res, JSON.stringify({ models: mappedCustom }));
+        }
       });
 
       if (fullBody && fullBody.length > 0) {
@@ -1048,14 +1103,21 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
       };
 
       const googleReq = https.request(parsedUrl, mdlOptions, (googleRes) => {
+        let googleResErrored = false;
+        googleRes.on('error', (err) => {
+          googleResErrored = true;
+          log.error('[Proxy] Models list upstream error:', err.message);
+        });
+
         // P0-5: Timeout for models list forward request (30s)
         googleReq.setTimeout(30_000, () => {
           log.error('[Proxy] Models list forward request timed out');
           googleReq.destroy();
-          if (!res.headersSent) {
+          if (!res.headersSent && !res.writableEnded) {
             const customModels = loadCustomModels();
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(
+            safeWriteHead(res, 200, { 'Content-Type': 'application/json' });
+            safeEnd(
+              res,
               JSON.stringify({
                 models: customModels.map((m) => ({
                   name: m.name,
@@ -1071,6 +1133,11 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
         let googleBody = '';
         googleRes.on('data', (chunk) => (googleBody += chunk));
         googleRes.on('end', () => {
+          // Guard: timeout or upstream error may have already terminated the response
+          if (googleResErrored || res.headersSent || res.writableEnded) {
+            log.debug('[Proxy] Models list: skipping end handler (response terminated)');
+            return;
+          }
           try {
             const googleJson = JSON.parse(googleBody) as { models?: unknown[] };
             const customModels = loadCustomModels();
@@ -1094,10 +1161,11 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
               googleJson.models = mappedCustom;
             }
 
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(googleJson));
+            safeWriteHead(res, 200, { 'Content-Type': 'application/json' });
+            safeEnd(res, JSON.stringify(googleJson));
           } catch (err) {
             log.error('[Proxy] Google list models failed, returning custom models list only:', err);
+            if (res.headersSent || res.writableEnded) return;
             const customModels = loadCustomModels();
             const mappedCustom = customModels.map((m) => ({
               name: 'models/' + generateModelPlaceholderId(m),
@@ -1108,26 +1176,29 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
               outputTokenLimit: 4096,
               supportedGenerationMethods: ['generateContent', 'countTokens'],
             }));
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ models: mappedCustom }));
+            safeWriteHead(res, 200, { 'Content-Type': 'application/json' });
+            safeEnd(res, JSON.stringify({ models: mappedCustom }));
           }
         });
       });
 
       googleReq.on('error', (err) => {
         log.error('[Proxy] Google models list request error:', err);
-        const customModels = loadCustomModels();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            models: customModels.map((m) => ({
-              name: m.name,
-              displayName: m.displayName,
-              description: m.description,
-              supportedGenerationMethods: ['generateContent'],
-            })),
-          }),
-        );
+        if (!res.headersSent && !res.writableEnded) {
+          const customModels = loadCustomModels();
+          safeWriteHead(res, 200, { 'Content-Type': 'application/json' });
+          safeEnd(
+            res,
+            JSON.stringify({
+              models: customModels.map((m) => ({
+                name: m.name,
+                displayName: m.displayName,
+                description: m.description,
+                supportedGenerationMethods: ['generateContent'],
+              })),
+            }),
+          );
+        }
       });
       googleReq.end();
       return;

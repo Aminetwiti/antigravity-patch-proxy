@@ -117,15 +117,82 @@ export const CONTENT_TYPES = {
 } as const;
 
 // ─── Provider Names ───────────────────────────────────────────────────────
+// Single source of truth for all supported providers.
 
 export const PROVIDERS = {
-  GOOGLE: 'google',
   OPENAI: 'openai',
-  ANTHROPIC: 'anthropic',
   OLLAMA: 'ollama',
-  CUSTOM: 'custom',
   OPENROUTER: 'openrouter',
+  CUSTOM: 'custom',
+  GROQ: 'groq',
+  MISTRAL: 'mistral',
+  CEREBRAS: 'cerebras',
+  NVIDIA: 'nvidia',
+  OPENCODE: 'opencode',
+  CODESTRAL: 'codestral',
+  // Anthropic-compatible transport
+  ANTHROPIC: 'anthropic',
+  DEEPSEEK: 'deepseek',
+  KIMI: 'kimi',
+  FIREWORKS: 'fireworks',
+  LMSTUDIO: 'lmstudio',
+  LLAMACPP: 'llamacpp',
+  WAFER: 'wafer',
+  ZAI: 'zai',
+  // Native
+  GOOGLE: 'google',
 } as const;
 
-/** Providers that use OpenAI-compatible API format. */
-export const OPENAI_COMPATIBLE_PROVIDERS = [PROVIDERS.OPENAI, PROVIDERS.CUSTOM, PROVIDERS.OPENROUTER] as const;
+export type ProviderName = (typeof PROVIDERS)[keyof typeof PROVIDERS];
+
+/** All provider names as an array, useful for validation. */
+export const ALL_PROVIDERS: readonly ProviderName[] = Object.values(PROVIDERS);
+
+/** Providers that use OpenAI-compatible API format (chat/completions). */
+export const OPENAI_COMPATIBLE_PROVIDERS = [
+  PROVIDERS.OPENAI,
+  PROVIDERS.CUSTOM,
+  PROVIDERS.OPENROUTER,
+] as const;
+
+/** Providers that require an API key for authentication. */
+export const PROVIDERS_REQUIRING_API_KEY: readonly ProviderName[] = [
+  PROVIDERS.OPENAI,
+  PROVIDERS.ANTHROPIC,
+  PROVIDERS.OPENROUTER,
+  PROVIDERS.GOOGLE,
+  PROVIDERS.DEEPSEEK,
+  PROVIDERS.GROQ,
+  PROVIDERS.MISTRAL,
+  PROVIDERS.CEREBRAS,
+  PROVIDERS.KIMI,
+  PROVIDERS.FIREWORKS,
+  PROVIDERS.NVIDIA,
+  PROVIDERS.OPENCODE,
+  PROVIDERS.CODESTRAL,
+  PROVIDERS.WAFER,
+  PROVIDERS.ZAI,
+];
+
+/** Default API URLs per provider. Override per-model via apiUrl in custom_models.json. */
+export const PROVIDER_DEFAULT_URLS: Record<ProviderName, string> = {
+  [PROVIDERS.OPENAI]: 'https://api.openai.com/v1/chat/completions',
+  [PROVIDERS.ANTHROPIC]: 'https://api.anthropic.com/v1/messages',
+  [PROVIDERS.OPENROUTER]: 'https://openrouter.ai/api/v1/chat/completions',
+  [PROVIDERS.OLLAMA]: 'http://localhost:11434/v1/chat/completions',
+  [PROVIDERS.GOOGLE]: 'https://generativelanguage.googleapis.com/v1beta/models/',
+  [PROVIDERS.CUSTOM]: '',
+  [PROVIDERS.DEEPSEEK]: 'https://api.deepseek.com/anthropic',
+  [PROVIDERS.GROQ]: 'https://api.groq.com/openai/v1',
+  [PROVIDERS.MISTRAL]: 'https://api.mistral.ai/v1',
+  [PROVIDERS.CEREBRAS]: 'https://api.cerebras.ai/v1',
+  [PROVIDERS.KIMI]: 'https://api.moonshot.ai/anthropic/v1',
+  [PROVIDERS.FIREWORKS]: 'https://api.fireworks.ai/inference/v1',
+  [PROVIDERS.LMSTUDIO]: 'http://localhost:1234/v1',
+  [PROVIDERS.LLAMACPP]: 'http://localhost:8080/v1',
+  [PROVIDERS.NVIDIA]: 'https://integrate.api.nvidia.com/v1',
+  [PROVIDERS.OPENCODE]: '',
+  [PROVIDERS.CODESTRAL]: '',
+  [PROVIDERS.WAFER]: '',
+  [PROVIDERS.ZAI]: '',
+};
