@@ -29,3 +29,4 @@ logs/*.txt
 # Local build artifacts
 archive/
 .kimchi/*
+ag-doctor/dist/*

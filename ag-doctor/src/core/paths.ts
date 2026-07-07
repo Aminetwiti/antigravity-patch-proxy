@@ -60,9 +60,9 @@ export function getLanguageServerBinary(installDir?: string): string | null {
   if (!dir) return null;
   const platform = getPlatform();
   if (platform === 'win32') {
-    return path.join(dir, 'resources', 'language_server.exe');
+    return path.join(dir, 'resources', 'bin', 'language_server.exe');
   }
-  return path.join(dir, 'resources', 'language_server');
+  return path.join(dir, 'resources', 'bin', 'language_server');
 }
 
 /** Path to the backup of the original (unpatched) language server binary. */

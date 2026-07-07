@@ -11,7 +11,7 @@ export interface CheckResult {
   message: string;
   details?: string;
   fixable?: boolean;
-  data?: Record<string, unknown>;
+  data?: unknown;
 }
 
 export interface CustomModel {
