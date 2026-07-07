@@ -1,0 +1,734 @@
+{
+  "log": {
+    "version": "1.2",
+    "creator": {
+      "name": "WebInspector",
+      "version": "537.36"
+    },
+    "pages": [],
+    "entries": [
+      {
+        "_connectionId": "22",
+        "_initiator": {
+          "type": "script",
+          "stack": {
+            "callFrames": [
+              {
+                "functionName": "next",
+                "scriptId": "13",
+                "url": "https://127.0.0.1:65473/main.js",
+                "lineNumber": 7798,
+                "columnNumber": 462
+              },
+              {
+                "functionName": "",
+                "scriptId": "13",
+                "url": "https://127.0.0.1:65473/main.js",
+                "lineNumber": 10875,
+                "columnNumber": 454
+              },
+              {
+                "functionName": "BA",
+                "scriptId": "13",
+                "url": "https://127.0.0.1:65473/main.js",
+                "lineNumber": 4392,
+                "columnNumber": 1722
+              },
+              {
+                "functionName": "unary",
+                "scriptId": "13",
+                "url": "https://127.0.0.1:65473/main.js",
+                "lineNumber": 7798,
+                "columnNumber": 203
+              },
+              {
+                "functionName": "",
+                "scriptId": "13",
+                "url": "https://127.0.0.1:65473/main.js",
+                "lineNumber": 4387,
+                "columnNumber": 432
+              },
+              {
+                "functionName": "Dma.b.<computed>",
+                "scriptId": "13",
+                "url": "https://127.0.0.1:65473/main.js",
+                "lineNumber": 4342,
+                "columnNumber": 42
+              }
+            ],
+            "parent": {
+              "description": "await",
+              "callFrames": [
+                {
+                  "functionName": "",
+                  "scriptId": "13",
+                  "url": "https://127.0.0.1:65473/main.js",
+                  "lineNumber": 4342,
+                  "columnNumber": 954
+                },
+                {
+                  "functionName": "",
+                  "scriptId": "13",
+                  "url": "https://127.0.0.1:65473/main.js",
+                  "lineNumber": 4342,
+                  "columnNumber": 257
+                },
+                {
+                  "functionName": "h",
+                  "scriptId": "13",
+                  "url": "https://127.0.0.1:65473/main.js",
+                  "lineNumber": 4342,
+                  "columnNumber": 920
+                },
+                {
+                  "functionName": "sendUserCascadeMessage",
+                  "scriptId": "13",
+                  "url": "https://127.0.0.1:65473/main.js",
+                  "lineNumber": 4345,
+                  "columnNumber": 318
+                },
+                {
+                  "functionName": "sendUserCascadeMessage",
+                  "scriptId": "13",
+                  "url": "https://127.0.0.1:65473/main.js",
+                  "lineNumber": 4365,
+                  "columnNumber": 145
+                },
+                {
+                  "functionName": "vwa.has.c.<computed>",
+                  "scriptId": "13",
+                  "url": "https://127.0.0.1:65473/main.js",
+                  "lineNumber": 5870,
+                  "columnNumber": 812
+                },
+                {
+                  "functionName": "",
+                  "scriptId": "13",
+                  "url": "https://127.0.0.1:65473/main.js",
+                  "lineNumber": 9428,
+                  "columnNumber": 262
+                }
+              ],
+              "parent": {
+                "description": "await",
+                "callFrames": [
+                  {
+                    "functionName": "",
+                    "scriptId": "13",
+                    "url": "https://127.0.0.1:65473/main.js",
+                    "lineNumber": 9493,
+                    "columnNumber": 331
+                  },
+                  {
+                    "functionName": "",
+                    "scriptId": "13",
+                    "url": "https://127.0.0.1:65473/main.js",
+                    "lineNumber": 9753,
+                    "columnNumber": 245
+                  },
+                  {
+                    "functionName": "",
+                    "scriptId": "13",
+                    "url": "https://127.0.0.1:65473/main.js",
+                    "lineNumber": 9617,
+                    "columnNumber": 331
+                  },
+                  {
+                    "functionName": "",
+                    "scriptId": "13",
+                    "url": "https://127.0.0.1:65473/main.js",
+                    "lineNumber": 9618,
+                    "columnNumber": 312
+                  },
+                  {
+                    "functionName": "",
+                    "scriptId": "13",
+                    "url": "https://127.0.0.1:65473/main.js",
+                    "lineNumber": 7773,
+                    "columnNumber": 393
+                  },
+                  {
+                    "functionName": "",
+                    "scriptId": "13",
+                    "url": "https://127.0.0.1:65473/main.js",
+                    "lineNumber": 7692,
+                    "columnNumber": 315
+                  },
+                  {
+                    "functionName": "",
+                    "scriptId": "13",
+                    "url": "https://127.0.0.1:65473/main.js",
+                    "lineNumber": 5090,
+                    "columnNumber": 422
+                  },
+                  {
+                    "functionName": "uD",
+                    "scriptId": "13",
+                    "url": "https://127.0.0.1:65473/main.js",
+                    "lineNumber": 5094,
+                    "columnNumber": 469
+                  },
+                  {
+                    "functionName": "EH",
+                    "scriptId": "13",
+                    "url": "https://127.0.0.1:65473/main.js",
+                    "lineNumber": 5090,
+                    "columnNumber": 394
+                  },
+                  {
+                    "functionName": "GD",
+                    "scriptId": "13",
+                    "url": "https://127.0.0.1:65473/main.js",
+                    "lineNumber": 5111,
+                    "columnNumber": 330
+                  },
+                  {
+                    "functionName": "joa",
+                    "scriptId": "13",
+                    "url": "https://127.0.0.1:65473/main.js",
+                    "lineNumber": 4974,
+                    "columnNumber": 219
+                  },
+                  {
+                    "functionName": "",
+                    "scriptId": "13",
+                    "url": "https://127.0.0.1:65473/main.js",
+                    "lineNumber": 5090,
+                    "columnNumber": 422
+                  },
+                  {
+                    "functionName": "tD",
+                    "scriptId": "13",
+                    "url": "https://127.0.0.1:65473/main.js",
+                    "lineNumber": 5093,
+                    "columnNumber": 49
+                  },
+                  {
+                    "functionName": "uD",
+                    "scriptId": "13",
+                    "url": "https://127.0.0.1:65473/main.js",
+                    "lineNumber": 5094,
+                    "columnNumber": 473
+                  },
+                  {
+                    "functionName": "EH",
+                    "scriptId": "13",
+                    "url": "https://127.0.0.1:65473/main.js",
+                    "lineNumber": 5090,
+                    "columnNumber": 394
+                  },
+                  {
+                    "functionName": "GD",
+                    "scriptId": "13",
+                    "url": "https://127.0.0.1:65473/main.js",
+                    "lineNumber": 5111,
+                    "columnNumber": 330
+                  },
+                  {
+                    "functionName": "roa",
+                    "scriptId": "13",
+                    "url": "https://127.0.0.1:65473/main.js",
+                    "lineNumber": 4972,
+                    "columnNumber": 128
+                  },
+                  {
+                    "functionName": "k._lexicalHandled",
+                    "scriptId": "13",
+                    "url": "https://127.0.0.1:65473/main.js",
+                    "lineNumber": 4978,
+                    "columnNumber": 305
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "_priority": "High",
+        "_resourceType": "fetch",
+        "cache": {},
+        "connection": "65473",
+        "request": {
+          "method": "POST",
+          "url": "https://127.0.0.1:65473/exa.language_server_pb.LanguageServerService/SendUserCascadeMessage",
+          "httpVersion": "http/2.0",
+          "headers": [
+            {
+              "name": ":authority",
+              "value": "127.0.0.1:65473"
+            },
+            {
+              "name": ":method",
+              "value": "POST"
+            },
+            {
+              "name": ":path",
+              "value": "/exa.language_server_pb.LanguageServerService/SendUserCascadeMessage"
+            },
+            {
+              "name": ":scheme",
+              "value": "https"
+            },
+            {
+              "name": "accept",
+              "value": "*/*"
+            },
+            {
+              "name": "accept-encoding",
+              "value": "gzip, deflate, br, zstd"
+            },
+            {
+              "name": "accept-language",
+              "value": "fr"
+            },
+            {
+              "name": "content-length",
+              "value": "5204"
+            },
+            {
+              "name": "content-type",
+              "value": "application/grpc-web+json"
+            },
+            {
+              "name": "origin",
+              "value": "https://127.0.0.1:65473"
+            },
+            {
+              "name": "priority",
+              "value": "u=1, i"
+            },
+            {
+              "name": "referer",
+              "value": "https://127.0.0.1:65473/c/b0d32e35-a5c9-47ce-8188-75881ef5a836?section=abfaaca3-e38d-4654-8bac-d769224781b0"
+            },
+            {
+              "name": "sec-ch-ua",
+              "value": "\"Not-A.Brand\";v=\"24\", \"Chromium\";v=\"146\""
+            },
+            {
+              "name": "sec-ch-ua-mobile",
+              "value": "?0"
+            },
+            {
+              "name": "sec-ch-ua-platform",
+              "value": "\"Windows\""
+            },
+            {
+              "name": "sec-fetch-dest",
+              "value": "empty"
+            },
+            {
+              "name": "sec-fetch-mode",
+              "value": "cors"
+            },
+            {
+              "name": "sec-fetch-site",
+              "value": "same-origin"
+            },
+            {
+              "name": "user-agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Antigravity/2.0.1 Chrome/146.0.7680.72 Electron/41.0.2 Safari/537.36"
+            },
+            {
+              "name": "x-codeium-csrf-token",
+              "value": "c30e7974-0895-4302-9ca8-7e64000f5ec6"
+            },
+            {
+              "name": "x-grpc-web",
+              "value": "1"
+            },
+            {
+              "name": "x-user-agent",
+              "value": "CONNECT_ES_USER_AGENT"
+            }
+          ],
+          "queryString": [],
+          "cookies": [],
+          "headersSize": -1,
+          "bodySize": 5204,
+          "postData": {
+            "mimeType": "application/grpc-web+json",
+            "text": "\u0000\u0000\u0000\u0014O{\"cascadeId\":\"b0d32e35-a5c9-47ce-8188-75881ef5a836\",\"items\":[{\"text\":\"hi\"}],\"cascadeConfig\":{\"plannerConfig\":{\"conversational\":{\"plannerMode\":\"CONVERSATIONAL_PLANNER_MODE_DEFAULT\",\"agenticMode\":true},\"toolConfig\":{\"runCommand\":{\"autoCommandConfig\":{\"autoExecutionPolicy\":\"CASCADE_COMMANDS_AUTO_EXECUTION_PROCEED_IN_SANDBOX\"},\"enableTerminalSandbox\":false},\"antigravityBrowser\":{\"browserJsExecutionPolicy\":\"BROWSER_JS_EXECUTION_POLICY_ALWAYS_ASK\"},\"notifyUser\":{\"artifactReviewMode\":\"ARTIFACT_REVIEW_MODE_ALWAYS\"},\"permissionConfig\":{\"enterpriseConfig\":{\"enforceWorkspaceValidation\":false},\"effectiveGrants\":{\"allow\":[\"command(Select-String -Path \\\"c:\\\\Users\\\\amine\\\\OmniRoute\\\\src\\\\shared\\\\constants\\\\providers.ts\\\" -Pattern \\\"PROVIDERS\\\\s*=\\\" -CaseSensitive:$false | Select-Object -Last 10)\",\"command(npm run build 2>&1 | tail -5)\",\"command(npm run)\",\"command($headers = @{ \\\"Content-Type\\\" = \\\"application/json\\\"; \\\"Authorization\\\" = \\\"Bearer castai_v1_9461ce88249f637ccd03b971227eb5f4126f2fd03e61c05f588c41f497ddb65e_20608230\\\"; \\\"user-agent\\\" = \\\"kimchi/0.1.50\\\"; \\\"x-stainless-arch\\\" = \\\"x64\\\"; \\\"x-stainless-lang\\\" = \\\"js\\\"; \\\"x-stainless-os\\\" = \\\"Windows\\\"; \\\"x-stainless-package-version\\\" = \\\"6.26.0\\\"; \\\"x-stainless-retry-count\\\" = \\\"0\\\"; \\\"x-stainless-runtime\\\" = \\\"node\\\"; \\\"x-stainless-runtime-version\\\" = \\\"v24.3.0\\\"; \\\"x-stainless-timeout\\\" = \\\"300\\\"; \\\"Accept\\\" = \\\"application/json\\\" }; $body = @{ model = \\\"kimi-k2.7\\\"; messages = @(@{ role = \\\"user\\\"; content = \\\"Say hello in 5 words max.\\\" }); stream = $false; max_tokens = 50 } | ConvertTo-Json; $resp = Invoke-WebRequest -Uri \\\"https://llm.kimchi.dev/openai/v1/chat/completions\\\" -Method POST -Headers $headers -Body $body -TimeoutSec 30; Write-Host \\\"Status: $($resp.StatusCode)\\\"; $resp.Content | ConvertFrom-Json | ConvertTo-Json -Depth 5)\",\"command($headers = @{ \\\"Content-Type\\\" = \\\"application/json\\\"; \\\"Authorization\\\" = \\\"Bearer castai_v1_9461ce88249f637ccd03b971227eb5f4126f2fd03e61c05f588c41f497ddb65e_20608230\\\"; \\\"user-agent\\\" = \\\"kimchi/0.1.50\\\"; \\\"x-stainless-arch\\\" = \\\"x64\\\"; \\\"x-stainless-lang\\\" = \\\"js\\\"; \\\"x-stainless-os\\\" = \\\"Windows\\\"; \\\"x-stainless-package-version\\\" = \\\"6.26.0\\\"; \\\"x-stainless-retry-count\\\" = \\\"0\\\"; \\\"x-stainless-runtime\\\" = \\\"node\\\"; \\\"x-stainless-runtime-version\\\" = \\\"v24.3.0\\\"; \\\"x-stainless-timeout\\\" = \\\"300\\\"; \\\"Accept\\\" = \\\"text/event-stream\\\" }; $body = @{ model = \\\"kimi-k2.7\\\"; messages = @(@{ role = \\\"user\\\"; content = \\\"Say hi.\\\" }); stream = $true } | ConvertTo-Json; try { $resp = Invoke-WebRequest -Uri \\\"https://llm.kimchi.dev/openai/v1/chat/completions\\\" -Method POST -Headers $headers -Body $body -TimeoutSec 15; Write-Host \\\"Status: $($resp.StatusCode)\\\"; Write-Host $resp.Content } catch { Write-Host \\\"Error: $($_.Exception.Message)\\\" })\",\"command(npm run)\",\"command(Start-Sleep -Seconds 6; node --import tsx/esm --test tests/integration/kimchi-e2e.test.ts 2>&1)\",\"command(node --import tsx/esm --test tests/integration/kimchi-e2e\\\\.test\\\\.ts 2>&1)\",\"command($r = Invoke-WebRequest -Uri \\\"http://localhost:20128/api/v1/chat/completions\\\" -Method POST -Headers @{\\\"Content-Type\\\"=\\\"application/json\\\";\\\"Authorization\\\"=\\\"Bearer sk-8535c065351998d0-e35f57-612b719e\\\";\\\"x-connection-id\\\"=\\\"kimchi\\\"} -Body '{\\\"model\\\":\\\"kimchi/kimi-k2.7\\\",\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"hi\\\"}],\\\"stream\\\":false,\\\"max_tokens\\\":10}' -TimeoutSec 30 -ErrorAction SilentlyContinue; Write-Host \\\"STATUS:\\\" $r.StatusCode; Write-Host \\\"BODY:\\\" $r.Content)\",\"command(try \\\\{ \\\\$r = Invoke-WebRequest -Uri \\\"http://localhost:20128/api/v1/chat/completions\\\" -Method POST -Headers @\\\\{\\\"Content-Type\\\"=\\\"application/json\\\";\\\"Authorization\\\"=\\\"Bearer sk-8535c065351998d0-e35f57-612b719e\\\";\\\"x-connection-id\\\"=\\\"kimchi\\\"\\\\} -Body '\\\\{\\\"model\\\":\\\"kimchi/kimi-k2\\\\.7\\\",\\\"messages\\\":\\\\[\\\\{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"hi\\\"\\\\}\\\\],\\\"stream\\\":false,\\\"max_tokens\\\":10\\\\}' -TimeoutSec 30 \\\\} catch \\\\{ \\\\$r = \\\\$_\\\\.Exception\\\\.Response \\\\}; \\\\$stream = \\\\$r\\\\.GetResponseStream\\\\(\\\\); \\\\$reader = New-Object System\\\\.IO\\\\.StreamReader\\\\(\\\\$stream\\\\); \\\\$body = \\\\$reader\\\\.ReadToEnd\\\\(\\\\); Write-Host \\\"STATUS:\\\" \\\\(\\\\[int\\\\]\\\\$r\\\\.StatusCode\\\\); Write-Host \\\"BODY:\\\" \\\\$body)\",\"command($r = Invoke-RestMethod -Uri \\\"http://localhost:20128/api/v1/chat/completions\\\" -Method POST -Headers @{\\\"Content-Type\\\"=\\\"application/json\\\";\\\"Authorization\\\"=\\\"Bearer sk-8535c065351998d0-e35f57-612b719e\\\";\\\"x-connection-id\\\"=\\\"kimchi\\\"} -Body '{\\\"model\\\":\\\"kimchi/kimi-k2.7\\\",\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"hi\\\"}],\\\"stream\\\":false,\\\"max_tokens\\\":10}' -TimeoutSec 30 -StatusCodeVariable sc -SkipHttpErrorCheck; Write-Host \\\"STATUS: $sc\\\"; $r | ConvertTo-Json -Depth 5)\",\"command(netstat -ano | findstr :20128 | Select-String \\\"LISTENING\\\")\",\"command($procs = netstat -ano | Select-String \\\":20128\\\"; Write-Host $procs)\",\"command(Stop-Process -Id 28332 -Force; Start-Sleep -Seconds 2; Write-Host \\\"Killed PID 28332\\\")\",\"read_file(*)\",\"write_file(*)\"]},\"defaultGrants\":{\"allow\":[\"command(*)\"],\"ask\":[\"read_url(*)\",\"mcp(chrome_devtools/evaluate_script)\"]}}},\"requestedModel\":{\"model\":\"MODEL_PLACEHOLDER_M546\"},\"knowledgeConfig\":{},\"useAiCredits\":false},\"conversationHistoryConfig\":{}}}"
+          }
+        },
+        "response": {
+          "status": 200,
+          "statusText": "",
+          "httpVersion": "http/2.0",
+          "headers": [
+            {
+              "name": "access-control-allow-credentials",
+              "value": "true"
+            },
+            {
+              "name": "access-control-allow-origin",
+              "value": "https://127.0.0.1:65473"
+            },
+            {
+              "name": "access-control-expose-headers",
+              "value": "Content-Length"
+            },
+            {
+              "name": "content-type",
+              "value": "application/grpc-web+json"
+            },
+            {
+              "name": "date",
+              "value": "Mon, 06 Jul 2026 16:42:15 GMT"
+            },
+            {
+              "name": "grpc-accept-encoding",
+              "value": "gzip"
+            },
+            {
+              "name": "vary",
+              "value": "Origin"
+            }
+          ],
+          "cookies": [],
+          "content": {
+            "size": 28,
+            "mimeType": "application/grpc-web+json"
+          },
+          "redirectURL": "",
+          "headersSize": -1,
+          "bodySize": -1,
+          "_transferSize": 72,
+          "_error": null,
+          "_fetchedViaServiceWorker": false
+        },
+        "serverIPAddress": "127.0.0.1",
+        "startedDateTime": "2026-07-06T16:42:15.622Z",
+        "time": 121.59599999995407,
+        "timings": {
+          "blocked": 4.7690000005876065,
+          "dns": -1,
+          "ssl": -1,
+          "connect": -1,
+          "send": 0.45799999999999996,
+          "wait": 115.10799999993539,
+          "receive": 1.2609999994310783,
+          "_blocked_queueing": 4.045000000587606,
+          "_workerStart": -1,
+          "_workerReady": -1,
+          "_workerFetchStart": -1,
+          "_workerRespondWithSettled": -1
+        }
+      },
+      {
+        "_connectionId": "22",
+        "_initiator": {
+          "type": "script",
+          "stack": {
+            "callFrames": [
+              {
+                "functionName": "next",
+                "scriptId": "13",
+                "url": "https://127.0.0.1:65473/main.js",
+                "lineNumber": 7798,
+                "columnNumber": 462
+              },
+              {
+                "functionName": "",
+                "scriptId": "13",
+                "url": "https://127.0.0.1:65473/main.js",
+                "lineNumber": 10875,
+                "columnNumber": 454
+              },
+              {
+                "functionName": "BA",
+                "scriptId": "13",
+                "url": "https://127.0.0.1:65473/main.js",
+                "lineNumber": 4392,
+                "columnNumber": 1722
+              },
+              {
+                "functionName": "unary",
+                "scriptId": "13",
+                "url": "https://127.0.0.1:65473/main.js",
+                "lineNumber": 7798,
+                "columnNumber": 203
+              },
+              {
+                "functionName": "",
+                "scriptId": "13",
+                "url": "https://127.0.0.1:65473/main.js",
+                "lineNumber": 4387,
+                "columnNumber": 432
+              },
+              {
+                "functionName": "Dma.b.<computed>",
+                "scriptId": "13",
+                "url": "https://127.0.0.1:65473/main.js",
+                "lineNumber": 4342,
+                "columnNumber": 42
+              }
+            ],
+            "parent": {
+              "description": "await",
+              "callFrames": [
+                {
+                  "functionName": "",
+                  "scriptId": "13",
+                  "url": "https://127.0.0.1:65473/main.js",
+                  "lineNumber": 4353,
+                  "columnNumber": 193
+                },
+                {
+                  "functionName": "",
+                  "scriptId": "13",
+                  "url": "https://127.0.0.1:65473/main.js",
+                  "lineNumber": 4342,
+                  "columnNumber": 225
+                },
+                {
+                  "functionName": "getTurnDiff",
+                  "scriptId": "13",
+                  "url": "https://127.0.0.1:65473/main.js",
+                  "lineNumber": 4353,
+                  "columnNumber": 186
+                },
+                {
+                  "functionName": "getTurnDiff",
+                  "scriptId": "13",
+                  "url": "https://127.0.0.1:65473/main.js",
+                  "lineNumber": 4368,
+                  "columnNumber": 339
+                },
+                {
+                  "functionName": "vwa.has.c.<computed>",
+                  "scriptId": "13",
+                  "url": "https://127.0.0.1:65473/main.js",
+                  "lineNumber": 5870,
+                  "columnNumber": 812
+                },
+                {
+                  "functionName": "ensureFetched",
+                  "scriptId": "13",
+                  "url": "https://127.0.0.1:65473/main.js",
+                  "lineNumber": 7439,
+                  "columnNumber": 313
+                },
+                {
+                  "functionName": "",
+                  "scriptId": "13",
+                  "url": "https://127.0.0.1:65473/main.js",
+                  "lineNumber": 7438,
+                  "columnNumber": 822
+                },
+                {
+                  "functionName": "hc",
+                  "scriptId": "13",
+                  "url": "https://127.0.0.1:65473/main.js",
+                  "lineNumber": 4117,
+                  "columnNumber": 238
+                },
+                {
+                  "functionName": "jh",
+                  "scriptId": "13",
+                  "url": "https://127.0.0.1:65473/main.js",
+                  "lineNumber": 4154,
+                  "columnNumber": 136
+                },
+                {
+                  "functionName": "",
+                  "scriptId": "13",
+                  "url": "https://127.0.0.1:65473/main.js",
+                  "lineNumber": 4150,
+                  "columnNumber": 318
+                },
+                {
+                  "functionName": "Hb",
+                  "scriptId": "13",
+                  "url": "https://127.0.0.1:65473/main.js",
+                  "lineNumber": 2721,
+                  "columnNumber": 332
+                },
+                {
+                  "functionName": "Gc",
+                  "scriptId": "13",
+                  "url": "https://127.0.0.1:65473/main.js",
+                  "lineNumber": 2726,
+                  "columnNumber": 85
+                }
+              ],
+              "parentId": {
+                "id": "35",
+                "debuggerId": "-855603210546226393.-3919397417518456467"
+              }
+            }
+          }
+        },
+        "_priority": "High",
+        "_resourceType": "fetch",
+        "cache": {},
+        "connection": "65473",
+        "request": {
+          "method": "POST",
+          "url": "https://127.0.0.1:65473/exa.language_server_pb.LanguageServerService/GetTurnDiff",
+          "httpVersion": "http/2.0",
+          "headers": [
+            {
+              "name": ":authority",
+              "value": "127.0.0.1:65473"
+            },
+            {
+              "name": ":method",
+              "value": "POST"
+            },
+            {
+              "name": ":path",
+              "value": "/exa.language_server_pb.LanguageServerService/GetTurnDiff"
+            },
+            {
+              "name": ":scheme",
+              "value": "https"
+            },
+            {
+              "name": "accept",
+              "value": "*/*"
+            },
+            {
+              "name": "accept-encoding",
+              "value": "gzip, deflate, br, zstd"
+            },
+            {
+              "name": "accept-language",
+              "value": "fr"
+            },
+            {
+              "name": "content-length",
+              "value": "76"
+            },
+            {
+              "name": "content-type",
+              "value": "application/grpc-web+json"
+            },
+            {
+              "name": "origin",
+              "value": "https://127.0.0.1:65473"
+            },
+            {
+              "name": "priority",
+              "value": "u=1, i"
+            },
+            {
+              "name": "referer",
+              "value": "https://127.0.0.1:65473/c/b0d32e35-a5c9-47ce-8188-75881ef5a836?section=abfaaca3-e38d-4654-8bac-d769224781b0"
+            },
+            {
+              "name": "sec-ch-ua",
+              "value": "\"Not-A.Brand\";v=\"24\", \"Chromium\";v=\"146\""
+            },
+            {
+              "name": "sec-ch-ua-mobile",
+              "value": "?0"
+            },
+            {
+              "name": "sec-ch-ua-platform",
+              "value": "\"Windows\""
+            },
+            {
+              "name": "sec-fetch-dest",
+              "value": "empty"
+            },
+            {
+              "name": "sec-fetch-mode",
+              "value": "cors"
+            },
+            {
+              "name": "sec-fetch-site",
+              "value": "same-origin"
+            },
+            {
+              "name": "user-agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Antigravity/2.0.1 Chrome/146.0.7680.72 Electron/41.0.2 Safari/537.36"
+            },
+            {
+              "name": "x-codeium-csrf-token",
+              "value": "c30e7974-0895-4302-9ca8-7e64000f5ec6"
+            },
+            {
+              "name": "x-grpc-web",
+              "value": "1"
+            },
+            {
+              "name": "x-user-agent",
+              "value": "CONNECT_ES_USER_AGENT"
+            }
+          ],
+          "queryString": [],
+          "cookies": [],
+          "headersSize": -1,
+          "bodySize": 76,
+          "postData": {
+            "mimeType": "application/grpc-web+json",
+            "text": "\u0000\u0000\u0000\u0000G{\"conversationId\":\"b0d32e35-a5c9-47ce-8188-75881ef5a836\",\"stepIndex\":7}"
+          }
+        },
+        "response": {
+          "status": 200,
+          "statusText": "",
+          "httpVersion": "http/2.0",
+          "headers": [
+            {
+              "name": "access-control-allow-credentials",
+              "value": "true"
+            },
+            {
+              "name": "access-control-allow-origin",
+              "value": "https://127.0.0.1:65473"
+            },
+            {
+              "name": "access-control-expose-headers",
+              "value": "Content-Length"
+            },
+            {
+              "name": "content-type",
+              "value": "application/grpc-web+json"
+            },
+            {
+              "name": "date",
+              "value": "Mon, 06 Jul 2026 16:42:18 GMT"
+            },
+            {
+              "name": "grpc-accept-encoding",
+              "value": "gzip"
+            },
+            {
+              "name": "vary",
+              "value": "Origin"
+            }
+          ],
+          "cookies": [],
+          "content": {
+            "size": 130,
+            "mimeType": "application/grpc-web+json"
+          },
+          "redirectURL": "",
+          "headersSize": -1,
+          "bodySize": -1,
+          "_transferSize": 197,
+          "_error": null,
+          "_fetchedViaServiceWorker": false
+        },
+        "serverIPAddress": "127.0.0.1",
+        "startedDateTime": "2026-07-06T16:42:17.804Z",
+        "time": 464.2919999996593,
+        "timings": {
+          "blocked": 20.392999999545804,
+          "dns": -1,
+          "ssl": -1,
+          "connect": -1,
+          "send": 0.536,
+          "wait": 442.4159999996623,
+          "receive": 0.9470000004512258,
+          "_blocked_queueing": 19.091999999545806,
+          "_workerStart": -1,
+          "_workerReady": -1,
+          "_workerFetchStart": -1,
+          "_workerRespondWithSettled": -1
+        }
+      }
+    ]
+  }
+}
