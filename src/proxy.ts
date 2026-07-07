@@ -1,8 +1,4 @@
-/**
- * Antigravity Local Proxy Server.
- * Routes requests to Google, OpenAI, Anthropic, Ollama, and custom provider endpoints.
- * Intercepts model lists to inject user-defined custom models.
- */
+// ─── Constants ─────────────────────────────────────────────────────────────
 
 import * as http from 'http';
 import * as https from 'https';
@@ -12,44 +8,44 @@ import * as dns from 'dns';
 import { app } from 'electron';
 import log from 'electron-log';
 
-// ─── Types ────────────────────────────────────────────────────────────────
-
-export interface CustomModel {
-  name: string;
-  displayName: string;
-  description: string;
-  provider: string;
-  apiKey: string;
-  apiUrl: string;
-  externalModelName: string;
-  allowUnauthorized?: boolean;
-  encrypted?: boolean;
-  _slug?: string;
-  timeout?: number;
-  maxRetries?: number;
-}
-
-interface GeminiRequestBody {
-  model?: string;
-  modelId?: string;
-  model_id?: string;
-  request?: GeminiRequestBody;
-  systemInstruction?: { parts: { text?: string }[] };
-  contents?: {
-    parts?: { text?: string; functionCall?: unknown; functionResponse?: unknown; thought?: boolean }[];
-    role?: string;
-  }[];
-  tools?: unknown[];
-  generationConfig?: {
-    temperature?: number;
-    maxOutputTokens?: number;
-  };
-}
-
-// ─── Imports ──────────────────────────────────────────────────────────────
-
 let server: http.Server | null = null;
 let proxyPort = 0;
+
+import {
+  DEFAULT_PROXY_PORT,
+  MAX_REQUEST_BODY_SIZE,
+  GOOGLE_PROXY_TIMEOUT_MS,
+  GOOGLE_FORWARD_TIMEOUT_MS,
+  FILE_DOWNLOAD_TIMEOUT_MS,
+  DEFAULT_MODEL_REQUEST_TIMEOUT_MS,
+  STREAM_RETRY_BASE_DELAY_MS,
+  NON_STREAM_RETRY_BASE_DELAY_MS,
+  RATE_LIMIT_RETRY_BASE_DELAY_MS,
+  SERVER_ERROR_RETRY_BASE_DELAY_MS,
+  DEFAULT_MAX_RETRIES,
+  MIN_MAX_RETRIES,
+  MAX_MAX_RETRIES,
+  CUSTOM_MODEL_MAX_TOKENS,
+  CUSTOM_MODEL_MAX_OUTPUT_TOKENS,
+  DEFAULT_TEMPERATURE,
+  DEFAULT_TOP_P,
+  DEFAULT_TOP_K,
+  PLACEHOLDER_ID_BASE,
+  PLACEHOLDER_ID_RANGE,
+  PUBLIC_DNS_SERVERS,
+  HTTP_STATUS,
+  GOOGLE_HOSTS,
+  CONTENT_TYPES,
+  PROVIDERS,
+  OPENAI_COMPATIBLE_PROVIDERS,
+} from './constants';
+
+// ─── Types ────────────────────────────────────────────────────────────────
+
+import type { CustomModel, GeminiRequestBody, GeminiCandidate, CloudCodeResponse } from './proxy/types';
+export type { CustomModel, GeminiRequestBody, GeminiCandidate, CloudCodeResponse };
+
+// ─── Module Imports ───────────────────────────────────────────────────────
 
 // Shared cross-turn state
 import {
@@ -69,9 +65,25 @@ import { detectModelCapabilities, detectModelCapabilitiesByName } from './proxy/
 // Provider translator registry (auto-discovers translators from proxy/translators/)
 import * as registry from './proxy/registry';
 
-// Dynamic imports (stays require for Electron-specific modules)
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const cryptoStore = require('./cryptoStore');
+// Crypto store (for API key encryption)
+import * as cryptoStore from './cryptoStore';
+
+// Protobuf injection (extracted from proxy.ts)
+import { injectCustomModelsIntoResponse } from './proxy/protoInjector';
+
+// Custom model loading (extracted from proxy.ts)
+import { loadCustomModels } from './proxy/modelLoader';
+
+// URL construction for custom model requests (extracted from proxy.ts)
+import {
+  resolveProvider,
+  resolveCustomModelUrl,
+  resolveMaxRetries,
+  resolveRequestTimeout,
+} from './proxy/urlBuilder';
+
+// ID generation (extracted from proxy.ts)
+export { generateModelPlaceholderId, toSlug } from './proxy/idGenerator';
 
 // ─── DNS bypass for upstream forwarding ───────────────────────────────────
 // The local network stack (hosts file / DNS) redirects Google Cloud Code
@@ -80,7 +92,7 @@ const cryptoStore = require('./cryptoStore');
 // ourselves. We use a dedicated Resolver pointed at public DNS servers, which
 // ignores both the hosts file and the local poisoned DNS.
 const googleDnsResolver = new dns.Resolver();
-googleDnsResolver.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
+googleDnsResolver.setServers(PUBLIC_DNS_SERVERS);
 
 async function resolveGoogleIp(hostname: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -120,140 +132,7 @@ async function resolveGoogleIp(hostname: string): Promise<string> {
 
 // ─── Model Helpers ────────────────────────────────────────────────────────
 
-function generateModelPlaceholderId(model: CustomModel): string {
-  const input = (model.displayName || model.name || 'custom-model').toLowerCase();
-  let hash = 5381;
-  for (let i = 0; i < input.length; i++) {
-    hash = (hash << 5) + hash + input.charCodeAt(i);
-    hash = hash & hash; // Force 32-bit integer
-  }
-  const placeholderNum = 400 + (Math.abs(hash) % 200);
-  return `MODEL_PLACEHOLDER_M${placeholderNum}`;
-}
-
-function getCustomModelsPath(): string {
-  const geminiDir = path.join(app.getPath('home'), '.gemini', 'antigravity');
-  return path.join(geminiDir, 'custom_models.json');
-}
-
-function toSlug(model: CustomModel): string {
-  return (
-    'custom-' +
-    (model.externalModelName || model.name)
-      .replace(/^models\//, '')
-      .replace(/[^a-zA-Z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .toLowerCase()
-  );
-}
-
-// ─── Model Loading ────────────────────────────────────────────────────────
-
-function loadCustomModels(): CustomModel[] {
-  const filePath = getCustomModelsPath();
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { validateCustomModel } = require('./schemaValidator');
-
-  if (!fs.existsSync(filePath)) {
-    const defaultModels = {
-      models: [
-        {
-          name: 'models/gpt-4o',
-          displayName: 'GPT-4o (OpenAI via Proxy)',
-          description: 'OpenAI GPT-4o model redirected through proxy',
-          provider: 'openai',
-          apiKey: process.env.OPENAI_API_KEY || 'YOUR_OPENAI_API_KEY',
-          apiUrl: 'https://api.openai.com/v1/chat/completions',
-          externalModelName: 'gpt-4o',
-        },
-        {
-          name: 'models/claude-3-5-sonnet',
-          displayName: 'Claude 3.5 Sonnet (Anthropic via Proxy)',
-          description: 'Anthropic Claude 3.5 Sonnet model redirected through proxy',
-          provider: 'anthropic',
-          apiKey: process.env.ANTHROPIC_API_KEY || 'YOUR_ANTHROPIC_API_KEY',
-          apiUrl: 'https://api.anthropic.com/v1/messages',
-          externalModelName: 'claude-3-5-sonnet-latest',
-        },
-        {
-          name: 'models/llama3',
-          displayName: 'Llama 3 (Local Ollama)',
-          description: 'Local Ollama Llama 3 model run on your machine',
-          provider: 'ollama',
-          apiUrl: 'http://localhost:11434/v1/chat/completions',
-          externalModelName: 'llama3',
-        },
-      ],
-    };
-    try {
-      fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      (defaultModels.models as CustomModel[]).forEach((m) => {
-        (m as unknown as Record<string, unknown>).encrypted = false;
-      });
-      const encrypted = cryptoStore.encryptModels(defaultModels.models);
-      fs.writeFileSync(filePath, JSON.stringify({ models: encrypted }, null, 2), 'utf-8');
-    } catch (e) {
-      log.error('[Proxy] Failed to write default custom_models.json', e);
-    }
-    return cryptoStore.decryptModels(defaultModels.models);
-  }
-
-  try {
-    let content = fs.readFileSync(filePath, 'utf-8');
-    // Strip UTF-8 BOM if present (Windows Notepad / PowerShell add it by default on save,
-    // which breaks JSON.parse and silently loads 0 custom models).
-    if (content.charCodeAt(0) === 0xFEFF) {
-      content = content.slice(1);
-    }
-    const parsed = JSON.parse(content) as { models?: CustomModel[] };
-    const models = parsed.models || [];
-
-    // Auto-migration check
-    const needsMigration = models.some(
-      (m) =>
-        !m.encrypted &&
-        m.apiKey &&
-        m.apiKey !== 'none' &&
-        !m.apiKey.startsWith('enc:') &&
-        !m.apiKey.startsWith('fallback:'),
-    );
-    if (needsMigration) {
-      log.info('[Proxy] Plaintext custom_models.json detected. Migrating to encrypted format...');
-      cryptoStore.backupFile(filePath);
-      const encryptedModels = cryptoStore.encryptModels(models);
-      try {
-        fs.writeFileSync(filePath, JSON.stringify({ models: encryptedModels }, null, 2), 'utf-8');
-        log.info('[Proxy] Successfully migrated custom_models.json to encrypted format.');
-        return cryptoStore.decryptModels(encryptedModels);
-      } catch (err) {
-        log.error('[Proxy] Failed to write encrypted custom_models.json during migration:', err);
-      }
-    }
-
-    const decrypted = cryptoStore.decryptModels(models) as CustomModel[];
-
-    // Validate all models
-    const validModels: CustomModel[] = [];
-    for (let i = 0; i < decrypted.length; i++) {
-      const validation = validateCustomModel(decrypted[i]) as { valid: boolean; error?: string };
-      if (validation.valid) {
-        validModels.push(decrypted[i]);
-      } else {
-        log.warn(`[Proxy] Skipping invalid model at index ${i}: ${validation.error}`);
-      }
-    }
-    if (validModels.length < decrypted.length) {
-      log.info(
-        `[Proxy] Loaded ${validModels.length}/${decrypted.length} valid models (${decrypted.length - validModels.length} skipped)`,
-      );
-    }
-
-    return validModels;
-  } catch (e) {
-    log.error('[Proxy] Failed to parse custom_models.json', e);
-    return [];
-  }
-}
+// generateModelPlaceholderId and toSlug are now in ./proxy/idGenerator.ts (re-exported above)
 
 // ─── Google Proxy ─────────────────────────────────────────────────────────
 
@@ -293,13 +172,23 @@ async function proxyToGoogle(req: http.IncomingMessage, res: http.ServerResponse
     servername: targetHost,
   };
 
+  // Guard flag to prevent ERR_HTTP_HEADERS_SENT when timeout and response race
+  let responseWritten = false;
+  const safeWriteHead = (status: number, headers?: Record<string, string>): boolean => {
+    if (responseWritten || res.headersSent || res.writableEnded) {
+      return false;
+    }
+    responseWritten = true;
+    res.writeHead(status, headers);
+    return true;
+  };
+
   const proxyReq = https.request(parsedUrl, options, (proxyRes) => {
     // P0-5: Timeout for Google proxy requests (60s)
     proxyReq.setTimeout(60_000, () => {
       log.error('[Proxy] Google proxy request timed out after 60s');
       proxyReq.destroy();
-      if (!res.headersSent) {
-        res.writeHead(504, { 'Content-Type': 'application/json' });
+      if (safeWriteHead(504, { 'Content-Type': 'application/json' })) {
         res.end(JSON.stringify({ error: { message: 'Google API request timed out' } }));
       }
     });
@@ -308,6 +197,7 @@ async function proxyToGoogle(req: http.IncomingMessage, res: http.ServerResponse
       const responseChunks: Buffer[] = [];
       proxyRes.on('data', (chunk) => responseChunks.push(chunk));
       proxyRes.on('end', () => {
+        if (responseWritten || res.headersSent || res.writableEnded) return;
         const fullResBody = Buffer.concat(responseChunks);
         let text: string;
         const encoding = proxyRes.headers['content-encoding'];
@@ -341,19 +231,22 @@ async function proxyToGoogle(req: http.IncomingMessage, res: http.ServerResponse
         const modifiedBuffer = Buffer.from(text, 'utf-8');
         modifiedHeaders['content-length'] = String(modifiedBuffer.length);
 
-        res.writeHead(proxyRes.statusCode || 200, modifiedHeaders as Record<string, string>);
-        res.end(modifiedBuffer);
+        if (safeWriteHead(proxyRes.statusCode || 200, modifiedHeaders as Record<string, string>)) {
+          res.end(modifiedBuffer);
+        }
       });
     } else {
-      res.writeHead(proxyRes.statusCode || 200, proxyRes.headers as Record<string, string>);
-      proxyRes.pipe(res);
+      if (safeWriteHead(proxyRes.statusCode || 200, proxyRes.headers as Record<string, string>)) {
+        proxyRes.pipe(res);
+      }
     }
   });
 
   proxyReq.on('error', (err) => {
     log.error('[Proxy] Google Forwarding Error:', err);
-    res.writeHead(500, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: { message: 'Proxy forwarding failed: ' + err.message } }));
+    if (safeWriteHead(500, { 'Content-Type': 'application/json' })) {
+      res.end(JSON.stringify({ error: { message: 'Proxy forwarding failed: ' + err.message } }));
+    }
   });
 
   if (reqBody) {
@@ -409,7 +302,7 @@ function downloadFileContent(url: string, authHeader: string): Promise<string> {
  * Parses the Retry-After header from upstream responses (RFC 7231 §7.1.3).
  * Returns delay in milliseconds, or 0 if no valid header is present.
  */
-function parseRetryAfter(headers: Record<string, string | string[] | undefined>): number {
+export function parseRetryAfter(headers: Record<string, string | string[] | undefined>): number {
   const val = headers['retry-after'];
   if (!val) return 0;
 
@@ -440,10 +333,10 @@ function handleCustomModelRequest(
   retryCount = 0,
 ): void {
   // P3-18: Configurable max retries per model (default 3, min 0, max 5)
-  const MAX_RETRIES = Math.min(Math.max(model.maxRetries ?? 3, 0), 5);
-  const REQUEST_TIMEOUT_MS = model.timeout || 120_000;
+  const MAX_RETRIES = resolveMaxRetries(model);
+  const REQUEST_TIMEOUT_MS = resolveRequestTimeout(model);
 
-  const provider = model.provider === 'custom' || model.provider === 'openrouter' ? 'openai' : model.provider;
+  const provider = resolveProvider(model);
 
   const payload = registry.translateRequest(provider, geminiBody, model.externalModelName);
   const headers = registry.getProviderHeaders(provider, model.apiKey);
@@ -452,24 +345,12 @@ function handleCustomModelRequest(
     (payload as Record<string, unknown>).stream = true;
   }
 
-  let finalUrlStr = model.apiUrl;
-  // P3-15: Google AI Studio uses dynamic URL construction for streaming vs non-streaming
-  // P3-16: Ollama uses URL normalization for default port and endpoint
-  if (provider === 'google' || provider === 'ollama') {
-    const providerTranslator = registry.getTranslator(provider);
-    finalUrlStr = registry.getProviderUrl(finalUrlStr, model.externalModelName, isStream, providerTranslator);
-  } else if (provider === 'openai' || model.provider === 'custom' || model.provider === 'openrouter') {
-    const urlLower = finalUrlStr.toLowerCase();
-    if (!urlLower.includes('/chat/completions') && !urlLower.includes('/completions')) {
-      if (finalUrlStr.endsWith('/v1')) {
-        finalUrlStr += '/chat/completions';
-      } else if (!finalUrlStr.endsWith('/')) {
-        finalUrlStr += '/v1/chat/completions';
-      } else {
-        finalUrlStr += 'v1/chat/completions';
-      }
-    }
-  }
+  const finalUrlStr = resolveCustomModelUrl(
+    model,
+    isStream,
+    (apiUrl, externalModelName, stream, translator) =>
+      registry.getProviderUrl(apiUrl, externalModelName, stream, translator as Parameters<typeof registry.getProviderUrl>[3]),
+  );
   const url = new URL(finalUrlStr);
   const client = url.protocol === 'https:' ? https : http;
 
@@ -735,154 +616,6 @@ function handleCustomModelRequest(
   request.end();
 }
 
-// ─── Protobuf Utilities ────────────────────────────────────────────────────
-
-interface ProtoField {
-  tag: number;        // full tag (field_number << 3 | wire_type)
-  wireType: number;
-  fieldNum: number;
-  value: number | Buffer | ProtoField[];
-  start: number;
-  end: number;
-}
-
-function readVarint(buf: Buffer, offset: number): { value: number; bytes: number } {
-  let result = 0;
-  let shift = 0;
-  let bytes = 0;
-  while (offset + bytes < buf.length) {
-    const byte = buf[offset + bytes];
-    result |= (byte & 0x7f) << shift;
-    bytes++;
-    if (!(byte & 0x80)) break;
-    shift += 7;
-  }
-  return { value: result >>> 0, bytes };
-}
-
-function encodeVarint(value: number): Buffer {
-  const parts: number[] = [];
-  let v = value >>> 0;
-  do {
-    let b = v & 0x7f;
-    v >>>= 7;
-    if (v !== 0) b |= 0x80;
-    parts.push(b);
-  } while (v !== 0);
-  return Buffer.from(parts);
-}
-
-function parseProto(buf: Buffer, offset: number, end: number): ProtoField[] {
-  const fields: ProtoField[] = [];
-  let pos = offset;
-  while (pos < end) {
-    const start = pos;
-    const tagVarint = readVarint(buf, pos);
-    const tag = tagVarint.value;
-    const wireType = tag & 0x07;
-    const fieldNum = tag >>> 3;
-    pos += tagVarint.bytes;
-
-    if (wireType === 0) {
-      const v = readVarint(buf, pos);
-      fields.push({ tag, wireType, fieldNum, value: v.value, start, end: pos + v.bytes });
-      pos += v.bytes;
-    } else if (wireType === 2) {
-      const lenVarint = readVarint(buf, pos);
-      pos += lenVarint.bytes;
-      const len = lenVarint.value;
-      const children = parseProto(buf, pos, pos + len);
-      const hasChildren = children.length > 0;
-      fields.push({ tag, wireType, fieldNum, value: hasChildren ? children : buf.subarray(pos, pos + len), start, end: pos + len });
-      pos += len;
-    } else if (wireType === 1) {
-      fields.push({ tag, wireType, fieldNum, value: buf.subarray(pos, pos + 8), start, end: pos + 8 });
-      pos += 8;
-    } else if (wireType === 5) {
-      fields.push({ tag, wireType, fieldNum, value: buf.subarray(pos, pos + 4), start, end: pos + 4 });
-      pos += 4;
-    } else {
-      break;
-    }
-  }
-  return fields;
-}
-
-function encodeProtoBuf(fields: { tag: number; value: Buffer }[]): Buffer {
-  const parts: Buffer[] = [];
-  for (const field of fields) {
-    const tagBuf = encodeVarint(field.tag);
-    const data = field.value;
-    const lenBuf = encodeVarint(data.length);
-    parts.push(tagBuf, lenBuf, data);
-  }
-  return Buffer.concat(parts);
-}
-
-function findModelEntryFieldTag(fields: ProtoField[]): number | null {
-  const tagCounts = new Map<number, number>();
-  for (const f of fields) {
-    if (f.wireType === 2) {
-      tagCounts.set(f.tag, (tagCounts.get(f.tag) || 0) + 1);
-    }
-  }
-  let bestTag: number | null = null;
-  let bestCount = 0;
-  for (const [tag, count] of tagCounts) {
-    if (count > bestCount) {
-      bestCount = count;
-      bestTag = tag;
-    }
-  }
-  if (bestTag !== null && bestCount >= 2) {
-    // Verify it has nested messages
-    const sample = fields.find((f) => f.tag === bestTag && Array.isArray(f.value));
-    if (sample) return bestTag;
-  }
-  return bestTag;
-}
-
-function extractFieldMapping(entry: ProtoField[]): Map<number, 'string' | 'varint' | 'bytes'> {
-  const mapping = new Map<number, 'string' | 'varint' | 'bytes'>();
-  for (const f of entry) {
-    if (f.wireType === 2 && Buffer.isBuffer(f.value)) {
-      mapping.set(f.fieldNum, 'string');
-    } else if (f.wireType === 0) {
-      mapping.set(f.fieldNum, 'varint');
-    } else if (f.wireType === 2 && Array.isArray(f.value)) {
-      mapping.set(f.fieldNum, 'bytes');
-    }
-  }
-  return mapping;
-}
-
-function encodeModelEntryForGetModels(
-  name: string,
-  displayName: string,
-  mapping: Map<number, 'string' | 'varint' | 'bytes'>,
-): Buffer {
-  const fields: { tag: number; value: Buffer }[] = [];
-  for (const [fieldNum, protoType] of mapping) {
-    if (protoType === 'string') {
-      const tag = (fieldNum << 3) | 2;
-      if (fieldNum === 1) {
-        fields.push({ tag, value: Buffer.from(name, 'utf-8') });
-      } else if (fieldNum === 2) {
-        fields.push({ tag, value: Buffer.from(displayName, 'utf-8') });
-      } else {
-        fields.push({ tag, value: Buffer.alloc(0) });
-      }
-    } else if (protoType === 'varint') {
-      const tag = (fieldNum << 3) | 0;
-      fields.push({ tag, value: encodeVarint(0) });
-    } else {
-      const tag = (fieldNum << 3) | 2;
-      fields.push({ tag, value: Buffer.alloc(0) });
-    }
-  }
-  return encodeProtoBuf(fields);
-}
-
 // ─── GetAvailableModels Proxy Handler ───────────────────────────────────────
 
 function handleGetAvailableModelsProxy(
@@ -912,52 +645,7 @@ function handleGetAvailableModelsProxy(
     lsRes.on('end', () => {
       const responseBuf = Buffer.concat(chunks);
       const customModels = loadCustomModels();
-      let modifiedBuf = responseBuf;
-
-      if (customModels.length > 0 && responseBuf.length > 6) {
-        try {
-          const flags = responseBuf[0];
-          const msgLen = responseBuf.readUInt32BE(1);
-          if (5 + msgLen <= responseBuf.length) {
-            const msgBody = responseBuf.subarray(5, 5 + msgLen);
-            const parsed = parseProto(msgBody, 0, msgBody.length);
-            const modelTag = findModelEntryFieldTag(parsed);
-
-            if (modelTag !== null) {
-              const sampleEntry = parsed.find(
-                (f) => f.tag === modelTag && Array.isArray(f.value),
-              );
-              if (sampleEntry && Array.isArray(sampleEntry.value)) {
-                const fieldMapping = extractFieldMapping(sampleEntry.value);
-                const newParts: Buffer[] = [msgBody];
-
-                for (const m of customModels) {
-                  const placeholderId = generateModelPlaceholderId(m);
-                  const entry = encodeModelEntryForGetModels(
-                    'models/' + placeholderId,
-                    m.displayName,
-                    fieldMapping,
-                  );
-                  const tagBuf = encodeVarint(modelTag);
-                  const lenBuf = encodeVarint(entry.length);
-                  newParts.push(tagBuf, lenBuf, entry);
-                  log.info(
-                    `[Proxy] Injected into GetAvailableModels: ${m.displayName} => ${placeholderId}`,
-                  );
-                }
-
-                const newMsgBody = Buffer.concat(newParts);
-                const newHeader = Buffer.alloc(5);
-                newHeader[0] = flags;
-                newHeader.writeUInt32BE(newMsgBody.length, 1);
-                modifiedBuf = Buffer.concat([newHeader, newMsgBody]);
-              }
-            }
-          }
-        } catch (err) {
-          log.error('[Proxy] Failed to inject models into GetAvailableModels:', err);
-        }
-      }
+      const { buffer: modifiedBuf } = injectCustomModelsIntoResponse(responseBuf, customModels);
 
       res.writeHead(lsRes.statusCode || 200, {
         'Content-Type': 'application/grpc-web+proto',

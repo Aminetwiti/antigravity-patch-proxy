@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import * as path from 'path';
+import { generateModelPlaceholderId, toSlug, parseRetryAfter } from '../proxy';
 
 // We need to mock the external dependencies that proxy.ts imports at module level
 vi.mock('electron', () => ({
@@ -9,6 +10,22 @@ vi.mock('electron', () => ({
       return '/mock/' + name;
     }),
   },
+  safeStorage: {
+    isEncryptionAvailable: vi.fn(() => false),
+    encryptString: vi.fn((s: string) => Buffer.from(s)),
+    decryptString: vi.fn((b: Buffer) => b.toString()),
+  },
+}));
+
+// Mock cryptoStore using the same path proxy.ts uses (./cryptoStore)
+// Vitest matches mocks by the resolved module path, not the specifier string
+vi.mock('./cryptoStore', () => ({
+  isEncryptionAvailable: vi.fn(() => false),
+  encryptString: vi.fn((s: string) => s),
+  decryptString: vi.fn((s: string) => s),
+  encryptModels: vi.fn((models: unknown[]) => models),
+  decryptModels: vi.fn((models: unknown[]) => models),
+  backupFile: vi.fn(),
 }));
 
 vi.mock('electron-log', () => ({
@@ -19,55 +36,6 @@ vi.mock('electron-log', () => ({
     debug: vi.fn(),
   },
 }));
-
-// ─── Test: generateModelPlaceholderId (via concept) ────────────────────────
-
-function generateModelPlaceholderId(model: { displayName?: string; name?: string }): string {
-  const input = (model.displayName || model.name || 'custom-model').toLowerCase();
-  let hash = 5381;
-  for (let i = 0; i < input.length; i++) {
-    hash = (hash << 5) + hash + input.charCodeAt(i);
-    hash = hash & hash; // Force 32-bit integer
-  }
-  const placeholderNum = 400 + (Math.abs(hash) % 200);
-  return `MODEL_PLACEHOLDER_M${placeholderNum}`;
-}
-
-// ─── Test: toSlug (via concept) ───────────────────────────────────────────
-
-function toSlug(model: { externalModelName?: string; name?: string }): string {
-  return (
-    'custom-' +
-    (model.externalModelName || model.name || '')
-      .replace(/^models\//, '')
-      .replace(/[^a-zA-Z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .toLowerCase()
-  );
-}
-
-// ─── Test: parseRetryAfter (via concept) ──────────────────────────────────
-
-function parseRetryAfter(headers: Record<string, string | string[] | undefined>): number {
-  const val = headers['retry-after'];
-  if (!val) return 0;
-
-  const raw = Array.isArray(val) ? val[0] : val;
-  if (!raw) return 0;
-
-  const seconds = parseInt(raw.trim(), 10);
-  if (!isNaN(seconds) && seconds >= 0) {
-    return seconds * 1000;
-  }
-
-  const date = new Date(raw);
-  if (!isNaN(date.getTime())) {
-    const delay = date.getTime() - Date.now();
-    return delay > 0 ? delay : 0;
-  }
-
-  return 0;
-}
 
 // ─── Tests ────────────────────────────────────────────────────────────────
 

@@ -1,5 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { safeStorage } = require('electron');
+import { safeStorage } from 'electron';
 import * as fs from 'fs';
 
 /**
