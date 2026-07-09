@@ -47,6 +47,18 @@ const HEADLESS = process.env.ELECTRON_OZONE_PLATFORM_HINT === 'headless';
 // When set, skip LS startup and load this URL directly (for dev iteration).
 const DEV_URL = process.env.DEV_URL;
 
+// P0: Disable the auto-updater by default. The official updater tries to
+// verify the binary against a SHA-512 checksum baked into the unmodified
+// app, which will NEVER match our patched app.asar. This results in
+// "sha512 checksum mismatch" errors that crash the main process via an
+// unhandled promise rejection.
+//
+// Set AG_DISABLE_UPDATER=0 to force-enable the updater (only safe on
+// pristine, unpatched builds). See src/updater.ts for details.
+if (process.env.AG_DISABLE_UPDATER === undefined) {
+  process.env.AG_DISABLE_UPDATER = '1';
+}
+
 if (HEADLESS) {
   app.commandLine.appendSwitch('ozone-platform', 'headless');
   app.commandLine.appendSwitch('headless');
@@ -296,8 +308,17 @@ app
       ]);
     }
 
-    // Start checking for app updates.
-    initAutoUpdater(HEADLESS);
+    // P0: Skip the auto-updater entirely on patched builds. The official
+    // updater tries to download and verify Antigravity-x64.exe against a
+    // checksum baked into the unmodified app, which will never match our
+    // patched app.asar. The resulting checksum mismatch crashes the main
+    // process via an unhandled promise rejection in the download stream.
+    // Set AG_DISABLE_UPDATER=0 to force-enable (only safe on pristine builds).
+    if (process.env.AG_DISABLE_UPDATER === '0') {
+      initAutoUpdater(HEADLESS);
+    } else {
+      log.warn('[Main] Auto-updater disabled (AG_DISABLE_UPDATER=' + (process.env.AG_DISABLE_UPDATER || '1') + ').');
+    }
     hasStartedMainApplication = true;
   })
   .catch(() => {

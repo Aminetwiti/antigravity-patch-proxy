@@ -20,6 +20,7 @@ exports.validateCustomModels = validateCustomModels;
 exports.validateGenerateContentRequest = validateGenerateContentRequest;
 exports.validateOpenAiChunk = validateOpenAiChunk;
 exports.validateAnthropicEvent = validateAnthropicEvent;
+const constants_1 = require("./constants");
 /**
  * Validates a Gemini candidate object structure.
  */
@@ -99,9 +100,8 @@ function validateCustomModel(model) {
     }
     const provider = m.provider;
     // Validate provider is one of the supported types
-    const validProviders = ['openai', 'anthropic', 'google', 'ollama', 'custom', 'openrouter', 'deepseek', 'groq', 'mistral', 'cerebras', 'kimi', 'fireworks', 'lmstudio', 'llamacpp', 'nvidia'];
-    if (!validProviders.includes(provider)) {
-        return { valid: false, error: `Unsupported provider: ${provider}. Must be one of: ${validProviders.join(', ')}` };
+    if (!constants_1.ALL_PROVIDERS.includes(provider)) {
+        return { valid: false, error: `Unsupported provider: ${provider}. Must be one of: ${constants_1.ALL_PROVIDERS.join(', ')}` };
     }
     const apiUrl = m.apiUrl;
     // Validate API URL format

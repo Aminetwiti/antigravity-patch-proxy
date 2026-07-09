@@ -31,3 +31,4 @@ ag-doctor-ui/dist/*
 ag-doctor-ui/release/*
 dist/proxy/*
 dist/
+tool/

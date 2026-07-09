@@ -44,7 +44,6 @@ const crypto = __importStar(require("crypto"));
 const readline = __importStar(require("readline"));
 const utils_1 = require("./utils");
 const languageServer_1 = require("./languageServer");
-const updater_1 = require("./updater");
 const constants_1 = require("./constants");
 const tray_1 = require("./tray");
 const storage_1 = require("./storage");
@@ -300,8 +299,13 @@ electron_1.app
             },
         ]);
     }
-    // Start checking for app updates.
-    (0, updater_1.initAutoUpdater)(HEADLESS);
+    // P0: Skip the auto-updater entirely on patched builds. The official
+    // updater tries to download and verify Antigravity-x64.exe against a
+    // checksum baked into the unmodified app, which will never match our
+    // patched app.asar. The resulting checksum mismatch crashes the main
+    // process via an unhandled promise rejection in the download stream.
+    // initAutoUpdater(HEADLESS);
+    main_1.default.warn('[Main] Auto-updater disabled (patched build).');
     hasStartedMainApplication = true;
 })
     .catch(() => {

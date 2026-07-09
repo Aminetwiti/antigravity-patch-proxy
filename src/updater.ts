@@ -3,6 +3,19 @@ import { app, BrowserWindow, dialog, Menu } from 'electron';
 import * as path from 'path';
 import { spawn } from 'child_process';
 
+// P0: Prevent unhandled promise rejections from the auto-updater (e.g. SHA-512
+// checksum mismatches during background downloads) from crashing the entire
+// Electron main process. Patched builds use a modified app.asar, so the
+// official update server's checksums will never match — we must stay alive
+// and just log the error instead.
+process.on('unhandledRejection', (reason: unknown) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  console.warn('[Updater] Suppressed unhandledRejection:', msg);
+});
+process.on('uncaughtException', (err: Error) => {
+  console.warn('[Updater] Suppressed uncaughtException:', err.message);
+});
+
 export enum MenuUpdateStep {
   CheckForUpdates = 'Check for Updates',
   CheckingForUpdates = 'Checking for Updates...',
@@ -61,6 +74,20 @@ function updateMenuState(step: MenuUpdateStep): void {
  * 4. Broadcast state to the renderer so AppUpdateButton can display progress.
  */
 export function initAutoUpdater(isHeadless: boolean): void {
+  // P0: Skip the auto-updater entirely on patched builds. The official
+  // updater tries to download and verify Antigravity-x64.exe against a
+  // checksum baked into the unmodified app, which will never match our
+  // patched app.asar. The resulting checksum mismatch crashes the main
+  // process via an unhandled promise rejection in the download stream.
+  //
+  // Set AG_DISABLE_UPDATER=0 to force-enable the updater (only useful on
+  // pristine, unpatched builds — not recommended for this project).
+  if (process.env.AG_DISABLE_UPDATER !== '0') {
+    console.warn('[Updater] Auto-updater disabled (AG_DISABLE_UPDATER is set, or unset on a patched build).');
+    console.warn('[Updater] To force-enable on a pristine build, set AG_DISABLE_UPDATER=0.');
+    return;
+  }
+
   // In dev mode (npm start), electron-updater skips checks because the app
   // isn't packaged. Force it to use the dev config file instead.
   if (!app.isPackaged) {
@@ -75,8 +102,8 @@ export function initAutoUpdater(isHeadless: boolean): void {
   } else {
     autoUpdater.channel = `latest-${process.arch}`;
   }
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = app.isPackaged;
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
   // Auto-updater event handlers → broadcast to renderer
   autoUpdater.on('checking-for-update', () => {
     console.log('[AutoUpdater] Checking for update…');
@@ -139,7 +166,17 @@ export function initAutoUpdater(isHeadless: boolean): void {
     updateMenuState(MenuUpdateStep.RestartToUpdate);
   });
   autoUpdater.on('error', (err) => {
-    console.error('[AutoUpdater] Error:', err.message);
+    const msg = err?.message || String(err);
+    // Detect the SHA-512 checksum mismatch that occurs on patched builds.
+    // Provide a clear, actionable message instead of a generic error.
+    if (/sha512|checksum mismatch/i.test(msg)) {
+      console.error('[AutoUpdater] ⚠️  SHA-512 checksum mismatch detected.');
+      console.error('[AutoUpdater] This is EXPECTED on patched builds because app.asar has been modified.');
+      console.error('[AutoUpdater] The official update server cannot verify our patched binary.');
+      console.error('[AutoUpdater] To silence this, set AG_DISABLE_UPDATER=1 (already the default on patched builds).');
+    } else {
+      console.error('[AutoUpdater] Error:', msg);
+    }
     broadcastState({ type: 'idle' });
     updateMenuState(MenuUpdateStep.CheckForUpdates);
     isManualCheck = false;

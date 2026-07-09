@@ -42,6 +42,18 @@ const electron_updater_1 = require("electron-updater");
 const electron_1 = require("electron");
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
+// P0: Prevent unhandled promise rejections from the auto-updater (e.g. SHA-512
+// checksum mismatches during background downloads) from crashing the entire
+// Electron main process. Patched builds use a modified app.asar, so the
+// official update server's checksums will never match — we must stay alive
+// and just log the error instead.
+process.on('unhandledRejection', (reason) => {
+    const msg = reason instanceof Error ? reason.message : String(reason);
+    console.warn('[Updater] Suppressed unhandledRejection:', msg);
+});
+process.on('uncaughtException', (err) => {
+    console.warn('[Updater] Suppressed uncaughtException:', err.message);
+});
 var MenuUpdateStep;
 (function (MenuUpdateStep) {
     MenuUpdateStep["CheckForUpdates"] = "Check for Updates";
@@ -106,8 +118,8 @@ function initAutoUpdater(isHeadless) {
     else {
         electron_updater_1.autoUpdater.channel = `latest-${process.arch}`;
     }
-    electron_updater_1.autoUpdater.autoDownload = true;
-    electron_updater_1.autoUpdater.autoInstallOnAppQuit = electron_1.app.isPackaged;
+    electron_updater_1.autoUpdater.autoDownload = false;
+    electron_updater_1.autoUpdater.autoInstallOnAppQuit = false;
     // Auto-updater event handlers → broadcast to renderer
     electron_updater_1.autoUpdater.on('checking-for-update', () => {
         console.log('[AutoUpdater] Checking for update…');

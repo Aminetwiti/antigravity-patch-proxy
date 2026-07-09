@@ -13,7 +13,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import log from 'electron-log';
-import { ALL_PROVIDERS, type ProviderName } from '../constants';
 
 // ─── Types ────────────────────────────────────────────────────────────────
 

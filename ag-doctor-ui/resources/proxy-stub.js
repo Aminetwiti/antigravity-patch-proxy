@@ -1,6 +1,8 @@
 const http = require('http');
 
-const PORT = 50999;
+// Port 51999 (separate from main proxy on 50999) to avoid conflicts
+// when both ag-doctor-ui stub and Antigravity proxy run simultaneously.
+const PORT = process.env.AG_STUB_PORT ? parseInt(process.env.AG_STUB_PORT, 10) : 51999;
 
 const server = http.createServer((req, res) => {
   console.log(`[Stub] ${req.method} ${req.url}`);

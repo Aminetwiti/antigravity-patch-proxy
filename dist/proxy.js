@@ -89,28 +89,55 @@ async function resolveGoogleIp(hostname) {
             });
             return;
         }
+        // Public DNS can be unreachable on some networks/corporate firewalls.
+        // Cap the attempt at 5 seconds so the LS's own 10s deadline isn't blown.
+        let timedOut = false;
+        const timeout = setTimeout(() => {
+            timedOut = true;
+            electron_log_1.default.warn(`[Proxy] Public DNS timed out for ${hostname}, falling back to system DNS resolver`);
+            fallbackToSystemDns(hostname, resolve, reject);
+        }, 5000);
         googleDnsResolver.resolve4(hostname, (err, addresses) => {
+            if (timedOut)
+                return;
+            clearTimeout(timeout);
             if (err || !addresses || addresses.length === 0) {
-                electron_log_1.default.warn(`[Proxy] Public DNS failed for ${hostname}, falling back to system DNS:`, err?.message);
-                dns.lookup(hostname, { family: 4 }, (err2, address) => {
-                    if (err2 || !address) {
-                        reject(err2 || err || new Error(`Could not resolve ${hostname}`));
-                    }
-                    else {
-                        resolve(address);
-                    }
-                });
+                electron_log_1.default.warn(`[Proxy] Public DNS failed for ${hostname}, falling back to system DNS resolver:`, err?.message);
+                fallbackToSystemDns(hostname, resolve, reject);
                 return;
             }
             const ip = addresses[0];
             if (!ip || typeof ip !== 'string') {
                 electron_log_1.default.error(`[Proxy] Public DNS returned invalid address for ${hostname}:`, addresses);
-                reject(new Error(`Invalid address for ${hostname}`));
+                fallbackToSystemDns(hostname, resolve, reject);
                 return;
             }
             electron_log_1.default.info(`[Proxy] resolveGoogleIp using ${ip} for ${hostname}`);
             resolve(ip);
         });
+    });
+}
+/**
+ * Fallback DNS resolver for googleapis.com that bypasses the hosts file.
+ * We MUST NOT use dns.lookup here because the hosts file redirects
+ * *.googleapis.com to 127.0.0.1. dns.resolve4 uses the network DNS directly,
+ * ignoring the hosts file, so it returns the real Google IP.
+ */
+function fallbackToSystemDns(hostname, resolve, reject) {
+    dns.resolve4(hostname, (err, addresses) => {
+        if (err || !addresses || addresses.length === 0) {
+            electron_log_1.default.error(`[Proxy] System DNS resolver failed for ${hostname}:`, err?.message);
+            reject(err || new Error(`Could not resolve ${hostname}`));
+            return;
+        }
+        const ip = addresses[0];
+        if (!ip || typeof ip !== 'string') {
+            electron_log_1.default.error(`[Proxy] System DNS returned invalid address for ${hostname}:`, addresses);
+            reject(new Error(`Invalid address for ${hostname}`));
+            return;
+        }
+        electron_log_1.default.info(`[Proxy] resolveGoogleIp using system DNS ${ip} for ${hostname}`);
+        resolve(ip);
     });
 }
 // ─── Safe Response Helpers ─────────────────────────────────────────────────
@@ -903,6 +930,16 @@ function handleRequest(req, res) {
                                     }
                                 });
                             }
+                        }
+                        // P1: Strip Google's upstream error from the response. When Google
+                        // returns 401/403/etc., the proxy forwards that error object alongside
+                        // our injected custom models. The Antigravity frontend treats any
+                        // `error` key as a hard failure and hides the entire model list,
+                        // even though we successfully injected valid models. Removing the
+                        // error key lets the frontend render the merged model list normally.
+                        if (googleJson.error) {
+                            electron_log_1.default.warn(`[Proxy] fetchAvailableModels: stripping upstream error from response (status: ${googleRes.statusCode})`);
+                            delete googleJson.error;
                         }
                         safeWriteHead(res, 200, { 'Content-Type': 'application/json' });
                         safeEnd(res, JSON.stringify(googleJson));

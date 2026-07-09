@@ -598,8 +598,25 @@ ipcMain.handle('ag:antigravity:restart', async () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Proxy stub lifecycle — portable emergency proxy on 127.0.0.1:50999
-// ─────────────────────────────────────────────────────────────────────────────
+// Proxy stub lifecycle — portable emergency proxy on 127.0.0.1:51999
+// (Separate from main Antigravity proxy on 50999 to avoid port conflicts)
+// ───────────────────────────────────────────────────────────────────────��─────
+
+const STUB_PORT = 51999;
+
+/**
+ * Check if port 50999 (main Antigravity proxy) is already in use.
+ * Used to warn the user when ag-doctor-ui stub might conflict.
+ */
+async function isPortInUse(port: number, host = '127.0.0.1'): Promise<boolean> {
+  return new Promise((resolve) => {
+    const net = require('net') as typeof import('net');
+    const tester = net.createServer()
+      .once('error', () => resolve(true))
+      .once('listening', () => tester.close(() => resolve(false)))
+      .listen(port, host);
+  });
+}
 
 /**
  * Launch proxy-stub.js in a detached Node.js process.
@@ -616,28 +633,27 @@ ipcMain.handle('ag:proxy:start-stub', async () => {
     }
     // Spawn detached so it survives if ag-doctor-ui is closed
     const child = spawn(process.execPath, [resolved], {
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', AG_STUB_PORT: String(STUB_PORT) },
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
     });
     child.unref();
     // Wait up to 3 s for the port to open
-    const port = 50999;
     const deadline = Date.now() + 3000;
     while (Date.now() < deadline) {
       await new Promise<void>((r) => setTimeout(r, 200));
       const alive = await new Promise<boolean>((resolve) => {
         const req = require('http').request(
-          { hostname: '127.0.0.1', port, path: '/health', method: 'GET', timeout: 1000 },
+          { hostname: '127.0.0.1', port: STUB_PORT, path: '/health', method: 'GET', timeout: 1000 },
           (res: { resume: () => void }) => { res.resume(); resolve(true); },
         );
         req.on('error', () => resolve(false));
         req.end();
       });
-      if (alive) return { ok: true, pid: child.pid };
+      if (alive) return { ok: true, pid: child.pid, port: STUB_PORT };
     }
-    return { ok: true, pid: child.pid, note: 'started but port not yet open' };
+    return { ok: true, pid: child.pid, port: STUB_PORT, note: 'started but port not yet open' };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
@@ -648,25 +664,85 @@ ipcMain.handle('ag:proxy:start-stub', async () => {
  */
 ipcMain.handle('ag:proxy:status', async () => {
   try {
-    const port = 50999;
-    const result = await new Promise<{ ok: boolean; stub: boolean; latencyMs: number; error?: string }>((resolve) => {
+    const result = await new Promise<{ ok: boolean; stub: boolean; latencyMs: number; port: number; error?: string }>((resolve) => {
       const started = Date.now();
       const req = require('http').request(
-        { hostname: '127.0.0.1', port, path: '/health', method: 'GET', timeout: 2000 },
+        { hostname: '127.0.0.1', port: STUB_PORT, path: '/health', method: 'GET', timeout: 2000 },
         (res: { statusCode: number; headers: Record<string, string>; resume: () => void }) => {
           res.resume();
           resolve({
             ok: true,
             stub: res.headers['x-proxy-stub'] === '1',
             latencyMs: Date.now() - started,
+            port: STUB_PORT,
           });
         },
       );
-      req.on('timeout', () => { req.destroy(); resolve({ ok: false, stub: false, latencyMs: Date.now() - Date.now(), error: 'timeout' }); });
-      req.on('error', (err: Error) => resolve({ ok: false, stub: false, latencyMs: 0, error: err.message }));
+      req.on('timeout', () => { req.destroy(); resolve({ ok: false, stub: false, latencyMs: 0, port: STUB_PORT, error: 'timeout' }); });
+      req.on('error', (err: Error) => resolve({ ok: false, stub: false, latencyMs: 0, port: STUB_PORT, error: err.message }));
       req.end();
     });
     return { ok: true, data: result };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
+/**
+ * Check if the main Antigravity proxy port (50999) is occupied.
+ * Useful to detect conflicts when launching Antigravity.
+ */
+ipcMain.handle('ag:proxy:check-main-port', async () => {
+  try {
+    const MAIN_PORT = 50999;
+    const inUse = await isPortInUse(MAIN_PORT);
+    if (inUse) {
+      // Try to identify which process is using the port
+      let processInfo = 'unknown';
+      try {
+        if (process.platform === 'win32') {
+          const { execSync } = require('child_process') as typeof import('child_process');
+          const out = execSync(`netstat -ano | findstr :${MAIN_PORT}`, { encoding: 'utf-8' });
+          processInfo = out.trim().split('\n')[0] || 'unknown';
+        } else {
+          const { execSync } = require('child_process') as typeof import('child_process');
+          const out = execSync(`lsof -i :${MAIN_PORT} -P -n 2>/dev/null | tail -n +2 | head -n 1`, { encoding: 'utf-8' });
+          processInfo = out.trim() || 'unknown';
+        }
+      } catch {
+        /* best effort */
+      }
+      return { ok: true, inUse: true, port: MAIN_PORT, process: processInfo };
+    }
+    return { ok: true, inUse: false, port: MAIN_PORT };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
+/**
+ * Kill the process occupying port 50999 (main Antigravity proxy).
+ * Use with caution — only kills processes we believe are conflicting.
+ */
+ipcMain.handle('ag:proxy:kill-main-port', async () => {
+  try {
+    const MAIN_PORT = 50999;
+    const { exec } = require('child_process') as typeof import('child_process');
+    return await new Promise<{ ok: boolean; killed?: string; error?: string }>((resolve) => {
+      let cmd: string;
+      if (process.platform === 'win32') {
+        cmd = `for /f "tokens=5" %a in ('netstat -ano ^| findstr :${MAIN_PORT}') do taskkill /F /PID %a`;
+      } else {
+        cmd = `lsof -ti :${MAIN_PORT} | xargs -r kill -9`;
+      }
+      exec(cmd, (err: Error | null, stdout: string) => {
+        if (err) {
+          resolve({ ok: false, error: err.message });
+        } else {
+          resolve({ ok: true, killed: stdout.trim() || 'no process found' });
+        }
+      });
+    });
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }

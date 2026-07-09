@@ -21,10 +21,11 @@ $Result = @{
     ca = $false
 }
 
-# 1. Set WinHTTP Proxy
-Write-Host "Setting WinHTTP proxy to 127.0.0.1:50999..."
+# 1. Set WinHTTP Proxy (port 51999 for the ag-doctor-ui stub proxy,
+#    NOT 50999 which is reserved for the main Antigravity proxy)
+Write-Host "Setting WinHTTP proxy to 127.0.0.1:51999..."
 try {
-    netsh winhttp set proxy proxy-server="127.0.0.1:50999" | Out-Null
+    netsh winhttp set proxy proxy-server="127.0.0.1:51999" | Out-Null
     $Result.proxy = $true
     Write-Host "WinHTTP proxy set successfully." -ForegroundColor Green
 } catch {

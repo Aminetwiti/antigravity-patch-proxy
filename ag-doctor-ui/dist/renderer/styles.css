@@ -468,6 +468,22 @@ body {
   border-color: var(--err-border);
 }
 .btn-danger:hover { background: var(--err-bg); border-color: var(--err); }
+.btn-warning {
+  background: linear-gradient(135deg, hsla(38, 92%, 50%, 0.18), hsla(28, 92%, 50%, 0.18));
+  color: hsl(38, 95%, 60%);
+  border-color: hsla(38, 92%, 50%, 0.45);
+  font-weight: var(--fw-semibold);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.btn-warning:hover {
+  background: linear-gradient(135deg, hsla(38, 92%, 50%, 0.32), hsla(28, 92%, 50%, 0.32));
+  color: hsl(38, 100%, 70%);
+  border-color: hsl(38, 92%, 55%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px hsla(38, 92%, 50%, 0.35);
+}
+.btn-warning:active { transform: translateY(0); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important; }
 .btn svg { width: 14px; height: 14px; }
 

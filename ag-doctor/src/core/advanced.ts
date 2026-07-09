@@ -521,12 +521,14 @@ export async function checkVersionCompatibility(): Promise<VersionCompatibility>
     }
   } catch { /* ignore */ }
 
-  if (result.installed && COMPATIBILITY_MATRIX[result.patchVersion]) {
-    const compat = COMPATIBILITY_MATRIX[result.patchVersion];
-    result.compatible = compareVersions(result.installed, compat.min) >= 0
-      && compareVersions(result.installed, compat.max) <= 0;
+  const installed = result.installed;
+  const patchVersion = result.patchVersion;
+  if (installed && patchVersion && COMPATIBILITY_MATRIX[patchVersion]) {
+    const compat = COMPATIBILITY_MATRIX[patchVersion];
+    result.compatible = compareVersions(installed, compat.min) >= 0
+      && compareVersions(installed, compat.max) <= 0;
     result.knownIssues = compat.issues;
-  } else if (!result.installed) {
+  } else if (!installed) {
     result.compatible = true;
     result.knownIssues = ['Could not detect installed Antigravity version.'];
   }
@@ -672,3 +674,4 @@ export async function generateAdvancedReport(): Promise<AdvancedDiagnosticReport
     recommendations,
   };
 }
+

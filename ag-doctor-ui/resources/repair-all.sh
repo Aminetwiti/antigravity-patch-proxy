@@ -14,11 +14,11 @@ OS="$(uname -s)"
 CA_CERT="$HOME/.gemini/antigravity/certs/ca-cert.pem"
 
 if [ "$OS" = "Darwin" ]; then
-  # macOS
+  # macOS (port 51999 for ag-doctor-ui stub, NOT 50999 which is reserved for main Antigravity proxy)
   echo "Setting system proxy (macOS)..."
   networksetup -listallnetworkservices | grep -v '*' | while read -r svc; do
-    networksetup -setwebproxy "$svc" 127.0.0.1 50999
-    networksetup -setsecurewebproxy "$svc" 127.0.0.1 50999
+    networksetup -setwebproxy "$svc" 127.0.0.1 51999
+    networksetup -setsecurewebproxy "$svc" 127.0.0.1 51999
     networksetup -setwebproxystate "$svc" on
     networksetup -setsecurewebproxystate "$svc" on
   done

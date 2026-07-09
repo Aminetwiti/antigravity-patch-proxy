@@ -5,6 +5,7 @@ import * as https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as dns from 'dns';
+import * as os from 'os';
 import { app } from 'electron';
 import log from 'electron-log';
 
@@ -12,15 +13,11 @@ let server: http.Server | null = null;
 let proxyPort = 0;
 
 import {
-  DEFAULT_PROXY_PORT,
-  MAX_REQUEST_BODY_SIZE,
   GOOGLE_PROXY_TIMEOUT_MS,
-  GOOGLE_FORWARD_TIMEOUT_MS,
   FILE_DOWNLOAD_TIMEOUT_MS,
-  DEFAULT_MODEL_REQUEST_TIMEOUT_MS,
-  DEFAULT_MAX_RETRIES,
   PUBLIC_DNS_SERVERS,
-  PROVIDERS,
+  FALLBACK_PROXY_PORTS,
+  ACTIVE_PORT_FILE,
 } from './constants';
 
 // ─── Types ────────────────────────────────────────────────────────────────
@@ -43,13 +40,10 @@ import {
 } from './proxy/shared';
 
 // Model configuration & capability detection
-import { detectModelCapabilities, detectModelCapabilitiesByName } from './proxy/modelUtils';
+import { detectModelCapabilities } from './proxy/modelUtils';
 
 // Provider translator registry (auto-discovers translators from proxy/translators/)
 import * as registry from './proxy/registry';
-
-// Crypto store (for API key encryption)
-import * as cryptoStore from './cryptoStore';
 
 // Protobuf injection (extracted from proxy.ts)
 import { injectCustomModelsIntoResponse } from './proxy/protoInjector';
@@ -90,27 +84,62 @@ async function resolveGoogleIp(hostname: string): Promise<string> {
       });
       return;
     }
+
+    // Public DNS can be unreachable on some networks/corporate firewalls.
+    // Cap the attempt at 5 seconds so the LS's own 10s deadline isn't blown.
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      log.warn(`[Proxy] Public DNS timed out for ${hostname}, falling back to system DNS resolver`);
+      fallbackToSystemDns(hostname, resolve, reject);
+    }, 5_000);
+
     googleDnsResolver.resolve4(hostname, (err, addresses) => {
+      if (timedOut) return;
+      clearTimeout(timeout);
+
       if (err || !addresses || addresses.length === 0) {
-        log.warn(`[Proxy] Public DNS failed for ${hostname}, falling back to system DNS:`, err?.message);
-        dns.lookup(hostname, { family: 4 }, (err2, address) => {
-          if (err2 || !address) {
-            reject(err2 || err || new Error(`Could not resolve ${hostname}`));
-          } else {
-            resolve(address);
-          }
-        });
+        log.warn(`[Proxy] Public DNS failed for ${hostname}, falling back to system DNS resolver:`, err?.message);
+        fallbackToSystemDns(hostname, resolve, reject);
         return;
       }
       const ip = addresses[0];
       if (!ip || typeof ip !== 'string') {
         log.error(`[Proxy] Public DNS returned invalid address for ${hostname}:`, addresses);
-        reject(new Error(`Invalid address for ${hostname}`));
+        fallbackToSystemDns(hostname, resolve, reject);
         return;
       }
       log.info(`[Proxy] resolveGoogleIp using ${ip} for ${hostname}`);
       resolve(ip);
     });
+  });
+}
+
+/**
+ * Fallback DNS resolver for googleapis.com that bypasses the hosts file.
+ * We MUST NOT use dns.lookup here because the hosts file redirects
+ * *.googleapis.com to 127.0.0.1. dns.resolve4 uses the network DNS directly,
+ * ignoring the hosts file, so it returns the real Google IP.
+ */
+function fallbackToSystemDns(
+  hostname: string,
+  resolve: (value: string | PromiseLike<string>) => void,
+  reject: (reason?: Error) => void,
+): void {
+  dns.resolve4(hostname, (err, addresses) => {
+    if (err || !addresses || addresses.length === 0) {
+      log.error(`[Proxy] System DNS resolver failed for ${hostname}:`, err?.message);
+      reject(err || new Error(`Could not resolve ${hostname}`));
+      return;
+    }
+    const ip = addresses[0];
+    if (!ip || typeof ip !== 'string') {
+      log.error(`[Proxy] System DNS returned invalid address for ${hostname}:`, addresses);
+      reject(new Error(`Invalid address for ${hostname}`));
+      return;
+    }
+    log.info(`[Proxy] resolveGoogleIp using system DNS ${ip} for ${hostname}`);
+    resolve(ip);
   });
 }
 
@@ -398,6 +427,28 @@ function handleCustomModelRequest(
         safeEnd(res);
       }
     });
+    const status = apiRes.statusCode || 0;
+
+    // P3: Log 401 errors with detailed diagnostic context to help users
+    // understand why their custom endpoint rejected the request.
+    // Common causes: missing API key, wrong header name, expired token,
+    // wrong endpoint URL, account suspended.
+    if (status === 401) {
+      const apiKeyPreview = model.apiKey
+        ? `${model.apiKey.slice(0, 4)}…${model.apiKey.slice(-4)} (len=${model.apiKey.length})`
+        : '<empty>';
+      log.error(`[Proxy] 401 Unauthorized from ${model.name} (${model.provider})`);
+      log.error(`[Proxy]   URL: ${finalUrlStr}`);
+      log.error(`[Proxy]   API key: ${apiKeyPreview}`);
+      log.error(`[Proxy]   Headers sent: ${Object.keys(headers).join(', ')}`);
+      log.error(`[Proxy]   Possible causes:`);
+      log.error(`[Proxy]     - Missing or invalid API key (check custom_models.json)`);
+      log.error(`[Proxy]     - Wrong header name for this provider (e.g. 'Authorization' vs 'x-api-key')`);
+      log.error(`[Proxy]     - Expired or revoked token`);
+      log.error(`[Proxy]     - Account suspended or rate-limited`);
+      log.error(`[Proxy]     - Wrong endpoint URL (${finalUrlStr})`);
+      log.error(`[Proxy]   Upstream response: ${JSON.stringify(apiRes.headers).slice(0, 200)}`);
+    }
 
     if (isStream) {
       // Check for API errors BEFORE writing streaming headers
@@ -1013,6 +1064,19 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
               }
             }
 
+            // P1: Strip Google's upstream error from the response. When Google
+            // returns 401/403/etc., the proxy forwards that error object alongside
+            // our injected custom models. The Antigravity frontend treats any
+            // `error` key as a hard failure and hides the entire model list,
+            // even though we successfully injected valid models. Removing the
+            // error key lets the frontend render the merged model list normally.
+            if (googleJson.error) {
+              log.warn(
+                `[Proxy] fetchAvailableModels: stripping upstream error from response (status: ${googleRes.statusCode})`,
+              );
+              delete (googleJson as Record<string, unknown>).error;
+            }
+
             safeWriteHead(res, 200, { 'Content-Type': 'application/json' });
             safeEnd(res, JSON.stringify(googleJson));
           } catch (err) {
@@ -1291,10 +1355,41 @@ export function startProxy(): Promise<number> {
       let primaryPort = defaultPort;
       let primaryHost = defaultHost;
 
-      function tryListen(port: number, host: string): void {
+      // Build the ordered list of ports to try: env override → default → fallbacks → dynamic
+      const portCandidates: number[] = [defaultPort];
+      if (defaultPort === 50999) {
+        // Only add fallbacks if the user did not override the port via env
+        portCandidates.push(...FALLBACK_PROXY_PORTS);
+      }
+      portCandidates.push(0); // 0 = OS-assigned dynamic port (last resort)
+
+      let attemptIdx = 0;
+
+      const tryListen = (port: number, host: string): void => {
         server!.listen(port, host, () => {
           proxyPort = (server!.address() as import('net').AddressInfo).port;
-          log.info(`[Proxy] Server listening on http://${host}:${proxyPort}`);
+          const isFallback = port !== defaultPort && port !== 0;
+          const isDynamic = port === 0;
+          if (isFallback) {
+            log.warn(`[Proxy] Default port ${defaultPort} unavailable. Using fallback port ${proxyPort}.`);
+            log.warn(`[Proxy] Set AG_PROXY_PORT=${proxyPort} in your environment to silence this warning.`);
+          } else if (isDynamic) {
+            log.warn(`[Proxy] All configured ports in use. Using OS-assigned dynamic port ${proxyPort}.`);
+          } else {
+            log.info(`[Proxy] Server listening on http://${host}:${proxyPort}`);
+          }
+
+          // Persist the active port so other processes (ag-doctor-ui, scripts)
+          // can discover which port the proxy is actually bound to.
+          try {
+            const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
+            const portFile = path.join(home, ACTIVE_PORT_FILE);
+            fs.mkdirSync(path.dirname(portFile), { recursive: true });
+            fs.writeFileSync(portFile, String(proxyPort), 'utf-8');
+            log.debug(`[Proxy] Active port persisted to ${portFile}`);
+          } catch (err) {
+            log.warn('[Proxy] Could not persist active port:', (err as Error).message);
+          }
 
           // Execute cleanup initialization after the server is already listening
           // so that failures here don't prevent the port from binding.
@@ -1306,15 +1401,17 @@ export function startProxy(): Promise<number> {
 
           resolve(proxyPort);
         });
-      }
+      };
 
       server.on('error', (err: NodeJS.ErrnoException) => {
         // Log full error details for diagnostics on new machines.
         log.error(`[Proxy] Server error: code=${err.code} message=${err.message} syscall=${err.syscall || ''} address=${(err as any).address || ''} port=${(err as any).port || ''}`);
-        if (err.code === 'EADDRINUSE' && primaryPort === defaultPort) {
-          log.warn(`[Proxy] Port ${defaultPort} is already in use. Retrying on dynamic port...`);
-          primaryPort = 0;
-          tryListen(0, primaryHost);
+        if (err.code === 'EADDRINUSE' && attemptIdx + 1 < portCandidates.length) {
+          const triedPort = portCandidates[attemptIdx];
+          const nextPort = portCandidates[attemptIdx + 1];
+          log.warn(`[Proxy] Port ${triedPort} is already in use. Trying ${nextPort === 0 ? 'OS-assigned dynamic port' : 'port ' + nextPort}...`);
+          attemptIdx += 1;
+          tryListen(nextPort, primaryHost);
         } else if (err.code === 'EACCES') {
           // P2: Surface permission errors clearly instead of silently failing.
           log.error(`[Proxy] Permission denied binding to ${primaryHost}:${primaryPort}. Try a different port (AG_PROXY_PORT) or run with sufficient privileges.`);
@@ -1325,6 +1422,7 @@ export function startProxy(): Promise<number> {
         }
       });
 
+      primaryPort = portCandidates[0];
       tryListen(primaryPort, primaryHost);
     } catch (err) {
       log.error('[Proxy] Unexpected error during startProxy:', err);
