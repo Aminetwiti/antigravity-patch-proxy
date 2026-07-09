@@ -11,6 +11,8 @@
  * and preventing cryptic UI errors.
  */
 
+import { ALL_PROVIDERS, type ProviderName } from './constants';
+
 interface ValidationResult {
   valid: boolean;
   error?: string;

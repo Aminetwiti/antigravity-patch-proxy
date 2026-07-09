@@ -1,7 +1,7 @@
 "use strict";
 /**
  * Shared state module for proxy orchestration.
- * Extracted from proxy.js to decouple translators from main orchestration.
+ * Extracted from proxy.ts to decouple translators from main orchestration.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.stateTimestamps = exports.translatedToolCalls = exports.activeStreamContexts = exports.modelReasoningContent = exports.modelToolCallIds = void 0;

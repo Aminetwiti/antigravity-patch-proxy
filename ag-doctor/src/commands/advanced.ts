@@ -25,11 +25,10 @@ import {
   verifyBackupIntegrity,
   checkVersionCompatibility,
   watchBinaryForUpdates,
-  getProxyStatus,
 } from '../core/advanced';
 import { getLanguageServerBinary, getLanguageServerBackup } from '../core/paths';
 import { loadConfig } from '../core/config';
-import { runStop } from './proxy';
+import { runStop, getProxyStatus } from './proxy';
 
 const USAGE = `ag-doctor advanced — rare edge-case diagnostics
 

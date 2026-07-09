@@ -9,6 +9,7 @@ import { app } from 'electron';
 import log from 'electron-log';
 import * as cryptoStore from '../cryptoStore';
 import { validateCustomModel } from '../schemaValidator';
+import { ALL_PROVIDERS, type ProviderName } from '../constants';
 import type { CustomModel } from './types';
 
 /**
@@ -62,16 +63,12 @@ function createDefaultModelsFile(filePath: string): CustomModel[] {
   const defaultModels = getDefaultCustomModels();
   try {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    (defaultModels as unknown as Record<string, unknown>[]).forEach((m) => {
-      m.encrypted = false;
-    });
     const encrypted = cryptoStore.encryptModels(defaultModels as unknown as Record<string, unknown>[]);
     fs.writeFileSync(filePath, JSON.stringify({ models: encrypted }, null, 2), 'utf-8');
   } catch (e) {
     log.error('[Proxy] Failed to write default custom_models.json', e);
   }
-  const decrypted = cryptoStore.decryptModels(defaultModels as unknown as Record<string, unknown>[]);
-  return decrypted as unknown as CustomModel[];
+  return defaultModels;
 }
 
 /**
@@ -97,9 +94,15 @@ function migrateToEncrypted(filePath: string, models: CustomModel[]): CustomMode
 function validateModels(decrypted: CustomModel[]): CustomModel[] {
   const validModels: CustomModel[] = [];
   for (let i = 0; i < decrypted.length; i++) {
-    const validation = validateCustomModel(decrypted[i]) as { valid: boolean; error?: string };
+    const m = decrypted[i];
+    const provider = m.provider as string;
+    if (!ALL_PROVIDERS.includes(provider as ProviderName)) {
+      log.warn(`[Proxy] Skipping model at index ${i}: Unsupported provider ${provider}. Must be one of: ${ALL_PROVIDERS.join(', ')}`);
+      continue;
+    }
+    const validation = validateCustomModel(m) as { valid: boolean; error?: string };
     if (validation.valid) {
-      validModels.push(decrypted[i]);
+      validModels.push(m);
     } else {
       log.warn(`[Proxy] Skipping invalid model at index ${i}: ${validation.error}`);
     }

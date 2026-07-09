@@ -18,26 +18,9 @@ import {
   GOOGLE_FORWARD_TIMEOUT_MS,
   FILE_DOWNLOAD_TIMEOUT_MS,
   DEFAULT_MODEL_REQUEST_TIMEOUT_MS,
-  STREAM_RETRY_BASE_DELAY_MS,
-  NON_STREAM_RETRY_BASE_DELAY_MS,
-  RATE_LIMIT_RETRY_BASE_DELAY_MS,
-  SERVER_ERROR_RETRY_BASE_DELAY_MS,
   DEFAULT_MAX_RETRIES,
-  MIN_MAX_RETRIES,
-  MAX_MAX_RETRIES,
-  CUSTOM_MODEL_MAX_TOKENS,
-  CUSTOM_MODEL_MAX_OUTPUT_TOKENS,
-  DEFAULT_TEMPERATURE,
-  DEFAULT_TOP_P,
-  DEFAULT_TOP_K,
-  PLACEHOLDER_ID_BASE,
-  PLACEHOLDER_ID_RANGE,
   PUBLIC_DNS_SERVERS,
-  HTTP_STATUS,
-  GOOGLE_HOSTS,
-  CONTENT_TYPES,
   PROVIDERS,
-  OPENAI_COMPATIBLE_PROVIDERS,
 } from './constants';
 
 // ─── Types ────────────────────────────────────────────────────────────────
@@ -214,9 +197,8 @@ async function proxyToGoogle(req: http.IncomingMessage, res: http.ServerResponse
     safeWriteHead(res, status, headers);
 
   const proxyReq = https.request(parsedUrl, options, (proxyRes) => {
-    // P0-5: Timeout for Google proxy requests (60s)
-    proxyReq.setTimeout(60_000, () => {
-      log.error('[Proxy] Google proxy request timed out after 60s');
+    proxyReq.setTimeout(GOOGLE_PROXY_TIMEOUT_MS, () => {
+      log.error(`[Proxy] Google proxy request timed out after ${GOOGLE_PROXY_TIMEOUT_MS / 1000}s`);
       proxyReq.destroy();
       if (safeHead(504, { 'Content-Type': 'application/json' })) {
         safeEnd(res, JSON.stringify({ error: { message: 'Google API request timed out' } }));
@@ -300,6 +282,8 @@ async function resolveFileData(body: GeminiRequestBody, reqHeaders: Record<strin
       const p = item.parts[i] as Record<string, unknown>;
       const fd = p.fileData as { mimeType?: string; fileUri?: string } | undefined;
       if (!fd?.fileUri) continue;
+      // Keep image fileData intact so provider translators can map it natively.
+      if (fd.mimeType?.startsWith('image/')) continue;
       try {
         const uri = fd.fileUri; let fileContent = '';
         if (uri.startsWith('file://')) {
@@ -321,7 +305,7 @@ function downloadFileContent(url: string, authHeader: string): Promise<string> {
     const u = new URL(url);
     (u.protocol === 'https:' ? https : http).request({
       hostname: u.hostname, path: u.pathname + u.search,
-      method: 'GET', headers: { 'Authorization': authHeader }, timeout: 30000,
+      method: 'GET', headers: { 'Authorization': authHeader }, timeout: FILE_DOWNLOAD_TIMEOUT_MS,
     }, (res) => {
       if (res.statusCode !== 200) { reject(new Error('HTTP ' + res.statusCode)); return; }
       let d = ''; res.on('data', (c: Buffer) => d += c.toString()); res.on('end', () => resolve(d));

@@ -4,9 +4,11 @@
  * Auto-discovers translator modules and provides a unified interface for request/response mapping.
  *
  * To add a new provider:
- *   1. Create a file in ./translators/ named <provider>.ts
+ *   1. Create a file in ./translators/ named <provider>.ts (compiled to <provider>.js at runtime)
  *   2. Export: mapGeminiTo<Provider>, map<Provider>ToGemini, map<Provider>ChunkToGemini
  *   3. The registry detects it automatically — no config changes needed.
+ *
+ * Note: Auto-discovery filters by .js because Node loads compiled output from ./translators/.
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;

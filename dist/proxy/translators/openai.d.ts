@@ -59,10 +59,17 @@ interface GeminiRequestBody {
 }
 interface OpenAIMessage {
     role: string;
-    content: string | null;
+    content: string | OpenAIContentBlock[] | null;
     tool_calls?: OpenAIToolCall[];
     tool_call_id?: string;
     reasoning_content?: string;
+}
+interface OpenAIContentBlock {
+    type: 'text' | 'image_url';
+    text?: string;
+    image_url?: {
+        url: string;
+    };
 }
 interface OpenAIToolCall {
     id: string;

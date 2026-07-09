@@ -92,6 +92,7 @@ const OBJECTIVE_LABELS = {
     doctor: "Faire un diagnostic (Doctor)",
     patch: "Faire un repair (Réparer)",
     logs: "Afficher et suivre les logs",
+    proxy: "Démarrer/arrêter le proxy stub sur 50999",
 };
 // ─────────────────────────────────────────────────────────────────────────────
 // Cached SVG icon strings (avoid recreating on every render)
@@ -485,7 +486,7 @@ async function runStartStub() {
     }
     finally {
         $('#startStubBtn')?.removeAttribute('disabled');
-        setStatus('Idle', 'ok');
+        setStatus('Idle', 'ready');
     }
 }
 // Reusable template for objective icons — avoids innerHTML on every doctor run

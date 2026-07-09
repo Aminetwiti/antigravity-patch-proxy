@@ -157,7 +157,7 @@ async function spawnDetached(scriptPath: string, args: string[], port: number, c
   }
 }
 
-async function runStop(ctx: CommandContext, port: number): Promise<number> {
+export async function runStop(ctx: CommandContext, port: number): Promise<number> {
   if (!ctx.json) header('Proxy — stop');
   const status = await getProxyStatus(port);
 

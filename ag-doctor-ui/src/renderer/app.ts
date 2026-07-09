@@ -244,6 +244,7 @@ const OBJECTIVE_LABELS: Record<ObjectiveKey, string> = {
   doctor: "Faire un diagnostic (Doctor)",
   patch: "Faire un repair (Réparer)",
   logs: "Afficher et suivre les logs",
+  proxy: "Démarrer/arrêter le proxy stub sur 50999",
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

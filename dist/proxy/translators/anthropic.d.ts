@@ -24,6 +24,14 @@ interface GeminiPart {
     thought?: boolean;
     functionCall?: GeminiFunctionCall;
     functionResponse?: GeminiFunctionResponse;
+    fileData?: {
+        mimeType: string;
+        fileUri: string;
+    };
+    inlineData?: {
+        mimeType: string;
+        data: string;
+    };
 }
 interface GeminiFunctionCall {
     name: string;
@@ -47,7 +55,7 @@ interface GeminiRequestBody {
     };
 }
 interface AnthropicContentBlock {
-    type: 'text' | 'tool_use' | 'tool_result' | 'thinking';
+    type: 'text' | 'tool_use' | 'tool_result' | 'thinking' | 'image';
     text?: string;
     thinking?: string;
     id?: string;
@@ -55,6 +63,11 @@ interface AnthropicContentBlock {
     input?: Record<string, unknown>;
     tool_use_id?: string;
     content?: string | AnthropicContentBlock[];
+    source?: {
+        type: 'base64' | 'url';
+        media_type: string;
+        data: string;
+    };
 }
 type AnthropicMessageRole = 'user' | 'assistant';
 interface AnthropicMessage {

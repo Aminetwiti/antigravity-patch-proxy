@@ -149,37 +149,42 @@ function mapGeminiToOpenAI(geminiBody, modelName) {
                         const partsContent = [];
                         for (const p of parts) {
                             if (p.text) {
-                                partsContent.push(p.text);
+                                partsContent.push({ type: 'text', text: p.text });
                             }
                             else if (p.fileData) {
                                 const fd = p.fileData;
-                                // Try to read local files directly
-                                try {
-                                    const url = new URL(fd.fileUri);
-                                    if (url.protocol === 'file:') {
-                                        const fs = require('fs');
-                                        const fileContent = fs.readFileSync(url.pathname.replace(/^\//, '').replace(/\//g, path.sep), 'utf-8');
-                                        partsContent.push(`[File content from ${fd.fileUri}]:\n${fileContent}`);
-                                    }
-                                    else {
-                                        partsContent.push(`[File reference: ${fd.fileUri} (${fd.mimeType})]`);
-                                    }
+                                if (fd.mimeType?.startsWith('image/')) {
+                                    partsContent.push({ type: 'image_url', image_url: { url: fd.fileUri } });
                                 }
-                                catch {
-                                    partsContent.push(`[File reference: ${fd.fileUri} (${fd.mimeType})]`);
+                                else {
+                                    // Try to read local files directly
+                                    try {
+                                        const url = new URL(fd.fileUri);
+                                        if (url.protocol === 'file:') {
+                                            const fs = require('fs');
+                                            const fileContent = fs.readFileSync(url.pathname.replace(/^\//, '').replace(/\//g, path.sep), 'utf-8');
+                                            partsContent.push({ type: 'text', text: `[File content from ${fd.fileUri}]:\n${fileContent}` });
+                                        }
+                                        else {
+                                            partsContent.push({ type: 'text', text: `[File reference: ${fd.fileUri} (${fd.mimeType})]` });
+                                        }
+                                    }
+                                    catch {
+                                        partsContent.push({ type: 'text', text: `[File reference: ${fd.fileUri} (${fd.mimeType})]` });
+                                    }
                                 }
                             }
                             else if (p.inlineData) {
                                 const id = p.inlineData;
                                 if (id.mimeType && id.mimeType.startsWith('image/')) {
-                                    partsContent.push(`[Image: data:${id.mimeType};base64,${id.data}]`);
+                                    partsContent.push({ type: 'image_url', image_url: { url: `data:${id.mimeType};base64,${id.data}` } });
                                 }
                                 else {
-                                    partsContent.push(`[Inline data: ${id.mimeType}, length: ${(id.data || '').length} chars]`);
+                                    partsContent.push({ type: 'text', text: `[Inline data: ${id.mimeType}, length: ${(id.data || '').length} chars]` });
                                 }
                             }
                         }
-                        content = partsContent.join('\n');
+                        content = partsContent;
                     }
                     const msg = { role, content };
                     if (reasoning_content)

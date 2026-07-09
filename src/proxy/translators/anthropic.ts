@@ -55,6 +55,8 @@ interface GeminiPart {
   thought?: boolean;
   functionCall?: GeminiFunctionCall;
   functionResponse?: GeminiFunctionResponse;
+  fileData?: { mimeType: string; fileUri: string };
+  inlineData?: { mimeType: string; data: string };
 }
 
 interface GeminiFunctionCall {
@@ -80,7 +82,7 @@ interface GeminiRequestBody {
 }
 
 interface AnthropicContentBlock {
-  type: 'text' | 'tool_use' | 'tool_result' | 'thinking';
+  type: 'text' | 'tool_use' | 'tool_result' | 'thinking' | 'image';
   text?: string;
   thinking?: string;
   id?: string;
@@ -88,6 +90,11 @@ interface AnthropicContentBlock {
   input?: Record<string, unknown>;
   tool_use_id?: string;
   content?: string | AnthropicContentBlock[];
+  source?: {
+    type: 'base64' | 'url';
+    media_type: string;
+    data: string;
+  };
 }
 
 type AnthropicMessageRole = 'user' | 'assistant';
@@ -238,18 +245,18 @@ export function mapGeminiToAnthropic(geminiBody: GeminiRequestBody, modelName: s
           messages.push({ role: 'user', content: contentBlocks });
         } else {
           const roleStr = item.role === 'model' ? 'assistant' : item.role || 'user';
-          let content = '';
+          let content: string | AnthropicContentBlock[] = '';
           if (item.parts) {
-            const partsContent: string[] = [];
+            const partsContent: AnthropicContentBlock[] = [];
             for (const p of item.parts) {
-              if (p.text) { partsContent.push(p.text); }
-              else if ((p as any).fileData) { const fd = (p as any).fileData; try { const url = new URL(fd.fileUri); if (url.protocol === 'file:') { const fs = require('fs'); partsContent.push(`[File:\n${fs.readFileSync(url.pathname.replace(/^\//, '').replace(/\//g, path.sep), 'utf-8')}\n]`); } else { partsContent.push(`[File: ${fd.fileUri} (${fd.mimeType})]`); } } catch { partsContent.push(`[File: ${fd.fileUri} (${fd.mimeType})]`); } }
-              else if ((p as any).inlineData) { const id = (p as any).inlineData; partsContent.push(`[${id.mimeType}: ${id.data}]`); }
+              if (p.text) { partsContent.push({ type: 'text', text: p.text }); }
+              else if ((p as any).fileData) { const fd = (p as any).fileData; if (fd.mimeType?.startsWith('image/')) { partsContent.push({ type: 'image', source: { type: 'url', media_type: fd.mimeType, data: fd.fileUri } }); } else { try { const url = new URL(fd.fileUri); if (url.protocol === 'file:') { const fs = require('fs'); partsContent.push({ type: 'text', text: `[File:\n${fs.readFileSync(url.pathname.replace(/^\//, '').replace(/\//g, path.sep), 'utf-8')}\n]` }); } else { partsContent.push({ type: 'text', text: `[File: ${fd.fileUri} (${fd.mimeType})]` }); } } catch { partsContent.push({ type: 'text', text: `[File: ${fd.fileUri} (${fd.mimeType})]` }); } } }
+              else if ((p as any).inlineData) { const id = (p as any).inlineData; if (id.mimeType?.startsWith('image/')) { partsContent.push({ type: 'image', source: { type: 'base64', media_type: id.mimeType, data: id.data } }); } else { partsContent.push({ type: 'text', text: `[${id.mimeType}: ${id.data}]` }); } }
             }
-            content = partsContent.join('\n');
+            content = partsContent;
           }
           if (roleStr === 'system') {
-            system = (system || '') + '\n' + content;
+            system = (system || '') + '\n' + (Array.isArray(content) ? content.map((c) => (c.type === 'text' ? c.text || '' : '')).join('\n') : content);
           } else {
             messages.push({ role: roleStr as AnthropicMessageRole, content });
           }

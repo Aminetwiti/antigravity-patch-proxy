@@ -145,33 +145,43 @@ function mapGeminiToAnthropic(geminiBody, modelName) {
                         const partsContent = [];
                         for (const p of item.parts) {
                             if (p.text) {
-                                partsContent.push(p.text);
+                                partsContent.push({ type: 'text', text: p.text });
                             }
                             else if (p.fileData) {
                                 const fd = p.fileData;
-                                try {
-                                    const url = new URL(fd.fileUri);
-                                    if (url.protocol === 'file:') {
-                                        const fs = require('fs');
-                                        partsContent.push(`[File:\n${fs.readFileSync(url.pathname.replace(/^\//, '').replace(/\//g, path.sep), 'utf-8')}\n]`);
-                                    }
-                                    else {
-                                        partsContent.push(`[File: ${fd.fileUri} (${fd.mimeType})]`);
-                                    }
+                                if (fd.mimeType?.startsWith('image/')) {
+                                    partsContent.push({ type: 'image', source: { type: 'url', media_type: fd.mimeType, data: fd.fileUri } });
                                 }
-                                catch {
-                                    partsContent.push(`[File: ${fd.fileUri} (${fd.mimeType})]`);
+                                else {
+                                    try {
+                                        const url = new URL(fd.fileUri);
+                                        if (url.protocol === 'file:') {
+                                            const fs = require('fs');
+                                            partsContent.push({ type: 'text', text: `[File:\n${fs.readFileSync(url.pathname.replace(/^\//, '').replace(/\//g, path.sep), 'utf-8')}\n]` });
+                                        }
+                                        else {
+                                            partsContent.push({ type: 'text', text: `[File: ${fd.fileUri} (${fd.mimeType})]` });
+                                        }
+                                    }
+                                    catch {
+                                        partsContent.push({ type: 'text', text: `[File: ${fd.fileUri} (${fd.mimeType})]` });
+                                    }
                                 }
                             }
                             else if (p.inlineData) {
                                 const id = p.inlineData;
-                                partsContent.push(`[${id.mimeType}: ${id.data}]`);
+                                if (id.mimeType?.startsWith('image/')) {
+                                    partsContent.push({ type: 'image', source: { type: 'base64', media_type: id.mimeType, data: id.data } });
+                                }
+                                else {
+                                    partsContent.push({ type: 'text', text: `[${id.mimeType}: ${id.data}]` });
+                                }
                             }
                         }
-                        content = partsContent.join('\n');
+                        content = partsContent;
                     }
                     if (roleStr === 'system') {
-                        system = (system || '') + '\n' + content;
+                        system = (system || '') + '\n' + (Array.isArray(content) ? content.map((c) => (c.type === 'text' ? c.text || '' : '')).join('\n') : content);
                     }
                     else {
                         messages.push({ role: roleStr, content });

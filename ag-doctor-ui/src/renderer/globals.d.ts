@@ -41,7 +41,10 @@ interface AgAPI {
   antigravityKill(): Promise<{ ok: boolean; data?: { killed: number; message: string }; error?: string }>;
   antigravityRestart(): Promise<{ ok: boolean; data?: { ok: boolean; message: string; pid?: number }; error?: string }>;
   repairRun(): Promise<{ ok: boolean; proxy?: boolean; ca?: boolean; error?: string }>;
-  proxyStartStub(): Promise<{ ok: boolean; pid?: number; error?: string }>;
+
+  // Proxy stub lifecycle — emergency fallback when Antigravity's bundled proxy fails
+  proxyStartStub(): Promise<{ ok: boolean; pid?: number; note?: string; error?: string }>;
+  proxyStatus(): Promise<{ ok: boolean; data?: { ok: boolean; stub: boolean; latencyMs: number; error?: string }; error?: string }>;
 }
 
 interface Window {

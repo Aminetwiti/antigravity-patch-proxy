@@ -1,6 +1,6 @@
 /**
  * Centralized model capability detection.
- * Replaces ~9 duplicate regex blocks across proxy.js.
+ * Replaces ~9 duplicate regex blocks across proxy.ts.
  */
 export interface CustomModelConfig {
     name: string;

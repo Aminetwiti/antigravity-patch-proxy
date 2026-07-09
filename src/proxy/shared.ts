@@ -1,6 +1,6 @@
 /**
  * Shared state module for proxy orchestration.
- * Extracted from proxy.js to decouple translators from main orchestration.
+ * Extracted from proxy.ts to decouple translators from main orchestration.
  */
 
 // ─── Types ────────────────────────────────────────────────────────────────

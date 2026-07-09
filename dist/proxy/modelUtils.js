@@ -1,7 +1,7 @@
 "use strict";
 /**
  * Centralized model capability detection.
- * Replaces ~9 duplicate regex blocks across proxy.js.
+ * Replaces ~9 duplicate regex blocks across proxy.ts.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.detectModelCapabilities = detectModelCapabilities;

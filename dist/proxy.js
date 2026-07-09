@@ -181,9 +181,8 @@ async function proxyToGoogle(req, res, reqBody) {
     // Guard flag to prevent ERR_HTTP_HEADERS_SENT when timeout and response race
     const safeHead = (status, headers) => safeWriteHead(res, status, headers);
     const proxyReq = https.request(parsedUrl, options, (proxyRes) => {
-        // P0-5: Timeout for Google proxy requests (60s)
-        proxyReq.setTimeout(60000, () => {
-            electron_log_1.default.error('[Proxy] Google proxy request timed out after 60s');
+        proxyReq.setTimeout(constants_1.GOOGLE_PROXY_TIMEOUT_MS, () => {
+            electron_log_1.default.error(`[Proxy] Google proxy request timed out after ${constants_1.GOOGLE_PROXY_TIMEOUT_MS / 1000}s`);
             proxyReq.destroy();
             if (safeHead(504, { 'Content-Type': 'application/json' })) {
                 safeEnd(res, JSON.stringify({ error: { message: 'Google API request timed out' } }));
@@ -261,6 +260,9 @@ async function resolveFileData(body, reqHeaders) {
             const fd = p.fileData;
             if (!fd?.fileUri)
                 continue;
+            // Keep image fileData intact so provider translators can map it natively.
+            if (fd.mimeType?.startsWith('image/'))
+                continue;
             try {
                 const uri = fd.fileUri;
                 let fileContent = '';
@@ -287,7 +289,7 @@ function downloadFileContent(url, authHeader) {
         const u = new URL(url);
         (u.protocol === 'https:' ? https : http).request({
             hostname: u.hostname, path: u.pathname + u.search,
-            method: 'GET', headers: { 'Authorization': authHeader }, timeout: 30000,
+            method: 'GET', headers: { 'Authorization': authHeader }, timeout: constants_1.FILE_DOWNLOAD_TIMEOUT_MS,
         }, (res) => {
             if (res.statusCode !== 200) {
                 reject(new Error('HTTP ' + res.statusCode));

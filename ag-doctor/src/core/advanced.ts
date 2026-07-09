@@ -526,6 +526,9 @@ export async function checkVersionCompatibility(): Promise<VersionCompatibility>
     result.compatible = compareVersions(result.installed, compat.min) >= 0
       && compareVersions(result.installed, compat.max) <= 0;
     result.knownIssues = compat.issues;
+  } else if (!result.installed) {
+    result.compatible = true;
+    result.knownIssues = ['Could not detect installed Antigravity version.'];
   }
 
   return result;

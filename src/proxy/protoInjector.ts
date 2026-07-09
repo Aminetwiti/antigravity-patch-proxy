@@ -11,6 +11,7 @@ import {
   encodeModelEntryForGetModels,
 } from './protobuf';
 import { generateModelPlaceholderId } from './idGenerator';
+import log from 'electron-log';
 import type { CustomModel } from './types';
 
 /**
@@ -94,7 +95,8 @@ export function injectCustomModelsIntoResponse(
     const modifiedBuf = Buffer.concat([newHeader, newMsgBody]);
 
     return { buffer: modifiedBuf, injectedCount: customModels.length, modified: true };
-  } catch {
+  } catch (err) {
+    log.warn('[ProtoInjector] Injection failed, returning original buffer:', (err as Error).message);
     return { buffer: responseBuf, injectedCount: 0, modified: false };
   }
 }

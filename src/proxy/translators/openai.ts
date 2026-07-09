@@ -87,10 +87,16 @@ interface GeminiRequestBody {
 
 interface OpenAIMessage {
   role: string;
-  content: string | null;
+  content: string | OpenAIContentBlock[] | null;
   tool_calls?: OpenAIToolCall[];
   tool_call_id?: string;
   reasoning_content?: string;
+}
+
+interface OpenAIContentBlock {
+  type: 'text' | 'image_url';
+  text?: string;
+  image_url?: { url: string };
 }
 
 interface OpenAIToolCall {
@@ -260,7 +266,7 @@ export function mapGeminiToOpenAI(geminiBody: GeminiRequestBody, modelName: stri
           }
         } else {
           const role = item.role === 'model' ? 'assistant' : item.role || 'user';
-          let content = '';
+          let content: string | OpenAIContentBlock[] = '';
           let reasoning_content = '';
           if (role === 'assistant') {
             const regularParts = (item.parts || []).filter((p) => !p.thought);
@@ -269,35 +275,39 @@ export function mapGeminiToOpenAI(geminiBody: GeminiRequestBody, modelName: stri
             reasoning_content = thoughtParts.map((p) => p.text || '').join('');
           } else {
             const parts = item.parts || [];
-            const partsContent: string[] = [];
+            const partsContent: OpenAIContentBlock[] = [];
             for (const p of parts) {
               if (p.text) {
-                partsContent.push(p.text);
+                partsContent.push({ type: 'text', text: p.text });
               } else if (p.fileData) {
                 const fd = p.fileData as { mimeType: string; fileUri: string };
-                // Try to read local files directly
-                try {
-                  const url = new URL(fd.fileUri);
-                  if (url.protocol === 'file:') {
-                    const fs = require('fs');
-                    const fileContent = fs.readFileSync(url.pathname.replace(/^\//, '').replace(/\//g, path.sep), 'utf-8');
-                    partsContent.push(`[File content from ${fd.fileUri}]:\n${fileContent}`);
-                  } else {
-                    partsContent.push(`[File reference: ${fd.fileUri} (${fd.mimeType})]`);
+                if (fd.mimeType?.startsWith('image/')) {
+                  partsContent.push({ type: 'image_url', image_url: { url: fd.fileUri } });
+                } else {
+                  // Try to read local files directly
+                  try {
+                    const url = new URL(fd.fileUri);
+                    if (url.protocol === 'file:') {
+                      const fs = require('fs');
+                      const fileContent = fs.readFileSync(url.pathname.replace(/^\//, '').replace(/\//g, path.sep), 'utf-8');
+                      partsContent.push({ type: 'text', text: `[File content from ${fd.fileUri}]:\n${fileContent}` });
+                    } else {
+                      partsContent.push({ type: 'text', text: `[File reference: ${fd.fileUri} (${fd.mimeType})]` });
+                    }
+                  } catch {
+                    partsContent.push({ type: 'text', text: `[File reference: ${fd.fileUri} (${fd.mimeType})]` });
                   }
-                } catch {
-                  partsContent.push(`[File reference: ${fd.fileUri} (${fd.mimeType})]`);
                 }
               } else if (p.inlineData) {
                 const id = p.inlineData as { mimeType: string; data: string };
                 if (id.mimeType && id.mimeType.startsWith('image/')) {
-                  partsContent.push(`[Image: data:${id.mimeType};base64,${id.data}]`);
+                  partsContent.push({ type: 'image_url', image_url: { url: `data:${id.mimeType};base64,${id.data}` } });
                 } else {
-                  partsContent.push(`[Inline data: ${id.mimeType}, length: ${(id.data || '').length} chars]`);
+                  partsContent.push({ type: 'text', text: `[Inline data: ${id.mimeType}, length: ${(id.data || '').length} chars]` });
                 }
               }
             }
-            content = partsContent.join('\n');
+            content = partsContent;
           }
           const msg: OpenAIMessage = { role, content };
           if (reasoning_content) msg.reasoning_content = reasoning_content;

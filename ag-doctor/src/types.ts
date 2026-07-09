@@ -68,5 +68,5 @@ export interface CommandContext {
   verbose: boolean;
   yes: boolean;
   cwd: string;
-  options?: Record<string, string | boolean>;
+  options: Record<string, string | boolean>;
 }
