@@ -1,0 +1,55 @@
+#!/bin/bash
+# Self-elevating repair script for Linux/macOS
+
+if [ "$EUID" -ne 0 ]; then
+  echo "Elevating privileges to repair proxy and CA..."
+  exec sudo "$0" "$@"
+fi
+
+echo "Running as root."
+RESULT_JSON="{\"proxy\":false,\"ca\":false}"
+TEMP_FILE="/tmp/ag-repair-result.json"
+
+OS="$(uname -s)"
+CA_CERT="$HOME/.gemini/antigravity/certs/ca-cert.pem"
+
+if [ "$OS" = "Darwin" ]; then
+  # macOS
+  echo "Setting system proxy (macOS)..."
+  networksetup -listallnetworkservices | grep -v '*' | while read -r svc; do
+    networksetup -setwebproxy "$svc" 127.0.0.1 50999
+    networksetup -setsecurewebproxy "$svc" 127.0.0.1 50999
+    networksetup -setwebproxystate "$svc" on
+    networksetup -setsecurewebproxystate "$svc" on
+  done
+  
+  if [ -f "$CA_CERT" ]; then
+    echo "Installing CA certificate..."
+    security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "$CA_CERT"
+    RESULT_JSON="{\"proxy\":true,\"ca\":true}"
+  else
+    RESULT_JSON="{\"proxy\":true,\"ca\":false}"
+  fi
+else
+  # Linux (best effort gsettings)
+  echo "Setting system proxy (Linux)..."
+  if command -v gsettings &> /dev/null; then
+    gsettings set org.gnome.system.proxy mode manual
+    gsettings set org.gnome.system.proxy.http host 127.0.0.1
+    gsettings set org.gnome.system.proxy.http port 50999
+    gsettings set org.gnome.system.proxy.https host 127.0.0.1
+    gsettings set org.gnome.system.proxy.https port 50999
+  fi
+  
+  if [ -f "$CA_CERT" ]; then
+    echo "Installing CA certificate..."
+    cp "$CA_CERT" /usr/local/share/ca-certificates/antigravity-mitm.crt
+    update-ca-certificates
+    RESULT_JSON="{\"proxy\":true,\"ca\":true}"
+  else
+    RESULT_JSON="{\"proxy\":true,\"ca\":false}"
+  fi
+fi
+
+echo "$RESULT_JSON" > "$TEMP_FILE"
+echo "Repair complete."

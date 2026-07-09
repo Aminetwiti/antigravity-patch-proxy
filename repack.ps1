@@ -24,6 +24,11 @@ if (-not (Test-Path $SourceDir)) {
     exit 1
 }
 
+Write-Host "==============================================" -ForegroundColor Cyan
+Write-Host "Running npm run build..." -ForegroundColor Yellow
+Write-Host "==============================================" -ForegroundColor Cyan
+npm run build
+
 # Repack using @electron/asar (excluding large/unnecessary directories)
 npx -y @electron/asar pack $SourceDir $DestAsar --unpack-dir "{node_modules,scratch,.git}"
 

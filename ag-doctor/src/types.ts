@@ -10,7 +10,7 @@ export interface CheckResult {
   status: Severity;
   message: string;
   details?: string;
-  fixable?: boolean;
+  fixable?: boolean | string;
   data?: unknown;
   source?: 'builtin' | 'plugin';
 }
@@ -57,6 +57,10 @@ export interface ConnectivityResult {
   latencyMs?: number;
   statusCode?: number;
   error?: string;
+  /** Response headers from the HTTP probe (for X-Proxy-Stub detection etc.) */
+  headers?: Record<string, string>;
+  /** First 512 chars of the response body (for diagnostics) */
+  body?: string;
 }
 
 export interface CommandContext {

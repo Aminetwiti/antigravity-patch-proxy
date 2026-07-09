@@ -76,7 +76,8 @@ function printResults(results: CheckResult[], ctx: CommandContext): void {
       console.log(c.gray(r.details.split('\n').join('\n    ')));
     }
     if (r.fixable) {
-      console.log(`    ${c.cyan('→ fixable:')} run \`ag-doctor repair\``);
+      const hint = typeof r.fixable === 'string' ? r.fixable : 'run `ag-doctor repair`';
+      console.log(`    ${c.cyan('→ fixable:')} ${hint}`);
     }
   }
 }

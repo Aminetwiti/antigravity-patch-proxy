@@ -39,6 +39,15 @@ const api = {
   antigravityRestart: (): Promise<{ ok: boolean; data?: { ok: boolean; message: string; pid?: number }; error?: string }> =>
     ipcRenderer.invoke('ag:antigravity:restart'),
 
+  // Proxy stub lifecycle — emergency fallback when Antigravity's bundled proxy fails
+  proxyStartStub: (): Promise<{ ok: boolean; pid?: number; note?: string; error?: string }> =>
+    ipcRenderer.invoke('ag:proxy:start-stub'),
+  proxyStatus: (): Promise<{ ok: boolean; data?: { ok: boolean; stub: boolean; latencyMs: number; error?: string }; error?: string }> =>
+    ipcRenderer.invoke('ag:proxy:status'),
+
+  repairRun: (): Promise<{ ok: boolean; proxy?: boolean; ca?: boolean; error?: string }> =>
+    ipcRenderer.invoke('ag:repair:run'),
+
   onRunDoctor: (handler: () => void): (() => void) => {
     const listener = () => handler();
     ipcRenderer.on('ag:run-doctor', listener);

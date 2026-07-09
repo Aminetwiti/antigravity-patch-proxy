@@ -65,15 +65,30 @@ export async function probe(url: string, timeoutMs = 5000): Promise<Connectivity
         headers: { 'User-Agent': 'ag-doctor/1.0' },
       },
       (res) => {
-        res.resume();
-        const reachable = isReachable(res.statusCode);
-        const success = isSuccess(res.statusCode);
-        finish({
-          url,
-          ok: reachable,
-          latencyMs: Date.now() - started,
-          statusCode: res.statusCode,
-          ...(success ? {} : { error: `HTTP ${res.statusCode}` }),
+        // Drain body to free the socket
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk: string) => { body += chunk; });
+        res.on('end', () => {
+          const reachable = isReachable(res.statusCode);
+          const success = isSuccess(res.statusCode);
+          // Expose selected headers for callers (e.g. X-Proxy-Stub detection)
+          const headers: Record<string, string> = {};
+          for (const [k, v] of Object.entries(res.headers)) {
+            if (v != null) headers[k] = Array.isArray(v) ? v[0] : String(v);
+          }
+          finish({
+            url,
+            ok: reachable,
+            latencyMs: Date.now() - started,
+            statusCode: res.statusCode,
+            headers,
+            body: body.slice(0, 512), // first 512 chars for diagnostics
+            ...(success ? {} : { error: `HTTP ${res.statusCode}` }),
+          });
+        });
+        res.on('error', (err) => {
+          finish({ url, ok: false, latencyMs: Date.now() - started, error: err.message });
         });
       },
     );
@@ -90,6 +105,7 @@ export async function probe(url: string, timeoutMs = 5000): Promise<Connectivity
     req.end();
   });
 }
+
 
 export async function probeWithProxy(
   url: string,

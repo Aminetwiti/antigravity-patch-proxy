@@ -7,7 +7,7 @@
     "build": "node scripts/copy-assets.js && tsc -p tsconfig.json",
     "build:cli": "cd ../ag-doctor && npm install && npm run build",
     "prebuild": "node scripts/copy-assets.js && tsc -p tsconfig.json",
-    "prepack": "npm run build && cd ../ag-doctor && npm install --omit=dev && npm run build",
+    "prepack": "npm run build && cd ../ag-doctor && npm install && npm run build && npm prune --omit=dev",
     "watch": "tsc -p tsconfig.json --watch",
     "start": "npm run build && electron .",
     "dev": "tsc -p tsconfig.json --watch & electron .",
@@ -40,6 +40,7 @@
     "files": [
       "dist/**/*",
       "assets/**/*",
+      "resources/**/*",
       "package.json"
     ],
     "extraResources": [

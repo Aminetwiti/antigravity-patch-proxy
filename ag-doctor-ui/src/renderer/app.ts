@@ -1053,8 +1053,38 @@ async function loadMitmStatus(): Promise<void> {
           </div>
           ${interceptionBanner}
         </div>
-      </div>`;
+      </div>
+      ${(!s.ca.installed || !s.proxy.redirected || !s.interception.reachable) ? `
+      <div style="margin-top: 20px; text-align: center;">
+        <button id="repair-all-btn" class="btn btn-primary" style="padding: 10px 20px; font-size: 14px;">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: text-bottom; margin-right: 6px;"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 9.36l-7.1 7.1a1 1 0 0 1-1.4 0l-2.8-2.8a1 1 0 0 1 0-1.4l7.1-7.1a6 6 0 0 1 9.36-7.94z"/></svg>
+          Repair All (Requires Admin)
+        </button>
+      </div>
+      ` : ''}`;
     mitmStatusEl.replaceChildren(mitmTpl.content);
+    
+    const repairBtn = document.getElementById('repair-all-btn');
+    if (repairBtn) {
+      repairBtn.addEventListener('click', async () => {
+        repairBtn.setAttribute('disabled', 'true');
+        repairBtn.innerHTML = 'Repairing... Please check UAC prompt.';
+        setStatus('Repairing MITM...', 'busy');
+        try {
+          const res = await window.ag.repairRun();
+          if (res.ok) {
+            toast('Repair script completed successfully.', 'ok', 5000);
+          } else {
+            toast('Repair failed: ' + res.error, 'err', 6000);
+          }
+        } catch (err) {
+          toast('Repair IPC error: ' + (err as Error).message, 'err', 6000);
+        } finally {
+          void loadMitmStatus();
+        }
+      });
+    }
+
     setStatus('Ready');
   } catch (e) {
     mitmStatusEl.innerHTML = `<div class="empty-state"><p>Error: ${escapeHtml((e as Error).message)}</p></div>`;

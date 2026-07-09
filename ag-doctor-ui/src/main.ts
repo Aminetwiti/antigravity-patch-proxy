@@ -510,6 +510,131 @@ ipcMain.handle('ag:antigravity:restart', async () => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Proxy stub lifecycle — portable emergency proxy on 127.0.0.1:50999
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Launch proxy-stub.js in a detached Node.js process.
+ * Works on any machine (no hardcoded paths).
+ * Returns { ok, pid?, error? }
+ */
+ipcMain.handle('ag:proxy:start-stub', async () => {
+  try {
+    // Resolve the stub path relative to the project root (same dir as the CLI package.json)
+    const stubPath = path.join(getCliPath(), '..', '..', '..', 'proxy-stub.js');
+    const resolved = path.resolve(stubPath);
+    if (!fs.existsSync(resolved)) {
+      return { ok: false, error: `proxy-stub.js not found at ${resolved}` };
+    }
+    // Spawn detached so it survives if ag-doctor-ui is closed
+    const child = spawn(process.execPath, [resolved], {
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.unref();
+    // Wait up to 3 s for the port to open
+    const port = 50999;
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline) {
+      await new Promise<void>((r) => setTimeout(r, 200));
+      const alive = await new Promise<boolean>((resolve) => {
+        const req = require('http').request(
+          { hostname: '127.0.0.1', port, path: '/health', method: 'GET', timeout: 1000 },
+          (res: { resume: () => void }) => { res.resume(); resolve(true); },
+        );
+        req.on('error', () => resolve(false));
+        req.end();
+      });
+      if (alive) return { ok: true, pid: child.pid };
+    }
+    return { ok: true, pid: child.pid, note: 'started but port not yet open' };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
+/**
+ * Check proxy health and detect stub vs real proxy.
+ */
+ipcMain.handle('ag:proxy:status', async () => {
+  try {
+    const port = 50999;
+    const result = await new Promise<{ ok: boolean; stub: boolean; latencyMs: number; error?: string }>((resolve) => {
+      const started = Date.now();
+      const req = require('http').request(
+        { hostname: '127.0.0.1', port, path: '/health', method: 'GET', timeout: 2000 },
+        (res: { statusCode: number; headers: Record<string, string>; resume: () => void }) => {
+          res.resume();
+          resolve({
+            ok: true,
+            stub: res.headers['x-proxy-stub'] === '1',
+            latencyMs: Date.now() - started,
+          });
+        },
+      );
+      req.on('timeout', () => { req.destroy(); resolve({ ok: false, stub: false, latencyMs: Date.now() - Date.now(), error: 'timeout' }); });
+      req.on('error', (err: Error) => resolve({ ok: false, stub: false, latencyMs: 0, error: err.message }));
+      req.end();
+    });
+    return { ok: true, data: result };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
+/**
+ * Run the repair-all script to self-elevate and fix the system proxy/CA.
+ */
+ipcMain.handle('ag:repair:run', async () => {
+  try {
+    const isWin = process.platform === 'win32';
+    const scriptName = isWin ? 'repair-all.ps1' : 'repair-all.sh';
+    const scriptPath = app.isPackaged
+      ? path.join(process.resourcesPath, scriptName)
+      : path.join(__dirname, '..', 'resources', scriptName);
+
+    if (!fs.existsSync(scriptPath)) {
+      return { ok: false, error: `Repair script not found at ${scriptPath}` };
+    }
+
+    const tempFile = isWin ? path.join(process.env.TEMP || '', 'ag-repair-result.json') : '/tmp/ag-repair-result.json';
+    if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+
+    await new Promise<void>((resolve, reject) => {
+      let proc;
+      if (isWin) {
+        proc = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `Start-Process powershell.exe -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File "${scriptPath}"' -Verb RunAs -Wait -WindowStyle Hidden`], {
+          windowsHide: true,
+          stdio: 'ignore'
+        });
+      } else {
+        proc = spawn('bash', [scriptPath], {
+          stdio: 'ignore'
+        });
+      }
+
+      proc.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`Repair script exited with code ${code}`));
+      });
+      proc.on('error', reject);
+    });
+
+    if (fs.existsSync(tempFile)) {
+      const data = JSON.parse(fs.readFileSync(tempFile, 'utf-8'));
+      fs.unlinkSync(tempFile);
+      return { ok: true, ...data };
+    }
+    return { ok: true, proxy: false, ca: false, error: 'Result file not found' };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
+
 // Streaming for `logs -f` — uses one-shot spawn (long-lived process), with
 // chunk batching to avoid IPC flooding the renderer.
 ipcMain.handle('ag:stream:start', (evt, args: string[], streamId: string) => {

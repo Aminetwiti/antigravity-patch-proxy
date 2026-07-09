@@ -21,6 +21,7 @@ import { runLogs } from './commands/logs';
 import { runUpdate } from './commands/update';
 import { runInfo } from './commands/info';
 import { runMitm } from './commands/mitm';
+import { runProxy } from './commands/proxy';
 import { runConfig } from './commands/config';
 import { runSnapshot } from './commands/snapshot';
 import { runHistory } from './commands/history';
@@ -57,6 +58,8 @@ Commands:
   logs [-f] [-n N]       Show language_server logs (tail/follow)
   mitm {status|install|uninstall|proxy-on|proxy-off|export-ca}
                          Manage MITM CA cert and system proxy
+  proxy {status|start|stop|stub}
+                         Manage standalone local proxy
   config {list|get|set|reset|path}
                          Manage persistent settings
   snapshot {list|create|restore|delete|clean}
@@ -153,6 +156,8 @@ export async function main(argv: string[]): Promise<number> {
         });
       case 'mitm':
         return await runMitm(ctx, sub);
+      case 'proxy':
+        return await runProxy(ctx, sub);
       case 'config':
         return await runConfig(ctx, sub, rest);
       case 'snapshot':

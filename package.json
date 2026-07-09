@@ -24,6 +24,7 @@
     "deploy:mac": "bash scripts/deploy/deploy.sh",
     "deploy:linux": "bash scripts/deploy/deploy_linux.sh",
     "repack": "powershell -ExecutionPolicy Bypass -File .\\scripts\\repack\\repack.ps1",
+    "prepack": "npm run build && powershell -ExecutionPolicy Bypass -File .\\scripts\\repack\\repack.ps1",
     "mitm": "powershell -ExecutionPolicy Bypass -File .\\scripts\\mitm\\start_mitm_443.ps1"
   },
   "dependencies": {

@@ -473,6 +473,123 @@ electron_1.ipcMain.handle('ag:antigravity:restart', async () => {
         return { ok: true, data: { ok: r.code === 0, message: r.stdout.trim() } };
     }
 });
+// ─────────────────────────────────────────────────────────────────────────────
+// Proxy stub lifecycle — portable emergency proxy on 127.0.0.1:50999
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Launch proxy-stub.js in a detached Node.js process.
+ * Works on any machine (no hardcoded paths).
+ * Returns { ok, pid?, error? }
+ */
+electron_1.ipcMain.handle('ag:proxy:start-stub', async () => {
+    try {
+        // Resolve the stub path relative to the project root (same dir as the CLI package.json)
+        const stubPath = path_1.default.join(getCliPath(), '..', '..', '..', 'proxy-stub.js');
+        const resolved = path_1.default.resolve(stubPath);
+        if (!fs_1.default.existsSync(resolved)) {
+            return { ok: false, error: `proxy-stub.js not found at ${resolved}` };
+        }
+        // Spawn detached so it survives if ag-doctor-ui is closed
+        const child = (0, child_process_1.spawn)(process.execPath, [resolved], {
+            env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+            detached: true,
+            stdio: 'ignore',
+            windowsHide: true,
+        });
+        child.unref();
+        // Wait up to 3 s for the port to open
+        const port = 50999;
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 200));
+            const alive = await new Promise((resolve) => {
+                const req = require('http').request({ hostname: '127.0.0.1', port, path: '/health', method: 'GET', timeout: 1000 }, (res) => { res.resume(); resolve(true); });
+                req.on('error', () => resolve(false));
+                req.end();
+            });
+            if (alive)
+                return { ok: true, pid: child.pid };
+        }
+        return { ok: true, pid: child.pid, note: 'started but port not yet open' };
+    }
+    catch (e) {
+        return { ok: false, error: e.message };
+    }
+});
+/**
+ * Check proxy health and detect stub vs real proxy.
+ */
+electron_1.ipcMain.handle('ag:proxy:status', async () => {
+    try {
+        const port = 50999;
+        const result = await new Promise((resolve) => {
+            const started = Date.now();
+            const req = require('http').request({ hostname: '127.0.0.1', port, path: '/health', method: 'GET', timeout: 2000 }, (res) => {
+                res.resume();
+                resolve({
+                    ok: true,
+                    stub: res.headers['x-proxy-stub'] === '1',
+                    latencyMs: Date.now() - started,
+                });
+            });
+            req.on('timeout', () => { req.destroy(); resolve({ ok: false, stub: false, latencyMs: Date.now() - Date.now(), error: 'timeout' }); });
+            req.on('error', (err) => resolve({ ok: false, stub: false, latencyMs: 0, error: err.message }));
+            req.end();
+        });
+        return { ok: true, data: result };
+    }
+    catch (e) {
+        return { ok: false, error: e.message };
+    }
+});
+/**
+ * Run the repair-all script to self-elevate and fix the system proxy/CA.
+ */
+electron_1.ipcMain.handle('ag:repair:run', async () => {
+    try {
+        const isWin = process.platform === 'win32';
+        const scriptName = isWin ? 'repair-all.ps1' : 'repair-all.sh';
+        const scriptPath = electron_1.app.isPackaged
+            ? path_1.default.join(process.resourcesPath, scriptName)
+            : path_1.default.join(__dirname, '..', 'resources', scriptName);
+        if (!fs_1.default.existsSync(scriptPath)) {
+            return { ok: false, error: `Repair script not found at ${scriptPath}` };
+        }
+        const tempFile = isWin ? path_1.default.join(process.env.TEMP || '', 'ag-repair-result.json') : '/tmp/ag-repair-result.json';
+        if (fs_1.default.existsSync(tempFile))
+            fs_1.default.unlinkSync(tempFile);
+        await new Promise((resolve, reject) => {
+            let proc;
+            if (isWin) {
+                proc = (0, child_process_1.spawn)('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `Start-Process powershell.exe -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File "${scriptPath}"' -Verb RunAs -Wait -WindowStyle Hidden`], {
+                    windowsHide: true,
+                    stdio: 'ignore'
+                });
+            }
+            else {
+                proc = (0, child_process_1.spawn)('bash', [scriptPath], {
+                    stdio: 'ignore'
+                });
+            }
+            proc.on('close', (code) => {
+                if (code === 0)
+                    resolve();
+                else
+                    reject(new Error(`Repair script exited with code ${code}`));
+            });
+            proc.on('error', reject);
+        });
+        if (fs_1.default.existsSync(tempFile)) {
+            const data = JSON.parse(fs_1.default.readFileSync(tempFile, 'utf-8'));
+            fs_1.default.unlinkSync(tempFile);
+            return { ok: true, ...data };
+        }
+        return { ok: true, proxy: false, ca: false, error: 'Result file not found' };
+    }
+    catch (e) {
+        return { ok: false, error: e.message };
+    }
+});
 // Streaming for `logs -f` — uses one-shot spawn (long-lived process), with
 // chunk batching to avoid IPC flooding the renderer.
 electron_1.ipcMain.handle('ag:stream:start', (evt, args, streamId) => {

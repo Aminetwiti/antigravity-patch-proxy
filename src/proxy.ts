@@ -1293,33 +1293,44 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
 
 export function startProxy(): Promise<number> {
   return new Promise((resolve, reject) => {
-    server = http.createServer(handleRequest);
+    try {
+      server = http.createServer(handleRequest);
 
-    // P1-9: Start managed cleanup interval
-    startCleanupInterval();
+      let primaryPort = 50999;
 
-    let primaryPort = 50999;
-
-    function tryListen(port: number): void {
-      server!.listen(port, '127.0.0.1', () => {
-        proxyPort = (server!.address() as import('net').AddressInfo).port;
-        log.info(`[Proxy] Server listening on http://127.0.0.1:${proxyPort}`);
-        resolve(proxyPort);
-      });
-    }
-
-    server.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE' && primaryPort === 50999) {
-        log.warn('[Proxy] Port 50999 is already in use. Retrying on dynamic port...');
-        primaryPort = 0;
-        tryListen(0);
-      } else {
-        log.error('[Proxy] Startup failed:', err);
-        reject(err);
+      function tryListen(port: number): void {
+        server!.listen(port, '127.0.0.1', () => {
+          proxyPort = (server!.address() as import('net').AddressInfo).port;
+          log.info(`[Proxy] Server listening on http://127.0.0.1:${proxyPort}`);
+          
+          // Execute cleanup initialization after the server is already listening
+          // so that failures here don't prevent the port from binding.
+          try {
+            startCleanupInterval();
+          } catch (err) {
+            log.error('[Proxy] Failed to start cleanup interval:', err);
+          }
+          
+          resolve(proxyPort);
+        });
       }
-    });
 
-    tryListen(primaryPort);
+      server.on('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EADDRINUSE' && primaryPort === 50999) {
+          log.warn('[Proxy] Port 50999 is already in use. Retrying on dynamic port...');
+          primaryPort = 0;
+          tryListen(0);
+        } else {
+          log.error('[Proxy] Startup failed:', err);
+          reject(err);
+        }
+      });
+
+      tryListen(primaryPort);
+    } catch (err) {
+      log.error('[Proxy] Unexpected error during startProxy:', err);
+      reject(err);
+    }
   });
 }
 

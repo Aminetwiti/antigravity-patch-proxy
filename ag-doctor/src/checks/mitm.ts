@@ -51,9 +51,9 @@ export async function checkMitm(): Promise<CheckResult> {
         id: 'mitm',
         title: 'MITM (HTTPS interception)',
         status: 'info',
-        message: 'CA not generated — run `ag-doctor mitm install` to enable interception',
+        message: 'CA not generated — interception unavailable',
         details,
-        fixable: true,
+        fixable: 'run `ag-doctor mitm install` to enable interception',
         data: s,
       };
     }
@@ -94,7 +94,7 @@ export async function checkMitm(): Promise<CheckResult> {
       status: 'warn',
       message,
       details,
-      fixable: true,
+      fixable: !s.caInstalled ? 'run `ag-doctor mitm install`' : (!s.proxyEnabled ? 'run `ag-doctor mitm proxy-on`' : false),
       data: s,
     };
   } catch (e) {

@@ -1,3 +1,4 @@
+import log from 'electron-log';
 import { execFile, spawn, ChildProcess } from 'child_process';
 import { app, session } from 'electron';
 import { shellEnvSync } from 'shell-env';
@@ -183,8 +184,11 @@ export function startLanguageServer(port: number, csrf: string, headless?: boole
 
     let proxyPort: number | undefined;
     try {
+      log.info('[LS] before startProxy');
       proxyPort = await startProxy();
+      log.info('[LS] after startProxy, port: ' + proxyPort);
     } catch (err) {
+      log.error('[LS] startProxy failed:', err);
       console.error('[LanguageServer] Failed to start local proxy:', err);
     }
 
