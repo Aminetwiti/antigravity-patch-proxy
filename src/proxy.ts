@@ -83,7 +83,8 @@ import {
 } from './proxy/urlBuilder';
 
 // ID generation (extracted from proxy.ts)
-export { generateModelPlaceholderId, toSlug } from './proxy/idGenerator';
+import { generateModelPlaceholderId, toSlug } from './proxy/idGenerator';
+export { generateModelPlaceholderId, toSlug };
 
 // ─── DNS bypass for upstream forwarding ───────────────────────────────────
 // The local network stack (hosts file / DNS) redirects Google Cloud Code

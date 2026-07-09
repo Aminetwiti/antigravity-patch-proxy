@@ -152,6 +152,12 @@ declare module 'electron' {
     stop(id: number): void;
   };
 
+  export const safeStorage: {
+    isEncryptionAvailable(): boolean;
+    encryptString(plainText: string): Buffer;
+    decryptString(encrypted: Buffer): string;
+  };
+
   export const shell: {
     openExternal(url: string, options?: Record<string, unknown>): Promise<void>;
   };

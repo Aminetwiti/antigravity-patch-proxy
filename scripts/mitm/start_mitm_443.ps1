@@ -5,8 +5,8 @@
 #>
 $ErrorActionPreference = "Stop"
 
-$ProjectDir = "C:\Users\amine\Downloads\antigravity-add-model-main\antigravity-add-model-main"
-$CaCert = "$ProjectDir\certs\ca-cert.pem"
+$ProjectDir = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$CaCert = Join-Path $ProjectDir "certs\ca-cert.pem"
 $Node = (Get-Command node -ErrorAction SilentlyContinue).Source
 if (-not $Node) {
     Write-Host "Node.js not found in PATH. Exiting." -ForegroundColor Red
@@ -24,4 +24,4 @@ Write-Host "CA imported to LocalMachine\\Root and CurrentUser\\Root." -Foregroun
 
 Write-Host "Starting MITM HTTPS forwarder on port 443..." -ForegroundColor Cyan
 Write-Host "(Press Ctrl+C to stop)" -ForegroundColor Yellow
-& $Node "$ProjectDir\mitm_443.js"
+& $Node (Join-Path $ProjectDir "scripts\mitm\mitm_443.js")
