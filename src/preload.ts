@@ -47,6 +47,7 @@ interface StorageAPI {
   saveCustomModel: (model: CustomModelEntry) => Promise<{ success: boolean; error?: string }>;
   deleteCustomModel: (modelName: string) => Promise<{ success: boolean; error?: string }>;
   testModelConnection: (model: TestModelParams) => Promise<ConnectionTestResult>;
+  fetchModels: (params: { apiUrl: string; provider: string; apiKey?: string; allowUnauthorized?: boolean }) => Promise<FetchModelsResult>;
 }
 
 interface LogsAPI {
@@ -96,6 +97,21 @@ interface CustomModelEntry {
   externalModelName: string;
   allowUnauthorized?: boolean;
   encrypted?: boolean;
+  /**
+   * Reasoning effort for this model (fetched from /v1/models, not hardcoded).
+   * Values: 'low' | 'medium' | 'high' | 'auto' | 'none'
+   */
+  reasoningEffort?: string;
+  /**
+   * Thinking budget for this model (fetched from /v1/models, not hardcoded).
+   * Values: 'auto' | 'enabled' | 'disabled'
+   */
+  thinkingBudget?: string;
+  /**
+   * Mode for this model (fetched from /v1/models, not hardcoded).
+   * Values: 'thinking' | 'reasoning' | 'non-thinking' | 'auto'
+   */
+  mode?: string;
   [key: string]: unknown;
 }
 
@@ -110,6 +126,12 @@ interface ConnectionTestResult {
   success: boolean;
   status?: number;
   message?: string;
+  error?: string;
+}
+
+interface FetchModelsResult {
+  success: boolean;
+  models?: { id: string; name: string }[];
   error?: string;
 }
 
@@ -165,6 +187,7 @@ const storageAPI: StorageAPI = {
   saveCustomModel: (model) => ipcRenderer.invoke('storage:save-custom-model', model),
   deleteCustomModel: (modelName) => ipcRenderer.invoke('storage:delete-custom-model', modelName),
   testModelConnection: (model) => ipcRenderer.invoke('storage:test-model-connection', model),
+  fetchModels: (params) => ipcRenderer.invoke('storage:fetch-models', params),
 };
 
 const logsAPI: LogsAPI = {
@@ -720,6 +743,57 @@ window.addEventListener('DOMContentLoaded', () => {
                     <div id="agy-model-id-error" style="font-size: 11px; color: #ef4444; display: none; margin-top: 2px;"></div>
                 </div>
 
+                <!-- Fetch Models Button + Model List -->
+                <div id="agy-fetch-models-container" style="display: none; flex-direction: column; gap: 6px;">
+                    <button id="agy-btn-fetch-models" style="background-color: #27272a; border: 1px solid #3f3f46; border-radius: 8px; color: #a1a1aa; padding: 8px 12px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s ease; display: flex; align-items: center; gap: 6px;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="16 8 12 12 8 8"/><line x1="12" y1="16" x2="12" y2="12"/></svg>
+                        Fetch Models
+                    </button>
+                    <div id="agy-model-list" style="display: none; max-height: 200px; overflow-y: auto; background-color: #1c1c1f; border: 1px solid #3f3f46; border-radius: 8px; padding: 4px;"></div>
+                    <div id="agy-fetch-status" style="font-size: 11px; color: #a1a1aa; display: none;"></div>
+                </div>
+
+                <!-- Mode Selection (from /v1/models) -->
+                <div id="agy-mode-config" style="display: none; flex-direction: column; gap: 12px; padding: 12px; background-color: #1c1c1f; border: 1px solid #3f3f46; border-radius: 8px;">
+                    <div style="font-size: 12px; font-weight: 600; color: #a1a1aa; text-transform: uppercase; letter-spacing: 0.5px;">Model Configuration (from API)</div>
+                    
+                    <!-- Reasoning Effort -->
+                    <div id="agy-reasoning-effort-container" style="display: flex; flex-direction: column; gap: 4px;">
+                        <label style="font-size: 12px; font-weight: 500; color: #a1a1aa;">Reasoning Effort</label>
+                        <select id="agy-reasoning-effort" style="background-color: #27272a; border: 1px solid #3f3f46; border-radius: 8px; color: #f4f4f5; padding: 8px 10px; font-size: 13px; outline: none;">
+                            <option value="">Auto (default)</option>
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                            <option value="none">None</option>
+                        </select>
+                        <div style="font-size: 10px; color: #71717a;">Controls how much the model thinks before responding (o1/o3/r1)</div>
+                    </div>
+
+                    <!-- Thinking Budget -->
+                    <div id="agy-thinking-budget-container" style="display: none; flex-direction: column; gap: 4px;">
+                        <label style="font-size: 12px; font-weight: 500; color: #a1a1aa;">Thinking Budget</label>
+                        <select id="agy-thinking-budget" style="background-color: #27272a; border: 1px solid #3f3f46; border-radius: 8px; color: #f4f4f5; padding: 8px 10px; font-size: 13px; outline: none;">
+                            <option value="">Auto (default)</option>
+                            <option value="enabled">Enabled</option>
+                            <option value="disabled">Disabled</option>
+                        </select>
+                        <div style="font-size: 10px; color: #71717a;">Controls thinking/reasoning for models like Claude, GPT-4o</div>
+                    </div>
+
+                    <!-- Mode -->
+                    <div id="agy-mode-container" style="display: none; flex-direction: column; gap: 4px;">
+                        <label style="font-size: 12px; font-weight: 500; color: #a1a1aa;">Mode</label>
+                        <select id="agy-mode" style="background-color: #27272a; border: 1px solid #3f3f46; border-radius: 8px; color: #f4f4f5; padding: 8px 10px; font-size: 13px; outline: none;">
+                            <option value="">Auto (default)</option>
+                            <option value="thinking">Thinking</option>
+                            <option value="reasoning">Reasoning</option>
+                            <option value="non-thinking">Non-Thinking</option>
+                        </select>
+                        <div style="font-size: 10px; color: #71717a;">Model mode — overrides automatic detection</div>
+                    </div>
+                </div>
+
                 <!-- Friendly Display Name -->
                 <div style="display: flex; flex-direction: column; gap: 6px;">
                     <label style="font-size: 13px; font-weight: 500; color: #a1a1aa;">Friendly Display Name</label>
@@ -790,6 +864,17 @@ window.addEventListener('DOMContentLoaded', () => {
     const keyRequired = document.getElementById('agy-key-required')!;
     const testBtn = document.getElementById('agy-btn-test') as HTMLButtonElement;
     const saveBtn = document.getElementById('agy-btn-save') as HTMLButtonElement;
+    const fetchBtn = document.getElementById('agy-btn-fetch-models') as HTMLButtonElement;
+    const fetchContainer = document.getElementById('agy-fetch-models-container')!;
+    const modelList = document.getElementById('agy-model-list')!;
+    const fetchStatus = document.getElementById('agy-fetch-status')!;
+    const modeConfig = document.getElementById('agy-mode-config')!;
+    const reasoningEffortSelect = document.getElementById('agy-reasoning-effort') as HTMLSelectElement;
+    const thinkingBudgetSelect = document.getElementById('agy-thinking-budget') as HTMLSelectElement;
+    const modeSelect = document.getElementById('agy-mode') as HTMLSelectElement;
+    const reasoningEffortContainer = document.getElementById('agy-reasoning-effort-container')!;
+    const thinkingBudgetContainer = document.getElementById('agy-thinking-budget-container')!;
+    const modeContainer = document.getElementById('agy-mode-container')!;
 
     const prefilledUrls: Record<string, string> = {
       openai: 'https://api.openai.com/v1/chat/completions',
@@ -897,10 +982,117 @@ window.addEventListener('DOMContentLoaded', () => {
         }
       }
 
+      // Show/hide fetch models button based on URL
+      if (urlInput.value.trim()) {
+        fetchContainer.style.display = 'flex';
+      } else {
+        fetchContainer.style.display = 'none';
+      }
+
       validateUrl();
     };
 
     providerSelect.addEventListener('change', updatePrefills);
+
+    // ─── Fetch Models from /v1/models ────────────────────────────────
+    fetchBtn.addEventListener('click', async () => {
+      const provider = providerSelect.value;
+      const apiKey = keyInput.value.trim();
+      const apiUrl = urlInput.value.trim();
+
+      if (!apiUrl) {
+        fetchStatus.textContent = 'Please enter an API URL first';
+        fetchStatus.style.color = '#fbbf24';
+        fetchStatus.style.display = 'block';
+        return;
+      }
+
+      fetchBtn.disabled = true;
+      fetchBtn.style.cursor = 'wait';
+      fetchBtn.style.color = '#fbbf24';
+      fetchBtn.style.borderColor = '#fbbf24';
+      const originalHtml = fetchBtn.innerHTML;
+      fetchBtn.innerHTML = '<span>Loading...</span>';
+      fetchStatus.textContent = 'Fetching available models...';
+      fetchStatus.style.color = '#a1a1aa';
+      fetchStatus.style.display = 'block';
+      modelList.style.display = 'none';
+
+      try {
+        const result = await storageAPI.fetchModels({
+          apiUrl,
+          provider,
+          apiKey,
+        });
+
+        if (result.success && result.models && result.models.length > 0) {
+          // Show mode config section
+          modeConfig.style.display = 'flex';
+          // Render model list
+          modelList.innerHTML = '';
+          modelList.style.display = 'block';
+          fetchStatus.style.display = 'none';
+
+          result.models.forEach((m) => {
+            const item = document.createElement('div');
+            item.style.padding = '8px 12px';
+            item.style.cursor = 'pointer';
+            item.style.borderRadius = '6px';
+            item.style.display = 'flex';
+            item.style.alignItems = 'center';
+            item.style.gap = '8px';
+            item.style.transition = 'background-color 0.1s ease';
+            item.style.color = '#e4e4e7';
+            item.style.fontSize = '13px';
+
+            item.addEventListener('mouseenter', () => {
+              item.style.backgroundColor = '#27272a';
+            });
+            item.addEventListener('mouseleave', () => {
+              item.style.backgroundColor = 'transparent';
+            });
+
+            item.addEventListener('click', () => {
+              // Auto-fill model ID and name
+              modelInput.value = m.id;
+              nameInput.value = m.name || m.id;
+              modelInput.style.borderColor = '#22c55e';
+              modelIdError.style.display = 'none';
+              fetchStatus.textContent = `Selected: ${m.name || m.id}`;
+              fetchStatus.style.color = '#22c55e';
+              fetchStatus.style.display = 'block';
+              modelList.style.display = 'none';
+            });
+
+            item.textContent = `${m.id} (${m.name || m.id})`;
+            modelList.appendChild(item);
+          });
+
+          fetchBtn.style.color = '#22c55e';
+          fetchBtn.style.borderColor = '#22c55e';
+        } else {
+          fetchStatus.textContent = result.error || 'No models found at this endpoint';
+          fetchStatus.style.color = '#ef4444';
+          fetchStatus.style.display = 'block';
+          fetchBtn.style.color = '#ef4444';
+          fetchBtn.style.borderColor = '#ef4444';
+        }
+      } catch (err) {
+        fetchStatus.textContent = 'Failed to fetch models: ' + (err as Error).message;
+        fetchStatus.style.color = '#ef4444';
+        fetchStatus.style.display = 'block';
+        fetchBtn.style.color = '#ef4444';
+        fetchBtn.style.borderColor = '#ef4444';
+      }
+
+      setTimeout(() => {
+        fetchBtn.disabled = false;
+        fetchBtn.style.cursor = 'pointer';
+        fetchBtn.style.color = '#a1a1aa';
+        fetchBtn.style.borderColor = '#3f3f46';
+        fetchBtn.innerHTML = originalHtml;
+      }, 3000);
+    });
 
     // ─── Test Connection in Modal ────────────────────
     testBtn.addEventListener('click', async () => {
@@ -1030,6 +1222,10 @@ window.addEventListener('DOMContentLoaded', () => {
         apiKey: apiKey || 'none',
         apiUrl: apiUrl,
         externalModelName: modelId,
+        // Mode fields from /v1/models
+        reasoningEffort: reasoningEffortSelect.value || undefined,
+        thinkingBudget: thinkingBudgetSelect.value || undefined,
+        mode: modeSelect.value || undefined,
       };
 
       saveBtn.disabled = true;

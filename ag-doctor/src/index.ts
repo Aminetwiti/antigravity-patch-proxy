@@ -14,6 +14,7 @@ import { runModelsList } from './commands/models/list';
 import { runModelsAdd } from './commands/models/add';
 import { runModelsRemove } from './commands/models/remove';
 import { runModelsTest } from './commands/models/test';
+import { runModelsFetch } from './commands/models/fetch';
 import { runPatchStatus } from './commands/patch/status';
 import { runPatchApply } from './commands/patch/apply';
 import { runPatchRestore } from './commands/patch/restore';
@@ -51,6 +52,7 @@ Commands:
   models add             Interactive model creation
   models remove <name>   Delete a model (snapshots first)
   models test [name]     Test connectivity for one or all models
+  models fetch           Query /v1/models for a provider and list available models
   patch status           Show binary patch state
   patch apply            Apply the binary patch (snapshots first)
   patch restore          Restore language_server from backup (snapshots first)
@@ -135,6 +137,7 @@ export async function main(argv: string[]): Promise<number> {
         if (sub === 'add') return await runModelsAdd(ctx);
         if (sub === 'remove' || sub === 'rm') return await runModelsRemove(ctx, rest[0]);
         if (sub === 'test') return await runModelsTest(ctx, rest[0]);
+        if (sub === 'fetch') return await runModelsFetch(ctx);
         console.error(`Unknown models subcommand: ${sub}`);
         console.error(USAGE);
         return 2;

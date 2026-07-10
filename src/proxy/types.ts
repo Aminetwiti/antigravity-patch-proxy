@@ -18,6 +18,21 @@ export interface CustomModel {
   _slug?: string;
   timeout?: number;
   maxRetries?: number;
+  /**
+   * Reasoning effort for this model (fetched from /v1/models, not hardcoded).
+   * Values: 'low' | 'medium' | 'high' | 'auto' | 'none'
+   */
+  reasoningEffort?: string;
+  /**
+   * Thinking budget for this model (fetched from /v1/models, not hardcoded).
+   * Values: 'auto' | 'enabled' | 'disabled'
+   */
+  thinkingBudget?: string;
+  /**
+   * Mode for this model (fetched from /v1/models, not hardcoded).
+   * Values: 'thinking' | 'reasoning' | 'non-thinking' | 'auto'
+   */
+  mode?: string;
 }
 
 /**

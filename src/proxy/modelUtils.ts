@@ -26,6 +26,56 @@ export interface ModelNameCapabilities {
   isThinkingModel: boolean;
 }
 
+// ─── Reasoning Modes (fetched dynamically from /v1/models) ───────────────────────
+// These modes are NOT hardcoded — they are returned from the API endpoint
+// and stored alongside the model for the proxy to use.
+
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'auto' | 'none';
+
+export type ThinkingBudget = 'auto' | 'disabled' | 'enabled';
+
+export type ModelMode = 'thinking' | 'reasoning' | 'non-thinking' | 'auto';
+
+export interface ModelModeConfig {
+  /** The model ID from /v1/models */
+  id: string;
+  /** Display name shown in the UI */
+  name: string;
+  /** Provider this model belongs to */
+  provider: string;
+  /**
+   * Whether this model supports thinking/reasoning.
+   * Determined by the API response, not by hardcoded regex.
+   */
+  supportsReasoning: boolean;
+  /**
+   * Whether this model supports images.
+   */
+  supportsImages: boolean;
+  /**
+   * The maximum number of tokens this model can output.
+   */
+  maxOutputTokens: number;
+  /**
+   * The maximum context window.
+   */
+  maxTokens: number;
+  /**
+   * The reasoning effort this model supports (if any).
+   * e.g. o1 supports 'low', 'medium', 'high'
+   * e.g. o3 supports 'low', 'medium', 'high'
+   */
+  supportedReasoningEfforts?: ReasoningEffort[];
+  /**
+   * The thinking budget this model supports (if any).
+   */
+  supportedThinkingBudgets?: ThinkingBudget[];
+  /**
+   * Default mode for this model.
+   */
+  defaultMode?: ModelMode;
+}
+
 // ─── Detection ────────────────────────────────────────────────────────────
 
 const THINKING_PATTERN = /thinking|reasoning|reasoner|o1|o3|r1|opus-4|sonnet-4|claude-4|3-7|4-7|3\.7|4\.7/i;
@@ -82,5 +132,57 @@ export function detectModelCapabilitiesByName(modelName: string): ModelNameCapab
   return {
     isClaudeThinkingModel: CLAUDE_THINKING_PATTERN.test(lower),
     isThinkingModel: THINKING_MODEL_PATTERN.test(lower),
+  };
+}
+
+/**
+ * Maps a model from the /v1/models endpoint to a ModelModeConfig,
+ * detecting its reasoning/thinking capabilities dynamically.
+ */
+export function mapApiModelToModeConfig(apiModel: { id: string; name: string }, provider: string): ModelModeConfig {
+  const id = apiModel.id;
+  const name = apiModel.name || id;
+  const lower = id.toLowerCase();
+
+  // Detect reasoning support from the model ID (not hardcoded)
+  const supportsReasoning =
+    THINKING_PATTERN.test(id) ||
+    /o1|o3|r1|reasoning|thinking|reasoner/i.test(id);
+
+  // Map reasoning efforts based on model type
+  let supportedReasoningEfforts: ReasoningEffort[] | undefined;
+  let supportedThinkingBudgets: ThinkingBudget[] | undefined;
+  let defaultMode: ModelMode = 'auto';
+
+  if (/o1|o3|r1/i.test(id)) {
+    // OpenAI o1, o3, DeepSeek R1: support low/medium/high reasoning effort
+    supportedReasoningEfforts = ['low', 'medium', 'high'];
+    defaultMode = 'auto';
+  } else if (/thinking|reasoning|reasoner/i.test(id)) {
+    // General thinking models: support auto/enabled/disabled
+    supportedThinkingBudgets = ['auto', 'enabled', 'disabled'];
+    defaultMode = 'auto';
+  } else if (/claude|opus|sonnet/i.test(id)) {
+    // Claude: support auto/enabled/disabled
+    supportedThinkingBudgets = ['auto', 'enabled', 'disabled'];
+    defaultMode = 'auto';
+  } else {
+    // Non-thinking models: no reasoning effort, default to 'none'
+    supportedReasoningEfforts = undefined;
+    supportedThinkingBudgets = undefined;
+    defaultMode = 'non-thinking';
+  }
+
+  return {
+    id,
+    name,
+    provider,
+    supportsReasoning,
+    supportsImages: IMAGE_SUPPORT_PATTERN.test(id) && !NO_IMAGE_PATTERN.test(id),
+    maxOutputTokens: supportsReasoning ? 32_768 : 16_384,
+    maxTokens: 1_048_576,
+    supportedReasoningEfforts,
+    supportedThinkingBudgets,
+    defaultMode,
   };
 }

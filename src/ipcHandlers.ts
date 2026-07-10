@@ -4,6 +4,8 @@ import { broadcastState, checkForUpdates } from './updater';
 import log from 'electron-log/main';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import * as http from 'http';
+import * as https from 'https';
 import { extensionAuthorities } from './customScheme';
 import { updateTrayAgentCount } from './tray';
 import { StorageManager } from './storage';
@@ -309,6 +311,167 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
     });
   });
 
+  // ─── Fetch Models from /v1/models endpoint ──────────────────────────────────────
+  // P3-18: Query a provider's /v1/models endpoint to discover available models
+  ipcMain.handle('storage:fetch-models', async (_event, params: FetchModelsParams) => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const https = require('https');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const http = require('http');
+
+    return new Promise<FetchModelsResult>((resolve) => {
+      try {
+        // Build the models list URL from the provider's base URL
+        // e.g. https://api.openai.com/v1/chat/completions → /v1/models
+        // e.g. https://api.anthropic.com/v1/messages → /v1/models
+        // e.g. http://localhost:11434/v1/chat/completions → /v1/models
+        let baseUrl = params.apiUrl;
+
+        // Strip the chat/completions or /messages path to get the base
+        const urlLower = baseUrl.toLowerCase();
+        // Detect Google AI Studio URLs (e.g. .../v1beta/models/...)
+        const isGooglePath = /\/v\d+beta\/models/i.test(baseUrl) || /\/v\d+\/models/i.test(baseUrl);
+
+        if (urlLower.includes('/chat/completions') || urlLower.includes('/completions')) {
+          baseUrl = baseUrl.replace(/\/chat\/completions|\/completions$/i, '');
+        } else if (urlLower.includes('/messages')) {
+          baseUrl = baseUrl.replace(/\/messages$/i, '');
+        } else if (isGooglePath || urlLower.includes(':generatecontent') || urlLower.includes('/generatecontent') || urlLower.includes(':streamgeneratecontent') || urlLower.includes('/streamgeneratecontent')) {
+          // Google: strip everything after /models/{modelName}
+          baseUrl = baseUrl.replace(/\/models\/[^/]+.*$/i, '/models');
+        }
+
+        // Trim trailing slashes
+        baseUrl = baseUrl.replace(/\/+$/, '');
+
+        // For Google-style URLs that already end with /models, return as-is
+        if (isGooglePath && baseUrl.endsWith('/models')) {
+          // keep as-is
+        } else if (baseUrl.endsWith('/v1')) {
+          baseUrl += '/models';
+        } else {
+          baseUrl += '/v1/models';
+        }
+
+        const url = new URL(baseUrl);
+        const client = url.protocol === 'https:' ? https : http;
+
+        const options: https.RequestOptions = {
+          method: 'GET',
+          hostname: url.hostname,
+          port: parseInt(url.port || (url.protocol === 'https:' ? '443' : '80'), 10),
+          path: url.pathname + url.search,
+          timeout: 15000,
+          rejectUnauthorized: !params.allowUnauthorized,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        };
+
+        // Add auth header
+        if (params.apiKey && params.apiKey !== 'none') {
+          let key = params.apiKey;
+          try {
+            key = cryptoStore.decryptString(params.apiKey);
+          } catch {
+            /* key might not be encrypted */
+          }
+
+          if (params.provider === 'anthropic') {
+            (options.headers as Record<string, string>)['x-api-key'] = key;
+          } else if (params.provider === 'google') {
+            (options.headers as Record<string, string>)['x-goog-api-key'] = key;
+          } else {
+            (options.headers as Record<string, string>)['Authorization'] = `Bearer ${key}`;
+          }
+        }
+
+        const req = client.request(options, (res: http.IncomingMessage) => {
+          let body = '';
+
+          res.on('data', (chunk: string) => {
+            body += chunk;
+          });
+
+          res.on('end', () => {
+            try {
+              const parsed = JSON.parse(body) as Record<string, unknown>;
+
+              // Handle different response formats:
+              // 1. OpenAI/OpenAI-compatible: { data: [{ id: 'gpt-4o', ... }] }
+              // 2. Google: { models: [{ name: 'models/gemini-pro', ... }] }
+              // 3. Anthropic: { data: [{ type: 'model', id: 'claude-3-5-sonnet-latest', ... }] }
+
+              let models: { id: string; name: string }[] = [];
+
+              if (Array.isArray(parsed.data)) {
+                // OpenAI format
+                models = (parsed.data as Array<Record<string, unknown>>).map((m) => ({
+                  id: (m.id as string) || '',
+                  name: (m.id as string) || (m.name as string) || '',
+                }));
+              } else if (Array.isArray(parsed.models)) {
+                // Google format
+                models = (parsed.models as Array<Record<string, unknown>>).map((m) => ({
+                  id: (m.name as string) || '',
+                  name: (m.displayName as string) || (m.name as string) || '',
+                }));
+              } else if (Array.isArray(parsed.model_ids)) {
+                // Some providers use model_ids
+                models = (parsed.model_ids as string[]).map((id) => ({
+                  id,
+                  name: id,
+                }));
+              }
+
+              // Also check for nested data property
+              if (models.length === 0 && parsed.data && typeof parsed.data === 'object') {
+                const nestedData = (parsed.data as Record<string, unknown>).data;
+                if (Array.isArray(nestedData)) {
+                  models = (nestedData as Array<Record<string, unknown>>).map((m) => ({
+                    id: (m.id as string) || '',
+                    name: (m.id as string) || (m.name as string) || '',
+                  }));
+                }
+              }
+
+              resolve({
+                success: true,
+                models,
+              });
+            } catch (parseErr) {
+              resolve({
+                success: false,
+                error: `Failed to parse response: ${(parseErr as Error).message}`,
+              });
+            }
+          });
+        });
+
+        req.setTimeout(15000, () => {
+          req.destroy();
+          resolve({ success: false, error: 'Request timed out after 15 seconds' });
+        });
+
+        req.on('error', (err: NodeJS.ErrnoException) => {
+          let message = err.message;
+          if (message.includes('ECONNREFUSED')) {
+            message = 'Connection refused — server may not be running';
+          } else if (message.includes('ENOTFOUND') || message.includes('getaddrinfo')) {
+            message = 'Host not found — check the API URL';
+          } else if (message.includes('CERT') || message.includes('certificate') || message.includes('SSL')) {
+            message = 'SSL/TLS error — try enabling "allowUnauthorized" for self-signed certs';
+          }
+          resolve({ success: false, error: message });
+        });
+
+        req.end();
+      } catch (err) {
+        resolve({ success: false, error: `Invalid URL: ${(err as Error).message}` });
+      }
+    });
+  });
+
   // Logs
   ipcMain.handle('logs:electron', async () => {
     try {
@@ -404,6 +567,12 @@ interface CustomModelFileEntry {
   externalModelName: string;
   allowUnauthorized?: boolean;
   encrypted?: boolean;
+  /** Reasoning effort from /v1/models */
+  reasoningEffort?: string;
+  /** Thinking budget from /v1/models */
+  thinkingBudget?: string;
+  /** Mode from /v1/models */
+  mode?: string;
   [key: string]: unknown;
 }
 
@@ -418,5 +587,20 @@ interface ConnectionTestResult {
   success: boolean;
   status?: number;
   message?: string;
+  error?: string;
+}
+
+// ─── Fetch Models Types ────────────────────────────────────────────────────────────
+
+interface FetchModelsParams {
+  apiUrl: string;
+  provider: string;
+  apiKey?: string;
+  allowUnauthorized?: boolean;
+}
+
+interface FetchModelsResult {
+  success: boolean;
+  models?: { id: string; name: string }[];
   error?: string;
 }

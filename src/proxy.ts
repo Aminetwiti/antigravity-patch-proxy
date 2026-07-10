@@ -904,6 +904,9 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
                     temperature: cap.isThinking ? undefined : 0.7,
                     topP: cap.isThinking ? undefined : 0.9,
                     topK: cap.isThinking ? undefined : 40,
+                    reasoningEffort: m.reasoningEffort || undefined,
+                    thinkingBudget: m.thinkingBudget || undefined,
+                    mode: m.mode || undefined,
                   };
                 });
                 return [...mapped, ...target];
@@ -916,6 +919,9 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
                     displayName: m.displayName,
                     supportsImages: cap.supportsImages,
                     supportsThinking: cap.isThinking,
+                    reasoningEffort: m.reasoningEffort || undefined,
+                    thinkingBudget: m.thinkingBudget || undefined,
+                    mode: m.mode || undefined,
                     recommended: true,
                     maxTokens: cap.maxTokens,
                     maxOutputTokens: cap.maxOutputTokens,
