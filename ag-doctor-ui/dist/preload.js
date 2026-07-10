@@ -22,6 +22,11 @@ const api = {
     // Proxy stub lifecycle — emergency fallback when Antigravity's bundled proxy fails
     proxyStartStub: () => electron_1.ipcRenderer.invoke('ag:proxy:start-stub'),
     proxyStatus: () => electron_1.ipcRenderer.invoke('ag:proxy:status'),
+    proxyStats: () => electron_1.ipcRenderer.invoke('ag:proxy-stats'),
+    // Installation Detector — scans for Antigravity binaries (v1.x vs v2.0+)
+    detectInstallation: () => electron_1.ipcRenderer.invoke('ag:detect-installation'),
+    // Model testing — tests a single model's connection
+    testModel: (name) => electron_1.ipcRenderer.invoke('ag:test-model', name),
     repairRun: () => electron_1.ipcRenderer.invoke('ag:repair:run'),
     onRunDoctor: (handler) => {
         const listener = () => handler();

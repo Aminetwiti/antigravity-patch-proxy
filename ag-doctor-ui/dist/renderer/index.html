@@ -11,6 +11,7 @@
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles-extra.css" />
 </head>
 <body>
   <!-- Animated background -->
@@ -645,6 +646,59 @@
           </div>
         </div>
 
+        <!-- Installation Detector (Axe 1) — visualizes v1.x vs v2.0+ conflict -->
+        <div class="panel" style="margin-top:24px" id="installDetectorPanel">
+          <div class="panel-header">
+            <h2>
+              Installation detector
+              <span class="badge badge-warn" id="installDetectorBadge" hidden>conflict</span>
+            </h2>
+            <button class="btn btn-ghost btn-sm" id="installDetectorScanBtn" type="button">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              Scan
+            </button>
+          </div>
+          <div class="panel-body">
+            <p class="panel-subtitle" id="installDetectorSummary">Click "Scan" to detect Antigravity installations on this machine.</p>
+            <div class="install-grid" id="installDetectorGrid">
+              <div class="skeleton-card skeleton-target"></div>
+              <div class="skeleton-card skeleton-target"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Real-time Proxy Monitor (Axe 2) -->
+        <div class="panel" style="margin-top:24px" id="proxyMonitorPanel">
+          <div class="panel-header">
+            <h2>
+              Proxy monitor
+              <span class="badge badge-ok" id="proxyMonitorBadge" hidden>live</span>
+            </h2>
+            <button class="btn btn-ghost btn-sm" id="proxyMonitorToggleBtn" type="button">Start</button>
+          </div>
+          <div class="panel-body">
+            <div class="proxy-stats-row">
+              <div class="proxy-stat">
+                <div class="proxy-stat-label">Latency</div>
+                <div class="proxy-stat-value" id="proxyLatency">—</div>
+              </div>
+              <div class="proxy-stat">
+                <div class="proxy-stat-label">Status</div>
+                <div class="proxy-stat-value" id="proxyStatus">idle</div>
+              </div>
+              <div class="proxy-stat">
+                <div class="proxy-stat-label">Uptime</div>
+                <div class="proxy-stat-value" id="proxyUptime">—</div>
+              </div>
+            </div>
+            <div class="proxy-spark" id="proxySpark" aria-hidden="true">
+              <svg viewBox="0 0 200 40" preserveAspectRatio="none" width="100%" height="40">
+                <polyline id="proxySparkLine" fill="none" stroke="var(--accent)" stroke-width="1.5" points="" />
+              </svg>
+            </div>
+          </div>
+        </div>
+
         <!-- Runtime details -->
         <div class="panel" style="margin-top:24px">
           <div class="panel-header"><h2>Runtime details</h2></div>
@@ -857,5 +911,6 @@
   </div>
 
   <script src="app.js"></script>
+  <script src="features.js"></script>
 </body>
 </html>

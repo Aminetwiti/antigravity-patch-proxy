@@ -1,0 +1,155 @@
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Installation Detector (Axe 1)
+ * ───────────────────────────────────────────────────────────────────────────── */
+.install-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.install-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  background: var(--bg-2);
+  transition: all var(--t-base) var(--ease);
+  position: relative;
+  overflow: hidden;
+}
+.install-card:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.18);
+}
+.install-card.recommended {
+  border-color: var(--ok);
+  box-shadow: 0 0 0 1px var(--ok-bg);
+}
+.install-card.recommended::before {
+  content: "★ RECOMMENDED";
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--ok);
+  font-weight: 600;
+}
+.install-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.install-version-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.install-version-pill.v2 { background: var(--ok-bg); color: var(--ok); }
+.install-version-pill.v1 { background: var(--warn-bg); color: var(--warn); }
+.install-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-2);
+  word-break: break-all;
+  background: var(--bg-1);
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+.install-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.install-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  background: var(--bg-1);
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.install-meta-item.warn { color: var(--warn); border-color: var(--warn-bg); background: var(--warn-bg); }
+.install-meta-item.ok { color: var(--ok); border-color: var(--ok-bg); background: var(--ok-bg); }
+.install-reason {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-2);
+  font-style: italic;
+}
+.panel-subtitle {
+  font-size: 12px;
+  color: var(--text-2);
+  margin: 4px 0 0;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Real-time Proxy Monitor (Axe 2)
+ * ───────────────────────────────────────────────────────────────────────────── */
+.proxy-stats-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.proxy-stat {
+  padding: 10px 12px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.proxy-stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-2);
+  margin-bottom: 4px;
+}
+.proxy-stat-value {
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+}
+.proxy-stat-value.ok { color: var(--ok); }
+.proxy-stat-value.err { color: var(--err); }
+.proxy-spark {
+  width: 100%;
+  height: 40px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px;
+  overflow: hidden;
+}
+.proxy-spark svg { display: block; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Badges (shared)
+ * ───────────────────────────────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  margin-left: 8px;
+  text-transform: uppercase;
+}
+.badge-ok { background: var(--ok-bg); color: var(--ok); }
+.badge-warn { background: var(--warn-bg); color: var(--warn); }
+.badge-err { background: var(--err-bg); color: var(--err); }
+.badge-info { background: var(--info-bg); color: var(--info); }

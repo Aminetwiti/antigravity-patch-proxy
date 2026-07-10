@@ -44,6 +44,40 @@ const api = {
     ipcRenderer.invoke('ag:proxy:start-stub'),
   proxyStatus: (): Promise<{ ok: boolean; data?: { ok: boolean; stub: boolean; latencyMs: number; error?: string }; error?: string }> =>
     ipcRenderer.invoke('ag:proxy:status'),
+  proxyStats: (): Promise<{
+    ok: boolean;
+    data?: {
+      current: { ok: boolean; latencyMs: number; stub: boolean; error?: string };
+      history: Array<{ ts: number; latencyMs: number; ok: boolean }>;
+      uptime: number;
+    };
+    error?: string;
+  }> => ipcRenderer.invoke('ag:proxy-stats'),
+
+  // Installation Detector — scans for Antigravity binaries (v1.x vs v2.0+)
+  detectInstallation: (): Promise<{
+    ok: boolean;
+    data?: {
+      candidates: Array<{
+        path: string;
+        version: 'v1.x' | 'v2.0+' | 'unknown';
+        exists: boolean;
+        size?: number;
+        modified?: string;
+        process?: { pid: number; name: string } | null;
+        portInUse?: { port: number; by: string } | null;
+        recommended?: boolean;
+        reason?: string;
+      }>;
+      hasConflict: boolean;
+      summary: string;
+    };
+    error?: string;
+  }> => ipcRenderer.invoke('ag:detect-installation'),
+
+  // Model testing — tests a single model's connection
+  testModel: (name: string): Promise<{ ok: boolean; data?: unknown; error?: string }> =>
+    ipcRenderer.invoke('ag:test-model', name),
 
   repairRun: (): Promise<{ ok: boolean; proxy?: boolean; ca?: boolean; error?: string }> =>
     ipcRenderer.invoke('ag:repair:run'),

@@ -598,6 +598,175 @@ ipcMain.handle('ag:antigravity:restart', async () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Installation Detector — scans for Antigravity binaries (v1.x vs v2.0+)
+// Returns structured info about each installation found + process ownership
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface InstallationCandidate {
+  path: string;
+  version: 'v1.x' | 'v2.0+' | 'unknown';
+  exists: boolean;
+  size?: number;
+  modified?: string;
+  process?: { pid: number; name: string } | null;
+  portInUse?: { port: number; by: string } | null;
+  recommended?: boolean;
+  reason?: string;
+}
+
+ipcMain.handle('ag:detect-installation', async () => {
+  const candidates: InstallationCandidate[] = [];
+  const isWin = process.platform === 'win32';
+
+  // Common locations to scan
+  const searchPaths: { path: string; version: 'v1.x' | 'v2.0+' }[] = isWin
+    ? [
+        { path: 'C:\\Program Files\\antigravity\\Antigravity.exe', version: 'v1.x' },
+        { path: 'C:\\Program Files\\Antigravity\\Antigravity.exe', version: 'v2.0+' },
+        { path: path.join(process.env.LOCALAPPDATA || '', 'Programs', 'antigravity', 'Antigravity.exe'), version: 'v1.x' },
+        { path: path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Antigravity', 'Antigravity.exe'), version: 'v2.0+' },
+        { path: path.join(process.env.USERPROFILE || '', 'AppData', 'Local', 'Programs', 'antigravity', 'Antigravity.exe'), version: 'v1.x' },
+        { path: path.join(process.env.USERPROFILE || '', 'AppData', 'Local', 'Programs', 'Antigravity', 'Antigravity.exe'), version: 'v2.0+' },
+      ]
+    : [
+        { path: '/usr/local/bin/antigravity', version: 'v1.x' },
+        { path: '/opt/Antigravity/Antigravity', version: 'v2.0+' },
+        { path: path.join(process.env.HOME || '', '.local', 'bin', 'antigravity'), version: 'v1.x' },
+      ];
+
+  for (const sp of searchPaths) {
+    try {
+      if (!fs.existsSync(sp.path)) continue;
+      const stat = fs.statSync(sp.path);
+      candidates.push({
+        path: sp.path,
+        version: sp.version,
+        exists: true,
+        size: stat.size,
+        modified: stat.mtime.toISOString(),
+      });
+    } catch { /* skip */ }
+  }
+
+  // Identify running processes on Windows via tasklist
+  if (isWin) {
+    try {
+      const { execSync } = require('child_process') as typeof import('child_process');
+      const out = execSync('tasklist /FI "IMAGENAME eq Antigravity.exe" /FO CSV /NH', { encoding: 'utf-8' });
+      const lines = out.trim().split('\n').filter((l) => l.includes('Antigravity'));
+      for (const line of lines) {
+        const m = line.match(/^"([^"]+)","(\d+)"/);
+        if (m) {
+          const pid = parseInt(m[2], 10);
+          const cand = candidates.find((c) => c.path.toLowerCase().includes('antigravity\\antigravity.exe'));
+          if (cand) cand.process = { pid, name: m[1] };
+        }
+      }
+    } catch { /* best effort */ }
+  }
+
+  // Check port 50999 ownership
+  try {
+    const inUse = await isPortInUse(50999);
+    if (inUse) {
+      const { execSync } = require('child_process') as typeof import('child_process');
+      const out = execSync(`netstat -ano | findstr :50999`, { encoding: 'utf-8' });
+      const line = out.trim().split('\n')[0] || '';
+      const m = line.match(/\s(\d+)\s*$/);
+      const pid = m ? m[1] : 'unknown';
+      // Attach to first candidate that has a process, or create a generic note
+      const target = candidates.find((c) => c.process) || candidates[0];
+      if (target) target.portInUse = { port: 50999, by: `PID ${pid}` };
+    }
+  } catch { /* best effort */ }
+
+  // Recommendation: prefer v2.0+ (uppercase) since that's the user's target
+  const v2 = candidates.find((c) => c.version === 'v2.0+');
+  if (v2) {
+    v2.recommended = true;
+    v2.reason = 'Latest Antigravity 2.0+ (uppercase)';
+  }
+  const v1 = candidates.find((c) => c.version === 'v1.x');
+  if (v1 && !v2) {
+    v1.recommended = true;
+    v1.reason = 'Only v1.x installation found';
+  }
+
+  return {
+    ok: true,
+    data: {
+      candidates,
+      hasConflict: candidates.length > 1,
+      summary: candidates.length === 0
+        ? 'No Antigravity installation detected'
+        : candidates.length === 1
+        ? `Single installation: ${candidates[0].version}`
+        : `Multiple installations detected (${candidates.length}) — possible confusion source`,
+    },
+  };
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Proxy Stats — lightweight polling endpoint for the Real-time Proxy Monitor
+// ─────────────────────────────────────────────────────────────────────────────
+
+const proxyStatsHistory: Array<{ ts: number; latencyMs: number; ok: boolean }> = [];
+const PROXY_STATS_MAX = 60;
+
+ipcMain.handle('ag:proxy-stats', async () => {
+  const start = Date.now();
+  try {
+    const result = await new Promise<{ ok: boolean; latencyMs: number; stub: boolean; error?: string }>((resolve) => {
+      const req = require('http').request(
+        { hostname: '127.0.0.1', port: STUB_PORT, path: '/health', method: 'GET', timeout: 2000 },
+        (res: { statusCode: number; headers: Record<string, string>; resume: () => void }) => {
+          res.resume();
+          resolve({
+            ok: true,
+            latencyMs: Date.now() - start,
+            stub: res.headers['x-proxy-stub'] === '1',
+          });
+        },
+      );
+      req.on('timeout', () => { req.destroy(); resolve({ ok: false, latencyMs: 0, stub: false, error: 'timeout' }); });
+      req.on('error', (err: Error) => resolve({ ok: false, latencyMs: 0, stub: false, error: err.message }));
+      req.end();
+    });
+
+    proxyStatsHistory.push({ ts: Date.now(), latencyMs: result.latencyMs, ok: result.ok });
+    if (proxyStatsHistory.length > PROXY_STATS_MAX) proxyStatsHistory.shift();
+
+    return {
+      ok: true,
+      data: {
+        current: result,
+        history: [...proxyStatsHistory],
+        uptime: proxyStatsHistory.length > 0 ? Date.now() - proxyStatsHistory[0].ts : 0,
+      },
+    };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
+// ──────────────────────────────────────────���──────────────────────────────────
+// Model Test — tests a single model's connection from the main process
+// ─────────────────────────────────────────────────────────────────────────────
+
+ipcMain.handle('ag:test-model', async (_evt, name: string) => {
+  try {
+    const r = await getCliPool().run(['models', 'test', name, '--json']);
+    try {
+      return { ok: true, data: JSON.parse(r.stdout) };
+    } catch {
+      return { ok: r.code === 0, data: { ok: r.code === 0, message: r.stdout.trim() || r.stderr.trim() } };
+    }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Proxy stub lifecycle — portable emergency proxy on 127.0.0.1:51999
 // (Separate from main Antigravity proxy on 50999 to avoid port conflicts)
 // ───────────────────────────────────────────────────────────────────────��─────

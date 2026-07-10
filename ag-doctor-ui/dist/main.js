@@ -554,9 +554,169 @@ electron_1.ipcMain.handle('ag:antigravity:restart', async () => {
         return { ok: true, data: { ok: r.code === 0, message: r.stdout.trim() } };
     }
 });
+electron_1.ipcMain.handle('ag:detect-installation', async () => {
+    const candidates = [];
+    const isWin = process.platform === 'win32';
+    // Common locations to scan
+    const searchPaths = isWin
+        ? [
+            { path: 'C:\\Program Files\\antigravity\\Antigravity.exe', version: 'v1.x' },
+            { path: 'C:\\Program Files\\Antigravity\\Antigravity.exe', version: 'v2.0+' },
+            { path: path_1.default.join(process.env.LOCALAPPDATA || '', 'Programs', 'antigravity', 'Antigravity.exe'), version: 'v1.x' },
+            { path: path_1.default.join(process.env.LOCALAPPDATA || '', 'Programs', 'Antigravity', 'Antigravity.exe'), version: 'v2.0+' },
+            { path: path_1.default.join(process.env.USERPROFILE || '', 'AppData', 'Local', 'Programs', 'antigravity', 'Antigravity.exe'), version: 'v1.x' },
+            { path: path_1.default.join(process.env.USERPROFILE || '', 'AppData', 'Local', 'Programs', 'Antigravity', 'Antigravity.exe'), version: 'v2.0+' },
+        ]
+        : [
+            { path: '/usr/local/bin/antigravity', version: 'v1.x' },
+            { path: '/opt/Antigravity/Antigravity', version: 'v2.0+' },
+            { path: path_1.default.join(process.env.HOME || '', '.local', 'bin', 'antigravity'), version: 'v1.x' },
+        ];
+    for (const sp of searchPaths) {
+        try {
+            if (!fs_1.default.existsSync(sp.path))
+                continue;
+            const stat = fs_1.default.statSync(sp.path);
+            candidates.push({
+                path: sp.path,
+                version: sp.version,
+                exists: true,
+                size: stat.size,
+                modified: stat.mtime.toISOString(),
+            });
+        }
+        catch { /* skip */ }
+    }
+    // Identify running processes on Windows via tasklist
+    if (isWin) {
+        try {
+            const { execSync } = require('child_process');
+            const out = execSync('tasklist /FI "IMAGENAME eq Antigravity.exe" /FO CSV /NH', { encoding: 'utf-8' });
+            const lines = out.trim().split('\n').filter((l) => l.includes('Antigravity'));
+            for (const line of lines) {
+                const m = line.match(/^"([^"]+)","(\d+)"/);
+                if (m) {
+                    const pid = parseInt(m[2], 10);
+                    const cand = candidates.find((c) => c.path.toLowerCase().includes('antigravity\\antigravity.exe'));
+                    if (cand)
+                        cand.process = { pid, name: m[1] };
+                }
+            }
+        }
+        catch { /* best effort */ }
+    }
+    // Check port 50999 ownership
+    try {
+        const inUse = await isPortInUse(50999);
+        if (inUse) {
+            const { execSync } = require('child_process');
+            const out = execSync(`netstat -ano | findstr :50999`, { encoding: 'utf-8' });
+            const line = out.trim().split('\n')[0] || '';
+            const m = line.match(/\s(\d+)\s*$/);
+            const pid = m ? m[1] : 'unknown';
+            // Attach to first candidate that has a process, or create a generic note
+            const target = candidates.find((c) => c.process) || candidates[0];
+            if (target)
+                target.portInUse = { port: 50999, by: `PID ${pid}` };
+        }
+    }
+    catch { /* best effort */ }
+    // Recommendation: prefer v2.0+ (uppercase) since that's the user's target
+    const v2 = candidates.find((c) => c.version === 'v2.0+');
+    if (v2) {
+        v2.recommended = true;
+        v2.reason = 'Latest Antigravity 2.0+ (uppercase)';
+    }
+    const v1 = candidates.find((c) => c.version === 'v1.x');
+    if (v1 && !v2) {
+        v1.recommended = true;
+        v1.reason = 'Only v1.x installation found';
+    }
+    return {
+        ok: true,
+        data: {
+            candidates,
+            hasConflict: candidates.length > 1,
+            summary: candidates.length === 0
+                ? 'No Antigravity installation detected'
+                : candidates.length === 1
+                    ? `Single installation: ${candidates[0].version}`
+                    : `Multiple installations detected (${candidates.length}) — possible confusion source`,
+        },
+    };
+});
 // ─────────────────────────────────────────────────────────────────────────────
-// Proxy stub lifecycle — portable emergency proxy on 127.0.0.1:50999
+// Proxy Stats — lightweight polling endpoint for the Real-time Proxy Monitor
 // ─────────────────────────────────────────────────────────────────────────────
+const proxyStatsHistory = [];
+const PROXY_STATS_MAX = 60;
+electron_1.ipcMain.handle('ag:proxy-stats', async () => {
+    const start = Date.now();
+    try {
+        const result = await new Promise((resolve) => {
+            const req = require('http').request({ hostname: '127.0.0.1', port: STUB_PORT, path: '/health', method: 'GET', timeout: 2000 }, (res) => {
+                res.resume();
+                resolve({
+                    ok: true,
+                    latencyMs: Date.now() - start,
+                    stub: res.headers['x-proxy-stub'] === '1',
+                });
+            });
+            req.on('timeout', () => { req.destroy(); resolve({ ok: false, latencyMs: 0, stub: false, error: 'timeout' }); });
+            req.on('error', (err) => resolve({ ok: false, latencyMs: 0, stub: false, error: err.message }));
+            req.end();
+        });
+        proxyStatsHistory.push({ ts: Date.now(), latencyMs: result.latencyMs, ok: result.ok });
+        if (proxyStatsHistory.length > PROXY_STATS_MAX)
+            proxyStatsHistory.shift();
+        return {
+            ok: true,
+            data: {
+                current: result,
+                history: [...proxyStatsHistory],
+                uptime: proxyStatsHistory.length > 0 ? Date.now() - proxyStatsHistory[0].ts : 0,
+            },
+        };
+    }
+    catch (e) {
+        return { ok: false, error: e.message };
+    }
+});
+// ──────────────────────────────────────────���──────────────────────────────────
+// Model Test — tests a single model's connection from the main process
+// ─────────────────────────────────────────────────────────────────────────────
+electron_1.ipcMain.handle('ag:test-model', async (_evt, name) => {
+    try {
+        const r = await getCliPool().run(['models', 'test', name, '--json']);
+        try {
+            return { ok: true, data: JSON.parse(r.stdout) };
+        }
+        catch {
+            return { ok: r.code === 0, data: { ok: r.code === 0, message: r.stdout.trim() || r.stderr.trim() } };
+        }
+    }
+    catch (e) {
+        return { ok: false, error: e.message };
+    }
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// Proxy stub lifecycle — portable emergency proxy on 127.0.0.1:51999
+// (Separate from main Antigravity proxy on 50999 to avoid port conflicts)
+// ───────────────────────────────────────────────────────────────────────��─────
+const STUB_PORT = 51999;
+/**
+ * Check if port 50999 (main Antigravity proxy) is already in use.
+ * Used to warn the user when ag-doctor-ui stub might conflict.
+ */
+async function isPortInUse(port, host = '127.0.0.1') {
+    return new Promise((resolve) => {
+        const net = require('net');
+        const tester = net.createServer()
+            .once('error', () => resolve(true))
+            .once('listening', () => tester.close(() => resolve(false)))
+            .listen(port, host);
+    });
+}
 /**
  * Launch proxy-stub.js in a detached Node.js process.
  * Works on any machine (no hardcoded paths).
@@ -572,26 +732,25 @@ electron_1.ipcMain.handle('ag:proxy:start-stub', async () => {
         }
         // Spawn detached so it survives if ag-doctor-ui is closed
         const child = (0, child_process_1.spawn)(process.execPath, [resolved], {
-            env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+            env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', AG_STUB_PORT: String(STUB_PORT) },
             detached: true,
             stdio: 'ignore',
             windowsHide: true,
         });
         child.unref();
         // Wait up to 3 s for the port to open
-        const port = 50999;
         const deadline = Date.now() + 3000;
         while (Date.now() < deadline) {
             await new Promise((r) => setTimeout(r, 200));
             const alive = await new Promise((resolve) => {
-                const req = require('http').request({ hostname: '127.0.0.1', port, path: '/health', method: 'GET', timeout: 1000 }, (res) => { res.resume(); resolve(true); });
+                const req = require('http').request({ hostname: '127.0.0.1', port: STUB_PORT, path: '/health', method: 'GET', timeout: 1000 }, (res) => { res.resume(); resolve(true); });
                 req.on('error', () => resolve(false));
                 req.end();
             });
             if (alive)
-                return { ok: true, pid: child.pid };
+                return { ok: true, pid: child.pid, port: STUB_PORT };
         }
-        return { ok: true, pid: child.pid, note: 'started but port not yet open' };
+        return { ok: true, pid: child.pid, port: STUB_PORT, note: 'started but port not yet open' };
     }
     catch (e) {
         return { ok: false, error: e.message };
@@ -602,22 +761,86 @@ electron_1.ipcMain.handle('ag:proxy:start-stub', async () => {
  */
 electron_1.ipcMain.handle('ag:proxy:status', async () => {
     try {
-        const port = 50999;
         const result = await new Promise((resolve) => {
             const started = Date.now();
-            const req = require('http').request({ hostname: '127.0.0.1', port, path: '/health', method: 'GET', timeout: 2000 }, (res) => {
+            const req = require('http').request({ hostname: '127.0.0.1', port: STUB_PORT, path: '/health', method: 'GET', timeout: 2000 }, (res) => {
                 res.resume();
                 resolve({
                     ok: true,
                     stub: res.headers['x-proxy-stub'] === '1',
                     latencyMs: Date.now() - started,
+                    port: STUB_PORT,
                 });
             });
-            req.on('timeout', () => { req.destroy(); resolve({ ok: false, stub: false, latencyMs: Date.now() - Date.now(), error: 'timeout' }); });
-            req.on('error', (err) => resolve({ ok: false, stub: false, latencyMs: 0, error: err.message }));
+            req.on('timeout', () => { req.destroy(); resolve({ ok: false, stub: false, latencyMs: 0, port: STUB_PORT, error: 'timeout' }); });
+            req.on('error', (err) => resolve({ ok: false, stub: false, latencyMs: 0, port: STUB_PORT, error: err.message }));
             req.end();
         });
         return { ok: true, data: result };
+    }
+    catch (e) {
+        return { ok: false, error: e.message };
+    }
+});
+/**
+ * Check if the main Antigravity proxy port (50999) is occupied.
+ * Useful to detect conflicts when launching Antigravity.
+ */
+electron_1.ipcMain.handle('ag:proxy:check-main-port', async () => {
+    try {
+        const MAIN_PORT = 50999;
+        const inUse = await isPortInUse(MAIN_PORT);
+        if (inUse) {
+            // Try to identify which process is using the port
+            let processInfo = 'unknown';
+            try {
+                if (process.platform === 'win32') {
+                    const { execSync } = require('child_process');
+                    const out = execSync(`netstat -ano | findstr :${MAIN_PORT}`, { encoding: 'utf-8' });
+                    processInfo = out.trim().split('\n')[0] || 'unknown';
+                }
+                else {
+                    const { execSync } = require('child_process');
+                    const out = execSync(`lsof -i :${MAIN_PORT} -P -n 2>/dev/null | tail -n +2 | head -n 1`, { encoding: 'utf-8' });
+                    processInfo = out.trim() || 'unknown';
+                }
+            }
+            catch {
+                /* best effort */
+            }
+            return { ok: true, inUse: true, port: MAIN_PORT, process: processInfo };
+        }
+        return { ok: true, inUse: false, port: MAIN_PORT };
+    }
+    catch (e) {
+        return { ok: false, error: e.message };
+    }
+});
+/**
+ * Kill the process occupying port 50999 (main Antigravity proxy).
+ * Use with caution — only kills processes we believe are conflicting.
+ */
+electron_1.ipcMain.handle('ag:proxy:kill-main-port', async () => {
+    try {
+        const MAIN_PORT = 50999;
+        const { exec } = require('child_process');
+        return await new Promise((resolve) => {
+            let cmd;
+            if (process.platform === 'win32') {
+                cmd = `for /f "tokens=5" %a in ('netstat -ano ^| findstr :${MAIN_PORT}') do taskkill /F /PID %a`;
+            }
+            else {
+                cmd = `lsof -ti :${MAIN_PORT} | xargs -r kill -9`;
+            }
+            exec(cmd, (err, stdout) => {
+                if (err) {
+                    resolve({ ok: false, error: err.message });
+                }
+                else {
+                    resolve({ ok: true, killed: stdout.trim() || 'no process found' });
+                }
+            });
+        });
     }
     catch (e) {
         return { ok: false, error: e.message };
