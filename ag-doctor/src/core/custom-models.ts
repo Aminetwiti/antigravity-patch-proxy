@@ -83,9 +83,19 @@ export function saveCustomModels(
   fs.writeFileSync(fp, JSON.stringify(file, null, 2), 'utf-8');
 }
 
+/**
+ * Returns a stable unique key for a custom model.
+ * Two models are considered the same only when they share BOTH name and provider,
+ * so users can register the same model name against different providers/endpoints.
+ */
+export function modelKey(model: CustomModel): string {
+  return `${model.provider || 'custom'}::${model.name}`;
+}
+
 export function addCustomModel(model: CustomModel, filePath?: string): CustomModelsFile {
   const file = loadCustomModels(filePath);
-  const idx = file.models.findIndex((m) => m.name === model.name);
+  const key = modelKey(model);
+  const idx = file.models.findIndex((m) => modelKey(m) === key);
   if (idx >= 0) {
     file.models[idx] = model;
   } else {
@@ -97,7 +107,12 @@ export function addCustomModel(model: CustomModel, filePath?: string): CustomMod
 
 export function removeCustomModel(name: string, filePath?: string): CustomModelsFile {
   const file = loadCustomModels(filePath);
-  file.models = file.models.filter((m) => m.name !== name);
+  // Match by name only when no provider is encoded, otherwise by full key.
+  // Accept either the legacy plain name or the "provider::name" form.
+  file.models = file.models.filter((m) => {
+    if (name.includes('::')) return modelKey(m) !== name;
+    return m.name !== name;
+  });
   saveCustomModels(file, filePath);
   return file;
 }

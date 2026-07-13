@@ -21,6 +21,7 @@ import {
   getCustomModelsPath,
   getLsLogPath,
 } from './paths';
+import { isWsl } from './platform';
 import { findAntigravityProcesses, killAntigravityProcesses } from './process';
 
 const execFileAsync = promisify(execFile);
@@ -258,7 +259,8 @@ export async function getAntigravityStatus(proxyPort = 50999): Promise<Antigravi
   // Binary path
   let binaryPath: string | null = null;
   if (installDir) {
-    const exeName = process.platform === 'win32' ? 'Antigravity.exe' : 'Antigravity';
+    const isWindowsExe = process.platform === 'win32' || installDir.includes('/mnt/') || installDir.includes(':\\\\');
+    const exeName = isWindowsExe ? 'Antigravity.exe' : 'Antigravity';
     const candidate = path.join(installDir, exeName);
     if (fs.existsSync(candidate)) binaryPath = candidate;
   }
@@ -300,7 +302,8 @@ export async function launchAntigravity(): Promise<{ ok: boolean; pid?: number; 
   const dir = findAntigravityInstallDir();
   if (!dir) return { ok: false, message: 'Antigravity not found on disk' };
 
-  const exeName = process.platform === 'win32' ? 'Antigravity.exe' : 'Antigravity';
+  const isWindowsExe = process.platform === 'win32' || isWsl() || dir.includes('/mnt/') || dir.includes(':\\\\');
+  const exeName = isWindowsExe ? 'Antigravity.exe' : 'Antigravity';
   const exe = path.join(dir, exeName);
   if (!fs.existsSync(exe)) {
     return { ok: false, message: `Executable not found: ${exe}` };
@@ -311,18 +314,57 @@ export async function launchAntigravity(): Promise<{ ok: boolean; pid?: number; 
     return { ok: true, pid: existing[0]!.pid, message: 'Already running' };
   }
 
+  // Convert a WSL path back to a Windows path for cmd.exe / start
+  const wslLaunch = isWsl();
+  const winExe = wslLaunch ? exe.replace(/^\/mnt\/([a-z])\//i, '$1:/').replace(/\//g, '\\') : exe;
+
   try {
-    const child = spawn(exe, [], {
-      detached: true,
-      stdio: 'ignore',
-      cwd: dir,
-      env: { ...process.env },
-    });
-    child.unref();
-    await new Promise((r) => setTimeout(r, 800));
-    const procs = await findAntigravityProcesses();
-    const pid = procs[0]?.pid ?? child.pid;
-    return { ok: true, pid, message: `Launched (pid=${pid})` };
+    if (process.platform === 'win32') {
+      // Windows native: use cmd.exe /c start to open the GUI window reliably
+      const { exec } = await import('child_process');
+      const { promisify } = await import('util');
+      const execAsync = promisify(exec);
+      execAsync(`cmd.exe /c start "" "${winExe}"`, {
+        cwd: dir,
+        windowsHide: false,
+      }).catch(() => {
+        // Ignore errors - process is already launched
+      });
+    } else if (wslLaunch) {
+      // WSL: spawn Windows binary through cmd.exe detached; GUI appears on the Windows host
+      const child = spawn('/mnt/c/Windows/System32/cmd.exe', ['/c', 'start', '', winExe], {
+        detached: true,
+        stdio: 'ignore',
+        cwd: dir,
+      });
+      child.unref();
+    } else {
+      // Unix: original behavior
+      const child = spawn(exe, [], {
+        detached: true,
+        stdio: 'ignore',
+        cwd: dir,
+        env: { ...process.env },
+      });
+      child.unref();
+    }
+
+    // Poll for the process a few times (Electron apps can be slow to show up)
+    for (let attempt = 0; attempt < 6; attempt++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const procs = await findAntigravityProcesses();
+      const pid = procs[0]?.pid;
+      if (pid) {
+        return { ok: true, pid, message: `Launched (pid=${pid})` };
+      }
+    }
+
+    return {
+      ok: false,
+      message: wslLaunch
+        ? 'Process launched but not visible from WSL; launch Antigravity directly from Windows if needed'
+        : 'Process started but not detected after 6s',
+    };
   } catch (e) {
     return { ok: false, message: `Failed to launch: ${(e as Error).message}` };
   }

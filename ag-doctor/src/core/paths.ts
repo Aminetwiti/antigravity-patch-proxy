@@ -7,6 +7,24 @@ import fs from 'fs';
 import { getPlatform } from './platform';
 import { getProfilePath } from './profile';
 
+/** Detect if we are running inside Windows Subsystem for Linux. */
+function isWsl(): boolean {
+  try {
+    const rel = fs.readFileSync('/proc/sys/kernel/osrelease', 'utf-8') ||
+                fs.readFileSync('/proc/version', 'utf-8');
+    return /microsoft|wsl/i.test(rel);
+  } catch {
+    return false;
+  }
+}
+
+/** Resolve a Windows path to its WSL mount (e.g. C:\... -> /mnt/c/...). */
+function winToWsl(winPath: string): string {
+  const m = winPath.match(/^([A-Za-z]):\\(.*)$/);
+  if (!m) return winPath;
+  return path.join('/mnt', m[1].toLowerCase(), m[2].replace(/\\/g, '/'));
+}
+
 /** User data dir for the Antigravity app. */
 export function getAntigravityDataDir(): string {
   return path.join(os.homedir(), '.gemini', 'antigravity');
@@ -45,6 +63,17 @@ export function findAntigravityInstallDir(): string | null {
     candidates.push('/usr/lib/antigravity');
     candidates.push('/opt/Antigravity');
     candidates.push(path.join(os.homedir(), 'antigravity'));
+
+    // WSL: also check the Windows-side install directories
+    if (isWsl()) {
+      const localAppData = process.env.LOCALAPPDATA;
+      if (localAppData) {
+        candidates.push(winToWsl(path.join(localAppData, 'Programs', 'Antigravity')));
+      }
+      candidates.push('/mnt/c/Users/' + (process.env.USER || os.userInfo().username) + '/AppData/Local/Programs/Antigravity');
+      candidates.push('/mnt/c/Program Files/Antigravity');
+      candidates.push('/mnt/c/Program Files (x86)/Antigravity');
+    }
   }
 
   for (const dir of candidates) {
@@ -88,6 +117,10 @@ export function getLsLogPath(): string {
   }
   if (platform === 'darwin') {
     return path.join(os.homedir(), 'Library', 'Logs', 'Antigravity', 'language_server.log');
+  }
+  if (isWsl()) {
+    const username = process.env.USER || os.userInfo().username;
+    return `/mnt/c/Users/${username}/AppData/Roaming/Antigravity/logs/language_server.log`;
   }
   return path.join(os.homedir(), '.config', 'Antigravity', 'logs', 'language_server.log');
 }

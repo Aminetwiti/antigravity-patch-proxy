@@ -1,46 +1,18 @@
 {
   "name": "antigravity",
   "productName": "Antigravity",
-  "version": "2.1.0",
+  "version": "2.2.1",
   "description": "Antigravity - Agentic Desktop Application",
   "homepage": "https://antigravity.google",
   "author": {
     "name": "Google",
     "email": "antigravity-support@google.com"
   },
-  "license": "Apache-2.0",
   "main": "dist/main.js",
-  "scripts": {
-    "build": "npx tsc",
-    "dev": "npx tsc --watch",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "lint": "npx eslint src/**/*.ts",
-    "lint:fix": "npx eslint src/**/*.ts --fix",
-    "format": "npx prettier --write \"src/**/*.ts\"",
-    "format:check": "npx prettier --check \"src/**/*.ts\"",
-    "clean": "npx tsc --build --clean",
-    "deploy:win": "powershell -ExecutionPolicy Bypass -File .\\scripts\\deploy\\deploy.ps1",
-    "deploy:mac": "bash scripts/deploy/deploy.sh",
-    "deploy:linux": "bash scripts/deploy/deploy_linux.sh",
-    "repack": "powershell -ExecutionPolicy Bypass -File .\\scripts\\repack\\repack.ps1",
-    "prepack": "npm run build && powershell -ExecutionPolicy Bypass -File .\\scripts\\repack\\repack.ps1",
-    "mitm": "powershell -ExecutionPolicy Bypass -File .\\scripts\\mitm\\start_mitm_443.ps1"
-  },
   "dependencies": {
     "chrome-devtools-mcp": "^0.23.0",
     "electron-log": "^5.4.3",
     "electron-updater": "^6.8.3",
     "shell-env": "^4.0.3"
-  },
-  "devDependencies": {
-    "@types/node": "^25.9.1",
-    "@typescript-eslint/eslint-plugin": "^8.44.1",
-    "@typescript-eslint/parser": "^8.44.1",
-    "eslint": "^9.33.0",
-    "eslint-config-prettier": "^10.1.8",
-    "prettier": "^3.6.2",
-    "typescript": "^6.0.3",
-    "vitest": "^4.1.7"
   }
 }

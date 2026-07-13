@@ -10,6 +10,7 @@ import { c } from './cli/output';
 import { runDoctor } from './commands/doctor';
 import { runCheck } from './commands/check';
 import { runRepair } from './commands/repair';
+import { runRepairAsar, runCheckAsar } from './commands/repair-asar';
 import { runModelsList } from './commands/models/list';
 import { runModelsAdd } from './commands/models/add';
 import { runModelsRemove } from './commands/models/remove';
@@ -49,6 +50,9 @@ Commands:
   doctor --report <f>    Write a report (html/md/json) to <f>
   check                  Quick health check (exit code only)
   repair [--yes]         Auto-fix detected issues (snapshots first)
+  repair-asar [--yes] [--from <path>] [--dry-run]
+                         Detect & restore a corrupted app.asar
+  check-asar             Read-only app.asar integrity report (JSON-friendly)
   models list            List configured custom models
   models add             Interactive model creation
   models remove <name>   Delete a model (snapshots first)
@@ -203,6 +207,10 @@ export async function main(argv: string[]): Promise<number> {
         return await runCheck(ctx);
       case 'repair':
         return await runRepair(ctx);
+      case 'repair-asar':
+        return await runRepairAsar(ctx);
+      case 'check-asar':
+        return await runCheckAsar(ctx);
       case 'models':
         if (sub === 'list' || sub === 'ls') return runModelsList(ctx);
         if (sub === 'add') return await runModelsAdd(ctx);

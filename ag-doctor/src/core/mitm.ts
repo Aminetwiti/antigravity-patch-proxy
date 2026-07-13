@@ -112,6 +112,18 @@ export async function getMitmStatus(port = DEFAULT_MITM_PORT): Promise<MitmStatu
 
   let interceptionOk: boolean | null = null;
   let interceptionError: string | null = null;
+  let proxyListening = false;
+  
+  // First, check if anything is listening on the proxy port
+  if (proxyEnabled && proxyHost && proxyPort) {
+    try {
+      const { isPortInUse } = await import('./process');
+      proxyListening = await isPortInUse(proxyPort, proxyHost);
+    } catch (e) {
+      // Ignore port check errors
+    }
+  }
+  
   if (caInstalled && proxyEnabled) {
     try {
       const r = await probeWithProxy(
@@ -172,7 +184,8 @@ export async function getMitmStatus(port = DEFAULT_MITM_PORT): Promise<MitmStatu
       redirected: proxyEnabled,
     },
     interception: {
-      listening: proxyEnabled,
+      // listening: check if something is actually listening on the proxy port
+      listening: proxyListening,
       reachable: interceptionOk === true,
     },
   };

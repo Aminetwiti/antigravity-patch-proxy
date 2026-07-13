@@ -663,6 +663,62 @@ ipcMain.handle('ag:antigravity:restart', async () => {
   }
 });
 
+// Launch Antigravity and immediately start streaming its language_server logs.
+// Returns a unique streamId the renderer can use to receive log chunks.
+ipcMain.handle('ag:antigravity:launch-logs', async (evt) => {
+  const streamId = `launch-logs-${Date.now()}`;
+  const cli = getCliPath();
+  if (!fs.existsSync(cli)) {
+    evt.sender.send(`ag:stream:${streamId}:error`, `CLI not found: ${cli}`);
+    return streamId;
+  }
+  const proc = spawn(process.execPath, [cli, 'antigravity', 'launch-logs'], {
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    windowsHide: true,
+  });
+  activeStreams.set(streamId, proc);
+
+  let pending: { stdout: string; stderr: string } | null = null;
+  let flushTimer: NodeJS.Timeout | null = null;
+  const flush = () => {
+    if (pending && (pending.stdout || pending.stderr)) {
+      if (!evt.sender.isDestroyed()) {
+        evt.sender.send(`ag:stream:${streamId}:data`, pending.stdout + pending.stderr);
+      }
+    }
+    pending = null;
+    flushTimer = null;
+  };
+  const schedule = () => {
+    if (!flushTimer) flushTimer = setTimeout(flush, 50);
+  };
+
+  proc.stdout?.on('data', (d: Buffer) => {
+    if (!pending) pending = { stdout: '', stderr: '' };
+    pending.stdout += d.toString();
+    schedule();
+  });
+  proc.stderr?.on('data', (d: Buffer) => {
+    if (!pending) pending = { stdout: '', stderr: '' };
+    pending.stderr += d.toString();
+    schedule();
+  });
+  proc.on('close', (code) => {
+    flush();
+    if (!evt.sender.isDestroyed()) {
+      evt.sender.send(`ag:stream:${streamId}:close`, code ?? 0);
+    }
+    activeStreams.delete(streamId);
+  });
+  proc.on('error', (err) => {
+    if (!evt.sender.isDestroyed()) {
+      evt.sender.send(`ag:stream:${streamId}:error`, err.message);
+    }
+    activeStreams.delete(streamId);
+  });
+  return streamId;
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Installation Detector — scans for Antigravity binaries (v1.x vs v2.0+)
 // Returns structured info about each installation found + process ownership

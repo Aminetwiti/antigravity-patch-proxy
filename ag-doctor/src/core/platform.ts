@@ -40,3 +40,16 @@ export function getNodeMajor(): number {
   const m = process.version.match(/^v(\d+)/);
   return m ? parseInt(m[1], 10) : 0;
 }
+
+/** Detect if we are running inside Windows Subsystem for Linux. */
+export function isWsl(): boolean {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require('fs');
+    const rel = fs.readFileSync('/proc/sys/kernel/osrelease', 'utf-8') ||
+                fs.readFileSync('/proc/version', 'utf-8');
+    return /microsoft|wsl/i.test(rel);
+  } catch {
+    return false;
+  }
+}

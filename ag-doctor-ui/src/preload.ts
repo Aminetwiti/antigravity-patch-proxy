@@ -49,6 +49,8 @@ const api = {
     ipcRenderer.invoke('ag:antigravity:kill'),
   antigravityRestart: (): Promise<{ ok: boolean; data?: { ok: boolean; message: string; pid?: number }; error?: string }> =>
     ipcRenderer.invoke('ag:antigravity:restart'),
+  antigravityLaunchLogs: (): Promise<string> =>
+    ipcRenderer.invoke('ag:antigravity:launch-logs'),
 
   // Proxy stub lifecycle — emergency fallback when Antigravity's bundled proxy fails
   proxyStartStub: (): Promise<{ ok: boolean; pid?: number; note?: string; error?: string }> =>

@@ -618,6 +618,62 @@ electron_1.ipcMain.handle('ag:antigravity:restart', async () => {
         return { ok: true, data: { ok: r.code === 0, message: r.stdout.trim() } };
     }
 });
+// Launch Antigravity and immediately start streaming its language_server logs.
+// Returns a unique streamId the renderer can use to receive log chunks.
+electron_1.ipcMain.handle('ag:antigravity:launch-logs', async (evt) => {
+    const streamId = `launch-logs-${Date.now()}`;
+    const cli = getCliPath();
+    if (!fs_1.default.existsSync(cli)) {
+        evt.sender.send(`ag:stream:${streamId}:error`, `CLI not found: ${cli}`);
+        return streamId;
+    }
+    const proc = (0, child_process_1.spawn)(process.execPath, [cli, 'antigravity', 'launch-logs'], {
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+        windowsHide: true,
+    });
+    activeStreams.set(streamId, proc);
+    let pending = null;
+    let flushTimer = null;
+    const flush = () => {
+        if (pending && (pending.stdout || pending.stderr)) {
+            if (!evt.sender.isDestroyed()) {
+                evt.sender.send(`ag:stream:${streamId}:data`, pending.stdout + pending.stderr);
+            }
+        }
+        pending = null;
+        flushTimer = null;
+    };
+    const schedule = () => {
+        if (!flushTimer)
+            flushTimer = setTimeout(flush, 50);
+    };
+    proc.stdout?.on('data', (d) => {
+        if (!pending)
+            pending = { stdout: '', stderr: '' };
+        pending.stdout += d.toString();
+        schedule();
+    });
+    proc.stderr?.on('data', (d) => {
+        if (!pending)
+            pending = { stdout: '', stderr: '' };
+        pending.stderr += d.toString();
+        schedule();
+    });
+    proc.on('close', (code) => {
+        flush();
+        if (!evt.sender.isDestroyed()) {
+            evt.sender.send(`ag:stream:${streamId}:close`, code ?? 0);
+        }
+        activeStreams.delete(streamId);
+    });
+    proc.on('error', (err) => {
+        if (!evt.sender.isDestroyed()) {
+            evt.sender.send(`ag:stream:${streamId}:error`, err.message);
+        }
+        activeStreams.delete(streamId);
+    });
+    return streamId;
+});
 electron_1.ipcMain.handle('ag:detect-installation', async () => {
     const candidates = [];
     const isWin = process.platform === 'win32';

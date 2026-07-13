@@ -1266,6 +1266,10 @@ async function loadPatchStatus() {
             patchTpl.innerHTML = `
       ${banner}
       <div class="patch-row">
+        <div class="patch-row-label">Antigravity Version</div>
+        <div class="patch-row-value">${escapeHtml(s.antigravityVersion ?? 'unknown')}</div>
+      </div>
+      <div class="patch-row">
         <div class="patch-row-label">Binary path</div>
         <div class="patch-row-value">${escapeHtml(s.binaryPath ?? '—')}</div>
       </div>
@@ -1282,13 +1286,27 @@ async function loadPatchStatus() {
         <div class="patch-row-value ${s.backupExists ? 'ok' : ''}">${s.backupExists ? 'yes' : 'no'}</div>
       </div>
       <div class="patch-row">
+        <div class="patch-row-label">Compatible</div>
+        <div class="patch-row-value ${s.compatible ? 'ok' : 'warn'}">${s.compatible ? 'yes' : 'no'}</div>
+      </div>
+      ${s.recommendedPatch ? `
+      <div class="patch-row">
+        <div class="patch-row-label">Version Range</div>
+        <div class="patch-row-value">${escapeHtml(s.recommendedPatch.versionRange)}</div>
+      </div>
+      <div class="patch-row">
         <div class="patch-row-label">Original URL</div>
-        <div class="patch-row-value">${escapeHtml(s.originalUrl)}</div>
+        <div class="patch-row-value">${escapeHtml(s.recommendedPatch.originalUrl)}</div>
       </div>
       <div class="patch-row">
         <div class="patch-row-label">Patched URL</div>
-        <div class="patch-row-value">${escapeHtml(s.patchedUrl)}</div>
-      </div>`;
+        <div class="patch-row-value">${escapeHtml(s.recommendedPatch.patchedUrl)}</div>
+      </div>` : ''}
+      ${s.warningMessage ? `
+      <div class="patch-row">
+        <div class="patch-row-label">Warning</div>
+        <div class="patch-row-value warn">${escapeHtml(s.warningMessage)}</div>
+      </div>` : ''}`;
             patchStatusEl.replaceChildren(patchTpl.content);
             setStatus('Ready');
         }
@@ -1473,6 +1491,7 @@ const agPaths = $('#agPaths');
 const agRefreshBtn = $('#agRefreshBtn');
 const agOpenBtn = $('#agOpenBtn');
 const agRestartBtn = $('#agRestartBtn');
+const agLaunchLogsBtn = $('#agLaunchLogsBtn');
 const agRevealBtn = $('#agRevealBtn');
 const agCopyPathsBtn = $('#agCopyPathsBtn');
 let agStartedAt = null;
@@ -1953,6 +1972,47 @@ $('#agLaunchBtn').addEventListener('click', async () => {
             toast(`Launch failed: ${r.error ?? 'unknown'}`, 'err');
         }
         await loadAntigravity();
+    }
+    catch (e) {
+        toast(`Error: ${e.message}`, 'err');
+        setStatus('Error', 'err');
+    }
+});
+$('#agLaunchLogsBtn').addEventListener('click', async () => {
+    if (logsStreaming) {
+        toast('A log stream is already running', 'warn');
+        return;
+    }
+    setStatus('Launching Antigravity + logs…', 'busy');
+    try {
+        const streamId = await window.ag.antigravityLaunchLogs();
+        if (!streamId) {
+            toast('Failed to start launch + logs stream', 'err');
+            return;
+        }
+        // Wire the same handlers used by the regular logs view
+        logsStreaming = true;
+        logsStreamId = streamId;
+        window.ag.onStreamData(streamId, (chunk) => {
+            logsPendingChunk = (logsPendingChunk ?? '') + ansiToHtml(chunk);
+            scheduleLogsFlush();
+        });
+        window.ag.onStreamClose(streamId, (code) => {
+            flushLogs();
+            logsStreaming = false;
+            logsStreamId = null;
+            setStatus(`Launch + logs closed (${code})`);
+            void loadAntigravity();
+        });
+        window.ag.onStreamError(streamId, (err) => {
+            flushLogs();
+            logsStreaming = false;
+            logsStreamId = null;
+            toast(`Stream error: ${err}`, 'err');
+        });
+        // Navigate to the logs view to show what comes in
+        navigate('logs');
+        toast('Antigravity launched — following logs', 'ok', 2000);
     }
     catch (e) {
         toast(`Error: ${e.message}`, 'err');

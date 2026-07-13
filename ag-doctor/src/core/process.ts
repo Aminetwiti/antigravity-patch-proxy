@@ -8,7 +8,7 @@
  */
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
-import { getPlatform } from './platform';
+import { getPlatform, isWsl } from './platform';
 
 const execFileAsync = promisify(execFile);
 
@@ -24,6 +24,15 @@ export async function findAntigravityProcesses(): Promise<ProcessInfo[]> {
     if (platform === 'win32') {
       const { stdout } = await execFileAsync('tasklist', ['/FI', 'IMAGENAME eq Antigravity.exe', '/FO', 'CSV', '/NH']);
       return parseWindowsTasklist(stdout);
+    }
+    if (isWsl()) {
+      // WSL can see Windows processes through tasklist.exe
+      try {
+        const { stdout } = await execFileAsync('/mnt/c/Windows/System32/tasklist.exe', ['/FI', 'IMAGENAME eq Antigravity.exe', '/FO', 'CSV', '/NH']);
+        return parseWindowsTasklist(stdout);
+      } catch {
+        // fall through to pgrep
+      }
     }
     if (platform === 'darwin' || platform === 'linux') {
       const { stdout } = await execFileAsync('pgrep', ['-af', 'Antigravity']);
@@ -64,10 +73,11 @@ function parsePgrep(stdout: string): ProcessInfo[] {
 export async function killAntigravityProcesses(): Promise<{ killed: number }> {
   const procs = await findAntigravityProcesses();
   const platform = getPlatform();
-  if (platform === 'win32') {
+  if (platform === 'win32' || isWsl()) {
+    const taskkill = platform === 'win32' ? 'taskkill' : '/mnt/c/Windows/System32/taskkill.exe';
     for (const p of procs) {
       try {
-        await execFileAsync('taskkill', ['/PID', String(p.pid), '/T', '/F'], { windowsHide: true });
+        await execFileAsync(taskkill, ['/PID', String(p.pid), '/T', '/F'], platform === 'win32' ? { windowsHide: true } : undefined);
       } catch {
         // ignore — process may have already exited
       }

@@ -24,6 +24,7 @@ const api = {
     antigravityLaunch: () => electron_1.ipcRenderer.invoke('ag:antigravity:launch'),
     antigravityKill: () => electron_1.ipcRenderer.invoke('ag:antigravity:kill'),
     antigravityRestart: () => electron_1.ipcRenderer.invoke('ag:antigravity:restart'),
+    antigravityLaunchLogs: () => electron_1.ipcRenderer.invoke('ag:antigravity:launch-logs'),
     // Proxy stub lifecycle — emergency fallback when Antigravity's bundled proxy fails
     proxyStartStub: () => electron_1.ipcRenderer.invoke('ag:proxy:start-stub'),
     proxyStubStatus: () => electron_1.ipcRenderer.invoke('ag:proxy:stub-status'),

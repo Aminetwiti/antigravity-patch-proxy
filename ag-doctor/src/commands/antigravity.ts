@@ -17,6 +17,7 @@ import {
   closeAntigravity,
   restartAntigravity,
 } from '../core/antigravity';
+import { runLogs } from './logs';
 
 export async function runAntigravity(ctx: CommandContext, sub: string[], rest: string[]): Promise<number> {
   const subCmd = sub[0] ?? 'status';
@@ -35,6 +36,9 @@ export async function runAntigravity(ctx: CommandContext, sub: string[], rest: s
       return await cmdKill(ctx);
     case 'restart':
       return await cmdRestart(ctx);
+    case 'launch-logs':
+    case 'start-logs':
+      return await cmdLaunchLogs(ctx);
     case '--help':
     case '-h':
     case 'help':
@@ -55,8 +59,9 @@ ${c.cyan('Subcommands:')}
   ${c.green('status')}    Show install path, version, running PIDs, proxy reachability
   ${c.green('version')}   Print the detected Antigravity version
   ${c.green('launch')}    Start Antigravity (no-op if already running)
-  ${c.green('kill')}      Terminate all Antigravity processes
-  ${c.green('restart')}   Kill then launch
+  ${c.green('kill')}          Terminate all Antigravity processes
+  ${c.green('restart')}       Kill then launch
+  ${c.green('launch-logs')}   Launch Antigravity and follow language_server logs
 
 ${c.cyan('Options:')}
   --json    Output machine-readable JSON
@@ -159,4 +164,21 @@ async function cmdRestart(ctx: CommandContext): Promise<number> {
     error(r.message);
   }
   return r.ok ? 0 : 2;
+}
+
+async function cmdLaunchLogs(ctx: CommandContext): Promise<number> {
+  if (!ctx.json) header('ag-doctor — launch antigravity + follow logs');
+  const launchRes = await launchAntigravity();
+  if (ctx.json) {
+    jsonOut({ launch: launchRes });
+  } else if (launchRes.ok) {
+    ok(launchRes.message);
+  } else {
+    error(launchRes.message);
+  }
+  if (!launchRes.ok) return 2;
+
+  // Give the language_server a moment to create/rotate its log file
+  await new Promise((r) => setTimeout(r, 1000));
+  return await runLogs(ctx, { follow: true, lines: 50, source: 'language_server' });
 }
