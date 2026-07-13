@@ -2,14 +2,32 @@
  * `ag-doctor patch status` — show detailed version-aware patch status.
  */
 import type { CommandContext } from '../../types';
+import fs from 'fs';
 import { info, ok, warn, error } from '../../cli/output';
 import { getVersionAwarePatchStatus } from '../../core/version-specific-patch';
+import { validateAsar } from './validate-asar';
 
 export async function runPatchStatus(ctx: CommandContext): Promise<number> {
   const status = getVersionAwarePatchStatus();
 
   // If --json flag is present, output JSON and return
   if (ctx.json) {
+    // Phase A.3 — run the asar preflight on the live archive so the UI can
+    // surface the verdict (ok / warn / block) and the size delta.
+    let validateReport: ReturnType<typeof validateAsar> | null = null;
+    let verdict: string | null = null;
+    try {
+      // Lazy require to avoid a circular dep at module load time.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { getAsarPath } = require('../../core/asar-integrity');
+      const liveAsar = getAsarPath() as string | null;
+      if (liveAsar && fs.existsSync(liveAsar)) {
+        validateReport = validateAsar(liveAsar, liveAsar);
+        verdict = validateReport.verdict;
+      }
+    } catch {
+      // Validation is best-effort; missing dependency ⇒ verdict stays null.
+    }
     const jsonOutput = {
       antigravityVersion: status.antigravityVersion,
       binaryPath: status.binaryPath,
@@ -30,6 +48,9 @@ export async function runPatchStatus(ctx: CommandContext): Promise<number> {
         originalUrl: p.originalUrl,
         patchedUrl: p.patchedUrl,
       })),
+      deltaSizeBytes: validateReport?.deltaSizeBytes ?? null,
+      verdict,
+      validateAsarReport: validateReport,
     };
     console.log(JSON.stringify(jsonOutput, null, 2));
     return status.compatible ? 0 : 1;

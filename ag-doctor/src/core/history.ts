@@ -18,8 +18,8 @@ export const HISTORY_DIR_NAME = 'history';
 export interface HistoryEntry {
   id: string;
   ranAt: string;
-  results: CheckResult[];
-  summary: {
+  results?: CheckResult[];
+  summary?: {
     ok: number;
     warn: number;
     error: number;
@@ -27,6 +27,9 @@ export interface HistoryEntry {
   };
   durationMs?: number;
   tags?: string[];
+  kind?: string;
+  message?: string;
+  details?: Record<string, unknown>;
 }
 
 export function getHistoryDir(): string {

@@ -1140,18 +1140,24 @@ window.addEventListener('DOMContentLoaded', () => {
                 const parsed = JSON.parse(responseText) as Record<string, unknown>;
                 const modelsObj = (parsed.models || parsed.availableModels || parsed.available_models || {}) as Record<string, unknown>;
                 for (const m of customModels) {
-                  const slug = 'custom-' + ((m.externalModelName || m.name || '') as string)
+                  const provider = (m.provider || 'custom') as string;
+                  const displayName = ((m.displayName || m.name || '') as string).trim();
+                  const apiUrl = ((m.apiUrl || '') as string).trim();
+                  const baseName = ((m.externalModelName || m.name || '') as string)
                     .replace(/^models\//, '')
                     .replace(/[^a-zA-Z0-9]+/g, '-')
                     .replace(/^-+|-+$/g, '')
                     .toLowerCase();
+                  const uniquenessHash = hashCodeStr(`${provider}:${displayName}:${apiUrl}`);
+                  const slug = `custom-${provider}-${baseName}-${uniquenessHash % 100000}`;
+                  const placeholderId = 400 + (Math.abs(hashCodeStr(`${provider}-${displayName}`)) % 200);
                   (modelsObj as Record<string, unknown>)[slug] = {
-                    displayName: m.displayName || m.name,
+                    displayName,
                     recommended: true,
                     maxTokens: 1048576,
                     maxOutputTokens: 4096,
                     tokenizerType: 'LLAMA_WITH_SPECIAL',
-                    model: 'MODEL_PLACEHOLDER_M' + (400 + (Math.abs(hashCodeStr(m.displayName || m.name || '') as number) % 200)),
+                    model: `MODEL_PLACEHOLDER_M${placeholderId}`,
                     apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
                     modelProvider: 'MODEL_PROVIDER_GOOGLE',
                   };
@@ -1185,18 +1191,24 @@ window.addEventListener('DOMContentLoaded', () => {
             const parsed = JSON.parse(text) as Record<string, unknown>;
             const modelsObj = (parsed.models || parsed.availableModels || parsed.available_models || {}) as Record<string, unknown>;
             for (const m of customModels) {
-              const slug = 'custom-' + ((m.externalModelName || m.name || '') as string)
+              const provider = (m.provider || 'custom') as string;
+              const displayName = ((m.displayName || m.name || '') as string).trim();
+              const apiUrl = ((m.apiUrl || '') as string).trim();
+              const baseName = ((m.externalModelName || m.name || '') as string)
                 .replace(/^models\//, '')
                 .replace(/[^a-zA-Z0-9]+/g, '-')
                 .replace(/^-+|-+$/g, '')
                 .toLowerCase();
+              const uniquenessHash = hashCodeStr(`${provider}:${displayName}:${apiUrl}`);
+              const slug = `custom-${provider}-${baseName}-${uniquenessHash % 100000}`;
+              const placeholderId = 400 + (Math.abs(hashCodeStr(`${provider}-${displayName}`)) % 200);
               (modelsObj as Record<string, unknown>)[slug] = {
-                displayName: m.displayName || m.name,
+                displayName,
                 recommended: true,
                 maxTokens: 1048576,
                 maxOutputTokens: 4096,
                 tokenizerType: 'LLAMA_WITH_SPECIAL',
-                model: 'MODEL_PLACEHOLDER_M' + (400 + (Math.abs(hashCodeStr(m.displayName || m.name || '') as number) % 200)),
+                model: `MODEL_PLACEHOLDER_M${placeholderId}`,
                 apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
                 modelProvider: 'MODEL_PROVIDER_GOOGLE',
               };

@@ -126,6 +126,101 @@ function escapeHtml(s) {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
 }
+/**
+ * Format a byte count as a short, human-readable string (B / KB / MB / GB).
+ * Used by the patch preflight modal to display the estimated delta size
+ * when the backend exposes `deltaSizeBytes` in its patch status payload.
+ */
+function formatBytes(bytes) {
+    if (!Number.isFinite(bytes) || bytes <= 0)
+        return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+    const value = bytes / Math.pow(1024, i);
+    return `${value.toFixed(value < 10 && i > 0 ? 2 : value < 100 && i > 0 ? 1 : 0)} ${units[i]}`;
+}
+const KNOWN_ERROR_PATTERNS = [
+    {
+        // Match MITM-specific listen/EADDR errors on port 443 only.
+        // Anchored with proxy/MITM context to avoid false positives on legitimate
+        // port-443 traffic elsewhere in the logs.
+        pattern: 'MITM proxy unreachable (127.0.0.1:443)',
+        hint: 'The local MITM proxy is not reachable. The proxy is mandatory for the patch to work — open the MITM view to start it (HTTP on port 443 + HTTPS on port 8443).',
+        action: 'open-mitm-view',
+        matcher: (s) => /(?:proxy|mitm|listen).*127\.0\.0\.1\s*:\s*443|EADDRNOTAVAIL.*127\.0\.0\.1.*443|ECONNREFUSED.*127\.0\.0\.1.*443/i.test(s),
+    },
+    {
+        pattern: 'Missing Node module (Cannot find module)',
+        hint: 'A dependency expected by the doctor CLI is missing. Run "npm install" in ag-doctor (or use the Repair action if available) and try again.',
+        action: 'run-doctor',
+        matcher: (s) => /Cannot find module|MODULE_NOT_FOUND|require\.resolve/i.test(s),
+    },
+    {
+        pattern: 'Antigravity crash on launch',
+        hint: 'Antigravity did not start cleanly after the patch (or before it). Verify the language_server binary is readable, the backup is intact and try again. If it keeps crashing, restore from backup.',
+        action: 'show-retry-toast',
+        matcher: (s) => /Antigravity crash|antigravity.*crash(ed)? on launch|crash on startup|process exited unexpectedly/i.test(s),
+    },
+    {
+        pattern: 'Port already in use (EADDRINUSE)',
+        hint: 'A local port (e.g. 50999 / 443 / 8443) is already taken by another process. Close the application using that port (often a leftover Antigravity instance) and retry.',
+        action: 'run-doctor',
+        matcher: (s) => /EADDRINUSE|address already in use|bind:.*already in use|listen.*already in use/i.test(s),
+    },
+];
+function decodeError(stderr, stdout = '') {
+    const haystack = `${stderr || ''}\n${stdout || ''}`;
+    for (const def of KNOWN_ERROR_PATTERNS) {
+        if (def.matcher(haystack)) {
+            return {
+                matched: true,
+                pattern: def.pattern,
+                hint: def.hint,
+                action: def.action,
+            };
+        }
+    }
+    return { matched: false, pattern: '', hint: '', action: 'none' };
+}
+/**
+ * Run an action associated with a decoded error (open a view, trigger a
+ * repair command, etc.). Returns true if an action was taken.
+ */
+function flashMitmBanner() {
+    // Best-effort fallback when `navigate` is not in scope. Surface the MITM
+    // banner with a quick highlight so the user knows where to go.
+    const banner = document.querySelector('[data-view="mitm"], #mitmBanner, .mitm-banner');
+    if (banner) {
+        banner.classList.add('flash-attention');
+        banner.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(() => banner.classList.remove('flash-attention'), 2000);
+    }
+}
+function runErrorAction(action) {
+    switch (action) {
+        case 'open-mitm-view':
+            if (typeof navigate === 'function') {
+                try {
+                    navigate('mitm');
+                }
+                catch {
+                    flashMitmBanner();
+                }
+            }
+            else {
+                flashMitmBanner();
+            }
+            return true;
+        case 'run-doctor':
+            void window.ag.run(['doctor', '--fix']).catch(() => undefined);
+            return true;
+        case 'show-retry-toast':
+            toast('Please retry the previous action. If it keeps failing, restore the patch.', 'warn', 5000);
+            return true;
+        default:
+            return false;
+    }
+}
 function maskKey(k) {
     if (!k)
         return '(none)';
@@ -201,17 +296,23 @@ function confirmModal(title, body, opts) {
         modalTitle.textContent = title;
         modalBody.innerHTML = body;
         modalConfirm.textContent = opts?.confirmLabel ?? 'Confirm';
-        modalConfirm.className = `btn ${opts?.danger ? 'btn-danger' : 'btn-primary'}`;
+        modalConfirm.className = `btn ${opts?.danger ? 'btn-danger' : opts?.confirmDisabled ? 'btn-muted' : 'btn-primary'}`;
+        modalConfirm.disabled = !!opts?.confirmDisabled;
         modalBackdrop.hidden = false;
         const cleanup = (result) => {
             modalBackdrop.hidden = true;
+            modalConfirm.disabled = false;
             modalConfirm.removeEventListener('click', onConfirm);
             modalCancel.removeEventListener('click', onCancel);
             modalClose.removeEventListener('click', onCancel);
             modalBackdrop.removeEventListener('click', onBackdrop);
             resolve(result);
         };
-        const onConfirm = () => cleanup(true);
+        const onConfirm = () => {
+            if (modalConfirm.disabled)
+                return;
+            cleanup(true);
+        };
         const onCancel = () => cleanup(false);
         const onBackdrop = (e) => {
             if (e.target === modalBackdrop)
@@ -1167,7 +1268,15 @@ $('#mitmProxyOnBtn').addEventListener('click', async () => {
         const startResult = await window.ag.proxyStart();
         console.log('[MITM] Proxy start result:', startResult);
         if (!startResult.ok) {
-            toast(`❌ Failed to start proxy server: ${startResult.message}`, 'err', 8000);
+            const decoded = decodeError(startResult.message ?? '', '');
+            if (decoded.matched) {
+                toast(`❌ Failed to start proxy server — ${decoded.pattern}`, 'err', 8000);
+                toast(decoded.hint, 'warn', 8000);
+                runErrorAction(decoded.action);
+            }
+            else {
+                toast(`❌ Failed to start proxy server: ${startResult.message}`, 'err', 8000);
+            }
             setStatus('Error', 'err');
             return;
         }
@@ -1216,7 +1325,15 @@ $('#mitmProxyOffBtn').addEventListener('click', async () => {
             toast('✅ Proxy server stopped', 'ok', 3000);
         }
         else {
-            toast(`⚠️ Failed to stop proxy server: ${stopResult.message}`, 'warn', 5000);
+            const decoded = decodeError(stopResult.message ?? '', '');
+            if (decoded.matched) {
+                toast(`⚠️ Failed to stop proxy server — ${decoded.pattern}`, 'warn', 5000);
+                toast(decoded.hint, 'warn', 8000);
+                runErrorAction(decoded.action);
+            }
+            else {
+                toast(`⚠️ Failed to stop proxy server: ${stopResult.message}`, 'warn', 5000);
+            }
         }
         void loadMitmStatus();
     }
@@ -1312,7 +1429,6 @@ async function loadPatchStatus() {
         }
         catch (e) {
             patchStatusEl.innerHTML = `<div class="empty-state"><p>Error: ${escapeHtml(e.message)}</p></div>`;
-            setStatus('Error', 'err');
         }
         finally {
             hideSkeleton(patchStatusEl);
@@ -1320,9 +1436,92 @@ async function loadPatchStatus() {
     });
 }
 $('#patchApplyBtn').addEventListener('click', async () => {
-    const ok = await confirmModal('Apply binary patch', `This will modify <code>language_server</code> to redirect API calls to the local proxy.<br><br>A backup will be created automatically.`, { confirmLabel: 'Apply patch' });
-    if (!ok)
+    // P1.3 (subset) — Pré-validation delta size avant d'ouvrir la confirmation.
+    // On récupère le statut patch actuel et on valide l'état du binaire
+    // (existence, compatibilité, présence d'un backup, patch recommandé connu)
+    // AVANT de risquer une modification destructive. C'est l'équivalent côté UI
+    // d'un "delta size check" : on s'assure que le delta (backup → binaire
+    // patché) est dans un état cohérent avant de l'appliquer.
+    let preflight = null;
+    try {
+        setStatus('Preflight check…', 'busy');
+        const r = await withTimeout(window.ag.run(['patch', 'status', '--json']), 12_000, 'patch status');
+        preflight = JSON.parse(r.stdout);
+    }
+    catch (e) {
+        setStatus('Ready');
+        toast(`❌ Preflight failed: cannot read patch status (${e.message})`, 'err', 6000);
         return;
+    }
+    if (!preflight.exists) {
+        setStatus('Ready');
+        toast('❌ Preflight failed: language_server binary not found. Nothing to patch.', 'err', 6000);
+        return;
+    }
+    if (!preflight.compatible) {
+        setStatus('Ready');
+        toast('❌ Preflight failed: Antigravity version is not compatible with the known patch.', 'err', 6000);
+        return;
+    }
+    if (!preflight.recommendedPatch) {
+        setStatus('Ready');
+        toast('❌ Preflight failed: no recommended patch available for this version.', 'err', 6000);
+        return;
+    }
+    if (preflight.applied) {
+        setStatus('Ready');
+        toast('⚠️ Patch is already applied. Use Restore first if you want to re-apply.', 'warn', 5000);
+        return;
+    }
+    if (!preflight.backupExists) {
+        // Non-bloquant : on prévient l'utilisateur mais on laisse confirmer
+        console.warn('[patch] No backup found — applying patch will not be reversible');
+    }
+    // Construit le détail affiché dans la modale (inclut la "taille" du delta
+    // quand le backend la renseigne via le champ optionnel deltaSizeBytes).
+    const sizeInfo = typeof preflight.deltaSizeBytes === 'number' && preflight.deltaSizeBytes > 0
+        ? `<br><br><strong>Estimated delta size:</strong> ${escapeHtml(formatBytes(preflight.deltaSizeBytes))}`
+        : '';
+    const backupWarn = preflight.backupExists
+        ? ''
+        : '<br><br><strong style="color:var(--warn)">⚠ No backup found — patch will not be reversible.</strong>';
+    const validateReport = preflight
+        .validateAsarReport ?? null;
+    const verdict = validateReport?.verdict ?? preflight.verdict ?? null;
+    let validateBlockHtml = '';
+    if (validateReport) {
+        const verdictColor = verdict === 'block' ? 'var(--err, #f44)' :
+            verdict === 'warn' ? 'var(--warn, #f90)' :
+                verdict === 'ok' ? 'var(--ok, #0a0)' : 'var(--muted, #888)';
+        const verdictLabel = (verdict ?? 'unknown').toUpperCase();
+        const rows = validateReport.checks
+            .map((c) => {
+            const icon = c.status === 'ok' ? '✅' : '❌';
+            const tag = c.required ? 'required' : 'advisory';
+            const detail = c.detail ? ` — <span class="patch-row-detail">${escapeHtml(c.detail)}</span>` : '';
+            return `<li>${icon} <strong>${escapeHtml(c.label)}</strong> <em>(${tag})</em>${detail}</li>`;
+        })
+            .join('');
+        validateBlockHtml = `
+      <div class="patch-row">
+        <div class="patch-row-label">Asar validation</div>
+        <div class="patch-row-value" style="color:${verdictColor}">
+          <strong>Verdict: ${escapeHtml(verdictLabel)}</strong>
+          <ul style="margin: 6px 0 0 18px; padding: 0;">${rows}</ul>
+        </div>
+      </div>`;
+    }
+    if (verdict === 'block') {
+        setStatus('Ready');
+        toast('❌ Asar validation failed (verdict=block). Patch cannot be applied — see preflight modal.', 'err', 8000);
+        // Open the confirmation modal anyway so the user can read the verdict,
+        // but the Apply button will be disabled below.
+    }
+    const ok = await confirmModal('Apply binary patch', `This will modify <code>language_server</code> to redirect API calls to the local proxy.<br><br>A backup will be created automatically.${sizeInfo}${backupWarn}${validateBlockHtml}`, { confirmLabel: verdict === 'block' ? 'Blocked — cannot apply' : 'Apply patch', confirmDisabled: verdict === 'block' });
+    if (!ok) {
+        setStatus('Ready');
+        return;
+    }
     setStatus('Applying patch…', 'busy');
     try {
         const r = await window.ag.run(['patch', 'apply', '--yes']);
@@ -1331,7 +1530,15 @@ $('#patchApplyBtn').addEventListener('click', async () => {
             void loadPatchStatus();
         }
         else {
-            toast(`Patch failed: ${r.stderr || r.stdout}`, 'err', 6000);
+            const decoded = decodeError(r.stderr, r.stdout);
+            if (decoded.matched) {
+                toast(`Patch failed — ${decoded.pattern}`, 'err', 6000);
+                toast(decoded.hint, 'warn', 8000);
+                runErrorAction(decoded.action);
+            }
+            else {
+                toast(`Patch failed: ${r.stderr || r.stdout}`, 'err', 6000);
+            }
         }
         setStatus('Ready');
     }
@@ -1352,7 +1559,15 @@ $('#patchRestoreBtn').addEventListener('click', async () => {
             void loadPatchStatus();
         }
         else {
-            toast(`Restore failed: ${r.stderr || r.stdout}`, 'err');
+            const decoded = decodeError(r.stderr, r.stdout);
+            if (decoded.matched) {
+                toast(`Restore failed — ${decoded.pattern}`, 'err');
+                toast(decoded.hint, 'warn', 8000);
+                runErrorAction(decoded.action);
+            }
+            else {
+                toast(`Restore failed: ${r.stderr || r.stdout}`, 'err');
+            }
         }
         setStatus('Ready');
     }

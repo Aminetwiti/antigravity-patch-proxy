@@ -414,6 +414,13 @@
             <button class="btn btn-ghost" id="mitmExportCaBtn" type="button">Export CA</button>
           </div>
         </div>
+        <div class="patch-banner err" id="mitmRequiredBanner" role="alert" aria-live="polite" style="margin-bottom: 16px;">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          <div class="patch-banner-body">
+            <div class="patch-banner-title">MITM sur 443 obligatoire (Antigravity 2.2.x)</div>
+            <div class="patch-banner-text">Antigravity 2.2.x <strong>REQUIERT</strong> le MITM sur le port 443. Sans lui, le Language Server continuera à échouer avec <code>127.0.0.1:443 refused</code>. Vérifiez que le proxy écoute bien sur 443 et que le certificat CA est installé.</div>
+          </div>
+        </div>
         <div id="mitmStatus" class="mitm-status">
           <div class="empty-state"><p>Loading MITM status…</p></div>
         </div>

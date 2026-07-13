@@ -19,6 +19,7 @@
  *   --dry-run         Print the report and exit without modifying anything.
  */
 import fs from 'fs';
+import path from 'path';
 import type { CommandContext } from '../types';
 import { c, header, ok, warn, error, info, dim } from '../cli/output';
 import { confirm } from '../cli/prompts';

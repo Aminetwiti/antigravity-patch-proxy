@@ -50,7 +50,8 @@ export async function runHistory(ctx: CommandContext, sub: string | undefined, r
 }
 
 function summarize(entry: HistoryEntry): string {
-  const { ok: o, warn: w, error: e } = entry.summary;
+  const s = entry.summary ?? { ok: 0, warn: 0, error: 0, info: 0 };
+  const { ok: o, warn: w, error: e } = s;
   return `${c.green(`${o} ok`)} · ${c.yellow(`${w} warn`)} · ${c.red(`${e} err`)}`;
 }
 
@@ -96,7 +97,7 @@ function runShow(ctx: CommandContext, id: string | undefined): number {
   info(`Ran at: ${entry.ranAt}`);
   if (entry.durationMs) info(`Duration: ${entry.durationMs}ms`);
   console.log('');
-  for (const r of entry.results) {
+  for (const r of entry.results ?? []) {
     const icon = r.status === 'ok' ? c.green('✔') : r.status === 'warn' ? c.yellow('⚠') : r.status === 'error' ? c.red('✖') : c.blue('ℹ');
     console.log(`${icon} ${c.bold(r.title)} — ${r.status}`);
     console.log(`    ${r.message}`);
@@ -123,8 +124,8 @@ function runDiff(ctx: CommandContext, id1: string | undefined, id2: string | und
     return 1;
   }
 
-  const mapA = new Map(a.results.map((r) => [r.id, r]));
-  const mapB = new Map(b.results.map((r) => [r.id, r]));
+  const mapA = new Map((a.results ?? []).map((r) => [r.id, r]));
+  const mapB = new Map((b.results ?? []).map((r) => [r.id, r]));
   const ids = Array.from(new Set([...mapA.keys(), ...mapB.keys()])).sort();
 
   if (ctx.json) {

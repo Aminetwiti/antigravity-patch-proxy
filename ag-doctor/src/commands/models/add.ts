@@ -2,27 +2,10 @@
  * `ag-doctor models add` — interactive model creation.
  */
 import type { CommandContext, CustomModel } from '../../types';
-import { addCustomModel, loadCustomModels, validateCustomModels } from '../../core/custom-models';
+import { addCustomModel, loadCustomModels, validateCustomModels, modelKey } from '../../core/custom-models';
 import { ask, askSecret, confirm } from '../../cli/prompts';
 import { ok, error, info, header } from '../../cli/output';
-
-const PROVIDERS = [
-  'openai',
-  'anthropic',
-  'openrouter',
-  'ollama',
-  'google',
-  'custom',
-  'deepseek',
-  'groq',
-  'mistral',
-  'cerebras',
-  'kimi',
-  'fireworks',
-  'lmstudio',
-  'llamacpp',
-  'nvidia',
-] as const;
+import { PROVIDERS, resolveProvider, suggestProvider } from './providers';
 
 const DEFAULT_URLS: Record<string, string> = {
   openai: 'https://api.openai.com/v1/chat/completions',
@@ -39,6 +22,9 @@ const DEFAULT_URLS: Record<string, string> = {
   lmstudio: 'http://localhost:1234/v1',
   llamacpp: 'http://localhost:8080/v1',
   nvidia: 'https://integrate.api.nvidia.com/v1',
+  // Internal proxy used by the user's setup. We probe /v1/models via
+  // buildModelsUrl(), which returns /openai/v1/models — see checks/connectivity.ts.
+  kimchi: 'https://llm.kimchi.dev/openai/v1/chat/completions',
 };
 
 export async function runModelsAdd(ctx: CommandContext): Promise<number> {
@@ -50,10 +36,15 @@ export async function runModelsAdd(ctx: CommandContext): Promise<number> {
   if (!provider) {
     provider = await ask(`Provider [${PROVIDERS.join('|')}]: `, 'custom');
   }
-  if (!PROVIDERS.includes(provider as (typeof PROVIDERS)[number])) {
-    error(`Unknown provider: ${provider}`);
+
+  const resolved = resolveProvider(provider);
+  if (!resolved) {
+    const suggestion = suggestProvider(provider);
+    error(`Unknown provider: ${provider}${suggestion ? ` (did you mean "${suggestion}"?)` : ''}`);
+    info(`Available: ${PROVIDERS.join(', ')}`);
     return 2;
   }
+  provider = resolved.provider;
 
   let name = options.name as string | undefined;
   if (!name) {
@@ -102,8 +93,8 @@ export async function runModelsAdd(ctx: CommandContext): Promise<number> {
   }
 
   const existing = loadCustomModels();
-  if (existing.models.some((m) => m.name === name)) {
-    const overwrite = ctx.yes || await confirm(`Model "${name}" already exists. Overwrite?`, false);
+  if (existing.models.some((m) => modelKey(m) === modelKey(model))) {
+    const overwrite = ctx.yes || await confirm(`Model "${model.name}" already exists for provider "${model.provider}". Overwrite?`, false);
     if (!overwrite) {
       info('Aborted');
       return 1;

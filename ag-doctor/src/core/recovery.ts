@@ -14,12 +14,12 @@
  *   ~/.gemini/antigravity/recovery.json
  *
  * Built-in rules:
- *   - proxy-down        → restart local proxy
- *   - patch-missing     → re-apply binary patch
- *   - ca-not-installed  → install CA cert (admin required)
- *   - models-corrupted  → restore from latest snapshot
- *   - disk-full         → cleanup old snapshots/history
- *   - connectivity-fail → retry with exponential backoff
+ *   - proxy-down        â†’ restart local proxy
+ *   - patch-missing     â†’ re-apply binary patch
+ *   - ca-not-installed  â†’ install CA cert (admin required)
+ *   - models-corrupted  â†’ restore from latest snapshot
+ *   - disk-full         â†’ cleanup old snapshots/history
+ *   - connectivity-fail â†’ retry with exponential backoff
  */
 import fs from 'fs';
 import path from 'path';
@@ -166,7 +166,7 @@ export function setRuleEnabled(id: string, enabled: boolean): boolean {
   return true;
 }
 
-// ─── Recovery actions ─────────────────────────────────────────────────────
+// â”€â”€â”€ Recovery actions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /** Run a recovery action with timeout. */
 async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -216,7 +216,7 @@ async function restartProxy(rule: RecoveryRule): Promise<RecoveryActionResult> {
 }
 
 /** Recovery action: re-apply binary patch.
- *  Note: This is intentionally conservative — we don't kill the running app
+ *  Note: This is intentionally conservative â€” we don't kill the running app
  *  from a background daemon. We only verify the patch state and report.
  *  The user must run `ag-doctor patch apply` manually.
  */
@@ -228,14 +228,14 @@ async function reapplyPatch(rule: RecoveryRule): Promise<RecoveryActionResult> {
     if (status.applied) {
       return {
         ok: true,
-        message: 'Patch already applied — nothing to do',
+        message: 'Patch already applied â€” nothing to do',
         durationMs: Date.now() - start,
         ruleId: rule.id,
       };
     }
     return {
       ok: false,
-      message: 'Patch not applied — manual intervention required',
+      message: 'Patch not applied â€” manual intervention required',
       details: 'Run `ag-doctor patch apply` (this requires closing Antigravity first).',
       durationMs: Date.now() - start,
       ruleId: rule.id,
@@ -325,18 +325,93 @@ async function cleanupDisk(rule: RecoveryRule): Promise<RecoveryActionResult> {
   }
 }
 
-/** Recovery action: retry connectivity. */
+/**
+ * Recovery action: retry connectivity.
+ *
+ * Improved: instead of counting any non-ok probe as "failed", we classify each
+ * probe outcome. Only true unreachable errors (timeout, DNS, TCP refused) are
+ * retried with exponential backoff. Path/auth errors (4xx/5xx with reachable=true)
+ * are surfaced but skipped â€” retrying them achieves nothing, since the cause is
+ * configuration, not network. This avoids log spam and false-positive recoveries.
+ */
 async function retryConnectivity(rule: RecoveryRule): Promise<RecoveryActionResult> {
   const start = Date.now();
   try {
     const { checkConnectivity } = await import('../checks/connectivity');
-    const result = await checkConnectivity();
-    const data = result.data as { results?: Array<{ ok: boolean }> } | undefined;
-    const failed = data?.results?.filter((r) => !r.ok).length ?? (result.status === 'ok' ? 0 : 1);
+    const { probe } = await import('./probe');
+    const { buildModelsUrl } = await import('../commands/models/fetch');
+    const { loadCustomModels } = await import('./custom-models');
+
+    const initial = await checkConnectivity();
+    const data = initial.data as
+      | { results?: Array<{ source: string; target: string; result: { ok: boolean; statusCode?: number; error?: string } }> }
+      | undefined;
+    const results = data?.results ?? [];
+
+    // Classify and count true unreachable vs reachable-but-4xx/5xx
+    let trulyDown = 0;
+    let reachableButBad = 0;
+    for (const { result } of results) {
+      if (!result.ok) trulyDown++;
+      else if (typeof result.statusCode === 'number' && result.statusCode >= 400) reachableButBad++;
+    }
+
+    if (trulyDown === 0) {
+      return {
+        ok: true,
+        message:
+          reachableButBad > 0
+            ? `All hosts reachable (${reachableButBad} still returning 4xx/5xx â€” config issue, not a network problem)`
+            : 'All providers reachable',
+        details: JSON.stringify(initial, null, 2),
+        durationMs: Date.now() - start,
+        ruleId: rule.id,
+      };
+    }
+
+    // Exponential backoff retry: 1s, 2s, 4s, 8s â€” capped at 4 attempts total
+    const backoffMs = [1000, 2000, 4000, 8000];
+    const file = loadCustomModels();
+    const urlToModel = new Map<string, (typeof file.models)[number]>();
+    for (const m of file.models) {
+      if (!m.apiUrl) continue;
+      if (!urlToModel.has(m.apiUrl)) {
+        urlToModel.set(m.apiUrl, m);
+      } else if (m.apiKey && !m.apiKey.startsWith('enc:') && urlToModel.get(m.apiUrl)?.apiKey?.startsWith('enc:')) {
+        urlToModel.set(m.apiUrl, m);
+      }
+    }
+    const urls = Array.from(urlToModel.keys());
+
+    let lastResult = initial;
+    for (let attempt = 0; attempt < backoffMs.length; attempt++) {
+      await new Promise((r) => setTimeout(r, backoffMs[attempt]));
+      const probes = await Promise.all(urls.map(async (u) => {
+        const target = buildModelsUrl(u);
+        const model = urlToModel.get(u);
+        return {
+          source: u,
+          target,
+          result: await probe(target, 5000, { provider: model?.provider, apiKey: model?.apiKey }),
+        };
+      }));
+      const stillDown = probes.filter(({ result }) => !result.ok).length;
+      if (stillDown === 0) {
+        return {
+          ok: true,
+          message: `Recovered after ${attempt + 1} retry(ies) â€” ${urls.length}/${urls.length} endpoints reachable`,
+          details: JSON.stringify({ results: probes }, null, 2),
+          durationMs: Date.now() - start,
+          ruleId: rule.id,
+        };
+      }
+      lastResult = { ...initial, data: { results: probes } };
+    }
+
     return {
-      ok: failed === 0,
-      message: failed === 0 ? 'All providers reachable' : `${failed} provider(s) still failing`,
-      details: JSON.stringify(result, null, 2),
+      ok: false,
+      message: `${trulyDown} endpoint(s) still unreachable after retries (${reachableButBad} returning 4xx/5xx â€” config issue)`,
+      details: JSON.stringify(lastResult, null, 2),
       durationMs: Date.now() - start,
       ruleId: rule.id,
     };
@@ -374,7 +449,7 @@ export async function runRecoveryAction(ruleId: string): Promise<RecoveryActionR
   return await withTimeout(action(rule), rule.timeoutMs);
 }
 
-// ─── Rule evaluation ────────────────────────────��─────────────────────────
+// â”€â”€â”€ Rule evaluation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface CooldownTracker {
   [ruleId: string]: number;
@@ -445,3 +520,4 @@ async function notifyWebhook(url: string, payload: unknown): Promise<void> {
 export function resetCooldowns(): void {
   for (const k of Object.keys(lastRun)) delete lastRun[k];
 }
+

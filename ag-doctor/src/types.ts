@@ -49,6 +49,12 @@ export interface PatchStatus {
   backupExists: boolean;
   originalUrl?: string;
   patchedUrl?: string;
+  /**
+   * Estimated size delta between the live binary and the candidate
+   * patch (in bytes). Reported by `validateAsar()` when the live asar
+   * is available; null otherwise. Positive when the candidate is larger.
+   */
+  deltaSizeBytes?: number | null;
 }
 
 export interface ConnectivityResult {

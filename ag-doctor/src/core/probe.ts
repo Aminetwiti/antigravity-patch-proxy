@@ -17,11 +17,34 @@
  *   - `probeWithProxy` no longer leaks sockets on error paths.
  *   - Adds an explicit socket timeout with cleanup.
  *   - Avoids hanging on unreachable proxies via a hard deadline.
+ *   - Optionally injects provider-specific auth headers so /v1/models probes
+ *     mirror the requests the Electron app actually makes.
  */
 import http from 'http';
 import https from 'https';
 import { URL } from 'url';
 import type { ConnectivityResult } from '../types';
+
+export interface ProbeOptions {
+  /** Extra headers merged into the request. */
+  headers?: Record<string, string>;
+  /** Provider id; used to pick the right auth header name. */
+  provider?: string;
+  /** API key. Encrypted blobs (`enc:`) are ignored. */
+  apiKey?: string;
+}
+
+/** Build auth headers for a provider/apiKey pair. Returns empty for encrypted keys. */
+export function authHeaders(provider: string | undefined, apiKey: string | undefined): Record<string, string> {
+  if (!apiKey || apiKey === 'none' || apiKey.startsWith('enc:')) return {};
+  if (provider === 'anthropic') {
+    return { 'x-api-key': apiKey, 'anthropic-version': '2025-04-01' };
+  }
+  if (provider === 'google') {
+    return { 'x-goog-api-key': apiKey };
+  }
+  return { Authorization: `Bearer ${apiKey}` };
+}
 
 /** A response counts as "reachable" if we got any HTTP status back. */
 function isReachable(code: number | undefined): boolean {
@@ -33,7 +56,11 @@ function isSuccess(code: number | undefined): boolean {
   return typeof code === 'number' && code >= 200 && code < 300;
 }
 
-export async function probe(url: string, timeoutMs = 5000): Promise<ConnectivityResult> {
+export async function probe(
+  url: string,
+  timeoutMs = 5000,
+  options: ProbeOptions = {},
+): Promise<ConnectivityResult> {
   const started = Date.now();
   let parsed: URL;
   try {
@@ -41,6 +68,7 @@ export async function probe(url: string, timeoutMs = 5000): Promise<Connectivity
   } catch (e) {
     return { url, ok: false, error: `invalid URL: ${(e as Error).message}` };
   }
+  const extraHeaders = { ...(options.headers ?? {}), ...authHeaders(options.provider, options.apiKey) };
   return new Promise((resolve) => {
     let settled = false;
     const deadline = setTimeout(() => {
@@ -62,7 +90,10 @@ export async function probe(url: string, timeoutMs = 5000): Promise<Connectivity
         port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
         path: parsed.pathname + parsed.search,
         timeout: timeoutMs,
-        headers: { 'User-Agent': 'ag-doctor/1.0' },
+        headers: {
+          'User-Agent': 'ag-doctor/1.0',
+          ...extraHeaders,
+        },
       },
       (res) => {
         // Drain body to free the socket
@@ -111,8 +142,9 @@ export async function probeWithProxy(
   url: string,
   timeoutMs = 5000,
   proxyUrl?: string,
+  options: ProbeOptions = {},
 ): Promise<ConnectivityResult> {
-  if (!proxyUrl) return probe(url, timeoutMs);
+  if (!proxyUrl) return probe(url, timeoutMs, options);
   const started = Date.now();
   let parsed: URL;
   let proxyParsed: URL;
@@ -122,6 +154,8 @@ export async function probeWithProxy(
   } catch (e) {
     return { url, ok: false, error: `invalid URL: ${(e as Error).message}` };
   }
+
+  const extraHeaders = { ...(options.headers ?? {}), ...authHeaders(options.provider, options.apiKey) };
 
   // Hard deadline: if neither CONNECT nor the inner TLS request completes in
   // `timeoutMs`, we resolve with an error rather than hanging forever.
@@ -175,7 +209,10 @@ export async function probeWithProxy(
             port: Number(parsed.port || 443),
             path: parsed.pathname + parsed.search,
             timeout: timeoutMs,
-            headers: { 'User-Agent': 'ag-doctor/1.0' },
+            headers: {
+              'User-Agent': 'ag-doctor/1.0',
+              ...extraHeaders,
+            },
             createConnection: () => socket,
             agent: false,
           } as https.RequestOptions,

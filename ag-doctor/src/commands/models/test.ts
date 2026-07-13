@@ -28,7 +28,7 @@ export async function runModelsTest(ctx: CommandContext, name?: string): Promise
   for (const m of targets) {
     const sp = new Spinner(`Testing ${m.name}`);
     sp.start();
-    const r = await probe(m.apiUrl, 10000);
+    const r = await probe(m.apiUrl, 10000, { provider: m.provider, apiKey: m.apiKey });
     if (r.ok) {
       sp.succeed(`${m.name} — ${r.statusCode} (${r.latencyMs}ms)`);
     } else {

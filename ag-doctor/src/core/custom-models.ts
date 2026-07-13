@@ -30,6 +30,7 @@ const KNOWN_PROVIDERS = new Set([
   'mistral',
   'cerebras',
   'kimi',
+  'kimchi', // internal OpenAI-compatible proxy
   'fireworks',
   'lmstudio',
   'llamacpp',
