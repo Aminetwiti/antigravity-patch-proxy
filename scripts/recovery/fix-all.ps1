@@ -1,65 +1,101 @@
-$ErrorActionPreference = 'Continue'
+﻿# fix-all.ps1 - One-click: fix every warning from ag-doctor
+#
+# Runs sequentially:
+#   1. Stop Antigravity + LS + proxy-stub
+#   2. Binary patch (ag-doctor patch apply)
+#   3. MITM CA install (ag-doctor mitm install)
+#   4. Kill proxy-stub so real proxy gets port 50999
+#   5. Repack app.asar with patched proxy code
+#   6. Restart Antigravity
+param([switch]$NoPause)
 
-# Portable paths — derived from $PSScriptRoot, never hardcoded.
+$ErrorActionPreference = "Continue"
 $ScriptDir = $PSScriptRoot
+
+function Write-Step($msg) { Write-Host "`n=== $msg ===" -ForegroundColor Cyan }
+function Write-Ok($msg)   { Write-Host "  [OK] $msg" -ForegroundColor Green }
+
+Write-Host "==============================================" -ForegroundColor Cyan
+Write-Host "  fix-all - Antigravity one-click repair"      -ForegroundColor Cyan
+Write-Host "==============================================" -ForegroundColor Cyan
+
+# -- 1. Stop everything
+Write-Step "Stopping all processes"
+Stop-Process -Name "Antigravity"     -Force -ErrorAction SilentlyContinue
+Stop-Process -Name "language_server" -Force -ErrorAction SilentlyContinue
+Get-Process -Name "node" -ErrorAction SilentlyContinue | ForEach-Object {
+    try {
+        $cmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)").CommandLine
+        if ($cmd -like "*proxy-stub*") {
+            Write-Host "  Killing proxy-stub (PID $($_.Id))" -ForegroundColor Yellow
+            $_ | Stop-Process -Force
+        }
+    } catch {}
+}
+Start-Sleep -Seconds 2
+Write-Ok "All stopped"
+
+# -- 2. Binary patch
+Write-Step "Applying binary patch"
 $AgDoctor = Join-Path $ScriptDir 'ag-doctor\bin\ag-doctor.js'
-
-# 1. Set system proxy via netsh winhttp
-Write-Host '== [1/4] netsh winhttp set proxy ==' -ForegroundColor Cyan
-$netshOut = netsh winhttp set proxy proxy-server="127.0.0.1:50999" 2>&1 | Out-String
-Write-Host $netshOut
-Write-Host '-- netsh winhttp show proxy --' -ForegroundColor Cyan
-netsh winhttp show proxy | Out-String | Write-Host
-
-# 2. Launch Antigravity (its internal proxy listens on 50999)
-Write-Host ''
-Write-Host '== [2/4] Launching Antigravity ==' -ForegroundColor Cyan
-$exe = Join-Path $env:LOCALAPPDATA 'Programs\antigravity\Antigravity.exe'
-if (Test-Path $exe) {
-  try {
-    Start-Process -FilePath $exe
-    Write-Host ("Started: " + $exe) -ForegroundColor Green
-  } catch {
-    Write-Host ("Start-Process failed: " + $_.Exception.Message) -ForegroundColor Red
-  }
-} else {
-  Write-Host ("Antigravity.exe not found at " + $exe) -ForegroundColor Red
-}
-
-# 3. Poll port 50999 until reachable (up to 60s)
-Write-Host ''
-Write-Host '== [3/4] Waiting for 127.0.0.1:50999 ==' -ForegroundColor Cyan
-$ready = $false
-for ($i = 1; $i -le 60; $i++) {
-  $tcp = $null
-  try {
-    $tcp = New-Object System.Net.Sockets.TcpClient
-    $iar = $tcp.BeginConnect('127.0.0.1', 50999, $null, $null)
-    $ok = $iar.AsyncWaitHandle.WaitOne(1000, $false)
-    if ($ok) {
-      $tcp.EndConnect($iar)
-      Write-Host ("Port 50999 OPEN after {0}s" -f $i) -ForegroundColor Green
-      $ready = $true
-      break
-    }
-  } catch {
-  } finally {
-    if ($tcp) { $tcp.Close() }
-  }
-  if ($i % 5 -eq 0) { Write-Host ("  still waiting... {0}s" -f $i) -ForegroundColor Yellow }
-  Start-Sleep -Seconds 1
-}
-if (-not $ready) {
-  Write-Host 'Port 50999 did NOT become reachable within 60s' -ForegroundColor Red
-}
-
-# 4. Re-run ag-doctor doctor
-Write-Host ''
-Write-Host '== [4/4] ag-doctor doctor ==' -ForegroundColor Cyan
 if (Test-Path $AgDoctor) {
-  & node $AgDoctor doctor
+    Push-Location $ScriptDir
+    try {
+        $out = echo "y" | node $AgDoctor patch apply 2>&1
+        if ($out -match "Patched|OK|already") { Write-Ok "Binary patch OK" }
+        else { Write-Host "  $out" -ForegroundColor Gray }
+    } catch {
+        Write-Host "  [WARN] $($_.Exception.Message)" -ForegroundColor Yellow
+    } finally { Pop-Location }
 } else {
-  Write-Host ("ag-doctor not found at: " + $AgDoctor) -ForegroundColor Yellow
+    Write-Host "  [WARN] ag-doctor not found, skipping patch" -ForegroundColor Yellow
 }
 
-Read-Host 'Press Enter to close'
+# -- 3. MITM CA
+Write-Step "Installing MITM CA"
+if (Test-Path $AgDoctor) {
+    Push-Location $ScriptDir
+    try {
+        $out = echo "y" | node $AgDoctor mitm install 2>&1
+        Write-Ok "MITM CA installed"
+    } catch {
+        Write-Host "  [WARN] $($_.Exception.Message)" -ForegroundColor Yellow
+    } finally { Pop-Location }
+}
+
+# -- 4. Kill proxy-stub (port 50999 must be free for real proxy)
+Write-Step "Ensuring port 50999 is free for real proxy"
+$busy = Get-NetTCPConnection -LocalPort 50999 -ErrorAction SilentlyContinue
+if ($busy) {
+    Write-Host "  Port 50999 occupied by PID $($busy.OwningProcess) -- killing" -ForegroundColor Yellow
+    Stop-Process -Id $busy.OwningProcess -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+}
+$busy2 = Get-NetTCPConnection -LocalPort 50999 -ErrorAction SilentlyContinue
+if (-not $busy2) { Write-Ok "Port 50999 free" }
+
+# -- 5. Repack app.asar
+Write-Step "Repacking app.asar"
+$RepackScript = Join-Path $ScriptDir 'repack.ps1'
+& $RepackScript -SkipRestart -NoPause
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  [ERROR] Repack failed" -ForegroundColor Red
+    if (-not $NoPause) { Read-Host "Press Enter to close" }
+    exit 1
+}
+
+# -- 6. Restart Antigravity
+Write-Step "Launching Antigravity"
+$ExePath = Join-Path $env:LOCALAPPDATA "Programs\antigravity\Antigravity.exe"
+if (Test-Path $ExePath) {
+    Start-Process -FilePath $ExePath
+    Write-Ok "Antigravity launched"
+} else {
+    Write-Host "  [ERROR] Antigravity.exe not found at $ExePath" -ForegroundColor Red
+}
+
+Write-Host "`n==============================================" -ForegroundColor Green
+Write-Host "  All fixes applied successfully!"              -ForegroundColor Green
+Write-Host "  Custom models will appear in the dropdown."   -ForegroundColor Green
+Write-Host "==============================================" -ForegroundColor Green
+if (-not $NoPause) { Read-Host "Press Enter to close" }

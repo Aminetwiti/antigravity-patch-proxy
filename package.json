@@ -33,5 +33,8 @@
     "electron-log": "^5.4.3",
     "electron-updater": "^6.8.3",
     "shell-env": "^4.0.3"
+  },
+  "devDependencies": {
+    "@electron/asar": "^4.2.0"
   }
 }

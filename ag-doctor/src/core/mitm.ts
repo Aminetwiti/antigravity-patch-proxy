@@ -43,6 +43,14 @@ function describe(r: { ok: boolean; message: string; stderr: string; stdout: str
 
 export const DEFAULT_MITM_PORT = 50999;
 
+/**
+ * Well-known MITM forwarder port. The `mitm_443.js` forwarder binds port 443
+ * and transparently forwards to {@link DEFAULT_MITM_PORT}. A system proxy set
+ * to 443 is therefore functionally equivalent to one set to 50999 and must not
+ * be reported as a port mismatch.
+ */
+export const MITM_FORWARDER_PORTS = new Set<number>([DEFAULT_MITM_PORT, 443]);
+
 export interface MitmStatus {
   caExists: boolean;
   caInstalled: boolean;

@@ -34,6 +34,14 @@ export interface PatchDefinition {
  */
 export const PATCH_REGISTRY: PatchDefinition[] = [
   {
+    versionRange: '2.2.0+',
+    minVersion: '2.2.0',
+    maxVersion: null,
+    originalUrl: 'https://daily-cloudcode-pa.googleapis.com',
+    patchedUrl: 'http://localhost:50999/v1internal/xxxxxxx',
+    description: 'Patch for Antigravity 2.2.0+ (41 bytes)',
+  },
+  {
     versionRange: '2.0.1 - 2.1.x',
     minVersion: '2.0.1',
     maxVersion: '2.1.99',
@@ -41,15 +49,6 @@ export const PATCH_REGISTRY: PatchDefinition[] = [
     patchedUrl: 'http://localhost:50999/v1internal/xxxxxxx',
     description: 'Patch for Antigravity 2.0.1 to 2.1.x (41 bytes)',
   },
-  // Future patches for 2.2.x can be added here once we identify the new URL
-  // {
-  //   versionRange: '2.2.0+',
-  //   minVersion: '2.2.0',
-  //   maxVersion: null,
-  //   originalUrl: 'https://new-api-endpoint.googleapis.com',
-  //   patchedUrl: 'http://localhost:50999/v1internal/xxxxxxx',
-  //   description: 'Patch for Antigravity 2.2.0+ (TBD)',
-  // },
 ];
 
 /** Parse semantic version string to comparable number array [major, minor, patch] */

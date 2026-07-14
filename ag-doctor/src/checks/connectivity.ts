@@ -28,8 +28,17 @@ function classify(result: { ok: boolean; statusCode?: number; error?: string }):
   if (typeof result.statusCode === 'number' && result.statusCode >= 200 && result.statusCode < 300) {
     return 'ok';
   }
-  // 3xx/4xx/5xx with ok=true means we got an HTTP response â€” host is alive
+  // 3xx/4xx/5xx with ok=true means we got an HTTP response — host is alive
   return 'reachable';
+}
+
+/** Whether the doctor can actually authenticate against this endpoint.
+ *  ag-doctor is a plain Node CLI and cannot use Electron's safeStorage, so
+ *  `enc:` API keys are opaque blobs it cannot send. A non-2xx response from
+ *  such an endpoint is therefore *unverifiable* rather than a real failure. */
+function isKeyUsable(model: { apiKey?: string } | undefined): boolean {
+  const k = model?.apiKey;
+  return !!k && !String(k).startsWith('enc:');
 }
 
 export async function checkConnectivity(): Promise<CheckResult> {
@@ -62,27 +71,34 @@ export async function checkConnectivity(): Promise<CheckResult> {
     return {
       source: u,
       target,
+      keyUsable: isKeyUsable(model),
       result: await probe(target, 5000, { provider: model?.provider, apiKey: model?.apiKey }),
     };
   }));
 
   let okCount = 0;
-  let reachableCount = 0; // host up, path/auth may be wrong
+  let reachableCount = 0; // host up, path/auth may be wrong (key was usable)
+  let unknownCount = 0; // non-2xx but key was encrypted — cannot verify from CLI
   let downCount = 0;
-  for (const { result } of raw) {
+  for (const { result, keyUsable } of raw) {
     const c = classify(result);
     if (c === 'ok') okCount++;
-    else if (c === 'reachable') reachableCount++;
-    else downCount++;
+    else if (c === 'down') downCount++;
+    else if (keyUsable) reachableCount++; // genuine 4xx/5xx => real misconfig
+    else unknownCount++; // 4xx/5xx with an encrypted key => unverifiable
   }
 
   const total = raw.length;
   const anyDown = downCount > 0;
   const renderLines = raw
-    .map(({ source, target, result }) => {
+    .map(({ source, target, result, keyUsable }) => {
       const c = classify(result);
-      const icon = c === 'ok' ? 'âœ”' : c === 'reachable' ? 'âš ' : 'âœ–';
-      const label = c === 'ok' ? 'ok' : c === 'reachable' ? 'up' : 'down';
+      // A non-2xx result on an endpoint whose key we can't use is "unknown",
+      // not a failure — the CLI simply can't authenticate against it.
+      const bucket: 'ok' | 'reachable' | 'unknown' | 'down' =
+        c === 'ok' ? 'ok' : c === 'down' ? 'down' : keyUsable ? 'reachable' : 'unknown';
+      const icon = bucket === 'ok' ? 'âœ”' : bucket === 'reachable' ? 'âš ' : bucket === 'unknown' ? 'â§ ' : 'âœ–';
+      const label = bucket === 'ok' ? 'ok' : bucket === 'reachable' ? 'up' : bucket === 'unknown' ? 'enc' : 'down';
       const code = result.statusCode ?? '???';
       const ms = result.latencyMs != null ? `${result.latencyMs}ms` : '?';
       const same = source === target ? '' : `  (probed ${target})`;
@@ -107,7 +123,7 @@ export async function checkConnectivity(): Promise<CheckResult> {
     };
   }
   if (reachableCount > 0) {
-    const offending = raw.find((r) => classify(r.result) === 'reachable');
+    const offending = raw.find((r) => classify(r.result) === 'reachable' && r.keyUsable);
     const code = offending?.result.statusCode ?? '4xx/5xx';
     return {
       id: 'connectivity',
@@ -116,8 +132,25 @@ export async function checkConnectivity(): Promise<CheckResult> {
       message: `${okCount}/${total} OK, ${reachableCount}/${total} reachable but returned ${code}`,
       details:
         renderLines +
-        '\n\nThese endpoints responded but with a non-2xx status.\n' +
+        '\n\nThese endpoints responded but with a non-2xx status using a plaintext API key.\n' +
         'Likely causes: missing/invalid API key, wrong model name, or trailing path mismatch.',
+      data: { results: raw },
+    };
+  }
+  if (unknownCount > 0) {
+    // Hosts responded, but every non-2xx came from an endpoint whose API key
+    // is encrypted and cannot be verified by this CLI. The app itself can
+    // decrypt the keys, so this is informational rather than a fault.
+    return {
+      id: 'connectivity',
+      title: 'Provider connectivity',
+      status: 'info',
+      message: `${okCount}/${total} OK · ${unknownCount}/${total} key(s) encrypted — cannot verify from CLI`,
+      details:
+        renderLines +
+        '\n\nSome endpoints returned a non-2xx status, but their API keys are encrypted\n' +
+        '(safeStorage) and ag-doctor (a plain Node CLI) cannot decrypt them to authenticate.\n' +
+        'Open Antigravity to confirm live connectivity — the running app can decrypt the keys.',
       data: { results: raw },
     };
   }
@@ -130,4 +163,3 @@ export async function checkConnectivity(): Promise<CheckResult> {
     data: { results: raw },
   };
 }
-

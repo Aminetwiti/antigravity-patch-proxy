@@ -1,70 +1,33 @@
-$ErrorActionPreference = 'Continue'
+﻿# start-stub.ps1 - Start the minimal proxy stub on port 50999
+#
+# WARNING: This stub does NOT inject custom models. It only returns empty 200s
+# so the patched language_server.exe can initialise without ECONNREFUSED errors.
+# The real proxy (inside the repacked app.asar) handles custom models.
+# Only use the stub when Antigravity is NOT running.
+param([switch]$NoPause)
 
-$nodeCmd = Get-Command node.exe -ErrorAction SilentlyContinue
-if (-not $nodeCmd) { Write-Host 'node.exe not found in PATH' -ForegroundColor Red; exit 1 }
-$nodeExe = $nodeCmd.Source
-Write-Host ("node.exe = " + $nodeExe) -ForegroundColor DarkGray
+$PORT = 50999
+$StubScript = Join-Path $PSScriptRoot 'proxy-stub.js'
 
-# Portable paths â€” derived from $PSScriptRoot and $env:TEMP, never hardcoded.
-$ScriptDir = $PSScriptRoot
-$Stub = Join-Path $ScriptDir 'proxy-stub.js'
-$LogFile = Join-Path $env:TEMP 'ag-proxy-stub.log'
-$OutFile = Join-Path $env:TEMP 'ag-proxy-stub.out'
-$ErrFile = Join-Path $env:TEMP 'ag-proxy-stub.err'
-
-if (-not (Test-Path $Stub)) {
-  Write-Host ("proxy-stub.js not found at: " + $Stub) -ForegroundColor Red
-  Write-Host 'Run this script from the project root directory.' -ForegroundColor Yellow
-  exit 1
+$busy = Get-NetTCPConnection -LocalPort $PORT -ErrorAction SilentlyContinue
+if ($busy) {
+  Write-Host "[WARN] Port $PORT already in use by PID $($busy.OwningProcess)." -ForegroundColor Yellow
+  Write-Host "       If Antigravity is running, the real proxy handles custom models." -ForegroundColor Yellow
+  Write-Host "       Only start the stub when Antigravity is stopped." -ForegroundColor Yellow
+  if (-not $NoPause) { Read-Host "Press Enter to close" }
+  exit 0
 }
 
-# Free port 50999
-Get-NetTCPConnection -LocalPort 50999 -State Listen -ErrorAction SilentlyContinue |
-  ForEach-Object { Write-Host ("killing PID " + $_.OwningProcess + " on 50999"); Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
-# Kill any previous stub node process
-Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
-  Where-Object { $_.CommandLine -match 'proxy-stub' } |
-  ForEach-Object { Write-Host ("killing previous stub pid=" + $_.ProcessId); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-Start-Sleep -Seconds 1
+Write-Host "Starting proxy-stub on port $PORT..." -ForegroundColor Cyan
+Write-Host "(No custom models -- use fix-all.ps1 for full support)" -ForegroundColor DarkGray
+Start-Process -FilePath "node" -ArgumentList $StubScript
+Start-Sleep -Seconds 2
 
-Start-Process -FilePath $nodeExe -ArgumentList "`"$Stub`"" -WindowStyle Hidden `
-  -RedirectStandardOutput $OutFile `
-  -RedirectStandardError $ErrFile
-Write-Host 'Stub launched.' -ForegroundColor Cyan
-Write-Host ("  stub=" + $Stub) -ForegroundColor DarkGray
-Write-Host ("  log =" + $LogFile) -ForegroundColor DarkGray
-
-Write-Host 'Waiting for 127.0.0.1:50999...' -ForegroundColor Cyan
-$ready = $false
-for ($i = 1; $i -le 20; $i++) {
-  $tcp = $null
-  try {
-    $tcp = New-Object System.Net.Sockets.TcpClient
-    $iar = $tcp.BeginConnect('127.0.0.1', 50999, $null, $null)
-    if ($iar.AsyncWaitHandle.WaitOne(800, $false)) { $tcp.EndConnect($iar); $ready = $true; Write-Host ("  OPEN after {0}s" -f $i) -ForegroundColor Green; break }
-  } catch {} finally { if ($tcp) { $tcp.Close() } }
-  Start-Sleep -Seconds 1
+$busy2 = Get-NetTCPConnection -LocalPort $PORT -ErrorAction SilentlyContinue
+if ($busy2) {
+  Write-Host "[OK] proxy-stub listening on port $PORT" -ForegroundColor Green
 }
-if (-not $ready) {
-  Write-Host 'Port 50999 did NOT open. Logs:' -ForegroundColor Red
-  if (Test-Path $LogFile) { Get-Content $LogFile }
-  if (Test-Path $ErrFile) { Get-Content $ErrFile }
-  exit 1
+else {
+  Write-Host "[ERROR] proxy-stub failed to start on port $PORT" -ForegroundColor Red
 }
-
-try {
-  $r = Invoke-WebRequest -Uri 'http://127.0.0.1:50999/health' -UseBasicParsing -TimeoutSec 3
-  Write-Host ("  /health -> " + $r.StatusCode + " " + $r.Content) -ForegroundColor Green
-} catch { Write-Host "  /health probe failed: $($_.Exception.Message)" -ForegroundColor Yellow }
-
-Write-Host ''
-Write-Host '== ag-doctor doctor ==' -ForegroundColor Cyan
-$agDoctor = Join-Path $PSScriptRoot '..\..\ag-doctor\bin\ag-doctor.js'
-if (Test-Path $agDoctor) {
-  & $nodeExe $agDoctor doctor
-} else {
-  Write-Host ("ag-doctor not found at: " + $agDoctor) -ForegroundColor Yellow
-}
-
-Write-Host ''
-Write-Host ('(Proxy stub log: ' + $LogFile + ')') -ForegroundColor DarkGray
+if (-not $NoPause) { Read-Host "Press Enter to close" }

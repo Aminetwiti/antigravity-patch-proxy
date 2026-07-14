@@ -8,7 +8,7 @@
  * `ERR_HTTP_HEADERS_SENT` in the bundled proxy.
  */
 import type { CheckResult } from '../types';
-import { getMitmStatus, DEFAULT_MITM_PORT } from '../core/mitm';
+import { getMitmStatus, DEFAULT_MITM_PORT, MITM_FORWARDER_PORTS } from '../core/mitm';
 import { getPatchStatus } from '../core/binary-patch';
 
 export async function checkMitm(): Promise<CheckResult> {
@@ -25,17 +25,46 @@ export async function checkMitm(): Promise<CheckResult> {
 
     // Detect the most common misconfiguration: proxy is set but on the wrong
     // port. This causes language_server to crash with ERR_HTTP_HEADERS_SENT
-    // because nothing is listening on that port.
+    // because nothing is listening on that port. The dedicated MITM forwarder
+    // (port 443 → DEFAULT_MITM_PORT) is a valid configuration, so accept it.
     const portMismatch =
       s.proxyEnabled &&
       s.proxyPort !== null &&
-      s.proxyPort !== DEFAULT_MITM_PORT;
+      !MITM_FORWARDER_PORTS.has(s.proxyPort);
 
     // Check if the binary patch is active
     const patch = getPatchStatus();
     const isPatched = patch.applied;
 
     // Severity logic
+    //
+    // When the binary patch is active, Antigravity connects directly to the
+    // local proxy on DEFAULT_MITM_PORT and does NOT rely on OS-level HTTPS
+    // interception. The system proxy (and its port) is therefore bypassed, so
+    // the interception test result is irrelevant — report the system as healthy
+    // regardless of whether the test passed, failed, or was never run. This
+    // must be checked first so a spurious "interception FAILED" (the 50999
+    // proxy is a plain HTTP translator and does not speak CONNECT/TLS) never
+    // produces a false warning.
+    if (isPatched) {
+      const portNote = portMismatch
+        ? `\n\nNote: Antigravity is binary-patched to connect directly to the local proxy on ${DEFAULT_MITM_PORT}.\n` +
+          `The system proxy on port ${s.proxyPort} is bypassed, so Antigravity works perfectly.\n` +
+          `Other system apps might fail if they try to use port ${s.proxyPort}.\n` +
+          `If you want to clear it, run an elevated PowerShell and execute:\n` +
+          `  netsh winhttp reset proxy`
+        : `\n\nNote: Antigravity is binary-patched to connect directly to the local proxy on ${DEFAULT_MITM_PORT}, ` +
+          `so OS-level HTTPS interception is not required.`;
+      return {
+        id: 'mitm',
+        title: 'MITM (HTTPS interception)',
+        status: 'ok',
+        message: `Interception bypassed (binary patch active) — Antigravity works perfectly`,
+        details: details + portNote,
+        fixable: false,
+        data: s,
+      };
+    }
     if (s.caInstalled && s.proxyEnabled && s.interceptionOk === true) {
       return {
         id: 'mitm',
@@ -58,25 +87,6 @@ export async function checkMitm(): Promise<CheckResult> {
       };
     }
     if (portMismatch) {
-      if (isPatched) {
-        // Binary patch is active - Antigravity works perfectly!
-        // The system proxy port mismatch is irrelevant since it's bypassed
-        return {
-          id: 'mitm',
-          title: 'MITM (HTTPS interception)',
-          status: 'ok', // Changed from 'warn' to 'ok' - system is healthy
-          message: `System proxy bypassed (binary patch active) - Antigravity works perfectly`,
-          details:
-            details +
-            `\n\nNote: Antigravity is binary-patched to connect directly to the local proxy on ${DEFAULT_MITM_PORT}.\n` +
-            `The system proxy on port ${s.proxyPort} is bypassed, so Antigravity works perfectly.\n` +
-            `Other system apps might fail if they try to use port ${s.proxyPort}.\n` +
-            `If you want to clear it, run an elevated PowerShell and execute:\n` +
-            `  netsh winhttp reset proxy`,
-          fixable: false,
-          data: s,
-        };
-      }
       return {
         id: 'mitm',
         title: 'MITM (HTTPS interception)',
