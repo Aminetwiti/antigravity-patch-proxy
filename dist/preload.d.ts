@@ -25,6 +25,22 @@ interface NotificationOptions {
     silent?: boolean;
     payload?: unknown;
 }
+interface ProviderModelEntry {
+    id: string;
+    displayName?: string;
+    enabled: boolean;
+}
+interface ProviderFileEntry {
+    id: string;
+    name: string;
+    provider: string;
+    apiUrl: string;
+    apiKey: string;
+    allowUnauthorized?: boolean;
+    encrypted?: boolean;
+    enabled: boolean;
+    models: ProviderModelEntry[];
+}
 interface NotificationAPI {
     send: (options: NotificationOptions) => Promise<void>;
     openSystemPreferences: () => Promise<void>;
@@ -45,11 +61,26 @@ interface StorageAPI {
     }>;
     testModelConnection: (model: TestModelParams) => Promise<ConnectionTestResult>;
     fetchModels: (params: {
-        apiUrl: string;
-        provider: string;
+        baseUrl: string;
         apiKey?: string;
         allowUnauthorized?: boolean;
-    }) => Promise<FetchModelsResult>;
+    }) => Promise<{
+        success: boolean;
+        models?: {
+            id: string;
+            displayName: string;
+        }[];
+        error?: string;
+    }>;
+    getProviders: () => Promise<ProviderFileEntry[]>;
+    saveProvider: (provider: ProviderFileEntry) => Promise<{
+        success: boolean;
+        error?: string;
+    }>;
+    deleteProvider: (providerId: string) => Promise<{
+        success: boolean;
+        error?: string;
+    }>;
 }
 interface LogsAPI {
     getElectronLogs: () => Promise<string>;
@@ -124,15 +155,6 @@ interface ConnectionTestResult {
     success: boolean;
     status?: number;
     message?: string;
-    error?: string;
-}
-interface FetchModelsResult {
-    success: boolean;
-    models?: {
-        id: string;
-        name: string;
-        inputModalities?: string[];
-    }[];
     error?: string;
 }
 declare global {

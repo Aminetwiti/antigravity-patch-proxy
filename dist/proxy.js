@@ -297,10 +297,26 @@ function parseRetryAfter(headers) {
     }
     return 0;
 }
-function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount = 0) {
+function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount = 0, fallbackDepth = 0) {
     // P3-18: Configurable max retries per model (default 3, min 0, max 5)
     const MAX_RETRIES = (0, urlBuilder_1.resolveMaxRetries)(model);
     const REQUEST_TIMEOUT_MS = (0, urlBuilder_1.resolveRequestTimeout)(model);
+    function attemptFallback(diagnostic) {
+        if (fallbackDepth > 0)
+            return false;
+        try {
+            const allModels = (0, modelLoader_1.loadCustomModels)();
+            for (const m of allModels) {
+                if (m.name !== model.name && m.apiKey && m.apiKey !== 'none' && !m.apiKey.startsWith('fallback:')) {
+                    electron_log_1.default.warn(`[Proxy] Model ${model.name} failed (${diagnostic.errorType}). Auto-falling back to ${m.name}...`);
+                    handleCustomModelRequest(res, m, geminiBody, isStream, 0, fallbackDepth + 1);
+                    return true; // Fallback successfully initiated
+                }
+            }
+        }
+        catch (e) { }
+        return false;
+    }
     const provider = (0, urlBuilder_1.resolveProvider)(model);
     const payload = registry.translateRequest(provider, geminiBody, model.externalModelName);
     const headers = registry.getProviderHeaders(provider, model.apiKey);
@@ -369,6 +385,8 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                         return;
                     }
                     const diagnostic = (0, errorClassifier_1.classifyError)(apiRes.statusCode, null, errorBody, model.provider);
+                    if (attemptFallback(diagnostic))
+                        return;
                     if (diagnostic.errorType === 'billing' || diagnostic.errorType === 'auth' || diagnostic.errorType === 'forbidden') {
                         const errResponse = {
                             response: {
@@ -508,6 +526,8 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                     // P0-3: Only log status code and model name, NOT response body content
                     electron_log_1.default.error(`[Proxy] API error (${apiRes.statusCode}) for ${model.name}`);
                     const diagnostic = (0, errorClassifier_1.classifyError)(apiRes.statusCode, null, body, model.provider);
+                    if (attemptFallback(diagnostic))
+                        return;
                     if (diagnostic.errorType === 'billing' || diagnostic.errorType === 'auth' || diagnostic.errorType === 'forbidden') {
                         const errResponse = {
                             response: {
@@ -578,6 +598,8 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                         return;
                     }
                     const diagnostic = (0, errorClassifier_1.classifyError)(500, e, body, model.provider);
+                    if (attemptFallback(diagnostic))
+                        return;
                     if (safeWriteHead(res, 500, {
                         'Content-Type': 'application/json',
                         'X-AG-Error-Type': diagnostic.errorType
@@ -597,6 +619,8 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
             return;
         }
         const diagnostic = (0, errorClassifier_1.classifyError)(504, 'ETIMEDOUT', undefined, model.provider);
+        if (attemptFallback(diagnostic))
+            return;
         if (safeWriteHead(res, 504, {
             'Content-Type': 'application/json',
             'X-AG-Error-Type': diagnostic.errorType
@@ -612,6 +636,8 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
             return;
         }
         const diagnostic = (0, errorClassifier_1.classifyError)(undefined, err, undefined, model.provider);
+        if (attemptFallback(diagnostic))
+            return;
         if (isStream) {
             if (!res.headersSent && !res.writableEnded) {
                 const errResponse = {

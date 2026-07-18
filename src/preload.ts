@@ -35,6 +35,24 @@ interface NotificationOptions {
   payload?: unknown;
 }
 
+interface ProviderModelEntry {
+  id: string;
+  displayName?: string;
+  enabled: boolean;
+}
+
+interface ProviderFileEntry {
+  id: string;
+  name: string;
+  provider: string;
+  apiUrl: string;
+  apiKey: string;
+  allowUnauthorized?: boolean;
+  encrypted?: boolean;
+  enabled: boolean;
+  models: ProviderModelEntry[];
+}
+
 interface NotificationAPI {
   send: (options: NotificationOptions) => Promise<void>;
   openSystemPreferences: () => Promise<void>;
@@ -49,7 +67,10 @@ interface StorageAPI {
   saveCustomModel: (model: CustomModelEntry) => Promise<{ success: boolean; error?: string }>;
   deleteCustomModel: (modelName: string) => Promise<{ success: boolean; error?: string }>;
   testModelConnection: (model: TestModelParams) => Promise<ConnectionTestResult>;
-  fetchModels: (params: { apiUrl: string; provider: string; apiKey?: string; allowUnauthorized?: boolean }) => Promise<FetchModelsResult>;
+  fetchModels: (params: { baseUrl: string; apiKey?: string; allowUnauthorized?: boolean }) => Promise<{ success: boolean; models?: {id: string, displayName: string}[]; error?: string }>;
+  getProviders: () => Promise<ProviderFileEntry[]>;
+  saveProvider: (provider: ProviderFileEntry) => Promise<{ success: boolean; error?: string }>;
+  deleteProvider: (providerId: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 interface LogsAPI {
@@ -195,6 +216,9 @@ const storageAPI: StorageAPI = {
   deleteCustomModel: (modelName) => ipcRenderer.invoke('storage:delete-custom-model', modelName),
   testModelConnection: (model) => ipcRenderer.invoke('storage:test-model-connection', model),
   fetchModels: (params) => ipcRenderer.invoke('storage:fetch-models', params),
+  getProviders: () => ipcRenderer.invoke('storage:get-providers'),
+  saveProvider: (provider) => ipcRenderer.invoke('storage:save-provider', provider),
+  deleteProvider: (providerId) => ipcRenderer.invoke('storage:delete-provider', providerId),
 };
 
 const logsAPI: LogsAPI = {
@@ -328,6 +352,9 @@ window.addEventListener('DOMContentLoaded', () => {
     custom: '#a855f7',
   };
 
+  const prefersReducedMotion = (): boolean =>
+    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+
   function getProviderIcon(provider: string): string {
     return PROVIDER_ICONS[provider] || PROVIDER_ICONS.custom;
   }
@@ -357,8 +384,8 @@ window.addEventListener('DOMContentLoaded', () => {
         placeholder.style.textAlign = 'center';
 
         placeholder.innerHTML = `
-                    <div style="font-size: 15px; font-weight: 600; color: #f4f4f5; margin-bottom: 4px;">No Custom Models</div>
-                    <div style="font-size: 13px; color: #a1a1aa;">You currently don't have any custom models installed. Add a custom model above.</div>
+                    <div style="font-size: 15px; font-weight: 600; color: #f4f4f5; margin-bottom: 4px;">No custom models yet</div>
+                    <div style="font-size: 13px; color: #a1a1aa;">You haven't added any custom models. Use "Provider Manager" above to connect one.</div>
                 `;
         contentArea.appendChild(placeholder);
       } else {
@@ -373,6 +400,9 @@ window.addEventListener('DOMContentLoaded', () => {
           item.style.borderRadius = '8px';
           item.style.transition = 'border-color 0.15s ease, background-color 0.15s ease';
           item.style.marginBottom = '8px';
+          item.style.cursor = 'default';
+          item.tabIndex = 0;
+          item.setAttribute('role', 'listitem');
 
           item.addEventListener('mouseenter', () => {
             item.style.borderColor = '#3f3f46';
@@ -482,6 +512,7 @@ window.addEventListener('DOMContentLoaded', () => {
           testBtn.style.justifyContent = 'center';
           testBtn.style.transition = 'color 0.15s ease, background-color 0.15s ease';
           testBtn.title = 'Test connection';
+          testBtn.setAttribute('aria-label', `Test connection for ${(model.displayName as string) || (model.name as string)}`);
 
           testBtn.addEventListener('mouseenter', () => {
             testBtn.style.color = '#22c55e';
@@ -499,7 +530,8 @@ window.addEventListener('DOMContentLoaded', () => {
             testBtn.style.color = '#fbbf24';
             testBtn.style.cursor = 'wait';
             testBtn.disabled = true;
-            testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>`;
+            const spinnerSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="${prefersReducedMotion() ? '' : 'animation: agy-spin 0.8s linear infinite;'}"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>`;
+            testBtn.innerHTML = spinnerSvg;
 
             try {
               const result = await storageAPI.testModelConnection({
@@ -515,6 +547,12 @@ window.addEventListener('DOMContentLoaded', () => {
                 testBtn.title = 'Connected ✓';
                 testBtn.style.color = '#22c55e';
                 testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`;
+                
+                // Auto-healing
+                const banner = document.getElementById('agy-persistent-banner');
+                if (banner) banner.remove();
+                failedModelDisplayNames.clear();
+                document.querySelectorAll('.ag-model-warning').forEach(el => el.remove());
               } else {
                 statusDot.style.backgroundColor = '#ef4444'; // red
                 const errMsg = result.error || 'Connection failed';
@@ -563,6 +601,7 @@ window.addEventListener('DOMContentLoaded', () => {
           deleteBtn.style.alignItems = 'center';
           deleteBtn.style.justifyContent = 'center';
           deleteBtn.style.transition = 'color 0.15s ease, background-color 0.15s ease';
+          deleteBtn.setAttribute('aria-label', `Delete ${(model.displayName as string) || (model.name as string)}`);
 
           deleteBtn.addEventListener('mouseenter', () => {
             deleteBtn.style.color = '#ef4444';
@@ -575,7 +614,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
           deleteBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
-            if (confirm(`Are you sure you want to delete the model "${model.displayName || model.name}"?`)) {
+            if (window.confirm(`Delete "${model.displayName || model.name}"? This removes it from your model list.`)) {
               await storageAPI.deleteCustomModel(model.name as string);
               await renderCustomModelsList();
 
@@ -640,7 +679,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     const addModelBtn = document.createElement('button');
     addModelBtn.id = 'agy-add-model-btn';
-    addModelBtn.textContent = 'Add Model';
+    addModelBtn.textContent = '☁️ Provider Manager';
     const refreshBtn = findRefreshButton();
     if (refreshBtn) {
       addModelBtn.className = refreshBtn.className;
@@ -648,9 +687,8 @@ window.addEventListener('DOMContentLoaded', () => {
     }
     addModelBtn.style.cursor = 'pointer';
     addModelBtn.addEventListener('click', () => {
-      openAddModelModal();
+      openProviderManagerModal();
     });
-
     newBtnGroup.appendChild(addModelBtn);
     newHeaderRow.appendChild(newHeading);
     newHeaderRow.appendChild(newBtnGroup);
@@ -673,310 +711,296 @@ window.addEventListener('DOMContentLoaded', () => {
     await renderCustomModelsList();
   }
 
-  function openAddModelModal(): void {
-    // Remove existing modal if any
+  function openProviderManagerModal(): void {
     const existing = document.getElementById('agy-modal-overlay');
     if (existing) existing.remove();
 
-    // Modal overlay backdrop
     const overlay = document.createElement('div');
     overlay.id = 'agy-modal-overlay';
-    overlay.style.position = 'fixed';
-    overlay.style.top = '0';
-    overlay.style.left = '0';
-    overlay.style.width = '100vw';
-    overlay.style.height = '100vh';
-    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.6)';
-    overlay.style.backdropFilter = 'blur(6px)';
-    overlay.style.display = 'flex';
-    overlay.style.justifyContent = 'center';
-    overlay.style.alignItems = 'center';
-    overlay.style.zIndex = '999999';
-    overlay.style.opacity = '0';
-    overlay.style.transition = 'opacity 0.2s ease-in-out';
+    overlay.style.cssText = `
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(6px); z-index: 999999;
+      display: flex; justify-content: center; align-items: center;
+      opacity: 1; transition: opacity 0.2s ease;
+    `;
 
-    // Modal card container
     const modal = document.createElement('div');
-    modal.id = 'agy-modal-card';
-    modal.style.width = '520px';
-    modal.style.maxHeight = '90vh';
-    modal.style.overflowY = 'auto';
-    modal.style.backgroundColor = '#18181b';
-    modal.style.border = '1px solid #27272a';
-    modal.style.borderRadius = '16px';
-    modal.style.padding = '32px';
-    modal.style.boxShadow = '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.5)';
-    modal.style.color = '#f4f4f5';
-    modal.style.fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
-    modal.style.transform = 'scale(0.9) translateY(20px)';
-    modal.style.transition = 'transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)';
+    modal.style.cssText = `
+      background: #18181b; border: 1px solid #3f3f46; border-radius: 12px;
+      width: 650px; max-height: 85vh; display: flex; flex-direction: column;
+      box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); overflow: hidden; color: #f4f4f5;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      transform: scale(1) translateY(0); opacity: 1; transition: transform 0.2s ease, opacity 0.2s ease;
+      outline: none;
+    `;
 
-    modal.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <div style="width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center; justify-content: center; background-color: #3b82f618; color: #3b82f6;">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/></svg>
-                    </div>
-                    <h3 style="margin: 0; font-size: 20px; font-weight: 600; color: #f4f4f5;">Add Custom Model</h3>
-                </div>
-                <button id="agy-modal-close" style="background: transparent; border: none; color: #a1a1aa; cursor: pointer; font-size: 20px; line-height: 1; padding: 4px; display: flex; align-items: center; justify-content: center; transition: color 0.15s ease;">&times;</button>
-            </div>
+    const header = document.createElement('div');
+    header.style.cssText = `padding: 16px 24px; border-bottom: 1px solid #3f3f46; display: flex; justify-content: space-between; align-items: center;`;
+    
+    const titleRow = document.createElement('div');
+    titleRow.style.cssText = `display: flex; align-items: center; gap: 8px;`;
+    titleRow.innerHTML = `<h3 style="margin:0; font-size:18px; font-weight:600;">Provider Manager</h3>`;
+    titleRow.setAttribute('role', 'heading');
+    titleRow.setAttribute('aria-level', '3');
+    
+    const closeBtn = document.createElement('button');
+    closeBtn.style.cssText = `background:none; border:none; color:#a1a1aa; font-size:24px; cursor:pointer; padding:0; line-height:1; border-radius:4px; transition: color 0.15s ease, background-color 0.15s ease;`;
+    closeBtn.setAttribute('aria-label', 'Close provider manager');
+    closeBtn.onclick = () => overlay.remove();
+    
+    header.appendChild(titleRow);
+    header.appendChild(closeBtn);
+    modal.appendChild(header);
 
-            <div style="display: flex; flex-direction: column; gap: 16px; margin-bottom: 24px;">
-                <!-- Step Indicator -->
-                <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid #3f3f46;">
-                    <div id="agy-step-1-indicator" style="display: flex; align-items: center; gap: 8px;">
-                        <div style="width: 28px; height: 28px; border-radius: 50%; background-color: #3b82f6; color: white; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600;">1</div>
-                        <span style="font-size: 13px; font-weight: 500; color: #e4e4e7;">Configure API</span>
-                    </div>
-                    <div style="flex: 1; height: 2px; background-color: #3f3f46;"></div>
-                    <div id="agy-step-2-indicator" style="display: flex; align-items: center; gap: 8px;">
-                        <div id="agy-step-2-circle" style="width: 28px; height: 28px; border-radius: 50%; background-color: #3f3f46; color: #71717a; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600;">2</div>
-                        <span id="agy-step-2-text" style="font-size: 13px; font-weight: 500; color: #71717a;">Select Models</span>
-                    </div>
-                </div>
+    const body = document.createElement('div');
+    body.style.cssText = `display: flex; flex-direction: column; flex: 1; overflow: hidden; position: relative;`;
 
-                <!-- Step 1: API Configuration -->
-                <div id="agy-step-1-content" style="display: flex; flex-direction: column; gap: 16px;">
-                    <!-- Provider Type -->
-                    <div style="display: flex; flex-direction: column; gap: 6px;">
-                        <label style="font-size: 13px; font-weight: 500; color: #a1a1aa;">Provider Type <span style="color: #ef4444;">*</span></label>
-                        <select id="agy-provider-type" style="background-color: #27272a; border: 1px solid #3f3f46; border-radius: 8px; color: #f4f4f5; padding: 10px 12px; font-size: 14px; outline: none; cursor: pointer; transition: border-color 0.15s ease;">
-                            <option value="openai">OpenAI Compatible</option>
-                            <option value="anthropic">Anthropic Compatible</option>
-                        </select>
-                    </div>
+    const listContainer = document.createElement('div');
+    listContainer.style.cssText = `padding: 24px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 16px;`;
 
-                    <!-- API URL -->
-                    <div style="display: flex; flex-direction: column; gap: 6px;">
-                        <label style="font-size: 13px; font-weight: 500; color: #a1a1aa;">API URL <span style="color: #ef4444;">*</span></label>
-                        <input type="text" id="agy-api-url" placeholder="https://api.openai.com/v1/chat/completions" style="background-color: #27272a; border: 1px solid #3f3f46; border-radius: 8px; color: #f4f4f5; padding: 10px 12px; font-size: 14px; outline: none; transition: border-color 0.15s ease;" />
-                        <div id="agy-url-error" style="font-size: 11px; color: #ef4444; display: none;"></div>
-                    </div>
+    const formContainer = document.createElement('div');
+    formContainer.style.cssText = `padding: 24px; overflow-y: auto; flex: 1; display: none; flex-direction: column; gap: 16px; background: #1c1c1f;`;
 
-                    <!-- API Key -->
-                    <div style="display: flex; flex-direction: column; gap: 6px;">
-                        <label style="font-size: 13px; font-weight: 500; color: #a1a1aa;">API Key <span style="color: #71717a;">(optional for local)</span></label>
-                        <input type="password" id="agy-api-key" placeholder="sk-..." style="background-color: #27272a; border: 1px solid #3f3f46; border-radius: 8px; color: #f4f4f5; padding: 10px 12px; font-size: 14px; outline: none; transition: border-color 0.15s ease;" />
-                    </div>
-
-                    <!-- Allow Unauthorized SSL -->
-                    <div style="display: flex; align-items: center; gap: 8px; padding: 10px 12px; background-color: #27272a; border: 1px solid #3f3f46; border-radius: 8px;">
-                        <input type="checkbox" id="agy-allow-unauthorized" style="width: 16px; height: 16px; cursor: pointer;" />
-                        <label for="agy-allow-unauthorized" style="font-size: 13px; color: #d4d4d8; cursor: pointer; user-select: none;">Allow self-signed certificates</label>
-                    </div>
-
-                    <!-- Fetch Models Button -->
-                    <button id="agy-fetch-models-btn" type="button" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); border: none; color: white; padding: 12px 16px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.15s ease; box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.3);">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="16 8 12 12 8 8"/><line x1="12" y1="16" x2="12" y2="12"/></svg>
-                        Fetch Available Models
-                    </button>
-                    <div id="agy-fetch-status" style="font-size: 12px; color: #a1a1aa; display: none; text-align: center;"></div>
-                </div>
-
-                <!-- Step 2: Model Selection -->
-                <div id="agy-step-2-content" style="display: none; flex-direction: column; gap: 16px;">
-                    <div style="font-size: 13px; color: #a1a1aa;">Select one or more models to add:</div>
-                    
-                    <!-- Models List -->
-                    <div id="agy-models-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 400px; overflow-y: auto; padding: 8px; background-color: #1c1c1f; border: 1px solid #3f3f46; border-radius: 8px;">
-                        <!-- Models will be populated here -->
-                    </div>
-
-                    <!-- Back Button -->
-                    <button id="agy-back-to-step1" type="button" style="background-color: #27272a; border: 1px solid #3f3f46; color: #d4d4d8; padding: 10px 16px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.15s ease;">
-                        ← Back to Configuration
-                    </button>
-
-                    <!-- Selected Models Display -->
-                    <div id="agy-selected-models" style="display: none; flex-direction: column; gap: 8px; padding: 12px; background-color: #1c1c1f; border: 1px solid #22c55e; border-radius: 8px;">
-                        <div style="font-size: 12px; font-weight: 600; color: #22c55e;">Selected Models:</div>
-                        <div id="agy-selected-list" style="font-size: 12px; color: #d4d4d8;"></div>
-                    </div>
-                </div>
-
-                <!-- Display Name Suffix (Optional, shown in step 2) -->
-                <div id="agy-display-name-container" style="display: none; flex-direction: column; gap: 6px;">
-                    <label style="font-size: 13px; font-weight: 500; color: #a1a1aa;">Display Name Suffix (optional)</label>
-                    <input type="text" id="agy-display-name-suffix" placeholder="e.g. (via OpenRouter)" style="background-color: #27272a; border: 1px solid #3f3f46; border-radius: 8px; color: #f4f4f5; padding: 10px 12px; font-size: 14px; outline: none; transition: border-color 0.15s ease;" />
-                    <div style="font-size: 11px; color: #71717a;">Will be appended to model names</div>
-                </div>
-            </div>
-
-            <div style="display: flex; gap: 12px; justify-content: flex-end; padding-top: 16px; border-top: 1px solid #3f3f46;">
-                <button id="agy-btn-cancel" style="background: transparent; border: 1px solid #3f3f46; color: #d4d4d8; padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.15s ease;">Cancel</button>
-                <button id="agy-btn-save" style="background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); border: none; color: white; padding: 10px 24px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.15s ease; box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.3); display: none;">Add Selected Models</button>
-            </div>
-        `;
-
+    body.appendChild(listContainer);
+    body.appendChild(formContainer);
+    modal.appendChild(body);
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
     // Animate in
-    setTimeout(() => {
+    if (!prefersReducedMotion()) {
+      overlay.style.opacity = '0';
+      modal.style.opacity = '0';
+      modal.style.transform = 'scale(0.9) translateY(20px)';
+      modal.style.transition = 'transform 0.2s ease, opacity 0.2s ease';
+      overlay.style.transition = 'opacity 0.2s ease';
+      requestAnimationFrame(() => {
+        overlay.style.opacity = '1';
+        modal.style.opacity = '1';
+        modal.style.transform = 'scale(1) translateY(0)';
+      });
+    } else {
       overlay.style.opacity = '1';
+      modal.style.opacity = '1';
       modal.style.transform = 'scale(1) translateY(0)';
-    }, 10);
+    }
 
-    // Close handler
-    const closeModal = () => {
+    const closeModalAndCleanup = () => {
       overlay.style.opacity = '0';
       modal.style.transform = 'scale(0.9) translateY(20px)';
+      document.removeEventListener('keydown', onKeydown);
       setTimeout(() => overlay.remove(), 200);
     };
 
-    document.getElementById('agy-modal-close')!.addEventListener('click', closeModal);
-    document.getElementById('agy-btn-cancel')!.addEventListener('click', closeModal);
+    document.getElementById('agy-modal-close')!.addEventListener('click', closeModalAndCleanup);
+    document.getElementById('agy-btn-cancel')!.addEventListener('click', closeModalAndCleanup);
     overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) closeModal();
+      if (e.target === overlay) closeModalAndCleanup();
     });
 
+    const onKeydown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        closeModalAndCleanup();
+      }
+    };
+    document.addEventListener('keydown', onKeydown);
+
     // Element references for Step 1
-    const providerTypeSelect = document.getElementById('agy-provider-type') as HTMLSelectElement;
-    const urlInput = document.getElementById('agy-api-url') as HTMLInputElement;
-    const keyInput = document.getElementById('agy-api-key') as HTMLInputElement;
-    const allowUnauthorized = document.getElementById('agy-allow-unauthorized') as HTMLInputElement;
-    const fetchModelsBtn = document.getElementById('agy-fetch-models-btn') as HTMLButtonElement;
-    const fetchStatus = document.getElementById('agy-fetch-status')!;
-    const urlError = document.getElementById('agy-url-error')!;
+    const updateSelectedDisplay = () => {
+      if (selectedModels.size > 0) {
+        selectedModelsDiv.style.display = 'flex';
+        selectedListDiv.textContent = `${selectedModels.size} model(s) selected`;
+        saveBtn.style.display = 'block';
+      } else {
+        selectedModelsDiv.style.display = 'none';
+        saveBtn.style.display = 'none';
+      }
+    };
 
-    // Element references for Step 2
-    const step1Content = document.getElementById('agy-step-1-content')!;
-    const step2Content = document.getElementById('agy-step-2-content')!;
-    const step1Indicator = document.getElementById('agy-step-1-indicator')!;
-    const step2Indicator = document.getElementById('agy-step-2-indicator')!;
-    const step2Circle = document.getElementById('agy-step-2-circle')!;
-    const step2Text = document.getElementById('agy-step-2-text')!;
-    const modelsList = document.getElementById('agy-models-list')!;
-    const backToStep1Btn = document.getElementById('agy-back-to-step1') as HTMLButtonElement;
-    const selectedModelsDiv = document.getElementById('agy-selected-models')!;
-    const selectedListDiv = document.getElementById('agy-selected-list')!;
-    const displayNameContainer = document.getElementById('agy-display-name-container')!;
-    const displayNameSuffix = document.getElementById('agy-display-name-suffix') as HTMLInputElement;
-    const saveBtn = document.getElementById('agy-btn-save') as HTMLButtonElement;
+    // Back to step 1
+    backToStep1Btn.addEventListener('click', () => {
+      step2Content.style.display = 'none';
+      step1Content.style.display = 'flex';
+      displayNameContainer.style.display = 'none';
+      step2Circle.style.backgroundColor = '#3f3f46';
+      step2Circle.style.color = '#71717a';
+      step2Text.style.color = '#71717a';
+      selectedModels.clear();
+      updateSelectedDisplay();
+    });
 
-    // Store fetched models and selected models
-    let fetchedModels: Array<{ id: string; name: string; inputModalities?: string[] }> = [];
-    let selectedModels: Set<string> = new Set();
-    let apiConfig = { provider: '', apiUrl: '', apiKey: '', allowUnauthorized: false };
-
-    // Step 1: Fetch models button
-    fetchModelsBtn.addEventListener('click', async () => {
-      const apiUrl = urlInput.value.trim();
-      const apiKey = keyInput.value.trim();
-      const provider = providerTypeSelect.value;
-
-      if (!apiUrl) {
-        urlError.textContent = 'Please enter an API URL';
-        urlError.style.display = 'block';
+    // Save selected models
+    saveBtn.addEventListener('click', async () => {
+      if (selectedModels.size === 0) {
+        fetchStatus.textContent = 'Please select at least one model';
+        fetchStatus.style.color = '#ef4444';
         return;
       }
 
-      urlError.style.display = 'none';
-      fetchModelsBtn.disabled = true;
-      fetchModelsBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg> Fetching...';
-      fetchStatus.textContent = 'Connecting to API...';
-      fetchStatus.style.color = '#a1a1aa';
-      fetchStatus.style.display = 'block';
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Adding models...';
 
-      try {
-        const result = await ipcRenderer.invoke('storage:fetch-provider-models', {
-          apiUrl,
-          apiKey: apiKey || undefined,
-          provider,
-          allowUnauthorized: allowUnauthorized.checked,
-        });
+    section.id = 'agy-custom-models-section';
+    section.style.marginTop = '24px';
+    section.style.display = 'flex';
+    section.style.flexDirection = 'column';
+    section.style.gap = '12px';
 
-        if (result.success && result.models && result.models.length > 0) {
-          fetchedModels = result.models;
-          apiConfig = { provider, apiUrl, apiKey, allowUnauthorized: allowUnauthorized.checked };
-          
-          fetchStatus.textContent = `Found ${result.models.length} model(s)`;
-          fetchStatus.style.color = '#22c55e';
+    const newHeaderRow = document.createElement('div');
+    newHeaderRow.className = (headerRow as HTMLElement).className;
+    newHeaderRow.style.cssText = (headerRow as HTMLElement).style.cssText;
+    newHeaderRow.style.display = 'flex';
+    newHeaderRow.style.justifyContent = 'space-between';
+    newHeaderRow.style.alignItems = 'center';
+    newHeaderRow.style.marginBottom = '8px';
 
-          // Transition to Step 2
-          setTimeout(() => {
-            step1Content.style.display = 'none';
-            step2Content.style.display = 'flex';
-            displayNameContainer.style.display = 'flex';
-            step2Circle.style.backgroundColor = '#3b82f6';
-            step2Circle.style.color = 'white';
-            step2Text.style.color = '#e4e4e7';
+    const originalHeading = headerRow.firstElementChild as HTMLElement;
+    const newHeading = document.createElement(originalHeading ? originalHeading.tagName : 'div');
+    if (originalHeading) {
+      newHeading.className = originalHeading.className;
+      newHeading.style.cssText = originalHeading.style.cssText;
+    }
+    newHeading.textContent = 'Custom Models';
 
-            // Populate models list
-            modelsList.innerHTML = '';
-            fetchedModels.forEach((model) => {
-              const modelCard = document.createElement('div');
-              modelCard.style.cssText = 'padding: 12px; background-color: #27272a; border: 2px solid #3f3f46; border-radius: 8px; cursor: pointer; transition: all 0.15s ease; display: flex; align-items: center; gap: 12px;';
-              
-              const checkbox = document.createElement('input');
-              checkbox.type = 'checkbox';
-              checkbox.style.cssText = 'width: 18px; height: 18px; cursor: pointer;';
-              checkbox.dataset.modelId = model.id;
+    const newBtnGroup = document.createElement('div');
+    const originalBtnGroup = headerRow.lastElementChild as HTMLElement;
+    if (originalBtnGroup) {
+      newBtnGroup.className = originalBtnGroup.className;
+      newBtnGroup.style.cssText = originalBtnGroup.style.cssText;
+    }
+    newBtnGroup.style.display = 'flex';
+    newBtnGroup.style.gap = '8px';
+    newBtnGroup.style.alignItems = 'center';
 
-              const infoDiv = document.createElement('div');
-              infoDiv.style.cssText = 'flex: 1; display: flex; flex-direction: column; gap: 4px;';
-              
-              const modelName = document.createElement('div');
-              modelName.textContent = model.name || model.id;
-              modelName.style.cssText = 'font-size: 14px; font-weight: 500; color: #f4f4f5;';
-              
-              const modelId = document.createElement('div');
-              modelId.textContent = model.id;
-              modelId.style.cssText = 'font-size: 12px; color: #71717a;';
+    const addModelBtn = document.createElement('button');
+    addModelBtn.id = 'agy-add-model-btn';
+    addModelBtn.textContent = '☁️ Provider Manager';
+    const refreshBtn = findRefreshButton();
+    if (refreshBtn) {
+      addModelBtn.className = refreshBtn.className;
+      addModelBtn.style.cssText = refreshBtn.style.cssText;
+    }
+    addModelBtn.style.cursor = 'pointer';
+    addModelBtn.addEventListener('click', () => {
+      openProviderManagerModal();
+    });
+    newBtnGroup.appendChild(addModelBtn);
+    newHeaderRow.appendChild(newHeading);
+    newHeaderRow.appendChild(newBtnGroup);
 
-              infoDiv.appendChild(modelName);
-              if (model.name !== model.id) infoDiv.appendChild(modelId);
+    const contentArea = document.createElement('div');
+    contentArea.id = 'agy-custom-models-content';
+    contentArea.style.display = 'flex';
+    contentArea.style.flexDirection = 'column';
+    contentArea.style.gap = '8px';
 
-              // Show modalities badge
-              if (model.inputModalities && model.inputModalities.length > 0 && model.inputModalities.some(m => m !== 'text')) {
-                const badge = document.createElement('span');
-                badge.textContent = model.inputModalities.join(', ');
-                badge.style.cssText = 'font-size: 10px; padding: 2px 6px; background-color: #3b82f6; color: white; border-radius: 4px; display: inline-block;';
-                infoDiv.appendChild(badge);
-              }
+    section.appendChild(newHeaderRow);
+    section.appendChild(contentArea);
 
-              modelCard.appendChild(checkbox);
-              modelCard.appendChild(infoDiv);
+    if (contentBlock && contentBlock.nextSibling) {
+      mainContainer.insertBefore(section, contentBlock.nextSibling);
+    } else {
+      mainContainer.appendChild(section);
+    }
 
-              // Toggle selection
-              modelCard.addEventListener('click', (e) => {
-                if (e.target !== checkbox) {
-                  checkbox.checked = !checkbox.checked;
-                }
-                
-                if (checkbox.checked) {
-                  selectedModels.add(model.id);
-                  modelCard.style.borderColor = '#22c55e';
-                  modelCard.style.backgroundColor = '#22c55e18';
-                } else {
-                  selectedModels.delete(model.id);
-                  modelCard.style.borderColor = '#3f3f46';
-                  modelCard.style.backgroundColor = '#27272a';
-                }
+    await renderCustomModelsList();
+  }
 
-                updateSelectedDisplay();
-              });
+  function openProviderManagerModal(): void {
+    const existing = document.getElementById('agy-modal-overlay');
+    if (existing) existing.remove();
 
-              modelsList.appendChild(modelCard);
-            });
-          }, 500);
-        } else {
-          fetchStatus.textContent = result.error || 'No models found';
-          fetchStatus.style.color = '#ef4444';
-        }
-      } catch (err) {
-        fetchStatus.textContent = 'Error: ' + (err as Error).message;
-        fetchStatus.style.color = '#ef4444';
-      } finally {
-        setTimeout(() => {
-          fetchModelsBtn.disabled = false;
-          fetchModelsBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="16 8 12 12 8 8"/><line x1="12" y1="16" x2="12" y2="12"/></svg> Fetch Available Models';
-        }, 1000);
-      }
+    const overlay = document.createElement('div');
+    overlay.id = 'agy-modal-overlay';
+    overlay.style.cssText = `
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(6px); z-index: 999999;
+      display: flex; justify-content: center; align-items: center;
+      opacity: 1; transition: opacity 0.2s ease;
+    `;
+
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+      background: #18181b; border: 1px solid #3f3f46; border-radius: 12px;
+      width: 650px; max-height: 85vh; display: flex; flex-direction: column;
+      box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); overflow: hidden; color: #f4f4f5;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      transform: scale(1) translateY(0); opacity: 1; transition: transform 0.2s ease, opacity 0.2s ease;
+      outline: none;
+    `;
+
+    const header = document.createElement('div');
+    header.style.cssText = `padding: 16px 24px; border-bottom: 1px solid #3f3f46; display: flex; justify-content: space-between; align-items: center;`;
+    
+    const titleRow = document.createElement('div');
+    titleRow.style.cssText = `display: flex; align-items: center; gap: 8px;`;
+    titleRow.innerHTML = `<h3 style="margin:0; font-size:18px; font-weight:600;">Provider Manager</h3>`;
+    titleRow.setAttribute('role', 'heading');
+    titleRow.setAttribute('aria-level', '3');
+    
+    const closeBtn = document.createElement('button');
+    closeBtn.style.cssText = `background:none; border:none; color:#a1a1aa; font-size:24px; cursor:pointer; padding:0; line-height:1; border-radius:4px; transition: color 0.15s ease, background-color 0.15s ease;`;
+    closeBtn.setAttribute('aria-label', 'Close provider manager');
+    closeBtn.onclick = () => overlay.remove();
+    
+    header.appendChild(titleRow);
+    header.appendChild(closeBtn);
+    modal.appendChild(header);
+
+    const body = document.createElement('div');
+    body.style.cssText = `display: flex; flex-direction: column; flex: 1; overflow: hidden; position: relative;`;
+
+    const listContainer = document.createElement('div');
+    listContainer.style.cssText = `padding: 24px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 16px;`;
+
+    const formContainer = document.createElement('div');
+    formContainer.style.cssText = `padding: 24px; overflow-y: auto; flex: 1; display: none; flex-direction: column; gap: 16px; background: #1c1c1f;`;
+
+    body.appendChild(listContainer);
+    body.appendChild(formContainer);
+    modal.appendChild(body);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    // Animate in
+    if (!prefersReducedMotion()) {
+      overlay.style.opacity = '0';
+      modal.style.opacity = '0';
+      modal.style.transform = 'scale(0.9) translateY(20px)';
+      modal.style.transition = 'transform 0.2s ease, opacity 0.2s ease';
+      overlay.style.transition = 'opacity 0.2s ease';
+      requestAnimationFrame(() => {
+        overlay.style.opacity = '1';
+        modal.style.opacity = '1';
+        modal.style.transform = 'scale(1) translateY(0)';
+      });
+    } else {
+      overlay.style.opacity = '1';
+      modal.style.opacity = '1';
+      modal.style.transform = 'scale(1) translateY(0)';
+    }
+
+    const closeModalAndCleanup = () => {
+      overlay.style.opacity = '0';
+      modal.style.transform = 'scale(0.9) translateY(20px)';
+      document.removeEventListener('keydown', onKeydown);
+      setTimeout(() => overlay.remove(), 200);
+    };
+
+    document.getElementById('agy-modal-close')!.addEventListener('click', closeModalAndCleanup);
+    document.getElementById('agy-btn-cancel')!.addEventListener('click', closeModalAndCleanup);
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) closeModalAndCleanup();
     });
 
-    // Update selected models display
+    const onKeydown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        closeModalAndCleanup();
+      }
+    };
+    document.addEventListener('keydown', onKeydown);
+
+    // Element references for Step 1
     const updateSelectedDisplay = () => {
       if (selectedModels.size > 0) {
         selectedModelsDiv.style.display = 'flex';
@@ -1031,7 +1055,7 @@ window.addEventListener('DOMContentLoaded', () => {
         }
 
         // Success - reload models and close
-        closeModal();
+        closeModalAndCleanup();
       } catch (err) {
         fetchStatus.textContent = 'Error: ' + (err as Error).message;
         fetchStatus.style.color = '#ef4444';
@@ -1048,7 +1072,6 @@ window.addEventListener('DOMContentLoaded', () => {
       existingOverlay.remove();
     }
   };
-
   // Efficient DOM tracking via MutationObserver — instead of setInterval
   let injectionObserver: MutationObserver | null = null;
   let injectionDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1145,12 +1168,16 @@ window.addEventListener('DOMContentLoaded', () => {
           20%, 60% { transform: translateX(-6px); }
           40%, 80% { transform: translateX(6px); }
         }
+        @media (prefers-reduced-motion: reduce) {
+          .agy-toast-el { animation: none !important; }
+        }
       `;
       document.head.appendChild(style);
     }
 
     const toast = document.createElement('div');
     toast.id = existingToastId;
+    toast.className = 'agy-toast-el';
     toast.style.cssText = `
       background-color: #18181b;
       border: 1px solid #27272a;
@@ -1346,7 +1373,7 @@ window.addEventListener('DOMContentLoaded', () => {
       configBtn.addEventListener('mouseenter', () => configBtn.style.backgroundColor = '#2563eb');
       configBtn.addEventListener('mouseleave', () => configBtn.style.backgroundColor = '#3b82f6');
       configBtn.addEventListener('click', () => {
-        openAddModelModal();
+        openProviderManagerModal();
         dismissToast();
       });
       actionsRow.appendChild(configBtn);
@@ -1423,7 +1450,25 @@ window.addEventListener('DOMContentLoaded', () => {
   async function getCustomModelsForInjection(): Promise<any[]> {
     if (Date.now() - customModelsCache.ts < 30000) return customModelsCache.models;
     try {
-      customModelsCache.models = await storageAPI.getCustomModels();
+      const providers = await storageAPI.getProviders();
+      const injectedModels: any[] = [];
+      providers.forEach(p => {
+        if (!p.enabled) return;
+        p.models.forEach((m: any) => {
+          if (!m.enabled) return;
+          injectedModels.push({
+            name: m.id,
+            displayName: m.displayName || m.id,
+            provider: p.provider,
+            apiKey: p.apiKey,
+            apiUrl: p.apiUrl,
+            externalModelName: m.id,
+            allowUnauthorized: p.allowUnauthorized,
+            inputModalities: ['text']
+          });
+        });
+      });
+      customModelsCache.models = injectedModels;
       customModelsCache.ts = Date.now();
     } catch { /* ignore */ }
     return customModelsCache.models;
@@ -1431,8 +1476,18 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // --- Advanced UX Mirroring (Persistent Banner & Model Selector Warnings) ---
 
+  interface ModelHealth {
+    status: 'healthy' | 'error' | 'unknown';
+    diagnostic?: any;
+    lastChecked: number;
+  }
+  const modelHealthState = new Map<string, ModelHealth>();
   const failedModelDisplayNames = new Set<string>();
 
+
+
+
+  let dropdownTimeout: any;
   const dropdownObserver = new MutationObserver((mutations) => {
     if (failedModelDisplayNames.size === 0) return;
     
@@ -1445,24 +1500,38 @@ window.addEventListener('DOMContentLoaded', () => {
     }
     if (!hasNewNodes) return;
 
-    failedModelDisplayNames.forEach(name => {
-      const xpath = `//div[text()="${name}"] | //span[text()="${name}"]`;
-      try {
-        const iterator = document.evaluate(xpath, document.body, null, XPathResult.UNORDERED_NODE_SNAPSHOT_TYPE, null);
-        for (let i = 0; i < iterator.snapshotLength; i++) {
-          const el = iterator.snapshotItem(i) as HTMLElement;
-          if (el && !el.querySelector('.ag-model-warning')) {
-            const warning = document.createElement('span');
-            warning.className = 'ag-model-warning';
-            warning.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#eab308" stroke-width="2" style="margin-left: 6px; vertical-align: middle;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
-            warning.title = "Quota reached or authentication failed";
-            el.appendChild(warning);
-          }
-        }
-      } catch (e) {
-        // ignore xpath errors
-      }
-    });
+    if (dropdownTimeout) clearTimeout(dropdownTimeout);
+    dropdownTimeout = setTimeout(() => {
+       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+       let node;
+       while ((node = walker.nextNode())) {
+         const text = node.nodeValue?.trim();
+         if (text && failedModelDisplayNames.has(text)) {
+            const parent = node.parentNode as HTMLElement;
+            if (parent && !parent.querySelector('.ag-model-warning')) {
+               // Find error msg
+               let errMsg = "Provider Error. Click to resolve.";
+               for (const health of Array.from(modelHealthState.values())) {
+                  if (health.status === 'error' && health.diagnostic) {
+                     errMsg = health.diagnostic.errorType.toUpperCase() + ": " + health.diagnostic.message;
+                     break;
+                  }
+               }
+               const warning = document.createElement('span');
+               warning.className = 'ag-model-warning';
+               warning.style.cssText = 'cursor: pointer; margin-left: 6px; display: inline-flex; align-items: center; justify-content: center;';
+               warning.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#eab308" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
+               warning.title = errMsg + " (Click to fix)";
+               warning.onclick = (e) => {
+                 e.preventDefault();
+                 e.stopPropagation();
+                 openProviderManagerModal();
+               };
+               parent.appendChild(warning);
+            }
+         }
+       }
+    }, 150); // Debounce to prevent blocking the main thread
   });
 
   if (document && document.body) {
@@ -1487,9 +1556,11 @@ window.addEventListener('DOMContentLoaded', () => {
     const textareas = document.querySelectorAll('textarea');
     let chatInput: HTMLElement | null = null;
     for (const ta of Array.from(textareas)) {
-      if (ta.placeholder && ta.placeholder.includes('Ask anything')) {
+      if (ta.getBoundingClientRect().height > 10) {
         chatInput = ta;
-        break;
+        if (ta.placeholder && (ta.placeholder.includes('Ask') || ta.placeholder.includes('Type'))) {
+          break;
+        }
       }
     }
     
@@ -1565,7 +1636,7 @@ window.addEventListener('DOMContentLoaded', () => {
       actionBtn.addEventListener('mouseleave', () => actionBtn.style.backgroundColor = '#0284c7');
       actionBtn.onclick = () => {
         if (diagnostic.errorType === 'auth') {
-          openAddModelModal();
+          openProviderManagerModal();
         } else {
           window.open(diagnostic.actionUrl, '_blank');
         }
@@ -1580,7 +1651,7 @@ window.addEventListener('DOMContentLoaded', () => {
       `;
       actionBtn.addEventListener('mouseenter', () => actionBtn.style.backgroundColor = '#0369a1');
       actionBtn.addEventListener('mouseleave', () => actionBtn.style.backgroundColor = '#0284c7');
-      actionBtn.onclick = () => { openAddModelModal(); banner.remove(); };
+      actionBtn.onclick = () => { openProviderManagerModal(); banner.remove(); };
       actionsRow.appendChild(actionBtn);
     }
 
@@ -1598,9 +1669,10 @@ window.addEventListener('DOMContentLoaded', () => {
     if (diagnostic.errorType === 'billing' || diagnostic.errorType === 'auth' || diagnostic.errorType === 'forbidden') {
       if (modelId) {
         const models = await getCustomModelsForInjection();
-        const m = models.find(x => \`MODEL_PLACEHOLDER_M\${generateModelPlaceholderId(x)}\` === modelId);
+        const m = models.find(x => `MODEL_PLACEHOLDER_M${generateModelPlaceholderId(x)}` === modelId);
         if (m) {
           failedModelDisplayNames.add(m.displayName || m.name);
+          modelHealthState.set(generateModelPlaceholderId(m), { status: 'error', lastChecked: Date.now(), diagnostic });
         }
       }
       showPersistentBanner(diagnostic);
@@ -1666,18 +1738,15 @@ window.addEventListener('DOMContentLoaded', () => {
       const origOnReady = xhr.onreadystatechange;
       xhr.onreadystatechange = async function (ev: Event) {
         if (xhr.readyState === 4) {
-          if (xhr.status >= 400) {
+          const errorTypeHeader = xhr.getResponseHeader('X-AG-Error-Type');
+          if (xhr.status >= 400 || errorTypeHeader) {
             try {
               const parsed = JSON.parse(xhr.responseText);
-              if (parsed._agDiagnostic) {
-                showErrorToast(parsed._agDiagnostic);
-              } else {
-                const diagnostic = classifyError(xhr.status, null, xhr.responseText);
-                showErrorToast(diagnostic);
-              }
+              const diagnostic = parsed._agDiagnostic || classifyError(xhr.status, null, xhr.responseText);
+              handleModelError(url, diagnostic);
             } catch {
               const diagnostic = classifyError(xhr.status, null, xhr.responseText);
-              showErrorToast(diagnostic);
+              handleModelError(url, diagnostic);
             }
           }
         }
@@ -1687,7 +1756,7 @@ window.addEventListener('DOMContentLoaded', () => {
       const origOnError = xhr.onerror;
       xhr.onerror = function (ev: ProgressEvent) {
         const diagnostic = classifyError(undefined, 'Network Error');
-        showErrorToast(diagnostic);
+        handleModelError(url, diagnostic);
         if (origOnError) origOnError.call(xhr, ev);
       };
     }
@@ -1733,20 +1802,17 @@ window.addEventListener('DOMContentLoaded', () => {
           } catch { /* ignore parse errors */ }
         }
       } else if (url.includes('generateContent') || url.includes('streamGenerateContent')) {
-        if (!response.ok || response.status >= 400) {
+        const errorTypeHeader = response.headers.get('X-AG-Error-Type');
+        if (!response.ok || response.status >= 400 || errorTypeHeader) {
           try {
             const cloned = response.clone();
             const text = await cloned.text();
             const parsed = JSON.parse(text);
-            if (parsed._agDiagnostic) {
-              showErrorToast(parsed._agDiagnostic);
-            } else {
-              const diagnostic = classifyError(response.status, null, text);
-              showErrorToast(diagnostic);
-            }
+            const diagnostic = parsed._agDiagnostic || classifyError(response.status, null, text);
+            handleModelError(url, diagnostic);
           } catch {
             const diagnostic = classifyError(response.status);
-            showErrorToast(diagnostic);
+            handleModelError(url, diagnostic);
           }
         }
       }
@@ -1754,7 +1820,7 @@ window.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       if (url.includes('generateContent') || url.includes('streamGenerateContent')) {
         const diagnostic = classifyError(undefined, err);
-        showErrorToast(diagnostic);
+        handleModelError(url, diagnostic);
       }
       throw err;
     }

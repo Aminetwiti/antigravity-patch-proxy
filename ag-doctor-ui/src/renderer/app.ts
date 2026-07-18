@@ -505,48 +505,18 @@ function toast(message: string, kind: ToastKind = 'info', durationMs = 3500): vo
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Modal
+// Modal — managed by ModalManager (see modal-manager.ts)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const modalBackdrop = $('#modalBackdrop') as HTMLDivElement;
-const modalTitle = $('#modalTitle') as HTMLHeadingElement;
-const modalBody = $('#modalBody') as HTMLDivElement;
-const modalConfirm = $('#modalConfirm') as HTMLButtonElement;
-const modalCancel = $('#modalCancel') as HTMLButtonElement;
-const modalClose = $('#modalClose') as HTMLButtonElement;
+// Single shared instance. ModalManager owns the #modalBackdrop DOM node and
+// all open/close/result lifecycle (listeners attached per-open, cleaned on
+// close). Mirrors the vscode-unify pickQuickItem / stack-router pattern.
+const modals = new ModalManager();
 
-function confirmModal(title: string, body: string, opts?: { confirmLabel?: string; danger?: boolean; confirmDisabled?: boolean }): Promise<boolean> {
-  return new Promise((resolve) => {
-    modalTitle.textContent = title;
-    modalBody.innerHTML = body;
-    modalConfirm.textContent = opts?.confirmLabel ?? 'Confirm';
-    modalConfirm.className = `btn ${opts?.danger ? 'btn-danger' : opts?.confirmDisabled ? 'btn-muted' : 'btn-primary'}`;
-    modalConfirm.disabled = !!opts?.confirmDisabled;
-    modalBackdrop.hidden = false;
-
-    const cleanup = (result: boolean) => {
-      modalBackdrop.hidden = true;
-      modalConfirm.disabled = false;
-      modalConfirm.removeEventListener('click', onConfirm);
-      modalCancel.removeEventListener('click', onCancel);
-      modalClose.removeEventListener('click', onCancel);
-      modalBackdrop.removeEventListener('click', onBackdrop);
-      resolve(result);
-    };
-    const onConfirm = () => {
-      if (modalConfirm.disabled) return;
-      cleanup(true);
-    };
-    const onCancel = () => cleanup(false);
-    const onBackdrop = (e: MouseEvent) => {
-      if (e.target === modalBackdrop) cleanup(false);
-    };
-
-    modalConfirm.addEventListener('click', onConfirm);
-    modalCancel.addEventListener('click', onCancel);
-    modalClose.addEventListener('click', onCancel);
-    modalBackdrop.addEventListener('click', onBackdrop);
-  });
+// Backward-compatible alias — existing call sites keep working unchanged.
+type ConfirmModalOpts = { confirmLabel?: string; cancelLabel?: string; danger?: boolean; confirmDisabled?: boolean };
+function confirmModal(title: string, body: string, opts?: ConfirmModalOpts): Promise<boolean> {
+  return modals.confirm(title, body, opts);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1083,6 +1053,10 @@ interface FetchedModel {
 let fetchedModels: FetchedModel[] = [];
 let currentStep = 1;
 
+// Unified fetch state for the add-model fetch cycle (mirrors the vendor's
+// OfficialModelsFetchState). Single source of truth for busy/error/ready.
+const addModelFetchState = createFetchState();
+
 function setAddStep(step: number): void {
   currentStep = step;
   if (step === 1) {
@@ -1129,33 +1103,31 @@ function resetAddModelModal(): void {
   setAddStep(1);
 }
 
+addModelModalClose.addEventListener('click', closeAddModelModal);
+addModelModalCancel.addEventListener('click', closeAddModelModal);
+
+// The add-model modal is owned by the shared ModalManager. We register it as a
+// non-blocking overlay so its Escape/backdrop handling is unified with the
+// confirm + palette modals (one key listener, no leaked handlers).
+modals.registerOverlay({
+  id: 'addModel',
+  backdrop: addModelModalBackdrop,
+  onOpen: () => {
+    resetAddModelModal();
+    setTimeout(() => modelApiUrlInput.focus(), 50);
+  },
+  onClose: () => {
+    /* nothing extra to tear down */
+  },
+});
+
 function openAddModelModal(): void {
-  resetAddModelModal();
-  addModelModalBackdrop.hidden = false;
-  addModelModalBackdrop.style.display = 'grid';
-  setTimeout(() => modelApiUrlInput.focus(), 50);
+  modals.openOverlay('addModel');
 }
 
 function closeAddModelModal(): void {
-  addModelModalBackdrop.hidden = true;
-  addModelModalBackdrop.style.display = 'none';
+  modals.closeOverlay('addModel');
 }
-
-$('#modelsAddBtn').addEventListener('click', openAddModelModal);
-$('#dashboardAddModelBtn').addEventListener('click', openAddModelModal);
-
-addModelModalClose.addEventListener('click', closeAddModelModal);
-addModelModalCancel.addEventListener('click', closeAddModelModal);
-addModelModalBackdrop.addEventListener('click', (e) => {
-  if (e.target === addModelModalBackdrop) closeAddModelModal();
-});
-
-// Escape key closes the modal
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !addModelModalBackdrop.hidden) {
-    closeAddModelModal();
-  }
-});
 
 // Safety: ensure modal is hidden on script load
 addModelModalBackdrop.hidden = true;
@@ -1225,6 +1197,7 @@ async function fetchModels(): Promise<void> {
   addModelModalFetch.textContent = 'Fetching…';
   fetchModelsError.style.display = 'none';
   setStatus('Fetching models…', 'busy');
+  addModelFetchState.isFetching = true;
 
   try {
     const args = [
@@ -1252,6 +1225,7 @@ async function fetchModels(): Promise<void> {
       }
       fetchModelsError.textContent = msg;
       fetchModelsError.style.display = 'block';
+      recordFetchFailure(addModelFetchState, msg);
       setStatus('Ready');
       return;
     }
@@ -1260,6 +1234,7 @@ async function fetchModels(): Promise<void> {
     if (!result.success) {
       fetchModelsError.textContent = result.error || 'Failed to fetch models';
       fetchModelsError.style.display = 'block';
+      recordFetchFailure(addModelFetchState, result.error || 'Failed to fetch models');
       setStatus('Ready');
       return;
     }
@@ -1267,10 +1242,12 @@ async function fetchModels(): Promise<void> {
     fetchedModels = result.models || [];
     renderFetchedModels();
     setAddStep(2);
+    recordFetchSuccess(addModelFetchState);
     setStatus('Ready');
   } catch (e) {
     fetchModelsError.textContent = `Error: ${(e as Error).message}`;
     fetchModelsError.style.display = 'block';
+    recordFetchFailure(addModelFetchState, (e as Error).message);
     setStatus('Error', 'err');
   } finally {
     addModelModalFetch.removeAttribute('disabled');

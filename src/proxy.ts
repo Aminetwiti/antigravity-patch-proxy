@@ -313,10 +313,26 @@ function handleCustomModelRequest(
   geminiBody: GeminiRequestBody,
   isStream: boolean,
   retryCount = 0,
+  fallbackDepth = 0,
 ): void {
   // P3-18: Configurable max retries per model (default 3, min 0, max 5)
   const MAX_RETRIES = resolveMaxRetries(model);
   const REQUEST_TIMEOUT_MS = resolveRequestTimeout(model);
+
+  function attemptFallback(diagnostic: ErrorDiagnostic): boolean {
+    if (fallbackDepth > 0) return false;
+    try {
+      const allModels = loadCustomModels();
+      for (const m of allModels) {
+        if (m.name !== model.name && m.apiKey && m.apiKey !== 'none' && !m.apiKey.startsWith('fallback:')) {
+           log.warn(`[Proxy] Model ${model.name} failed (${diagnostic.errorType}). Auto-falling back to ${m.name}...`);
+           handleCustomModelRequest(res, m, geminiBody, isStream, 0, fallbackDepth + 1);
+           return true; // Fallback successfully initiated
+        }
+      }
+    } catch(e) {}
+    return false;
+  }
 
   const provider = resolveProvider(model);
 
@@ -403,6 +419,8 @@ function handleCustomModelRequest(
             return;
           }
           const diagnostic = classifyError(apiRes.statusCode!, null, errorBody, model.provider);
+
+          if (attemptFallback(diagnostic)) return;
 
           if (diagnostic.errorType === 'billing' || diagnostic.errorType === 'auth' || diagnostic.errorType === 'forbidden') {
             const errResponse = {
@@ -549,6 +567,8 @@ function handleCustomModelRequest(
           
           const diagnostic = classifyError(apiRes.statusCode!, null, body, model.provider);
 
+          if (attemptFallback(diagnostic)) return;
+
           if (diagnostic.errorType === 'billing' || diagnostic.errorType === 'auth' || diagnostic.errorType === 'forbidden') {
             const errResponse = {
               response: {
@@ -631,6 +651,9 @@ function handleCustomModelRequest(
           }
 
           const diagnostic = classifyError(500, e, body, model.provider);
+          
+          if (attemptFallback(diagnostic)) return;
+          
           if (safeWriteHead(res, 500, {
             'Content-Type': 'application/json',
             'X-AG-Error-Type': diagnostic.errorType
@@ -656,6 +679,9 @@ function handleCustomModelRequest(
     }
 
     const diagnostic = classifyError(504, 'ETIMEDOUT', undefined, model.provider);
+    
+    if (attemptFallback(diagnostic)) return;
+    
     if (safeWriteHead(res, 504, {
       'Content-Type': 'application/json',
       'X-AG-Error-Type': diagnostic.errorType
@@ -677,6 +703,8 @@ function handleCustomModelRequest(
     }
 
     const diagnostic = classifyError(undefined, err, undefined, model.provider);
+
+    if (attemptFallback(diagnostic)) return;
 
     if (isStream) {
       if (!res.headersSent && !res.writableEnded) {

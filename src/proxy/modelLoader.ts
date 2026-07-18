@@ -133,7 +133,35 @@ export function loadCustomModels(): CustomModel[] {
     if (content.charCodeAt(0) === 0xFEFF) {
       content = content.slice(1);
     }
-    const parsed = JSON.parse(content) as { models?: CustomModel[] };
+    const parsed = JSON.parse(content) as any;
+    
+    // Support new Providers schema
+    if (parsed.providers) {
+       const flatModels: any[] = [];
+       for (const p of parsed.providers) {
+         if (!p.enabled) continue;
+         for (const m of p.models) {
+           if (!m.enabled) continue;
+           
+           // Generate deterministic ID matching what preload.ts generates
+           const deterministicId = `models/MODEL_PLACEHOLDER_M${p.provider}_${m.id}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+           
+           flatModels.push({
+              name: deterministicId,
+              displayName: m.displayName || m.id,
+              provider: p.provider,
+              apiKey: p.apiKey,
+              encrypted: p.encrypted,
+              apiUrl: p.apiUrl,
+              externalModelName: m.id,
+              allowUnauthorized: p.allowUnauthorized,
+           });
+         }
+       }
+       const decrypted = cryptoStore.decryptModels(flatModels) as unknown as CustomModel[];
+       return validateModels(decrypted);
+    }
+
     const models = parsed.models || [];
 
     // Auto-migration check

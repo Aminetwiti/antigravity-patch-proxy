@@ -58,6 +58,24 @@ export interface FallbackModelEntry {
   apiProvider: string;
 }
 
+export interface ProviderModelEntry {
+  id: string;
+  displayName?: string;
+  enabled: boolean;
+}
+
+export interface ProviderFileEntry {
+  id: string;
+  name: string;
+  provider: string;
+  apiUrl: string;
+  apiKey: string;
+  allowUnauthorized?: boolean;
+  encrypted?: boolean;
+  enabled: boolean;
+  models: ProviderModelEntry[];
+}
+
 /**
  * Returns the absolute path to custom_models.json.
  */
@@ -76,8 +94,34 @@ export async function loadCustomModels(): Promise<CustomModelFileEntry[]> {
 
   try {
     const content = await fs.readFile(filePath, 'utf-8');
-    const parsed = JSON.parse(stripBom(content)) as { models?: CustomModelFileEntry[] };
-    return parsed.models ?? [];
+    const parsed = JSON.parse(stripBom(content)) as { models?: CustomModelFileEntry[], providers?: ProviderFileEntry[] };
+    
+    // Legacy migration case
+    if (parsed.models && !parsed.providers) {
+      return parsed.models;
+    }
+
+    if (parsed.providers) {
+      const flatModels: CustomModelFileEntry[] = [];
+      for (const p of parsed.providers) {
+        if (!p.enabled) continue;
+        for (const m of p.models) {
+          if (!m.enabled) continue;
+          flatModels.push({
+             name: `${p.id}-${m.id}`,
+             displayName: m.displayName || m.id,
+             provider: p.provider,
+             apiKey: p.apiKey,
+             apiUrl: p.apiUrl,
+             externalModelName: m.id,
+             allowUnauthorized: p.allowUnauthorized,
+             encrypted: p.encrypted
+          });
+        }
+      }
+      return flatModels;
+    }
+    return [];
   } catch (error) {
     if (isNodeError(error) && error.code === 'ENOENT') {
       log.info('[CustomModelStore] custom_models.json not found, returning empty list');
@@ -88,17 +132,68 @@ export async function loadCustomModels(): Promise<CustomModelFileEntry[]> {
   }
 }
 
-/**
- * Persists the full list of custom models to disk.
- */
 export async function saveCustomModels(models: CustomModelFileEntry[]): Promise<void> {
   const filePath = getCustomModelsPath();
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, JSON.stringify({ models }, null, 2), 'utf-8');
 }
 
+export async function loadProviders(): Promise<ProviderFileEntry[]> {
+  const filePath = getCustomModelsPath();
+  try {
+    const content = await fs.readFile(filePath, 'utf-8');
+    const parsed = JSON.parse(stripBom(content)) as { models?: CustomModelFileEntry[], providers?: ProviderFileEntry[] };
+    
+    if (parsed.providers) {
+       return parsed.providers;
+    }
+
+    if (parsed.models && parsed.models.length > 0) {
+       log.info('[CustomModelStore] Migrating legacy models to providers architecture');
+       const providerMap = new Map<string, ProviderFileEntry>();
+       let pId = 1;
+       for (const m of parsed.models) {
+         const pKey = m.apiUrl + '|' + m.provider + '|' + m.apiKey;
+         if (!providerMap.has(pKey)) {
+            providerMap.set(pKey, {
+              id: `provider-${Date.now()}-${pId++}`,
+              name: `Legacy ${m.provider}`,
+              provider: m.provider,
+              apiUrl: m.apiUrl,
+              apiKey: m.apiKey,
+              allowUnauthorized: m.allowUnauthorized,
+              encrypted: m.encrypted,
+              enabled: true,
+              models: []
+            });
+         }
+         const p = providerMap.get(pKey)!;
+         p.models.push({
+            id: m.externalModelName || m.name,
+            displayName: m.displayName || m.name,
+            enabled: true
+         });
+       }
+       const migratedProviders = Array.from(providerMap.values());
+       saveProviders(migratedProviders).catch(e => log.error('Failed to save migration', e));
+       return migratedProviders;
+    }
+    return [];
+  } catch (error) {
+    if (isNodeError(error) && error.code === 'ENOENT') return [];
+    log.error('[CustomModelStore] Failed to load providers:', error);
+    return [];
+  }
+}
+
+export async function saveProviders(providers: ProviderFileEntry[]): Promise<void> {
+  const filePath = getCustomModelsPath();
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, JSON.stringify({ providers }, null, 2), 'utf-8');
+}
+
 /**
- * Removes a model by name and persists the remaining models.
+ * Removes a model by name and persists the remaining models. (Legacy)
  */
 export async function deleteCustomModel(modelName: string): Promise<void> {
   const models = await loadCustomModels();

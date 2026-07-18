@@ -57,6 +57,9 @@ const storageAPI = {
     deleteCustomModel: (modelName) => electron_1.ipcRenderer.invoke('storage:delete-custom-model', modelName),
     testModelConnection: (model) => electron_1.ipcRenderer.invoke('storage:test-model-connection', model),
     fetchModels: (params) => electron_1.ipcRenderer.invoke('storage:fetch-models', params),
+    getProviders: () => electron_1.ipcRenderer.invoke('storage:get-providers'),
+    saveProvider: (provider) => electron_1.ipcRenderer.invoke('storage:save-provider', provider),
+    deleteProvider: (providerId) => electron_1.ipcRenderer.invoke('storage:delete-provider', providerId),
 };
 const logsAPI = {
     getElectronLogs: () => electron_1.ipcRenderer.invoke('logs:electron'),
@@ -154,6 +157,7 @@ window.addEventListener('DOMContentLoaded', () => {
         openrouter: '#ff7a45',
         custom: '#a855f7',
     };
+    const prefersReducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
     function getProviderIcon(provider) {
         return PROVIDER_ICONS[provider] || PROVIDER_ICONS.custom;
     }
@@ -179,8 +183,8 @@ window.addEventListener('DOMContentLoaded', () => {
                 placeholder.style.borderRadius = '8px';
                 placeholder.style.textAlign = 'center';
                 placeholder.innerHTML = `
-                    <div style="font-size: 15px; font-weight: 600; color: #f4f4f5; margin-bottom: 4px;">No Custom Models</div>
-                    <div style="font-size: 13px; color: #a1a1aa;">You currently don't have any custom models installed. Add a custom model above.</div>
+                    <div style="font-size: 15px; font-weight: 600; color: #f4f4f5; margin-bottom: 4px;">No custom models yet</div>
+                    <div style="font-size: 13px; color: #a1a1aa;">You haven't added any custom models. Use "Provider Manager" above to connect one.</div>
                 `;
                 contentArea.appendChild(placeholder);
             }
@@ -196,6 +200,9 @@ window.addEventListener('DOMContentLoaded', () => {
                     item.style.borderRadius = '8px';
                     item.style.transition = 'border-color 0.15s ease, background-color 0.15s ease';
                     item.style.marginBottom = '8px';
+                    item.style.cursor = 'default';
+                    item.tabIndex = 0;
+                    item.setAttribute('role', 'listitem');
                     item.addEventListener('mouseenter', () => {
                         item.style.borderColor = '#3f3f46';
                         item.style.backgroundColor = '#1c1c1f';
@@ -290,6 +297,7 @@ window.addEventListener('DOMContentLoaded', () => {
                     testBtn.style.justifyContent = 'center';
                     testBtn.style.transition = 'color 0.15s ease, background-color 0.15s ease';
                     testBtn.title = 'Test connection';
+                    testBtn.setAttribute('aria-label', `Test connection for ${model.displayName || model.name}`);
                     testBtn.addEventListener('mouseenter', () => {
                         testBtn.style.color = '#22c55e';
                         testBtn.style.backgroundColor = 'rgba(34, 197, 94, 0.1)';
@@ -305,7 +313,8 @@ window.addEventListener('DOMContentLoaded', () => {
                         testBtn.style.color = '#fbbf24';
                         testBtn.style.cursor = 'wait';
                         testBtn.disabled = true;
-                        testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>`;
+                        const spinnerSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="${prefersReducedMotion() ? '' : 'animation: agy-spin 0.8s linear infinite;'}"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>`;
+                        testBtn.innerHTML = spinnerSvg;
                         try {
                             const result = await storageAPI.testModelConnection({
                                 apiUrl: model.apiUrl,
@@ -319,6 +328,12 @@ window.addEventListener('DOMContentLoaded', () => {
                                 testBtn.title = 'Connected ✓';
                                 testBtn.style.color = '#22c55e';
                                 testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`;
+                                // Auto-healing
+                                const banner = document.getElementById('agy-persistent-banner');
+                                if (banner)
+                                    banner.remove();
+                                failedModelDisplayNames.clear();
+                                document.querySelectorAll('.ag-model-warning').forEach(el => el.remove());
                             }
                             else {
                                 statusDot.style.backgroundColor = '#ef4444'; // red
@@ -366,6 +381,7 @@ window.addEventListener('DOMContentLoaded', () => {
                     deleteBtn.style.alignItems = 'center';
                     deleteBtn.style.justifyContent = 'center';
                     deleteBtn.style.transition = 'color 0.15s ease, background-color 0.15s ease';
+                    deleteBtn.setAttribute('aria-label', `Delete ${model.displayName || model.name}`);
                     deleteBtn.addEventListener('mouseenter', () => {
                         deleteBtn.style.color = '#ef4444';
                         deleteBtn.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
@@ -376,7 +392,7 @@ window.addEventListener('DOMContentLoaded', () => {
                     });
                     deleteBtn.addEventListener('click', async (e) => {
                         e.stopPropagation();
-                        if (confirm(`Are you sure you want to delete the model "${model.displayName || model.name}"?`)) {
+                        if (window.confirm(`Delete "${model.displayName || model.name}"? This removes it from your model list.`)) {
                             await storageAPI.deleteCustomModel(model.name);
                             await renderCustomModelsList();
                             const refreshBtn = findRefreshButton();
@@ -434,7 +450,7 @@ window.addEventListener('DOMContentLoaded', () => {
         newBtnGroup.style.alignItems = 'center';
         const addModelBtn = document.createElement('button');
         addModelBtn.id = 'agy-add-model-btn';
-        addModelBtn.textContent = 'Add Model';
+        addModelBtn.textContent = '☁️ Provider Manager';
         const refreshBtn = findRefreshButton();
         if (refreshBtn) {
             addModelBtn.className = refreshBtn.className;
@@ -442,7 +458,7 @@ window.addEventListener('DOMContentLoaded', () => {
         }
         addModelBtn.style.cursor = 'pointer';
         addModelBtn.addEventListener('click', () => {
-            openAddModelModal();
+            openProviderManagerModal();
         });
         newBtnGroup.appendChild(addModelBtn);
         newHeaderRow.appendChild(newHeading);
@@ -462,158 +478,88 @@ window.addEventListener('DOMContentLoaded', () => {
         }
         await renderCustomModelsList();
     }
-    function openAddModelModal() {
-        // Remove existing modal if any
+    function openProviderManagerModal() {
         const existing = document.getElementById('agy-modal-overlay');
         if (existing)
             existing.remove();
-        // Modal overlay backdrop
         const overlay = document.createElement('div');
         overlay.id = 'agy-modal-overlay';
-        overlay.style.position = 'fixed';
-        overlay.style.top = '0';
-        overlay.style.left = '0';
-        overlay.style.width = '100vw';
-        overlay.style.height = '100vh';
-        overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.6)';
-        overlay.style.backdropFilter = 'blur(6px)';
-        overlay.style.display = 'flex';
-        overlay.style.justifyContent = 'center';
-        overlay.style.alignItems = 'center';
-        overlay.style.zIndex = '999999';
-        overlay.style.opacity = '0';
-        overlay.style.transition = 'opacity 0.2s ease-in-out';
-        // Modal card container
+        overlay.style.cssText = `
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(6px); z-index: 999999;
+      display: flex; justify-content: center; align-items: center;
+      opacity: 1; transition: opacity 0.2s ease;
+    `;
         const modal = document.createElement('div');
-        modal.id = 'agy-modal-card';
-        modal.style.width = '520px';
-        modal.style.maxHeight = '90vh';
-        modal.style.overflowY = 'auto';
-        modal.style.backgroundColor = '#18181b';
-        modal.style.border = '1px solid #27272a';
-        modal.style.borderRadius = '16px';
-        modal.style.padding = '32px';
-        modal.style.boxShadow = '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.5)';
-        modal.style.color = '#f4f4f5';
-        modal.style.fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
-        modal.style.transform = 'scale(0.9) translateY(20px)';
-        modal.style.transition = 'transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)';
-        modal.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <div style="width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center; justify-content: center; background-color: #3b82f618; color: #3b82f6;">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/></svg>
-                    </div>
-                    <h3 style="margin: 0; font-size: 20px; font-weight: 600; color: #f4f4f5;">Add Custom Model</h3>
-                </div>
-                <button id="agy-modal-close" style="background: transparent; border: none; color: #a1a1aa; cursor: pointer; font-size: 20px; line-height: 1; padding: 4px; display: flex; align-items: center; justify-content: center; transition: color 0.15s ease;">&times;</button>
-            </div>
-
-            <div style="display: flex; flex-direction: column; gap: 16px; margin-bottom: 24px;">
-                <!-- Step Indicator -->
-                <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid #3f3f46;">
-                    <div id="agy-step-1-indicator" style="display: flex; align-items: center; gap: 8px;">
-                        <div style="width: 28px; height: 28px; border-radius: 50%; background-color: #3b82f6; color: white; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600;">1</div>
-                        <span style="font-size: 13px; font-weight: 500; color: #e4e4e7;">Configure API</span>
-                    </div>
-                    <div style="flex: 1; height: 2px; background-color: #3f3f46;"></div>
-                    <div id="agy-step-2-indicator" style="display: flex; align-items: center; gap: 8px;">
-                        <div id="agy-step-2-circle" style="width: 28px; height: 28px; border-radius: 50%; background-color: #3f3f46; color: #71717a; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600;">2</div>
-                        <span id="agy-step-2-text" style="font-size: 13px; font-weight: 500; color: #71717a;">Select Models</span>
-                    </div>
-                </div>
-
-                <!-- Step 1: API Configuration -->
-                <div id="agy-step-1-content" style="display: flex; flex-direction: column; gap: 16px;">
-                    <!-- Provider Type -->
-                    <div style="display: flex; flex-direction: column; gap: 6px;">
-                        <label style="font-size: 13px; font-weight: 500; color: #a1a1aa;">Provider Type <span style="color: #ef4444;">*</span></label>
-                        <select id="agy-provider-type" style="background-color: #27272a; border: 1px solid #3f3f46; border-radius: 8px; color: #f4f4f5; padding: 10px 12px; font-size: 14px; outline: none; cursor: pointer; transition: border-color 0.15s ease;">
-                            <option value="openai">OpenAI Compatible</option>
-                            <option value="anthropic">Anthropic Compatible</option>
-                        </select>
-                    </div>
-
-                    <!-- API URL -->
-                    <div style="display: flex; flex-direction: column; gap: 6px;">
-                        <label style="font-size: 13px; font-weight: 500; color: #a1a1aa;">API URL <span style="color: #ef4444;">*</span></label>
-                        <input type="text" id="agy-api-url" placeholder="https://api.openai.com/v1/chat/completions" style="background-color: #27272a; border: 1px solid #3f3f46; border-radius: 8px; color: #f4f4f5; padding: 10px 12px; font-size: 14px; outline: none; transition: border-color 0.15s ease;" />
-                        <div id="agy-url-error" style="font-size: 11px; color: #ef4444; display: none;"></div>
-                    </div>
-
-                    <!-- API Key -->
-                    <div style="display: flex; flex-direction: column; gap: 6px;">
-                        <label style="font-size: 13px; font-weight: 500; color: #a1a1aa;">API Key <span style="color: #71717a;">(optional for local)</span></label>
-                        <input type="password" id="agy-api-key" placeholder="sk-..." style="background-color: #27272a; border: 1px solid #3f3f46; border-radius: 8px; color: #f4f4f5; padding: 10px 12px; font-size: 14px; outline: none; transition: border-color 0.15s ease;" />
-                    </div>
-
-                    <!-- Allow Unauthorized SSL -->
-                    <div style="display: flex; align-items: center; gap: 8px; padding: 10px 12px; background-color: #27272a; border: 1px solid #3f3f46; border-radius: 8px;">
-                        <input type="checkbox" id="agy-allow-unauthorized" style="width: 16px; height: 16px; cursor: pointer;" />
-                        <label for="agy-allow-unauthorized" style="font-size: 13px; color: #d4d4d8; cursor: pointer; user-select: none;">Allow self-signed certificates</label>
-                    </div>
-
-                    <!-- Fetch Models Button -->
-                    <button id="agy-fetch-models-btn" type="button" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); border: none; color: white; padding: 12px 16px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.15s ease; box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.3);">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="16 8 12 12 8 8"/><line x1="12" y1="16" x2="12" y2="12"/></svg>
-                        Fetch Available Models
-                    </button>
-                    <div id="agy-fetch-status" style="font-size: 12px; color: #a1a1aa; display: none; text-align: center;"></div>
-                </div>
-
-                <!-- Step 2: Model Selection -->
-                <div id="agy-step-2-content" style="display: none; flex-direction: column; gap: 16px;">
-                    <div style="font-size: 13px; color: #a1a1aa;">Select one or more models to add:</div>
-                    
-                    <!-- Models List -->
-                    <div id="agy-models-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 400px; overflow-y: auto; padding: 8px; background-color: #1c1c1f; border: 1px solid #3f3f46; border-radius: 8px;">
-                        <!-- Models will be populated here -->
-                    </div>
-
-                    <!-- Back Button -->
-                    <button id="agy-back-to-step1" type="button" style="background-color: #27272a; border: 1px solid #3f3f46; color: #d4d4d8; padding: 10px 16px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.15s ease;">
-                        ← Back to Configuration
-                    </button>
-
-                    <!-- Selected Models Display -->
-                    <div id="agy-selected-models" style="display: none; flex-direction: column; gap: 8px; padding: 12px; background-color: #1c1c1f; border: 1px solid #22c55e; border-radius: 8px;">
-                        <div style="font-size: 12px; font-weight: 600; color: #22c55e;">Selected Models:</div>
-                        <div id="agy-selected-list" style="font-size: 12px; color: #d4d4d8;"></div>
-                    </div>
-                </div>
-
-                <!-- Display Name Suffix (Optional, shown in step 2) -->
-                <div id="agy-display-name-container" style="display: none; flex-direction: column; gap: 6px;">
-                    <label style="font-size: 13px; font-weight: 500; color: #a1a1aa;">Display Name Suffix (optional)</label>
-                    <input type="text" id="agy-display-name-suffix" placeholder="e.g. (via OpenRouter)" style="background-color: #27272a; border: 1px solid #3f3f46; border-radius: 8px; color: #f4f4f5; padding: 10px 12px; font-size: 14px; outline: none; transition: border-color 0.15s ease;" />
-                    <div style="font-size: 11px; color: #71717a;">Will be appended to model names</div>
-                </div>
-            </div>
-
-            <div style="display: flex; gap: 12px; justify-content: flex-end; padding-top: 16px; border-top: 1px solid #3f3f46;">
-                <button id="agy-btn-cancel" style="background: transparent; border: 1px solid #3f3f46; color: #d4d4d8; padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.15s ease;">Cancel</button>
-                <button id="agy-btn-save" style="background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); border: none; color: white; padding: 10px 24px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.15s ease; box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.3); display: none;">Add Selected Models</button>
-            </div>
-        `;
+        modal.style.cssText = `
+      background: #18181b; border: 1px solid #3f3f46; border-radius: 12px;
+      width: 650px; max-height: 85vh; display: flex; flex-direction: column;
+      box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); overflow: hidden; color: #f4f4f5;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      transform: scale(1) translateY(0); opacity: 1; transition: transform 0.2s ease, opacity 0.2s ease;
+      outline: none;
+    `;
+        const header = document.createElement('div');
+        header.style.cssText = `padding: 16px 24px; border-bottom: 1px solid #3f3f46; display: flex; justify-content: space-between; align-items: center;`;
+        const titleRow = document.createElement('div');
+        titleRow.style.cssText = `display: flex; align-items: center; gap: 8px;`;
+        titleRow.innerHTML = `<h3 style="margin:0; font-size:18px; font-weight:600;">Provider Manager</h3>`;
+        titleRow.setAttribute('role', 'heading');
+        titleRow.setAttribute('aria-level', '3');
+        const closeBtn = document.createElement('button');
+        closeBtn.style.cssText = `background:none; border:none; color:#a1a1aa; font-size:24px; cursor:pointer; padding:0; line-height:1; border-radius:4px; transition: color 0.15s ease, background-color 0.15s ease;`;
+        closeBtn.setAttribute('aria-label', 'Close provider manager');
+        closeBtn.onclick = () => overlay.remove();
+        header.appendChild(titleRow);
+        header.appendChild(closeBtn);
+        modal.appendChild(header);
+        const body = document.createElement('div');
+        body.style.cssText = `display: flex; flex-direction: column; flex: 1; overflow: hidden; position: relative;`;
+        const listContainer = document.createElement('div');
+        listContainer.style.cssText = `padding: 24px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 16px;`;
+        const formContainer = document.createElement('div');
+        formContainer.style.cssText = `padding: 24px; overflow-y: auto; flex: 1; display: none; flex-direction: column; gap: 16px; background: #1c1c1f;`;
+        body.appendChild(listContainer);
+        body.appendChild(formContainer);
+        modal.appendChild(body);
         overlay.appendChild(modal);
         document.body.appendChild(overlay);
         // Animate in
-        setTimeout(() => {
+        if (!prefersReducedMotion()) {
+            overlay.style.opacity = '0';
+            modal.style.opacity = '0';
+            modal.style.transform = 'scale(0.9) translateY(20px)';
+            modal.style.transition = 'transform 0.2s ease, opacity 0.2s ease';
+            overlay.style.transition = 'opacity 0.2s ease';
+            requestAnimationFrame(() => {
+                overlay.style.opacity = '1';
+                modal.style.opacity = '1';
+                modal.style.transform = 'scale(1) translateY(0)';
+            });
+        }
+        else {
             overlay.style.opacity = '1';
+            modal.style.opacity = '1';
             modal.style.transform = 'scale(1) translateY(0)';
-        }, 10);
-        // Close handler
-        const closeModal = () => {
+        }
+        const closeModalAndCleanup = () => {
             overlay.style.opacity = '0';
             modal.style.transform = 'scale(0.9) translateY(20px)';
+            document.removeEventListener('keydown', onKeydown);
             setTimeout(() => overlay.remove(), 200);
         };
-        document.getElementById('agy-modal-close').addEventListener('click', closeModal);
-        document.getElementById('agy-btn-cancel').addEventListener('click', closeModal);
+        document.getElementById('agy-modal-close').addEventListener('click', closeModalAndCleanup);
+        document.getElementById('agy-btn-cancel').addEventListener('click', closeModalAndCleanup);
         overlay.addEventListener('click', (e) => {
             if (e.target === overlay)
-                closeModal();
+                closeModalAndCleanup();
         });
+        const onKeydown = (e) => {
+            if (e.key === 'Escape') {
+                closeModalAndCleanup();
+            }
+        };
+        document.addEventListener('keydown', onKeydown);
         // Element references for Step 1
         const providerTypeSelect = document.getElementById('agy-provider-type');
         const urlInput = document.getElementById('agy-api-url');
@@ -646,231 +592,162 @@ window.addEventListener('DOMContentLoaded', () => {
             const apiKey = keyInput.value.trim();
             const provider = providerTypeSelect.value;
             if (!apiUrl) {
-                urlError.textContent = 'Please enter an API URL';
-                urlError.style.display = 'block';
-                return;
-            }
-            urlError.style.display = 'none';
-            fetchModelsBtn.disabled = true;
-            fetchModelsBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg> Fetching...';
-            fetchStatus.textContent = 'Connecting to API...';
-            fetchStatus.style.color = '#a1a1aa';
-            fetchStatus.style.display = 'block';
-            try {
                 const result = await electron_1.ipcRenderer.invoke('storage:fetch-provider-models', {
                     apiUrl,
-                    apiKey: apiKey || undefined,
-                    provider,
-                    allowUnauthorized: allowUnauthorized.checked,
-                });
-                if (result.success && result.models && result.models.length > 0) {
-                    fetchedModels = result.models;
-                    apiConfig = { provider, apiUrl, apiKey, allowUnauthorized: allowUnauthorized.checked };
-                    fetchStatus.textContent = `Found ${result.models.length} model(s)`;
-                    fetchStatus.style.color = '#22c55e';
-                    // Transition to Step 2
-                    setTimeout(() => {
-                        step1Content.style.display = 'none';
-                        step2Content.style.display = 'flex';
-                        displayNameContainer.style.display = 'flex';
-                        step2Circle.style.backgroundColor = '#3b82f6';
-                        step2Circle.style.color = 'white';
-                        step2Text.style.color = '#e4e4e7';
-                        // Populate models list
-                        modelsList.innerHTML = '';
-                        fetchedModels.forEach((model) => {
-                            const modelCard = document.createElement('div');
-                            modelCard.style.cssText = 'padding: 12px; background-color: #27272a; border: 2px solid #3f3f46; border-radius: 8px; cursor: pointer; transition: all 0.15s ease; display: flex; align-items: center; gap: 12px;';
-                            const checkbox = document.createElement('input');
-                            checkbox.type = 'checkbox';
-                            checkbox.style.cssText = 'width: 18px; height: 18px; cursor: pointer;';
-                            checkbox.dataset.modelId = model.id;
-                            const infoDiv = document.createElement('div');
-                            infoDiv.style.cssText = 'flex: 1; display: flex; flex-direction: column; gap: 4px;';
-                            const modelName = document.createElement('div');
-                            modelName.textContent = model.name || model.id;
-                            modelName.style.cssText = 'font-size: 14px; font-weight: 500; color: #f4f4f5;';
-                            const modelId = document.createElement('div');
-                            modelId.textContent = model.id;
-                            modelId.style.cssText = 'font-size: 12px; color: #71717a;';
-                            infoDiv.appendChild(modelName);
-                            if (model.name !== model.id)
-                                infoDiv.appendChild(modelId);
-                            // Show modalities badge
-                            if (model.inputModalities && model.inputModalities.length > 0 && model.inputModalities.some(m => m !== 'text')) {
-                                const badge = document.createElement('span');
-                                badge.textContent = model.inputModalities.join(', ');
-                                badge.style.cssText = 'font-size: 10px; padding: 2px 6px; background-color: #3b82f6; color: white; border-radius: 4px; display: inline-block;';
-                                infoDiv.appendChild(badge);
-                            }
-                            modelCard.appendChild(checkbox);
-                            modelCard.appendChild(infoDiv);
-                            // Toggle selection
-                            modelCard.addEventListener('click', (e) => {
-                                if (e.target !== checkbox) {
-                                    checkbox.checked = !checkbox.checked;
-                                }
-                                if (checkbox.checked) {
-                                    selectedModels.add(model.id);
-                                    modelCard.style.borderColor = '#22c55e';
-                                    modelCard.style.backgroundColor = '#22c55e18';
-                                }
-                                else {
-                                    selectedModels.delete(model.id);
-                                    modelCard.style.borderColor = '#3f3f46';
-                                    modelCard.style.backgroundColor = '#27272a';
-                                }
-                                updateSelectedDisplay();
-                            });
-                            modelsList.appendChild(modelCard);
-                        });
-                    }, 500);
-                }
-                else {
-                    fetchStatus.textContent = result.error || 'No models found';
-                    fetchStatus.style.color = '#ef4444';
-                }
-            }
-            catch (err) {
-                fetchStatus.textContent = 'Error: ' + err.message;
-                fetchStatus.style.color = '#ef4444';
-            }
-            finally {
-                setTimeout(() => {
-                    fetchModelsBtn.disabled = false;
-                    fetchModelsBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="16 8 12 12 8 8"/><line x1="12" y1="16" x2="12" y2="12"/></svg> Fetch Available Models';
-                }, 1000);
-            }
-        });
-        // Update selected models display
-        const updateSelectedDisplay = () => {
-            if (selectedModels.size > 0) {
-                selectedModelsDiv.style.display = 'flex';
-                selectedListDiv.textContent = `${selectedModels.size} model(s) selected`;
-                saveBtn.style.display = 'block';
+                    modelCard, : .addEventListener('click', (e) => {
+                        if (e.target !== checkbox) {
+                            checkbox.checked = !checkbox.checked;
+                        }
+                        modelsList.appendChild(modelCard);
+                    })
+                }, 500);
             }
             else {
-                selectedModelsDiv.style.display = 'none';
-                saveBtn.style.display = 'none';
-            }
-        };
-        // Back to step 1
-        backToStep1Btn.addEventListener('click', () => {
-            step2Content.style.display = 'none';
-            step1Content.style.display = 'flex';
-            displayNameContainer.style.display = 'none';
-            step2Circle.style.backgroundColor = '#3f3f46';
-            step2Circle.style.color = '#71717a';
-            step2Text.style.color = '#71717a';
-            selectedModels.clear();
-            updateSelectedDisplay();
-        });
-        // Save selected models
-        saveBtn.addEventListener('click', async () => {
-            if (selectedModels.size === 0) {
-                fetchStatus.textContent = 'Please select at least one model';
+                fetchStatus.textContent = result.error || 'No models found';
                 fetchStatus.style.color = '#ef4444';
-                return;
-            }
-            saveBtn.disabled = true;
-            saveBtn.textContent = 'Adding models...';
-            const suffix = displayNameSuffix.value.trim();
-            const modelsToAdd = fetchedModels.filter(m => selectedModels.has(m.id));
-            try {
-                for (const model of modelsToAdd) {
-                    const displayName = model.name + (suffix ? ` ${suffix}` : '');
-                    await electron_1.ipcRenderer.invoke('storage:save-custom-model', {
-                        name: model.id,
-                        displayName,
-                        provider: apiConfig.provider,
-                        apiKey: apiConfig.apiKey,
-                        apiUrl: apiConfig.apiUrl,
-                        externalModelName: model.id,
-                        allowUnauthorized: apiConfig.allowUnauthorized,
-                        inputModalities: model.inputModalities || ['text'],
-                    });
-                }
-                // Success - reload models and close
-                closeModal();
-            }
-            catch (err) {
-                fetchStatus.textContent = 'Error: ' + err.message;
-                fetchStatus.style.color = '#ef4444';
-                saveBtn.disabled = false;
-                saveBtn.textContent = 'Add Selected Models';
             }
         });
+        try { }
+        catch (err) {
+            fetchStatus.textContent = 'Error: ' + err.message;
+            fetchStatus.style.color = '#ef4444';
+        }
+        finally {
+            setTimeout(() => {
+                fetchModelsBtn.disabled = false;
+                fetchModelsBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="16 8 12 12 8 8"/><line x1="12" y1="16" x2="12" y2="12"/></svg> Fetch Available Models';
+            }, 1000);
+        }
     }
-    ;
-    // Close add model modal if open
-    const closeAddModelModal = () => {
-        const existingOverlay = document.getElementById('agy-modal-overlay');
-        if (existingOverlay) {
-            existingOverlay.remove();
-        }
-    };
-    // Efficient DOM tracking via MutationObserver — instead of setInterval
-    let injectionObserver = null;
-    let injectionDebounceTimer = null;
-    function setupInjectionObserver() {
-        // Try immediately first
-        void injectCustomModelsSection();
-        // If already added, no need for observer
-        if (document.getElementById('agy-custom-models-section'))
-            return;
-        // Set up observer: watch all changes under document.body
-        injectionObserver = new MutationObserver(() => {
-            // Debounce: coalesce consecutive mutations into a single attempt
-            if (injectionDebounceTimer)
-                clearTimeout(injectionDebounceTimer);
-            injectionDebounceTimer = setTimeout(async () => {
-                await injectCustomModelsSection();
-                // If successfully injected, stop observing
-                if (document.getElementById('agy-custom-models-section')) {
-                    if (injectionObserver) {
-                        injectionObserver.disconnect();
-                        injectionObserver = null;
-                    }
-                }
-            }, 200);
-        });
-        injectionObserver.observe(document.body, {
-            childList: true,
-            subtree: true,
-        });
+});
+// Update selected models display
+const updateSelectedDisplay = () => {
+    if (selectedModels.size > 0) {
+        selectedModelsDiv.style.display = 'flex';
+        selectedListDiv.textContent = `${selectedModels.size} model(s) selected`;
+        saveBtn.style.display = 'block';
     }
-    // URL tracking for re-injection on SPA page transitions
-    let lastUrl = location.href;
-    setInterval(() => {
-        const currentUrl = location.href;
-        if (currentUrl !== lastUrl) {
-            lastUrl = currentUrl;
-            // Page changed — clean up previous observer and re-initialize
-            if (injectionObserver) {
-                injectionObserver.disconnect();
-                injectionObserver = null;
+    else {
+        selectedModelsDiv.style.display = 'none';
+        saveBtn.style.display = 'none';
+    }
+};
+// Back to step 1
+backToStep1Btn.addEventListener('click', () => {
+    step2Content.style.display = 'none';
+    step1Content.style.display = 'flex';
+    displayNameContainer.style.display = 'none';
+    step2Circle.style.backgroundColor = '#3f3f46';
+    step2Circle.style.color = '#71717a';
+    step2Text.style.color = '#71717a';
+    selectedModels.clear();
+    updateSelectedDisplay();
+});
+// Save selected models
+saveBtn.addEventListener('click', async () => {
+    if (selectedModels.size === 0) {
+        fetchStatus.textContent = 'Please select at least one model';
+        fetchStatus.style.color = '#ef4444';
+        return;
+    }
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Adding models...';
+    const suffix = displayNameSuffix.value.trim();
+    const modelsToAdd = fetchedModels.filter(m => selectedModels.has(m.id));
+    try {
+        for (const model of modelsToAdd) {
+            const displayName = model.name + (suffix ? ` ${suffix}` : '');
+            await electron_1.ipcRenderer.invoke('storage:save-custom-model', {
+                name: model.id,
+                displayName,
+                provider: apiConfig.provider,
+                apiKey: apiConfig.apiKey,
+                apiUrl: apiConfig.apiUrl,
+                externalModelName: model.id,
+                allowUnauthorized: apiConfig.allowUnauthorized,
+                inputModalities: model.inputModalities || ['text'],
+            });
+        }
+        // Success - reload models and close
+        closeModalAndCleanup();
+    }
+    catch (err) {
+        fetchStatus.textContent = 'Error: ' + err.message;
+        fetchStatus.style.color = '#ef4444';
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Add Selected Models';
+    }
+});
+;
+// Close add model modal if open
+const closeAddModelModal = () => {
+    const existingOverlay = document.getElementById('agy-modal-overlay');
+    if (existingOverlay) {
+        existingOverlay.remove();
+    }
+};
+// Efficient DOM tracking via MutationObserver — instead of setInterval
+let injectionObserver = null;
+let injectionDebounceTimer = null;
+function setupInjectionObserver() {
+    // Try immediately first
+    void injectCustomModelsSection();
+    // If already added, no need for observer
+    if (document.getElementById('agy-custom-models-section'))
+        return;
+    // Set up observer: watch all changes under document.body
+    injectionObserver = new MutationObserver(() => {
+        // Debounce: coalesce consecutive mutations into a single attempt
+        if (injectionDebounceTimer)
+            clearTimeout(injectionDebounceTimer);
+        injectionDebounceTimer = setTimeout(async () => {
+            await injectCustomModelsSection();
+            // If successfully injected, stop observing
+            if (document.getElementById('agy-custom-models-section')) {
+                if (injectionObserver) {
+                    injectionObserver.disconnect();
+                    injectionObserver = null;
+                }
             }
-            // Re-initialize after a short delay (for new DOM to render)
-            setTimeout(setupInjectionObserver, 500);
+        }, 200);
+    });
+    injectionObserver.observe(document.body, {
+        childList: true,
+        subtree: true,
+    });
+}
+// URL tracking for re-injection on SPA page transitions
+let lastUrl = location.href;
+setInterval(() => {
+    const currentUrl = location.href;
+    if (currentUrl !== lastUrl) {
+        lastUrl = currentUrl;
+        // Page changed — clean up previous observer and re-initialize
+        if (injectionObserver) {
+            injectionObserver.disconnect();
+            injectionObserver = null;
         }
-    }, 1500);
-    // --- Contextual Error Toast UI ----------------------------------------
-    function showErrorToast(diagnostic) {
-        if (!document || !document.body)
-            return;
-        const existingToastId = `agy-toast-${diagnostic.errorType}`;
-        const existing = document.getElementById(existingToastId);
-        if (existing) {
-            existing.style.animation = 'none';
-            void existing.offsetWidth; // trigger reflow
-            existing.style.animation = 'agy-toast-shake 0.4s ease-in-out, agy-toast-fade-in 0.3s ease-out';
-            return;
-        }
-        let container = document.getElementById('agy-toast-container');
-        if (!container) {
-            container = document.createElement('div');
-            container.id = 'agy-toast-container';
-            container.style.cssText = `
+        // Re-initialize after a short delay (for new DOM to render)
+        setTimeout(setupInjectionObserver, 500);
+    }
+}, 1500);
+// --- Contextual Error Toast UI ----------------------------------------
+function showErrorToast(diagnostic) {
+    if (!document || !document.body)
+        return;
+    const existingToastId = `agy-toast-${diagnostic.errorType}`;
+    const existing = document.getElementById(existingToastId);
+    if (existing) {
+        existing.style.animation = 'none';
+        void existing.offsetWidth; // trigger reflow
+        existing.style.animation = 'agy-toast-shake 0.4s ease-in-out, agy-toast-fade-in 0.3s ease-out';
+        return;
+    }
+    let container = document.getElementById('agy-toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'agy-toast-container';
+        container.style.cssText = `
         position: fixed;
         top: 24px;
         right: 24px;
@@ -882,9 +759,9 @@ window.addEventListener('DOMContentLoaded', () => {
         width: calc(100vw - 48px);
         pointer-events: none;
       `;
-            document.body.appendChild(container);
-            const style = document.createElement('style');
-            style.textContent = `
+        document.body.appendChild(container);
+        const style = document.createElement('style');
+        style.textContent = `
         @keyframes agy-toast-fade-in {
           from { opacity: 0; transform: translateY(-20px) scale(0.95); }
           to { opacity: 1; transform: translateY(0) scale(1); }
@@ -898,12 +775,16 @@ window.addEventListener('DOMContentLoaded', () => {
           20%, 60% { transform: translateX(-6px); }
           40%, 80% { transform: translateX(6px); }
         }
-      `;
-            document.head.appendChild(style);
+        @media (prefers-reduced-motion: reduce) {
+          .agy-toast-el { animation: none !important; }
         }
-        const toast = document.createElement('div');
-        toast.id = existingToastId;
-        toast.style.cssText = `
+      `;
+        document.head.appendChild(style);
+    }
+    const toast = document.createElement('div');
+    toast.id = existingToastId;
+    toast.className = 'agy-toast-el';
+    toast.style.cssText = `
       background-color: #18181b;
       border: 1px solid #27272a;
       border-radius: 12px;
@@ -919,34 +800,34 @@ window.addEventListener('DOMContentLoaded', () => {
       flex-direction: column;
       gap: 10px;
     `;
-        let borderLeftColor = '#a855f7';
-        let iconHtml = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>`;
-        if (diagnostic.errorType === 'billing') {
-            borderLeftColor = '#ef4444';
-            iconHtml = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>`;
-        }
-        else if (diagnostic.errorType === 'auth' || diagnostic.errorType === 'forbidden') {
-            borderLeftColor = '#f97316';
-            iconHtml = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`;
-        }
-        else if (diagnostic.errorType === 'rate_limit') {
-            borderLeftColor = '#eab308';
-            iconHtml = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
-        }
-        else if (diagnostic.errorType === 'timeout') {
-            borderLeftColor = '#3b82f6';
-            iconHtml = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
-        }
-        else if (diagnostic.errorType === 'network' || diagnostic.errorType === 'dns') {
-            borderLeftColor = '#64748b';
-            iconHtml = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.59 16a7.5 7.5 0 0 1 6.82 0M12 20h.01"/></svg>`;
-        }
-        else if (diagnostic.errorType === 'server') {
-            borderLeftColor = '#ef4444';
-            iconHtml = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
-        }
-        const accentLine = document.createElement('div');
-        accentLine.style.cssText = `
+    let borderLeftColor = '#a855f7';
+    let iconHtml = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>`;
+    if (diagnostic.errorType === 'billing') {
+        borderLeftColor = '#ef4444';
+        iconHtml = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>`;
+    }
+    else if (diagnostic.errorType === 'auth' || diagnostic.errorType === 'forbidden') {
+        borderLeftColor = '#f97316';
+        iconHtml = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`;
+    }
+    else if (diagnostic.errorType === 'rate_limit') {
+        borderLeftColor = '#eab308';
+        iconHtml = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+    }
+    else if (diagnostic.errorType === 'timeout') {
+        borderLeftColor = '#3b82f6';
+        iconHtml = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+    }
+    else if (diagnostic.errorType === 'network' || diagnostic.errorType === 'dns') {
+        borderLeftColor = '#64748b';
+        iconHtml = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.59 16a7.5 7.5 0 0 1 6.82 0M12 20h.01"/></svg>`;
+    }
+    else if (diagnostic.errorType === 'server') {
+        borderLeftColor = '#ef4444';
+        iconHtml = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
+    }
+    const accentLine = document.createElement('div');
+    accentLine.style.cssText = `
       position: absolute;
       left: 0;
       top: 0;
@@ -954,50 +835,50 @@ window.addEventListener('DOMContentLoaded', () => {
       width: 4px;
       background-color: ${borderLeftColor};
     `;
-        toast.appendChild(accentLine);
-        const mainRow = document.createElement('div');
-        mainRow.style.cssText = `
+    toast.appendChild(accentLine);
+    const mainRow = document.createElement('div');
+    mainRow.style.cssText = `
       display: flex;
       gap: 12px;
       align-items: flex-start;
     `;
-        const iconContainer = document.createElement('div');
-        iconContainer.style.cssText = `
+    const iconContainer = document.createElement('div');
+    iconContainer.style.cssText = `
       color: ${borderLeftColor};
       display: flex;
       align-items: center;
       justify-content: center;
       margin-top: 2px;
     `;
-        iconContainer.innerHTML = iconHtml;
-        mainRow.appendChild(iconContainer);
-        const textContainer = document.createElement('div');
-        textContainer.style.cssText = `
+    iconContainer.innerHTML = iconHtml;
+    mainRow.appendChild(iconContainer);
+    const textContainer = document.createElement('div');
+    textContainer.style.cssText = `
       display: flex;
       flex-direction: column;
       gap: 4px;
       flex: 1;
     `;
-        const title = document.createElement('div');
-        title.style.cssText = `
+    const title = document.createElement('div');
+    title.style.cssText = `
       font-size: 14px;
       font-weight: 600;
       color: #f4f4f5;
     `;
-        title.textContent = diagnostic.title;
-        textContainer.appendChild(title);
-        const desc = document.createElement('div');
-        desc.style.cssText = `
+    title.textContent = diagnostic.title;
+    textContainer.appendChild(title);
+    const desc = document.createElement('div');
+    desc.style.cssText = `
       font-size: 12px;
       color: #a1a1aa;
       line-height: 1.4;
     `;
-        desc.textContent = diagnostic.message;
-        textContainer.appendChild(desc);
-        mainRow.appendChild(textContainer);
-        const closeBtn = document.createElement('button');
-        closeBtn.textContent = '×';
-        closeBtn.style.cssText = `
+    desc.textContent = diagnostic.message;
+    textContainer.appendChild(desc);
+    mainRow.appendChild(textContainer);
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '×';
+    closeBtn.style.cssText = `
       background: transparent;
       border: none;
       color: #71717a;
@@ -1008,22 +889,22 @@ window.addEventListener('DOMContentLoaded', () => {
       margin-top: -2px;
       transition: color 0.15s ease;
     `;
-        closeBtn.addEventListener('mouseenter', () => closeBtn.style.color = '#f4f4f5');
-        closeBtn.addEventListener('mouseleave', () => closeBtn.style.color = '#71717a');
-        let autoDismissTimer = null;
-        const dismissToast = () => {
-            if (autoDismissTimer) {
-                clearTimeout(autoDismissTimer);
-            }
-            toast.style.animation = 'agy-toast-fade-out 0.25s ease-in forwards';
-            setTimeout(() => toast.remove(), 250);
-        };
-        closeBtn.addEventListener('click', dismissToast);
-        mainRow.appendChild(closeBtn);
-        toast.appendChild(mainRow);
-        if (diagnostic.suggestions && diagnostic.suggestions.length > 0) {
-            const suggBox = document.createElement('div');
-            suggBox.style.cssText = `
+    closeBtn.addEventListener('mouseenter', () => closeBtn.style.color = '#f4f4f5');
+    closeBtn.addEventListener('mouseleave', () => closeBtn.style.color = '#71717a');
+    let autoDismissTimer = null;
+    const dismissToast = () => {
+        if (autoDismissTimer) {
+            clearTimeout(autoDismissTimer);
+        }
+        toast.style.animation = 'agy-toast-fade-out 0.25s ease-in forwards';
+        setTimeout(() => toast.remove(), 250);
+    };
+    closeBtn.addEventListener('click', dismissToast);
+    mainRow.appendChild(closeBtn);
+    toast.appendChild(mainRow);
+    if (diagnostic.suggestions && diagnostic.suggestions.length > 0) {
+        const suggBox = document.createElement('div');
+        suggBox.style.cssText = `
         background-color: #1c1c1f;
         border-radius: 6px;
         padding: 10px 12px;
@@ -1032,18 +913,18 @@ window.addEventListener('DOMContentLoaded', () => {
         gap: 6px;
         margin-left: 30px;
       `;
-            const suggTitle = document.createElement('div');
-            suggTitle.style.cssText = `
+        const suggTitle = document.createElement('div');
+        suggTitle.style.cssText = `
         font-size: 10px;
         font-weight: 600;
         color: #71717a;
         text-transform: uppercase;
         letter-spacing: 0.5px;
       `;
-            suggTitle.textContent = 'Suggested Actions';
-            suggBox.appendChild(suggTitle);
-            const suggList = document.createElement('ul');
-            suggList.style.cssText = `
+        suggTitle.textContent = 'Suggested Actions';
+        suggBox.appendChild(suggTitle);
+        const suggList = document.createElement('ul');
+        suggList.style.cssText = `
         margin: 0;
         padding-left: 16px;
         font-size: 11px;
@@ -1052,26 +933,26 @@ window.addEventListener('DOMContentLoaded', () => {
         flex-direction: column;
         gap: 4px;
       `;
-            diagnostic.suggestions.forEach((sug) => {
-                const item = document.createElement('li');
-                item.textContent = sug;
-                suggList.appendChild(item);
-            });
-            suggBox.appendChild(suggList);
-            toast.appendChild(suggBox);
-        }
-        const actionsRow = document.createElement('div');
-        actionsRow.style.cssText = `
+        diagnostic.suggestions.forEach((sug) => {
+            const item = document.createElement('li');
+            item.textContent = sug;
+            suggList.appendChild(item);
+        });
+        suggBox.appendChild(suggList);
+        toast.appendChild(suggBox);
+    }
+    const actionsRow = document.createElement('div');
+    actionsRow.style.cssText = `
       display: flex;
       justify-content: flex-end;
       gap: 8px;
       margin-top: 4px;
       margin-left: 30px;
     `;
-        if (diagnostic.errorType === 'auth') {
-            const configBtn = document.createElement('button');
-            configBtn.textContent = 'Configure API Key';
-            configBtn.style.cssText = `
+    if (diagnostic.errorType === 'auth') {
+        const configBtn = document.createElement('button');
+        configBtn.textContent = 'Configure API Key';
+        configBtn.style.cssText = `
         background-color: #3b82f6;
         border: none;
         color: white;
@@ -1082,18 +963,18 @@ window.addEventListener('DOMContentLoaded', () => {
         cursor: pointer;
         transition: background-color 0.15s ease;
       `;
-            configBtn.addEventListener('mouseenter', () => configBtn.style.backgroundColor = '#2563eb');
-            configBtn.addEventListener('mouseleave', () => configBtn.style.backgroundColor = '#3b82f6');
-            configBtn.addEventListener('click', () => {
-                openAddModelModal();
-                dismissToast();
-            });
-            actionsRow.appendChild(configBtn);
-        }
-        if (diagnostic.actionUrl) {
-            const billingBtn = document.createElement('button');
-            billingBtn.textContent = 'Manage Billing';
-            billingBtn.style.cssText = `
+        configBtn.addEventListener('mouseenter', () => configBtn.style.backgroundColor = '#2563eb');
+        configBtn.addEventListener('mouseleave', () => configBtn.style.backgroundColor = '#3b82f6');
+        configBtn.addEventListener('click', () => {
+            openProviderManagerModal();
+            dismissToast();
+        });
+        actionsRow.appendChild(configBtn);
+    }
+    if (diagnostic.actionUrl) {
+        const billingBtn = document.createElement('button');
+        billingBtn.textContent = 'Manage Billing';
+        billingBtn.style.cssText = `
         background-color: #ef4444;
         border: none;
         color: white;
@@ -1104,19 +985,19 @@ window.addEventListener('DOMContentLoaded', () => {
         cursor: pointer;
         transition: background-color 0.15s ease;
       `;
-            billingBtn.addEventListener('mouseenter', () => billingBtn.style.backgroundColor = '#dc2626');
-            billingBtn.addEventListener('mouseleave', () => billingBtn.style.backgroundColor = '#ef4444');
-            billingBtn.addEventListener('click', () => {
-                window.open(diagnostic.actionUrl, '_blank');
-                dismissToast();
-            });
-            actionsRow.appendChild(billingBtn);
-        }
-        const refreshBtn = findRefreshButton();
-        if (refreshBtn && (diagnostic.errorType === 'rate_limit' || diagnostic.errorType === 'server' || diagnostic.errorType === 'network')) {
-            const retryBtn = document.createElement('button');
-            retryBtn.textContent = 'Retry Request';
-            retryBtn.style.cssText = `
+        billingBtn.addEventListener('mouseenter', () => billingBtn.style.backgroundColor = '#dc2626');
+        billingBtn.addEventListener('mouseleave', () => billingBtn.style.backgroundColor = '#ef4444');
+        billingBtn.addEventListener('click', () => {
+            window.open(diagnostic.actionUrl, '_blank');
+            dismissToast();
+        });
+        actionsRow.appendChild(billingBtn);
+    }
+    const refreshBtn = findRefreshButton();
+    if (refreshBtn && (diagnostic.errorType === 'rate_limit' || diagnostic.errorType === 'server' || diagnostic.errorType === 'network')) {
+        const retryBtn = document.createElement('button');
+        retryBtn.textContent = 'Retry Request';
+        retryBtn.style.cssText = `
         background-color: #27272a;
         border: 1px solid #3f3f46;
         color: #d4d4d8;
@@ -1127,136 +1008,265 @@ window.addEventListener('DOMContentLoaded', () => {
         cursor: pointer;
         transition: all 0.15s ease;
       `;
-            retryBtn.addEventListener('mouseenter', () => {
-                retryBtn.style.backgroundColor = '#3f3f46';
-                retryBtn.style.borderColor = '#52525b';
-            });
-            retryBtn.addEventListener('mouseleave', () => {
-                retryBtn.style.backgroundColor = '#27272a';
-                retryBtn.style.borderColor = '#3f3f46';
-            });
-            retryBtn.addEventListener('click', () => {
-                refreshBtn.click();
-                dismissToast();
-            });
-            actionsRow.appendChild(retryBtn);
-        }
-        if (actionsRow.children.length > 0) {
-            toast.appendChild(actionsRow);
-        }
-        container.appendChild(toast);
-        if (diagnostic.errorType !== 'auth' && diagnostic.errorType !== 'billing') {
-            autoDismissTimer = setTimeout(dismissToast, 10000);
-        }
+        retryBtn.addEventListener('mouseenter', () => {
+            retryBtn.style.backgroundColor = '#3f3f46';
+            retryBtn.style.borderColor = '#52525b';
+        });
+        retryBtn.addEventListener('mouseleave', () => {
+            retryBtn.style.backgroundColor = '#27272a';
+            retryBtn.style.borderColor = '#3f3f46';
+        });
+        retryBtn.addEventListener('click', () => {
+            refreshBtn.click();
+            dismissToast();
+        });
+        actionsRow.appendChild(retryBtn);
     }
-    // --- Network Interceptor for Model Injection & Diagnostics -----------
-    const customModelsCache = { models: [], ts: 0 };
-    async function getCustomModelsForInjection() {
-        if (Date.now() - customModelsCache.ts < 30000)
-            return customModelsCache.models;
-        try {
-            customModelsCache.models = await storageAPI.getCustomModels();
-            customModelsCache.ts = Date.now();
-        }
-        catch { /* ignore */ }
+    if (actionsRow.children.length > 0) {
+        toast.appendChild(actionsRow);
+    }
+    container.appendChild(toast);
+    if (diagnostic.errorType !== 'auth' && diagnostic.errorType !== 'billing') {
+        autoDismissTimer = setTimeout(dismissToast, 10000);
+    }
+}
+// --- Network Interceptor for Model Injection & Diagnostics -----------
+const customModelsCache = { models: [], ts: 0 };
+async function getCustomModelsForInjection() {
+    if (Date.now() - customModelsCache.ts < 30000)
         return customModelsCache.models;
+    try {
+        const providers = await storageAPI.getProviders();
+        const injectedModels = [];
+        providers.forEach(p => {
+            if (!p.enabled)
+                return;
+            p.models.forEach((m) => {
+                if (!m.enabled)
+                    return;
+                injectedModels.push({
+                    name: m.id,
+                    displayName: m.displayName || m.id,
+                    provider: p.provider,
+                    apiKey: p.apiKey,
+                    apiUrl: p.apiUrl,
+                    externalModelName: m.id,
+                    allowUnauthorized: p.allowUnauthorized,
+                    inputModalities: ['text']
+                });
+            });
+        });
+        customModelsCache.models = injectedModels;
+        customModelsCache.ts = Date.now();
     }
-    // Intercept XHR to inject custom models and capture errors
-    const origXHROpen = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function (method, url, async, username, password) {
-        this._agy_url = typeof url === 'string' ? url : url.toString();
-        this._agy_method = method;
-        return origXHROpen.call(this, method, url, async, username, password);
-    };
-    const origXHRSend = XMLHttpRequest.prototype.send;
-    XMLHttpRequest.prototype.send = function (body) {
-        const xhr = this;
-        const url = xhr._agy_url || '';
-        if (url.includes('GetAvailableModels') || url.includes('fetchAvailableModels')) {
-            const origOnReady = xhr.onreadystatechange;
-            xhr.onreadystatechange = async function (ev) {
-                if (xhr.readyState === 4 && xhr.status === 200) {
-                    const customModels = await getCustomModelsForInjection();
-                    if (customModels && customModels.length > 0) {
-                        try {
-                            const responseText = xhr.responseText;
-                            if (responseText && responseText.length > 10) {
-                                const parsed = JSON.parse(responseText);
-                                const modelsObj = (parsed.models || parsed.availableModels || parsed.available_models || {});
-                                for (const m of customModels) {
-                                    const slug = (0, idGenerator_1.toSlug)(m);
-                                    const placeholderId = (0, idGenerator_1.generateModelPlaceholderId)(m);
-                                    modelsObj[slug] = {
-                                        displayName: m.displayName || m.name,
-                                        recommended: true,
-                                        maxTokens: 1048576,
-                                        maxOutputTokens: 4096,
-                                        tokenizerType: 'LLAMA_WITH_SPECIAL',
-                                        model: `MODEL_PLACEHOLDER_M${placeholderId}`,
-                                        apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
-                                        modelProvider: 'MODEL_PROVIDER_GOOGLE',
-                                    };
-                                }
-                                // Override response
-                                Object.defineProperty(xhr, 'responseText', { value: JSON.stringify(parsed), writable: true });
-                                Object.defineProperty(xhr, 'response', { value: JSON.stringify(parsed), writable: true });
-                            }
-                        }
-                        catch { /* ignore parse errors */ }
-                    }
-                }
-                if (origOnReady)
-                    origOnReady.call(xhr, ev);
-            };
+    catch { /* ignore */ }
+    return customModelsCache.models;
+}
+const modelHealthState = new Map();
+const failedModelDisplayNames = new Set();
+let dropdownTimeout;
+const dropdownObserver = new MutationObserver((mutations) => {
+    if (failedModelDisplayNames.size === 0)
+        return;
+    let hasNewNodes = false;
+    for (const m of mutations) {
+        if (m.addedNodes.length > 0) {
+            hasNewNodes = true;
+            break;
         }
-        else if (url.includes('generateContent') || url.includes('streamGenerateContent')) {
-            const origOnReady = xhr.onreadystatechange;
-            xhr.onreadystatechange = async function (ev) {
-                if (xhr.readyState === 4) {
-                    if (xhr.status >= 400) {
-                        try {
-                            const parsed = JSON.parse(xhr.responseText);
-                            if (parsed._agDiagnostic) {
-                                showErrorToast(parsed._agDiagnostic);
-                            }
-                            else {
-                                const diagnostic = (0, errorClassifier_1.classifyError)(xhr.status, null, xhr.responseText);
-                                showErrorToast(diagnostic);
-                            }
-                        }
-                        catch {
-                            const diagnostic = (0, errorClassifier_1.classifyError)(xhr.status, null, xhr.responseText);
-                            showErrorToast(diagnostic);
+    }
+    if (!hasNewNodes)
+        return;
+    if (dropdownTimeout)
+        clearTimeout(dropdownTimeout);
+    dropdownTimeout = setTimeout(() => {
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+        let node;
+        while ((node = walker.nextNode())) {
+            const text = node.nodeValue?.trim();
+            if (text && failedModelDisplayNames.has(text)) {
+                const parent = node.parentNode;
+                if (parent && !parent.querySelector('.ag-model-warning')) {
+                    // Find error msg
+                    let errMsg = "Provider Error. Click to resolve.";
+                    for (const health of Array.from(modelHealthState.values())) {
+                        if (health.status === 'error' && health.diagnostic) {
+                            errMsg = health.diagnostic.errorType.toUpperCase() + ": " + health.diagnostic.message;
+                            break;
                         }
                     }
+                    const warning = document.createElement('span');
+                    warning.className = 'ag-model-warning';
+                    warning.style.cssText = 'cursor: pointer; margin-left: 6px; display: inline-flex; align-items: center; justify-content: center;';
+                    warning.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#eab308" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
+                    warning.title = errMsg + " (Click to fix)";
+                    warning.onclick = (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        openProviderManagerModal();
+                    };
+                    parent.appendChild(warning);
                 }
-                if (origOnReady)
-                    origOnReady.call(xhr, ev);
-            };
-            const origOnError = xhr.onerror;
-            xhr.onerror = function (ev) {
-                const diagnostic = (0, errorClassifier_1.classifyError)(undefined, 'Network Error');
-                showErrorToast(diagnostic);
-                if (origOnError)
-                    origOnError.call(xhr, ev);
-            };
+            }
         }
-        return origXHRSend.call(xhr, body);
-    };
-    // Intercept fetch responses for model endpoints and error capturing
-    const origFetch = window.fetch;
-    window.fetch = async function (input, init) {
-        const url = typeof input === 'string' ? input : input.url;
-        try {
-            const response = await origFetch.call(window, input, init);
-            if ((url.includes('GetAvailableModels') || url.includes('fetchAvailableModels')) && response.ok) {
+    }, 150); // Debounce to prevent blocking the main thread
+});
+if (document && document.body) {
+    dropdownObserver.observe(document.body, { childList: true, subtree: true });
+}
+else {
+    document.addEventListener('DOMContentLoaded', () => {
+        dropdownObserver.observe(document.body, { childList: true, subtree: true });
+    });
+}
+function showPersistentBanner(diagnostic) {
+    if (!document || !document.body)
+        return;
+    const existing = document.getElementById('agy-persistent-banner');
+    if (existing) {
+        existing.style.animation = 'none';
+        void existing.offsetWidth;
+        existing.style.animation = 'agy-toast-shake 0.4s ease-in-out';
+        return;
+    }
+    const textareas = document.querySelectorAll('textarea');
+    let chatInput = null;
+    for (const ta of Array.from(textareas)) {
+        if (ta.getBoundingClientRect().height > 10) {
+            chatInput = ta;
+            if (ta.placeholder && (ta.placeholder.includes('Ask') || ta.placeholder.includes('Type'))) {
+                break;
+            }
+        }
+    }
+    if (!chatInput) {
+        showErrorToast(diagnostic); // fallback
+        return;
+    }
+    let container = chatInput.parentElement;
+    while (container && container.tagName !== 'BODY') {
+        if (window.getComputedStyle(container).position === 'relative')
+            break;
+        container = container.parentElement;
+    }
+    if (!container || container.tagName === 'BODY')
+        container = chatInput.parentElement;
+    const banner = document.createElement('div');
+    banner.id = 'agy-persistent-banner';
+    banner.style.cssText = `
+      background-color: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-bottom: 12px;
+      color: #e5e5e5;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+      position: relative;
+      z-index: 100;
+    `;
+    const headerRow = document.createElement('div');
+    headerRow.style.cssText = `display: flex; align-items: center; gap: 8px;`;
+    const icon = document.createElement('div');
+    icon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
+    const title = document.createElement('div');
+    title.style.cssText = `font-weight: 600; font-size: 13px;`;
+    title.textContent = diagnostic.title || 'Model quota reached';
+    headerRow.appendChild(icon);
+    headerRow.appendChild(title);
+    banner.appendChild(headerRow);
+    const desc = document.createElement('div');
+    desc.style.cssText = `font-size: 12px; color: #a3a3a3; line-height: 1.4;`;
+    desc.textContent = diagnostic.message + ' To continue using this model now, check your provider billing or API key.';
+    banner.appendChild(desc);
+    const actionsRow = document.createElement('div');
+    actionsRow.style.cssText = `display: flex; justify-content: flex-end; gap: 8px; align-items: center;`;
+    const dismissBtn = document.createElement('button');
+    dismissBtn.textContent = 'Dismiss';
+    dismissBtn.style.cssText = `
+      background-color: #333; border: none; color: #e5e5e5; font-size: 12px; padding: 6px 12px; border-radius: 4px; cursor: pointer;
+    `;
+    dismissBtn.addEventListener('mouseenter', () => dismissBtn.style.backgroundColor = '#404040');
+    dismissBtn.addEventListener('mouseleave', () => dismissBtn.style.backgroundColor = '#333');
+    dismissBtn.onclick = () => banner.remove();
+    actionsRow.appendChild(dismissBtn);
+    if (diagnostic.actionUrl) {
+        const actionBtn = document.createElement('button');
+        actionBtn.textContent = diagnostic.errorType === 'auth' ? 'Configure API Key' : 'Manage Billing';
+        actionBtn.style.cssText = `
+        background-color: #0284c7; border: none; color: white; font-size: 12px; padding: 6px 12px; border-radius: 4px; cursor: pointer;
+      `;
+        actionBtn.addEventListener('mouseenter', () => actionBtn.style.backgroundColor = '#0369a1');
+        actionBtn.addEventListener('mouseleave', () => actionBtn.style.backgroundColor = '#0284c7');
+        actionBtn.onclick = () => {
+            if (diagnostic.errorType === 'auth') {
+                openProviderManagerModal();
+            }
+            else {
+                window.open(diagnostic.actionUrl, '_blank');
+            }
+            banner.remove();
+        };
+        actionsRow.appendChild(actionBtn);
+    }
+    else if (diagnostic.errorType === 'auth') {
+        const actionBtn = document.createElement('button');
+        actionBtn.textContent = 'Configure API Key';
+        actionBtn.style.cssText = `
+        background-color: #0284c7; border: none; color: white; font-size: 12px; padding: 6px 12px; border-radius: 4px; cursor: pointer;
+      `;
+        actionBtn.addEventListener('mouseenter', () => actionBtn.style.backgroundColor = '#0369a1');
+        actionBtn.addEventListener('mouseleave', () => actionBtn.style.backgroundColor = '#0284c7');
+        actionBtn.onclick = () => { openProviderManagerModal(); banner.remove(); };
+        actionsRow.appendChild(actionBtn);
+    }
+    banner.appendChild(actionsRow);
+    if (container && container.parentElement) {
+        container.parentElement.insertBefore(banner, container);
+    }
+}
+async function handleModelError(url, diagnostic) {
+    const match = url.match(/models\/(MODEL_PLACEHOLDER_M[^:]+)/);
+    const modelId = match ? match[1] : null;
+    if (diagnostic.errorType === 'billing' || diagnostic.errorType === 'auth' || diagnostic.errorType === 'forbidden') {
+        if (modelId) {
+            const models = await getCustomModelsForInjection();
+            const m = models.find(x => `MODEL_PLACEHOLDER_M${(0, idGenerator_1.generateModelPlaceholderId)(x)}` === modelId);
+            if (m) {
+                failedModelDisplayNames.add(m.displayName || m.name);
+                modelHealthState.set((0, idGenerator_1.generateModelPlaceholderId)(m), { status: 'error', lastChecked: Date.now(), diagnostic });
+            }
+        }
+        showPersistentBanner(diagnostic);
+    }
+    else {
+        showErrorToast(diagnostic);
+    }
+}
+// Intercept XHR to inject custom models and capture errors
+const origXHROpen = XMLHttpRequest.prototype.open;
+XMLHttpRequest.prototype.open = function (method, url, async, username, password) {
+    this._agy_url = typeof url === 'string' ? url : url.toString();
+    this._agy_method = method;
+    return origXHROpen.call(this, method, url, async, username, password);
+};
+const origXHRSend = XMLHttpRequest.prototype.send;
+XMLHttpRequest.prototype.send = function (body) {
+    const xhr = this;
+    const url = xhr._agy_url || '';
+    if (url.includes('GetAvailableModels') || url.includes('fetchAvailableModels')) {
+        const origOnReady = xhr.onreadystatechange;
+        xhr.onreadystatechange = async function (ev) {
+            if (xhr.readyState === 4 && xhr.status === 200) {
                 const customModels = await getCustomModelsForInjection();
                 if (customModels && customModels.length > 0) {
                     try {
-                        const cloned = response.clone();
-                        const text = await cloned.text();
-                        if (text && text.length > 10) {
-                            const parsed = JSON.parse(text);
+                        const responseText = xhr.responseText;
+                        if (responseText && responseText.length > 10) {
+                            const parsed = JSON.parse(responseText);
                             const modelsObj = (parsed.models || parsed.availableModels || parsed.available_models || {});
                             for (const m of customModels) {
                                 const slug = (0, idGenerator_1.toSlug)(m);
@@ -1272,47 +1282,114 @@ window.addEventListener('DOMContentLoaded', () => {
                                     modelProvider: 'MODEL_PROVIDER_GOOGLE',
                                 };
                             }
-                            return new Response(JSON.stringify(parsed), {
-                                status: response.status,
-                                statusText: response.statusText,
-                                headers: response.headers,
-                            });
+                            // Override response
+                            Object.defineProperty(xhr, 'responseText', { value: JSON.stringify(parsed), writable: true });
+                            Object.defineProperty(xhr, 'response', { value: JSON.stringify(parsed), writable: true });
                         }
                     }
                     catch { /* ignore parse errors */ }
                 }
             }
-            else if (url.includes('generateContent') || url.includes('streamGenerateContent')) {
-                if (!response.ok || response.status >= 400) {
+            if (origOnReady)
+                origOnReady.call(xhr, ev);
+        };
+    }
+    else if (url.includes('generateContent') || url.includes('streamGenerateContent')) {
+        const origOnReady = xhr.onreadystatechange;
+        xhr.onreadystatechange = async function (ev) {
+            if (xhr.readyState === 4) {
+                const errorTypeHeader = xhr.getResponseHeader('X-AG-Error-Type');
+                if (xhr.status >= 400 || errorTypeHeader) {
                     try {
-                        const cloned = response.clone();
-                        const text = await cloned.text();
-                        const parsed = JSON.parse(text);
-                        if (parsed._agDiagnostic) {
-                            showErrorToast(parsed._agDiagnostic);
-                        }
-                        else {
-                            const diagnostic = (0, errorClassifier_1.classifyError)(response.status, null, text);
-                            showErrorToast(diagnostic);
-                        }
+                        const parsed = JSON.parse(xhr.responseText);
+                        const diagnostic = parsed._agDiagnostic || (0, errorClassifier_1.classifyError)(xhr.status, null, xhr.responseText);
+                        handleModelError(url, diagnostic);
                     }
                     catch {
-                        const diagnostic = (0, errorClassifier_1.classifyError)(response.status);
-                        showErrorToast(diagnostic);
+                        const diagnostic = (0, errorClassifier_1.classifyError)(xhr.status, null, xhr.responseText);
+                        handleModelError(url, diagnostic);
                     }
                 }
             }
-            return response;
-        }
-        catch (err) {
-            if (url.includes('generateContent') || url.includes('streamGenerateContent')) {
-                const diagnostic = (0, errorClassifier_1.classifyError)(undefined, err);
-                showErrorToast(diagnostic);
+            if (origOnReady)
+                origOnReady.call(xhr, ev);
+        };
+        const origOnError = xhr.onerror;
+        xhr.onerror = function (ev) {
+            const diagnostic = (0, errorClassifier_1.classifyError)(undefined, 'Network Error');
+            handleModelError(url, diagnostic);
+            if (origOnError)
+                origOnError.call(xhr, ev);
+        };
+    }
+    return origXHRSend.call(xhr, body);
+};
+// Intercept fetch responses for model endpoints and error capturing
+const origFetch = window.fetch;
+window.fetch = async function (input, init) {
+    const url = typeof input === 'string' ? input : input.url;
+    try {
+        const response = await origFetch.call(window, input, init);
+        if ((url.includes('GetAvailableModels') || url.includes('fetchAvailableModels')) && response.ok) {
+            const customModels = await getCustomModelsForInjection();
+            if (customModels && customModels.length > 0) {
+                try {
+                    const cloned = response.clone();
+                    const text = await cloned.text();
+                    if (text && text.length > 10) {
+                        const parsed = JSON.parse(text);
+                        const modelsObj = (parsed.models || parsed.availableModels || parsed.available_models || {});
+                        for (const m of customModels) {
+                            const slug = (0, idGenerator_1.toSlug)(m);
+                            const placeholderId = (0, idGenerator_1.generateModelPlaceholderId)(m);
+                            modelsObj[slug] = {
+                                displayName: m.displayName || m.name,
+                                recommended: true,
+                                maxTokens: 1048576,
+                                maxOutputTokens: 4096,
+                                tokenizerType: 'LLAMA_WITH_SPECIAL',
+                                model: `MODEL_PLACEHOLDER_M${placeholderId}`,
+                                apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
+                                modelProvider: 'MODEL_PROVIDER_GOOGLE',
+                            };
+                        }
+                        return new Response(JSON.stringify(parsed), {
+                            status: response.status,
+                            statusText: response.statusText,
+                            headers: response.headers,
+                        });
+                    }
+                }
+                catch { /* ignore parse errors */ }
             }
-            throw err;
         }
-    };
-    // Start the observer
-    setupInjectionObserver();
-});
+        else if (url.includes('generateContent') || url.includes('streamGenerateContent')) {
+            const errorTypeHeader = response.headers.get('X-AG-Error-Type');
+            if (!response.ok || response.status >= 400 || errorTypeHeader) {
+                try {
+                    const cloned = response.clone();
+                    const text = await cloned.text();
+                    const parsed = JSON.parse(text);
+                    const diagnostic = parsed._agDiagnostic || (0, errorClassifier_1.classifyError)(response.status, null, text);
+                    handleModelError(url, diagnostic);
+                }
+                catch {
+                    const diagnostic = (0, errorClassifier_1.classifyError)(response.status);
+                    handleModelError(url, diagnostic);
+                }
+            }
+        }
+        return response;
+    }
+    catch (err) {
+        if (url.includes('generateContent') || url.includes('streamGenerateContent')) {
+            const diagnostic = (0, errorClassifier_1.classifyError)(undefined, err);
+            handleModelError(url, diagnostic);
+        }
+        throw err;
+    }
+};
+// Start the observer
+setupInjectionObserver();
+;
 //# sourceMappingURL=preload.js.map

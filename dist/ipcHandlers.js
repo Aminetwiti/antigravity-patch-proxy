@@ -49,6 +49,7 @@ const customScheme_1 = require("./customScheme");
 const tray_1 = require("./tray");
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const cryptoStore = require('./cryptoStore');
+const customModelStore = __importStar(require("./customModelStore"));
 /**
  * Registers all IPC handlers for the main process.
  */
@@ -134,33 +135,116 @@ function registerIpcHandlers(storageManager) {
         await storageManager.updateItems(changes);
     });
     electron_1.ipcMain.handle('storage:get-custom-models', async () => {
-        const geminiDir = path.join(electron_1.app.getPath('home'), '.gemini', 'antigravity');
-        const filePath = path.join(geminiDir, 'custom_models.json');
+        // Unmasked version for preload.ts injection
+        return await customModelStore.loadCustomModels();
+    });
+    electron_1.ipcMain.handle('storage:get-providers', async () => {
+        const providers = await customModelStore.loadProviders();
+        return providers.map(p => ({
+            ...p,
+            apiKey: customModelStore.maskApiKey(p.apiKey)
+        }));
+    });
+    electron_1.ipcMain.handle('storage:save-provider', async (_event, newProvider) => {
         try {
-            const content = await fs.readFile(filePath, 'utf-8');
-            const parsed = JSON.parse(content);
-            const models = parsed.models || [];
-            // Return models with masked API keys to the UI
-            return models.map((m) => {
-                let maskedKey = m.apiKey;
-                if (m.apiKey && m.apiKey !== 'none') {
-                    const decrypted = cryptoStore.decryptString(m.apiKey);
-                    if (decrypted.length <= 8) {
-                        maskedKey = '********';
-                    }
-                    else {
-                        maskedKey = decrypted.substring(0, 4) + '...' + decrypted.substring(decrypted.length - 4);
+            const providers = await customModelStore.loadProviders();
+            const existingIdx = providers.findIndex((p) => p.id === newProvider.id);
+            const isMasked = newProvider.apiKey && (newProvider.apiKey.includes('...') || newProvider.apiKey.startsWith('***') || newProvider.apiKey === '********');
+            if (isMasked && existingIdx !== -1) {
+                newProvider.apiKey = providers[existingIdx].apiKey;
+                newProvider.encrypted = providers[existingIdx].encrypted;
+            }
+            else {
+                const enc = customModelStore.encryptApiKeyIfNeeded(newProvider.apiKey);
+                newProvider.apiKey = enc.apiKey;
+                newProvider.encrypted = enc.encrypted;
+            }
+            if (existingIdx !== -1) {
+                providers[existingIdx] = newProvider;
+            }
+            else {
+                providers.push(newProvider);
+            }
+            await customModelStore.saveProviders(providers);
+            return { success: true };
+        }
+        catch (err) {
+            console.error('[IPC] Failed to save provider:', err);
+            return { success: false, error: err.message };
+        }
+    });
+    electron_1.ipcMain.handle('storage:delete-provider', async (_event, providerId) => {
+        try {
+            const providers = await customModelStore.loadProviders();
+            const filtered = providers.filter((p) => p.id !== providerId);
+            await customModelStore.saveProviders(filtered);
+            return { success: true };
+        }
+        catch (err) {
+            console.error('[IPC] Failed to delete provider:', err);
+            return { success: false, error: err.message };
+        }
+    });
+    electron_1.ipcMain.handle('storage:fetch-models', async (_event, params) => {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const https = require('https');
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const http = require('http');
+        return new Promise((resolve) => {
+            let baseUrl = params.baseUrl;
+            if (baseUrl.endsWith('/chat/completions') || baseUrl.endsWith('/completions')) {
+                baseUrl = baseUrl.replace(/\/chat\/completions$/, '').replace(/\/completions$/, '');
+            }
+            let urlStr = baseUrl.replace(/\/$/, '') + '/models';
+            const url = new URL(urlStr);
+            const client = url.protocol === 'https:' ? https : http;
+            const options = {
+                method: 'GET',
+                hostname: url.hostname,
+                port: parseInt(url.port || (url.protocol === 'https:' ? '443' : '80'), 10),
+                path: url.pathname + url.search,
+                timeout: 10000,
+                rejectUnauthorized: !params.allowUnauthorized,
+                headers: {}
+            };
+            if (params.apiKey && params.apiKey !== 'none') {
+                let key = params.apiKey;
+                try {
+                    if (!key.includes('***')) {
+                        key = customModelStore.maskApiKey(key) === key ? key : cryptoStore.decryptString(key);
                     }
                 }
-                return {
-                    ...m,
-                    apiKey: maskedKey,
-                };
+                catch { /* ignore */ }
+                options.headers['Authorization'] = `Bearer ${key}`;
+            }
+            const req = client.request(options, (res) => {
+                let data = '';
+                res.on('data', (chunk) => { data += chunk; });
+                res.on('end', () => {
+                    if (res.statusCode >= 200 && res.statusCode < 300) {
+                        try {
+                            const parsed = JSON.parse(data);
+                            const models = parsed.data || parsed.models || parsed;
+                            if (Array.isArray(models)) {
+                                resolve({ success: true, models: models.map(m => ({ id: m.id, displayName: m.name || m.id })) });
+                            }
+                            else {
+                                resolve({ success: false, error: 'Invalid response format' });
+                            }
+                        }
+                        catch (e) {
+                            resolve({ success: false, error: 'Failed to parse JSON' });
+                        }
+                    }
+                    else {
+                        resolve({ success: false, error: `HTTP ${res.statusCode}` });
+                    }
+                });
             });
-        }
-        catch {
-            return [];
-        }
+            req.on('error', (err) => resolve({ success: false, error: err.message }));
+            req.on('timeout', () => { req.destroy(); resolve({ success: false, error: 'Timeout' }); });
+            req.end();
+        });
     });
     electron_1.ipcMain.handle('storage:save-custom-model', async (_event, newModel) => {
         const geminiDir = path.join(electron_1.app.getPath('home'), '.gemini', 'antigravity');
