@@ -31,15 +31,58 @@ export interface PatchDefinition {
 /**
  * Registry of known patches for different Antigravity versions.
  * Ordered from newest to oldest.
+ *
+ * ⚠️ 2.3.x notes (added 2026-07-21):
+ * - Binary URL pattern is UNCHANGED from 2.2.x (still `daily-cloudcode-pa.googleapis.com`)
+ * - BUT: Google removed the entire `dist/proxy/*` tree + `cryptoStore` +
+ *   `customModelStore` + `schemaValidator` + `proxy-runner.js` from the JS bundle.
+ * - The repo's v2.2.x-patched `main.js`, `languageServer.js`, `ipcHandlers.js`,
+ *   `preload.js`, `constants.js` still work as drop-in replacements (they contain
+ *   the proxy integration hooks).
+ * - The patch tool must therefore ALSO inject the 25 missing JS modules and
+ *   overwrite the 5 stripped files. See `scripts/patch_2_3.js`.
  */
 export const PATCH_REGISTRY: PatchDefinition[] = [
   {
-    versionRange: '2.2.0+',
-    minVersion: '2.2.0',
+    versionRange: '2.3.0+',
+    minVersion: '2.3.0',
     maxVersion: null,
     originalUrl: 'https://daily-cloudcode-pa.googleapis.com',
     patchedUrl: 'http://localhost:50999/v1internal/xxxxxxx',
-    description: 'Patch for Antigravity 2.2.0+ (41 bytes)',
+    description: 'Patch for Antigravity 2.3.0+ (41 bytes; binary URL unchanged — JS overlay required)',
+    extraInstructions: {
+      scriptName: 'patch_2_3.js',
+      missingJsModules: [
+        'cryptoStore', 'customModelStore', 'schemaValidator',
+        'proxy',
+        'proxy/dnsResolver', 'proxy/errorClassifier', 'proxy/idGenerator',
+        'proxy/jsonRepair', 'proxy/modelLoader', 'proxy/modelUtils',
+        'proxy/protoInjector', 'proxy/protobuf', 'proxy/registry',
+        'proxy/retryStrategy', 'proxy/shared',
+        'proxy/translators/anthropic', 'proxy/translators/google',
+        'proxy/translators/ollama', 'proxy/translators/openai',
+        'proxy/translators/utils', 'proxy/types', 'proxy/urlBuilder',
+      ],
+      overwriteFiles: [
+        'dist/main.js', 'dist/languageServer.js', 'dist/ipcHandlers.js',
+        'dist/preload.js', 'dist/constants.js',
+      ],
+      newRootFiles: ['proxy-runner.js'],
+    },
+  },
+  {
+    versionRange: '2.2.0 - 2.2.x',
+    minVersion: '2.2.0',
+    maxVersion: '2.2.99',
+    originalUrl: 'https://daily-cloudcode-pa.googleapis.com',
+    patchedUrl: 'http://localhost:50999/v1internal/xxxxxxx',
+    description: 'Patch for Antigravity 2.2.0+ (41 bytes; 3 modules missing)',
+    extraInstructions: {
+      scriptName: 'patch_2_2_1.js',
+      missingJsModules: [
+        'cryptoStore', 'customModelStore', 'schemaValidator',
+      ],
+    },
   },
   {
     versionRange: '2.0.1 - 2.1.x',
@@ -47,7 +90,7 @@ export const PATCH_REGISTRY: PatchDefinition[] = [
     maxVersion: '2.1.99',
     originalUrl: 'https://daily-cloudcode-pa.googleapis.com',
     patchedUrl: 'http://localhost:50999/v1internal/xxxxxxx',
-    description: 'Patch for Antigravity 2.0.1 to 2.1.x (41 bytes)',
+    description: 'Patch for Antigravity 2.0.1 to 2.1.x (41 bytes; full overlay OK)',
   },
 ];
 
