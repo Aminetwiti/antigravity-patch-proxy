@@ -19,11 +19,70 @@
  *   - Avoids hanging on unreachable proxies via a hard deadline.
  *   - Optionally injects provider-specific auth headers so /v1/models probes
  *     mirror the requests the Electron app actually makes.
+ *   - Adds `Accept: application/json` so APIs return JSON error bodies
+ *     instead of HTML 404 pages.
+ *   - Classifies low-level errors (`errorCategory`) so the doctor check
+ *     can give actionable advice:
+ *       dns      → ENOTFOUND / EAI_AGAIN (host doesn't resolve)
+ *       refused  → ECONNREFUSED (port closed, e.g. local proxy down)
+ *       timeout  → ETIMEDOUT / hard deadline
+ *       tls      → CERT_* errors or TLS handshake failures
+ *       reset    → ECONNRESET (peer dropped the connection)
+ *       other    → anything else
  */
 import http from 'http';
 import https from 'https';
 import { URL } from 'url';
 import type { ConnectivityResult } from '../types';
+
+/** Coarse-grained category for a failed probe. Drives recovery advice. */
+export type ProbeErrorCategory = 'dns' | 'refused' | 'timeout' | 'tls' | 'reset' | 'other';
+
+/** Map a Node error to a coarse category, or 'other' if we can't tell. */
+export function classifyError(err: NodeJS.ErrnoException | Error | undefined): ProbeErrorCategory {
+  if (!err) return 'other';
+  const code = (err as NodeJS.ErrnoException).code ?? '';
+  const msg = (err.message ?? '').toLowerCase();
+  if (
+    code === 'ENOTFOUND' ||
+    code === 'EAI_AGAIN' ||
+    code === 'EADDRINFO' ||
+    msg.includes('getaddrinfo') ||
+    msg.includes('dns')
+  ) {
+    return 'dns';
+  }
+  if (code === 'ECONNREFUSED' || msg.includes('econnrefused') || msg.includes('refused')) {
+    return 'refused';
+  }
+  if (
+    code === 'ETIMEDOUT' ||
+    code === 'ESOCKETTIMEDOUT' ||
+    msg.includes('timeout') ||
+    msg.includes('hard deadline')
+  ) {
+    return 'timeout';
+  }
+  if (
+    code === 'ECONNRESET' ||
+    msg.includes('econnreset') ||
+    msg.includes('socket hang up')
+  ) {
+    return 'reset';
+  }
+  if (
+    code === 'CERT_HAS_EXPIRED' ||
+    code === 'DEPTH_ZERO_SELF_SIGNED_CERT' ||
+    code === 'SELF_SIGNED_CERT_IN_CHAIN' ||
+    code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' ||
+    code === 'ERR_TLS_CERT_ALTNAME_INVALID' ||
+    msg.includes('cert') ||
+    msg.includes('tls')
+  ) {
+    return 'tls';
+  }
+  return 'other';
+}
 
 export interface ProbeOptions {
   /** Extra headers merged into the request. */
@@ -74,7 +133,7 @@ export async function probe(
     const deadline = setTimeout(() => {
       if (settled) return;
       settled = true;
-      resolve({ url, ok: false, latencyMs: Date.now() - started, error: 'hard deadline reached' });
+      resolve({ url, ok: false, latencyMs: Date.now() - started, error: 'hard deadline reached', errorCategory: 'timeout' });
     }, timeoutMs * 2 + 1000);
     const finish = (res: ConnectivityResult) => {
       if (settled) return;
@@ -92,6 +151,9 @@ export async function probe(
         timeout: timeoutMs,
         headers: {
           'User-Agent': 'ag-doctor/1.0',
+          // Ask the API for JSON so we get structured error bodies instead of
+          // an HTML 404 page when the path is wrong.
+          'Accept': 'application/json, text/plain;q=0.9, */*;q=0.5',
           ...extraHeaders,
         },
       },
@@ -119,19 +181,19 @@ export async function probe(
           });
         });
         res.on('error', (err) => {
-          finish({ url, ok: false, latencyMs: Date.now() - started, error: err.message });
+          finish({ url, ok: false, latencyMs: Date.now() - started, error: err.message, errorCategory: classifyError(err) });
         });
       },
     );
     req.on('timeout', () => {
-      finish({ url, ok: false, latencyMs: Date.now() - started, error: 'timeout' });
+      finish({ url, ok: false, latencyMs: Date.now() - started, error: 'timeout', errorCategory: 'timeout' });
       try { req.destroy(); } catch { /* ignore */ }
     });
     req.on('error', (err) => {
-      finish({ url, ok: false, latencyMs: Date.now() - started, error: err.message });
+      finish({ url, ok: false, latencyMs: Date.now() - started, error: err.message, errorCategory: classifyError(err) });
     });
     req.on('close', () => {
-      finish({ url, ok: false, latencyMs: Date.now() - started, error: 'connection closed' });
+      finish({ url, ok: false, latencyMs: Date.now() - started, error: 'connection closed', errorCategory: 'reset' });
     });
     req.end();
   });
@@ -166,7 +228,7 @@ export async function probeWithProxy(
     const deadline = setTimeout(() => {
       if (settled) return;
       settled = true;
-      resolve({ url, ok: false, latencyMs: Date.now() - started, error: 'hard deadline reached' });
+      resolve({ url, ok: false, latencyMs: Date.now() - started, error: 'hard deadline reached', errorCategory: 'timeout' });
     }, timeoutMs * 2 + 1000);
     const settle = (res: ConnectivityResult) => {
       if (settled) return;
@@ -194,12 +256,13 @@ export async function probeWithProxy(
             ok: false,
             latencyMs: Date.now() - started,
             error: `proxy CONNECT ${proxyRes.statusCode}`,
+            errorCategory: 'refused',
           });
           return;
         }
         const socket = proxyRes.socket;
         if (!socket) {
-          settle({ url, ok: false, latencyMs: Date.now() - started, error: 'proxy returned no socket' });
+          settle({ url, ok: false, latencyMs: Date.now() - started, error: 'proxy returned no socket', errorCategory: 'other' });
           return;
         }
         const tlsReq = https.request(
@@ -211,6 +274,7 @@ export async function probeWithProxy(
             timeout: timeoutMs,
             headers: {
               'User-Agent': 'ag-doctor/1.0',
+              'Accept': 'application/json, text/plain;q=0.9, */*;q=0.5',
               ...extraHeaders,
             },
             createConnection: () => socket,
@@ -230,29 +294,29 @@ export async function probeWithProxy(
           },
         );
         tlsReq.on('timeout', () => {
-          settle({ url, ok: false, latencyMs: Date.now() - started, error: 'TLS timeout' });
+          settle({ url, ok: false, latencyMs: Date.now() - started, error: 'TLS timeout', errorCategory: 'timeout' });
           try { tlsReq.destroy(); } catch { /* ignore */ }
         });
         tlsReq.on('error', (err) => {
-          settle({ url, ok: false, latencyMs: Date.now() - started, error: err.message });
+          settle({ url, ok: false, latencyMs: Date.now() - started, error: err.message, errorCategory: classifyError(err) });
         });
         tlsReq.on('close', () => {
           // Safety net: if neither timeout nor error fired, resolve with a generic error.
-          settle({ url, ok: false, latencyMs: Date.now() - started, error: 'TLS connection closed' });
+          settle({ url, ok: false, latencyMs: Date.now() - started, error: 'TLS connection closed', errorCategory: 'reset' });
         });
         tlsReq.end();
       },
     );
     proxyReq.on('timeout', () => {
-      settle({ url, ok: false, latencyMs: Date.now() - started, error: 'proxy timeout' });
+      settle({ url, ok: false, latencyMs: Date.now() - started, error: 'proxy timeout', errorCategory: 'timeout' });
       try { proxyReq.destroy(); } catch { /* ignore */ }
     });
     proxyReq.on('error', (err) => {
-      settle({ url, ok: false, latencyMs: Date.now() - started, error: err.message });
+      settle({ url, ok: false, latencyMs: Date.now() - started, error: err.message, errorCategory: classifyError(err) });
     });
     proxyReq.on('close', () => {
       // Safety net: if neither timeout nor error fired, resolve with a generic error.
-      settle({ url, ok: false, latencyMs: Date.now() - started, error: 'proxy connection closed' });
+      settle({ url, ok: false, latencyMs: Date.now() - started, error: 'proxy connection closed', errorCategory: 'reset' });
     });
     proxyReq.end();
   });

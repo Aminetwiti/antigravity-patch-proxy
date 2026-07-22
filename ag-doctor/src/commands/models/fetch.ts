@@ -32,9 +32,17 @@ interface FetchModelsResult {
  *  https://api.openai.com/v1                   → https://api.openai.com/v1/models
  *  https://api.openai.com/v1/                  → https://api.openai.com/v1/models
  *  https://api.openai.com                      → https://api.openai.com/v1/models
+ *
+ * Note: query strings (`?key=…`, `?token=…`) are deliberately stripped. Some
+ * users put their API key in the URL — sending that key to `/v1/models` (a
+ * different endpoint) at best doubles the surface area for accidental
+ * leakage into logs/proxies, and at worst fails with 401/403 because the
+ * upstream checks the `key` query parameter only on the chat-completions
+ * path. Auth headers are still injected by the probe/caller if available.
  */
 export function buildModelsUrl(apiUrl: string): string {
-  let baseUrl = apiUrl;
+  // Drop any query string first — never carry it into /v1/models.
+  let baseUrl = apiUrl.split('?')[0];
   const urlLower = baseUrl.toLowerCase();
 
   // Detect Google AI Studio URLs (e.g. .../v1beta/models/...)

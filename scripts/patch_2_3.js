@@ -131,6 +131,14 @@ const OVERWRITE_FILES = [
   'dist/constants.js',
 ];
 
+// IPC channels that are registered TWICE in the repo's v2.2.x ipcHandlers.js.
+// We strip the duplicate (the older, less-feature-complete one) so
+// registerIpcHandlers doesn't throw "Attempted to register a second
+// handler for <channel>" on startup.
+const DUPLICATE_IPC_HANDLERS = [
+  'storage:fetch-models',     // registered at L188 and L418 in repo ipcHandlers.js
+];
+
 // ─── The 1 root-level file that v2.3.x removed ─────────────────────────────
 const NEW_ROOT_FILES = [
   'proxy-runner.js',
@@ -238,6 +246,86 @@ async function main() {
     }
     ensureDir(path.dirname(dst));
     let content = fs.readFileSync(src, 'utf8');
+    // v2.3.x patch: dedupe duplicate IPC handler registrations in ipcHandlers.js.
+    //
+    // Two safeguards are needed because tsc output varies across builds:
+    //   1. Match EITHER single OR double quotes around the channel name.
+    //   2. Use a greedy 'g' flag loop instead of String.replace (which by
+    //      default replaces only the first match), so we strip every
+    //      duplicate instead of just one. We keep the LAST registration
+    //      (most feature-complete) and strip all preceding ones.
+    if (rel === 'dist/ipcHandlers.js') {
+      for (const channel of DUPLICATE_IPC_HANDLERS) {
+        // Escape any regex metacharacters in the channel name (defensive).
+        const esc = channel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Match ipcMain.handle("channel" ...) OR ipcMain.handle('channel' ...)
+        // up to the closing `});` at the end of the callback. The handler
+        // body may be a multi-line arrow function, a multi-line function,
+        // or an inline expression — so we allow nested braces via the
+        // balanced-brace trick: walk the string char-by-char tracking depth.
+        const quote = `["']`;
+        const handleStart = new RegExp(
+          `ipcMain\\.handle\\(${quote}${esc}${quote}\\s*,`,
+          'g',
+        );
+        let totalOccurrences = 0;
+        let stripped = 0;
+        // First pass: count and collect ALL handler blocks by parsing braces.
+        const blocks = [];
+        let m;
+        while ((m = handleStart.exec(content)) !== null) {
+          let startIdx = m.index;
+          // Look backwards to capture the 'electron_1.' (or similar) prefix
+          // so we don't leave a dangling 'electron_1.' before the comment.
+          const before = content.slice(0, startIdx);
+          const prefixMatch = before.match(/([A-Za-z_$][A-Za-z0-9_$]*\.)$/);
+          if (prefixMatch) {
+            startIdx -= prefixMatch[1].length;
+          }
+          // Walk forward from the ipcMain.handle match tracking brace depth
+          // until we close back to depth 0, then consume the closing `);`.
+          let depth = 0;
+          let i = m.index;
+          let opened = false;
+          for (; i < content.length; i++) {
+            const c = content[i];
+            if (c === '{') { depth++; opened = true; }
+            else if (c === '}') { depth--; }
+            if (opened && depth === 0) {
+              // Skip whitespace then expect `);`
+              let j = i + 1;
+              while (j < content.length && /\s/.test(content[j])) j++;
+              if (content[j] === ')' && content[j + 1] === ';') {
+                blocks.push({ start: startIdx, end: j + 2 });
+                break;
+              }
+            }
+          }
+          // Safety: if we never closed, bail to avoid infinite loop.
+          if (i >= content.length) break;
+        }
+        totalOccurrences = blocks.length;
+        if (totalOccurrences > 1) {
+          // Keep the LAST block (most feature-complete), strip the preceding
+          // ones. Build the new content by stitching non-stripped regions.
+          const kept = blocks[blocks.length - 1];
+          let out = '';
+          let cursor = 0;
+          for (let k = 0; k < blocks.length - 1; k++) {
+            const b = blocks[k];
+            out += content.slice(cursor, b.start);
+            out += `/* v2.3.x patch: duplicate '${channel}' registration stripped */\n`;
+            cursor = b.end;
+            stripped++;
+          }
+          out += content.slice(cursor);
+          content = out;
+          console.log(`            + stripped ${stripped} duplicate '${channel}' registration(s) (kept last of ${totalOccurrences})`);
+        } else {
+          console.log(`            = '${channel}' registered ${totalOccurrences}× (no dedupe needed)`);
+        }
+      }
+    }
     // v2.3.x patch: inject require('../proxy-runner') at the top of dist/main.js
     // because 2.3.x removed the proxy-runner hook that 2.2.x relied on.
     // proxy-runner.js is a standalone Electron-app entry that:
@@ -261,11 +349,6 @@ async function main() {
       console.log('            + injected require(\'../proxy-runner\') at line ' + (insertAt + 1));
     }
     // v2.3.x patch: wrap main_1.default.initialize() in try/catch.
-    // proxy-runner.js (injected below) also calls electron-log's
-    // log.initialize({ preload: true }). The second call THROWS
-    // "log.initialize({ preload }) already called" and breaks the
-    // whenReady callback — the IDE never opens because the rest of the
-    // callback never runs. Catch the throw and log a warning instead.
     if (rel === 'dist/main.js') {
       const before = content;
       content = content.replace(
@@ -277,11 +360,6 @@ async function main() {
       }
     }
     // v2.3.x patch: skip the IDE install wizard.
-    // maybeShowIdeInstallWizard() blocks the whenReady callback until the
-    // user dismisses a modal. On patched installations, this modal either
-    // doesn't render (renderer crash from patched preload.js) or hangs the
-    // entire app init. Bypass it entirely — we don't need the wizard on
-    // an already-patched build.
     if (rel === 'dist/main.js') {
       const before = content;
       content = content.replace(
@@ -292,66 +370,58 @@ async function main() {
         console.log('            + skipped maybeShowIdeInstallWizard');
       }
     }
-    // v2.3.x patch: inject debug logs to trace startup.
+    // v2.3.x patch: wrap registerIpcHandlers in try/catch with logging
+    // to identify the cause of the IDE window not opening.
     if (rel === 'dist/main.js') {
       const before = content;
       content = content.replace(
-        /console\.log\(`Starting app \(v\$\{electron_1\.app\.getVersion\(\)\}\) with dynamic port/,
-        'console.log("[v2.3.x patch] before-Starting-app");\n    console.log(`Starting app (v${electron_1.app.getVersion()}) with dynamic port',
-      );
-      if (content !== before) {
-        console.log('            + injected debug log before "Starting app"');
-      }
-      // Also log before the await getLsCL
-      content = content.replace(
-        /const cl = await \(0, languageServer_1\.getLsCL\(\)\);/,
-        'console.log("[v2.3.x patch] before-getLsCL");\n    const cl = await (0, languageServer_1.getLsCL)();\n    console.log("[v2.3.x patch] after-getLsCL cl=" + cl);',
-      );
-      if (content !== before) {
-        console.log('            + injected debug logs around getLsCL');
-      }
-      // Also log right after the try/catch initialize
-      content = content.replace(
-        /Object\.assign\(console, main_1\.default\.functions\);/,
-        'Object.assign(console, main_1.default.functions);\n    console.log("[v2.3.x patch] after-Object.assign-console");',
-      );
-      if (content !== before) {
-        console.log('            + injected debug log after Object.assign(console)');
-      }
-      // Also log right after webRequest setup
-      content = content.replace(
-        /setAboutPanelOptions\(\{/,
-        'console.log("[v2.3.x patch] after-webRequest");\n    electron_1.app.setAboutPanelOptions({',
-      );
-      if (content !== before) {
-        console.log('            + injected debug log after webRequest setup');
-      }
-      // Granular logs between Object.assign and setAboutPanelOptions
-      content = content.replace(
-        /const storagePath = \(0, paths_1\.getAppStoragePath\(\)\);/,
-        'console.log("[v2.3.x patch] before-getAppStoragePath");\n    const storagePath = (0, paths_1.getAppStoragePath)();\n    console.log("[v2.3.x patch] after-getAppStoragePath=" + storagePath);',
-      );
-      content = content.replace(
-        /storageManager = new storage_1\.StorageManager/,
-        'console.log("[v2.3.x patch] before-StorageManager");\n    storageManager = new storage_1.StorageManager',
-      );
-      content = content.replace(
-        /settingsService = new settingsService_1\.SettingsService/,
-        'console.log("[v2.3.x patch] before-SettingsService");\n    settingsService = new settingsService_1.SettingsService',
-      );
-      content = content.replace(
         /\(0, ipcHandlers_1\.registerIpcHandlers\)\(storageManager\);/,
-        'console.log("[v2.3.x patch] before-registerIpcHandlers");\n    try { (0, ipcHandlers_1.registerIpcHandlers)(storageManager); } catch (e) { console.error("[v2.3.x patch] registerIpcHandlers FAILED:", e); throw e; } console.log("[v2.3.x patch] after-registerIpcHandlers");',
+        'console.log("[v2.3.x patch] before-registerIpcHandlers"); try { (0, ipcHandlers_1.registerIpcHandlers)(storageManager); console.log("[v2.3.x patch] after-registerIpcHandlers"); } catch (e) { console.error("[v2.3.x patch] registerIpcHandlers FAILED:", e && e.message); throw e; }',
       );
+      if (content !== before) {
+        console.log('            + wrapped registerIpcHandlers with debug logging');
+      }
+    }
+    // v2.3.x patch: disable GPU acceleration to prevent black screen on Windows.
+    // Electron's GPU compositing frequently produces a fully black window on
+    // certain Windows/GPU driver combinations.  Calling disableHardwareAcceleration()
+    // before the app is ready forces software rendering and eliminates the issue.
+    if (rel === 'dist/main.js') {
+      const before = content;
       content = content.replace(
-        /\(0, customScheme_1\.registerCustomSchemeHandlers\)\(\);/,
-        'console.log("[v2.3.x patch] before-registerCustomSchemeHandlers");\n    try { (0, customScheme_1.registerCustomSchemeHandlers)(); } catch (e) { console.error("[v2.3.x patch] registerCustomSchemeHandlers FAILED:", e); throw e; } console.log("[v2.3.x patch] after-registerCustomSchemeHandlers");',
+        /const gotTheLock = electron_1\.app\.requestSingleInstanceLock\(\);/,
+        [
+          '// v2.3.x patch: disable GPU acceleration to prevent black screen on Windows',
+          'electron_1.app.disableHardwareAcceleration();',
+          "electron_1.app.commandLine.appendSwitch('disable-gpu');",
+          "electron_1.app.commandLine.appendSwitch('disable-gpu-compositing');",
+          'const gotTheLock = electron_1.app.requestSingleInstanceLock();',
+        ].join('\n'),
       );
+      if (content !== before) {
+        console.log('            + disabled GPU acceleration (black screen fix)');
+      }
+    }
+    // v2.3.x patch: deduplicate 'storage:fetch-models' IPC handler.
+    // The patched dist/ipcHandlers.js registers this handler TWICE
+    // (once via registerModelHandlers + once via registerStorageHandlers).
+    // Electron throws "Attempted to register a second handler for
+    // 'storage:fetch-models'" which crashes whenReady BEFORE the IDE
+    // window can open. Strip every duplicate registration.
+    if (rel === 'dist/ipcHandlers.js') {
+      const before = content;
+      let dupCount = 0;
       content = content.replace(
-        /electron_1\.session\.defaultSession\.webRequest\.onBeforeRequest/,
-        'console.log("[v2.3.x patch] before-webRequest-onBeforeRequest");\n    electron_1.session.defaultSession.webRequest.onBeforeRequest',
+        /ipcMain\.handle\(\s*['"]storage:fetch-models['"]\s*,[\s\S]*?\);/g,
+        (match) => {
+          dupCount++;
+          if (dupCount === 1) return match;
+          return '/* v2.3.x patch: removed duplicate storage:fetch-models registration */';
+        },
       );
-      console.log('            + injected 4 granular logs + 2 try/catch wrappers');
+      if (content !== before) {
+        console.log('            + stripped ' + (dupCount - 1) + ' duplicate \'storage:fetch-models\' registration(s)');
+      }
     }
     fs.writeFileSync(dst, content);
     const size = fs.statSync(dst).size;

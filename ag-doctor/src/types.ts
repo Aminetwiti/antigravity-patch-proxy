@@ -63,6 +63,18 @@ export interface ConnectivityResult {
   latencyMs?: number;
   statusCode?: number;
   error?: string;
+  /**
+   * Coarse-grained classification of a failed probe:
+   *   - `dns`     → host did not resolve (ENOTFOUND, EAI_AGAIN)
+   *   - `refused` → connection refused (ECONNREFUSED, e.g. local proxy down)
+   *   - `timeout` → hard deadline or socket timeout
+   *   - `tls`     → TLS / certificate error
+   *   - `reset`   → peer dropped the connection (ECONNRESET)
+   *   - `other`   → anything else
+   * Missing when `ok` is true (no error to classify) or when the probe
+   * produced a non-2xx HTTP response (the host is reachable).
+   */
+  errorCategory?: 'dns' | 'refused' | 'timeout' | 'tls' | 'reset' | 'other';
   /** Response headers from the HTTP probe (for X-Proxy-Stub detection etc.) */
   headers?: Record<string, string>;
   /** First 512 chars of the response body (for diagnostics) */

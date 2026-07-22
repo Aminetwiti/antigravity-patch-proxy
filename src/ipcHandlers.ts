@@ -156,69 +156,6 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
     }
   });
 
-  ipcMain.handle('storage:fetch-models', async (_event, params: { baseUrl: string; apiKey?: string; allowUnauthorized?: boolean }) => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const https = require('https');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const http = require('http');
-
-    return new Promise((resolve) => {
-      let baseUrl = params.baseUrl;
-      if (baseUrl.endsWith('/chat/completions') || baseUrl.endsWith('/completions')) {
-         baseUrl = baseUrl.replace(/\/chat\/completions$/, '').replace(/\/completions$/, '');
-      }
-      let urlStr = baseUrl.replace(/\/$/, '') + '/models';
-      
-      const url = new URL(urlStr);
-      const client = url.protocol === 'https:' ? https : http;
-
-      const options: any = {
-        method: 'GET',
-        hostname: url.hostname,
-        port: parseInt(url.port || (url.protocol === 'https:' ? '443' : '80'), 10),
-        path: url.pathname + url.search,
-        timeout: 10000,
-        rejectUnauthorized: !params.allowUnauthorized,
-        headers: {}
-      };
-
-      if (params.apiKey && params.apiKey !== 'none') {
-        let key = params.apiKey;
-        try {
-           if (!key.includes('***')) {
-              key = customModelStore.maskApiKey(key) === key ? key : cryptoStore.decryptString(key);
-           }
-        } catch { /* ignore */ }
-        options.headers['Authorization'] = `Bearer ${key}`;
-      }
-
-      const req = client.request(options, (res: any) => {
-        let data = '';
-        res.on('data', (chunk: string) => { data += chunk; });
-        res.on('end', () => {
-          if (res.statusCode >= 200 && res.statusCode < 300) {
-            try {
-              const parsed = JSON.parse(data);
-              const models = parsed.data || parsed.models || parsed;
-              if (Array.isArray(models)) {
-                 resolve({ success: true, models: models.map(m => ({ id: m.id, displayName: m.name || m.id })) });
-              } else {
-                 resolve({ success: false, error: 'Invalid response format' });
-              }
-            } catch (e) {
-              resolve({ success: false, error: 'Failed to parse JSON' });
-            }
-          } else {
-            resolve({ success: false, error: `HTTP ${res.statusCode}` });
-          }
-        });
-      });
-      req.on('error', (err: Error) => resolve({ success: false, error: err.message }));
-      req.on('timeout', () => { req.destroy(); resolve({ success: false, error: 'Timeout' }); });
-      req.end();
-    });
-  });
-
   ipcMain.handle('storage:save-custom-model', async (_event, newModel: CustomModelFileEntry & { apiKey?: string }) => {
     const geminiDir = path.join(app.getPath('home'), '.gemini', 'antigravity');
     const filePath = path.join(geminiDir, 'custom_models.json');
