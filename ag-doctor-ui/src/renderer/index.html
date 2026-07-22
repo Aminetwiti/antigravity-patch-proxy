@@ -489,6 +489,47 @@
             <button class="btn btn-primary" id="patchApplyBtn" type="button">Apply patch</button>
           </div>
         </div>
+
+        <!-- Version detector + selector -->
+        <div class="panel patch-version-panel">
+          <div class="panel-body">
+            <div class="patch-version-detector" id="patchVersionDetector">
+              <div class="patch-version-detector-main">
+                <div class="patch-version-detector-label">Detected Antigravity version</div>
+                <div class="patch-version-detector-version" id="patchDetectedVersion">—</div>
+                <div class="patch-version-detector-meta" id="patchDetectedMeta">
+                  <span class="badge badge-muted" id="patchDetectedSource">scanning…</span>
+                  <span class="badge badge-muted" id="patchRecommendedBadge">auto-detect</span>
+                </div>
+              </div>
+              <div class="patch-version-detector-actions">
+                <button class="btn btn-ghost btn-sm" id="patchRescanBtn" type="button" title="Rescan Antigravity installation">
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                  Rescan
+                </button>
+              </div>
+            </div>
+
+            <!-- Three patch range cards (2.1 / 2.2 / 2.3) -->
+            <div class="patch-range-grid" id="patchRangeGrid">
+              <div class="skeleton skeleton-card"></div>
+              <div class="skeleton skeleton-card"></div>
+              <div class="skeleton skeleton-card"></div>
+            </div>
+
+            <!-- Override banner (only shown when manual override is active) -->
+            <div class="patch-banner warn" id="patchOverrideBanner" hidden>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 0 0 1.74-3L13.74 4a2 2 0 0 0-3.48 0l-6.93 12a2 2 0 0 0 1.74 3z"/></svg>
+              <div class="patch-banner-body">
+                <div class="patch-banner-title">Manual override active</div>
+                <div class="patch-banner-text" id="patchOverrideBannerText">—</div>
+              </div>
+              <button class="btn btn-ghost btn-sm" id="patchClearOverrideBtn" type="button">Clear override</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Detailed patch status (binary path, compatibility, backup) -->
         <div class="panel">
           <div class="panel-body">
             <div id="patchStatus" class="patch-status">

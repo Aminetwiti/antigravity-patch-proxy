@@ -1,12 +1,20 @@
 /**
  * Version-specific binary patches for Antigravity language_server.
- * 
+ *
  * Different Antigravity versions have different URL patterns in the binary.
  * This module detects the version and applies the appropriate patch.
+ *
+ * Auto-detection can be overridden by setting `patch.versionOverride` in the
+ * user config (see `core/config.ts`). The override is exposed to the UI so
+ * users can manually pin a range when:
+ *   - auto-detection fails (binary stripped of version metadata)
+ *   - the binary was modified by Google and no longer matches the registry
+ *   - the user wants to test a patch range before it's officially supported
  */
 import fs from 'fs';
 import { getLanguageServerBinary, getLanguageServerBackup } from './paths';
 import { detectAntigravityVersion } from './antigravity';
+import { getPatchVersionOverride } from './config';
 import type { PatchStatus } from '../types';
 
 /**
@@ -166,20 +174,45 @@ export function detectAvailablePatches(binaryPath: string): PatchDefinition[] {
  */
 export interface VersionAwarePatchStatus extends PatchStatus {
   antigravityVersion: string | null;
+  /** Patch range the UI should highlight / the user selected (after override resolution). */
   recommendedPatch: PatchDefinition | null;
+  /** All patch definitions whose URL pattern is found in the live binary. */
   detectedPatches: PatchDefinition[];
   compatible: boolean;
   warningMessage?: string;
+  /** True when the recommended patch came from the user override, not auto-detection. */
+  overrideActive?: boolean;
+  /** Source of the recommended patch (for UI display). */
+  recommendedSource?: 'auto' | 'override' | 'none';
+  /** Override metadata (only present when overrideActive). */
+  overrideInfo?: {
+    range: string;
+    reason: string | null;
+    setAt: string | null;
+  };
+  /** All known ranges so the UI can render the version-selector cards. */
+  availableRanges?: PatchDefinition[];
 }
 
 /**
  * Get version-aware patch status.
  * This checks the Antigravity version and determines the correct patch to use.
+ *
+ * Resolution order for `recommendedPatch`:
+ *   1. If the user has set `patch.versionOverride` in config.json and that
+ *      range is known, use it (marked `overrideActive=true`).
+ *   2. Otherwise auto-detect from the binary and version.
+ *   3. If neither works, return `null`.
+ *
+ * In all cases we ALSO return `availableRanges` so the UI can render the
+ * version-selector cards, and `detectedPatches` so the UI can show which
+ * ranges are actually present in the binary.
  */
 export function getVersionAwarePatchStatus(installDir?: string): VersionAwarePatchStatus {
   const binaryPath = getLanguageServerBinary(installDir);
   const backupPath = getLanguageServerBackup(installDir);
-  
+  const override = getPatchVersionOverride();
+
   // Base status
   const baseStatus: PatchStatus = {
     binaryPath: binaryPath ?? null,
@@ -187,6 +220,9 @@ export function getVersionAwarePatchStatus(installDir?: string): VersionAwarePat
     applied: false,
     backupExists: backupPath ? fs.existsSync(backupPath) : false,
   };
+
+  // Always surface the available ranges so the UI can render the selector.
+  const availableRanges = PATCH_REGISTRY;
 
   if (!binaryPath || !baseStatus.exists) {
     return {
@@ -196,6 +232,8 @@ export function getVersionAwarePatchStatus(installDir?: string): VersionAwarePat
       detectedPatches: [],
       compatible: false,
       warningMessage: 'Language server binary not found',
+      availableRanges,
+      recommendedSource: 'none',
     };
   }
 
@@ -203,31 +241,51 @@ export function getVersionAwarePatchStatus(installDir?: string): VersionAwarePat
   const versionInfo = detectAntigravityVersion(installDir);
   const version = versionInfo?.version ?? 'unknown';
 
-  // Find recommended patch for this version
-  const recommendedPatch = version !== 'unknown' ? findPatchForVersion(version) : null;
-
   // Detect which patches are available in the binary
   const detectedPatches = detectAvailablePatches(binaryPath);
+
+  // Auto-detected recommendation
+  const autoRecommended = version !== 'unknown' ? findPatchForVersion(version) : null;
+
+  // Apply override if present and valid; otherwise use auto-detection.
+  let recommendedPatch: PatchDefinition | null = autoRecommended;
+  let overrideActive = false;
+  let recommendedSource: 'auto' | 'override' | 'none' = autoRecommended ? 'auto' : 'none';
+  let overrideInfo: VersionAwarePatchStatus['overrideInfo'] | undefined;
+
+  if (override.range) {
+    const overridden = PATCH_REGISTRY.find((p) => p.versionRange === override.range);
+    if (overridden) {
+      recommendedPatch = overridden;
+      overrideActive = true;
+      recommendedSource = 'override';
+      overrideInfo = {
+        range: override.range,
+        reason: override.reason,
+        setAt: override.setAt,
+      };
+    }
+  }
 
   // Check if any patch is applied
   const buf = fs.readFileSync(binaryPath);
   const haystack = buf.toString('binary');
-  const applied = detectedPatches.some(p => haystack.includes(p.patchedUrl));
+  const applied = detectedPatches.some((p) => haystack.includes(p.patchedUrl));
 
-  // Check compatibility
+  // Check compatibility (override bypasses auto-detect-specific warnings)
   let compatible = true;
   let warningMessage: string | undefined;
 
-  if (version === 'unknown') {
+  if (!recommendedPatch) {
     compatible = false;
-    warningMessage = 'Cannot determine Antigravity version. Patch compatibility unknown.';
-  } else if (!recommendedPatch) {
-    compatible = false;
-    warningMessage = `No patch available for Antigravity ${version}. This version may not be supported yet.`;
+    warningMessage =
+      version === 'unknown'
+        ? 'Cannot determine Antigravity version. Pick a range manually below.'
+        : `No patch available for Antigravity ${version}. This version may not be supported yet.`;
   } else if (detectedPatches.length === 0) {
     compatible = false;
-    warningMessage = `Binary does not contain expected URL pattern for version ${version}. The binary may have been modified by Google.`;
-  } else if (!detectedPatches.some(p => p === recommendedPatch)) {
+    warningMessage = `Binary does not contain expected URL pattern. The binary may have been modified by Google.`;
+  } else if (!overrideActive && !detectedPatches.some((p) => p === recommendedPatch)) {
     compatible = false;
     warningMessage = `Binary contains URL from ${detectedPatches[0].versionRange}, but Antigravity reports version ${version}. Version mismatch detected.`;
   }
@@ -241,6 +299,10 @@ export function getVersionAwarePatchStatus(installDir?: string): VersionAwarePat
     detectedPatches,
     compatible,
     warningMessage,
+    overrideActive,
+    recommendedSource,
+    overrideInfo,
+    availableRanges,
     originalUrl: recommendedPatch?.originalUrl,
     patchedUrl: recommendedPatch?.patchedUrl,
   };
@@ -248,6 +310,8 @@ export function getVersionAwarePatchStatus(installDir?: string): VersionAwarePat
 
 /**
  * Apply version-specific patch based on detected Antigravity version.
+ * If a user override is set in config.json, that range is used instead of
+ * the auto-detected one.
  */
 export function applyVersionSpecificPatch(installDir?: string): { ok: boolean; message: string } {
   const status = getVersionAwarePatchStatus(installDir);
@@ -266,24 +330,25 @@ export function applyVersionSpecificPatch(installDir?: string): { ok: boolean; m
 
   const binaryPath = status.binaryPath!;
   const patch = status.recommendedPatch;
+  const source = status.overrideActive ? 'user override' : 'auto-detect';
 
   // Check if already patched
   const buf = fs.readFileSync(binaryPath);
   const haystack = buf.toString('binary');
-  
+
   if (haystack.includes(patch.patchedUrl)) {
-    return { 
-      ok: true, 
-      message: `Already patched (${patch.versionRange})` 
+    return {
+      ok: true,
+      message: `Already patched (${patch.versionRange}, source: ${source})`,
     };
   }
 
   // Find original URL
   const idx = haystack.indexOf(patch.originalUrl);
   if (idx === -1) {
-    return { 
-      ok: false, 
-      message: `Original URL not found in binary. Expected: ${patch.originalUrl}` 
+    return {
+      ok: false,
+      message: `Original URL not found in binary. Expected: ${patch.originalUrl} (source: ${source})`,
     };
   }
 
@@ -307,16 +372,16 @@ export function applyVersionSpecificPatch(installDir?: string): { ok: boolean; m
   } catch (e) {
     const err = e as NodeJS.ErrnoException;
     if (err.code === 'EBUSY') {
-      return { 
-        ok: false, 
-        message: 'language_server is running. Close Antigravity and retry.' 
+      return {
+        ok: false,
+        message: 'language_server is running. Close Antigravity and retry.',
       };
     }
     return { ok: false, message: `Failed to write binary: ${err.message}` };
   }
 
-  return { 
-    ok: true, 
-    message: `Patched with ${patch.description} (backup at ${backupPath})` 
+  return {
+    ok: true,
+    message: `Patched with ${patch.description} (source: ${source}; backup at ${backupPath})`,
   };
 }

@@ -978,6 +978,54 @@ body {
 .patch-banner-body { flex: 1; }
 .patch-banner-title { font-weight: 600; font-size: 13px; margin-bottom: 2px; }
 .patch-banner-text { font-size: 11.5px; color: var(--text-1); }
+.patch-version-panel .panel-body { display: flex; flex-direction: column; gap: 14px; }
+.patch-version-detector {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px;
+  background: linear-gradient(180deg, var(--bg-1), var(--bg-2));
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.patch-version-detector-main { display: flex; flex-direction: column; gap: 6px; }
+.patch-version-detector-label { font-size: 12px; color: var(--text-2); }
+.patch-version-detector-version { font-size: 20px; font-weight: 700; color: var(--text-0); }
+.patch-version-detector-meta { display: flex; flex-wrap: wrap; gap: 8px; }
+.patch-version-detector-actions { display: flex; align-items: center; }
+.patch-range-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.patch-range-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  transition: border-color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+}
+.patch-range-card.recommended { border-color: var(--info); box-shadow: 0 0 0 1px var(--info-border) inset; }
+.patch-range-card.selected { border-color: var(--ok); box-shadow: 0 0 0 1px var(--ok-border) inset; }
+.patch-range-card.detected { background: color-mix(in srgb, var(--bg-1) 88%, var(--ok-bg) 12%); }
+.patch-range-card.incompatible { opacity: 0.78; }
+.patch-range-card-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.patch-range-card-title { font-weight: 700; color: var(--text-0); }
+.patch-range-card-body { display: flex; flex-direction: column; gap: 8px; }
+.patch-range-card-description { font-size: 12px; color: var(--text-1); line-height: 1.5; }
+.patch-range-card-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.patch-range-card-actions { display: flex; gap: 8px; margin-top: auto; }
+.patch-range-card-actions .btn { flex: 1; }
+.patch-inline-note { font-size: 11.5px; color: var(--text-2); }
+.patch-suggestions { display: flex; flex-direction: column; gap: 8px; }
+.patch-suggestion-list { margin: 0; padding-left: 18px; color: var(--text-1); font-size: 12px; line-height: 1.55; }
+.patch-suggestion-list li + li { margin-top: 4px; }
+@media (max-width: 960px) {
+  .patch-range-grid { grid-template-columns: 1fr; }
+  .patch-version-detector { flex-direction: column; align-items: flex-start; }
+  .patch-row { flex-direction: column; align-items: flex-start; gap: 6px; }
+  .patch-row-value { max-width: 100%; text-align: left; }
+}
 
 /* ─────────────────────────────────────────────────────────────────────────
    Info table

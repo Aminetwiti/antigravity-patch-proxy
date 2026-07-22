@@ -51,6 +51,16 @@ export async function runPatchStatus(ctx: CommandContext): Promise<number> {
       deltaSizeBytes: validateReport?.deltaSizeBytes ?? null,
       verdict,
       validateAsarReport: validateReport,
+      // New fields for version-override UI:
+      overrideActive: status.overrideActive ?? false,
+      recommendedSource: status.recommendedSource ?? 'auto',
+      overrideInfo: status.overrideInfo ?? null,
+      availableRanges: (status.availableRanges ?? []).map(p => ({
+        versionRange: p.versionRange,
+        description: p.description,
+        originalUrl: p.originalUrl,
+        patchedUrl: p.patchedUrl,
+      })),
     };
     console.log(JSON.stringify(jsonOutput, null, 2));
     return status.compatible ? 0 : 1;
@@ -92,6 +102,10 @@ export async function runPatchStatus(ctx: CommandContext): Promise<number> {
     console.log(`  Description: ${status.recommendedPatch.description}`);
     console.log(`  Original URL: ${status.recommendedPatch.originalUrl}`);
     console.log(`  Patched URL:  ${status.recommendedPatch.patchedUrl}`);
+    console.log(`  Source:       ${status.overrideActive ? 'manual override' : 'auto-detect'}`);
+    if (status.overrideInfo?.reason) {
+      console.log(`  Reason:       ${status.overrideInfo.reason}`);
+    }
   } else {
     warn('No recommended patch found for this version');
   }

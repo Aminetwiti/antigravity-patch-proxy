@@ -235,6 +235,23 @@ interface PatchStatus {
     originalUrl: string;
     patchedUrl: string;
   }>;
+  /** Whether the recommended patch came from a manual user override. */
+  overrideActive?: boolean;
+  /** Source of the recommended patch: auto-detect, manual override, or none. */
+  recommendedSource?: 'auto' | 'override' | 'none';
+  /** Override metadata (present when overrideActive). */
+  overrideInfo?: {
+    range: string;
+    reason: string | null;
+    setAt: string | null;
+  } | null;
+  /** All known patch ranges — used to render the version-selector cards. */
+  availableRanges?: Array<{
+    versionRange: string;
+    description: string;
+    originalUrl: string;
+    patchedUrl: string;
+  }>;
 }
 
 interface MitmStatus {
@@ -1540,9 +1557,105 @@ $('#mitmExportCaBtn').addEventListener('click', () => void mitmAction(['mitm', '
 // ─────────────────────────────────────────────────────────────────────────────
 
 const patchStatusEl = $('#patchStatus') as HTMLDivElement;
+const patchDetectedVersionEl = $('#patchDetectedVersion') as HTMLDivElement;
+const patchDetectedSourceEl = $('#patchDetectedSource') as HTMLSpanElement;
+const patchRecommendedBadgeEl = $('#patchRecommendedBadge') as HTMLSpanElement;
+const patchDetectedMetaEl = $('#patchDetectedMeta') as HTMLDivElement;
+const patchRangeGridEl = $('#patchRangeGrid') as HTMLDivElement;
+const patchOverrideBannerEl = $('#patchOverrideBanner') as HTMLDivElement;
+const patchOverrideBannerTextEl = $('#patchOverrideBannerText') as HTMLDivElement;
+const patchRescanBtn = $('#patchRescanBtn') as HTMLButtonElement;
+const patchClearOverrideBtn = $('#patchClearOverrideBtn') as HTMLButtonElement;
 
 // Reusable template for patch status — avoids creating a new <template> each load
 const patchTpl = document.createElement('template');
+
+function patchBadge(label: string, tone: 'ok' | 'warn' | 'err' | 'muted' = 'muted'): string {
+  return `<span class="badge badge-${tone}">${escapeHtml(label)}</span>`;
+}
+
+function patchSourceLabel(s: PatchStatus): string {
+  if (s.overrideActive) return 'manual override';
+  if (s.antigravityVersion && s.antigravityVersion !== 'unknown') return 'detected from install';
+  return 'detection uncertain';
+}
+
+function patchFamilyLabel(range: string): string {
+  if (range.includes('2.3')) return 'Patch family 2.3';
+  if (range.includes('2.2')) return 'Patch family 2.2';
+  return 'Patch family 2.1';
+}
+
+function renderPatchSelector(s: PatchStatus): void {
+  patchDetectedVersionEl.textContent = s.antigravityVersion ?? 'unknown';
+  patchDetectedSourceEl.className = `badge ${s.overrideActive ? 'badge-warn' : 'badge-muted'}`;
+  patchDetectedSourceEl.textContent = patchSourceLabel(s);
+  patchRecommendedBadgeEl.className = `badge ${s.compatible ? 'badge-ok' : 'badge-warn'}`;
+  patchRecommendedBadgeEl.textContent = s.recommendedPatch ? `${patchFamilyLabel(s.recommendedPatch.versionRange)} · ${s.recommendedSource ?? 'auto'}` : 'no patch match';
+
+  if (s.overrideActive && s.overrideInfo?.range) {
+    patchOverrideBannerEl.hidden = false;
+    const reason = s.overrideInfo.reason ? ` — ${s.overrideInfo.reason}` : '';
+    patchOverrideBannerTextEl.textContent = `${s.overrideInfo.range}${reason}`;
+  } else {
+    patchOverrideBannerEl.hidden = true;
+    patchOverrideBannerTextEl.textContent = '—';
+  }
+
+  const detectedRanges = new Set((s.detectedPatches ?? []).map((p) => p.versionRange));
+  const recommendedRange = s.recommendedPatch?.versionRange ?? null;
+  const cards = (s.availableRanges ?? []).map((range) => {
+    const isRecommended = recommendedRange === range.versionRange;
+    const isSelected = s.overrideInfo?.range === range.versionRange;
+    const isDetected = detectedRanges.has(range.versionRange);
+    const classes = [
+      'patch-range-card',
+      isRecommended ? 'recommended' : '',
+      isSelected ? 'selected' : '',
+      isDetected ? 'detected' : '',
+      !s.compatible && isRecommended ? 'incompatible' : '',
+    ].filter(Boolean).join(' ');
+    const tags = [
+      patchBadge(patchFamilyLabel(range.versionRange), 'muted'),
+      isRecommended ? patchBadge('recommended', 'ok') : '',
+      isSelected ? patchBadge('manual', 'warn') : '',
+      isDetected ? patchBadge('binary match', 'ok') : patchBadge('not seen in binary', 'muted'),
+    ].filter(Boolean).join('');
+    return `
+      <div class="${classes}">
+        <div class="patch-range-card-header">
+          <div class="patch-range-card-title">${escapeHtml(range.versionRange)}</div>
+          ${isRecommended ? patchBadge(s.overrideActive ? 'active override' : 'auto target', s.overrideActive ? 'warn' : 'ok') : ''}
+        </div>
+        <div class="patch-range-card-body">
+          <div class="patch-range-card-description">${escapeHtml(range.description)}</div>
+          <div class="patch-range-card-tags">${tags}</div>
+          <div class="patch-inline-note">${escapeHtml(range.originalUrl)} → ${escapeHtml(range.patchedUrl)}</div>
+        </div>
+        <div class="patch-range-card-actions">
+          <button class="btn ${isSelected ? 'btn-secondary' : 'btn-ghost'} btn-sm" type="button" data-patch-range="${escapeHtml(range.versionRange)}">${isSelected ? 'Selected' : 'Use this range'}</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  patchRangeGridEl.innerHTML = cards || '<div class="empty-state"><p>No patch ranges available.</p></div>';
+}
+
+async function applyPatchRangeSelection(range: string | null): Promise<void> {
+  setStatus(range ? `Selecting ${range}…` : 'Returning to auto-detect…', 'busy');
+  try {
+    const args = range ? ['patch', 'select', range, '--json'] : ['patch', 'select', 'auto', '--json'];
+    const r = await withTimeout(window.ag.run(args), 12_000, 'patch select');
+    if (r.code !== 0) {
+      throw new Error(r.stderr || r.stdout || 'patch select failed');
+    }
+    toast(range ? `Patch range set to ${range}` : 'Patch range override cleared', 'ok', 4000);
+    await loadPatchStatus();
+  } catch (e) {
+    toast(`Patch range update failed: ${(e as Error).message}`, 'err', 7000);
+    setStatus('Error', 'err');
+  }
+}
 
 async function loadPatchStatus(): Promise<void> {
   return guardLoad('patch', async () => {
@@ -1555,6 +1668,7 @@ async function loadPatchStatus(): Promise<void> {
         'patch status',
       );
     const s = JSON.parse(r.stdout) as PatchStatus;
+    renderPatchSelector(s);
     const banner =
       s.applied
         ? `<div class="patch-banner ok">
@@ -1579,6 +1693,52 @@ async function loadPatchStatus(): Promise<void> {
                  <div class="patch-banner-text">Could not locate language_server binary.</div>
                </div>
              </div>`;
+
+    const recommendationRow = s.recommendedPatch
+      ? `
+      <div class="patch-row">
+        <div class="patch-row-label">Recommended range</div>
+        <div class="patch-row-value">${escapeHtml(s.recommendedPatch.versionRange)}</div>
+      </div>
+      <div class="patch-row">
+        <div class="patch-row-label">Recommendation source</div>
+        <div class="patch-row-value ${s.overrideActive ? 'warn' : 'ok'}">${escapeHtml(s.overrideActive ? 'manual override' : 'auto-detect')}</div>
+      </div>
+      <div class="patch-row">
+        <div class="patch-row-label">Original URL</div>
+        <div class="patch-row-value">${escapeHtml(s.recommendedPatch.originalUrl)}</div>
+      </div>
+      <div class="patch-row">
+        <div class="patch-row-label">Patched URL</div>
+        <div class="patch-row-value">${escapeHtml(s.recommendedPatch.patchedUrl)}</div>
+      </div>`
+      : '';
+
+    const overrideRow = s.overrideInfo?.range
+      ? `
+      <div class="patch-row">
+        <div class="patch-row-label">Manual override</div>
+        <div class="patch-row-value warn">${escapeHtml(s.overrideInfo.range)}</div>
+      </div>
+      ${s.overrideInfo.reason ? `
+      <div class="patch-row">
+        <div class="patch-row-label">Override reason</div>
+        <div class="patch-row-value warn">${escapeHtml(s.overrideInfo.reason)}</div>
+      </div>` : ''}`
+      : '';
+
+    const suggestions = `
+      <div class="patch-row patch-suggestions">
+        <div class="patch-row-label">Suggestions</div>
+        <div class="patch-row-value" style="max-width:100%; text-align:left;">
+          <ul class="patch-suggestion-list">
+            <li>Use auto-detect by default, and only pin a patch family when the detected version looks wrong.</li>
+            <li>Keep a fresh backup before switching between 2.1, 2.2, and 2.3 patch families.</li>
+            <li>For 2.2.x and 2.3.x, verify MITM and CA status before applying the patch.</li>
+            <li>If the binary pattern and detected app version disagree, restore first, then try a different family manually.</li>
+          </ul>
+        </div>
+      </div>`;
 
     patchTpl.innerHTML = `
       ${banner}
@@ -1606,24 +1766,14 @@ async function loadPatchStatus(): Promise<void> {
         <div class="patch-row-label">Compatible</div>
         <div class="patch-row-value ${s.compatible ? 'ok' : 'warn'}">${s.compatible ? 'yes' : 'no'}</div>
       </div>
-      ${s.recommendedPatch ? `
-      <div class="patch-row">
-        <div class="patch-row-label">Version Range</div>
-        <div class="patch-row-value">${escapeHtml(s.recommendedPatch.versionRange)}</div>
-      </div>
-      <div class="patch-row">
-        <div class="patch-row-label">Original URL</div>
-        <div class="patch-row-value">${escapeHtml(s.recommendedPatch.originalUrl)}</div>
-      </div>
-      <div class="patch-row">
-        <div class="patch-row-label">Patched URL</div>
-        <div class="patch-row-value">${escapeHtml(s.recommendedPatch.patchedUrl)}</div>
-      </div>` : ''}
+      ${recommendationRow}
+      ${overrideRow}
       ${s.warningMessage ? `
       <div class="patch-row">
         <div class="patch-row-label">Warning</div>
         <div class="patch-row-value warn">${escapeHtml(s.warningMessage)}</div>
-      </div>` : ''}`;
+      </div>` : ''}
+      ${suggestions}`;
     patchStatusEl.replaceChildren(patchTpl.content);
     setStatus('Ready');
   } catch (e) {
@@ -1634,6 +1784,16 @@ async function loadPatchStatus(): Promise<void> {
   });
 }
 
+patchRescanBtn.addEventListener('click', () => void loadPatchStatus());
+patchClearOverrideBtn.addEventListener('click', () => void applyPatchRangeSelection(null));
+patchRangeGridEl.addEventListener('click', (event) => {
+  const target = event.target as HTMLElement | null;
+  const button = target?.closest<HTMLButtonElement>('[data-patch-range]');
+  if (!button) return;
+  const range = button.getAttribute('data-patch-range');
+  if (!range) return;
+  void applyPatchRangeSelection(range);
+});
 
 $('#patchApplyBtn').addEventListener('click', async () => {
   // P1.3 (subset) — Pré-validation delta size avant d'ouvrir la confirmation.

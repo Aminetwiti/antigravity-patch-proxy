@@ -19,6 +19,7 @@ import { runModelsFetch } from './commands/models/fetch';
 import { runPatchStatus } from './commands/patch/status';
 import { runPatchApply } from './commands/patch/apply';
 import { runPatchRestore } from './commands/patch/restore';
+import { runPatchSelect } from './commands/patch/select';
 import { runLogs } from './commands/logs';
 import { runUpdate } from './commands/update';
 import { runInfo } from './commands/info';
@@ -61,6 +62,8 @@ Commands:
   patch status           Show binary patch state
   patch apply            Apply the binary patch (snapshots first)
   patch restore          Restore language_server from backup (snapshots first)
+  patch select <range|auto>
+                         Force a patch range or return to auto-detect
   logs [-f] [-n N]       Show language_server logs (tail/follow)
   mitm {status|install|uninstall|proxy-on|proxy-off|export-ca}
                          Manage MITM CA cert and system proxy
@@ -224,6 +227,7 @@ export async function main(argv: string[]): Promise<number> {
         if (sub === 'status') return runPatchStatus(ctx);
         if (sub === 'apply') return await runPatchApply(ctx);
         if (sub === 'restore') return await runPatchRestore(ctx);
+        if (sub === 'select') return await runPatchSelect(ctx, rest[0]);
         console.error(`Unknown patch subcommand: ${sub}`);
         console.error(USAGE);
         return 2;
