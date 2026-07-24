@@ -10,11 +10,7 @@
   <!-- PERF: load Google Fonts as a non-render-blocking print stylesheet, then
        promote to "all" once it loads. Avoids the redundant <link rel=preload>
        + <link rel=stylesheet> race that fetched the same URL twice. -->
-  <link rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
-        media="print"
-        onload="this.media='all'"
-  />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" />
   <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" /></noscript>
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="styles-extra.css" />
@@ -924,7 +920,7 @@
           </div>
         </div>
 
-        <form id="addModelForm" onsubmit="return false;">
+        <form id="addModelForm">
           <!-- Step 1: Configure API -->
           <div id="addStep1">
             <div class="form-group">

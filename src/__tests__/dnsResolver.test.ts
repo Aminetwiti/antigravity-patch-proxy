@@ -110,8 +110,9 @@ describe('resolveWithServer', () => {
     });
 
     const promise = resolveWithServer('daily-cloudcode-pa.googleapis.com', '8.8.8.8');
+    const expectPromise = expect(promise).rejects.toThrow('timed out');
     await vi.advanceTimersByTimeAsync(DNS_QUERY_TIMEOUT_MS + 100);
-    await expect(promise).rejects.toThrow('timed out');
+    await expectPromise;
     expect(resolverProto.cancel).toHaveBeenCalled();
   });
 
@@ -126,8 +127,9 @@ describe('resolveWithServer', () => {
     );
 
     const promise = resolveWithServer('daily-cloudcode-pa.googleapis.com', '8.8.8.8');
+    const expectPromise = expect(promise).rejects.toThrow('SERVFAIL');
     await vi.advanceTimersByTimeAsync(0);
-    await expect(promise).rejects.toThrow('SERVFAIL');
+    await expectPromise;
   });
 });
 
@@ -163,8 +165,9 @@ describe('resolveWithSystemDns', () => {
     );
 
     const promise = resolveWithSystemDns('daily-cloudcode-pa.googleapis.com');
+    const expectPromise = expect(promise).rejects.toThrow('ENOTFOUND');
     await vi.advanceTimersByTimeAsync(0);
-    await expect(promise).rejects.toThrow('ENOTFOUND');
+    await expectPromise;
   });
 });
 

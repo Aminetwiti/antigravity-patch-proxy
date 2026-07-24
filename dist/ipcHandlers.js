@@ -149,15 +149,35 @@ function registerIpcHandlers(storageManager) {
         try {
             const providers = await customModelStore.loadProviders();
             const existingIdx = providers.findIndex((p) => p.id === newProvider.id);
-            const isMasked = newProvider.apiKey && (newProvider.apiKey.includes('...') || newProvider.apiKey.startsWith('***') || newProvider.apiKey === '********');
-            if (isMasked && existingIdx !== -1) {
+            // Decide the effective API key value to persist.
+            // - 'none' or empty means the user explicitly cleared the key.
+            // - Anything matching a masked shape means the field is untouched; preserve existing.
+            // - Otherwise treat as a new plaintext value and encrypt.
+            const rawKey = newProvider.apiKey;
+            const isExplicitClear = !rawKey || rawKey === 'none' || rawKey === '';
+            const isMasked = !isExplicitClear && (rawKey.includes('...') || rawKey.startsWith('***') || rawKey === '********');
+            if (isExplicitClear) {
+                newProvider.apiKey = 'none';
+                newProvider.encrypted = false;
+            }
+            else if (isMasked && existingIdx !== -1) {
                 newProvider.apiKey = providers[existingIdx].apiKey;
                 newProvider.encrypted = providers[existingIdx].encrypted;
             }
             else {
-                const enc = customModelStore.encryptApiKeyIfNeeded(newProvider.apiKey);
+                const enc = customModelStore.encryptApiKeyIfNeeded(rawKey);
                 newProvider.apiKey = enc.apiKey;
                 newProvider.encrypted = enc.encrypted;
+            }
+            // Validate URL
+            try {
+                const u = new URL(newProvider.apiUrl);
+                if (!/^https?:$/.test(u.protocol)) {
+                    return { success: false, error: 'API URL must use http or https' };
+                }
+            }
+            catch {
+                return { success: false, error: 'Invalid API URL' };
             }
             if (existingIdx !== -1) {
                 providers[existingIdx] = newProvider;
@@ -185,33 +205,77 @@ function registerIpcHandlers(storageManager) {
             return { success: false, error: err.message };
         }
     });
-    electron_1.ipcMain.handle('storage:save-custom-model', async (_event, newModel) => {
-        const geminiDir = path.join(electron_1.app.getPath('home'), '.gemini', 'antigravity');
-        const filePath = path.join(geminiDir, 'custom_models.json');
+    electron_1.ipcMain.handle('storage:export-providers', async () => {
         try {
-            let models = [];
+            const providers = await customModelStore.loadProviders();
+            const saveResult = await electron_1.dialog.showSaveDialog({
+                title: 'Export Provider Configuration',
+                defaultPath: 'antigravity_providers.json',
+                filters: [{ name: 'JSON Files', extensions: ['json'] }],
+            });
+            if (saveResult.canceled || !saveResult.filePath) {
+                return { success: false, error: 'Cancelled' };
+            }
+            await fs.writeFile(saveResult.filePath, JSON.stringify({ providers }, null, 2), 'utf-8');
+            return { success: true, count: providers.length };
+        }
+        catch (err) {
+            return { success: false, error: err.message };
+        }
+    });
+    electron_1.ipcMain.handle('storage:get-doctor-diagnostics', async () => {
+        try {
+            const providers = await customModelStore.loadProviders();
+            const customModels = await customModelStore.loadCustomModels();
+            let activePort = 50999;
             try {
-                const content = await fs.readFile(filePath, 'utf-8');
-                const parsed = JSON.parse(content);
-                models = parsed.models || [];
+                const home = process.env.HOME || process.env.USERPROFILE || require('os').homedir();
+                const portFile = path.join(home, '.gemini', 'antigravity', '.proxy_port');
+                const content = await fs.readFile(portFile, 'utf-8');
+                activePort = parseInt(content.trim(), 10) || 50999;
             }
             catch {
-                // Ignore if file doesn't exist
+                /* default port */
             }
-            // Check if model already exists, if so update it, otherwise push
+            const activeProviders = providers.filter((p) => p.enabled);
+            const totalTokens = providers.reduce((acc, p) => acc + (p.usage?.promptTokens || 0) + (p.usage?.completionTokens || 0), 0);
+            const totalRequests = providers.reduce((acc, p) => acc + (p.usage?.totalRequests || 0), 0);
+            return {
+                success: true,
+                proxyPort: activePort,
+                providersCount: providers.length,
+                activeProvidersCount: activeProviders.length,
+                customModelsCount: customModels.length,
+                totalTokens,
+                totalRequests,
+                providers: providers.map((p) => ({
+                    id: p.id,
+                    name: p.name,
+                    provider: p.provider,
+                    enabled: p.enabled,
+                    modelCount: p.models.length,
+                    enabledModelCount: p.models.filter((m) => m.enabled).length,
+                    usage: p.usage,
+                })),
+            };
+        }
+        catch (err) {
+            return { success: false, error: err.message };
+        }
+    });
+    electron_1.ipcMain.handle('storage:save-custom-model', async (_event, newModel) => {
+        try {
+            const models = await customModelStore.loadCustomModels();
             const existingIdx = models.findIndex((m) => m.name === newModel.name);
-            // Edit collision protection: If new key is masked and old record exists, preserve old encrypted key
             const isMasked = newModel.apiKey &&
                 (newModel.apiKey.includes('...') || newModel.apiKey.startsWith('***') || newModel.apiKey === '********');
             if (isMasked && existingIdx !== -1) {
                 newModel.apiKey = models[existingIdx].apiKey;
                 newModel.encrypted = models[existingIdx].encrypted;
             }
-            else {
-                if (newModel.apiKey && newModel.apiKey !== 'none') {
-                    newModel.apiKey = cryptoStore.encryptString(newModel.apiKey);
-                    newModel.encrypted = true;
-                }
+            else if (newModel.apiKey && newModel.apiKey !== 'none') {
+                newModel.apiKey = cryptoStore.encryptString(newModel.apiKey);
+                newModel.encrypted = true;
             }
             if (existingIdx !== -1) {
                 models[existingIdx] = newModel;
@@ -219,8 +283,7 @@ function registerIpcHandlers(storageManager) {
             else {
                 models.push(newModel);
             }
-            await fs.mkdir(path.dirname(filePath), { recursive: true });
-            await fs.writeFile(filePath, JSON.stringify({ models }, null, 2), 'utf-8');
+            await customModelStore.saveCustomModels(models);
             return { success: true };
         }
         catch (err) {
@@ -229,21 +292,8 @@ function registerIpcHandlers(storageManager) {
         }
     });
     electron_1.ipcMain.handle('storage:delete-custom-model', async (_event, modelName) => {
-        const geminiDir = path.join(electron_1.app.getPath('home'), '.gemini', 'antigravity');
-        const filePath = path.join(geminiDir, 'custom_models.json');
         try {
-            let models = [];
-            try {
-                const content = await fs.readFile(filePath, 'utf-8');
-                const parsed = JSON.parse(content);
-                models = parsed.models || [];
-            }
-            catch {
-                // Ignore if file doesn't exist
-            }
-            models = models.filter((m) => m.name !== modelName);
-            await fs.mkdir(path.dirname(filePath), { recursive: true });
-            await fs.writeFile(filePath, JSON.stringify({ models }, null, 2), 'utf-8');
+            await customModelStore.deleteCustomModel(modelName);
             return { success: true };
         }
         catch (err) {
@@ -316,27 +366,41 @@ function registerIpcHandlers(storageManager) {
                         };
                     }
                 }
-                const req = client.request(options, (res) => {
-                    // Any response (even 401/403) means the endpoint is reachable
-                    if (res.statusCode >= 200 && res.statusCode < 500) {
-                        resolve({
-                            success: true,
-                            status: res.statusCode,
-                            message: `Endpoint reachable (HTTP ${res.statusCode})`,
-                        });
+                const startTime = Date.now();
+                const getLatency = () => Math.round(Date.now() - startTime);
+                const req = client.request(options);
+                req.on('response', (res) => {
+                    // Distinguish auth failures (401/403) from network reachable.
+                    if (res.statusCode === 401 || res.statusCode === 403) {
+                        res.resume();
+                        resolve({ success: false, status: res.statusCode, error: `Authentication failed (HTTP ${res.statusCode})`, latencyMs: getLatency() });
+                        return;
                     }
-                    else {
-                        resolve({
-                            success: false,
-                            status: res.statusCode,
-                            error: `Server returned HTTP ${res.statusCode}`,
-                        });
+                    if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 500) {
+                        res.resume();
+                        resolve({ success: false, status: res.statusCode, error: `HTTP ${res.statusCode}`, latencyMs: getLatency() });
+                        return;
                     }
-                    res.resume(); // consume response to free memory
+                    let body = '';
+                    let bytes = 0;
+                    const MAX_BODY = 256 * 1024;
+                    res.on('data', (chunk) => {
+                        bytes += chunk.length;
+                        if (bytes > MAX_BODY) {
+                            req.destroy();
+                            resolve({ success: false, error: 'Response too large', latencyMs: getLatency() });
+                            return;
+                        }
+                        body += chunk.toString();
+                    });
+                    res.on('end', () => {
+                        const ok = res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 400;
+                        resolve({ success: ok, status: res.statusCode, message: `HTTP ${res.statusCode}`, latencyMs: getLatency() });
+                    });
                 });
                 req.setTimeout(10000, () => {
                     req.destroy();
-                    resolve({ success: false, error: 'Connection timed out after 10 seconds' });
+                    resolve({ success: false, error: 'Request timed out', latencyMs: getLatency() });
                 });
                 req.on('error', (err) => {
                     let message = err.message;
@@ -349,7 +413,7 @@ function registerIpcHandlers(storageManager) {
                     else if (message.includes('CERT') || message.includes('certificate') || message.includes('SSL')) {
                         message = 'SSL/TLS error — try enabling "allowUnauthorized" for self-signed certs';
                     }
-                    resolve({ success: false, error: message });
+                    resolve({ success: false, error: message, latencyMs: getLatency() });
                 });
                 req.end();
             }
@@ -358,6 +422,10 @@ function registerIpcHandlers(storageManager) {
             }
         });
     });
+    function isMaskedKey(key) {
+        return key.includes('...') || key.startsWith('***') || key === '********';
+    }
+    ;
     // ─── Fetch Models from /v1/models endpoint ──────────────────────────────────────
     // P3-18: Query a provider's /v1/models endpoint to discover available models
     electron_1.ipcMain.handle('storage:fetch-models', async (_event, params) => {
@@ -415,19 +483,22 @@ function registerIpcHandlers(storageManager) {
                         'Content-Type': 'application/json',
                     },
                 };
+                const providerLower = (params.provider || '').toLowerCase();
                 // Add auth header
-                if (params.apiKey && params.apiKey !== 'none') {
-                    let key = params.apiKey;
+                const apiKey = params.apiKey;
+                if (apiKey && apiKey !== 'none' && !isMaskedKey(apiKey)) {
+                    let key = apiKey;
                     try {
-                        key = cryptoStore.decryptString(params.apiKey);
+                        key = cryptoStore.decryptString(apiKey);
                     }
                     catch {
                         /* key might not be encrypted */
                     }
-                    if (params.provider === 'anthropic') {
+                    if (providerLower === 'anthropic') {
                         options.headers['x-api-key'] = key;
+                        options.headers['anthropic-version'] = '2025-04-01';
                     }
-                    else if (params.provider === 'google') {
+                    else if (providerLower === 'google') {
                         options.headers['x-goog-api-key'] = key;
                     }
                     else {
@@ -436,10 +507,22 @@ function registerIpcHandlers(storageManager) {
                 }
                 const req = client.request(options, (res) => {
                     let body = '';
+                    let bytes = 0;
+                    const MAX_BODY = 4 * 1024 * 1024;
                     res.on('data', (chunk) => {
-                        body += chunk;
+                        bytes += chunk.length;
+                        if (bytes > MAX_BODY) {
+                            req.destroy();
+                            resolve({ success: false, error: 'Response too large' });
+                            return;
+                        }
+                        body += chunk.toString();
                     });
                     res.on('end', () => {
+                        if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+                            resolve({ success: false, error: `HTTP ${res.statusCode}: ${body.slice(0, 200)}` });
+                            return;
+                        }
                         try {
                             const parsed = JSON.parse(body);
                             // Handle different response formats:

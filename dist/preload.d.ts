@@ -40,6 +40,12 @@ interface ProviderFileEntry {
     encrypted?: boolean;
     enabled: boolean;
     models: ProviderModelEntry[];
+    usage?: {
+        promptTokens: number;
+        completionTokens: number;
+        totalRequests: number;
+        lastUsed?: number;
+    };
 }
 interface NotificationAPI {
     send: (options: NotificationOptions) => Promise<void>;
@@ -60,19 +66,7 @@ interface StorageAPI {
         error?: string;
     }>;
     testModelConnection: (model: TestModelParams) => Promise<ConnectionTestResult>;
-    fetchModels: (params: {
-        baseUrl: string;
-        apiUrl?: string;
-        apiKey?: string;
-        allowUnauthorized?: boolean;
-    }) => Promise<{
-        success: boolean;
-        models?: {
-            id: string;
-            displayName: string;
-        }[];
-        error?: string;
-    }>;
+    fetchModels: (params: FetchModelsParams) => Promise<FetchModelsResult>;
     getProviders: () => Promise<ProviderFileEntry[]>;
     saveProvider: (provider: ProviderFileEntry) => Promise<{
         success: boolean;
@@ -82,6 +76,17 @@ interface StorageAPI {
         success: boolean;
         error?: string;
     }>;
+    exportProviders: () => Promise<{
+        success: boolean;
+        count?: number;
+        error?: string;
+    }>;
+    importProviders: () => Promise<{
+        success: boolean;
+        count?: number;
+        error?: string;
+    }>;
+    getDoctorDiagnostics: () => Promise<any>;
 }
 interface LogsAPI {
     getElectronLogs: () => Promise<string>;
@@ -156,6 +161,24 @@ interface ConnectionTestResult {
     success: boolean;
     status?: number;
     message?: string;
+    error?: string;
+    latencyMs?: number;
+}
+interface FetchModelsParams {
+    baseUrl?: string;
+    apiUrl?: string;
+    apiKey?: string;
+    provider: string;
+    allowUnauthorized?: boolean;
+}
+interface FetchModelsResult {
+    success: boolean;
+    models?: {
+        id: string;
+        name?: string;
+        displayName?: string;
+        inputModalities?: string[];
+    }[];
     error?: string;
 }
 declare global {

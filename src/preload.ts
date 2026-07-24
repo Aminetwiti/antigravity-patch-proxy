@@ -741,466 +741,985 @@ window.addEventListener('DOMContentLoaded', () => {
     await renderCustomModelsList();
   }
 
-  function openProviderManagerModal(): void {
-  const existing = document.getElementById('agy-modal-overlay');
-  if (existing) existing.remove();
+  // ─── Helper: Inject design tokens + modal styles (idempotent) ──────────
+  function ensureAgyTokens(): void {
+    if (document.getElementById('agy-style-tokens')) return;
+    const style = document.createElement('style');
+    style.id = 'agy-style-tokens';
+    style.textContent = `
+      :root {
+        --agy-bg-base: #18181b;
+        --agy-bg-elevated: #1c1c1f;
+        --agy-bg-input: #27272a;
+        --agy-bg-input-hover: #2f2f33;
+        --agy-border: #3f3f46;
+        --agy-border-strong: #52525b;
+        --agy-ink-primary: #f4f4f5;
+        --agy-ink-secondary: #a1a1aa;
+        --agy-ink-muted: #71717a;
+        --agy-accent: #3b82f6;
+        --agy-accent-hover: #2563eb;
+        --agy-success: #22c55e;
+        --agy-success-hover: #16a34a;
+        --agy-warning: #facc15;
+        --agy-danger: #ef4444;
+        --agy-danger-hover: #dc2626;
+        --agy-warning-text: #854d0e;
+        --agy-overlay-bg: rgba(0, 0, 0, 0.6);
+        --agy-overlay-blur: blur(6px);
+        --agy-shadow-modal: 0 20px 25px -5px rgba(0,0,0,0.5), 0 8px 10px -6px rgba(0,0,0,0.4);
+        --agy-z-overlay: 100000;
+        --agy-radius-sm: 4px;
+        --agy-radius-md: 6px;
+        --agy-radius-lg: 8px;
+        --agy-radius-xl: 12px;
+        --agy-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        --agy-font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+      }
 
-  const overlay = document.createElement('div');
-  overlay.id = 'agy-modal-overlay';
-  overlay.style.cssText = `
-    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-    background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(6px); z-index: 999999;
-    display: flex; justify-content: center; align-items: center;
-  `;
+      /* ── Overlay ────────────────────────────────────────────────── */
+      .agy-overlay {
+        position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+        background: var(--agy-overlay-bg);
+        -webkit-backdrop-filter: var(--agy-overlay-blur);
+        backdrop-filter: var(--agy-overlay-blur);
+        z-index: var(--agy-z-overlay);
+        display: flex; justify-content: center; align-items: center;
+        font-family: var(--agy-font);
+        color: var(--agy-ink-primary);
+      }
+      @keyframes agy-modal-in {
+        from { opacity: 0; transform: scale(0.96) translateY(8px); }
+        to   { opacity: 1; transform: scale(1) translateY(0); }
+      }
+      @keyframes agy-overlay-in {
+        from { opacity: 0; }
+        to   { opacity: 1; }
+      }
+      .agy-anim-in { animation: agy-overlay-in 180ms ease-out; }
+      .agy-anim-in .agy-modal { animation: agy-modal-in 220ms cubic-bezier(0.16, 1, 0.3, 1); }
+      .agy-no-motion, .agy-no-motion .agy-modal { animation: none !important; }
 
-  const modal = document.createElement('div');
-  modal.style.cssText = `
-    background: #18181b; border: 1px solid #3f3f46; border-radius: 12px;
-    width: 650px; max-height: 85vh; display: flex; flex-direction: column;
-    box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); overflow: hidden; color: #f4f4f5;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  `;
+      /* ── Modal ──────────────────────────────────────────────────── */
+      .agy-modal {
+        background: var(--agy-bg-base);
+        border: 1px solid var(--agy-border);
+        border-radius: var(--agy-radius-xl);
+        width: min(650px, calc(100vw - 48px));
+        max-height: 85vh;
+        display: flex; flex-direction: column;
+        box-shadow: var(--agy-shadow-modal);
+        overflow: hidden;
+      }
+      .agy-modal-header {
+        padding: 16px 24px;
+        border-bottom: 1px solid var(--agy-border);
+        display: flex; justify-content: space-between; align-items: center;
+        gap: 12px;
+      }
+      .agy-modal-title { display: flex; align-items: center; gap: 8px; }
+      .agy-modal-body {
+        display: flex; flex-direction: column; flex: 1; overflow: hidden; position: relative;
+      }
+      .agy-modal-list {
+        padding: 24px; overflow-y: auto; flex: 1;
+        display: flex; flex-direction: column; gap: 16px;
+      }
+      .agy-modal-form {
+        padding: 24px; overflow-y: auto; flex: 1;
+        display: none; flex-direction: column; gap: 16px;
+        background: var(--agy-bg-elevated);
+      }
 
-  const header = document.createElement('div');
-  header.style.cssText = `padding: 16px 24px; border-bottom: 1px solid #3f3f46; display: flex; justify-content: space-between; align-items: center;`;
-  
-  const titleRow = document.createElement('div');
-  titleRow.style.cssText = `display: flex; align-items: center; gap: 8px;`;
-  titleRow.innerHTML = `<h3 style="margin:0; font-size:18px; font-weight:600;">☁️ Provider Manager</h3>`;
-  
-  const closeBtn = document.createElement('button');
-  closeBtn.innerHTML = '&times;';
-  closeBtn.style.cssText = `background:none; border:none; color:#a1a1aa; font-size:24px; cursor:pointer; padding:0; line-height:1;`;
-  closeBtn.onclick = () => overlay.remove();
-  
-  header.appendChild(titleRow);
-  header.appendChild(closeBtn);
-  modal.appendChild(header);
+      /* ── Icon button (close) ────────────────────────────────────── */
+      .agy-icon-btn {
+        background: transparent;
+        border: none;
+        color: var(--agy-ink-secondary);
+        cursor: pointer;
+        padding: 6px;
+        border-radius: var(--agy-radius-md);
+        display: inline-flex; align-items: center; justify-content: center;
+        min-width: 32px; min-height: 32px;
+        transition: background-color 120ms ease, color 120ms ease;
+      }
+      .agy-icon-btn:hover { background: var(--agy-bg-input); color: var(--agy-ink-primary); }
+      .agy-icon-btn:focus-visible { outline: 2px solid var(--agy-accent); outline-offset: 2px; }
 
-  const body = document.createElement('div');
-  body.style.cssText = `display: flex; flex-direction: column; flex: 1; overflow: hidden; position: relative;`;
+      /* ── Buttons ────────────────────────────────────────────────── */
+      .agy-btn-primary, .agy-btn-secondary, .agy-btn-success, .agy-btn-ghost {
+        font-family: var(--agy-font);
+        border-radius: var(--agy-radius-md);
+        cursor: pointer;
+        font-weight: 500;
+        transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, transform 60ms ease;
+        min-height: 32px;
+        padding: 8px 14px;
+        font-size: 13px;
+      }
+      .agy-btn-primary {
+        background: var(--agy-accent);
+        border: 1px solid var(--agy-accent);
+        color: white;
+      }
+      .agy-btn-primary:hover:not(:disabled) { background: var(--agy-accent-hover); border-color: var(--agy-accent-hover); }
+      .agy-btn-secondary {
+        background: var(--agy-bg-input);
+        border: 1px solid var(--agy-border-strong);
+        color: var(--agy-ink-primary);
+      }
+      .agy-btn-secondary:hover:not(:disabled) { background: var(--agy-bg-input-hover); }
+      .agy-btn-success {
+        background: var(--agy-success);
+        border: 1px solid var(--agy-success);
+        color: white;
+        padding: 10px 20px;
+        font-size: 14px;
+      }
+      .agy-btn-success:hover:not(:disabled) { background: var(--agy-success-hover); border-color: var(--agy-success-hover); }
+      .agy-btn-ghost {
+        background: transparent;
+        border: 1px solid var(--agy-border);
+        color: var(--agy-ink-secondary);
+      }
+      .agy-btn-ghost:hover:not(:disabled) { background: var(--agy-bg-input); color: var(--agy-ink-primary); }
+      .agy-btn-danger { color: var(--agy-danger); }
+      .agy-btn-danger:hover:not(:disabled) { background: var(--agy-danger); color: white; border-color: var(--agy-danger); }
+      .agy-btn-confirm {
+        background: var(--agy-danger) !important;
+        color: white !important;
+        border-color: var(--agy-danger) !important;
+        padding: 6px 12px !important;
+      }
+      .agy-btn-success:not(:disabled), .agy-btn-success.agy-btn-success { color: white; }
+      .agy-btn-success.agy-btn-success { background: var(--agy-success); }
+      .agy-btn-success.agy-btn-error { background: var(--agy-danger); border-color: var(--agy-danger); }
+      /* Make status variants that are applied to the secondary test button work */
+      .agy-btn-secondary.agy-btn-success { background: var(--agy-success); border-color: var(--agy-success); color: white; }
+      .agy-btn-secondary.agy-btn-error { background: var(--agy-danger); border-color: var(--agy-danger); color: white; }
 
-  const listContainer = document.createElement('div');
-  listContainer.style.cssText = `padding: 24px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 16px;`;
+      button:focus-visible, input:focus-visible, select:focus-visible {
+        outline: 2px solid var(--agy-accent);
+        outline-offset: 2px;
+      }
 
-  const formContainer = document.createElement('div');
-  formContainer.style.cssText = `padding: 24px; overflow-y: auto; flex: 1; display: none; flex-direction: column; gap: 16px; background: #1c1c1f;`;
+      /* ── List view ──────────────────────────────────────────────── */
+      .agy-list-topactions {
+        display: flex; justify-content: space-between; align-items: center;
+        gap: 12px; flex-wrap: wrap;
+      }
+      .agy-list-subtitle {
+        font-size: 14px; color: var(--agy-ink-secondary);
+      }
+      .agy-empty-state {
+        display: flex; flex-direction: column; align-items: center;
+        padding: 48px 24px; text-align: center;
+        border: 1px dashed var(--agy-border);
+        border-radius: var(--agy-radius-lg);
+        background: var(--agy-bg-input);
+      }
+      .agy-provider-row {
+        background: var(--agy-bg-input);
+        border: 1px solid var(--agy-border);
+        border-radius: var(--agy-radius-lg);
+        padding: 16px;
+        display: flex; flex-direction: column; gap: 12px;
+        transition: border-color 120ms ease;
+      }
+      .agy-provider-row:hover { border-color: var(--agy-border-strong); }
+      .agy-row-header {
+        display: flex; justify-content: space-between; align-items: center; gap: 12px;
+        flex-wrap: wrap;
+      }
+      .agy-row-info {
+        display: flex; align-items: center; gap: 8px; min-width: 0;
+      }
+      .agy-row-name {
+        font-size: 15px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        max-width: 100%;
+      }
+      .agy-row-actions {
+        display: flex; gap: 8px; flex-wrap: wrap;
+      }
+      .agy-row-sub {
+        font-size: 12px; color: var(--agy-ink-secondary);
+      }
+      .agy-status-dot {
+        width: 10px; height: 10px; border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .agy-status-on { background-color: var(--agy-success); }
+      .agy-status-off { background-color: var(--agy-ink-muted); }
 
-  body.appendChild(listContainer);
-  body.appendChild(formContainer);
-  modal.appendChild(body);
-  overlay.appendChild(modal);
-  document.body.appendChild(overlay);
+      /* ── Form view ──────────────────────────────────────────────── */
+      .agy-form-header {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 8px;
+      }
+      .agy-form-title { font-size: 16px; font-weight: 600; }
+      .agy-form-field {
+        display: flex; flex-direction: column; gap: 6px;
+      }
+      .agy-form-label {
+        font-size: 13px; font-weight: 500; color: var(--agy-ink-secondary);
+      }
+      .agy-form-help {
+        font-size: 11px; color: var(--agy-ink-muted);
+      }
+      .agy-form-error {
+        font-size: 12px; color: var(--agy-danger);
+        min-height: 0; max-height: 0; overflow: hidden;
+        transition: max-height 160ms ease, margin 160ms ease;
+      }
+      .agy-form-error.agy-form-error-visible {
+        max-height: 32px; margin-top: 2px;
+      }
+      .agy-input {
+        background-color: var(--agy-bg-input);
+        border: 1px solid var(--agy-border);
+        border-radius: var(--agy-radius-lg);
+        color: var(--agy-ink-primary);
+        padding: 10px 12px;
+        font-size: 14px;
+        font-family: var(--agy-font);
+        outline: none;
+        transition: border-color 120ms ease, background-color 120ms ease;
+        min-height: 38px;
+      }
+      .agy-input:hover { border-color: var(--agy-border-strong); }
+      .agy-input:focus { border-color: var(--agy-accent); }
+      .agy-input:invalid:not(:placeholder-shown) { border-color: var(--agy-danger); }
+      .agy-form-checkbox {
+        display: flex; align-items: center; gap: 8px;
+        font-size: 13px; color: var(--agy-ink-secondary);
+        cursor: pointer;
+      }
+      .agy-form-checkbox input { accent-color: var(--agy-accent); }
+      .agy-form-status {
+        font-size: 12px; color: var(--agy-ink-secondary);
+        min-height: 14px;
+      }
+      .agy-status-success { color: var(--agy-success); }
+      .agy-status-error { color: var(--agy-danger); }
+      .agy-status-warning { color: var(--agy-warning); }
 
-  async function renderList() {
-    listContainer.style.display = 'flex';
-    formContainer.style.display = 'none';
-    listContainer.innerHTML = '';
-    
-    const providers = await storageAPI.getProviders();
+      .agy-fetch-row {
+        display: flex; align-items: center; gap: 12px; margin-top: 8px;
+        flex-wrap: wrap;
+      }
+      .agy-models-list {
+        display: flex; flex-direction: column; gap: 8px;
+        max-height: 220px; overflow-y: auto;
+        background: var(--agy-bg-input);
+        border: 1px solid var(--agy-border);
+        border-radius: var(--agy-radius-lg);
+        padding: 8px;
+      }
+      .agy-model-row {
+        display: flex; align-items: center; gap: 10px;
+        cursor: pointer; padding: 6px 8px;
+        border-radius: var(--agy-radius-sm);
+        transition: background-color 80ms ease;
+      }
+      .agy-model-row:hover { background: var(--agy-bg-input-hover); }
+      .agy-model-row input { accent-color: var(--agy-accent); }
+      .agy-model-row-label {
+        font-size: 13px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        flex: 1; min-width: 0;
+      }
+      .agy-models-empty {
+        color: var(--agy-ink-secondary);
+        font-size: 13px;
+        text-align: center;
+        padding: 16px 10px;
+      }
+      .agy-form-footer {
+        display: flex; justify-content: flex-end; gap: 12px;
+        margin-top: auto; padding-top: 16px;
+        border-top: 1px solid var(--agy-border);
+        flex-wrap: wrap;
+      }
 
-    const topActions = document.createElement('div');
-    topActions.style.cssText = `display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;`;
-    
-    const subtitle = document.createElement('div');
-    subtitle.style.cssText = `font-size: 14px; color: #a1a1aa;`;
-    subtitle.textContent = `${providers.length} provider(s) configured.`;
-    
-    const btnGroup = document.createElement('div');
-    btnGroup.style.cssText = `display: flex; gap: 8px; align-items: center;`;
+      /* ── Responsive ─────────────────────────────────────────────── */
+      @media (max-width: 480px) {
+        .agy-modal { width: calc(100vw - 24px); }
+        .agy-modal-header { padding: 12px 16px; }
+        .agy-modal-list, .agy-modal-form { padding: 16px; }
+        .agy-row-header { flex-direction: column; align-items: flex-start; }
+        .agy-row-actions { width: 100%; }
+        .agy-row-actions .agy-btn-secondary { flex: 1; min-width: 0; }
+        .agy-form-footer { justify-content: stretch; }
+        .agy-form-footer > button { flex: 1; }
+      }
 
-    const importBtn = document.createElement('button');
-    importBtn.textContent = '📥 Import';
-    importBtn.style.cssText = `background: #27272a; border: 1px solid #3f3f46; color: #f4f4f5; padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer;`;
-    importBtn.onclick = async () => {
-      const res = await storageAPI.importProviders();
-      if (res.success) renderList();
-    };
-
-    const exportBtn = document.createElement('button');
-    exportBtn.textContent = '📤 Export';
-    exportBtn.style.cssText = importBtn.style.cssText;
-    exportBtn.onclick = async () => {
-      await storageAPI.exportProviders();
-    };
-
-    const addBtn = document.createElement('button');
-    addBtn.textContent = '+ Add Provider';
-    addBtn.style.cssText = `background: #3b82f6; border: none; color: white; padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer;`;
-    addBtn.onclick = () => renderForm();
-
-    btnGroup.appendChild(importBtn);
-    btnGroup.appendChild(exportBtn);
-    btnGroup.appendChild(addBtn);
-    topActions.appendChild(subtitle);
-    topActions.appendChild(btnGroup);
-    listContainer.appendChild(topActions);
-
-    providers.forEach(p => {
-       const row = document.createElement('div');
-       row.style.cssText = `background: #27272a; border: 1px solid #3f3f46; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 12px;`;
-       
-       const headerRow = document.createElement('div');
-       headerRow.style.cssText = `display: flex; justify-content: space-between; align-items: center;`;
-       
-       const info = document.createElement('div');
-       info.style.cssText = `display: flex; align-items: center; gap: 8px;`;
-       const indicator = document.createElement('div');
-       indicator.style.cssText = `width: 10px; height: 10px; border-radius: 50%; background-color: ${p.enabled ? '#22c55e' : '#a1a1aa'}`;
-       const name = document.createElement('strong');
-       name.textContent = p.name;
-       name.style.fontSize = '15px';
-       info.appendChild(indicator);
-       info.appendChild(name);
-       
-       const actions = document.createElement('div');
-       actions.style.cssText = `display: flex; gap: 8px;`;
-       
-       const testBtn = document.createElement('button');
-       testBtn.textContent = '🩺 Test Health';
-       testBtn.style.cssText = `background: #3f3f46; border: 1px solid #52525b; color: white; padding: 6px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;`;
-       testBtn.onclick = async () => {
-         testBtn.textContent = 'Testing...';
-         const res = await storageAPI.testModelConnection({ apiUrl: p.apiUrl, provider: p.provider, apiKey: p.apiKey, allowUnauthorized: p.allowUnauthorized });
-         const lat = res.latencyMs !== undefined ? ` (${res.latencyMs}ms)` : '';
-         testBtn.textContent = res.success ? `✅ Healthy${lat}` : `❌ Error${lat}`;
-         setTimeout(() => { testBtn.textContent = '🩺 Test Health'; }, 4000);
-       };
-
-       const editBtn = document.createElement('button');
-       editBtn.textContent = '⚙️ Edit';
-       editBtn.style.cssText = testBtn.style.cssText;
-       editBtn.onclick = () => renderForm(p);
-
-       const delBtn = document.createElement('button');
-       delBtn.textContent = '🗑️';
-       delBtn.style.cssText = testBtn.style.cssText;
-       delBtn.style.color = '#ef4444';
-       delBtn.onclick = async () => {
-          if (confirm('Delete this provider?')) {
-             await storageAPI.deleteProvider(p.id);
-             renderList();
-          }
-       };
-
-       actions.appendChild(testBtn);
-       actions.appendChild(editBtn);
-       actions.appendChild(delBtn);
-       
-       headerRow.appendChild(info);
-       headerRow.appendChild(actions);
-       
-       const subRow = document.createElement('div');
-       subRow.style.cssText = `font-size: 12px; color: #a1a1aa; display: flex; gap: 12px; flex-wrap: wrap;`;
-       const enabledCount = p.models.filter((m: any) => m.enabled).length;
-       const totalTokens = (p.usage?.promptTokens || 0) + (p.usage?.completionTokens || 0);
-       const tokenText = totalTokens > 0 ? ` | 📊 ${totalTokens >= 1000 ? (totalTokens / 1000).toFixed(1) + 'k' : totalTokens} tokens (${p.usage?.totalRequests || 0} reqs)` : '';
-       subRow.textContent = `${p.provider} | ${enabledCount} model(s) enabled${tokenText}`;
-       
-       row.appendChild(headerRow);
-       row.appendChild(subRow);
-       listContainer.appendChild(row);
-    });
+      /* ── Reduced motion ─────────────────────────────────────────── */
+      @media (prefers-reduced-motion: reduce) {
+        .agy-overlay, .agy-modal, .agy-btn-primary, .agy-btn-secondary,
+        .agy-btn-success, .agy-btn-ghost, .agy-icon-btn, .agy-input,
+        .agy-provider-row, .agy-form-error {
+          transition: none !important;
+          animation: none !important;
+        }
+      }
+    `;
+    document.head.appendChild(style);
   }
 
-  function renderForm(existingProvider?: any) {
-    listContainer.style.display = 'none';
-    formContainer.style.display = 'flex';
-    formContainer.innerHTML = '';
-    
-    let state = existingProvider ? JSON.parse(JSON.stringify(existingProvider)) : {
-       id: 'provider-' + Date.now(),
-       name: '',
-       provider: 'openai',
-       apiUrl: 'https://api.openai.com/v1',
-       apiKey: '',
-       allowUnauthorized: false,
-       enabled: true,
-       models: []
-    };
+  // ─── Helper: focusable elements inside a container ──────────────────
+  function getFocusableElements(root: HTMLElement): HTMLElement[] {
+    const selector = [
+      'a[href]',
+      'button:not([disabled])',
+      'input:not([disabled])',
+      'select:not([disabled])',
+      'textarea:not([disabled])',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(',');
+    return Array.from(root.querySelectorAll<HTMLElement>(selector)).filter(
+      (el) => !el.hasAttribute('inert') && el.offsetParent !== null,
+    );
+  }
 
-    const headerRow = document.createElement('div');
-    headerRow.style.cssText = `display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;`;
-    const backBtn = document.createElement('button');
-    backBtn.textContent = '← Back';
-    backBtn.style.cssText = `background: transparent; border: none; color: #a1a1aa; cursor: pointer; padding: 0; font-size: 14px;`;
-    backBtn.onclick = () => renderList();
-    const title = document.createElement('div');
-    title.style.cssText = `font-size: 16px; font-weight: 600;`;
-    title.textContent = existingProvider ? 'Edit Provider' : 'Add New Provider';
-    headerRow.appendChild(backBtn);
-    headerRow.appendChild(title);
-    formContainer.appendChild(headerRow);
+  function openProviderManagerModal(): void {
+    const existing = document.getElementById('agy-modal-overlay');
+    if (existing) existing.remove();
 
-    const createInput = (labelStr: string, key: string, type: string = 'text', helpText?: string) => {
-       const w = document.createElement('div');
-       w.style.cssText = `display: flex; flex-direction: column; gap: 6px;`;
-       const l = document.createElement('label');
-       l.textContent = labelStr;
-       l.style.cssText = `font-size: 13px; font-weight: 500; color: #a1a1aa;`;
-       const i = document.createElement('input');
-       i.type = type;
-       i.value = state[key] || '';
-       i.id = `agy-input-${key}`;
-       i.setAttribute('aria-label', labelStr);
-       i.style.cssText = `background-color: #27272a; border: 1px solid #3f3f46; border-radius: 8px; color: #f4f4f5; padding: 10px 12px; font-size: 14px; outline: none;`;
-       i.onchange = (e) => state[key] = (e.target as HTMLInputElement).value;
-       w.appendChild(l);
-       w.appendChild(i);
-       if (helpText) {
-          const help = document.createElement('div');
-          help.textContent = helpText;
-          help.style.cssText = `font-size: 11px; color: #71717a;`;
-          w.appendChild(help);
-       }
-       return { wrapper: w, input: i };
-    };
+    // Remember the trigger element so we can restore focus on close
+    const triggerElement = document.activeElement as HTMLElement | null;
 
-    // Provider preset select
-    const providerWrap = document.createElement('div');
-    providerWrap.style.cssText = `display: flex; flex-direction: column; gap: 6px;`;
-    const providerLabel = document.createElement('label');
-    providerLabel.textContent = 'Provider Type';
-    providerLabel.style.cssText = `font-size: 13px; font-weight: 500; color: #a1a1aa;`;
-    const providerSelect = document.createElement('select');
-    providerSelect.id = 'agy-input-provider';
-    providerSelect.setAttribute('aria-label', 'Provider Type');
-    providerSelect.style.cssText = `background-color: #27272a; border: 1px solid #3f3f46; border-radius: 8px; color: #f4f4f5; padding: 10px 12px; font-size: 14px; outline: none;`;
-    for (const preset of PROVIDER_PRESETS) {
-       const opt = document.createElement('option');
-       opt.value = preset.id;
-       opt.textContent = preset.label;
-       if (state.provider === preset.id) opt.selected = true;
-       providerSelect.appendChild(opt);
-    }
-    // If saved provider doesn't match a preset, add a custom entry
-    if (!PROVIDER_PRESETS.some((p) => p.id === state.provider)) {
-      const opt = document.createElement('option');
-      opt.value = state.provider;
-      opt.textContent = `${state.provider} (saved)`;
-      opt.selected = true;
-      providerSelect.appendChild(opt);
-    }
-    providerSelect.onchange = (e) => {
-      const id = (e.target as HTMLSelectElement).value;
-      state.provider = id;
-      const preset = PROVIDER_PRESETS.find((p) => p.id === id);
-      if (preset && preset.defaultApiUrl && !state.apiUrl) {
-        urlInp.input.value = preset.defaultApiUrl;
-        state.apiUrl = preset.defaultApiUrl;
+    // Inject design tokens once (idempotent)
+    ensureAgyTokens();
+
+    // ─── Overlay ──────────────────────────────────────────────────────────
+    const overlay = document.createElement('div');
+    overlay.id = 'agy-modal-overlay';
+    overlay.className = 'agy-overlay';
+    overlay.setAttribute('aria-hidden', 'true');
+
+    // ─── Modal ────────────────────────────────────────────────────────────
+    const modal = document.createElement('div');
+    modal.className = 'agy-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-labelledby', 'agy-modal-title');
+
+    // ─── Header ───────────────────────────────────────────────────────────
+    const header = document.createElement('div');
+    header.className = 'agy-modal-header';
+
+    const titleRow = document.createElement('div');
+    titleRow.id = 'agy-modal-title';
+    titleRow.className = 'agy-modal-title';
+    titleRow.innerHTML = `<h3 style="margin:0; font-size:18px; font-weight:600; display:flex; align-items:center; gap:8px;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>Provider Manager</h3>`;
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'agy-icon-btn';
+    closeBtn.setAttribute('aria-label', 'Close Provider Manager');
+    closeBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+
+    header.appendChild(titleRow);
+    header.appendChild(closeBtn);
+    modal.appendChild(header);
+
+    // ─── Body ─────────────────────────────────────────────────────────────
+    const body = document.createElement('div');
+    body.className = 'agy-modal-body';
+
+    const listContainer = document.createElement('div');
+    listContainer.className = 'agy-modal-list';
+
+    const formContainer = document.createElement('div');
+    formContainer.className = 'agy-modal-form';
+    formContainer.setAttribute('aria-hidden', 'true');
+
+    body.appendChild(listContainer);
+    body.appendChild(formContainer);
+    modal.appendChild(body);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    // ─── Close with cleanup ───────────────────────────────────────────────
+    const closeModal = (): void => {
+      overlay.remove();
+      document.removeEventListener('keydown', escHandler);
+      if (triggerElement && typeof triggerElement.focus === 'function') {
+        try { triggerElement.focus(); } catch { /* no-op */ }
       }
     };
-    providerWrap.appendChild(providerLabel);
-    providerWrap.appendChild(providerSelect);
 
-    const nameInp = createInput('Provider Name (e.g. My OpenRouter)', 'name');
-    const urlInp = createInput('Base API URL (e.g. https://openrouter.ai/api/v1)', 'apiUrl');
+    closeBtn.addEventListener('click', closeModal);
+    overlay.addEventListener('click', (ev) => {
+      if (ev.target === overlay) closeModal();
+    });
 
-    // Key input with dirty flag (so empty/cleared value is distinguishable from untouched)
-    const keyWrap = document.createElement('div');
-    keyWrap.style.cssText = `display: flex; flex-direction: column; gap: 6px;`;
-    const keyLabel = document.createElement('label');
-    keyLabel.textContent = 'API Key';
-    keyLabel.style.cssText = `font-size: 13px; font-weight: 500; color: #a1a1aa;`;
-    const keyInp = document.createElement('input');
-    keyInp.type = 'password';
-    keyInp.id = 'agy-input-apiKey';
-    keyInp.setAttribute('aria-label', 'API Key');
-    keyInp.style.cssText = `background-color: #27272a; border: 1px solid #3f3f46; border-radius: 8px; color: #f4f4f5; padding: 10px 12px; font-size: 14px; outline: none;`;
-    if (existingProvider) {
-      keyInp.placeholder = '•••••••• (leave empty to keep, type to replace)';
+    // ─── Keyboard: Escape + focus trap ───────────────────────────────────
+    const escHandler = (ev: KeyboardEvent): void => {
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        closeModal();
+        return;
+      }
+      if (ev.key === 'Tab') {
+        const focusables = getFocusableElements(modal);
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (ev.shiftKey && document.activeElement === first) {
+          ev.preventDefault();
+          last.focus();
+        } else if (!ev.shiftKey && document.activeElement === last) {
+          ev.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', escHandler);
+
+    // ─── Entrance animation ───────────────────────────────────────────────
+    if (prefersReducedMotion()) {
+      overlay.classList.add('agy-no-motion');
     } else {
-      keyInp.placeholder = 'Paste your API key';
+      overlay.classList.add('agy-anim-in');
     }
-    let keyDirty = false;
-    keyInp.oninput = () => { keyDirty = true; };
-    keyWrap.appendChild(keyLabel);
-    keyWrap.appendChild(keyInp);
-    const keyHelp = document.createElement('div');
-    keyHelp.textContent = 'Leave empty to keep the existing key. Type a new value to replace it. Click "Remove key" to clear.';
-    keyHelp.style.cssText = `font-size: 11px; color: #71717a;`;
-    keyWrap.appendChild(keyHelp);
 
-    // allowUnauthorized toggle
-    const tlsWrap = document.createElement('label');
-    tlsWrap.style.cssText = `display: flex; align-items: center; gap: 8px; font-size: 13px; color: #a1a1aa;`;
-    const tlsChk = document.createElement('input');
-    tlsChk.type = 'checkbox';
-    tlsChk.checked = !!state.allowUnauthorized;
-    tlsChk.id = 'agy-input-allowUnauthorized';
-    tlsChk.setAttribute('aria-label', 'Allow self-signed certificates');
-    tlsChk.onchange = (e) => state.allowUnauthorized = (e.target as HTMLInputElement).checked;
-    const tlsLbl = document.createElement('span');
-    tlsLbl.textContent = 'Allow self-signed certificates (insecure)';
-    tlsWrap.appendChild(tlsChk);
-    tlsWrap.appendChild(tlsLbl);
+    // ─── Render: List view ────────────────────────────────────────────────
+    async function renderList(): Promise<void> {
+      listContainer.style.display = 'flex';
+      formContainer.style.display = 'none';
+      formContainer.setAttribute('aria-hidden', 'true');
+      listContainer.setAttribute('aria-hidden', 'false');
+      listContainer.replaceChildren();
 
-    formContainer.appendChild(providerWrap);
-    formContainer.appendChild(nameInp.wrapper);
-    formContainer.appendChild(urlInp.wrapper);
-    formContainer.appendChild(keyWrap);
-    formContainer.appendChild(tlsWrap);
+      let providers: ProviderFileEntry[] = [];
+      try {
+        providers = await storageAPI.getProviders();
+      } catch (err) {
+        providers = [];
+        console.error('Failed to load providers:', err);
+      }
 
-    // Global status for inline save/feedback
-    const formStatus = document.createElement('div');
-    formStatus.style.cssText = `font-size: 12px; color: #a1a1aa; min-height: 14px;`;
-    formContainer.appendChild(formStatus);
+      // Empty state
+      if (providers.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'agy-empty-state';
+        empty.innerHTML = `
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: var(--ink-muted);"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
+          <div style="font-size: 14px; font-weight: 600; color: var(--ink-primary); margin-top: 12px;">No providers configured</div>
+          <div style="font-size: 13px; color: var(--ink-secondary); margin-top: 4px; max-width: 320px; text-align: center; line-height: 1.5;">Add a provider to connect OpenAI, Anthropic, Google AI, Ollama, OpenRouter, or any OpenAI-compatible endpoint.</div>
+        `;
+        const addBtnEmpty = document.createElement('button');
+        addBtnEmpty.type = 'button';
+        addBtnEmpty.className = 'agy-btn-primary';
+        addBtnEmpty.textContent = '+ Add Provider';
+        addBtnEmpty.style.marginTop = '16px';
+        addBtnEmpty.addEventListener('click', () => renderForm());
+        empty.appendChild(addBtnEmpty);
+        listContainer.appendChild(empty);
+        return;
+      }
 
-    // Fetch Models Section
-    const fetchRow = document.createElement('div');
-    fetchRow.style.cssText = `display: flex; align-items: center; gap: 12px; margin-top: 8px;`;
-    const fetchBtn = document.createElement('button');
-    fetchBtn.textContent = '🔄 Fetch Available Models';
-    fetchBtn.style.cssText = `background: #3f3f46; border: 1px solid #52525b; color: #f4f4f5; padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer;`;
-    const fetchStatus = document.createElement('div');
-    fetchStatus.style.cssText = `font-size: 12px; color: #a1a1aa;`;
-    fetchRow.appendChild(fetchBtn);
-    fetchRow.appendChild(fetchStatus);
-    formContainer.appendChild(fetchRow);
+      const topActions = document.createElement('div');
+      topActions.className = 'agy-list-topactions';
 
-    const modelsList = document.createElement('div');
-    modelsList.style.cssText = `display: flex; flex-direction: column; gap: 8px; max-height: 200px; overflow-y: auto; background: #27272a; border: 1px solid #3f3f46; border-radius: 8px; padding: 8px;`;
-    formContainer.appendChild(modelsList);
+      const subtitle = document.createElement('div');
+      subtitle.className = 'agy-list-subtitle';
+      subtitle.textContent = `${providers.length} provider${providers.length === 1 ? '' : 's'} configured`;
 
-    const renderModelsList = () => {
-       modelsList.innerHTML = '';
-       if (state.models.length === 0) {
-          modelsList.innerHTML = '<div style="color:#a1a1aa; font-size:13px; text-align:center; padding: 10px;">No models found. Click fetch or save provider.</div>';
+      const addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.className = 'agy-btn-primary';
+      addBtn.textContent = '+ Add Provider';
+      addBtn.addEventListener('click', () => renderForm());
+
+      topActions.appendChild(subtitle);
+      topActions.appendChild(addBtn);
+      listContainer.appendChild(topActions);
+
+      providers.forEach((p) => {
+        const row = document.createElement('div');
+        row.className = 'agy-provider-row';
+
+        const headerRow = document.createElement('div');
+        headerRow.className = 'agy-row-header';
+
+        const info = document.createElement('div');
+        info.className = 'agy-row-info';
+        const indicator = document.createElement('span');
+        indicator.className = `agy-status-dot ${p.enabled ? 'agy-status-on' : 'agy-status-off'}`;
+        indicator.setAttribute('aria-label', p.enabled ? 'Enabled' : 'Disabled');
+        const name = document.createElement('strong');
+        name.className = 'agy-row-name';
+        name.textContent = p.name;
+        name.title = p.name;
+        info.appendChild(indicator);
+        info.appendChild(name);
+
+        const actions = document.createElement('div');
+        actions.className = 'agy-row-actions';
+
+        const testBtn = document.createElement('button');
+        testBtn.type = 'button';
+        testBtn.className = 'agy-btn-secondary';
+        testBtn.textContent = '🩺 Test Health';
+
+        const editBtn = document.createElement('button');
+        editBtn.type = 'button';
+        editBtn.className = 'agy-btn-secondary';
+        editBtn.textContent = '⚙️ Edit';
+        editBtn.addEventListener('click', () => renderForm(p));
+
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'agy-btn-secondary agy-btn-danger';
+        delBtn.setAttribute('aria-label', `Delete provider ${p.name}`);
+        delBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>`;
+
+        let confirmOpen = false;
+        const resetConfirm = (): void => {
+          confirmOpen = false;
+          delBtn.classList.remove('agy-btn-confirm');
+          delBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>`;
+          delBtn.setAttribute('aria-label', `Delete provider ${p.name}`);
+        };
+        let confirmTimer: ReturnType<typeof setTimeout> | null = null;
+        delBtn.addEventListener('click', async () => {
+          if (delBtn.disabled) return;
+          if (!confirmOpen) {
+            confirmOpen = true;
+            delBtn.classList.add('agy-btn-confirm');
+            delBtn.innerHTML = `<span style="font-size: 12px; font-weight: 500;">Confirm?</span>`;
+            delBtn.setAttribute('aria-label', `Confirm delete provider ${p.name}`);
+            if (confirmTimer) clearTimeout(confirmTimer);
+            confirmTimer = setTimeout(() => { if (confirmOpen) resetConfirm(); }, 3000);
+            return;
+          }
+          if (confirmTimer) clearTimeout(confirmTimer);
+          delBtn.disabled = true;
+          try {
+            await storageAPI.deleteProvider(p.id);
+          } catch (err) {
+            console.error('Delete failed:', err);
+          }
+          await renderList();
+        });
+
+        testBtn.addEventListener('click', async () => {
+          if (testBtn.disabled) return;
+          testBtn.disabled = true;
+          const originalLabel = testBtn.textContent;
+          testBtn.textContent = 'Testing...';
+          try {
+            const res = await storageAPI.testModelConnection({
+              apiUrl: p.apiUrl,
+              provider: p.provider,
+              apiKey: p.apiKey,
+              allowUnauthorized: p.allowUnauthorized,
+            });
+            testBtn.classList.remove('agy-btn-success', 'agy-btn-error');
+            if (res.success) {
+              testBtn.textContent = '✅ Healthy';
+              testBtn.classList.add('agy-btn-success');
+            } else {
+              testBtn.textContent = `❌ ${res.status || 'Error'}`;
+              testBtn.classList.add('agy-btn-error');
+            }
+          } catch (err) {
+            testBtn.textContent = '❌ Failed';
+            testBtn.classList.add('agy-btn-error');
+          }
+          setTimeout(() => {
+            testBtn.textContent = originalLabel;
+            testBtn.classList.remove('agy-btn-success', 'agy-btn-error');
+            testBtn.disabled = false;
+          }, 3000);
+        });
+
+        actions.appendChild(testBtn);
+        actions.appendChild(editBtn);
+        actions.appendChild(delBtn);
+
+        headerRow.appendChild(info);
+        headerRow.appendChild(actions);
+
+        const subRow = document.createElement('div');
+        subRow.className = 'agy-row-sub';
+        const enabledCount = p.models.filter((m) => m.enabled).length;
+        const displayProvider = p.provider.charAt(0).toUpperCase() + p.provider.slice(1);
+        subRow.textContent = `${displayProvider} • ${enabledCount} of ${p.models.length} model${p.models.length === 1 ? '' : 's'} enabled`;
+
+        row.appendChild(headerRow);
+        row.appendChild(subRow);
+        listContainer.appendChild(row);
+      });
+    }
+
+    // ─── Render: Form view ────────────────────────────────────────────────
+    function renderForm(existingProvider?: ProviderFileEntry): void {
+      listContainer.style.display = 'none';
+      formContainer.style.display = 'flex';
+      listContainer.setAttribute('aria-hidden', 'true');
+      formContainer.setAttribute('aria-hidden', 'false');
+      formContainer.replaceChildren();
+
+      const state = existingProvider
+        ? JSON.parse(JSON.stringify(existingProvider))
+        : {
+            id: 'provider-' + Date.now(),
+            name: '',
+            provider: 'openai',
+            apiUrl: 'https://api.openai.com/v1',
+            apiKey: '',
+            allowUnauthorized: false,
+            enabled: true,
+            models: [] as ProviderModelEntry[],
+          };
+
+      const headerRow = document.createElement('div');
+      headerRow.className = 'agy-form-header';
+      const backBtn = document.createElement('button');
+      backBtn.type = 'button';
+      backBtn.className = 'agy-btn-ghost';
+      backBtn.setAttribute('aria-label', 'Back to provider list');
+      backBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align: -2px; margin-right: 4px;"><polyline points="15 18 9 12 15 6"/></svg>Back`;
+      backBtn.addEventListener('click', () => renderList());
+      const title = document.createElement('div');
+      title.className = 'agy-form-title';
+      title.textContent = existingProvider ? 'Edit Provider' : 'Add New Provider';
+      headerRow.appendChild(backBtn);
+      headerRow.appendChild(title);
+      formContainer.appendChild(headerRow);
+
+      const createInput = (
+        labelStr: string,
+        key: string,
+        type: string = 'text',
+        helpText?: string,
+        required: boolean = false,
+      ): { wrapper: HTMLElement; input: HTMLInputElement; errorEl: HTMLElement } => {
+        const w = document.createElement('div');
+        w.className = 'agy-form-field';
+        const l = document.createElement('label');
+        l.textContent = labelStr + (required ? ' *' : '');
+        l.className = 'agy-form-label';
+        l.htmlFor = `agy-input-${key}`;
+        const i = document.createElement('input');
+        i.type = type;
+        i.id = `agy-input-${key}`;
+        i.value = state[key] || '';
+        i.className = 'agy-input';
+        if (required) i.setAttribute('required', 'true');
+        if (helpText) i.setAttribute('aria-describedby', `agy-help-${key}`);
+        const errorEl = document.createElement('div');
+        errorEl.className = 'agy-form-error';
+        errorEl.id = `agy-error-${key}`;
+        errorEl.setAttribute('role', 'alert');
+        errorEl.setAttribute('aria-live', 'polite');
+        if (existingProvider && key === 'apiKey') {
+          i.placeholder = '•••••••• (leave empty to keep, type to replace)';
+        } else if (key === 'apiKey') {
+          i.placeholder = 'Paste your API key';
+        }
+        w.appendChild(l);
+        w.appendChild(i);
+        if (helpText) {
+          const help = document.createElement('div');
+          help.id = `agy-help-${key}`;
+          help.className = 'agy-form-help';
+          help.textContent = helpText;
+          w.appendChild(help);
+        }
+        w.appendChild(errorEl);
+        return { wrapper: w, input: i, errorEl };
+      };
+
+      const providerWrap = document.createElement('div');
+      providerWrap.className = 'agy-form-field';
+      const providerLabel = document.createElement('label');
+      providerLabel.textContent = 'Provider Type';
+      providerLabel.className = 'agy-form-label';
+      providerLabel.htmlFor = 'agy-input-provider';
+      const providerSelect = document.createElement('select');
+      providerSelect.id = 'agy-input-provider';
+      providerSelect.className = 'agy-input';
+      for (const preset of PROVIDER_PRESETS) {
+        const opt = document.createElement('option');
+        opt.value = preset.id;
+        opt.textContent = preset.label;
+        if (state.provider === preset.id) opt.selected = true;
+        providerSelect.appendChild(opt);
+      }
+      if (!PROVIDER_PRESETS.some((pp) => pp.id === state.provider)) {
+        const opt = document.createElement('option');
+        opt.value = state.provider;
+        opt.textContent = `${state.provider} (saved)`;
+        opt.selected = true;
+        providerSelect.appendChild(opt);
+      }
+      providerSelect.addEventListener('change', (e) => {
+        const id = (e.target as HTMLSelectElement).value;
+        state.provider = id;
+        const preset = PROVIDER_PRESETS.find((pp) => pp.id === id);
+        if (preset && preset.defaultApiUrl && !state.apiUrl) {
+          urlInp.input.value = preset.defaultApiUrl;
+          state.apiUrl = preset.defaultApiUrl;
+        }
+      });
+      providerWrap.appendChild(providerLabel);
+      providerWrap.appendChild(providerSelect);
+
+      const nameInp = createInput('Provider Name', 'name', 'text', 'e.g. My OpenRouter', true);
+      const urlInp = createInput('Base API URL', 'apiUrl', 'url', 'e.g. https://openrouter.ai/api/v1', true);
+
+      const keyWrap = document.createElement('div');
+      keyWrap.className = 'agy-form-field';
+      const keyLabel = document.createElement('label');
+      keyLabel.textContent = 'API Key';
+      keyLabel.className = 'agy-form-label';
+      keyLabel.htmlFor = 'agy-input-apiKey';
+      const keyInp = document.createElement('input');
+      keyInp.type = 'password';
+      keyInp.id = 'agy-input-apiKey';
+      keyInp.className = 'agy-input';
+      keyInp.autocomplete = 'off';
+      keyInp.spellcheck = false;
+      if (existingProvider) {
+        keyInp.placeholder = '•••••••• (leave empty to keep, type to replace)';
+      } else {
+        keyInp.placeholder = 'Paste your API key';
+      }
+      let keyDirty = false;
+      keyInp.addEventListener('input', () => { keyDirty = true; });
+      const keyHelp = document.createElement('div');
+      keyHelp.className = 'agy-form-help';
+      keyHelp.textContent = 'Leave empty to keep the existing key. Type a new value to replace it.';
+      keyWrap.appendChild(keyLabel);
+      keyWrap.appendChild(keyInp);
+      keyWrap.appendChild(keyHelp);
+
+      const tlsWrap = document.createElement('label');
+      tlsWrap.className = 'agy-form-checkbox';
+      const tlsChk = document.createElement('input');
+      tlsChk.type = 'checkbox';
+      tlsChk.checked = !!state.allowUnauthorized;
+      tlsChk.id = 'agy-input-allowUnauthorized';
+      tlsChk.addEventListener('change', (e) => {
+        state.allowUnauthorized = (e.target as HTMLInputElement).checked;
+      });
+      const tlsLbl = document.createElement('span');
+      tlsLbl.textContent = 'Allow self-signed certificates (insecure)';
+      tlsWrap.appendChild(tlsChk);
+      tlsWrap.appendChild(tlsLbl);
+
+      formContainer.appendChild(providerWrap);
+      formContainer.appendChild(nameInp.wrapper);
+      formContainer.appendChild(urlInp.wrapper);
+      formContainer.appendChild(keyWrap);
+      formContainer.appendChild(tlsWrap);
+
+      const showError = (el: HTMLElement, msg: string): void => {
+        el.textContent = msg;
+        el.classList.add('agy-form-error-visible');
+      };
+      const clearError = (el: HTMLElement): void => {
+        el.textContent = '';
+        el.classList.remove('agy-form-error-visible');
+      };
+      const validateUrl = (url: string): boolean => {
+        try {
+          const u = new URL(url);
+          return u.protocol === 'http:' || u.protocol === 'https:';
+        } catch { return false; }
+      };
+
+      const formStatus = document.createElement('div');
+      formStatus.className = 'agy-form-status';
+      formStatus.setAttribute('role', 'status');
+      formStatus.setAttribute('aria-live', 'polite');
+      formContainer.appendChild(formStatus);
+
+      const fetchRow = document.createElement('div');
+      fetchRow.className = 'agy-fetch-row';
+      const fetchBtn = document.createElement('button');
+      fetchBtn.type = 'button';
+      fetchBtn.className = 'agy-btn-secondary';
+      fetchBtn.textContent = '🔄 Fetch Available Models';
+      const fetchStatus = document.createElement('div');
+      fetchStatus.className = 'agy-form-status';
+      fetchStatus.setAttribute('role', 'status');
+      fetchStatus.setAttribute('aria-live', 'polite');
+      fetchRow.appendChild(fetchBtn);
+      fetchRow.appendChild(fetchStatus);
+      formContainer.appendChild(fetchRow);
+
+      const modelsList = document.createElement('div');
+      modelsList.className = 'agy-models-list';
+      modelsList.setAttribute('role', 'group');
+      modelsList.setAttribute('aria-label', 'Available models');
+      formContainer.appendChild(modelsList);
+
+      const renderModelsList = (): void => {
+        modelsList.replaceChildren();
+        if (state.models.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'agy-models-empty';
+          empty.textContent = 'No models yet. Click "Fetch Available Models" or save the provider to apply.';
+          modelsList.appendChild(empty);
           return;
-       }
-       state.models.forEach((m: any, idx: number) => {
+        }
+        state.models.forEach((m: ProviderModelEntry, idx: number) => {
           const row = document.createElement('label');
-          row.style.cssText = `display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 4px;`;
+          row.className = 'agy-model-row';
           const chk = document.createElement('input');
           chk.type = 'checkbox';
           chk.checked = m.enabled;
-          chk.onchange = (e) => state.models[idx].enabled = (e.target as HTMLInputElement).checked;
+          chk.addEventListener('change', (e) => {
+            state.models[idx].enabled = (e.target as HTMLInputElement).checked;
+          });
           const lbl = document.createElement('span');
           lbl.textContent = m.displayName || m.id;
-          lbl.style.fontSize = '13px';
+          lbl.title = m.id;
+          lbl.className = 'agy-model-row-label';
           row.appendChild(chk);
           row.appendChild(lbl);
           modelsList.appendChild(row);
-       });
-    };
-    renderModelsList();
+        });
+      };
+      renderModelsList();
 
-    fetchBtn.onclick = async () => {
-       fetchBtn.textContent = 'Fetching...';
-       fetchBtn.disabled = true;
-       // Read current values from DOM in case they changed without blur
-       state.apiUrl = urlInp.input.value;
-       if (keyDirty) {
-          state.apiKey = keyInp.value;
-       }
+      fetchBtn.addEventListener('click', async () => {
+        if (fetchBtn.disabled) return;
+        fetchStatus.textContent = '';
+        fetchStatus.className = 'agy-form-status';
+        const url = urlInp.input.value.trim();
+        if (!validateUrl(url)) {
+          showError(urlInp.errorEl, 'Enter a valid http(s) URL');
+          urlInp.input.focus();
+          return;
+        }
+        clearError(urlInp.errorEl);
+        state.apiUrl = url;
+        if (keyDirty) state.apiKey = keyInp.value;
 
-       const res = await storageAPI.fetchModels({ baseUrl: state.apiUrl, apiUrl: state.apiUrl, apiKey: state.apiKey, provider: state.provider, allowUnauthorized: state.allowUnauthorized });
-       fetchBtn.textContent = '🔄 Fetch Available Models';
-       fetchBtn.disabled = false;
-
-       if (res.success && res.models) {
-          fetchStatus.textContent = `Found ${res.models.length} models.`;
-          fetchStatus.style.color = '#22c55e';
-          // Merge models
-          const existingMap = new Map(state.models.map((x:any) => [x.id, x]));
-          state.models = res.models.map((m:any) => {
-             const ext = existingMap.get(m.id);
-             return ext ? ext : { id: m.id, displayName: m.displayName || m.id, enabled: false };
+        fetchBtn.disabled = true;
+        const originalText = fetchBtn.textContent;
+        fetchBtn.textContent = 'Fetching...';
+        try {
+          const res = await storageAPI.fetchModels({
+            baseUrl: state.apiUrl,
+            apiUrl: state.apiUrl,
+            apiKey: state.apiKey,
+            provider: state.provider,
+            allowUnauthorized: state.allowUnauthorized,
           });
-          renderModelsList();
-       } else {
-          fetchStatus.textContent = 'Error: ' + (res.error || 'Unknown error');
-          fetchStatus.style.color = '#ef4444';
-       }
-    };
+          if (res.success && res.models) {
+            fetchStatus.textContent = `Found ${res.models.length} model${res.models.length === 1 ? '' : 's'}.`;
+            fetchStatus.classList.add('agy-status-success');
+            const existingMap = new Map(state.models.map((x) => [x.id, x]));
+            state.models = res.models.map((m) => {
+              const ext = existingMap.get(m.id);
+              return ext ? ext : { id: m.id, displayName: m.displayName || m.id, enabled: false };
+            });
+            renderModelsList();
+          } else {
+            fetchStatus.textContent = `Error: ${res.error || 'Unknown error'}`;
+            fetchStatus.classList.add('agy-status-error');
+          }
+        } catch (err) {
+          fetchStatus.textContent = `Error: ${(err as Error).message}`;
+          fetchStatus.classList.add('agy-status-error');
+        } finally {
+          fetchBtn.textContent = originalText;
+          fetchBtn.disabled = false;
+        }
+      });
 
-    const saveRow = document.createElement('div');
-    saveRow.style.cssText = `display: flex; justify-content: flex-end; gap: 12px; margin-top: auto; padding-top: 16px; border-top: 1px solid #3f3f46;`;
-    const removeKeyBtn = document.createElement('button');
-    removeKeyBtn.textContent = '🗝 Remove key';
-    removeKeyBtn.style.cssText = `background: transparent; border: 1px solid #52525b; color: #a1a1aa; padding: 10px 16px; border-radius: 6px; font-size: 13px; cursor: pointer;`;
-    removeKeyBtn.onclick = () => {
-       keyInp.value = '';
-       keyDirty = true;
-       state.apiKey = '';
-       formStatus.textContent = 'Key will be removed on save.';
-       formStatus.style.color = '#facc15';
-    };
-    const cancelBtn = document.createElement('button');
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.style.cssText = `background: transparent; border: 1px solid #3f3f46; color: #a1a1aa; padding: 10px 16px; border-radius: 6px; font-size: 13px; cursor: pointer;`;
-    cancelBtn.onclick = () => renderList();
-    const saveBtn = document.createElement('button');
-    saveBtn.textContent = 'Save Provider';
-    saveBtn.style.cssText = `background: #22c55e; border: none; color: white; padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer;`;
-    saveBtn.onclick = async () => {
-       saveBtn.textContent = 'Saving...';
-       saveBtn.disabled = true;
-       state.name = nameInp.input.value || 'Unnamed Provider';
-       state.apiUrl = urlInp.input.value;
-       if (keyDirty) {
-          state.apiKey = keyInp.value;
-       }
-       try {
+      const saveRow = document.createElement('div');
+      saveRow.className = 'agy-form-footer';
+
+      const removeKeyBtn = document.createElement('button');
+      removeKeyBtn.type = 'button';
+      removeKeyBtn.className = 'agy-btn-ghost agy-btn-danger';
+      removeKeyBtn.textContent = '🗝 Remove key';
+      removeKeyBtn.addEventListener('click', () => {
+        keyInp.value = '';
+        keyDirty = true;
+        state.apiKey = '';
+        formStatus.textContent = 'Key will be removed on save.';
+        formStatus.className = 'agy-form-status agy-status-warning';
+      });
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.className = 'agy-btn-secondary';
+      cancelBtn.textContent = 'Cancel';
+      cancelBtn.addEventListener('click', () => renderList());
+
+      const saveBtn = document.createElement('button');
+      saveBtn.type = 'button';
+      saveBtn.className = 'agy-btn-success';
+      saveBtn.textContent = 'Save Provider';
+      saveBtn.addEventListener('click', async () => {
+        if (saveBtn.disabled) return;
+        let valid = true;
+        const name = nameInp.input.value.trim();
+        const url = urlInp.input.value.trim();
+        if (!name) {
+          showError(nameInp.errorEl, 'Provider name is required');
+          valid = false;
+        } else {
+          clearError(nameInp.errorEl);
+        }
+        if (!validateUrl(url)) {
+          showError(urlInp.errorEl, 'Enter a valid http(s) URL');
+          valid = false;
+        } else {
+          clearError(urlInp.errorEl);
+        }
+        if (!valid) return;
+
+        state.name = name;
+        state.apiUrl = url;
+        if (keyDirty) state.apiKey = keyInp.value;
+
+        saveBtn.disabled = true;
+        const originalText = saveBtn.textContent;
+        saveBtn.textContent = 'Saving...';
+        try {
           const res = await storageAPI.saveProvider(state);
           if (res.success) {
-             formStatus.textContent = 'Saved.';
-             formStatus.style.color = '#22c55e';
-             // Invalidate cached models so the proxy picks up changes
-             try {
-                const rm = await storageAPI.getCustomModels();
-                void rm; // keep linter happy
-             } catch {
-                /* ignore */
-             }
-             renderList();
+            formStatus.textContent = 'Saved.';
+            formStatus.className = 'agy-form-status agy-status-success';
+            renderList();
           } else {
-             formStatus.textContent = 'Error: ' + (res.error || 'Unknown error');
-             formStatus.style.color = '#ef4444';
-             saveBtn.textContent = 'Save Provider';
-             saveBtn.disabled = false;
+            formStatus.textContent = `Error: ${res.error || 'Unknown error'}`;
+            formStatus.className = 'agy-form-status agy-status-error';
+            saveBtn.textContent = originalText;
+            saveBtn.disabled = false;
           }
-       } catch (err) {
-          formStatus.textContent = 'Error: ' + (err as Error).message;
-          formStatus.style.color = '#ef4444';
-          saveBtn.textContent = 'Save Provider';
+        } catch (err) {
+          formStatus.textContent = `Error: ${(err as Error).message}`;
+          formStatus.className = 'agy-form-status agy-status-error';
+          saveBtn.textContent = originalText;
           saveBtn.disabled = false;
-       }
-    };
-    saveRow.appendChild(removeKeyBtn);
-    saveRow.appendChild(cancelBtn);
-    saveRow.appendChild(saveBtn);
-    formContainer.appendChild(saveRow);
-  }
+        }
+      });
 
-  // Accessibility: close on overlay click or Escape
-  overlay.addEventListener('click', (ev) => {
-    if (ev.target === overlay) overlay.remove();
-  });
-  modal.setAttribute('role', 'dialog');
-  modal.setAttribute('aria-modal', 'true');
-  modal.setAttribute('aria-labelledby', 'agy-modal-title');
-  titleRow.setAttribute('id', 'agy-modal-title');
-  closeBtn.setAttribute('aria-label', 'Close');
-  const escHandler = (ev: KeyboardEvent) => {
-    if (ev.key === 'Escape') overlay.remove();
-  };
-  document.addEventListener('keydown', escHandler);
-  overlay.addEventListener('agy-modal-closed', () => {
-    document.removeEventListener('keydown', escHandler);
-  });
-  // Cleanup listener when overlay removes
-  const overlayObserver = new MutationObserver(() => {
-    if (!overlay.isConnected) {
-      document.removeEventListener('keydown', escHandler);
-      overlayObserver.disconnect();
+      saveRow.appendChild(removeKeyBtn);
+      saveRow.appendChild(cancelBtn);
+      saveRow.appendChild(saveBtn);
+      formContainer.appendChild(saveRow);
+
+      requestAnimationFrame(() => {
+        nameInp.input.focus();
+        if (existingProvider) nameInp.input.select();
+      });
     }
-  });
-  overlayObserver.observe(document.body, { childList: true });
 
-  renderList();
-}
-
+    renderList();
+  }
 
   // Efficient DOM tracking via MutationObserver — instead of setInterval
   let injectionObserver: MutationObserver | null = null;

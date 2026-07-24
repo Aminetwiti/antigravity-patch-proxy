@@ -62,6 +62,7 @@ const registry = __importStar(require("./proxy/registry"));
 const protoInjector_1 = require("./proxy/protoInjector");
 // Custom model loading (extracted from proxy.ts)
 const modelLoader_1 = require("./proxy/modelLoader");
+const customModelStore_1 = require("./customModelStore");
 const errorClassifier_1 = require("./proxy/errorClassifier");
 const retryStrategy_1 = require("./proxy/retryStrategy");
 function generateGracefulMarkdown(diagnostic) {
@@ -302,19 +303,28 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
     const MAX_RETRIES = (0, urlBuilder_1.resolveMaxRetries)(model);
     const REQUEST_TIMEOUT_MS = (0, urlBuilder_1.resolveRequestTimeout)(model);
     function attemptFallback(diagnostic) {
-        if (fallbackDepth > 0)
+        if (fallbackDepth >= 2)
+            return false;
+        const isEligibleForFallback = diagnostic.errorType === 'rate_limit' ||
+            diagnostic.errorType === 'server' ||
+            diagnostic.errorType === 'network' ||
+            diagnostic.errorType === 'billing' ||
+            diagnostic.errorType === 'timeout';
+        if (!isEligibleForFallback)
             return false;
         try {
             const allModels = (0, modelLoader_1.loadCustomModels)();
             for (const m of allModels) {
-                if (m.name !== model.name && m.apiKey && m.apiKey !== 'none' && !m.apiKey.startsWith('fallback:')) {
-                    electron_log_1.default.warn(`[Proxy] Model ${model.name} failed (${diagnostic.errorType}). Auto-falling back to ${m.name}...`);
+                if (m.name !== model.name && m.apiKey && !m.apiKey.startsWith('fallback:')) {
+                    electron_log_1.default.warn(`[Proxy] Model ${model.name} failed with ${diagnostic.errorType} (${diagnostic.title}). Auto-falling back to ${m.displayName || m.name}...`);
                     handleCustomModelRequest(res, m, geminiBody, isStream, 0, fallbackDepth + 1);
-                    return true; // Fallback successfully initiated
+                    return true;
                 }
             }
         }
-        catch (e) { }
+        catch (e) {
+            electron_log_1.default.error('[Proxy] Auto-fallback exception:', e);
+        }
         return false;
     }
     const provider = (0, urlBuilder_1.resolveProvider)(model);
@@ -508,6 +518,8 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                 };
                 res.write(`data: ${JSON.stringify(finalChunk)}\n\n`);
                 res.end();
+                const pId = model.name.includes('-') ? model.name.split('-')[0] : model.provider;
+                void (0, customModelStore_1.recordProviderUsage)(pId, 100, 150);
             });
         }
         else {

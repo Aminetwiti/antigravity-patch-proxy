@@ -16,16 +16,7 @@
 
 // (See globals.d.ts for the window.ag interface)
 
-import { decodeError, formatBytes } from './error-decoder';
-
-// `error-decoder` exports the `ErrorAction` discriminated string union, but
-// keeping a local alias here avoids a second named export round-trip when this
-// file is consumed in the browser (it is also bundled as a global <script>).
-type ErrorAction =
-  | 'open-mitm-view'
-  | 'run-doctor'
-  | 'show-retry-toast'
-  | 'none';
+// (ErrorAction type is declared in error-decoder.ts)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tiny memoization cache for repeated IPC calls (config, info, etc.)
@@ -881,7 +872,11 @@ async function loadModels(): Promise<void> {
           <div class="empty-icon">
             <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/></svg>
           </div>
-          <p>No models configured. Click <strong>Add model</strong> to create one.</p>
+          <p style="margin-bottom: 12px;">No models configured. Add a custom provider to get started.</p>
+          <button class="btn btn-primary btn-sm" id="emptyAddModelBtn" type="button">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add model
+          </button>
         </div>`;
     } else {
       // Use template element for parse-once, insert-once
@@ -923,6 +918,10 @@ async function loadModels(): Promise<void> {
 // Event delegation for model-card actions (one listener, not N)
 modelsList.addEventListener('click', (e) => {
   const target = e.target as HTMLElement;
+  if (target.closest('#emptyAddModelBtn')) {
+    openAddModelModal();
+    return;
+  }
   const btn = target.closest<HTMLElement>('[data-action]');
   if (!btn) return;
   void handleModelAction(btn);
@@ -1282,6 +1281,8 @@ addModelModalSave.addEventListener('click', async () => {
     if (added > 0) void loadModels();
   }
 });
+
+$('#modelsAddBtn')?.addEventListener('click', () => openAddModelModal());
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MITM view
@@ -1851,48 +1852,48 @@ async function loadPatchStatus(): Promise<void> {
       ${confidenceHero}
       ${metadataWithoutBinaryBanner}
       <div class="patch-row">
-        <div class="patch-row-label">Version Antigravity</div>
-        <div class="patch-row-value">${escapeHtml(s.antigravityVersion ?? 'inconnue')}</div>
+        <div class="patch-row-label">Antigravity version</div>
+        <div class="patch-row-value">${escapeHtml(s.antigravityVersion ?? 'unknown')}</div>
       </div>
       <div class="patch-row">
-        <div class="patch-row-label">Source version</div>
+        <div class="patch-row-label">Version source</div>
         <div class="patch-row-value">${escapeHtml(s.antigravityVersionSource ?? 'unknown')}</div>
       </div>
       <div class="patch-row">
-        <div class="patch-row-label">Chemin du binaire</div>
+        <div class="patch-row-label">Binary path</div>
         <div class="patch-row-value">${escapeHtml(s.binaryPath ?? '—')}</div>
       </div>
       <div class="patch-row">
-        <div class="patch-row-label">Présent</div>
-        <div class="patch-row-value ${s.exists ? 'ok' : 'err'}">${s.exists ? 'oui' : 'non'}</div>
+        <div class="patch-row-label">Present</div>
+        <div class="patch-row-value ${s.exists ? 'ok' : 'err'}">${s.exists ? 'yes' : 'no'}</div>
       </div>
       <div class="patch-row">
-        <div class="patch-row-label">Déjà patché</div>
-        <div class="patch-row-value ${s.applied ? 'ok' : 'warn'}">${s.applied ? 'oui' : 'non'}</div>
+        <div class="patch-row-label">Already patched</div>
+        <div class="patch-row-value ${s.applied ? 'ok' : 'warn'}">${s.applied ? 'yes' : 'no'}</div>
       </div>
       <div class="patch-row">
         <div class="patch-row-label">Backup</div>
-        <div class="patch-row-value ${s.backupExists ? 'ok' : ''}">${s.backupExists ? 'oui' : 'non'}</div>
+        <div class="patch-row-value ${s.backupExists ? 'ok' : ''}">${s.backupExists ? 'yes' : 'no'}</div>
       </div>
       <div class="patch-row">
-        <div class="patch-row-label">Compatibilité</div>
-        <div class="patch-row-value ${s.compatible ? 'ok' : 'warn'}">${s.compatible ? 'ok' : 'à vérifier'}</div>
+        <div class="patch-row-label">Compatibility</div>
+        <div class="patch-row-value ${s.compatible ? 'ok' : 'warn'}">${s.compatible ? 'ok' : 'needs verification'}</div>
       </div>
       ${s.detectionReason ? `
       <div class="patch-row">
-        <div class="patch-row-label">Pourquoi cette recommandation</div>
+        <div class="patch-row-label">Recommendation reason</div>
         <div class="patch-row-value">${escapeHtml(s.detectionReason)}</div>
       </div>` : ''}
       ${recommendationRow}
       ${overrideRow}
       ${s.warningMessage ? `
       <div class="patch-row">
-        <div class="patch-row-label">Avertissement</div>
+        <div class="patch-row-label">Warning</div>
         <div class="patch-row-value warn">${escapeHtml(s.warningMessage)}</div>
       </div>` : ''}
       ${suggestions}`;
     patchStatusEl.replaceChildren(patchTpl.content);
-    setStatus('Prêt');
+    setStatus('Ready');
   } catch (e) {
     patchStatusEl.innerHTML = `<div class="empty-state"><p>Error: ${escapeHtml((e as Error).message)}</p></div>`;
   } finally {
@@ -2525,14 +2526,21 @@ const paletteInput = $('#paletteInput') as HTMLInputElement;
 const paletteResults = $('#paletteResults') as HTMLDivElement;
 
 const PALETTE_COMMANDS: Array<{ id: string; label: string; view: string; action?: () => void }> = [
-  { id: 'dashboard', label: 'Dashboard', view: 'dashboard' },
-  { id: 'doctor', label: 'Run doctor', view: 'dashboard', action: () => void runDoctor() },
-  { id: 'logs', label: 'Logs', view: 'logs' },
-  { id: 'models', label: 'Models', view: 'models' },
-  { id: 'mitm', label: 'MITM Proxy', view: 'mitm' },
-  { id: 'patch', label: 'Binary patch', view: 'patch' },
-  { id: 'settings', label: 'Settings', view: 'settings' },
-  { id: 'info', label: 'Antigravity Status', view: 'info' },
+  { id: 'dashboard', label: 'Go to Dashboard', view: 'dashboard' },
+  { id: 'doctor', label: 'Run System Diagnostic (Doctor)', view: 'dashboard', action: () => void runDoctor() },
+  { id: 'fix-all', label: 'Fix All — Full Auto-Repair', view: 'dashboard', action: () => void runFixAll() },
+  { id: 'antigravity', label: 'Go to Antigravity Status', view: 'info' },
+  { id: 'models', label: 'Go to Custom Models', view: 'models' },
+  { id: 'mitm', label: 'Go to MITM Proxy Manager', view: 'mitm' },
+  { id: 'patch', label: 'Go to Binary Patch Manager', view: 'patch' },
+  { id: 'proxy-stub', label: 'Start Emergency Proxy Stub (Port 50999)', view: 'mitm', action: () => void runStartStub() },
+  { id: 'logs', label: 'Go to System Logs', view: 'logs' },
+  { id: 'settings', label: 'Go to Settings', view: 'settings' },
+  { id: 'theme', label: 'Toggle Light / Dark Theme', view: 'settings', action: () => {
+    const current = document.documentElement.dataset.theme ?? 'dark';
+    void setTheme(current === 'dark' ? 'light' : 'dark');
+  } },
+  { id: 'info', label: 'Go to System Info & Installations', view: 'info' },
 ];
 
 function openPalette(): void {
@@ -2557,7 +2565,7 @@ paletteResults.addEventListener('click', (e) => {
 
 function renderPalette(query: string): void {
   const q = query.trim().toLowerCase();
-  const filtered = PALETTE_COMMANDS.filter((c) => c.label.toLowerCase().includes(q));
+  const filtered = PALETTE_COMMANDS.filter((c) => c.label.toLowerCase().includes(q) || c.view.toLowerCase().includes(q));
   const html = filtered
     .map(
       (c, i) => `
@@ -2589,11 +2597,13 @@ paletteInput.addEventListener('keydown', (e) => {
     idx = Math.min(idx + 1, items.length - 1);
     items.forEach((it) => it.classList.remove('selected'));
     items[idx]?.classList.add('selected');
+    items[idx]?.scrollIntoView({ block: 'nearest' });
   } else if (e.key === 'ArrowUp') {
     e.preventDefault();
     idx = Math.max(idx - 1, 0);
     items.forEach((it) => it.classList.remove('selected'));
     items[idx]?.classList.add('selected');
+    items[idx]?.scrollIntoView({ block: 'nearest' });
   } else if (e.key === 'Enter') {
     e.preventDefault();
     const target = paletteResults.querySelector<HTMLDivElement>('.palette-item.selected') ?? items[0];
@@ -2604,6 +2614,14 @@ paletteInput.addEventListener('keydown', (e) => {
 });
 paletteBackdrop.addEventListener('click', (e) => {
   if (e.target === paletteBackdrop) closePalette();
+});
+
+// Global shortcut: Ctrl+Shift+P / Cmd+Shift+P
+document.addEventListener('keydown', (e: KeyboardEvent) => {
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'P' || e.key === 'p')) {
+    e.preventDefault();
+    openPalette();
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
