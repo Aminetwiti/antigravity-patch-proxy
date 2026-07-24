@@ -231,21 +231,28 @@ function createWindow(): void {
       nodeIntegration: false,
       sandbox: false,
       spellcheck: false,
-      backgroundThrottling: false,
+      // PERF: allow Chromium to throttle timers/rAF in backgrounded windows.
+      // Disabling this kept the proxy poller (1.5 s) and the uptime ticker
+      // (1 s) running at full cadence when the user minimized the window,
+      // burning ~10-30 % idle CPU on Windows.
+      backgroundThrottling: true,
     },
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
-  mainWindow.once('ready-to-show', () => {
-    mainWindow?.show();
-  });
-
-  setTimeout(() => {
+  // PERF: cancel the unconditional 2 s fallback when ready-to-show fires so
+  // we don't run a no-op show() check on every successful launch.
+  const showFallback = setTimeout(() => {
     if (mainWindow && !mainWindow.isVisible()) {
       mainWindow.show();
     }
   }, 2000);
+
+  mainWindow.once('ready-to-show', () => {
+    clearTimeout(showFallback);
+    mainWindow?.show();
+  });
 
   mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
     console.error(`[main] did-fail-load: ${code} ${desc} ${url}`);

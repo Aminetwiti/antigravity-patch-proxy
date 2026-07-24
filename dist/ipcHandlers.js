@@ -259,10 +259,16 @@ function registerIpcHandlers(storageManager) {
         const http = require('http');
         return new Promise((resolve) => {
             try {
-                let urlStr = model.apiUrl;
+                let urlStr = model.apiUrl || '';
+                if (!urlStr) {
+                    resolve({ success: false, error: 'No API URL provided' });
+                    return;
+                }
+                const providerLower = (model.provider || '').toLowerCase();
                 // Normalize URL for chat API endpoints
-                if (model.provider === 'openai' || model.provider === 'custom' || model.provider === 'ollama') {
-                    if (!urlStr.toLowerCase().includes('/chat/completions') && !urlStr.toLowerCase().includes('/completions')) {
+                if (providerLower === 'openai' || providerLower === 'custom' || providerLower === 'ollama') {
+                    const urlLower = urlStr.toLowerCase();
+                    if (!urlLower.includes('/chat/completions') && !urlLower.includes('/completions')) {
                         if (urlStr.endsWith('/v1')) {
                             urlStr += '/chat/completions';
                         }
@@ -365,7 +371,11 @@ function registerIpcHandlers(storageManager) {
                 // e.g. https://api.openai.com/v1/chat/completions → /v1/models
                 // e.g. https://api.anthropic.com/v1/messages → /v1/models
                 // e.g. http://localhost:11434/v1/chat/completions → /v1/models
-                let baseUrl = params.apiUrl;
+                let baseUrl = (typeof params?.apiUrl === 'string' && params.apiUrl) ? params.apiUrl : (typeof params?.baseUrl === 'string' ? params.baseUrl : '');
+                if (!baseUrl || typeof baseUrl !== 'string') {
+                    resolve({ success: false, error: 'No API URL provided' });
+                    return;
+                }
                 // Strip the chat/completions or /messages path to get the base
                 const urlLower = baseUrl.toLowerCase();
                 // Detect Google AI Studio URLs (e.g. .../v1beta/models/...)

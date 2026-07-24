@@ -12,12 +12,6 @@ const Module = require('module');
 // transform does not trip on it.
 const electronAsarPath = require.resolve('@electron/asar');
 const electronAsarReal = require('@electron/asar');
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const hoisted = global.__hoistedAsarSpy__ || {
-  listPackage: (p) => electronAsarReal.listPackage(p),
-  extractFile: (p, f) => electronAsarReal.extractFile(p, f),
-};
-global.__hoistedAsarSpy__ = hoisted;
 
 require.cache[electronAsarPath] = {
   id: electronAsarPath,
@@ -25,8 +19,8 @@ require.cache[electronAsarPath] = {
   loaded: true,
   exports: {
     ...electronAsarReal,
-    listPackage: (...args) => hoisted.listPackage(...args),
-    extractFile: (...args) => hoisted.extractFile(...args),
+    listPackage: (...args) => (global.__hoistedAsarSpy__?.listPackage || electronAsarReal.listPackage)(...args),
+    extractFile: (...args) => (global.__hoistedAsarSpy__?.extractFile || electronAsarReal.extractFile)(...args),
   },
   children: [],
   paths: [],

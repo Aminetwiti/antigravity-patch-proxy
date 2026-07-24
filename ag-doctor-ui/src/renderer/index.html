@@ -7,9 +7,15 @@
   <title>Antigravity Doctor — Diagnostic &amp; Repair</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <!-- display=swap avoids invisible text while fonts load -->
-  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <!-- PERF: load Google Fonts as a non-render-blocking print stylesheet, then
+       promote to "all" once it loads. Avoids the redundant <link rel=preload>
+       + <link rel=stylesheet> race that fetched the same URL twice. -->
+  <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+        media="print"
+        onload="this.media='all'"
+  />
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" /></noscript>
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="styles-extra.css" />
 </head>
@@ -82,7 +88,7 @@
       <ul class="nav-list">
         <li><button class="nav-item active" data-view="dashboard" type="button">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-          <span>Accueil</span>
+          <span>Dashboard</span>
         </button></li>
         <li><button class="nav-item" data-view="antigravity" type="button">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
@@ -130,12 +136,12 @@
 
     <!-- Content -->
     <section class="content">
-      <!-- Accueil -->
+      <!-- Dashboard -->
       <div class="view active" id="view-dashboard">
         <div class="view-header">
           <div>
-            <h1>Accueil</h1>
-            <p class="subtitle">Tableau de bord de diagnostic et de réparation Antigravity</p>
+            <h1>Dashboard</h1>
+            <p class="subtitle">Antigravity diagnostic &amp; repair dashboard</p>
           </div>
           <div class="header-actions">
             <button class="btn btn-ghost" id="refreshBtn" type="button">
@@ -194,8 +200,8 @@
             <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
           </div>
           <div class="home-intro-body">
-            <h2>Logiciel Objectif</h2>
-            <p>ag-doctor vérifie l'état d'Antigravity, gère le proxy MITM, applique le patch binaire et assure le bon fonctionnement des modèles personnalisés. Utilisez la checklist ci-dessous pour suivre la réalisation de chaque objectif.</p>
+            <h2>System Objectives</h2>
+            <p>ag-doctor checks Antigravity status, manages the MITM proxy, applies binary patches, and ensures custom models function cleanly. Use the checklist below to track objective status.</p>
           </div>
         </div>
 
@@ -240,30 +246,30 @@
 
         <div class="panel">
           <div class="panel-header">
-            <h2>Objectifs</h2>
+            <h2>Objectives</h2>
             <span class="badge" id="lastRunBadge">never run</span>
           </div>
           <div class="panel-body">
             <div id="objectiveList" class="objective-list">
               <div class="objective-item" id="obj-antigravity">
                 <div class="objective-icon pending"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/></svg></div>
-                <div class="objective-body"><div class="objective-title">Vérifier les statuts d'Antigravity et version</div><div class="objective-status">En attente</div></div>
+                <div class="objective-body"><div class="objective-title">Verify Antigravity status &amp; version</div><div class="objective-status">Pending</div></div>
               </div>
               <div class="objective-item" id="obj-mitm">
                 <div class="objective-icon pending"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/></svg></div>
-                <div class="objective-body"><div class="objective-title">Vérifier et gérer le MITM et le statut proxy</div><div class="objective-status">En attente</div></div>
+                <div class="objective-body"><div class="objective-title">Verify &amp; manage MITM proxy status</div><div class="objective-status">Pending</div></div>
               </div>
               <div class="objective-item" id="obj-doctor">
                 <div class="objective-icon pending"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/></svg></div>
-                <div class="objective-body"><div class="objective-title">Faire un diagnostic (Doctor)</div><div class="objective-status">En attente</div></div>
+                <div class="objective-body"><div class="objective-title">Run system diagnostic (Doctor)</div><div class="objective-status">Pending</div></div>
               </div>
               <div class="objective-item" id="obj-patch">
                 <div class="objective-icon pending"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/></svg></div>
-                <div class="objective-body"><div class="objective-title">Faire un repair (Réparer)</div><div class="objective-status">En attente</div></div>
+                <div class="objective-body"><div class="objective-title">Apply repair patch</div><div class="objective-status">Pending</div></div>
               </div>
               <div class="objective-item" id="obj-logs">
                 <div class="objective-icon pending"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/></svg></div>
-                <div class="objective-body"><div class="objective-title">Afficher et suivre les logs</div><div class="objective-status">En attente</div></div>
+                <div class="objective-body"><div class="objective-title">View &amp; follow system logs</div><div class="objective-status">Pending</div></div>
               </div>
             </div>
           </div>
@@ -279,7 +285,11 @@
                 <div class="empty-icon">
                   <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
                 </div>
-                <p>Click <strong>Run doctor</strong> to start a diagnostic.</p>
+                <p style="margin-bottom: 12px;">No diagnostic results yet. Run Doctor to scan your environment for issues.</p>
+                <button class="btn btn-primary btn-sm" id="emptyStateRunDoctorBtn" type="button">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  Run diagnostic
+                </button>
               </div>
             </div>
           </div>
@@ -417,8 +427,8 @@
         <div class="patch-banner err" id="mitmRequiredBanner" role="alert" aria-live="polite" style="margin-bottom: 16px;">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
           <div class="patch-banner-body">
-            <div class="patch-banner-title">MITM sur 443 obligatoire (Antigravity 2.2.x)</div>
-            <div class="patch-banner-text">Antigravity 2.2.x <strong>REQUIERT</strong> le MITM sur le port 443. Sans lui, le Language Server continuera à échouer avec <code>127.0.0.1:443 refused</code>. Vérifiez que le proxy écoute bien sur 443 et que le certificat CA est installé.</div>
+            <div class="patch-banner-title">MITM on 443 Required (Antigravity 2.2.x)</div>
+            <div class="patch-banner-text">Antigravity 2.2.x <strong>REQUIRES</strong> MITM on port 443. Without it, the Language Server will continue to fail with <code>127.0.0.1:443 refused</code>. Ensure the proxy is listening on 443 and the CA certificate is installed.</div>
           </div>
         </div>
         <div id="mitmStatus" class="mitm-status">
@@ -481,12 +491,12 @@
       <div class="view" id="view-patch">
         <div class="view-header">
           <div>
-            <h1>Patch du binaire</h1>
-            <p class="subtitle">Choisissez la bonne famille de patch pour rediriger <code>language_server</code> vers le proxy local en toute sécurité.</p>
+            <h1>Binary Patch</h1>
+            <p class="subtitle">Select the matching patch family to safely redirect <code>language_server</code> to the local proxy.</p>
           </div>
           <div class="header-actions">
-            <button class="btn btn-ghost" id="patchRestoreBtn" type="button">Restaurer</button>
-            <button class="btn btn-primary" id="patchApplyBtn" type="button">Appliquer le patch</button>
+            <button class="btn btn-ghost" id="patchRestoreBtn" type="button">Restore</button>
+            <button class="btn btn-primary" id="patchApplyBtn" type="button">Apply patch</button>
           </div>
         </div>
 
@@ -495,42 +505,42 @@
           <div class="panel-body">
             <div class="patch-version-detector" id="patchVersionDetector">
               <div class="patch-version-detector-main">
-                <div class="patch-version-detector-label">Version Antigravity détectée</div>
+                <div class="patch-version-detector-label">Detected Antigravity version</div>
                 <div class="patch-version-detector-version" id="patchDetectedVersion">—</div>
                 <div class="patch-version-detector-meta" id="patchDetectedMeta">
-                  <span class="badge badge-muted" id="patchDetectedSource">analyse en cours…</span>
-                  <span class="badge badge-muted" id="patchRecommendedBadge">auto-détection</span>
+                  <span class="badge badge-muted" id="patchDetectedSource">analyzing…</span>
+                  <span class="badge badge-muted" id="patchRecommendedBadge">auto-detected</span>
                 </div>
               </div>
               <div class="patch-version-detector-actions">
-                <button class="btn btn-ghost btn-sm" id="patchRescanBtn" type="button" title="Relancer l’analyse de l’installation Antigravity">
+                <button class="btn btn-ghost btn-sm" id="patchRescanBtn" type="button" title="Re-scan Antigravity installation">
                   <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                  Relancer la détection
+                  Re-scan
                 </button>
               </div>
             </div>
 
-            <details class="patch-legend" open aria-label="Légende de détection du patch">
+            <details class="patch-legend" open aria-label="Patch detection legend">
               <summary class="patch-legend-summary">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="patch-legend-icon"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                <span class="patch-legend-title">Comment lire la détection</span>
+                <span class="patch-legend-title">Understanding detection signals</span>
                 <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="patch-legend-chevron"><polyline points="6 9 12 15 18 9"/></svg>
               </summary>
               <dl class="patch-legend-list">
                 <div class="patch-legend-row">
                   <dt class="patch-legend-term">
-                    <span class="badge badge-info">Signature binaire</span>
+                    <span class="badge badge-info">Binary signature</span>
                   </dt>
                   <dd class="patch-legend-def">
-                    Motif d'URL trouvé dans <code>language_server.exe</code> (patch déjà appliqué ou non). C'est le signal principal attestant que le binaire est patchable.
+                    URL pattern found in <code>language_server.exe</code> (stock or patched). Primary signal that the binary is patchable.
                   </dd>
                 </div>
                 <div class="patch-legend-row">
                   <dt class="patch-legend-term">
-                    <span class="badge badge-muted">Empreinte JS overlay</span>
+                    <span class="badge badge-muted">JS overlay footprint</span>
                   </dt>
                   <dd class="patch-legend-def">
-                    Présence/absence de fichiers JS caractéristiques (<code>proxy-runner.js</code>, <code>cryptoStore.js</code>, <code>dist/proxy/</code>) dans <code>app.asar</code> pour départager 2.2.x et 2.3.x.
+                    Presence/absence of specific JS files (<code>proxy-runner.js</code>, <code>cryptoStore.js</code>) in <code>app.asar</code> to distinguish 2.2.x from 2.3.x.
                   </dd>
                 </div>
               </dl>
@@ -547,10 +557,10 @@
             <div class="patch-banner warn" id="patchOverrideBanner" hidden>
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 0 0 1.74-3L13.74 4a2 2 0 0 0-3.48 0l-6.93 12a2 2 0 0 0 1.74 3z"/></svg>
               <div class="patch-banner-body">
-                <div class="patch-banner-title">Sélection manuelle active</div>
+                <div class="patch-banner-title">Manual selection active</div>
                 <div class="patch-banner-text" id="patchOverrideBannerText">—</div>
               </div>
-              <button class="btn btn-ghost btn-sm" id="patchClearOverrideBtn" type="button">Revenir à l’auto-détection</button>
+              <button class="btn btn-ghost btn-sm" id="patchClearOverrideBtn" type="button">Reset to auto-detection</button>
             </div>
           </div>
         </div>
@@ -884,10 +894,10 @@
 
   <!-- Modal: Add Custom Model -->
   <div class="modal-backdrop" id="addModelModalBackdrop" hidden>
-    <div class="modal" role="dialog" aria-modal="true" style="width: 560px; max-width: 95vw;">
+    <div class="modal modal-lg" role="dialog" aria-modal="true">
       <div class="modal-header">
-        <div style="display: flex; align-items: center; gap: 10px;">
-          <div style="width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center; justify-content: center; background-color: #3b82f618; color: #3b82f6; font-weight: 600;">+</div>
+        <div class="modal-header-title-wrap">
+          <div class="modal-header-icon">+</div>
           <h2>Add Custom Model</h2>
         </div>
         <button class="modal-close" id="addModelModalClose" type="button" aria-label="Close">
@@ -896,20 +906,20 @@
       </div>
       <div class="modal-body">
         <!-- Step indicators -->
-        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 24px; padding: 0 4px;">
-          <div id="addStep1Indicator" style="display: flex; align-items: center; gap: 8px; flex: 1;">
-            <div id="addStep1Badge" style="width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background-color: #3b82f6; color: white; font-weight: 600; font-size: 13px;">1</div>
+        <div class="step-indicators">
+          <div id="addStep1Indicator" class="step-indicator active">
+            <div id="addStep1Badge" class="step-badge">1</div>
             <div>
-              <div style="font-weight: 600; font-size: 13px; color: #f4f4f5;">Configure API</div>
-              <div style="font-size: 11px; color: #a1a1aa;">Provider, URL & key</div>
+              <div class="step-title">Configure API</div>
+              <div class="step-subtitle">Provider, URL &amp; key</div>
             </div>
           </div>
-          <div style="width: 32px; height: 2px; background-color: #27272a;"></div>
-          <div id="addStep2Indicator" style="display: flex; align-items: center; gap: 8px; flex: 1; opacity: 0.5;">
-            <div id="addStep2Badge" style="width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background-color: #27272a; color: #a1a1aa; font-weight: 600; font-size: 13px;">2</div>
+          <div class="step-divider"></div>
+          <div id="addStep2Indicator" class="step-indicator inactive">
+            <div id="addStep2Badge" class="step-badge">2</div>
             <div>
-              <div style="font-weight: 600; font-size: 13px; color: #f4f4f5;">Select Models</div>
-              <div style="font-size: 11px; color: #a1a1aa;">Choose models to add</div>
+              <div class="step-title">Select Models</div>
+              <div class="step-subtitle">Choose models to add</div>
             </div>
           </div>
         </div>
@@ -934,39 +944,39 @@
               <label for="modelApiKey">API Key <span class="form-hint">(optional)</span></label>
               <input type="password" id="modelApiKey" class="input" placeholder="sk-..." />
             </div>
-            <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
-              <input type="checkbox" id="modelAllowUnauthorized" style="width: 18px; height: 18px; accent-color: #3b82f6; cursor: pointer;" />
-              <label for="modelAllowUnauthorized" style="margin: 0; font-weight: 400; cursor: pointer;">Allow self-signed / unauthorized certificates</label>
+            <div class="form-group form-group-checkbox">
+              <input type="checkbox" id="modelAllowUnauthorized" class="form-checkbox" />
+              <label for="modelAllowUnauthorized" class="form-label-inline">Allow self-signed / unauthorized certificates</label>
             </div>
-            <div id="fetchModelsError" style="display: none; color: #ef4444; font-size: 13px; margin-top: 12px; padding: 10px; background-color: #ef444418; border-radius: 8px;"></div>
+            <div id="fetchModelsError" class="form-error-banner"></div>
           </div>
 
           <!-- Step 2: Select Models -->
-          <div id="addStep2" style="display: none;">
+          <div id="addStep2" hidden>
             <div class="form-group">
               <label>Display Name Suffix <span class="form-hint">(optional)</span></label>
               <input type="text" id="modelDisplayNameSuffix" class="input" placeholder="e.g. My Provider" />
             </div>
             <div class="form-group">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <div class="form-header-row">
                 <label>Available Models</label>
-                <button type="button" id="refetchModelsBtn" class="btn btn-ghost btn-sm" style="padding: 4px 10px; font-size: 12px;">Refetch</button>
+                <button type="button" id="refetchModelsBtn" class="btn btn-ghost btn-sm">Refetch</button>
               </div>
-              <div id="fetchedModelsList" style="max-height: 240px; overflow-y: auto; border: 1px solid #27272a; border-radius: 8px; padding: 8px; background-color: #0f0f10;">
-                <div style="text-align: center; padding: 24px; color: #a1a1aa; font-size: 13px;">
+              <div id="fetchedModelsList" class="fetched-models-container">
+                <div class="fetched-models-empty">
                   Fetch models to see available options.
                 </div>
               </div>
             </div>
-            <div id="saveModelsError" style="display: none; color: #ef4444; font-size: 13px; margin-top: 12px; padding: 10px; background-color: #ef444418; border-radius: 8px;"></div>
+            <div id="saveModelsError" class="form-error-banner"></div>
           </div>
         </form>
       </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" id="addModelModalCancel" type="button">Cancel</button>
-        <button class="btn btn-primary" id="addModelModalBack" type="button" style="display: none;">Back</button>
+        <button class="btn btn-primary" id="addModelModalBack" type="button" hidden>Back</button>
         <button class="btn btn-primary" id="addModelModalFetch" type="button">Fetch Models</button>
-        <button class="btn btn-primary" id="addModelModalSave" type="button" style="display: none;">Add Selected Models</button>
+        <button class="btn btn-primary" id="addModelModalSave" type="button" hidden>Add Selected Models</button>
       </div>
     </div>
   </div>

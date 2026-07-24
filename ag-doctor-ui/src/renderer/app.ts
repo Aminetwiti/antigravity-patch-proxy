@@ -16,6 +16,17 @@
 
 // (See globals.d.ts for the window.ag interface)
 
+import { decodeError, formatBytes } from './error-decoder';
+
+// `error-decoder` exports the `ErrorAction` discriminated string union, but
+// keeping a local alias here avoids a second named export round-trip when this
+// file is consumed in the browser (it is also bundled as a global <script>).
+type ErrorAction =
+  | 'open-mitm-view'
+  | 'run-doctor'
+  | 'show-retry-toast'
+  | 'none';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tiny memoization cache for repeated IPC calls (config, info, etc.)
 // Avoids re-fetching the same data within a short TTL.
@@ -286,12 +297,12 @@ interface MitmStatus {
 type ObjectiveKey = 'antigravity' | 'mitm' | 'doctor' | 'patch' | 'logs' | 'proxy';
 
 const OBJECTIVE_LABELS: Record<ObjectiveKey, string> = {
-  antigravity: "Vérifier les statuts d'Antigravity et version",
-  mitm: "Vérifier et gérer le MITM et le statut proxy",
-  doctor: "Faire un diagnostic (Doctor)",
-  patch: "Faire un repair (Réparer)",
-  logs: "Afficher et suivre les logs",
-  proxy: "Démarrer/arrêter le proxy stub sur 50999",
+  antigravity: "Verify Antigravity status & version",
+  mitm: "Verify & manage MITM proxy status",
+  doctor: "Run system diagnostic (Doctor)",
+  patch: "Apply repair patch",
+  logs: "View & follow system logs",
+  proxy: "Start/stop proxy stub on 50999",
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -679,7 +690,7 @@ function resultStatusToObjective(status: CheckResult['status']): 'ok' | 'warn' |
 function updateObjectives(results: CheckResult[]): void {
   const hasError = results.some((r) => r.status === 'error');
   const hasWarn = results.some((r) => r.status === 'warn');
-  setObjective('doctor', hasError ? 'error' : hasWarn ? 'warn' : 'ok', hasError ? 'Problèmes détectés' : hasWarn ? 'Avertissements' : 'Diagnostic OK');
+  setObjective('doctor', hasError ? 'error' : hasWarn ? 'warn' : 'ok', hasError ? 'Issues detected' : hasWarn ? 'Warnings found' : 'Diagnostic OK');
 
   const antigravity = results.find((r) => r.id === 'antigravity' || r.id === 'version' || r.id === 'install');
   setObjective('antigravity', antigravity ? resultStatusToObjective(antigravity.status) : 'pending', antigravity?.message);
@@ -691,11 +702,12 @@ function updateObjectives(results: CheckResult[]): void {
   setObjective('patch', patch ? resultStatusToObjective(patch.status) : 'pending', patch?.message);
 
   const logs = results.find((r) => r.id === 'logs');
-  setObjective('logs', logs ? resultStatusToObjective(logs.status) : 'ok', logs?.message ?? 'Logs disponibles');
+  setObjective('logs', logs ? resultStatusToObjective(logs.status) : 'ok', logs?.message ?? 'Logs available');
 }
 
 $('#runDoctorBtn').addEventListener('click', () => void runDoctor());
 $('#quickRunBtn').addEventListener('click', () => void runDoctor());
+$('#emptyStateRunDoctorBtn')?.addEventListener('click', () => void runDoctor());
 $('#refreshBtn').addEventListener('click', () => void runDoctor());
 $('#repairBtn').addEventListener('click', () => void runRepair());
 
@@ -707,23 +719,23 @@ $('#startStubBtn')?.addEventListener('click', () => void runStartStub());
 
 async function runFixAll(): Promise<void> {
   const ok = await confirmModal(
-    'Fix All — Réparation complète',
-    'Cela va lancer <code>ag-doctor repair --yes --auto-elevate</code> avec élévation admin (UAC). ' +
-    'Toutes les actions de réparation seront effectuées : patch, port 50999, proxy, CA cert.',
+    'Fix All — Full Repair',
+    'This will launch <code>ag-doctor repair --yes --auto-elevate</code> with admin elevation (UAC). ' +
+    'All repair actions will be performed: patch, port 50999, proxy, CA cert.',
     { confirmLabel: 'Fix All', danger: true },
   );
   if (!ok) return;
-  setStatus('Fix All — élévation admin…', 'busy');
+  setStatus('Fix All — admin elevation…', 'busy');
   $('#fixAllBtn')?.setAttribute('disabled', 'true');
   try {
     // Use the existing IPC handler that spawns the elevated repair script
     const r = await window.ag.repairRun();
     if (r?.ok) {
       toast('Fix All completed successfully', 'ok', 5000);
-      setObjective('patch', 'ok', 'Réparation complète effectuée');
+      setObjective('patch', 'ok', 'Full repair completed');
     } else {
       toast(`Fix All failed: ${r?.error ?? 'unknown'}`, 'err', 6000);
-      setObjective('patch', 'error', 'Échec de la réparation complète');
+      setObjective('patch', 'error', 'Full repair failed');
     }
     setStatus('Refreshing diagnostic…', 'busy');
     await runDoctor();
@@ -742,10 +754,10 @@ async function runStartStub(): Promise<void> {
     const r = await window.ag.proxyStartStub();
     if (r?.ok) {
       toast(`Proxy stub started (pid=${r.pid ?? '?'})`, 'ok', 5000);
-      setObjective('proxy', 'ok', 'Stub proxy actif sur 50999');
+      setObjective('proxy', 'ok', 'Proxy stub active on 50999');
     } else {
       toast(`Stub failed: ${r?.error ?? 'unknown'}`, 'err', 6000);
-      setObjective('proxy', 'error', 'Échec du stub');
+      setObjective('proxy', 'error', 'Proxy stub failed');
     }
   } catch (e) {
     toast(`Stub error: ${(e as Error).message}`, 'err');
@@ -766,13 +778,13 @@ function setObjective(key: ObjectiveKey, state: 'pending' | 'ok' | 'warn' | 'err
   icon.className = `objective-icon ${state}`;
   objectiveIconTpl.innerHTML = iconForObjective(state);
   icon.replaceChildren(objectiveIconTpl.content);
-  status.textContent = detail ?? (state === 'ok' ? 'Actif' : state === 'pending' ? 'En attente' : state === 'warn' ? 'Avertissement' : 'Erreur');
+  status.textContent = detail ?? (state === 'ok' ? 'Active' : state === 'pending' ? 'Pending' : state === 'warn' ? 'Warning' : 'Error');
 }
 
 async function runRepair(): Promise<void> {
   const ok = await confirmModal(
-    'Réparer Antigravity',
-    'Cela exécutera <code>ag-doctor repair --yes</code> pour tenter de réparer automatiquement les problèmes détectés.',
+    'Repair Antigravity',
+    'This will run <code>ag-doctor repair --yes</code> to automatically attempt repairing detected issues.',
     { confirmLabel: 'Repair' },
   );
   if (!ok) return;
@@ -782,10 +794,10 @@ async function runRepair(): Promise<void> {
     const r = await window.ag.run(['repair', '--yes']);
     if (r.code === 0) {
       toast('Repair completed successfully', 'ok', 5000);
-      setObjective('patch', 'ok', 'Réparation effectuée');
+      setObjective('patch', 'ok', 'Repair completed');
     } else {
       toast(`Repair failed: ${r.stderr || r.stdout}`, 'err', 6000);
-      setObjective('patch', 'error', 'Échec de la réparation');
+      setObjective('patch', 'error', 'Repair failed');
     }
     setStatus('Refreshing diagnostic…', 'busy');
     await runDoctor();
@@ -1586,21 +1598,21 @@ function patchBadge(label: string, tone: 'ok' | 'warn' | 'err' | 'muted' = 'mute
 function patchSourceLabel(s: PatchStatus): string {
   if (s.overrideActive) return 'sélection manuelle';
   if (s.antigravityVersionSource && s.antigravityVersionSource !== 'unknown') {
-    return `version lue depuis ${s.antigravityVersionSource}`;
+    return `version read from ${s.antigravityVersionSource}`;
   }
-  return 'détection incertaine';
+  return 'uncertain detection';
 }
 
 function patchFamilyLabel(range: string): string {
-  if (range.includes('2.3')) return 'Famille 2.3';
-  if (range.includes('2.2')) return 'Famille 2.2';
-  return 'Famille 2.1';
+  if (range.includes('2.3')) return 'Family 2.3';
+  if (range.includes('2.2')) return 'Family 2.2';
+  return 'Family 2.1';
 }
 
 function patchConfidenceLabel(confidence?: PatchStatus['detectionConfidence']): string {
-  if (confidence === 'high') return 'confiance forte';
-  if (confidence === 'medium') return 'confiance moyenne';
-  return 'confiance faible';
+  if (confidence === 'high') return 'high confidence';
+  if (confidence === 'medium') return 'medium confidence';
+  return 'low confidence';
 }
 
 function patchConfidenceTone(confidence?: PatchStatus['detectionConfidence']): 'ok' | 'warn' | 'err' {
@@ -1610,14 +1622,14 @@ function patchConfidenceTone(confidence?: PatchStatus['detectionConfidence']): '
 }
 
 function patchSignatureLabel(s: PatchStatus): string {
-  if (s.binarySignatureState === 'patched') return 'signature binaire : patch déjà présent';
-  if (s.binarySignatureState === 'original') return 'signature binaire : binaire d’origine détecté';
-  return 'signature binaire absente';
+  if (s.binarySignatureState === 'patched') return 'binary signature: patch already present';
+  if (s.binarySignatureState === 'original') return 'binary signature: stock binary detected';
+  return 'binary signature missing';
 }
 
 function patchOverlayLabel(s: PatchStatus): string {
-  if (!s.overlayFingerprintDetected || !s.overlayFingerprintRange) return 'empreinte JS overlay absente ou non concluante';
-  return `empreinte JS overlay : ${s.overlayFingerprintRange}`;
+  if (!s.overlayFingerprintDetected || !s.overlayFingerprintRange) return 'JS overlay footprint missing or inconclusive';
+  return `JS overlay footprint: ${s.overlayFingerprintRange}`;
 }
 
 function patchNeedsMetadataWithoutBinaryWarning(s: PatchStatus): boolean {
@@ -1625,13 +1637,13 @@ function patchNeedsMetadataWithoutBinaryWarning(s: PatchStatus): boolean {
 }
 
 function renderPatchSelector(s: PatchStatus): void {
-  patchDetectedVersionEl.textContent = s.antigravityVersion ?? 'inconnue';
+  patchDetectedVersionEl.textContent = s.antigravityVersion ?? 'unknown';
   patchDetectedSourceEl.className = `badge ${s.overrideActive ? 'badge-warn' : 'badge-muted'}`;
   patchDetectedSourceEl.textContent = patchSourceLabel(s);
   patchRecommendedBadgeEl.className = `badge ${s.compatible ? 'badge-ok' : 'badge-warn'}`;
   patchRecommendedBadgeEl.textContent = s.recommendedPatch
     ? `${patchFamilyLabel(s.recommendedPatch.versionRange)} · ${patchConfidenceLabel(s.detectionConfidence)}`
-    : 'aucune famille recommandée';
+    : 'no recommended family';
 
   const detectorMeta = [
     `<span class="badge badge-${patchConfidenceTone(s.detectionConfidence)}">${escapeHtml(patchConfidenceLabel(s.detectionConfidence))}</span>`,
@@ -1643,13 +1655,13 @@ function renderPatchSelector(s: PatchStatus): void {
   ].filter(Boolean).join('');
   patchDetectedMetaEl.innerHTML = `
     <span class="badge ${s.overrideActive ? 'badge-warn' : 'badge-muted'}">${escapeHtml(patchSourceLabel(s))}</span>
-    <span class="badge ${s.compatible ? 'badge-ok' : 'badge-warn'}">${escapeHtml(s.recommendedPatch ? `${patchFamilyLabel(s.recommendedPatch.versionRange)} · ${patchConfidenceLabel(s.detectionConfidence)}` : 'aucune famille recommandée')}</span>
+    <span class="badge ${s.compatible ? 'badge-ok' : 'badge-warn'}">${escapeHtml(s.recommendedPatch ? `${patchFamilyLabel(s.recommendedPatch.versionRange)} · ${patchConfidenceLabel(s.detectionConfidence)}` : 'no recommended family')}</span>
     ${detectorMeta}`;
 
   if (s.overrideActive && s.overrideInfo?.range) {
     patchOverrideBannerEl.hidden = false;
     const reason = s.overrideInfo.reason ? ` — ${s.overrideInfo.reason}` : '';
-    patchOverrideBannerTextEl.textContent = `Famille forcée : ${s.overrideInfo.range}${reason}`;
+    patchOverrideBannerTextEl.textContent = `Forced family: ${s.overrideInfo.range}${reason}`;
   } else {
     patchOverrideBannerEl.hidden = true;
     patchOverrideBannerTextEl.textContent = '—';
@@ -1673,19 +1685,19 @@ function renderPatchSelector(s: PatchStatus): void {
     ].filter(Boolean).join(' ');
     const tags = [
       patchBadge(patchFamilyLabel(range.versionRange), 'muted'),
-      isRecommended ? patchBadge('recommandée', 'ok') : '',
-      isSelected ? patchBadge('manuelle', 'warn') : '',
+      isRecommended ? patchBadge('recommended', 'ok') : '',
+      isSelected ? patchBadge('manual', 'warn') : '',
       isDetected && s.overlayFingerprintRange === range.versionRange
-        ? patchBadge(`empreinte JS overlay · ${patchConfidenceLabel(s.overlayFingerprintConfidence)}`, s.overlayFingerprintConfidence === 'high' ? 'ok' : 'warn')
+        ? patchBadge(`JS overlay footprint · ${patchConfidenceLabel(s.overlayFingerprintConfidence)}`, s.overlayFingerprintConfidence === 'high' ? 'ok' : 'warn')
         : '',
-      isDetected && s.overlayFingerprintRange !== range.versionRange ? patchBadge('signature spécifique détectée', 'ok') : '',
-      !isDetected && s.binarySignatureDetected ? patchBadge('version guidée par métadonnées', 'muted') : patchBadge('à tester manuellement', 'muted'),
+      isDetected && s.overlayFingerprintRange !== range.versionRange ? patchBadge('specific signature detected', 'ok') : '',
+      !isDetected && s.binarySignatureDetected ? patchBadge('metadata-guided version', 'muted') : patchBadge('test manually', 'muted'),
     ].filter(Boolean).join('');
     return `
       <div class="${classes}">
         <div class="patch-range-card-header">
           <div class="patch-range-card-title">${escapeHtml(range.versionRange)}</div>
-          ${isRecommended ? patchBadge(s.overrideActive ? 'forcée' : 'cible auto', s.overrideActive ? 'warn' : 'ok') : ''}
+          ${isRecommended ? patchBadge(s.overrideActive ? 'forced' : 'auto target', s.overrideActive ? 'warn' : 'ok') : ''}
         </div>
         <div class="patch-range-card-body">
           <div class="patch-range-card-description">${escapeHtml(range.description)}</div>
@@ -1693,27 +1705,27 @@ function renderPatchSelector(s: PatchStatus): void {
           <div class="patch-inline-note">${escapeHtml(range.originalUrl)} → ${escapeHtml(range.patchedUrl)}</div>
         </div>
         <div class="patch-range-card-actions">
-          <button class="btn ${isSelected ? 'btn-secondary' : 'btn-ghost'} btn-sm" type="button" data-patch-range="${escapeHtml(range.versionRange)}">${isSelected ? 'Sélectionnée' : 'Choisir cette famille'}</button>
+          <button class="btn ${isSelected ? 'btn-secondary' : 'btn-ghost'} btn-sm" type="button" data-patch-range="${escapeHtml(range.versionRange)}">${isSelected ? 'Selected' : 'Select family'}</button>
         </div>
       </div>`;
   }).join('');
 
-  patchRangeGridEl.innerHTML = cards || '<div class="empty-state"><p>Aucune famille de patch disponible.</p></div>';
+  patchRangeGridEl.innerHTML = cards || '<div class="empty-state"><p>No patch families available.</p></div>';
 }
 
 async function applyPatchRangeSelection(range: string | null): Promise<void> {
-  setStatus(range ? `Sélection de ${range}…` : 'Retour à l’auto-détection…', 'busy');
+  setStatus(range ? `Selecting ${range}…` : 'Resetting to auto-detection…', 'busy');
   try {
     const args = range ? ['patch', 'select', range, '--json'] : ['patch', 'select', 'auto', '--json'];
     const r = await withTimeout(window.ag.run(args), 12_000, 'patch select');
     if (r.code !== 0) {
       throw new Error(r.stderr || r.stdout || 'patch select failed');
     }
-    toast(range ? `Famille de patch définie sur ${range}` : 'Sélection manuelle supprimée', 'ok', 4000);
+    toast(range ? `Patch family set to ${range}` : 'Manual selection cleared', 'ok', 4000);
     await loadPatchStatus();
   } catch (e) {
-    toast(`Échec de mise à jour du patch : ${(e as Error).message}`, 'err', 7000);
-    setStatus('Erreur', 'err');
+    toast(`Patch update failed: ${(e as Error).message}`, 'err', 7000);
+    setStatus('Error', 'err');
   }
 }
 
@@ -1734,39 +1746,39 @@ async function loadPatchStatus(): Promise<void> {
         ? `<div class="patch-banner ok">
              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
              <div class="patch-banner-body">
-               <div class="patch-banner-title">Patch actif</div>
-               <div class="patch-banner-text"><code>language_server</code> redirige déjà les requêtes vers le proxy local.</div>
+               <div class="patch-banner-title">Patch Active</div>
+               <div class="patch-banner-text"><code>language_server</code> is redirecting requests to the local proxy.</div>
              </div>
            </div>`
         : s.exists
           ? `<div class="patch-banner warn">
                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                <div class="patch-banner-body">
-                 <div class="patch-banner-title">Patch non appliqué</div>
-                 <div class="patch-banner-text">Les modèles personnalisés n’apparaîtront pas dans le menu tant que cette étape n’est pas appliquée.</div>
+                 <div class="patch-banner-title">Patch Not Applied</div>
+                 <div class="patch-banner-text">Custom models will not appear in the menu until this step is applied.</div>
                </div>
              </div>`
           : `<div class="patch-banner err">
                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
                <div class="patch-banner-body">
-                 <div class="patch-banner-title">Binaire introuvable</div>
-                 <div class="patch-banner-text">Impossible de localiser <code>language_server</code> dans l’installation Antigravity.</div>
+                 <div class="patch-banner-title">Binary Not Found</div>
+                 <div class="patch-banner-text">Could not locate <code>language_server</code> in the Antigravity installation.</div>
                </div>
              </div>`;
 
     const confidenceHero = `
       <div class="patch-confidence patch-confidence-${patchConfidenceTone(s.detectionConfidence)}">
-        <div class="patch-confidence-eyebrow">Niveau de confiance</div>
+        <div class="patch-confidence-eyebrow">Confidence level</div>
         <div class="patch-confidence-value">${escapeHtml(patchConfidenceLabel(s.detectionConfidence))}</div>
-        <div class="patch-confidence-text">${escapeHtml(s.detectionReason ?? 'Aucune explication détaillée fournie par l’auto-détection.')}</div>
+        <div class="patch-confidence-text">${escapeHtml(s.detectionReason ?? 'No detailed explanation provided by auto-detection.')}</div>
       </div>`;
 
     const metadataWithoutBinaryBanner = patchNeedsMetadataWithoutBinaryWarning(s)
       ? `<div class="patch-banner err">
            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
            <div class="patch-banner-body">
-             <div class="patch-banner-title">Version détectée, signature binaire absente</div>
-             <div class="patch-banner-text">Antigravity <code>${escapeHtml(s.antigravityVersion ?? 'inconnue')}</code> a bien été reconnu via <code>${escapeHtml(s.antigravityVersionSource ?? 'métadonnées')}</code>, mais le binaire <code>language_server</code> ne contient pas la signature attendue. Cela peut indiquer un build différent, un binaire déjà modifié, ou une installation mélangée.</div>
+             <div class="patch-banner-title">Version detected, binary signature missing</div>
+             <div class="patch-banner-text">Antigravity <code>${escapeHtml(s.antigravityVersion ?? 'unknown')}</code> was recognized via <code>${escapeHtml(s.antigravityVersionSource ?? 'metadata')}</code>, but the <code>language_server</code> binary does not contain the expected signature. This can indicate a different build, a pre-modified binary, or a mixed installation.</div>
            </div>
          </div>`
       : '';
@@ -1774,36 +1786,36 @@ async function loadPatchStatus(): Promise<void> {
     const recommendationRow = s.recommendedPatch
       ? `
       <div class="patch-row">
-        <div class="patch-row-label">Famille recommandée</div>
+        <div class="patch-row-label">Recommended family</div>
         <div class="patch-row-value">${escapeHtml(s.recommendedPatch.versionRange)}</div>
       </div>
       <div class="patch-row">
-        <div class="patch-row-label">Source de recommandation</div>
-        <div class="patch-row-value ${s.overrideActive ? 'warn' : 'ok'}">${escapeHtml(s.overrideActive ? 'sélection manuelle' : 'auto-détection')}</div>
+        <div class="patch-row-label">Recommendation source</div>
+        <div class="patch-row-value ${s.overrideActive ? 'warn' : 'ok'}">${escapeHtml(s.overrideActive ? 'manual selection' : 'auto-detection')}</div>
       </div>
       <div class="patch-row">
-        <div class="patch-row-label">Confiance</div>
+        <div class="patch-row-label">Confidence</div>
         <div class="patch-row-value ${patchConfidenceTone(s.detectionConfidence)}">${escapeHtml(patchConfidenceLabel(s.detectionConfidence))}</div>
       </div>
       <div class="patch-row">
-        <div class="patch-row-label">Signature binaire</div>
+        <div class="patch-row-label">Binary signature</div>
         <div class="patch-row-value ${s.binarySignatureDetected ? 'ok' : 'warn'}">${escapeHtml(patchSignatureLabel(s))}</div>
       </div>
       <div class="patch-row">
-        <div class="patch-row-label">Empreinte JS overlay</div>
+        <div class="patch-row-label">JS overlay footprint</div>
         <div class="patch-row-value ${s.overlayFingerprintDetected ? (s.overlayFingerprintConfidence === 'high' ? 'ok' : 'warn') : 'warn'}">${escapeHtml(patchOverlayLabel(s))}</div>
       </div>
       ${s.overlayFingerprintReason ? `
       <div class="patch-row">
-        <div class="patch-row-label">Pourquoi l’empreinte JS</div>
+        <div class="patch-row-label">JS footprint reason</div>
         <div class="patch-row-value">${escapeHtml(s.overlayFingerprintReason)}</div>
       </div>` : ''}
       <div class="patch-row">
-        <div class="patch-row-label">URL d’origine</div>
+        <div class="patch-row-label">Original URL</div>
         <div class="patch-row-value">${escapeHtml(s.recommendedPatch.originalUrl)}</div>
       </div>
       <div class="patch-row">
-        <div class="patch-row-label">URL patchée</div>
+        <div class="patch-row-label">Patched URL</div>
         <div class="patch-row-value">${escapeHtml(s.recommendedPatch.patchedUrl)}</div>
       </div>`
       : '';
@@ -1811,25 +1823,25 @@ async function loadPatchStatus(): Promise<void> {
     const overrideRow = s.overrideInfo?.range
       ? `
       <div class="patch-row">
-        <div class="patch-row-label">Sélection manuelle</div>
+        <div class="patch-row-label">Manual selection</div>
         <div class="patch-row-value warn">${escapeHtml(s.overrideInfo.range)}</div>
       </div>
       ${s.overrideInfo.reason ? `
       <div class="patch-row">
-        <div class="patch-row-label">Motif</div>
+        <div class="patch-row-label">Reason</div>
         <div class="patch-row-value warn">${escapeHtml(s.overrideInfo.reason)}</div>
       </div>` : ''}`
       : '';
 
     const suggestions = `
       <div class="patch-row patch-suggestions">
-        <div class="patch-row-label">Conseils</div>
+        <div class="patch-row-label">Guidance</div>
         <div class="patch-row-value" style="max-width:100%; text-align:left;">
           <ul class="patch-suggestion-list">
-            <li>Laissez l’auto-détection active par défaut et ne forcez une famille que si la version trouvée vous semble incohérente.</li>
-            <li>Gardez toujours un backup propre avant de passer d’une famille 2.1, 2.2 ou 2.3 à une autre.</li>
-            <li>Pour 2.2.x et 2.3.x, vérifiez aussi l’état MITM et le certificat CA avant d’appliquer le patch.</li>
-            <li>Si les métadonnées et la signature binaire ne racontent pas la même chose, restaurez d’abord puis testez une autre famille manuellement.</li>
+            <li>Keep auto-detection active by default and only force a family if the detected version is incorrect.</li>
+            <li>Always keep a clean backup before switching between 2.1, 2.2, or 2.3 patch families.</li>
+            <li>For 2.2.x and 2.3.x, check MITM status and CA certificate installation before applying the patch.</li>
+            <li>If metadata and binary signature disagree, restore from backup first before trying a manual family.</li>
           </ul>
         </div>
       </div>`;
@@ -2087,18 +2099,31 @@ const logsCopyBtn = $('#logsCopyBtn') as HTMLButtonElement;
 let logsStreamId: string | null = null;
 let logsStreaming = false;
 
-// Streaming buffer: chunks are accumulated and flushed once per animation frame
-// to avoid layout thrashing when many small chunks arrive.
+// Streaming buffer: raw text chunks are concatenated and ANSI-converted ONCE
+// per animation frame, then appended in a single DOM mutation. The previous
+// implementation ran ansiToHtml on every chunk (N regex passes per flush
+// window) — see audit finding P0.
+// Hard cap on the rendered log buffer so a long stream cannot bloat the
+// <pre> node past ~500 KB and stall layout. We keep the last ~400 KB.
+const LOGS_MAX_BYTES = 500_000;
+const LOGS_KEEP_BYTES = 400_000;
 let logsPendingChunk: string | null = null;
 let logsFlushScheduled = false;
 const flushLogs = () => {
   logsFlushScheduled = false;
   if (logsPendingChunk) {
-    // Use insertAdjacentHTML on a text-only container — faster than innerHTML
-    // for appending, and avoids re-parsing the existing content.
+    // Append as text (no HTML parsing needed for ANSI-stripped output).
     logsOutput.insertAdjacentText('beforeend', logsPendingChunk);
-    logsOutput.scrollTop = logsOutput.scrollHeight;
     logsPendingChunk = null;
+  }
+  // Bound the DOM: when the rendered text grows past the cap, drop the
+  // oldest content while keeping the latest keep-window.
+  if (logsOutput.textContent && logsOutput.textContent.length > LOGS_MAX_BYTES) {
+    const trimmed = logsOutput.textContent.slice(-LOGS_KEEP_BYTES);
+    logsOutput.textContent = trimmed;
+    logsOutput.scrollTop = logsOutput.scrollHeight;
+  } else {
+    logsOutput.scrollTop = logsOutput.scrollHeight;
   }
 };
 const scheduleLogsFlush = () => {
@@ -2138,8 +2163,10 @@ async function startLogStream(): Promise<void> {
   logsStreamId = `logs-${Date.now()}`;
 
   window.ag.onStreamData(logsStreamId, (chunk) => {
-    // Accumulate the raw chunk; ansiToHtml is expensive, do it once per flush.
-    logsPendingChunk = (logsPendingChunk ?? '') + ansiToHtml(chunk);
+    // PERF: accumulate RAW chunks and run ansiToHtml exactly once per flush.
+    // The previous code called ansiToHtml on every chunk (N regex passes
+    // per flush window when chunks arrive in quick bursts).
+    logsPendingChunk = (logsPendingChunk ?? '') + chunk;
     scheduleLogsFlush();
   });
   window.ag.onStreamClose(logsStreamId, (code) => {
@@ -2233,7 +2260,14 @@ function formatUptime(ms: number): string {
 }
 
 function startUptimeTicker(): void {
-  if (agUptimeTimer !== null) window.clearInterval(agUptimeTimer);
+  // PERF: every previous interval must be cleared before assigning a new one.
+  // The original code only cleared when re-entering startUptimeTicker, so a
+  // fast launch → refresh → launch sequence leaked N zombie timers that kept
+  // writing into a hidden view's DOM node.
+  if (agUptimeTimer !== null) {
+    window.clearInterval(agUptimeTimer);
+    agUptimeTimer = null;
+  }
   agStartedAt = Date.now();
   agUptimeTimer = window.setInterval(() => {
     if (agStartedAt) agUptime.textContent = formatUptime(Date.now() - agStartedAt);
@@ -2336,7 +2370,9 @@ async function loadAntigravityStatus(): Promise<void> {
     try {
       // Parallel: info IPC, status IPC, version IPC, models count
       const [info, statusResult, versionResult, modelsResult] = await Promise.all([
-        memo('info', 5_000, () => window.ag.info()),
+        // PERF: 5 s TTL caused stale reads and split-cached state with the
+        // boot path that requests 60 s. Unify to 60 s (info rarely changes).
+        memo('info', 60_000, () => window.ag.info()),
         withTimeout(window.ag.antigravityStatus(), 10_000, 'antigravity status').catch((err: Error) => ({ ok: false, data: undefined, error: err.message })),
         withTimeout(window.ag.antigravityVersion(), 10_000, 'antigravity version').catch((err: Error) => ({ ok: false, data: undefined, error: err.message })),
         withTimeout(window.ag.run(['models', 'list', '--json']), 10_000, 'models list').catch(() => ({ stdout: '{"models":[]}', stderr: '', code: 0 })),
@@ -2344,7 +2380,15 @@ async function loadAntigravityStatus(): Promise<void> {
 
     const status = statusResult.ok ? (statusResult.data as Record<string, unknown>) : null;
     const versionData = versionResult.ok ? versionResult.data : null;
-    const modelsData = JSON.parse(modelsResult.stdout) as { models: Array<{ name: string }> };
+    let modelsCount = 0;
+    try {
+      const modelsData = JSON.parse(modelsResult.stdout) as { models?: Array<{ name: string }> };
+      if (modelsData && Array.isArray(modelsData.models)) {
+        modelsCount = modelsData.models.length;
+      }
+    } catch {
+      modelsCount = 0;
+    }
 
     const installed = Boolean(status?.installed ?? status?.installDir);
     const running = Boolean(status?.running ?? status?.pid);
@@ -2366,7 +2410,7 @@ async function loadAntigravityStatus(): Promise<void> {
     // Stat cards
     agVersion.textContent = version ?? '—';
     agPid.textContent = pid != null ? String(pid) : '—';
-    agCustomModels.textContent = String(modelsData.models?.length ?? 0);
+    agCustomModels.textContent = String(modelsCount);
     if (!running && agUptime) agUptime.textContent = '—';
 
     // Paths

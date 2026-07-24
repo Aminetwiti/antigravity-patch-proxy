@@ -41,6 +41,7 @@ interface FetchModelsResult {
  * path. Auth headers are still injected by the probe/caller if available.
  */
 export function buildModelsUrl(apiUrl: string): string {
+  if (!apiUrl || typeof apiUrl !== 'string') return '';
   // Drop any query string first — never carry it into /v1/models.
   let baseUrl = apiUrl.split('?')[0];
   const urlLower = baseUrl.toLowerCase();

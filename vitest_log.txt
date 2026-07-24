@@ -1,0 +1,183 @@
+﻿
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.10 [39m[90mC:/Users/amine/Downloads/antigravity-add-model-main/antigravity-add-model-main[39m
+
+[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[90mstdout[2m | src/__tests__/openai.test.ts[2m > [22m[2mmapOpenAIToGemini[2m > [22m[2mshould parse DSML tool calls from text content
+[22m[39m15:00:21.059 > [Proxy] Detected 1 DSML tool call(s): search_web
+
+[90mstdout[2m | src/__tests__/openai.test.ts[2m > [22m[2mmapOpenAIChunkToGemini[2m > [22m[2mshould detect DSML tool calls in accumulated streaming text
+[22m[39m15:00:21.090 > [Proxy] Detected 1 DSML tool call(s): run_command
+15:00:21.094 > [Proxy] Translating run_command "ls" to list_dir on "C:\Users\amine\Downloads\antigravity-add-model-main\antigravity-add-model-main"
+
+[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[90mstdout[2m | src/__tests__/proxy.test.ts
+[22m[39m15:00:21.110 > [TranslatorRegistry] 0 provider translator(s) loaded: 
+
+[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[90mstdout[2m | src/__tests__/utils.test.ts[2m > [22m[2mtranslateToolCallToNative[2m > [22m[2mshould translate ls to list_dir
+[22m[39m15:00:21.188 > [Proxy] Translating run_command "ls /home/user" to list_dir on "/tmp"
+
+[90mstdout[2m | src/__tests__/utils.test.ts[2m > [22m[2mtranslateToolCallToNative[2m > [22m[2mshould translate dir to list_dir (Windows)
+[22m[39m15:00:21.213 > [Proxy] Translating run_command "dir src" to list_dir on "C:\project\src"
+
+[90mstdout[2m | src/__tests__/utils.test.ts[2m > [22m[2mtranslateToolCallToNative[2m > [22m[2mshould translate cat to view_file
+[22m[39m15:00:21.216 > [Proxy] Translating run_command "cat /etc/hosts" to view_file on "/etc/hosts"
+
+[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[90mstdout[2m | src/__tests__/anthropic.test.ts[2m > [22m[2mmapAnthropicChunkToGemini[2m > [22m[2mshould accumulate input_delta for tool arguments
+[22m[39m15:00:21.204 > [Proxy] Translating run_command "ls" to list_dir on "C:\Users\amine\Downloads\antigravity-add-model-main\antigravity-add-model-main"
+
+[90mstdout[2m | src/__tests__/utils.test.ts[2m > [22m[2mtranslateToolCallToNative[2m > [22m[2mshould translate type to view_file (Windows)
+[22m[39m15:00:21.223 > [Proxy] Translating run_command "type C:\file.txt" to view_file on "C:\file.txt"
+
+[90mstdout[2m | src/__tests__/utils.test.ts[2m > [22m[2mtranslateToolCallToNative[2m > [22m[2mshould translate echo redirect to write_file
+[22m[39m15:00:21.228 > [Proxy] Translating run_command "echo hello > /tmp/out.txt" to write_file on "/tmp/out.txt"
+
+[90mstdout[2m | src/__tests__/utils.test.ts[2m > [22m[2mtranslateToolCallToNative[2m > [22m[2mshould translate grep to grep_search
+[22m[39m15:00:21.231 > [Proxy] Translating run_command "grep -i "TODO" /src" to grep_search (Query: "TODO", Path: "/")
+
+[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[90mstdout[2m | src/__tests__/utils.test.ts[2m > [22m[2mtranslateToolCallToNative[2m > [22m[2mshould handle findstr (Windows grep)
+[22m[39m15:00:21.235 > [Proxy] Translating run_command "findstr /i TODO *.ts" to grep_search (Query: "*.ts", Path: "C:\src\TODO")
+
+[90mstdout[2m | src/__tests__/utils.test.ts[2m > [22m[2mformatTranslatedResponse[2m > [22m[2mshould format list_dir array response
+[22m[39m15:00:21.243 > [Proxy] Formatting native response back to CLI for translated tool "list_dir" (Cmd: "ls")
+
+[90mstdout[2m | src/__tests__/utils.test.ts[2m > [22m[2mformatTranslatedResponse[2m > [22m[2mshould format list_dir object response with children
+[22m[39m15:00:21.249 > [Proxy] Formatting native response back to CLI for translated tool "list_dir" (Cmd: "ls")
+
+[90mstdout[2m | src/__tests__/utils.test.ts[2m > [22m[2mformatTranslatedResponse[2m > [22m[2mshould format view_file response
+[22m[39m15:00:21.255 > [Proxy] Formatting native response back to CLI for translated tool "view_file" (Cmd: "ls")
+
+[90mstdout[2m | src/__tests__/utils.test.ts[2m > [22m[2mformatTranslatedResponse[2m > [22m[2mshould format grep_search response
+[22m[39m15:00:21.258 > [Proxy] Formatting native response back to CLI for translated tool "grep_search" (Cmd: "ls")
+
+node.exe : (node:17928) PromiseRejectionHandledWarning: Promise rejection was handled asynchronously (rejection id: 1)
+Au caractère Ligne:1 : 1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ((node:17928) Pr...ejection id: 1):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstdout[2m | src/__tests__/utils.test.ts[2m > [22m[2mformatTranslatedResponse[2m > [22m[2mshould format write_file success response
+[22m[39m15:00:21.261 > [Proxy] Formatting native response back to CLI for translated tool "write_file" (Cmd: "ls")
+
+[90mstdout[2m | src/__tests__/utils.test.ts[2m > [22m[2mformatTranslatedResponse[2m > [22m[2mshould format write_file failure response
+[22m[39m15:00:21.263 > [Proxy] Formatting native response back to CLI for translated tool "write_file" (Cmd: "ls")
+
+[90mstdout[2m | src/__tests__/utils.test.ts[2m > [22m[2mformatTranslatedResponse[2m > [22m[2mshould fallback to JSON.stringify for unknown types
+[22m[39m15:00:21.265 > [Proxy] Formatting native response back to CLI for translated tool "list_dir" (Cmd: "ls")
+
+[90mstdout[2m | src/__tests__/utils.test.ts[2m > [22m[2mformatTranslatedResponse[2m > [22m[2mshould fallback to string for string inputs
+[22m[39m15:00:21.267 > [Proxy] Formatting native response back to CLI for translated tool "list_dir" (Cmd: "ls")
+
+(node:17928) PromiseRejectionHandledWarning: Promise rejection was handled asynchronously (rejection id: 2)
+(node:17928) PromiseRejectionHandledWarning: Promise rejection was handled asynchronously (rejection id: 3)
+[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[90mstdout[2m | src/__tests__/dnsResolver.test.ts[2m > [22m[2mresolveGoogleIp[2m > [22m[2mreturns public DNS result when available
+[22m[39m15:00:21.285 > [Proxy] resolveGoogleIp using public DNS 142.250.80.46 for daily-cloudcode-pa.googleapis.com
+
+[90mstderr[2m | src/__tests__/dnsResolver.test.ts[2m > [22m[2mresolveGoogleIp[2m > [22m[2mfalls back to system 
+DNS when public DNS fails
+[22m[39m15:00:21.308 > [Proxy] Public DNS failed for daily-cloudcode-pa.googleapis.com: SERVFAIL; SERVFAIL; SERVFAIL
+
+[90mstdout[2m | src/__tests__/dnsResolver.test.ts[2m > [22m[2mresolveGoogleIp[2m > [22m[2mfalls back to system DNS when public DNS fails
+[22m[39m15:00:21.308 > [Proxy] resolveGoogleIp using system DNS 172.217.16.46 for daily-cloudcode-pa.googleapis.com
+
+[90mstderr[2m | src/__tests__/dnsResolver.test.ts[2m > [22m[2mresolveGoogleIp[2m > [22m[2mfalls back to 
+hardcoded IP when all DNS methods fail
+[22m[39m15:00:21.317 > [Proxy] Public DNS failed for daily-cloudcode-pa.googleapis.com: SERVFAIL; SERVFAIL; SERVFAIL
+
+[90mstderr[2m | src/__tests__/dnsResolver.test.ts[2m > [22m[2mresolveGoogleIp[2m > [22m[2mfalls back to 
+hardcoded IP when all DNS methods fail
+[22m[39m15:00:21.317 > [Proxy] System DNS fallback failed for daily-cloudcode-pa.googleapis.com: ENOTFOUND
+
+[90mstderr[2m | src/__tests__/dnsResolver.test.ts[2m > [22m[2mresolveGoogleIp[2m > [22m[2mfalls back to 
+hardcoded IP when all DNS methods fail
+[22m[39m15:00:21.317 > [Proxy] resolveGoogleIp using hardcoded fallback 172.217.16.46 for 
+daily-cloudcode-pa.googleapis.com
+
+[90mstdout[2m | src/__tests__/dnsResolver.test.ts[2m > [22m[2mresolveGoogleIp[2m > [22m[2mfilters out loopback results from public DNS
+[22m[39m15:00:21.329 > [Proxy] resolveGoogleIp using public DNS 142.250.80.46 for daily-cloudcode-pa.googleapis.com
+
+[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m[33m[39m[32m┬À[39m
+[31mÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»[39m[1m[41m Unhandled Errors [49m[22m[31mÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»[39m
+[31m[1m
+Vitest caught 3 unhandled errors during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.[22m[39m
+
+[31mÔÄ»ÔÄ»ÔÄ»ÔÄ»[39m[1m[41m Unhandled Rejection [49m[22m[31mÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»[39m
+[31m[1mError[22m: DNS query to 8.8.8.8 timed out for daily-cloudcode-pa.googleapis.com[39m
+[36m [2mÔØ»[22m src/proxy/dnsResolver.ts:[2m63:14[22m[39m
+    [90m 61|[39m       settled [33m=[39m [35mtrue[39m[33m;[39m
+    [90m 62|[39m       resolver[33m.[39m[34mcancel[39m()[33m;[39m
+    [90m 63|[39m       reject(new Error(`DNS query to ${server} timed out for ${hostnamÔÇª
+    [90m   |[39m              [31m^[39m
+    [90m 64|[39m     }[33m,[39m [33mDNS_QUERY_TIMEOUT_MS[39m)[33m;[39m
+    [90m 65|[39m
+[90m [2mÔØ»[22m callTimer node_modules/vitest/dist/chunks/test.DNmyFkvJ.js:[2m1773:25[22m[39m
+[90m [2mÔØ»[22m doTickInner node_modules/vitest/dist/chunks/test.DNmyFkvJ.js:[2m2444:30[22m[39m
+[90m [2mÔØ»[22m doTick node_modules/vitest/dist/chunks/test.DNmyFkvJ.js:[2m2525:21[22m[39m
+[90m [2mÔØ»[22m Immediate.<anonymous> node_modules/vitest/dist/chunks/test.DNmyFkvJ.js:[2m2546:34[22m[39m
+[90m [2mÔØ»[22m processImmediate node:internal/timers:[2m485:21[22m[39m
+
+[31mThis error originated in "[1msrc/__tests__/dnsResolver.test.ts[22m" test file. It doesn't mean the error was 
+thrown inside the file itself, but while it was running.[39m
+[31mThe latest test that might've caused the error is "[1mtimes out if the resolver never answers[22m". It might 
+mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.[39m
+
+[31mÔÄ»ÔÄ»ÔÄ»ÔÄ»[39m[1m[41m Unhandled Rejection [49m[22m[31mÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»[39m
+[31m[1mError[22m: SERVFAIL[39m
+[36m [2mÔØ»[22m FakeResolver.<anonymous> src/__tests__/dnsResolver.test.ts:[2m124:12[22m[39m
+
+[2m Test Files [22m [1m[32m21 passed[39m[22m[90m (21)[39m
+[2m      Tests [22m [1m[32m375 passed[39m[22m[90m (375)[39m
+[2m     Errors [22m [1m[31m3 errors[39m[22m
+[2m   Start at [22m 15:00:17
+[2m   Duration [22m 4.77s[2m (transform 14.91s, setup 0ms, import 22.74s, tests 2.00s, environment 12ms)[22m
+
+    [90m122|[39m     resolverProto[33m.[39mresolve4[33m.[39m[34mmockImplementation[39m(
+    [90m123|[39m       (_hostname[33m:[39m string[33m,[39m cb[33m:[39m (err[33m:[39m [33mError[39m) 
+[33m=>[39m [35mvoid[39m) [33m=>[39m {
+    [90m124|[39m         [34mcb[39m([35mnew[39m [33mError[39m([32m'SERVFAIL'[39m))[33m;[39m
+    [90m   |[39m            [31m^[39m
+    [90m125|[39m       }[33m,[39m
+    [90m126|[39m     )[33m;[39m
+[90m [2mÔØ»[22m FakeResolver.Mock [as resolve4] node_modules/@vitest/spy/dist/index.js:[2m332:34[22m[39m
+[90m [2mÔØ»[22m src/proxy/dnsResolver.ts:[2m66:14[22m[39m
+[90m [2mÔØ»[22m Module.resolveWithServer src/proxy/dnsResolver.ts:[2m54:10[22m[39m
+[90m [2mÔØ»[22m src/__tests__/dnsResolver.test.ts:[2m128:21[22m[39m
+[90m [2mÔØ»[22m node_modules/@vitest/runner/dist/chunk-artifact.js:[2m302:11[22m[39m
+[90m [2mÔØ»[22m node_modules/@vitest/runner/dist/chunk-artifact.js:[2m1903:26[22m[39m
+[90m [2mÔØ»[22m node_modules/@vitest/runner/dist/chunk-artifact.js:[2m2326:20[22m[39m
+
+[31mThis error originated in "[1msrc/__tests__/dnsResolver.test.ts[22m" test file. It doesn't mean the error was 
+thrown inside the file itself, but while it was running.[39m
+[31mThe latest test that might've caused the error is "[1mrejects on resolver error[22m". It might mean one of the 
+following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.[39m
+
+[31mÔÄ»ÔÄ»ÔÄ»ÔÄ»[39m[1m[41m Unhandled Rejection [49m[22m[31mÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»[39m
+[31m[1mError[22m: ENOTFOUND[39m
+[36m [2mÔØ»[22m Proxy.<anonymous> src/__tests__/dnsResolver.test.ts:[2m161:12[22m[39m
+    [90m159|[39m     resolve4[33m.[39m[34mmockImplementation[39m(
+    [90m160|[39m       (_hostname[33m:[39m string[33m,[39m cb[33m:[39m (err[33m:[39m [33mError[39m) 
+[33m=>[39m [35mvoid[39m) [33m=>[39m {
+    [90m161|[39m         [34mcb[39m([35mnew[39m [33mError[39m([32m'ENOTFOUND'[39m))[33m;[39m
+    [90m   |[39m            [31m^[39m
+    [90m162|[39m       }[33m,[39m
+    [90m163|[39m     )[33m;[39m
+[90m [2mÔØ»[22m Proxy.Mock node_modules/@vitest/spy/dist/index.js:[2m332:34[22m[39m
+[90m [2mÔØ»[22m src/proxy/dnsResolver.ts:[2m93:9[22m[39m
+[90m [2mÔØ»[22m Module.resolveWithSystemDns src/proxy/dnsResolver.ts:[2m85:10[22m[39m
+[90m [2mÔØ»[22m src/__tests__/dnsResolver.test.ts:[2m165:21[22m[39m
+[90m [2mÔØ»[22m node_modules/@vitest/runner/dist/chunk-artifact.js:[2m302:11[22m[39m
+[90m [2mÔØ»[22m node_modules/@vitest/runner/dist/chunk-artifact.js:[2m1903:26[22m[39m
+[90m [2mÔØ»[22m node_modules/@vitest/runner/dist/chunk-artifact.js:[2m2326:20[22m[39m
+
+[31mThis error originated in "[1msrc/__tests__/dnsResolver.test.ts[22m" test file. It doesn't mean the error was 
+thrown inside the file itself, but while it was running.[39m
+[31mThe latest test that might've caused the error is "[1mrejects when dns.resolve4 fails[22m". It might mean one 
+of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.[39m
+[31mÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»[39m
+

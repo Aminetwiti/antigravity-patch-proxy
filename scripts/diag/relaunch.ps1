@@ -9,7 +9,7 @@ $STAMP      = (Get-Date).ToString('yyyyMMdd-HHmmss')
 Write-Host '=== Step 1: Kill all Antigravity-related processes ===' -ForegroundColor Cyan
 foreach ($n in @('Antigravity.exe', 'language_server.exe')) {
     try {
-        $out = & taskkill /F /IM $n /T 2>&1
+        & taskkill /F /IM $n /T 2>&1 | Out-Null
         if ($LASTEXITCODE -eq 0) { Write-Host "  killed $n" }
     } catch { }
 }

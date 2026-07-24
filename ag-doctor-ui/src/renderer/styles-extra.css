@@ -134,22 +134,13 @@
   overflow: hidden;
 }
 .proxy-spark svg { display: block; }
-
-/* ─────────────────────────────────────────────────────────────────────────────
- * Badges (shared)
- * ───────────────────────────────────────────────────────────────────────────── */
-.badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  margin-left: 8px;
-  text-transform: uppercase;
+.proxy-spark polyline {
+  transition: points var(--t-base) var(--ease-out);
 }
-.badge-ok { background: var(--ok-bg); color: var(--ok); }
-.badge-warn { background: var(--warn-bg); color: var(--warn); }
-.badge-err { background: var(--err-bg); color: var(--err); }
-.badge-info { background: var(--info-bg); color: var(--info); }
+@media (prefers-reduced-motion: reduce) {
+  .proxy-spark polyline {
+    transition: none !important;
+  }
+}
+
+/* Badges centralized in styles.css */

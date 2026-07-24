@@ -62,6 +62,7 @@ interface StorageAPI {
     testModelConnection: (model: TestModelParams) => Promise<ConnectionTestResult>;
     fetchModels: (params: {
         baseUrl: string;
+        apiUrl?: string;
         apiKey?: string;
         allowUnauthorized?: boolean;
     }) => Promise<{

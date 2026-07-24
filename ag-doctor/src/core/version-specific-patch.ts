@@ -12,7 +12,6 @@
  *   - the user wants to test a patch range before it's officially supported
  */
 import fs from 'fs';
-import * as asar from '@electron/asar';
 import { getAppAsarPath, getLanguageServerBinary, getLanguageServerBackup } from './paths';
 import { detectAntigravityVersion } from './antigravity';
 import { getPatchVersionOverride } from './config';
@@ -230,7 +229,12 @@ export function inspectOverlayPatchFingerprint(installDir?: string): OverlayFing
   }
 
   try {
-    const entries: string[] = (asar.listPackage(asarPath) as string[]).map(normalizeAsarEntry);
+    const asar = require('@electron/asar');
+    const listFn = asar.listPackage ?? (asar.default as any)?.listPackage;
+    if (typeof listFn !== 'function') {
+      throw new Error('@electron/asar listPackage method is unavailable');
+    }
+    const entries: string[] = (listFn(asarPath) as string[]).map(normalizeAsarEntry);
 
     const hasProxyTree = hasAsarPrefix(entries, '/dist/proxy');
     const hasProxyModelLoader = hasAsarEntry(entries, '/dist/proxy/modelLoader.js');

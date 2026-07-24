@@ -1,4 +1,18 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('electron', () => ({
+  app: { getPath: () => '/mock/home' },
+}));
+
+vi.mock('electron-log/main', () => ({
+  default: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  },
+}));
+
 import { generateModelPlaceholderId, toSlug, parseRetryAfter } from '../proxy';
 
 describe('generateModelPlaceholderId', () => {

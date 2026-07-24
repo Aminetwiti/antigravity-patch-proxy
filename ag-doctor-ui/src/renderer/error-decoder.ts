@@ -7,7 +7,7 @@
  * Format a byte count as a short, human-readable string (B / KB / MB / GB / TB).
  * Mirrors the implementation previously inlined in `app.ts`.
  */
-function formatBytes(bytes: number): string {
+export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
@@ -76,7 +76,7 @@ const KNOWN_ERROR_PATTERNS: ErrorPattern[] = [
  * Decode a CLI stderr/stdout pair into a structured, actionable error.
  * Returns `{ matched: false, ... }` when no known pattern matches.
  */
-function decodeError(stderr: string, stdout = ''): DecodedError {
+export function decodeError(stderr: string, stdout = ''): DecodedError {
   const haystack = `${stderr || ''}\n${stdout || ''}`;
   for (const def of KNOWN_ERROR_PATTERNS) {
     if (def.matcher(haystack)) {

@@ -120,14 +120,34 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
       const providers = await customModelStore.loadProviders();
       const existingIdx = providers.findIndex((p) => p.id === newProvider.id);
 
-      const isMasked = newProvider.apiKey && (newProvider.apiKey.includes('...') || newProvider.apiKey.startsWith('***') || newProvider.apiKey === '********');
-      if (isMasked && existingIdx !== -1) {
+      // Decide the effective API key value to persist.
+      // - 'none' or empty means the user explicitly cleared the key.
+      // - Anything matching a masked shape means the field is untouched; preserve existing.
+      // - Otherwise treat as a new plaintext value and encrypt.
+      const rawKey = newProvider.apiKey;
+      const isExplicitClear = !rawKey || rawKey === 'none' || rawKey === '';
+      const isMasked = !isExplicitClear && (rawKey.includes('...') || rawKey.startsWith('***') || rawKey === '********');
+
+      if (isExplicitClear) {
+        newProvider.apiKey = 'none';
+        newProvider.encrypted = false;
+      } else if (isMasked && existingIdx !== -1) {
         newProvider.apiKey = providers[existingIdx].apiKey;
         newProvider.encrypted = providers[existingIdx].encrypted;
       } else {
-        const enc = customModelStore.encryptApiKeyIfNeeded(newProvider.apiKey);
+        const enc = customModelStore.encryptApiKeyIfNeeded(rawKey);
         newProvider.apiKey = enc.apiKey;
         newProvider.encrypted = enc.encrypted;
+      }
+
+      // Validate URL
+      try {
+        const u = new URL(newProvider.apiUrl);
+        if (!/^https?:$/.test(u.protocol)) {
+          return { success: false, error: 'API URL must use http or https' };
+        }
+      } catch {
+        return { success: false, error: 'Invalid API URL' };
       }
 
       if (existingIdx !== -1) {
@@ -156,34 +176,81 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
     }
   });
 
-  ipcMain.handle('storage:save-custom-model', async (_event, newModel: CustomModelFileEntry & { apiKey?: string }) => {
-    const geminiDir = path.join(app.getPath('home'), '.gemini', 'antigravity');
-    const filePath = path.join(geminiDir, 'custom_models.json');
+  ipcMain.handle('storage:export-providers', async () => {
     try {
-      let models: CustomModelFileEntry[] = [];
-      try {
-        const content = await fs.readFile(filePath, 'utf-8');
-        const parsed = JSON.parse(content) as { models?: CustomModelFileEntry[] };
-        models = parsed.models || [];
-      } catch {
-        // Ignore if file doesn't exist
+      const providers = await customModelStore.loadProviders();
+      const saveResult = await (dialog as any).showSaveDialog({
+        title: 'Export Provider Configuration',
+        defaultPath: 'antigravity_providers.json',
+        filters: [{ name: 'JSON Files', extensions: ['json'] }],
+      });
+      if (saveResult.canceled || !saveResult.filePath) {
+        return { success: false, error: 'Cancelled' };
       }
+      await fs.writeFile(saveResult.filePath, JSON.stringify({ providers }, null, 2), 'utf-8');
+      return { success: true, count: providers.length };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  });
 
-      // Check if model already exists, if so update it, otherwise push
+  ipcMain.handle('storage:get-doctor-diagnostics', async () => {
+    try {
+      const providers = await customModelStore.loadProviders();
+      const customModels = await customModelStore.loadCustomModels();
+      let activePort = 50999;
+      try {
+        const home = process.env.HOME || process.env.USERPROFILE || require('os').homedir();
+        const portFile = path.join(home, '.gemini', 'antigravity', '.proxy_port');
+        const content = await fs.readFile(portFile, 'utf-8');
+        activePort = parseInt(content.trim(), 10) || 50999;
+      } catch {
+        /* default port */
+      }
+      const activeProviders = providers.filter((p) => p.enabled);
+      const totalTokens = providers.reduce(
+        (acc, p) => acc + (p.usage?.promptTokens || 0) + (p.usage?.completionTokens || 0),
+        0,
+      );
+      const totalRequests = providers.reduce((acc, p) => acc + (p.usage?.totalRequests || 0), 0);
+
+      return {
+        success: true,
+        proxyPort: activePort,
+        providersCount: providers.length,
+        activeProvidersCount: activeProviders.length,
+        customModelsCount: customModels.length,
+        totalTokens,
+        totalRequests,
+        providers: providers.map((p) => ({
+          id: p.id,
+          name: p.name,
+          provider: p.provider,
+          enabled: p.enabled,
+          modelCount: p.models.length,
+          enabledModelCount: p.models.filter((m) => m.enabled).length,
+          usage: p.usage,
+        })),
+      };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle('storage:save-custom-model', async (_event, newModel: CustomModelFileEntry & { apiKey?: string }) => {
+    try {
+      const models = await customModelStore.loadCustomModels();
       const existingIdx = models.findIndex((m) => m.name === newModel.name);
 
-      // Edit collision protection: If new key is masked and old record exists, preserve old encrypted key
       const isMasked =
         newModel.apiKey &&
         (newModel.apiKey.includes('...') || newModel.apiKey.startsWith('***') || newModel.apiKey === '********');
       if (isMasked && existingIdx !== -1) {
         newModel.apiKey = models[existingIdx].apiKey;
         newModel.encrypted = models[existingIdx].encrypted;
-      } else {
-        if (newModel.apiKey && newModel.apiKey !== 'none') {
-          newModel.apiKey = cryptoStore.encryptString(newModel.apiKey);
-          newModel.encrypted = true;
-        }
+      } else if (newModel.apiKey && newModel.apiKey !== 'none') {
+        newModel.apiKey = cryptoStore.encryptString(newModel.apiKey);
+        newModel.encrypted = true;
       }
 
       if (existingIdx !== -1) {
@@ -192,8 +259,7 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
         models.push(newModel);
       }
 
-      await fs.mkdir(path.dirname(filePath), { recursive: true });
-      await fs.writeFile(filePath, JSON.stringify({ models }, null, 2), 'utf-8');
+      await customModelStore.saveCustomModels(models);
       return { success: true };
     } catch (err) {
       console.error('[IPC] Failed to save custom model:', err);
@@ -202,22 +268,8 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
   });
 
   ipcMain.handle('storage:delete-custom-model', async (_event, modelName: string) => {
-    const geminiDir = path.join(app.getPath('home'), '.gemini', 'antigravity');
-    const filePath = path.join(geminiDir, 'custom_models.json');
     try {
-      let models: CustomModelFileEntry[] = [];
-      try {
-        const content = await fs.readFile(filePath, 'utf-8');
-        const parsed = JSON.parse(content) as { models?: CustomModelFileEntry[] };
-        models = parsed.models || [];
-      } catch {
-        // Ignore if file doesn't exist
-      }
-
-      models = models.filter((m) => m.name !== modelName);
-
-      await fs.mkdir(path.dirname(filePath), { recursive: true });
-      await fs.writeFile(filePath, JSON.stringify({ models }, null, 2), 'utf-8');
+      await customModelStore.deleteCustomModel(modelName);
       return { success: true };
     } catch (err) {
       console.error('[IPC] Failed to delete custom model:', err);
@@ -234,10 +286,17 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
 
     return new Promise<ConnectionTestResult>((resolve) => {
       try {
-        let urlStr = model.apiUrl;
+        let urlStr = model.apiUrl || '';
+        if (!urlStr) {
+          resolve({ success: false, error: 'No API URL provided' });
+          return;
+        }
+
+        const providerLower = (model.provider || '').toLowerCase();
         // Normalize URL for chat API endpoints
-        if (model.provider === 'openai' || model.provider === 'custom' || model.provider === 'ollama') {
-          if (!urlStr.toLowerCase().includes('/chat/completions') && !urlStr.toLowerCase().includes('/completions')) {
+        if (providerLower === 'openai' || providerLower === 'custom' || providerLower === 'ollama') {
+          const urlLower = urlStr.toLowerCase();
+          if (!urlLower.includes('/chat/completions') && !urlLower.includes('/completions')) {
             if (urlStr.endsWith('/v1')) {
               urlStr += '/chat/completions';
             } else if (!urlStr.endsWith('/')) {
@@ -295,27 +354,44 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
           }
         }
 
-        const req = client.request(options, (res: { statusCode?: number; resume: () => void }) => {
-          // Any response (even 401/403) means the endpoint is reachable
-          if (res.statusCode! >= 200 && res.statusCode! < 500) {
-            resolve({
-              success: true,
-              status: res.statusCode,
-              message: `Endpoint reachable (HTTP ${res.statusCode})`,
-            });
-          } else {
-            resolve({
-              success: false,
-              status: res.statusCode,
-              error: `Server returned HTTP ${res.statusCode}`,
-            });
+        const startTime = Date.now();
+        const getLatency = () => Math.round(Date.now() - startTime);
+
+        const req = client.request(options);
+
+        req.on('response', (res: http.IncomingMessage) => {
+          // Distinguish auth failures (401/403) from network reachable.
+          if (res.statusCode === 401 || res.statusCode === 403) {
+            res.resume();
+            resolve({ success: false, status: res.statusCode, error: `Authentication failed (HTTP ${res.statusCode})`, latencyMs: getLatency() });
+            return;
           }
-          res.resume(); // consume response to free memory
+          if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 500) {
+            res.resume();
+            resolve({ success: false, status: res.statusCode, error: `HTTP ${res.statusCode}`, latencyMs: getLatency() });
+            return;
+          }
+          let body = '';
+          let bytes = 0;
+          const MAX_BODY = 256 * 1024;
+          res.on('data', (chunk: Buffer | string) => {
+            bytes += chunk.length;
+            if (bytes > MAX_BODY) {
+              req.destroy();
+              resolve({ success: false, error: 'Response too large', latencyMs: getLatency() });
+              return;
+            }
+            body += chunk.toString();
+          });
+          res.on('end', () => {
+            const ok = res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 400;
+            resolve({ success: ok, status: res.statusCode, message: `HTTP ${res.statusCode}`, latencyMs: getLatency() });
+          });
         });
 
         req.setTimeout(10000, () => {
           req.destroy();
-          resolve({ success: false, error: 'Connection timed out after 10 seconds' });
+          resolve({ success: false, error: 'Request timed out', latencyMs: getLatency() });
         });
 
         req.on('error', (err: NodeJS.ErrnoException) => {
@@ -327,7 +403,7 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
           } else if (message.includes('CERT') || message.includes('certificate') || message.includes('SSL')) {
             message = 'SSL/TLS error — try enabling "allowUnauthorized" for self-signed certs';
           }
-          resolve({ success: false, error: message });
+          resolve({ success: false, error: message, latencyMs: getLatency() });
         });
 
         req.end();
@@ -336,6 +412,10 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
       }
     });
   });
+
+  function isMaskedKey(key: string): boolean {
+    return key.includes('...') || key.startsWith('***') || key === '********';
+  };
 
   // ─── Fetch Models from /v1/models endpoint ──────────────────────────────────────
   // P3-18: Query a provider's /v1/models endpoint to discover available models
@@ -351,9 +431,9 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
         // e.g. https://api.openai.com/v1/chat/completions → /v1/models
         // e.g. https://api.anthropic.com/v1/messages → /v1/models
         // e.g. http://localhost:11434/v1/chat/completions → /v1/models
-        let baseUrl = params.apiUrl || (params as any).baseUrl;
+        let baseUrl = (typeof params?.apiUrl === 'string' && params.apiUrl) ? params.apiUrl : (typeof (params as any)?.baseUrl === 'string' ? (params as any).baseUrl : '');
 
-        if (!baseUrl) {
+        if (!baseUrl || typeof baseUrl !== 'string') {
           resolve({ success: false, error: 'No API URL provided' });
           return;
         }
@@ -399,18 +479,22 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
           },
         };
 
+        const providerLower = (params.provider || '').toLowerCase();
+
         // Add auth header
-        if (params.apiKey && params.apiKey !== 'none') {
-          let key = params.apiKey;
+        const apiKey = (params as { apiKey?: string }).apiKey;
+        if (apiKey && apiKey !== 'none' && !isMaskedKey(apiKey)) {
+          let key = apiKey;
           try {
-            key = cryptoStore.decryptString(params.apiKey);
+            key = cryptoStore.decryptString(apiKey);
           } catch {
             /* key might not be encrypted */
           }
 
-          if (params.provider === 'anthropic') {
+          if (providerLower === 'anthropic') {
             (options.headers as Record<string, string>)['x-api-key'] = key;
-          } else if (params.provider === 'google') {
+            (options.headers as Record<string, string>)['anthropic-version'] = '2025-04-01';
+          } else if (providerLower === 'google') {
             (options.headers as Record<string, string>)['x-goog-api-key'] = key;
           } else {
             (options.headers as Record<string, string>)['Authorization'] = `Bearer ${key}`;
@@ -419,12 +503,24 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
 
         const req = client.request(options, (res: http.IncomingMessage) => {
           let body = '';
+          let bytes = 0;
+          const MAX_BODY = 4 * 1024 * 1024;
 
-          res.on('data', (chunk: string) => {
-            body += chunk;
+          res.on('data', (chunk: string | Buffer) => {
+            bytes += chunk.length;
+            if (bytes > MAX_BODY) {
+              req.destroy();
+              resolve({ success: false, error: 'Response too large' });
+              return;
+            }
+            body += chunk.toString();
           });
 
           res.on('end', () => {
+            if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+              resolve({ success: false, error: `HTTP ${res.statusCode}: ${body.slice(0, 200)}` });
+              return;
+            }
             try {
               const parsed = JSON.parse(body) as Record<string, unknown>;
 
@@ -714,6 +810,7 @@ interface ConnectionTestResult {
   status?: number;
   message?: string;
   error?: string;
+  latencyMs?: number;
 }
 
 // ─── Fetch Models Types ────────────────────────────────────────────────────────────

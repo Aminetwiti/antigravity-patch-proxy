@@ -48,6 +48,7 @@ import { injectCustomModelsIntoResponse } from './proxy/protoInjector';
 
 // Custom model loading (extracted from proxy.ts)
 import { loadCustomModels } from './proxy/modelLoader';
+import { recordProviderUsage } from './customModelStore';
 import { classifyError, ErrorDiagnostic } from './proxy/errorClassifier';
 import { shouldRetryStatus } from './proxy/retryStrategy';
 
@@ -320,17 +321,27 @@ function handleCustomModelRequest(
   const REQUEST_TIMEOUT_MS = resolveRequestTimeout(model);
 
   function attemptFallback(diagnostic: ErrorDiagnostic): boolean {
-    if (fallbackDepth > 0) return false;
+    if (fallbackDepth >= 2) return false;
+    const isEligibleForFallback =
+      diagnostic.errorType === 'rate_limit' ||
+      diagnostic.errorType === 'server' ||
+      diagnostic.errorType === 'network' ||
+      diagnostic.errorType === 'billing' ||
+      diagnostic.errorType === 'timeout';
+    if (!isEligibleForFallback) return false;
+
     try {
       const allModels = loadCustomModels();
       for (const m of allModels) {
-        if (m.name !== model.name && m.apiKey && m.apiKey !== 'none' && !m.apiKey.startsWith('fallback:')) {
-           log.warn(`[Proxy] Model ${model.name} failed (${diagnostic.errorType}). Auto-falling back to ${m.name}...`);
+        if (m.name !== model.name && m.apiKey && !m.apiKey.startsWith('fallback:')) {
+           log.warn(`[Proxy] Model ${model.name} failed with ${diagnostic.errorType} (${diagnostic.title}). Auto-falling back to ${m.displayName || m.name}...`);
            handleCustomModelRequest(res, m, geminiBody, isStream, 0, fallbackDepth + 1);
-           return true; // Fallback successfully initiated
+           return true;
         }
       }
-    } catch(e) {}
+    } catch (e) {
+      log.error('[Proxy] Auto-fallback exception:', e);
+    }
     return false;
   }
 
@@ -545,6 +556,8 @@ function handleCustomModelRequest(
         };
         res.write(`data: ${JSON.stringify(finalChunk)}\n\n`);
         res.end();
+        const pId = model.name.includes('-') ? model.name.split('-')[0] : model.provider;
+        void recordProviderUsage(pId, 100, 150);
       });
     } else {
       let body = '';

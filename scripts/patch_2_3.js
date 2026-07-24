@@ -103,6 +103,15 @@ const {
   addIdeBridgeToPreload,
   addUpdaterStateBridgeToPreload,
 } = require('./lib/patch-2-3-source');
+const {
+  UNPACKED_LAYOUT,
+  assertMitmSourcesExist,
+  stageUnpackedFiles,
+  moveUnpackedAside,
+  restoreUnpackedAfterRepack,
+  assertAsarExcludesUnpacked,
+  assertUnpackedDeployed,
+} = require('./lib/patch-2-3-mitm');
 
 // ─── The 25 modules that v2.3.x dropped and we need to re-inject ───────────
 const MISSING_JS_MODULES = [
@@ -501,13 +510,42 @@ async function main() {
   }
   console.log(`            sub-total: ${nrCount} files, ${nrBytes} B`);
 
-  // Step 5: repack
-  console.log('[patch_2_3] step 5/5 — repack');
+  // Step 5: stage MITM files into app.asar.unpacked/ so proxy-runner.js
+  // can spawn the MITM HTTPS forwarder on Antigravity startup.
+  console.log(`[patch_2_3] step 5/6 — stage ${UNPACKED_LAYOUT.length} MITM files into app.asar.unpacked/`);
+  assertMitmSourcesExist(repoDir);
+  const staged = stageUnpackedFiles(buildDir, repoDir);
+  for (const file of staged.staged) {
+    console.log(`            + app.asar.unpacked/${file.relativePath} (${file.size} B)`);
+  }
+  console.log(`            sub-total: ${staged.staged.length} files, ${staged.totalBytes} B`);
+
+  // Step 6: repack
+  // @electron/asar@4.2.0 does NOT honour the `*.unpacked` convention
+  // automatically. We move `app.asar.unpacked/` to its final destination
+  // NEXT TO asarOut BEFORE createPackage, so the packer never sees those
+  // files. After repack we validate that the asar is clean and that the
+  // unpacked folder landed where expected.
+  console.log('[patch_2_3] step 6/6 — repack');
   if (fs.existsSync(asarOut)) fs.unlinkSync(asarOut);
+  // Pre-create the asar-out directory if it doesn't exist yet so the
+  // move-aside target is valid (moveUnpackedAside renames across the
+  // build/asar-out boundary).
+  fs.mkdirSync(path.dirname(asarOut), { recursive: true });
+  const finalUnpacked = moveUnpackedAside(buildDir, asarOut);
+  if (finalUnpacked) {
+    console.log(`            > moved app.asar.unpacked/ next to ${path.basename(asarOut)}`);
+  }
   try {
     await asar.createPackage(buildDir, asarOut);
     validateAsarInventory(asarOut, manifest, asar);
+    assertAsarExcludesUnpacked(asarOut, UNPACKED_LAYOUT, asar);
     console.log(`[patch_2_3] candidate validated: ${manifest.length} required JavaScript files present`);
+    console.log('            + asar confirmed free of MITM unpacked paths');
+    if (finalUnpacked) {
+      assertUnpackedDeployed(asarOut, UNPACKED_LAYOUT);
+      console.log(`            + app.asar.unpacked/mitm deployed next to ${path.basename(asarOut)}`);
+    }
   } catch (err) {
     die(`asar.createPackage failed: ${err.stack || err.message}`, 3);
   }
@@ -515,7 +553,7 @@ async function main() {
   const inSize = fs.statSync(asarIn).size;
   const outSize = fs.statSync(asarOut).size;
   const delta = outSize - inSize;
-  const grandTotal = totalBytes + owBytes + nrBytes;
+  const grandTotal = totalBytes + owBytes + nrBytes + staged.totalBytes;
   console.log(`[patch_2_3] done — ${asarOut}`);
   console.log(`            in:  ${inSize} B`);
   console.log(`            out: ${outSize} B (+${delta} B)`);

@@ -51,6 +51,12 @@ interface ProviderFileEntry {
   encrypted?: boolean;
   enabled: boolean;
   models: ProviderModelEntry[];
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalRequests: number;
+    lastUsed?: number;
+  };
 }
 
 interface NotificationAPI {
@@ -67,10 +73,13 @@ interface StorageAPI {
   saveCustomModel: (model: CustomModelEntry) => Promise<{ success: boolean; error?: string }>;
   deleteCustomModel: (modelName: string) => Promise<{ success: boolean; error?: string }>;
   testModelConnection: (model: TestModelParams) => Promise<ConnectionTestResult>;
-  fetchModels: (params: { baseUrl: string; apiKey?: string; allowUnauthorized?: boolean }) => Promise<{ success: boolean; models?: {id: string, displayName: string}[]; error?: string }>;
+  fetchModels: (params: FetchModelsParams) => Promise<FetchModelsResult>;
   getProviders: () => Promise<ProviderFileEntry[]>;
   saveProvider: (provider: ProviderFileEntry) => Promise<{ success: boolean; error?: string }>;
   deleteProvider: (providerId: string) => Promise<{ success: boolean; error?: string }>;
+  exportProviders: () => Promise<{ success: boolean; count?: number; error?: string }>;
+  importProviders: () => Promise<{ success: boolean; count?: number; error?: string }>;
+  getDoctorDiagnostics: () => Promise<any>;
 }
 
 interface LogsAPI {
@@ -155,13 +164,31 @@ interface ConnectionTestResult {
   status?: number;
   message?: string;
   error?: string;
+  latencyMs?: number;
+}
+
+interface FetchModelsParams {
+  baseUrl?: string;
+  apiUrl?: string;
+  apiKey?: string;
+  provider: string;
+  allowUnauthorized?: boolean;
 }
 
 interface FetchModelsResult {
   success: boolean;
-  models?: { id: string; name: string; inputModalities?: string[] }[];
+  models?: { id: string; name?: string; displayName?: string; inputModalities?: string[] }[];
   error?: string;
 }
+
+const PROVIDER_PRESETS: { id: string; label: string; defaultApiUrl: string }[] = [
+  { id: 'openai', label: 'OpenAI-compatible', defaultApiUrl: 'https://api.openai.com/v1' },
+  { id: 'openrouter', label: 'OpenRouter', defaultApiUrl: 'https://openrouter.ai/api/v1' },
+  { id: 'anthropic', label: 'Anthropic', defaultApiUrl: 'https://api.anthropic.com' },
+  { id: 'google', label: 'Google AI Studio', defaultApiUrl: 'https://generativelanguage.googleapis.com' },
+  { id: 'ollama', label: 'Ollama (local)', defaultApiUrl: 'http://localhost:11434/v1' },
+  { id: 'custom', label: 'Custom', defaultApiUrl: '' },
+];
 
 // ─── API Definitions ─────────────────────────────────────────────────────────
 
@@ -219,6 +246,9 @@ const storageAPI: StorageAPI = {
   getProviders: () => ipcRenderer.invoke('storage:get-providers'),
   saveProvider: (provider) => ipcRenderer.invoke('storage:save-provider', provider),
   deleteProvider: (providerId) => ipcRenderer.invoke('storage:delete-provider', providerId),
+  exportProviders: () => ipcRenderer.invoke('storage:export-providers'),
+  importProviders: () => ipcRenderer.invoke('storage:import-providers'),
+  getDoctorDiagnostics: () => ipcRenderer.invoke('storage:get-doctor-diagnostics'),
 };
 
 const logsAPI: LogsAPI = {
@@ -776,13 +806,34 @@ window.addEventListener('DOMContentLoaded', () => {
     subtitle.style.cssText = `font-size: 14px; color: #a1a1aa;`;
     subtitle.textContent = `${providers.length} provider(s) configured.`;
     
+    const btnGroup = document.createElement('div');
+    btnGroup.style.cssText = `display: flex; gap: 8px; align-items: center;`;
+
+    const importBtn = document.createElement('button');
+    importBtn.textContent = '📥 Import';
+    importBtn.style.cssText = `background: #27272a; border: 1px solid #3f3f46; color: #f4f4f5; padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer;`;
+    importBtn.onclick = async () => {
+      const res = await storageAPI.importProviders();
+      if (res.success) renderList();
+    };
+
+    const exportBtn = document.createElement('button');
+    exportBtn.textContent = '📤 Export';
+    exportBtn.style.cssText = importBtn.style.cssText;
+    exportBtn.onclick = async () => {
+      await storageAPI.exportProviders();
+    };
+
     const addBtn = document.createElement('button');
     addBtn.textContent = '+ Add Provider';
-    addBtn.style.cssText = `background: #3b82f6; border: none; color: white; padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer;`;
+    addBtn.style.cssText = `background: #3b82f6; border: none; color: white; padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer;`;
     addBtn.onclick = () => renderForm();
-    
+
+    btnGroup.appendChild(importBtn);
+    btnGroup.appendChild(exportBtn);
+    btnGroup.appendChild(addBtn);
     topActions.appendChild(subtitle);
-    topActions.appendChild(addBtn);
+    topActions.appendChild(btnGroup);
     listContainer.appendChild(topActions);
 
     providers.forEach(p => {
@@ -811,8 +862,9 @@ window.addEventListener('DOMContentLoaded', () => {
        testBtn.onclick = async () => {
          testBtn.textContent = 'Testing...';
          const res = await storageAPI.testModelConnection({ apiUrl: p.apiUrl, provider: p.provider, apiKey: p.apiKey, allowUnauthorized: p.allowUnauthorized });
-         testBtn.textContent = res.success ? '✅ Healthy' : '❌ Error: ' + res.status;
-         setTimeout(() => { testBtn.textContent = '🩺 Test Health'; }, 3000);
+         const lat = res.latencyMs !== undefined ? ` (${res.latencyMs}ms)` : '';
+         testBtn.textContent = res.success ? `✅ Healthy${lat}` : `❌ Error${lat}`;
+         setTimeout(() => { testBtn.textContent = '🩺 Test Health'; }, 4000);
        };
 
        const editBtn = document.createElement('button');
@@ -839,9 +891,11 @@ window.addEventListener('DOMContentLoaded', () => {
        headerRow.appendChild(actions);
        
        const subRow = document.createElement('div');
-       subRow.style.cssText = `font-size: 12px; color: #a1a1aa;`;
-       const enabledCount = p.models.filter(m => m.enabled).length;
-       subRow.textContent = `${p.provider} | ${enabledCount} model(s) enabled`;
+       subRow.style.cssText = `font-size: 12px; color: #a1a1aa; display: flex; gap: 12px; flex-wrap: wrap;`;
+       const enabledCount = p.models.filter((m: any) => m.enabled).length;
+       const totalTokens = (p.usage?.promptTokens || 0) + (p.usage?.completionTokens || 0);
+       const tokenText = totalTokens > 0 ? ` | 📊 ${totalTokens >= 1000 ? (totalTokens / 1000).toFixed(1) + 'k' : totalTokens} tokens (${p.usage?.totalRequests || 0} reqs)` : '';
+       subRow.textContent = `${p.provider} | ${enabledCount} model(s) enabled${tokenText}`;
        
        row.appendChild(headerRow);
        row.appendChild(subRow);
@@ -878,7 +932,7 @@ window.addEventListener('DOMContentLoaded', () => {
     headerRow.appendChild(title);
     formContainer.appendChild(headerRow);
 
-    const createInput = (labelStr: string, key: string, type: string = 'text') => {
+    const createInput = (labelStr: string, key: string, type: string = 'text', helpText?: string) => {
        const w = document.createElement('div');
        w.style.cssText = `display: flex; flex-direction: column; gap: 6px;`;
        const l = document.createElement('label');
@@ -887,21 +941,110 @@ window.addEventListener('DOMContentLoaded', () => {
        const i = document.createElement('input');
        i.type = type;
        i.value = state[key] || '';
+       i.id = `agy-input-${key}`;
+       i.setAttribute('aria-label', labelStr);
        i.style.cssText = `background-color: #27272a; border: 1px solid #3f3f46; border-radius: 8px; color: #f4f4f5; padding: 10px 12px; font-size: 14px; outline: none;`;
        i.onchange = (e) => state[key] = (e.target as HTMLInputElement).value;
        w.appendChild(l);
        w.appendChild(i);
+       if (helpText) {
+          const help = document.createElement('div');
+          help.textContent = helpText;
+          help.style.cssText = `font-size: 11px; color: #71717a;`;
+          w.appendChild(help);
+       }
        return { wrapper: w, input: i };
     };
 
+    // Provider preset select
+    const providerWrap = document.createElement('div');
+    providerWrap.style.cssText = `display: flex; flex-direction: column; gap: 6px;`;
+    const providerLabel = document.createElement('label');
+    providerLabel.textContent = 'Provider Type';
+    providerLabel.style.cssText = `font-size: 13px; font-weight: 500; color: #a1a1aa;`;
+    const providerSelect = document.createElement('select');
+    providerSelect.id = 'agy-input-provider';
+    providerSelect.setAttribute('aria-label', 'Provider Type');
+    providerSelect.style.cssText = `background-color: #27272a; border: 1px solid #3f3f46; border-radius: 8px; color: #f4f4f5; padding: 10px 12px; font-size: 14px; outline: none;`;
+    for (const preset of PROVIDER_PRESETS) {
+       const opt = document.createElement('option');
+       opt.value = preset.id;
+       opt.textContent = preset.label;
+       if (state.provider === preset.id) opt.selected = true;
+       providerSelect.appendChild(opt);
+    }
+    // If saved provider doesn't match a preset, add a custom entry
+    if (!PROVIDER_PRESETS.some((p) => p.id === state.provider)) {
+      const opt = document.createElement('option');
+      opt.value = state.provider;
+      opt.textContent = `${state.provider} (saved)`;
+      opt.selected = true;
+      providerSelect.appendChild(opt);
+    }
+    providerSelect.onchange = (e) => {
+      const id = (e.target as HTMLSelectElement).value;
+      state.provider = id;
+      const preset = PROVIDER_PRESETS.find((p) => p.id === id);
+      if (preset && preset.defaultApiUrl && !state.apiUrl) {
+        urlInp.input.value = preset.defaultApiUrl;
+        state.apiUrl = preset.defaultApiUrl;
+      }
+    };
+    providerWrap.appendChild(providerLabel);
+    providerWrap.appendChild(providerSelect);
+
     const nameInp = createInput('Provider Name (e.g. My OpenRouter)', 'name');
     const urlInp = createInput('Base API URL (e.g. https://openrouter.ai/api/v1)', 'apiUrl');
-    const keyInp = createInput('API Key', 'apiKey', 'password');
-    if (existingProvider) keyInp.input.placeholder = '********';
 
+    // Key input with dirty flag (so empty/cleared value is distinguishable from untouched)
+    const keyWrap = document.createElement('div');
+    keyWrap.style.cssText = `display: flex; flex-direction: column; gap: 6px;`;
+    const keyLabel = document.createElement('label');
+    keyLabel.textContent = 'API Key';
+    keyLabel.style.cssText = `font-size: 13px; font-weight: 500; color: #a1a1aa;`;
+    const keyInp = document.createElement('input');
+    keyInp.type = 'password';
+    keyInp.id = 'agy-input-apiKey';
+    keyInp.setAttribute('aria-label', 'API Key');
+    keyInp.style.cssText = `background-color: #27272a; border: 1px solid #3f3f46; border-radius: 8px; color: #f4f4f5; padding: 10px 12px; font-size: 14px; outline: none;`;
+    if (existingProvider) {
+      keyInp.placeholder = '•••••••• (leave empty to keep, type to replace)';
+    } else {
+      keyInp.placeholder = 'Paste your API key';
+    }
+    let keyDirty = false;
+    keyInp.oninput = () => { keyDirty = true; };
+    keyWrap.appendChild(keyLabel);
+    keyWrap.appendChild(keyInp);
+    const keyHelp = document.createElement('div');
+    keyHelp.textContent = 'Leave empty to keep the existing key. Type a new value to replace it. Click "Remove key" to clear.';
+    keyHelp.style.cssText = `font-size: 11px; color: #71717a;`;
+    keyWrap.appendChild(keyHelp);
+
+    // allowUnauthorized toggle
+    const tlsWrap = document.createElement('label');
+    tlsWrap.style.cssText = `display: flex; align-items: center; gap: 8px; font-size: 13px; color: #a1a1aa;`;
+    const tlsChk = document.createElement('input');
+    tlsChk.type = 'checkbox';
+    tlsChk.checked = !!state.allowUnauthorized;
+    tlsChk.id = 'agy-input-allowUnauthorized';
+    tlsChk.setAttribute('aria-label', 'Allow self-signed certificates');
+    tlsChk.onchange = (e) => state.allowUnauthorized = (e.target as HTMLInputElement).checked;
+    const tlsLbl = document.createElement('span');
+    tlsLbl.textContent = 'Allow self-signed certificates (insecure)';
+    tlsWrap.appendChild(tlsChk);
+    tlsWrap.appendChild(tlsLbl);
+
+    formContainer.appendChild(providerWrap);
     formContainer.appendChild(nameInp.wrapper);
     formContainer.appendChild(urlInp.wrapper);
-    formContainer.appendChild(keyInp.wrapper);
+    formContainer.appendChild(keyWrap);
+    formContainer.appendChild(tlsWrap);
+
+    // Global status for inline save/feedback
+    const formStatus = document.createElement('div');
+    formStatus.style.cssText = `font-size: 12px; color: #a1a1aa; min-height: 14px;`;
+    formContainer.appendChild(formStatus);
 
     // Fetch Models Section
     const fetchRow = document.createElement('div');
@@ -947,12 +1090,14 @@ window.addEventListener('DOMContentLoaded', () => {
        fetchBtn.disabled = true;
        // Read current values from DOM in case they changed without blur
        state.apiUrl = urlInp.input.value;
-       state.apiKey = keyInp.input.value || state.apiKey;
-       
-       const res = await storageAPI.fetchModels({ baseUrl: state.apiUrl, apiUrl: state.apiUrl, apiKey: state.apiKey, allowUnauthorized: state.allowUnauthorized });
+       if (keyDirty) {
+          state.apiKey = keyInp.value;
+       }
+
+       const res = await storageAPI.fetchModels({ baseUrl: state.apiUrl, apiUrl: state.apiUrl, apiKey: state.apiKey, provider: state.provider, allowUnauthorized: state.allowUnauthorized });
        fetchBtn.textContent = '🔄 Fetch Available Models';
        fetchBtn.disabled = false;
-       
+
        if (res.success && res.models) {
           fetchStatus.textContent = `Found ${res.models.length} models.`;
           fetchStatus.style.color = '#22c55e';
@@ -960,30 +1105,98 @@ window.addEventListener('DOMContentLoaded', () => {
           const existingMap = new Map(state.models.map((x:any) => [x.id, x]));
           state.models = res.models.map((m:any) => {
              const ext = existingMap.get(m.id);
-             return ext ? ext : { id: m.id, displayName: m.displayName, enabled: false };
+             return ext ? ext : { id: m.id, displayName: m.displayName || m.id, enabled: false };
           });
           renderModelsList();
        } else {
-          fetchStatus.textContent = 'Error: ' + res.error;
+          fetchStatus.textContent = 'Error: ' + (res.error || 'Unknown error');
           fetchStatus.style.color = '#ef4444';
        }
     };
 
     const saveRow = document.createElement('div');
     saveRow.style.cssText = `display: flex; justify-content: flex-end; gap: 12px; margin-top: auto; padding-top: 16px; border-top: 1px solid #3f3f46;`;
+    const removeKeyBtn = document.createElement('button');
+    removeKeyBtn.textContent = '🗝 Remove key';
+    removeKeyBtn.style.cssText = `background: transparent; border: 1px solid #52525b; color: #a1a1aa; padding: 10px 16px; border-radius: 6px; font-size: 13px; cursor: pointer;`;
+    removeKeyBtn.onclick = () => {
+       keyInp.value = '';
+       keyDirty = true;
+       state.apiKey = '';
+       formStatus.textContent = 'Key will be removed on save.';
+       formStatus.style.color = '#facc15';
+    };
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.style.cssText = `background: transparent; border: 1px solid #3f3f46; color: #a1a1aa; padding: 10px 16px; border-radius: 6px; font-size: 13px; cursor: pointer;`;
+    cancelBtn.onclick = () => renderList();
     const saveBtn = document.createElement('button');
     saveBtn.textContent = 'Save Provider';
     saveBtn.style.cssText = `background: #22c55e; border: none; color: white; padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer;`;
     saveBtn.onclick = async () => {
+       saveBtn.textContent = 'Saving...';
+       saveBtn.disabled = true;
        state.name = nameInp.input.value || 'Unnamed Provider';
        state.apiUrl = urlInp.input.value;
-       state.apiKey = keyInp.input.value || state.apiKey;
-       await storageAPI.saveProvider(state);
-       renderList();
+       if (keyDirty) {
+          state.apiKey = keyInp.value;
+       }
+       try {
+          const res = await storageAPI.saveProvider(state);
+          if (res.success) {
+             formStatus.textContent = 'Saved.';
+             formStatus.style.color = '#22c55e';
+             // Invalidate cached models so the proxy picks up changes
+             try {
+                const rm = await storageAPI.getCustomModels();
+                void rm; // keep linter happy
+             } catch {
+                /* ignore */
+             }
+             renderList();
+          } else {
+             formStatus.textContent = 'Error: ' + (res.error || 'Unknown error');
+             formStatus.style.color = '#ef4444';
+             saveBtn.textContent = 'Save Provider';
+             saveBtn.disabled = false;
+          }
+       } catch (err) {
+          formStatus.textContent = 'Error: ' + (err as Error).message;
+          formStatus.style.color = '#ef4444';
+          saveBtn.textContent = 'Save Provider';
+          saveBtn.disabled = false;
+       }
     };
+    saveRow.appendChild(removeKeyBtn);
+    saveRow.appendChild(cancelBtn);
     saveRow.appendChild(saveBtn);
     formContainer.appendChild(saveRow);
   }
+
+  // Accessibility: close on overlay click or Escape
+  overlay.addEventListener('click', (ev) => {
+    if (ev.target === overlay) overlay.remove();
+  });
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-labelledby', 'agy-modal-title');
+  titleRow.setAttribute('id', 'agy-modal-title');
+  closeBtn.setAttribute('aria-label', 'Close');
+  const escHandler = (ev: KeyboardEvent) => {
+    if (ev.key === 'Escape') overlay.remove();
+  };
+  document.addEventListener('keydown', escHandler);
+  overlay.addEventListener('agy-modal-closed', () => {
+    document.removeEventListener('keydown', escHandler);
+  });
+  // Cleanup listener when overlay removes
+  const overlayObserver = new MutationObserver(() => {
+    if (!overlay.isConnected) {
+      document.removeEventListener('keydown', escHandler);
+      overlayObserver.disconnect();
+    }
+  });
+  overlayObserver.observe(document.body, { childList: true });
 
   renderList();
 }
@@ -1582,11 +1795,12 @@ window.addEventListener('DOMContentLoaded', () => {
   async function handleModelError(url: string, diagnostic: any) {
     const match = url.match(/models\/(MODEL_PLACEHOLDER_M[^:]+)/);
     const modelId = match ? match[1] : null;
-    
+
     if (diagnostic.errorType === 'billing' || diagnostic.errorType === 'auth' || diagnostic.errorType === 'forbidden') {
       if (modelId) {
         const models = await getCustomModelsForInjection();
-        const m = models.find(x => `MODEL_PLACEHOLDER_M${generateModelPlaceholderId(x)}` === modelId);
+        // generateModelPlaceholderId already returns the fully-prefixed id.
+        const m = models.find((x) => generateModelPlaceholderId(x) === modelId);
         if (m) {
           failedModelDisplayNames.add(m.displayName || m.name);
           modelHealthState.set(generateModelPlaceholderId(m), { status: 'error', lastChecked: Date.now(), diagnostic });
@@ -1630,6 +1844,9 @@ window.addEventListener('DOMContentLoaded', () => {
                 const modelsObj = (parsed.models || parsed.availableModels || parsed.available_models || {}) as Record<string, unknown>;
                 for (const m of customModels) {
                   const slug = toSlug(m);
+                  // generateModelPlaceholderId already returns the full
+                  // "MODEL_PLACEHOLDER_M###" string — do NOT prefix it again
+                  // or routing in the proxy will not match.
                   const placeholderId = generateModelPlaceholderId(m);
                   (modelsObj as Record<string, unknown>)[slug] = {
                     displayName: m.displayName || m.name,
@@ -1637,7 +1854,7 @@ window.addEventListener('DOMContentLoaded', () => {
                     maxTokens: 1048576,
                     maxOutputTokens: 4096,
                     tokenizerType: 'LLAMA_WITH_SPECIAL',
-                    model: `MODEL_PLACEHOLDER_M${placeholderId}`,
+                    model: placeholderId,
                     apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
                     modelProvider: 'MODEL_PROVIDER_GOOGLE',
                   };
@@ -1683,7 +1900,14 @@ window.addEventListener('DOMContentLoaded', () => {
   // Intercept fetch responses for model endpoints and error capturing
   const origFetch = window.fetch;
   window.fetch = async function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-    const url = typeof input === 'string' ? input : (input as Request).url;
+    let url: string;
+    if (typeof input === 'string') {
+      url = input;
+    } else if (input instanceof URL) {
+      url = input.href;
+    } else {
+      url = input.url;
+    }
     try {
       const response = await origFetch.call(window, input, init);
 
@@ -1698,6 +1922,8 @@ window.addEventListener('DOMContentLoaded', () => {
               const modelsObj = (parsed.models || parsed.availableModels || parsed.available_models || {}) as Record<string, unknown>;
               for (const m of customModels) {
                 const slug = toSlug(m);
+                // generateModelPlaceholderId already returns the full
+                // "MODEL_PLACEHOLDER_M###" string — do NOT prefix it again.
                 const placeholderId = generateModelPlaceholderId(m);
                 (modelsObj as Record<string, unknown>)[slug] = {
                   displayName: m.displayName || m.name,
@@ -1705,7 +1931,7 @@ window.addEventListener('DOMContentLoaded', () => {
                   maxTokens: 1048576,
                   maxOutputTokens: 4096,
                   tokenizerType: 'LLAMA_WITH_SPECIAL',
-                  model: `MODEL_PLACEHOLDER_M${placeholderId}`,
+                  model: placeholderId,
                   apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
                   modelProvider: 'MODEL_PROVIDER_GOOGLE',
                 };

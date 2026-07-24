@@ -8,8 +8,8 @@ const {
 } = vi.hoisted(() => ({
   mockExistsSync: vi.fn(),
   mockReadFileSync: vi.fn(),
-  mockGetAppAsarPath: vi.fn<(installDir?: string) => string | null>(),
-  mockListPackage: vi.fn<(asarPath: string) => string[]>(),
+  mockGetAppAsarPath: vi.fn(),
+  mockListPackage: vi.fn(),
 }));
 
 vi.mock('fs', () => ({
@@ -33,12 +33,28 @@ vi.mock('./config', () => ({
   getPatchVersionOverride: vi.fn(() => ({ range: null, reason: null, setAt: null })),
 }));
 
-vi.mock('@electron/asar', () => ({
-  default: {
-    listPackage: mockListPackage,
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const electronAsarPath = require.resolve('@electron/asar');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const electronAsarReal = require('@electron/asar');
+require.cache[electronAsarPath] = {
+  id: electronAsarPath,
+  filename: electronAsarPath,
+  loaded: true,
+  exports: {
+    ...electronAsarReal,
+    listPackage: (...args: any[]) => mockListPackage(...args),
   },
+  // @ts-ignore
+  children: [],
+  // @ts-ignore
+  paths: [],
+};
+
+(globalThis as any).__hoistedAsarSpy__ = {
   listPackage: mockListPackage,
-}));
+  extractFile: vi.fn(),
+};
 
 import fs from 'fs';
 import { inspectOverlayPatchFingerprint } from './version-specific-patch';

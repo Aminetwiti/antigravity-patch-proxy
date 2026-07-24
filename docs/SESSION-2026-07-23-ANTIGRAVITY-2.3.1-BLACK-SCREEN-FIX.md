@@ -1,7 +1,7 @@
 # Résumé de session — correction de l’écran noir Antigravity 2.3.1
 
-**Date :** 2026-07-23  
-**Projet :** `antigravity-add-model-main`  
+**Date :** 2026-07-23
+**Projet :** `antigravity-add-model-main`
 **Installation testée :** `C:\Users\amine\AppData\Local\Programs\Antigravity`
 
 ## ✅ État final (2026-07-23 13:17)

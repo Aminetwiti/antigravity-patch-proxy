@@ -24,7 +24,7 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@electron/asar": "^4.2.0"
+    "@electron/asar": "^3.4.1"
   },
   "devDependencies": {
     "@rolldown/binding-win32-x64-msvc": "^1.1.5",

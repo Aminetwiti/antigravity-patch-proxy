@@ -7,12 +7,12 @@
  */
 
 import * as fs from 'fs/promises';
+import * as fsSync from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
 import log from 'electron-log/main';
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const cryptoStore = require('./cryptoStore');
+import * as cryptoStore from './cryptoStore';
 
 import {
   CUSTOM_MODEL_MAX_TOKENS,
@@ -45,6 +45,7 @@ export interface ConnectionTestResult {
   status?: number;
   message?: string;
   error?: string;
+  latencyMs?: number;
 }
 
 export interface FallbackModelEntry {
@@ -74,6 +75,12 @@ export interface ProviderFileEntry {
   encrypted?: boolean;
   enabled: boolean;
   models: ProviderModelEntry[];
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalRequests: number;
+    lastUsed?: number;
+  };
 }
 
 /**
@@ -95,32 +102,34 @@ export async function loadCustomModels(): Promise<CustomModelFileEntry[]> {
   try {
     const content = await fs.readFile(filePath, 'utf-8');
     const parsed = JSON.parse(stripBom(content)) as { models?: CustomModelFileEntry[], providers?: ProviderFileEntry[] };
-    
-    // Legacy migration case
-    if (parsed.models && !parsed.providers) {
-      return parsed.models;
-    }
 
-    if (parsed.providers) {
-      const flatModels: CustomModelFileEntry[] = [];
-      for (const p of parsed.providers) {
-        if (!p.enabled) continue;
-        for (const m of p.models) {
-          if (!m.enabled) continue;
-          flatModels.push({
-             name: `${p.id}-${m.id}`,
-             displayName: m.displayName || m.id,
-             provider: p.provider,
-             apiKey: p.apiKey,
-             apiUrl: p.apiUrl,
-             externalModelName: m.id,
-             allowUnauthorized: p.allowUnauthorized,
-             encrypted: p.encrypted
-          });
-        }
+  // Legacy migration case
+  if (parsed.models && !parsed.providers) {
+    return parsed.models;
+  }
+
+  if (parsed.providers) {
+    const flatModels: CustomModelFileEntry[] = [];
+    for (const p of parsed.providers) {
+      if (!p) continue;
+      if (p.enabled === false) continue;
+      const models = Array.isArray(p.models) ? p.models : [];
+      for (const m of models) {
+        if (!m || m.enabled === false) continue;
+        flatModels.push({
+           name: `${p.id || 'provider-unknown'}-${m.id}`,
+           displayName: m.displayName || m.id,
+           provider: p.provider || 'openai',
+           apiKey: p.apiKey || 'none',
+           apiUrl: p.apiUrl || '',
+           externalModelName: m.id,
+           allowUnauthorized: p.allowUnauthorized,
+           encrypted: p.encrypted
+        });
       }
-      return flatModels;
     }
+    return flatModels;
+  }
     return [];
   } catch (error) {
     if (isNodeError(error) && error.code === 'ENOENT') {
@@ -134,18 +143,9 @@ export async function loadCustomModels(): Promise<CustomModelFileEntry[]> {
 
 export async function saveCustomModels(models: CustomModelFileEntry[]): Promise<void> {
   const filePath = getCustomModelsPath();
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-
-  // Preserve existing providers key when saving models
-  let existing: Record<string, unknown> = {};
-  try {
-    const content = await fs.readFile(filePath, 'utf-8');
-    existing = JSON.parse(stripBom(content)) as Record<string, unknown>;
-  } catch {
-    // File doesn't exist yet, start fresh
-  }
+  const existing = readExistingJson(filePath);
   existing.models = models;
-  await fs.writeFile(filePath, JSON.stringify(existing, null, 2), 'utf-8');
+  await atomicWriteJson(filePath, existing);
 }
 
 export async function loadProviders(): Promise<ProviderFileEntry[]> {
@@ -196,26 +196,79 @@ export async function loadProviders(): Promise<ProviderFileEntry[]> {
   }
 }
 
+function atomicWriteJson(filePath: string, payload: unknown): Promise<void> {
+  return (async () => {
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(payload, null, 2), 'utf-8');
+    await fs.rename(tmp, filePath);
+  })();
+}
+
+function readExistingJson(filePath: string): Record<string, unknown> {
+  try {
+    const content = fsSync.readFileSync(filePath, 'utf-8');
+    return JSON.parse(stripBom(content)) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
 export async function saveProviders(providers: ProviderFileEntry[]): Promise<void> {
   const filePath = getCustomModelsPath();
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-
-  // Preserve existing models key when saving providers
-  let existing: Record<string, unknown> = {};
-  try {
-    const content = await fs.readFile(filePath, 'utf-8');
-    existing = JSON.parse(stripBom(content)) as Record<string, unknown>;
-  } catch {
-    // File doesn't exist yet, start fresh
-  }
+  const existing = readExistingJson(filePath);
   existing.providers = providers;
-  await fs.writeFile(filePath, JSON.stringify(existing, null, 2), 'utf-8');
+  await atomicWriteJson(filePath, existing);
+}
+
+/**
+ * Increments request count and token statistics for a specified provider.
+ */
+export async function recordProviderUsage(providerId: string, promptTokens: number = 0, completionTokens: number = 0): Promise<void> {
+  try {
+    const providers = await loadProviders();
+    const target = providers.find((p) => p.id === providerId || `provider-${p.id}` === providerId);
+    if (!target) return;
+
+    if (!target.usage) {
+      target.usage = { promptTokens: 0, completionTokens: 0, totalRequests: 0 };
+    }
+    target.usage.promptTokens += Math.max(0, promptTokens);
+    target.usage.completionTokens += Math.max(0, completionTokens);
+    target.usage.totalRequests += 1;
+    target.usage.lastUsed = Date.now();
+
+    await saveProviders(providers);
+  } catch (err) {
+    log.error('[CustomModelStore] Failed to record provider usage:', err);
+  }
 }
 
 /**
  * Removes a model by name and persists the remaining models. (Legacy)
+ *
+ * For provider-backed models (name format `providerId-modelId`), this removes
+ * the model entry from the corresponding provider rather than rewriting the
+ * legacy `models` array, which would clobber the entire `providers` block.
  */
 export async function deleteCustomModel(modelName: string): Promise<void> {
+  const providers = await loadProviders();
+  let mutated = false;
+  for (const p of providers) {
+    const prefix = `${p.id}-`;
+    if (modelName.startsWith(prefix)) {
+      const modelId = modelName.slice(prefix.length);
+      const before = p.models.length;
+      p.models = p.models.filter((m) => m.id !== modelId);
+      if (p.models.length !== before) {
+        mutated = true;
+      }
+    }
+  }
+  if (mutated) {
+    await saveProviders(providers);
+    return;
+  }
   const models = await loadCustomModels();
   const filtered = models.filter((model) => model.name !== modelName);
   await saveCustomModels(filtered);

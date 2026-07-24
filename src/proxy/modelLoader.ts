@@ -143,8 +143,12 @@ export function loadCustomModels(): CustomModel[] {
          for (const m of p.models) {
            if (!m.enabled) continue;
            
-           // Generate deterministic ID matching what preload.ts generates
-           const deterministicId = `models/MODEL_PLACEHOLDER_M${p.provider}_${m.id}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+           // Generate deterministic ID matching what preload.ts generates.
+           // IMPORTANT: apply the URL-safe sanitization only to the provider/model part
+           // so the leading "models/" prefix is preserved (the schemaValidator rejects
+           // names that don't start with "models/" AND don't contain "/").
+           const sanitizedId = `${p.provider}_${m.id}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+           const deterministicId = `models/MODEL_PLACEHOLDER_M${sanitizedId}`;
            
            flatModels.push({
               name: deterministicId,
