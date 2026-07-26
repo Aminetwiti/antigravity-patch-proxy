@@ -104,21 +104,37 @@ function getTranslator(provider) {
         return translators.get('google') || null;
     return translators.get('openai') || null;
 }
-function translateRequest(provider, geminiBody, modelName) {
+function translateRequest(provider, geminiBody, modelName, extraBody) {
     const t = getTranslator(provider);
-    if (provider === 'google')
-        return geminiBody;
-    if (OPENAI_COMPAT.has(provider))
-        return t?.mapGeminiToOpenAI ? t.mapGeminiToOpenAI(geminiBody, modelName) : geminiBody;
-    if (ANTHROPIC_COMPAT.has(provider))
-        return t?.mapGeminiToAnthropic ? t.mapGeminiToAnthropic(geminiBody, modelName) : geminiBody;
-    // Generic: try mapGeminiTo<Provider> convention
-    const fnName = `mapGeminiTo${provider.charAt(0).toUpperCase() + provider.slice(1)}`;
-    if (t && typeof t[fnName] === 'function') {
-        return t[fnName](geminiBody, modelName);
+    let payload = geminiBody;
+    if (provider === 'google') {
+        payload = geminiBody;
     }
-    electron_log_1.default.warn(`[TranslatorRegistry] No request translator for provider "${provider}", passing through`);
-    return geminiBody;
+    else if (OPENAI_COMPAT.has(provider)) {
+        payload = t?.mapGeminiToOpenAI ? t.mapGeminiToOpenAI(geminiBody, modelName) : geminiBody;
+    }
+    else if (ANTHROPIC_COMPAT.has(provider)) {
+        payload = t?.mapGeminiToAnthropic ? t.mapGeminiToAnthropic(geminiBody, modelName) : geminiBody;
+    }
+    else {
+        // Generic: try mapGeminiTo<Provider> convention
+        const fnName = `mapGeminiTo${provider.charAt(0).toUpperCase() + provider.slice(1)}`;
+        if (t && typeof t[fnName] === 'function') {
+            payload = t[fnName](geminiBody, modelName);
+        }
+        else {
+            electron_log_1.default.warn(`[TranslatorRegistry] No request translator for provider "${provider}", passing through`);
+            payload = geminiBody;
+        }
+    }
+    // Merge extraBody parameters if payload is a plain object
+    if (extraBody && typeof payload === 'object' && payload !== null && !Array.isArray(payload)) {
+        payload = {
+            ...payload,
+            ...extraBody,
+        };
+    }
+    return payload;
 }
 function translateResponse(provider, providerRes, modelName) {
     const t = getTranslator(provider);
@@ -149,10 +165,11 @@ function translateStreamChunk(provider, chunk, modelName) {
     }
     return null;
 }
-function getProviderHeaders(provider, apiKey) {
+function getProviderHeaders(provider, apiKey, extraHeaders) {
     const headers = { 'Content-Type': 'application/json' };
-    if (!apiKey || apiKey === 'none')
-        return headers;
+    if (!apiKey || apiKey === 'none') {
+        return extraHeaders ? { ...headers, ...extraHeaders } : headers;
+    }
     if (provider === 'anthropic' || ANTHROPIC_COMPAT.has(provider)) {
         headers['x-api-key'] = apiKey;
         headers['anthropic-version'] = '2025-04-01';
@@ -167,6 +184,9 @@ function getProviderHeaders(provider, apiKey) {
     }
     else if (provider !== 'ollama') {
         headers['Authorization'] = `Bearer ${apiKey}`;
+    }
+    if (extraHeaders) {
+        Object.assign(headers, extraHeaders);
     }
     return headers;
 }

@@ -4,13 +4,10 @@
  */
 
 import type { CustomModel } from './types';
+import { PLACEHOLDER_ID_BASE, PLACEHOLDER_ID_RANGE } from '../constants';
 
-/**
- * Base value for placeholder ID generation. Combined with a hash-derived offset
- * to produce IDs in the range [BASE, BASE + RANGE).
- */
-export const PLACEHOLDER_ID_BASE = 400;
-export const PLACEHOLDER_ID_RANGE = 200;
+export { PLACEHOLDER_ID_BASE, PLACEHOLDER_ID_RANGE };
+
 
 /**
  * Generates a deterministic placeholder ID for a custom model.

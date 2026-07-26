@@ -33,10 +33,10 @@ export interface ProviderHeaders {
     [key: string]: string | undefined;
 }
 export declare function getTranslator(provider: string): TranslatorModule | null;
-export declare function translateRequest(provider: string, geminiBody: unknown, modelName: string): unknown;
+export declare function translateRequest(provider: string, geminiBody: unknown, modelName: string, extraBody?: Record<string, unknown>): unknown;
 export declare function translateResponse(provider: string, providerRes: unknown, modelName: string): unknown;
 export declare function translateStreamChunk(provider: string, chunk: unknown, modelName: string): unknown;
-export declare function getProviderHeaders(provider: string, apiKey: string): ProviderHeaders;
+export declare function getProviderHeaders(provider: string, apiKey: string, extraHeaders?: Record<string, string>): ProviderHeaders;
 export declare function supportsStreaming(provider: string): boolean;
 export declare function getProviderUrl(baseUrl: string, modelName: string, isStream: boolean, translator: TranslatorModule | null): string;
 //# sourceMappingURL=registry.d.ts.map

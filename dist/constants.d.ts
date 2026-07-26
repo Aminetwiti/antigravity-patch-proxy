@@ -39,8 +39,31 @@ export declare const GOOGLE_PROXY_TIMEOUT_MS = 60000;
 export declare const GOOGLE_FORWARD_TIMEOUT_MS = 30000;
 /** Timeout for downloading file content from external URIs (30 seconds). */
 export declare const FILE_DOWNLOAD_TIMEOUT_MS = 30000;
-/** Default request timeout for custom model requests (2 minutes). */
-export declare const DEFAULT_MODEL_REQUEST_TIMEOUT_MS = 120000;
+/**
+ * Per-chunk idle timeout for streaming upstream responses.
+ *
+ * If no new SSE chunk arrives within this window, the proxy treats the
+ * upstream as stuck and aborts the request. This is fundamentally different
+ * from a *total* request timeout (which `request.setTimeout()` enforces):
+ * a total timeout kills healthy streams that legitimately take several
+ * minutes; the idle timeout only fires when the upstream *stops saying
+ * anything* mid-stream.
+ *
+ * Ported from vscode-unify-chat-provider's `withIdleTimeout` (vendors/...).
+ * Default: 60 seconds — generous enough for slow reasoning models, short
+ * enough that a stuck upstream doesn't tie up the proxy indefinitely.
+ */
+export declare const STREAM_IDLE_TIMEOUT_MS = 60000;
+/**
+ * Default request timeout for custom model requests.
+ *
+ * Lowered from 120_000 to 30_000 to bound the worst-case blocking time
+ * of an upstream connection (3 attempts × 30s = 90s max). Combined with
+ * DEFAULT_MAX_RETRIES = 1, a fully-failing model holds the proxy open
+ * for at most 60s before giving up, freeing connections for the rest of
+ * the dropdown models.
+ */
+export declare const DEFAULT_MODEL_REQUEST_TIMEOUT_MS = 30000;
 /** Default retry delay for streaming errors (1 second). */
 export declare const STREAM_RETRY_BASE_DELAY_MS = 1000;
 /** Default retry delay for non-streaming errors (1 second). */
@@ -49,12 +72,41 @@ export declare const NON_STREAM_RETRY_BASE_DELAY_MS = 1000;
 export declare const RATE_LIMIT_RETRY_BASE_DELAY_MS = 2000;
 /** Base delay for 5xx server error retries (1 second). */
 export declare const SERVER_ERROR_RETRY_BASE_DELAY_MS = 1000;
-/** Default maximum number of retries per model. */
-export declare const DEFAULT_MAX_RETRIES = 3;
+/**
+ * Exponential backoff multiplier (AWS-style decorrelated jitter).
+ *
+ * The delay for attempt N is roughly:
+ *     min(initialDelay * MULTIPLIER^N, maxDelay) * (1 +/- JITTER)
+ *
+ * 2x is the AWS-recommended default — fast enough to recover from transient
+ * errors, gentle enough to avoid pile-up.
+ */
+export declare const RETRY_BACKOFF_MULTIPLIER = 2;
+/**
+ * Jitter factor in [0, 1]. With 0.1, each delay is randomly scaled within
+ * +/-10% of its computed value, preventing retry-wave synchronization when
+ * many concurrent requests hit the same upstream at the same time.
+ *
+ * Inspired by `vscode-unify-chat-provider`'s DEFAULT_CHAT_RETRY_CONFIG.
+ */
+export declare const RETRY_BACKOFF_JITTER_FACTOR = 0.1;
+/**
+ * Default maximum number of retries per model.
+ *
+ * Lowered from 3 to 1 to prevent retry storms: a stuck upstream used to
+ * block the proxy for up to ~360s (3 × 120s) per model, which cascaded
+ * across 8+ custom models and starved the rest of the dropdown.
+ * With 1 retry, a fully-failing model gives up in ≤ 60s (2 × 30s).
+ */
+export declare const DEFAULT_MAX_RETRIES = 1;
 /** Minimum allowed retry count. */
 export declare const MIN_MAX_RETRIES = 0;
 /** Maximum allowed retry count. */
 export declare const MAX_MAX_RETRIES = 5;
+/** Maximum consecutive cache refresh failures before backing off. */
+export declare const CACHE_REFRESH_MAX_FAILURES = 3;
+/** Backoff duration after circuit breaker trips (5 minutes). */
+export declare const CACHE_REFRESH_BACKOFF_MS: number;
 /** Maximum input tokens for custom models. */
 export declare const CUSTOM_MODEL_MAX_TOKENS = 1048576;
 /** Maximum output tokens for custom models. */
@@ -122,4 +174,15 @@ export declare const OPENAI_COMPATIBLE_PROVIDERS: readonly ["openai", "custom", 
 export declare const PROVIDERS_REQUIRING_API_KEY: readonly ProviderName[];
 /** Default API URLs per provider. Override per-model via apiUrl in custom_models.json. */
 export declare const PROVIDER_DEFAULT_URLS: Record<ProviderName, string>;
+export interface SuggestedModel {
+    id: string;
+    displayName: string;
+}
+export interface DetailedProviderPreset {
+    id: ProviderName;
+    label: string;
+    defaultApiUrl: string;
+    suggestedModels: SuggestedModel[];
+}
+export declare const DETAILED_PROVIDER_PRESETS: DetailedProviderPreset[];
 //# sourceMappingURL=constants.d.ts.map

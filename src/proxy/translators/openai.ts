@@ -13,6 +13,7 @@ import {
   ToolCallArgs,
   TranslatedCallInfo,
 } from './utils';
+import { repairPartialJson } from '../jsonRepair';
 import {
   modelToolCallIds,
   modelReasoningContent,
@@ -409,10 +410,10 @@ export function mapOpenAIToGemini(openAiRes: OpenAIResponse, modelName: string):
     const parts: GeminiPart[] = choice.message.tool_calls.map((tc) => {
       let args: ToolCallArgs;
       try {
-        args =
-          typeof tc.function.arguments === 'string'
-            ? JSON.parse(tc.function.arguments)
-            : (tc.function.arguments as unknown as ToolCallArgs);
+        const rawStr = typeof tc.function.arguments === 'string'
+          ? tc.function.arguments
+          : JSON.stringify(tc.function.arguments);
+        args = (repairPartialJson(rawStr) as ToolCallArgs) || {};
       } catch (e) {
         log.debug('[OpenAI] Tool call args parse fallback:', (e as Error).message);
         args = {};
@@ -530,7 +531,7 @@ export function mapOpenAIChunkToGemini(chunk: OpenAIResponse, modelName: string)
       const parts: GeminiPart[] = pendingToolCalls.map((tc) => {
         let args: ToolCallArgs = {};
         try {
-          args = JSON.parse(tc.arguments);
+          args = (repairPartialJson(tc.arguments) as ToolCallArgs) || {};
         } catch (_e) {
           args = {};
         }
@@ -577,7 +578,7 @@ export function mapOpenAIChunkToGemini(chunk: OpenAIResponse, modelName: string)
     const parts: GeminiPart[] = Object.values(context.toolCalls).map((tc) => {
       let args: ToolCallArgs = {};
       try {
-        args = JSON.parse(tc.arguments);
+        args = (repairPartialJson(tc.arguments) as ToolCallArgs) || {};
       } catch (e) {
         log.debug('[OpenAI] Stream tool args parse fallback:', (e as Error).message);
         args = {};

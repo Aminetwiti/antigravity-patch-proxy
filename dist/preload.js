@@ -8,6 +8,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const electron_1 = require("electron");
 const idGenerator_1 = require("./proxy/idGenerator");
 const errorClassifier_1 = require("./proxy/errorClassifier");
+const constants_1 = require("./constants");
 const PROVIDER_PRESETS = [
     { id: 'openai', label: 'OpenAI-compatible', defaultApiUrl: 'https://api.openai.com/v1' },
     { id: 'openrouter', label: 'OpenRouter', defaultApiUrl: 'https://openrouter.ai/api/v1' },
@@ -529,36 +530,31 @@ window.addEventListener('DOMContentLoaded', () => {
       /* ── Overlay ────────────────────────────────────────────────── */
       .agy-overlay {
         position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-        background: var(--agy-overlay-bg);
-        -webkit-backdrop-filter: var(--agy-overlay-blur);
-        backdrop-filter: var(--agy-overlay-blur);
-        z-index: var(--agy-z-overlay);
-        display: flex; justify-content: center; align-items: center;
-        font-family: var(--agy-font);
-        color: var(--agy-ink-primary);
+        position: fixed; inset: 0;
+        background: rgba(0, 0, 0, 0.65);
+        backdrop-filter: blur(4px);
+        display: flex; align-items: center; justify-content: center;
+        z-index: 10000;
+        animation: agy-fade-in 150ms ease-out;
       }
-      @keyframes agy-modal-in {
-        from { opacity: 0; transform: scale(0.96) translateY(8px); }
-        to   { opacity: 1; transform: scale(1) translateY(0); }
-      }
-      @keyframes agy-overlay-in {
+      @keyframes agy-fade-in {
         from { opacity: 0; }
-        to   { opacity: 1; }
+        to { opacity: 1; }
       }
-      .agy-anim-in { animation: agy-overlay-in 180ms ease-out; }
-      .agy-anim-in .agy-modal { animation: agy-modal-in 220ms cubic-bezier(0.16, 1, 0.3, 1); }
-      .agy-no-motion, .agy-no-motion .agy-modal { animation: none !important; }
-
-      /* ── Modal ──────────────────────────────────────────────────── */
       .agy-modal {
-        background: var(--agy-bg-base);
-        border: 1px solid var(--agy-border);
+        background: var(--agy-bg-surface);
+        border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: var(--agy-radius-xl);
-        width: min(650px, calc(100vw - 48px));
-        max-height: 85vh;
+        width: 580px; max-width: calc(100vw - 32px);
+        max-height: min(680px, 88vh);
         display: flex; flex-direction: column;
-        box-shadow: var(--agy-shadow-modal);
+        box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08);
         overflow: hidden;
+        animation: agy-modal-pop 160ms cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      @keyframes agy-modal-pop {
+        from { opacity: 0; transform: scale(0.97) translateY(8px); }
+        to { opacity: 1; transform: scale(1) translateY(0); }
       }
       .agy-modal-header {
         padding: 16px 24px;
@@ -566,7 +562,7 @@ window.addEventListener('DOMContentLoaded', () => {
         display: flex; justify-content: space-between; align-items: center;
         gap: 12px;
       }
-      .agy-modal-title { display: flex; align-items: center; gap: 8px; }
+      .agy-modal-title { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 600; }
       .agy-modal-body {
         display: flex; flex-direction: column; flex: 1; overflow: hidden; position: relative;
       }
@@ -580,7 +576,7 @@ window.addEventListener('DOMContentLoaded', () => {
         background: var(--agy-bg-elevated);
       }
 
-      /* ── Icon button (close) ────────────────────────────────────── */
+      /* ── Icon button (close - WCAG 44x44px touch target) ──────────────── */
       .agy-icon-btn {
         background: transparent;
         border: none;
@@ -757,32 +753,79 @@ window.addEventListener('DOMContentLoaded', () => {
         display: flex; align-items: center; gap: 12px; margin-top: 8px;
         flex-wrap: wrap;
       }
-      .agy-models-list {
-        display: flex; flex-direction: column; gap: 8px;
-        max-height: 220px; overflow-y: auto;
-        background: var(--agy-bg-input);
-        border: 1px solid var(--agy-border);
-        border-radius: var(--agy-radius-lg);
-        padding: 8px;
+      .agy-models-list-wrapper {
+        display: flex; flex-direction: column; gap: 8px; margin-top: 8px;
       }
+      .agy-models-toolbar {
+        display: flex; align-items: center; justify-content: space-between; gap: 8px;
+        flex-wrap: wrap; margin-bottom: 4px;
+      }
+      .agy-models-search {
+        flex: 1; min-width: 140px;
+        padding: 5px 10px; font-size: 12px;
+        background: #18181b; border: 1px solid #3f3f46;
+        border-radius: 6px; color: #f4f4f5;
+        outline: none; transition: border-color 0.15s ease;
+      }
+      .agy-models-search:focus {
+        border-color: #38bdf8; box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+      }
+      .agy-models-actions {
+        display: flex; align-items: center; gap: 6px;
+      }
+      .agy-models-btn-link {
+        background: transparent; border: none; color: #38bdf8;
+        font-size: 11px; font-weight: 500; cursor: pointer;
+        padding: 2px 6px; border-radius: 4px; transition: background 0.15s ease;
+      }
+      .agy-models-btn-link:hover { background: rgba(56, 189, 248, 0.1); }
+      .agy-models-counter {
+        font-size: 11px; color: #a1a1aa; background: #27272a;
+        padding: 2px 8px; border-radius: 12px; font-weight: 500;
+      }
+      .agy-models-list {
+        display: flex; flex-direction: column; gap: 4px;
+        max-height: 240px; min-height: 100px; overflow-y: auto;
+        background: #0f0f11;
+        border: 1px solid #27272a;
+        border-radius: 8px;
+        padding: 8px;
+        box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+      }
+      .agy-models-list::-webkit-scrollbar { width: 6px; }
+      .agy-models-list::-webkit-scrollbar-track { background: #0f0f11; }
+      .agy-models-list::-webkit-scrollbar-thumb { background: #27272a; border-radius: 4px; }
+      .agy-models-list::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
       .agy-model-row {
         display: flex; align-items: center; gap: 10px;
-        cursor: pointer; padding: 6px 8px;
-        border-radius: var(--agy-radius-sm);
-        transition: background-color 80ms ease;
+        cursor: pointer; padding: 7px 10px;
+        border-radius: 6px; background: #141416;
+        border: 1px solid #1f1f23;
+        transition: all 0.15s ease;
       }
-      .agy-model-row:hover { background: var(--agy-bg-input-hover); }
-      .agy-model-row input { accent-color: var(--agy-accent); }
+      .agy-model-row:hover { background: #1f1f23; border-color: #27272a; }
+      .agy-model-row--checked { background: rgba(56, 189, 248, 0.08); border-color: rgba(56, 189, 248, 0.3); }
+      .agy-model-row input { accent-color: #38bdf8; width: 15px; height: 15px; cursor: pointer; }
       .agy-model-row-label {
-        font-size: 13px;
+        font-size: 13px; color: #f4f4f5; font-weight: 400;
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         flex: 1; min-width: 0;
       }
       .agy-models-empty {
-        color: var(--agy-ink-secondary);
-        font-size: 13px;
+        color: #a1a1aa;
+        font-size: 12px;
         text-align: center;
-        padding: 16px 10px;
+        padding: 24px 12px;
+        display: flex; flex-direction: column; align-items: center; gap: 6px;
+      }
+      .agy-skeleton-item {
+        height: 32px; background: #18181b; border-radius: 6px;
+        animation: agy-pulse 1.2s infinite ease-in-out;
+      }
+      @keyframes agy-pulse {
+        0% { opacity: 0.5; }
+        50% { opacity: 1; }
+        100% { opacity: 0.5; }
       }
       .agy-form-footer {
         display: flex; justify-content: flex-end; gap: 12px;
@@ -807,10 +850,125 @@ window.addEventListener('DOMContentLoaded', () => {
       @media (prefers-reduced-motion: reduce) {
         .agy-overlay, .agy-modal, .agy-btn-primary, .agy-btn-secondary,
         .agy-btn-success, .agy-btn-ghost, .agy-icon-btn, .agy-input,
-        .agy-provider-row, .agy-form-error {
+        .agy-provider-row, .agy-form-error,
+        .ag-health-dot, .ag-health-refresh {
           transition: none !important;
           animation: none !important;
         }
+      }
+
+      /* ── Dropdown Health Indicators ──────────────────────────────── */
+      @keyframes ag-pulse-error {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+        50%      { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0); }
+      }
+      @keyframes ag-pulse-healthy {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+        50%      { box-shadow: 0 0 0 3px rgba(34, 197, 94, 0); }
+      }
+      @keyframes ag-spin {
+        from { transform: rotate(0deg); }
+        to   { transform: rotate(360deg); }
+      }
+      @keyframes ag-fade-in {
+        from { opacity: 0; transform: translateY(4px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      .ag-health-dot {
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+        flex-shrink: 0;
+        margin-left: 6px;
+        vertical-align: middle;
+        transition: background-color 300ms ease, box-shadow 300ms ease;
+      }
+      .ag-health-dot--healthy {
+        background-color: #22c55e;
+        animation: ag-pulse-healthy 2.5s ease-in-out infinite;
+      }
+      .ag-health-dot--error {
+        background-color: #ef4444;
+        animation: ag-pulse-error 1.8s ease-in-out infinite;
+      }
+      .ag-health-dot--unknown {
+        background-color: #6b7280;
+        opacity: 0.7;
+      }
+      .ag-health-refresh {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px; height: 18px;
+        margin-left: 4px;
+        padding: 2px;
+        border: none;
+        background: transparent;
+        color: #a1a1aa;
+        cursor: pointer;
+        border-radius: 50%;
+        transition: color 150ms ease, background-color 150ms ease;
+        vertical-align: middle;
+        flex-shrink: 0;
+      }
+      .ag-health-refresh:hover {
+        color: #f4f4f5;
+        background-color: rgba(63, 63, 70, 0.6);
+      }
+      .ag-health-refresh--spinning svg {
+        animation: ag-spin 0.8s linear infinite;
+      }
+      .ag-health-tooltip {
+        position: absolute;
+        z-index: 100001;
+        background: #1a1a1a;
+        border: 1px solid #3f3f46;
+        border-left: 3px solid #ef4444;
+        border-radius: 6px;
+        padding: 10px 14px;
+        max-width: 320px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 12px;
+        color: #e5e5e5;
+        line-height: 1.5;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        animation: ag-fade-in 150ms ease-out;
+        pointer-events: auto;
+      }
+      .ag-health-tooltip__title {
+        font-weight: 600;
+        font-size: 12px;
+        margin-bottom: 4px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .ag-health-tooltip__msg {
+        color: #a1a1aa;
+        font-size: 11px;
+        margin-bottom: 8px;
+      }
+      .ag-health-tooltip__action {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        font-weight: 500;
+        color: #3b82f6;
+        cursor: pointer;
+        background: none;
+        border: none;
+        padding: 0;
+        text-decoration: none;
+      }
+      .ag-health-tooltip__action:hover {
+        color: #60a5fa;
+        text-decoration: underline;
+      }
+      .ag-dropdown-error-overlay {
+        opacity: 0.55;
+        pointer-events: auto;
+        position: relative;
       }
     `;
         document.head.appendChild(style);
@@ -990,6 +1148,43 @@ window.addEventListener('DOMContentLoaded', () => {
                 testBtn.type = 'button';
                 testBtn.className = 'agy-btn-secondary';
                 testBtn.textContent = '🩺 Test Health';
+                testBtn.addEventListener('click', async () => {
+                    if (testBtn.disabled)
+                        return;
+                    testBtn.disabled = true;
+                    const origText = testBtn.textContent;
+                    testBtn.textContent = '⏳ Testing...';
+                    const startTime = Date.now();
+                    try {
+                        // Ping URL or fetch models endpoint to test connectivity & API key validity
+                        const checkUrl = p.apiUrl.endsWith('/') ? `${p.apiUrl}models` : `${p.apiUrl}/models`;
+                        const resp = await window.fetch(checkUrl, {
+                            method: 'GET',
+                            headers: {
+                                ...(p.apiKey && p.apiKey !== 'none' ? { Authorization: `Bearer ${p.apiKey}` } : {}),
+                            },
+                        });
+                        const latency = Date.now() - startTime;
+                        if (resp.ok || resp.status === 404 || resp.status === 405) {
+                            testBtn.textContent = `🟢 Online (${latency}ms)`;
+                            testBtn.style.color = '#10b981';
+                        }
+                        else {
+                            testBtn.textContent = `🔴 HTTP ${resp.status}`;
+                            testBtn.style.color = '#ef4444';
+                        }
+                    }
+                    catch (_err) {
+                        const latency = Date.now() - startTime;
+                        testBtn.textContent = `🔴 Offline (${latency}ms)`;
+                        testBtn.style.color = '#ef4444';
+                    }
+                    setTimeout(() => {
+                        testBtn.disabled = false;
+                        testBtn.textContent = origText;
+                        testBtn.style.color = '';
+                    }, 3500);
+                });
                 const editBtn = document.createElement('button');
                 editBtn.type = 'button';
                 editBtn.className = 'agy-btn-secondary';
@@ -1180,10 +1375,21 @@ window.addEventListener('DOMContentLoaded', () => {
             providerSelect.addEventListener('change', (e) => {
                 const id = e.target.value;
                 state.provider = id;
-                const preset = PROVIDER_PRESETS.find((pp) => pp.id === id);
-                if (preset && preset.defaultApiUrl && !state.apiUrl) {
-                    urlInp.input.value = preset.defaultApiUrl;
-                    state.apiUrl = preset.defaultApiUrl;
+                const detailedPreset = constants_1.DETAILED_PROVIDER_PRESETS.find((pp) => pp.id === id);
+                if (detailedPreset) {
+                    if (detailedPreset.defaultApiUrl) {
+                        urlInp.input.value = detailedPreset.defaultApiUrl;
+                        state.apiUrl = detailedPreset.defaultApiUrl;
+                    }
+                    // If state.models is empty, pre-populate with recommended models from the detailed preset
+                    if (!state.models || state.models.length === 0) {
+                        state.models = detailedPreset.suggestedModels.map((m) => ({
+                            id: m.id,
+                            displayName: m.displayName,
+                            enabled: true,
+                        }));
+                        renderModelsList();
+                    }
                 }
             });
             providerWrap.appendChild(providerLabel);
@@ -1269,28 +1475,99 @@ window.addEventListener('DOMContentLoaded', () => {
             fetchRow.appendChild(fetchBtn);
             fetchRow.appendChild(fetchStatus);
             formContainer.appendChild(fetchRow);
+            const listWrapper = document.createElement('div');
+            listWrapper.className = 'agy-models-list-wrapper';
+            const toolbar = document.createElement('div');
+            toolbar.className = 'agy-models-toolbar';
+            const searchInp = document.createElement('input');
+            searchInp.type = 'text';
+            searchInp.className = 'agy-models-search';
+            searchInp.placeholder = '🔍 Filter models...';
+            const actionsDiv = document.createElement('div');
+            actionsDiv.className = 'agy-models-actions';
+            const selectAllBtn = document.createElement('button');
+            selectAllBtn.type = 'button';
+            selectAllBtn.className = 'agy-models-btn-link';
+            selectAllBtn.textContent = 'Select All';
+            const deselectAllBtn = document.createElement('button');
+            deselectAllBtn.type = 'button';
+            deselectAllBtn.className = 'agy-models-btn-link';
+            deselectAllBtn.textContent = 'Deselect All';
+            const counterBadge = document.createElement('span');
+            counterBadge.className = 'agy-models-counter';
+            counterBadge.textContent = '0 / 0 enabled';
+            actionsDiv.appendChild(selectAllBtn);
+            actionsDiv.appendChild(deselectAllBtn);
+            actionsDiv.appendChild(counterBadge);
+            toolbar.appendChild(searchInp);
+            toolbar.appendChild(actionsDiv);
+            listWrapper.appendChild(toolbar);
             const modelsList = document.createElement('div');
             modelsList.className = 'agy-models-list';
             modelsList.setAttribute('role', 'group');
             modelsList.setAttribute('aria-label', 'Available models');
-            formContainer.appendChild(modelsList);
-            const renderModelsList = () => {
+            listWrapper.appendChild(modelsList);
+            formContainer.appendChild(listWrapper);
+            let filterQuery = '';
+            function updateCounter() {
+                const enabledCount = state.models.filter((m) => m.enabled).length;
+                counterBadge.textContent = `${enabledCount} / ${state.models.length} enabled`;
+            }
+            function showSkeletonLoader() {
                 modelsList.replaceChildren();
+                for (let i = 0; i < 4; i++) {
+                    const sk = document.createElement('div');
+                    sk.className = 'agy-skeleton-item';
+                    modelsList.appendChild(sk);
+                }
+            }
+            function renderModelsList() {
+                modelsList.replaceChildren();
+                updateCounter();
                 if (state.models.length === 0) {
                     const empty = document.createElement('div');
                     empty.className = 'agy-models-empty';
-                    empty.textContent = 'No models yet. Click "Fetch Available Models" or save the provider to apply.';
+                    empty.innerHTML = `
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: #71717a;"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+            <div>No models configured yet.</div>
+            <div style="font-size: 11px; color: #71717a;">Click "Fetch Available Models" or add model IDs manually.</div>
+          `;
                     modelsList.appendChild(empty);
                     return;
                 }
-                state.models.forEach((m, idx) => {
+                const filtered = state.models.filter((m) => {
+                    if (!filterQuery)
+                        return true;
+                    const query = filterQuery.toLowerCase();
+                    return (m.id && m.id.toLowerCase().includes(query)) ||
+                        (m.displayName && m.displayName.toLowerCase().includes(query));
+                });
+                if (filtered.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.className = 'agy-models-empty';
+                    empty.textContent = `No models match "${filterQuery}".`;
+                    modelsList.appendChild(empty);
+                    return;
+                }
+                filtered.forEach((m) => {
+                    const realIdx = state.models.findIndex((item) => item.id === m.id);
                     const row = document.createElement('label');
-                    row.className = 'agy-model-row';
+                    row.className = `agy-model-row ${m.enabled ? 'agy-model-row--checked' : ''}`;
                     const chk = document.createElement('input');
                     chk.type = 'checkbox';
                     chk.checked = m.enabled;
                     chk.addEventListener('change', (e) => {
-                        state.models[idx].enabled = e.target.checked;
+                        const isChecked = e.target.checked;
+                        if (realIdx !== -1) {
+                            state.models[realIdx].enabled = isChecked;
+                        }
+                        if (isChecked) {
+                            row.classList.add('agy-model-row--checked');
+                        }
+                        else {
+                            row.classList.remove('agy-model-row--checked');
+                        }
+                        updateCounter();
                     });
                     const lbl = document.createElement('span');
                     lbl.textContent = m.displayName || m.id;
@@ -1300,7 +1577,19 @@ window.addEventListener('DOMContentLoaded', () => {
                     row.appendChild(lbl);
                     modelsList.appendChild(row);
                 });
-            };
+            }
+            searchInp.addEventListener('input', (e) => {
+                filterQuery = e.target.value.trim();
+                renderModelsList();
+            });
+            selectAllBtn.addEventListener('click', () => {
+                state.models.forEach((m) => { m.enabled = true; });
+                renderModelsList();
+            });
+            deselectAllBtn.addEventListener('click', () => {
+                state.models.forEach((m) => { m.enabled = false; });
+                renderModelsList();
+            });
             renderModelsList();
             fetchBtn.addEventListener('click', async () => {
                 if (fetchBtn.disabled)
@@ -1320,6 +1609,7 @@ window.addEventListener('DOMContentLoaded', () => {
                 fetchBtn.disabled = true;
                 const originalText = fetchBtn.textContent;
                 fetchBtn.textContent = 'Fetching...';
+                showSkeletonLoader();
                 try {
                     const res = await storageAPI.fetchModels({
                         baseUrl: state.apiUrl,
@@ -1334,18 +1624,20 @@ window.addEventListener('DOMContentLoaded', () => {
                         const existingMap = new Map(state.models.map((x) => [x.id, x]));
                         state.models = res.models.map((m) => {
                             const ext = existingMap.get(m.id);
-                            return ext ? ext : { id: m.id, displayName: m.displayName || m.id, enabled: false };
+                            return ext ? ext : { id: m.id, displayName: m.displayName || m.id, enabled: true };
                         });
                         renderModelsList();
                     }
                     else {
                         fetchStatus.textContent = `Error: ${res.error || 'Unknown error'}`;
                         fetchStatus.classList.add('agy-status-error');
+                        renderModelsList();
                     }
                 }
                 catch (err) {
                     fetchStatus.textContent = `Error: ${err.message}`;
                     fetchStatus.classList.add('agy-status-error');
+                    renderModelsList();
                 }
                 finally {
                     fetchBtn.textContent = originalText;
@@ -1814,10 +2106,268 @@ window.addEventListener('DOMContentLoaded', () => {
     }
     const modelHealthState = new Map();
     const failedModelDisplayNames = new Set();
+    // --- Proxy port auto-detection ---
+    // We sniff the proxy port from intercepted XHR/fetch URLs that go to 127.0.0.1
+    let detectedProxyPort = 0;
+    function detectProxyPort(url) {
+        if (detectedProxyPort > 0)
+            return;
+        try {
+            const m = url.match(/127\.0\.0\.1:(\d+)/);
+            if (m) {
+                detectedProxyPort = parseInt(m[1], 10);
+            }
+        }
+        catch { /* ignore */ }
+    }
+    // --- Fetch health from proxy /model-health endpoint ---
+    async function fetchModelHealthFromProxy() {
+        if (detectedProxyPort <= 0)
+            return null;
+        try {
+            const resp = await window.fetch(`http://127.0.0.1:${detectedProxyPort}/model-health`, {
+                method: 'GET',
+                signal: AbortSignal.timeout(3000),
+            });
+            if (!resp.ok)
+                return null;
+            const data = await resp.json();
+            return data.models || null;
+        }
+        catch {
+            return null;
+        }
+    }
+    // --- Build a display-name → model-id lookup for BOTH native and custom models ---
+    // Key = displayName, Value = { id, isCustom }
+    const allKnownModels = new Map();
+    // Called from XHR/fetch interceptors when we see GetAvailableModels
+    function ingestModelsFromResponse(modelsObj) {
+        if (!modelsObj)
+            return;
+        for (const [key, val] of Object.entries(modelsObj)) {
+            if (val && typeof val === 'object' && typeof val.displayName === 'string') {
+                const id = val.model || val.requestedModel || val.planModel || key;
+                const isCustom = id.startsWith('MODEL_PLACEHOLDER_M');
+                allKnownModels.set(val.displayName, { id, isCustom });
+            }
+        }
+    }
+    async function refreshModelHealthState() {
+        try {
+            // 1. Fetch custom models from proxy config
+            const customModels = await getCustomModelsForInjection();
+            if (customModels && customModels.length > 0) {
+                for (const m of customModels) {
+                    const dn = m.displayName || m.name;
+                    const pid = (0, idGenerator_1.generateModelPlaceholderId)(m);
+                    allKnownModels.set(dn, { id: pid, isCustom: true });
+                }
+            }
+            // 2. Fetch live health for custom models from proxy
+            const proxyHealth = await fetchModelHealthFromProxy();
+            if (proxyHealth && customModels) {
+                failedModelDisplayNames.clear();
+                for (const m of customModels) {
+                    const dn = m.displayName || m.name;
+                    const pid = (0, idGenerator_1.generateModelPlaceholderId)(m);
+                    const ph = proxyHealth[pid];
+                    if (ph) {
+                        const health = {
+                            status: ph.status === 'error' ? 'error' : 'healthy',
+                            errorType: ph.errorType,
+                            trippedAt: ph.trippedAt,
+                            failures: ph.failures,
+                            lastChecked: Date.now(),
+                        };
+                        modelHealthState.set(pid, health);
+                        if (ph.status === 'error')
+                            failedModelDisplayNames.add(dn);
+                    }
+                    else {
+                        modelHealthState.set(pid, { status: 'healthy', lastChecked: Date.now() });
+                    }
+                }
+            }
+            else if (customModels) {
+                // Proxy unreachable: mark custom models as unknown
+                for (const m of customModels) {
+                    const pid = (0, idGenerator_1.generateModelPlaceholderId)(m);
+                    if (!modelHealthState.has(pid)) {
+                        modelHealthState.set(pid, { status: 'unknown', lastChecked: Date.now() });
+                    }
+                }
+            }
+        }
+        catch { /* ignore */ }
+    }
+    // --- SVG constants ---
+    const SVG_REFRESH = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>`;
+    const SVG_ALERT = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
+    const SVG_CHECK = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`;
+    // --- Error type to human-friendly label ---
+    function errorTypeLabel(errorType) {
+        switch (errorType) {
+            case 'billing': return '💳 Billing / Quota';
+            case 'auth': return '🔑 Authentication';
+            case 'forbidden': return '🚫 Access Denied';
+            case 'rate_limit': return '⏱ Rate Limited';
+            case 'server': return '🖥 Server Error';
+            case 'network': return '🌐 Network Error';
+            case 'dns': return '🔍 DNS Error';
+            case 'timeout': return '⏳ Timeout';
+            default: return '⚠ Error';
+        }
+    }
+    // --- Create/update health dot for a model item ---
+    function createHealthDot(health) {
+        const dot = document.createElement('span');
+        dot.className = 'ag-health-dot';
+        if (health.status === 'healthy') {
+            dot.classList.add('ag-health-dot--healthy');
+            dot.title = '✅ Online';
+        }
+        else if (health.status === 'error') {
+            dot.classList.add('ag-health-dot--error');
+            dot.title = `❌ ${errorTypeLabel(health.errorType)}`;
+        }
+        else {
+            dot.classList.add('ag-health-dot--unknown');
+            dot.title = '⏳ Status unknown';
+        }
+        return dot;
+    }
+    // --- Create refresh button ---
+    function createRefreshButton(onRefresh) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ag-health-refresh';
+        btn.title = 'Refresh health status';
+        btn.innerHTML = SVG_REFRESH;
+        btn.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            btn.classList.add('ag-health-refresh--spinning');
+            onRefresh();
+            setTimeout(() => btn.classList.remove('ag-health-refresh--spinning'), 1500);
+        };
+        return btn;
+    }
+    // --- Show rich error tooltip ---
+    function showHealthTooltip(anchor, health, displayName) {
+        // Remove any existing tooltip
+        const existing = document.querySelector('.ag-health-tooltip');
+        if (existing)
+            existing.remove();
+        if (health.status !== 'error')
+            return;
+        const tooltip = document.createElement('div');
+        tooltip.className = 'ag-health-tooltip';
+        const title = document.createElement('div');
+        title.className = 'ag-health-tooltip__title';
+        title.innerHTML = `${SVG_ALERT} ${errorTypeLabel(health.errorType)}`;
+        tooltip.appendChild(title);
+        const msg = document.createElement('div');
+        msg.className = 'ag-health-tooltip__msg';
+        if (health.diagnostic?.message) {
+            msg.textContent = health.diagnostic.message;
+        }
+        else if (health.errorType) {
+            msg.textContent = `This model is experiencing ${health.errorType} issues. It may not respond correctly.`;
+        }
+        else {
+            msg.textContent = `Model "${displayName}" is currently unavailable.`;
+        }
+        tooltip.appendChild(msg);
+        const action = document.createElement('button');
+        action.className = 'ag-health-tooltip__action';
+        action.textContent = '🔧 Fix in Provider Manager';
+        action.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            tooltip.remove();
+            openProviderManagerModal();
+        };
+        tooltip.appendChild(action);
+        // Position tooltip near the anchor
+        document.body.appendChild(tooltip);
+        const rect = anchor.getBoundingClientRect();
+        tooltip.style.top = `${rect.bottom + 4}px`;
+        tooltip.style.left = `${Math.max(8, rect.left - 60)}px`;
+        // Auto-dismiss on click outside
+        const dismiss = (ev) => {
+            if (!tooltip.contains(ev.target) && !anchor.contains(ev.target)) {
+                tooltip.remove();
+                document.removeEventListener('click', dismiss, true);
+            }
+        };
+        setTimeout(() => document.addEventListener('click', dismiss, true), 50);
+    }
+    // --- Dropdown health polling ---
+    let healthPollingInterval = null;
+    let dropdownCurrentlyOpen = false;
+    function startHealthPolling() {
+        if (healthPollingInterval)
+            return;
+        dropdownCurrentlyOpen = true;
+        healthPollingInterval = setInterval(async () => {
+            if (!dropdownCurrentlyOpen) {
+                stopHealthPolling();
+                return;
+            }
+            await refreshModelHealthState();
+            updateDropdownHealthBadges();
+        }, 10000); // Poll every 10 seconds
+    }
+    function stopHealthPolling() {
+        dropdownCurrentlyOpen = false;
+        if (healthPollingInterval) {
+            clearInterval(healthPollingInterval);
+            healthPollingInterval = null;
+        }
+    }
+    // --- Update all health badges in current dropdown ---
+    function updateDropdownHealthBadges() {
+        if (allKnownModels.size === 0)
+            return;
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+        let node;
+        while ((node = walker.nextNode())) {
+            const text = node.nodeValue?.trim();
+            if (!text || !allKnownModels.has(text))
+                continue;
+            const parent = node.parentNode;
+            if (!parent)
+                continue;
+            const modelInfo = allKnownModels.get(text);
+            // Default to healthy for native models unless we logged an error
+            const health = modelHealthState.get(modelInfo.id) || { status: 'healthy', lastChecked: Date.now() };
+            // Remove existing indicators
+            parent.querySelectorAll('.ag-health-dot, .ag-health-refresh, .ag-model-warning, .ag-status-badge').forEach(el => el.remove());
+            parent.classList.remove('ag-dropdown-error-overlay');
+            // Add health dot (applies to ALL models)
+            const dot = createHealthDot(health);
+            parent.appendChild(dot);
+            // For error models: add visual dimming, tooltip on hover
+            if (health.status === 'error') {
+                parent.classList.add('ag-dropdown-error-overlay');
+                const showTip = () => showHealthTooltip(parent, health, text);
+                dot.addEventListener('mouseenter', showTip);
+                dot.style.cursor = 'pointer';
+            }
+            // Add refresh button ONLY for custom models (native models can't be pinged by proxy)
+            if (modelInfo.isCustom) {
+                const refreshBtn = createRefreshButton(async () => {
+                    await refreshModelHealthState();
+                    updateDropdownHealthBadges();
+                });
+                parent.appendChild(refreshBtn);
+            }
+        }
+    }
+    // --- Dropdown observer: detect opens, inject health UI, manage polling ---
     let dropdownTimeout;
     const dropdownObserver = new MutationObserver((mutations) => {
-        if (failedModelDisplayNames.size === 0)
-            return;
         let hasNewNodes = false;
         for (const m of mutations) {
             if (m.addedNodes.length > 0) {
@@ -1829,37 +2379,63 @@ window.addEventListener('DOMContentLoaded', () => {
             return;
         if (dropdownTimeout)
             clearTimeout(dropdownTimeout);
-        dropdownTimeout = setTimeout(() => {
-            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
-            let node;
-            while ((node = walker.nextNode())) {
-                const text = node.nodeValue?.trim();
-                if (text && failedModelDisplayNames.has(text)) {
-                    const parent = node.parentNode;
-                    if (parent && !parent.querySelector('.ag-model-warning')) {
-                        // Find error msg
-                        let errMsg = "Provider Error. Click to resolve.";
-                        for (const health of Array.from(modelHealthState.values())) {
-                            if (health.status === 'error' && health.diagnostic) {
-                                errMsg = health.diagnostic.errorType.toUpperCase() + ": " + health.diagnostic.message;
-                                break;
-                            }
-                        }
-                        const warning = document.createElement('span');
-                        warning.className = 'ag-model-warning';
-                        warning.style.cssText = 'cursor: pointer; margin-left: 6px; display: inline-flex; align-items: center; justify-content: center;';
-                        warning.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#eab308" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
-                        warning.title = errMsg + " (Click to fix)";
-                        warning.onclick = (e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            openProviderManagerModal();
-                        };
-                        parent.appendChild(warning);
+        dropdownTimeout = setTimeout(async () => {
+            // Detect any dropdown or popup menu element in VS Code / Electron webview
+            const dropdownMenu = document.querySelector('[role="listbox"], [role="menu"], .monaco-select-box-dropdown-container, .dropdown-menu, .monaco-menu-container, .action-menu-container, .select-box-dropdown');
+            if (dropdownMenu) {
+                // Dropdown just opened — inject refresh bar if not already there
+                if (!dropdownMenu.querySelector('.ag-dropdown-refresh-bar')) {
+                    const refreshBar = document.createElement('div');
+                    refreshBar.className = 'ag-dropdown-refresh-bar';
+                    refreshBar.style.cssText = `
+            padding: 6px 12px;
+            background: #141416;
+            border-bottom: 1px solid #2a2a2e;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            color: #a1a1aa;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          `;
+                    const label = document.createElement('span');
+                    label.style.cssText = 'display: flex; align-items: center; gap: 6px; font-weight: 500;';
+                    label.innerHTML = `${SVG_CHECK} Models Health`;
+                    refreshBar.appendChild(label);
+                    const refreshBtn = createRefreshButton(async () => {
+                        const lbl = refreshBar.querySelector('span');
+                        lbl.innerHTML = `⏳ Checking...`;
+                        await refreshModelHealthState();
+                        updateDropdownHealthBadges();
+                        lbl.innerHTML = `${SVG_CHECK} Models Health`;
+                    });
+                    refreshBar.appendChild(refreshBtn);
+                    dropdownMenu.insertBefore(refreshBar, dropdownMenu.firstChild);
+                }
+                // Initial health check + badge injection
+                await refreshModelHealthState();
+                updateDropdownHealthBadges();
+                // Start live polling while dropdown is open
+                startHealthPolling();
+                // Watch for dropdown close (element removal)
+                const closeObserver = new MutationObserver(() => {
+                    if (!document.querySelector('[role="listbox"], .monaco-select-box-dropdown-container, .dropdown-menu')) {
+                        stopHealthPolling();
+                        // Clean up tooltips
+                        document.querySelectorAll('.ag-health-tooltip').forEach(el => el.remove());
+                        closeObserver.disconnect();
                     }
+                });
+                closeObserver.observe(document.body, { childList: true, subtree: true });
+            }
+            else {
+                // Not a dropdown event, but might be model text appearing elsewhere
+                // Update badges if we have health data
+                if (modelHealthState.size > 0 && allKnownModels.size > 0) {
+                    updateDropdownHealthBadges();
                 }
             }
-        }, 150); // Debounce to prevent blocking the main thread
+        }, 150); // Debounce
     });
     if (document && document.body) {
         dropdownObserver.observe(document.body, { childList: true, subtree: true });
@@ -1979,17 +2555,28 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     }
     async function handleModelError(url, diagnostic) {
-        const match = url.match(/models\/(MODEL_PLACEHOLDER_M[^:]+)/);
+        const match = url.match(/models\/([^:/]+)/);
         const modelId = match ? match[1] : null;
         if (diagnostic.errorType === 'billing' || diagnostic.errorType === 'auth' || diagnostic.errorType === 'forbidden') {
             if (modelId) {
-                const models = await getCustomModelsForInjection();
-                // generateModelPlaceholderId already returns the fully-prefixed id.
-                const m = models.find((x) => (0, idGenerator_1.generateModelPlaceholderId)(x) === modelId);
-                if (m) {
-                    failedModelDisplayNames.add(m.displayName || m.name);
-                    modelHealthState.set((0, idGenerator_1.generateModelPlaceholderId)(m), { status: 'error', lastChecked: Date.now(), diagnostic });
+                let displayName = modelId;
+                // Find the displayName from allKnownModels
+                for (const [dn, info] of allKnownModels.entries()) {
+                    if (info.id === modelId) {
+                        displayName = dn;
+                        break;
+                    }
                 }
+                failedModelDisplayNames.add(displayName);
+                allKnownModels.set(displayName, { id: modelId, isCustom: modelId.startsWith('MODEL_PLACEHOLDER_M') });
+                modelHealthState.set(modelId, {
+                    status: 'error',
+                    errorType: diagnostic.errorType,
+                    lastChecked: Date.now(),
+                    diagnostic,
+                });
+                // Immediately update dropdown badges if visible
+                updateDropdownHealthBadges();
             }
             showPersistentBanner(diagnostic);
         }
@@ -2008,22 +2595,20 @@ window.addEventListener('DOMContentLoaded', () => {
     XMLHttpRequest.prototype.send = function (body) {
         const xhr = this;
         const url = xhr._agy_url || '';
+        detectProxyPort(url);
         if (url.includes('GetAvailableModels') || url.includes('fetchAvailableModels')) {
             const origOnReady = xhr.onreadystatechange;
             xhr.onreadystatechange = async function (ev) {
                 if (xhr.readyState === 4 && xhr.status === 200) {
-                    const customModels = await getCustomModelsForInjection();
-                    if (customModels && customModels.length > 0) {
-                        try {
-                            const responseText = xhr.responseText;
-                            if (responseText && responseText.length > 10) {
-                                const parsed = JSON.parse(responseText);
-                                const modelsObj = (parsed.models || parsed.availableModels || parsed.available_models || {});
+                    try {
+                        const responseText = xhr.responseText;
+                        if (responseText && responseText.length > 10) {
+                            const parsed = JSON.parse(responseText);
+                            const modelsObj = (parsed.models || parsed.availableModels || parsed.available_models || {});
+                            const customModels = await getCustomModelsForInjection();
+                            if (customModels && customModels.length > 0) {
                                 for (const m of customModels) {
                                     const slug = (0, idGenerator_1.toSlug)(m);
-                                    // generateModelPlaceholderId already returns the full
-                                    // "MODEL_PLACEHOLDER_M###" string — do NOT prefix it again
-                                    // or routing in the proxy will not match.
                                     const placeholderId = (0, idGenerator_1.generateModelPlaceholderId)(m);
                                     modelsObj[slug] = {
                                         displayName: m.displayName || m.name,
@@ -2032,17 +2617,20 @@ window.addEventListener('DOMContentLoaded', () => {
                                         maxOutputTokens: 4096,
                                         tokenizerType: 'LLAMA_WITH_SPECIAL',
                                         model: placeholderId,
+                                        planModel: placeholderId,
+                                        requestedModel: placeholderId,
                                         apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
                                         modelProvider: 'MODEL_PROVIDER_GOOGLE',
                                     };
                                 }
-                                // Override response
-                                Object.defineProperty(xhr, 'responseText', { value: JSON.stringify(parsed), writable: true });
-                                Object.defineProperty(xhr, 'response', { value: JSON.stringify(parsed), writable: true });
                             }
+                            ingestModelsFromResponse(modelsObj);
+                            // Override response
+                            Object.defineProperty(xhr, 'responseText', { value: JSON.stringify(parsed), writable: true });
+                            Object.defineProperty(xhr, 'response', { value: JSON.stringify(parsed), writable: true });
                         }
-                        catch { /* ignore parse errors */ }
                     }
+                    catch { /* ignore parse errors */ }
                 }
                 if (origOnReady)
                     origOnReady.call(xhr, ev);
@@ -2091,21 +2679,20 @@ window.addEventListener('DOMContentLoaded', () => {
         else {
             url = input.url;
         }
+        detectProxyPort(url);
         try {
             const response = await origFetch.call(window, input, init);
             if ((url.includes('GetAvailableModels') || url.includes('fetchAvailableModels')) && response.ok) {
-                const customModels = await getCustomModelsForInjection();
-                if (customModels && customModels.length > 0) {
-                    try {
-                        const cloned = response.clone();
-                        const text = await cloned.text();
-                        if (text && text.length > 10) {
-                            const parsed = JSON.parse(text);
-                            const modelsObj = (parsed.models || parsed.availableModels || parsed.available_models || {});
+                try {
+                    const cloned = response.clone();
+                    const text = await cloned.text();
+                    if (text && text.length > 10) {
+                        const parsed = JSON.parse(text);
+                        const modelsObj = (parsed.models || parsed.availableModels || parsed.available_models || {});
+                        const customModels = await getCustomModelsForInjection();
+                        if (customModels && customModels.length > 0) {
                             for (const m of customModels) {
                                 const slug = (0, idGenerator_1.toSlug)(m);
-                                // generateModelPlaceholderId already returns the full
-                                // "MODEL_PLACEHOLDER_M###" string — do NOT prefix it again.
                                 const placeholderId = (0, idGenerator_1.generateModelPlaceholderId)(m);
                                 modelsObj[slug] = {
                                     displayName: m.displayName || m.name,
@@ -2114,19 +2701,22 @@ window.addEventListener('DOMContentLoaded', () => {
                                     maxOutputTokens: 4096,
                                     tokenizerType: 'LLAMA_WITH_SPECIAL',
                                     model: placeholderId,
+                                    planModel: placeholderId,
+                                    requestedModel: placeholderId,
                                     apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
                                     modelProvider: 'MODEL_PROVIDER_GOOGLE',
                                 };
                             }
-                            return new Response(JSON.stringify(parsed), {
-                                status: response.status,
-                                statusText: response.statusText,
-                                headers: response.headers,
-                            });
                         }
+                        ingestModelsFromResponse(modelsObj);
+                        return new Response(JSON.stringify(parsed), {
+                            status: response.status,
+                            statusText: response.statusText,
+                            headers: response.headers,
+                        });
                     }
-                    catch { /* ignore parse errors */ }
                 }
+                catch { /* ignore parse errors */ }
             }
             else if (url.includes('generateContent') || url.includes('streamGenerateContent')) {
                 const errorTypeHeader = response.headers.get('X-AG-Error-Type');

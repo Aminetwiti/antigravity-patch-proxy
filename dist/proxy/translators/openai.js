@@ -47,6 +47,7 @@ exports.mapGeminiToolsToOpenAI = mapGeminiToolsToOpenAI;
 const path = __importStar(require("path"));
 const electron_log_1 = __importDefault(require("electron-log"));
 const utils_1 = require("./utils");
+const jsonRepair_1 = require("../jsonRepair");
 const shared_1 = require("../shared");
 // ─── REQUEST: Gemini → OpenAI ──────────────────────────────────────────────
 function mapGeminiToolsToOpenAI(geminiTools) {
@@ -281,10 +282,10 @@ function mapOpenAIToGemini(openAiRes, modelName) {
         const parts = choice.message.tool_calls.map((tc) => {
             let args;
             try {
-                args =
-                    typeof tc.function.arguments === 'string'
-                        ? JSON.parse(tc.function.arguments)
-                        : tc.function.arguments;
+                const rawStr = typeof tc.function.arguments === 'string'
+                    ? tc.function.arguments
+                    : JSON.stringify(tc.function.arguments);
+                args = (0, jsonRepair_1.repairPartialJson)(rawStr) || {};
             }
             catch (e) {
                 electron_log_1.default.debug('[OpenAI] Tool call args parse fallback:', e.message);
@@ -403,7 +404,7 @@ function mapOpenAIChunkToGemini(chunk, modelName) {
             const parts = pendingToolCalls.map((tc) => {
                 let args = {};
                 try {
-                    args = JSON.parse(tc.arguments);
+                    args = (0, jsonRepair_1.repairPartialJson)(tc.arguments) || {};
                 }
                 catch (_e) {
                     args = {};
@@ -451,7 +452,7 @@ function mapOpenAIChunkToGemini(chunk, modelName) {
         const parts = Object.values(context.toolCalls).map((tc) => {
             let args = {};
             try {
-                args = JSON.parse(tc.arguments);
+                args = (0, jsonRepair_1.repairPartialJson)(tc.arguments) || {};
             }
             catch (e) {
                 electron_log_1.default.debug('[OpenAI] Stream tool args parse fallback:', e.message);

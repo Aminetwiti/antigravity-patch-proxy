@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
+import { getProviderHeaders, translateRequest } from '../proxy/registry';
+
 
 // We need to mock electron-log and fs/path before importing the registry
 vi.mock('electron-log', () => ({
@@ -102,3 +104,27 @@ describe('Registry - Provider routing matrix', () => {
     // The registry would fallback to 'openai' translator
   });
 });
+
+describe('Registry - extraHeaders & extraBody support', () => {
+  it('merges custom extraHeaders into getProviderHeaders', () => {
+    const headers = getProviderHeaders('openai', 'sk-test', {
+      'HTTP-Referer': 'https://antigravity.dev',
+      'X-Custom-Header': 'custom-value',
+    });
+    expect(headers['Content-Type']).toBe('application/json');
+    expect(headers['Authorization']).toBe('Bearer sk-test');
+    expect(headers['HTTP-Referer']).toBe('https://antigravity.dev');
+    expect(headers['X-Custom-Header']).toBe('custom-value');
+  });
+
+  it('merges extraBody parameters into translateRequest payload', () => {
+    const geminiBody = { contents: [{ parts: [{ text: 'Hello' }] }] };
+    const extraBody = { thinking: { type: 'enabled', budget_tokens: 1024 }, service_tier: 'flex' };
+    const payload = translateRequest('google', geminiBody, 'gemini-pro', extraBody) as Record<string, unknown>;
+
+    expect(payload.contents).toBeDefined();
+    expect(payload.thinking).toEqual({ type: 'enabled', budget_tokens: 1024 });
+    expect(payload.service_tier).toBe('flex');
+  });
+});
+

@@ -49,8 +49,11 @@ import {
   deleteCustomModel,
   maskApiKey,
   encryptApiKeyIfNeeded,
+  isMaskedApiKey,
   buildFallbackModelEntry,
+  testProviderHealth,
 } from '../customModelStore';
+
 
 describe('customModelStore', () => {
   beforeEach(() => {
@@ -231,4 +234,72 @@ describe('customModelStore', () => {
       expect(fallback.supportedGenerationMethods).toContain('generateContent');
     });
   });
+
+  // ─── TS-3: isMaskedApiKey ────────────────────────────────────────────────────
+  describe('isMaskedApiKey', () => {
+    it('matches the ★★★★★★★★ placeholder', () => {
+      expect(isMaskedApiKey('********')).toBe(true);
+    });
+
+    it('matches the exact 4+...+4 format produced by maskApiKey()', () => {
+      // Simulate output of maskApiKey('sk-proj-ABCDEF1234567890')
+      expect(isMaskedApiKey('sk-p...7890')).toBe(true);
+      expect(isMaskedApiKey('abcd...wxyz')).toBe(true);
+    });
+
+    it('does NOT match legitimate keys that contain ... in the middle', () => {
+      // A JWT or key with ...  in the middle should not be treated as masked
+      expect(isMaskedApiKey('Bearer token...extra.data')).toBe(false);
+      expect(isMaskedApiKey('prefix...suffix.extra')).toBe(false);
+    });
+
+    it('does NOT match keys with fewer or more than 4 chars around ...', () => {
+      expect(isMaskedApiKey('abc...xyz')).toBe(false);   // 3 chars
+      expect(isMaskedApiKey('abcde...wxyz')).toBe(false); // 5 chars prefix
+      expect(isMaskedApiKey('abcd...wxyz5')).toBe(false); // 5 chars suffix
+    });
+
+    it('does NOT match empty string', () => {
+      expect(isMaskedApiKey('')).toBe(false);
+    });
+
+    it('does NOT match "none"', () => {
+      expect(isMaskedApiKey('none')).toBe(false);
+    });
+
+    it('does NOT match short keys that would be fully masked', () => {
+      // Short keys are masked as '********', not 4+...+4
+      expect(isMaskedApiKey('short')).toBe(false);
+    });
+
+    it('integrates with encryptApiKeyIfNeeded: masked keys are not re-encrypted', () => {
+      // A masked key should be returned as-is with encrypted:false
+      const result = encryptApiKeyIfNeeded('abcd...wxyz');
+      expect(result.apiKey).toBe('abcd...wxyz');
+      expect(result.encrypted).toBe(false);
+    });
+
+    it('integrates with encryptApiKeyIfNeeded: plaintext keys ARE encrypted', () => {
+      const result = encryptApiKeyIfNeeded('sk-real-api-key-1234567890');
+      // The mock encryptString returns 'enc:' + input
+      expect(result.apiKey).toMatch(/^enc:/);
+      expect(result.encrypted).toBe(true);
+    });
+  });
+
+  describe('testProviderHealth', () => {
+    it('returns error when apiUrl is missing', async () => {
+      const res = await testProviderHealth({ apiUrl: '', provider: 'openai' });
+      expect(res.success).toBe(false);
+      expect(res.error).toContain('API URL is required');
+    });
+
+    it('returns error when apiUrl is invalid', async () => {
+      const res = await testProviderHealth({ apiUrl: 'not-a-url', provider: 'openai' });
+      expect(res.success).toBe(false);
+      expect(res.error).toContain('Invalid API URL');
+    });
+  });
 });
+
+

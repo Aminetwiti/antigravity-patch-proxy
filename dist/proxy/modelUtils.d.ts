@@ -20,6 +20,13 @@ export interface ModelNameCapabilities {
     isClaudeThinkingModel: boolean;
     isThinkingModel: boolean;
 }
+export interface ModelUXBadges {
+    supportsVision: boolean;
+    supportsTools: boolean;
+    supportsThinking: boolean;
+    isLocal: boolean;
+    contextWindowLabel: string;
+}
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'auto' | 'none';
 export type ThinkingBudget = 'auto' | 'disabled' | 'enabled';
 export type ModelMode = 'thinking' | 'reasoning' | 'non-thinking' | 'auto';
@@ -78,4 +85,8 @@ export declare function mapApiModelToModeConfig(apiModel: {
     id: string;
     name: string;
 }, provider: string): ModelModeConfig;
+/**
+ * Computes UX badges for a model (Vision 🖼️, Tools 🛠️, Thinking 🧠, Local 💻, Context Window Label).
+ */
+export declare function detectModelUXBadges(m: CustomModelConfig): ModelUXBadges;
 //# sourceMappingURL=modelUtils.d.ts.map

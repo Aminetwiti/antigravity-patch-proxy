@@ -6,6 +6,13 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const electron_1 = require("electron");
 const api = {
     run: (args) => electron_1.ipcRenderer.invoke('ag:run', args),
+    // Provider Management APIs
+    providers: {
+        get: () => electron_1.ipcRenderer.invoke('ag:providers:get'),
+        save: (p) => electron_1.ipcRenderer.invoke('ag:providers:save', p),
+        delete: (id) => electron_1.ipcRenderer.invoke('ag:providers:delete', id),
+        test: (params) => electron_1.ipcRenderer.invoke('ag:providers:test', params),
+    },
     info: () => electron_1.ipcRenderer.invoke('ag:info'),
     config: () => electron_1.ipcRenderer.invoke('ag:config'),
     setTheme: (theme) => electron_1.ipcRenderer.invoke('ag:config:set-theme', theme),

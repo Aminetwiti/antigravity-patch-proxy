@@ -32,8 +32,12 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.backupFile = backupFile;
+exports.getEncryptionStatus = getEncryptionStatus;
 exports.isEncryptionAvailable = isEncryptionAvailable;
 exports.encryptString = encryptString;
 exports.decryptString = decryptString;
@@ -41,6 +45,7 @@ exports.encryptModels = encryptModels;
 exports.decryptModels = decryptModels;
 const electron_1 = require("electron");
 const fs = __importStar(require("fs"));
+const electron_log_1 = __importDefault(require("electron-log"));
 /**
  * Creates a backup of the specified file with a .bak extension.
  */
@@ -49,12 +54,26 @@ function backupFile(filePath) {
         if (fs.existsSync(filePath)) {
             const backupPath = filePath + '.bak';
             fs.copyFileSync(filePath, backupPath);
-            console.log(`[CryptoStore] Backup created successfully at: ${backupPath}`);
+            electron_log_1.default.info(`[CryptoStore] Backup created successfully at: ${backupPath}`);
         }
     }
     catch (err) {
-        console.error('[CryptoStore] Failed to create file backup:', err);
+        electron_log_1.default.error('[CryptoStore] Failed to create file backup:', err);
     }
+}
+/**
+ * Returns current system encryption capabilities and mode.
+ */
+function getEncryptionStatus() {
+    const available = isEncryptionAvailable();
+    if (available) {
+        return { available: true, mode: 'safeStorage' };
+    }
+    return {
+        available: false,
+        mode: 'fallback-base64',
+        warning: 'Native OS keychain encryption (safeStorage) is unavailable. API keys are encoded using base64 fallback.',
+    };
 }
 /**
  * Checks if Electron's safeStorage API is fully functional on the current system.
@@ -79,12 +98,12 @@ function encryptString(plainText) {
             return 'enc:' + buffer.toString('base64');
         }
         catch (err) {
-            console.error('[CryptoStore] safeStorage encryption failed, falling back to base64:', err);
+            electron_log_1.default.error('[CryptoStore] safeStorage encryption failed, falling back to base64:', err);
             return 'fallback:' + Buffer.from(plainText, 'utf-8').toString('base64');
         }
     }
     else {
-        console.warn('[CryptoStore] safeStorage not available. Using base64 fallback format.');
+        electron_log_1.default.warn('[CryptoStore] safeStorage not available. Using base64 fallback format.');
         return 'fallback:' + Buffer.from(plainText, 'utf-8').toString('base64');
     }
 }
@@ -102,12 +121,12 @@ function decryptString(encryptedText) {
                 return electron_1.safeStorage.decryptString(buffer);
             }
             catch (err) {
-                console.error('[CryptoStore] safeStorage decryption failed:', err);
+                electron_log_1.default.error('[CryptoStore] safeStorage decryption failed:', err);
                 return 'DECRYPTION_FAILED';
             }
         }
         else {
-            console.error('[CryptoStore] safeStorage is unavailable, but data was encrypted with it. Trying fallback raw data.');
+            electron_log_1.default.error('[CryptoStore] safeStorage is unavailable, but data was encrypted with it. Trying fallback raw data.');
             return 'DECRYPTION_FAILED_STORAGE_UNAVAILABLE';
         }
     }
@@ -117,7 +136,7 @@ function decryptString(encryptedText) {
             return Buffer.from(base64Data, 'base64').toString('utf-8');
         }
         catch (err) {
-            console.error('[CryptoStore] Fallback base64 decryption failed:', err);
+            electron_log_1.default.error('[CryptoStore] Fallback base64 decryption failed:', err);
             return 'DECRYPTION_FAILED';
         }
     }

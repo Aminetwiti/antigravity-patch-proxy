@@ -110,11 +110,14 @@ describe('resolveWithServer', () => {
     });
 
     const promise = resolveWithServer('daily-cloudcode-pa.googleapis.com', '8.8.8.8');
+    // Attach a no-op catch so the promise is never unhandled
+    promise.catch(() => undefined);
     const expectPromise = expect(promise).rejects.toThrow('timed out');
     await vi.advanceTimersByTimeAsync(DNS_QUERY_TIMEOUT_MS + 100);
     await expectPromise;
     expect(resolverProto.cancel).toHaveBeenCalled();
   });
+
 
   it('rejects on resolver error', async () => {
     const resolverProto = dns.Resolver.prototype as unknown as {
@@ -127,10 +130,13 @@ describe('resolveWithServer', () => {
     );
 
     const promise = resolveWithServer('daily-cloudcode-pa.googleapis.com', '8.8.8.8');
+    // Attach a no-op catch immediately so Node never marks this as unhandled
+    promise.catch(() => undefined);
     const expectPromise = expect(promise).rejects.toThrow('SERVFAIL');
     await vi.advanceTimersByTimeAsync(0);
     await expectPromise;
   });
+
 });
 
 describe('resolveWithSystemDns', () => {
@@ -165,10 +171,13 @@ describe('resolveWithSystemDns', () => {
     );
 
     const promise = resolveWithSystemDns('daily-cloudcode-pa.googleapis.com');
+    // Attach a no-op catch immediately so Node never marks this as unhandled
+    promise.catch(() => undefined);
     const expectPromise = expect(promise).rejects.toThrow('ENOTFOUND');
     await vi.advanceTimersByTimeAsync(0);
     await expectPromise;
   });
+
 });
 
 describe('resolveGoogleIp', () => {

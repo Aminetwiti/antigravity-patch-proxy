@@ -519,6 +519,122 @@ function getCliPool(): CliWorkerPool {
 // IPC handlers
 // ─────────────────────────────────────────────────────────────────────────────
 
+
+  // --- Provider Management IPCs ---
+  ipcMain.handle('ag:providers:get', async () => {
+    try {
+      const p = path.join(app.getPath('home'), '.gemini', 'antigravity', 'custom_models.json');
+      const c = await fs.promises.readFile(p, 'utf8');
+      const parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
+      if (parsed.providers) return parsed.providers;
+      
+      // Fallback for legacy models array
+      if (parsed.models && parsed.models.length > 0) {
+        const pm = new Map();
+        let pid = 1;
+        for (const m of parsed.models) {
+          const k = m.apiUrl + '|' + m.provider + '|' + m.apiKey;
+          if (!pm.has(k)) {
+            pm.set(k, {
+              id: 'provider-' + Date.now() + '-' + (pid++),
+              name: 'Legacy ' + m.provider,
+              provider: m.provider,
+              apiUrl: m.apiUrl,
+              apiKey: m.apiKey,
+              enabled: true,
+              models: []
+            });
+          }
+          pm.get(k).models.push({
+            id: m.externalModelName || m.name,
+            displayName: m.displayName || m.name,
+            enabled: true
+          });
+        }
+        return Array.from(pm.values());
+      }
+      return [];
+    } catch(e) {
+      return [];
+    }
+  });
+
+  ipcMain.handle('ag:providers:save', async (_, p) => {
+    try {
+      const fp = path.join(app.getPath('home'), '.gemini', 'antigravity', 'custom_models.json');
+      let parsed: { providers: any[]; models: any[] } = { providers: [], models: [] };
+      try {
+        const c = await fs.promises.readFile(fp, 'utf8');
+        parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
+      } catch(e) {}
+
+      if (!parsed.providers) parsed.providers = [];
+      const idx = parsed.providers.findIndex((x: any) => x.id === p.id);
+      if (idx !== -1) parsed.providers[idx] = p;
+      else parsed.providers.push(p);
+
+      await fs.promises.writeFile(fp, JSON.stringify(parsed, null, 2), 'utf8');
+      return { success: true };
+    } catch(e) {
+      return { success: false, error: (e as Error).message };
+    }
+  });
+
+  ipcMain.handle('ag:providers:delete', async (_, id) => {
+    try {
+      const fp = path.join(app.getPath('home'), '.gemini', 'antigravity', 'custom_models.json');
+      const c = await fs.promises.readFile(fp, 'utf8');
+      const parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
+      if (parsed.providers) {
+        parsed.providers = parsed.providers.filter((x: any) => x.id !== id);
+        await fs.promises.writeFile(fp, JSON.stringify(parsed, null, 2), 'utf8');
+      }
+      return { success: true };
+    } catch(e) {
+      return { success: false, error: (e as Error).message };
+    }
+  });
+
+  ipcMain.handle('ag:providers:test', async (_evt: Electron.IpcMainInvokeEvent, params: { apiUrl: string; apiKey: string }) => {
+     try {
+       // Only test /models endpoint
+       const url = params.apiUrl + (params.apiUrl.endsWith('/') ? '' : '/') + 'models';
+       const { net } = require('electron') as typeof import('electron');
+
+       return await new Promise<{ success: boolean; status?: number; error?: string }>((resolve) => {
+         const request = net.request({
+           url: url,
+           method: 'GET'
+         });
+
+         if (params.apiKey) {
+           request.setHeader('Authorization', 'Bearer ' + params.apiKey);
+         }
+
+         request.on('response', (response: Electron.IncomingMessage) => {
+           let data = '';
+           response.on('data', (chunk: Buffer) => { data += chunk.toString(); });
+           response.on('end', () => {
+             if (response.statusCode && response.statusCode >= 200 && response.statusCode < 300) {
+                resolve({ success: true, status: response.statusCode });
+             } else {
+                resolve({ success: false, status: response.statusCode, error: data });
+             }
+           });
+         });
+
+         request.on('error', (error: Error) => {
+           resolve({ success: false, error: error.message });
+         });
+
+         request.end();
+       });
+     } catch(e) {
+       const err = e as Error;
+       return { success: false, error: err.message };
+     }
+  });
+  
 ipcMain.handle('ag:run', async (_evt, args: string[]) => {
   return getCliPool().run(args);
 });

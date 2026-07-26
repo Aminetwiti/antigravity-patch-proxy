@@ -8,10 +8,11 @@ export type ErrorType =
   | 'auth'
   | 'forbidden'
   | 'rate_limit'
-  | 'server'
-  | 'network'
   | 'dns'
   | 'timeout'
+  | 'network'
+  | 'server'
+  | 'empty_stream'
   | 'unknown';
 
 export interface ErrorDiagnostic {
@@ -269,3 +270,28 @@ export function classifyError(
     severity: 'error',
   };
 }
+
+/**
+ * Generates an enriched, user-friendly Markdown diagnostic card for display in the UI/Chat.
+ */
+export function generateDiagnosticCardMarkdown(diagnostic: ErrorDiagnostic): string {
+  const alertType = diagnostic.severity === 'warning' ? 'WARNING' : 'CAUTION';
+  let md = `> [!${alertType}]\n`;
+  md += `> **${diagnostic.title}**\n>\n`;
+  md += `> ${diagnostic.message}\n`;
+
+  if (diagnostic.suggestions && diagnostic.suggestions.length > 0) {
+    md += `>\n> **Suggested Actions:**\n`;
+    diagnostic.suggestions.forEach((s) => {
+      md += `> - ${s}\n`;
+    });
+  }
+
+  if (diagnostic.actionUrl) {
+    md += `>\n> 🔗 [Manage Billing & Credits](${diagnostic.actionUrl})\n`;
+  }
+
+  md += `\n<span class="ag-system-error-marker" data-type="${diagnostic.errorType}" style="display:none;"></span>`;
+  return md;
+}
+

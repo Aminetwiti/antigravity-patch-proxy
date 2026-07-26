@@ -20,6 +20,20 @@ import {
   PROVIDERS,
 } from './constants';
 
+/**
+ * Simple promise-based mutex to serialize concurrent writes to custom_models.json.
+ * Prevents race conditions in recordProviderUsage when multiple requests complete
+ * simultaneously and all try to load-modify-save the same file.
+ */
+let _writeLock: Promise<void> = Promise.resolve();
+function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
+  const next = _writeLock.then(() => fn(), () => fn());
+  // Swallow errors so the lock chain never breaks
+  _writeLock = next.then(() => undefined, () => undefined);
+  return next;
+}
+
+
 export interface CustomModelFileEntry {
   name: string;
   displayName?: string;
@@ -30,6 +44,9 @@ export interface CustomModelFileEntry {
   externalModelName: string;
   allowUnauthorized?: boolean;
   encrypted?: boolean;
+  useRawBaseUrl?: boolean;
+  extraHeaders?: Record<string, string>;
+  extraBody?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -63,6 +80,8 @@ export interface ProviderModelEntry {
   id: string;
   displayName?: string;
   enabled: boolean;
+  extraHeaders?: Record<string, string>;
+  extraBody?: Record<string, unknown>;
 }
 
 export interface ProviderFileEntry {
@@ -74,6 +93,9 @@ export interface ProviderFileEntry {
   allowUnauthorized?: boolean;
   encrypted?: boolean;
   enabled: boolean;
+  useRawBaseUrl?: boolean;
+  extraHeaders?: Record<string, string>;
+  extraBody?: Record<string, unknown>;
   models: ProviderModelEntry[];
   usage?: {
     promptTokens: number;
@@ -116,6 +138,9 @@ export async function loadCustomModels(): Promise<CustomModelFileEntry[]> {
       const models = Array.isArray(p.models) ? p.models : [];
       for (const m of models) {
         if (!m || m.enabled === false) continue;
+        const mergedHeaders = { ...p.extraHeaders, ...m.extraHeaders };
+        const mergedBody = { ...p.extraBody, ...m.extraBody };
+
         flatModels.push({
            name: `${p.id || 'provider-unknown'}-${m.id}`,
            displayName: m.displayName || m.id,
@@ -124,12 +149,16 @@ export async function loadCustomModels(): Promise<CustomModelFileEntry[]> {
            apiUrl: p.apiUrl || '',
            externalModelName: m.id,
            allowUnauthorized: p.allowUnauthorized,
-           encrypted: p.encrypted
+           encrypted: p.encrypted,
+           useRawBaseUrl: p.useRawBaseUrl,
+           extraHeaders: Object.keys(mergedHeaders).length > 0 ? mergedHeaders : undefined,
+           extraBody: Object.keys(mergedBody).length > 0 ? mergedBody : undefined,
         });
       }
     }
     return flatModels;
   }
+
     return [];
   } catch (error) {
     if (isNodeError(error) && error.code === 'ENOENT') {
@@ -223,26 +252,31 @@ export async function saveProviders(providers: ProviderFileEntry[]): Promise<voi
 
 /**
  * Increments request count and token statistics for a specified provider.
+ * Uses a write-lock to prevent race conditions when multiple requests
+ * complete simultaneously.
  */
 export async function recordProviderUsage(providerId: string, promptTokens: number = 0, completionTokens: number = 0): Promise<void> {
-  try {
-    const providers = await loadProviders();
-    const target = providers.find((p) => p.id === providerId || `provider-${p.id}` === providerId);
-    if (!target) return;
+  return withWriteLock(async () => {
+    try {
+      const providers = await loadProviders();
+      const target = providers.find((p) => p.id === providerId || `provider-${p.id}` === providerId);
+      if (!target) return;
 
-    if (!target.usage) {
-      target.usage = { promptTokens: 0, completionTokens: 0, totalRequests: 0 };
+      if (!target.usage) {
+        target.usage = { promptTokens: 0, completionTokens: 0, totalRequests: 0 };
+      }
+      target.usage.promptTokens += Math.max(0, promptTokens);
+      target.usage.completionTokens += Math.max(0, completionTokens);
+      target.usage.totalRequests += 1;
+      target.usage.lastUsed = Date.now();
+
+      await saveProviders(providers);
+    } catch (err) {
+      log.error('[CustomModelStore] Failed to record provider usage:', err);
     }
-    target.usage.promptTokens += Math.max(0, promptTokens);
-    target.usage.completionTokens += Math.max(0, completionTokens);
-    target.usage.totalRequests += 1;
-    target.usage.lastUsed = Date.now();
-
-    await saveProviders(providers);
-  } catch (err) {
-    log.error('[CustomModelStore] Failed to record provider usage:', err);
-  }
+  });
 }
+
 
 /**
  * Removes a model by name and persists the remaining models. (Legacy)
@@ -307,7 +341,7 @@ export function encryptApiKeyIfNeeded(apiKey: string | undefined): {
   apiKey: string;
   encrypted: boolean;
 } {
-  if (!apiKey || apiKey === 'none' || isMaskedKey(apiKey)) {
+  if (!apiKey || apiKey === 'none' || isMaskedApiKey(apiKey)) {
     return { apiKey: apiKey ?? 'none', encrypted: false };
   }
   return {
@@ -337,10 +371,105 @@ function stripBom(content: string): string {
   return content.charCodeAt(0) === 0xfeff ? content.slice(1) : content;
 }
 
-function isMaskedKey(key: string): boolean {
-  return key.includes('...') || key.startsWith('***') || key === '********';
+/**
+ * Returns true if the key matches the exact mask format produced by maskApiKey().
+ *
+ * Valid mask formats:
+ *   - '********'               (key ≤ 8 chars)
+ *   - 'abcd...wxyz'            (key > 8 chars: first-4 + '...' + last-4)
+ *
+ * IMPORTANT: A legitimately masked key has exactly 4 chars, then '...', then
+ * 4 chars. A plain API key containing '...' somewhere in the middle would NOT
+ * match this pattern, so it will be correctly treated as unmasked and encrypted.
+ */
+export function isMaskedApiKey(key: string): boolean {
+  if (!key) return false;
+  // Exact '********' placeholder
+  if (key === '********') return true;
+  // Pattern: exactly 4 chars (alphanum/hyphen/underscore) + '...' + exactly 4 chars
+  return /^[A-Za-z0-9_-]{4}\.\.\.[A-Za-z0-9_-]{4}$/.test(key);
 }
+
+/** @deprecated Use isMaskedApiKey — kept for internal backward-compat. */
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error;
 }
+
+/**
+ * Performs a real-time HTTP/HTTPS health probe against a provider's API URL.
+ * Measures RTT latency (ms) and returns status diagnostic information.
+ */
+export async function testProviderHealth(params: TestModelParams): Promise<ConnectionTestResult> {
+  const { apiUrl, apiKey, allowUnauthorized } = params;
+  if (!apiUrl) {
+    return { success: false, error: 'API URL is required' };
+  }
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(apiUrl);
+  } catch (err) {
+    return { success: false, error: `Invalid API URL: ${(err as Error).message}` };
+  }
+
+  const startTime = Date.now();
+  const protocol = parsedUrl.protocol === 'https:' ? require('https') : require('http');
+
+  const headers: Record<string, string> = {
+    'User-Agent': 'Antigravity-HealthProbe/2.2',
+  };
+
+  if (apiKey && apiKey !== 'none' && !isMaskedApiKey(apiKey)) {
+    headers['Authorization'] = `Bearer ${apiKey}`;
+  }
+
+  return new Promise((resolve) => {
+    const reqOptions = {
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
+      path: parsedUrl.pathname + parsedUrl.search,
+      method: 'GET',
+      headers,
+      timeout: 10_000, // 10s timeout for health check
+      rejectUnauthorized: !allowUnauthorized,
+    };
+
+    const req = protocol.request(reqOptions, (res: import('http').IncomingMessage) => {
+      const latencyMs = Date.now() - startTime;
+      const status = res.statusCode || 0;
+      // Consider status < 500 (even 401/403/404) as an active server reachable over network
+      const isReachable = status > 0 && status < 500;
+
+      resolve({
+        success: isReachable,
+        status,
+        latencyMs,
+        message: isReachable
+          ? `Server reachable (${status}), latency: ${latencyMs}ms`
+          : `HTTP error ${status} (${res.statusMessage || 'Upstream Error'})`,
+      });
+    });
+
+    req.on('error', (err: Error) => {
+      const latencyMs = Date.now() - startTime;
+      resolve({
+        success: false,
+        latencyMs,
+        error: `Connection failed: ${err.message}`,
+      });
+    });
+
+    req.on('timeout', () => {
+      req.destroy();
+      resolve({
+        success: false,
+        latencyMs: Date.now() - startTime,
+        error: 'Health check timed out after 10s',
+      });
+    });
+
+    req.end();
+  });
+}
+

@@ -24,7 +24,15 @@ interface AgAPI {
   trayStatus(status: 'ok' | 'warn' | 'err'): Promise<void>;
   openExternal(url: string): Promise<void>;
   reveal(p: string): Promise<void>;
-  
+
+  // Provider Management APIs
+  providers: {
+    get(): Promise<unknown[]>;
+    save(p: unknown): Promise<{ success: boolean; error?: string }>;
+    delete(id: string): Promise<{ success: boolean; error?: string }>;
+    test(params: { apiUrl: string; apiKey: string }): Promise<{ success: boolean; status?: number; error?: string }>;
+  };
+
   // MITM Proxy Server Management
   proxyStart(): Promise<{ ok: boolean; message: string; pid?: number }>;
   proxyStop(): Promise<{ ok: boolean; message: string }>;

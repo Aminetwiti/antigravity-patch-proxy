@@ -125,8 +125,29 @@ function moveUnpackedAside(buildDir, asarOut, fsImpl = fs) {
   if (fsImpl.existsSync(finalRoot)) {
     fsImpl.rmSync(finalRoot, { recursive: true, force: true });
   }
-  // Rename to its final location, bypassing buildDir entirely.
-  fsImpl.renameSync(unpackedRoot, finalRoot);
+  // Try rename first (fast, same-device). Falls back to recursive copy +
+  // delete when renameSync throws EXDEV (cross-device link), which happens
+  // when %TEMP% and %LOCALAPPDATA% are on different volumes or junctions.
+  try {
+    fsImpl.renameSync(unpackedRoot, finalRoot);
+  } catch (err) {
+    if (err.code === 'EXDEV') {
+      fsImpl.cpSync(unpackedRoot, finalRoot, { recursive: true });
+    } else {
+      throw err;
+    }
+  }
+  // CRITICAL: remove the unpacked folder from buildDir so createPackage
+  // never sees it — even if the rename succeeded above, a stale staging
+  // folder from a previous run could still be lingering.
+  if (fsImpl.existsSync(unpackedRoot)) {
+    fsImpl.rmSync(unpackedRoot, { recursive: true, force: true });
+  }
+  // Also clean up any stale staging-suffix folders from older patch runs.
+  const staleStaging = path.join(buildDir, 'app.asar.unpacked' + STAGING_SUFFIX);
+  if (fsImpl.existsSync(staleStaging)) {
+    fsImpl.rmSync(staleStaging, { recursive: true, force: true });
+  }
   return finalRoot;
 }
 

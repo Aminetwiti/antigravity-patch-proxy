@@ -3,6 +3,18 @@
  */
 export declare function backupFile(filePath: string): void;
 /**
+ * Diagnostic info on the encryption system status.
+ */
+export interface EncryptionStatus {
+    available: boolean;
+    mode: 'safeStorage' | 'fallback-base64';
+    warning?: string;
+}
+/**
+ * Returns current system encryption capabilities and mode.
+ */
+export declare function getEncryptionStatus(): EncryptionStatus;
+/**
  * Checks if Electron's safeStorage API is fully functional on the current system.
  */
 export declare function isEncryptionAvailable(): boolean;

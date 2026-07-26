@@ -56,8 +56,32 @@ export const GOOGLE_FORWARD_TIMEOUT_MS = 30_000;
 /** Timeout for downloading file content from external URIs (30 seconds). */
 export const FILE_DOWNLOAD_TIMEOUT_MS = 30_000;
 
-/** Default request timeout for custom model requests (2 minutes). */
-export const DEFAULT_MODEL_REQUEST_TIMEOUT_MS = 120_000;
+/**
+ * Per-chunk idle timeout for streaming upstream responses.
+ *
+ * If no new SSE chunk arrives within this window, the proxy treats the
+ * upstream as stuck and aborts the request. This is fundamentally different
+ * from a *total* request timeout (which `request.setTimeout()` enforces):
+ * a total timeout kills healthy streams that legitimately take several
+ * minutes; the idle timeout only fires when the upstream *stops saying
+ * anything* mid-stream.
+ *
+ * Ported from vscode-unify-chat-provider's `withIdleTimeout` (vendors/...).
+ * Default: 60 seconds — generous enough for slow reasoning models, short
+ * enough that a stuck upstream doesn't tie up the proxy indefinitely.
+ */
+export const STREAM_IDLE_TIMEOUT_MS = 60_000;
+
+/**
+ * Default request timeout for custom model requests.
+ *
+ * Lowered from 120_000 to 30_000 to bound the worst-case blocking time
+ * of an upstream connection (3 attempts × 30s = 90s max). Combined with
+ * DEFAULT_MAX_RETRIES = 1, a fully-failing model holds the proxy open
+ * for at most 60s before giving up, freeing connections for the rest of
+ * the dropdown models.
+ */
+export const DEFAULT_MODEL_REQUEST_TIMEOUT_MS = 30_000;
 
 /** Default retry delay for streaming errors (1 second). */
 export const STREAM_RETRY_BASE_DELAY_MS = 1_000;
@@ -71,16 +95,51 @@ export const RATE_LIMIT_RETRY_BASE_DELAY_MS = 2_000;
 /** Base delay for 5xx server error retries (1 second). */
 export const SERVER_ERROR_RETRY_BASE_DELAY_MS = 1_000;
 
+/**
+ * Exponential backoff multiplier (AWS-style decorrelated jitter).
+ *
+ * The delay for attempt N is roughly:
+ *     min(initialDelay * MULTIPLIER^N, maxDelay) * (1 +/- JITTER)
+ *
+ * 2x is the AWS-recommended default — fast enough to recover from transient
+ * errors, gentle enough to avoid pile-up.
+ */
+export const RETRY_BACKOFF_MULTIPLIER = 2;
+
+/**
+ * Jitter factor in [0, 1]. With 0.1, each delay is randomly scaled within
+ * +/-10% of its computed value, preventing retry-wave synchronization when
+ * many concurrent requests hit the same upstream at the same time.
+ *
+ * Inspired by `vscode-unify-chat-provider`'s DEFAULT_CHAT_RETRY_CONFIG.
+ */
+export const RETRY_BACKOFF_JITTER_FACTOR = 0.1;
+
 // ─── Retry Configuration ──────────────────────────────────────────────────
 
-/** Default maximum number of retries per model. */
-export const DEFAULT_MAX_RETRIES = 3;
+/**
+ * Default maximum number of retries per model.
+ *
+ * Lowered from 3 to 1 to prevent retry storms: a stuck upstream used to
+ * block the proxy for up to ~360s (3 × 120s) per model, which cascaded
+ * across 8+ custom models and starved the rest of the dropdown.
+ * With 1 retry, a fully-failing model gives up in ≤ 60s (2 × 30s).
+ */
+export const DEFAULT_MAX_RETRIES = 1;
 
 /** Minimum allowed retry count. */
 export const MIN_MAX_RETRIES = 0;
 
 /** Maximum allowed retry count. */
 export const MAX_MAX_RETRIES = 5;
+
+// ─── Circuit Breaker ──────────────────────────────────────────────────────
+
+/** Maximum consecutive cache refresh failures before backing off. */
+export const CACHE_REFRESH_MAX_FAILURES = 3;
+
+/** Backoff duration after circuit breaker trips (5 minutes). */
+export const CACHE_REFRESH_BACKOFF_MS = 5 * 60 * 1000;
 
 // ─── Model Capabilities ────────────────────────────────────────────────────
 
@@ -208,17 +267,110 @@ export const PROVIDER_DEFAULT_URLS: Record<ProviderName, string> = {
   [PROVIDERS.OLLAMA]: 'http://localhost:11434/v1/chat/completions',
   [PROVIDERS.GOOGLE]: 'https://generativelanguage.googleapis.com/v1beta/models/',
   [PROVIDERS.CUSTOM]: '',
-  [PROVIDERS.DEEPSEEK]: 'https://api.deepseek.com/anthropic',
+  [PROVIDERS.DEEPSEEK]: 'https://api.deepseek.com/v1',
   [PROVIDERS.GROQ]: 'https://api.groq.com/openai/v1',
   [PROVIDERS.MISTRAL]: 'https://api.mistral.ai/v1',
   [PROVIDERS.CEREBRAS]: 'https://api.cerebras.ai/v1',
-  [PROVIDERS.KIMI]: 'https://api.moonshot.ai/anthropic/v1',
+  [PROVIDERS.KIMI]: 'https://api.moonshot.ai/v1',
   [PROVIDERS.FIREWORKS]: 'https://api.fireworks.ai/inference/v1',
   [PROVIDERS.LMSTUDIO]: 'http://localhost:1234/v1',
   [PROVIDERS.LLAMACPP]: 'http://localhost:8080/v1',
   [PROVIDERS.NVIDIA]: 'https://integrate.api.nvidia.com/v1',
   [PROVIDERS.OPENCODE]: '',
-  [PROVIDERS.CODESTRAL]: '',
+  [PROVIDERS.CODESTRAL]: 'https://codestral.mistral.ai/v1',
   [PROVIDERS.WAFER]: '',
   [PROVIDERS.ZAI]: '',
 };
+
+export interface SuggestedModel {
+  id: string;
+  displayName: string;
+}
+
+export interface DetailedProviderPreset {
+  id: ProviderName;
+  label: string;
+  defaultApiUrl: string;
+  suggestedModels: SuggestedModel[];
+}
+
+export const DETAILED_PROVIDER_PRESETS: DetailedProviderPreset[] = [
+  {
+    id: PROVIDERS.OPENAI,
+    label: 'OpenAI',
+    defaultApiUrl: 'https://api.openai.com/v1',
+    suggestedModels: [
+      { id: 'gpt-4o', displayName: 'GPT-4o (Omni)' },
+      { id: 'gpt-4o-mini', displayName: 'GPT-4o Mini' },
+      { id: 'o1', displayName: 'OpenAI o1 Reasoning' },
+      { id: 'o3-mini', displayName: 'OpenAI o3-mini' },
+    ],
+  },
+  {
+    id: PROVIDERS.DEEPSEEK,
+    label: 'DeepSeek (Official)',
+    defaultApiUrl: 'https://api.deepseek.com/v1',
+    suggestedModels: [
+      { id: 'deepseek-chat', displayName: 'DeepSeek-V3 (Chat)' },
+      { id: 'deepseek-reasoner', displayName: 'DeepSeek-R1 (Reasoner)' },
+    ],
+  },
+  {
+    id: PROVIDERS.OPENROUTER,
+    label: 'OpenRouter',
+    defaultApiUrl: 'https://openrouter.ai/api/v1',
+    suggestedModels: [
+      { id: 'deepseek/deepseek-r1', displayName: 'DeepSeek R1 (OpenRouter)' },
+      { id: 'anthropic/claude-3.5-sonnet', displayName: 'Claude 3.5 Sonnet' },
+      { id: 'meta-llama/llama-3.3-70b-instruct', displayName: 'Llama 3.3 70B' },
+      { id: 'qwen/qwen-2.5-coder-32b-instruct', displayName: 'Qwen 2.5 Coder 32B' },
+    ],
+  },
+  {
+    id: PROVIDERS.GROQ,
+    label: 'Groq (Ultra Fast)',
+    defaultApiUrl: 'https://api.groq.com/openai/v1',
+    suggestedModels: [
+      { id: 'llama-3.3-70b-versatile', displayName: 'Llama 3.3 70B Versatile' },
+      { id: 'mixtral-8x7b-32768', displayName: 'Mixtral 8x7B (32k)' },
+      { id: 'deepseek-r1-distill-llama-70b', displayName: 'DeepSeek R1 Distill 70B' },
+    ],
+  },
+  {
+    id: PROVIDERS.OLLAMA,
+    label: 'Ollama (Local)',
+    defaultApiUrl: 'http://localhost:11434/v1',
+    suggestedModels: [
+      { id: 'llama3', displayName: 'Llama 3 Local' },
+      { id: 'deepseek-r1:8b', displayName: 'DeepSeek R1 8B Local' },
+      { id: 'qwen2.5-coder', displayName: 'Qwen 2.5 Coder Local' },
+    ],
+  },
+  {
+    id: PROVIDERS.ANTHROPIC,
+    label: 'Anthropic Claude',
+    defaultApiUrl: 'https://api.anthropic.com/v1',
+    suggestedModels: [
+      { id: 'claude-3-5-sonnet-latest', displayName: 'Claude 3.5 Sonnet' },
+      { id: 'claude-3-5-haiku-latest', displayName: 'Claude 3.5 Haiku' },
+    ],
+  },
+  {
+    id: PROVIDERS.MISTRAL,
+    label: 'Mistral AI',
+    defaultApiUrl: 'https://api.mistral.ai/v1',
+    suggestedModels: [
+      { id: 'mistral-large-latest', displayName: 'Mistral Large' },
+      { id: 'codestral-latest', displayName: 'Codestral (Code)' },
+    ],
+  },
+  {
+    id: PROVIDERS.KIMI,
+    label: 'Moonshot (Kimi)',
+    defaultApiUrl: 'https://api.moonshot.ai/v1',
+    suggestedModels: [
+      { id: 'moonshot-v1-8k', displayName: 'Kimi Moonshot 8k' },
+      { id: 'moonshot-v1-32k', displayName: 'Kimi Moonshot 32k' },
+    ],
+  },
+];

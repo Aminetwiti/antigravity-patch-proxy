@@ -3,6 +3,33 @@
  */
 
 /**
+ * CustomModelFileEntry is also exported by ./proxy/types. We re-export
+ * the legacy customModelStore definition here under an alias so the
+ * ipcHandlers can refer to either type without name clashes.
+ */
+export interface CustomModelFileEntry {
+  name: string;
+  displayName?: string;
+  description?: string;
+  provider?: string;
+  apiKey?: string;
+  apiUrl?: string;
+  externalModelName?: string;
+  allowUnauthorized?: boolean;
+  encrypted?: boolean;
+  enabled?: boolean;
+  useRawBaseUrl?: boolean;
+  extraHeaders?: Record<string, string>;
+  extraBody?: Record<string, unknown>;
+  models?: Array<{
+    id: string;
+    displayName?: string;
+    description?: string;
+    enabled?: boolean;
+  }>;
+}
+
+/**
  * Configuration for a user-defined custom model.
  */
 export interface CustomModel {
@@ -15,6 +42,9 @@ export interface CustomModel {
   externalModelName: string;
   allowUnauthorized?: boolean;
   encrypted?: boolean;
+  useRawBaseUrl?: boolean;
+  extraHeaders?: Record<string, string>;
+  extraBody?: Record<string, unknown>;
   _slug?: string;
   timeout?: number;
   maxRetries?: number;
@@ -35,9 +65,8 @@ export interface CustomModel {
   mode?: string;
 }
 
-/**
- * Shape of a Gemini-format request body.
- */
+
+
 export interface GeminiRequestBody {
   model?: string;
   modelId?: string;

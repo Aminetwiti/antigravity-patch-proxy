@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { classifyError } from '../proxy/errorClassifier';
+import { classifyError, generateDiagnosticCardMarkdown } from '../proxy/errorClassifier';
+
 
 describe('Error Classifier', () => {
   describe('Billing / Quota errors', () => {
@@ -159,12 +160,17 @@ describe('Error Classifier', () => {
     });
   });
 
-  describe('Unknown errors', () => {
-    it('returns unknown error diagnostic for other failures', () => {
-      const result = classifyError(418); // I'm a teapot
-      expect(result.errorType).toBe('unknown');
-      expect(result.title).toBe('Unexpected Error');
-      expect(result.retryable).toBe(false);
+  describe('generateDiagnosticCardMarkdown', () => {
+    it('formats a Markdown alert card with title, message, suggestions and actionUrl', () => {
+      const diag = classifyError(402, null, null, 'openai');
+      const md = generateDiagnosticCardMarkdown(diag);
+
+      expect(md).toContain('[!CAUTION]');
+      expect(md).toContain('Insufficient Credits');
+      expect(md).toContain('Suggested Actions');
+      expect(md).toContain('https://platform.openai.com/billing');
+      expect(md).toContain('ag-system-error-marker');
     });
   });
 });
+

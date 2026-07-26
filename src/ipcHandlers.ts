@@ -10,9 +10,15 @@ import { extensionAuthorities } from './customScheme';
 import { updateTrayAgentCount } from './tray';
 import { StorageManager } from './storage';
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const cryptoStore = require('./cryptoStore');
+import * as cryptoStore from './cryptoStore';
 import * as customModelStore from './customModelStore';
+// Avoid TS2440 name clash with customModelStore's own CustomModelFileEntry.
+import type { CustomModelFileEntry as CustomModelFileEntryFromTypes } from './proxy/types';
+import { WELL_KNOWN_PRESETS } from './presets';
+import * as configExchange from './configExchange';
+
+
+
 
 /**
  * Registers all IPC handlers for the main process.
@@ -115,6 +121,39 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
     }));
   });
 
+  ipcMain.handle('storage:get-well-known-presets', async () => {
+    return WELL_KNOWN_PRESETS;
+  });
+
+  ipcMain.handle('storage:test-provider-health', async (_event, params: customModelStore.TestModelParams) => {
+    return customModelStore.testProviderHealth(params);
+  });
+
+  ipcMain.handle('storage:export-providers-base64', async () => {
+    try {
+      const providers = await customModelStore.loadProviders();
+      const base64 = configExchange.exportProvidersToBase64(providers);
+      return { success: true, base64, count: providers.length };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle('storage:import-providers-base64', async (_event, base64Str: string, strategy: configExchange.MergeStrategy = 'merge') => {
+    try {
+      const incoming = configExchange.parseProvidersFromBase64(base64Str);
+      const existing = await customModelStore.loadProviders();
+      const res = configExchange.mergeProviderConfigs(existing, incoming, strategy);
+      await customModelStore.saveProviders(res.providers);
+      return res;
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  });
+
+
+
+
   ipcMain.handle('storage:save-provider', async (_event, newProvider: customModelStore.ProviderFileEntry) => {
     try {
       const providers = await customModelStore.loadProviders();
@@ -179,7 +218,9 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
   ipcMain.handle('storage:export-providers', async () => {
     try {
       const providers = await customModelStore.loadProviders();
-      const saveResult = await (dialog as any).showSaveDialog({
+      const saveResult = await (dialog as unknown as {
+        showSaveDialog: (opts: { title: string; defaultPath: string; filters: Array<{ name: string; extensions: string[] }>; }) => Promise<{ canceled: boolean; filePath?: string }>;
+      }).showSaveDialog({
         title: 'Export Provider Configuration',
         defaultPath: 'antigravity_providers.json',
         filters: [{ name: 'JSON Files', extensions: ['json'] }],
@@ -193,6 +234,7 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
       return { success: false, error: (err as Error).message };
     }
   });
+
 
   ipcMain.handle('storage:get-doctor-diagnostics', async () => {
     try {

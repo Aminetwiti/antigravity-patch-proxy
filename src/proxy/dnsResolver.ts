@@ -104,6 +104,29 @@ export function resolveWithSystemDns(hostname: string): Promise<string[]> {
 }
 
 /**
+ * In-memory DNS cache – stores the last successfully resolved IP for each
+ * hostname so we can reuse it when all DNS servers are unreachable.
+ * Entries expire after DNS_CACHE_TTL_MS.
+ */
+const DNS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const dnsCache = new Map<string, { ip: string; ts: number }>();
+
+function cacheDnsResult(hostname: string, ip: string): void {
+  dnsCache.set(hostname, { ip, ts: Date.now() });
+}
+
+function getCachedDns(hostname: string): string | undefined {
+  const entry = dnsCache.get(hostname);
+  if (!entry) return undefined;
+  // Use cached entry even if stale – it's better than nothing when DNS is down.
+  // The TTL is only used to log a warning.
+  if (Date.now() - entry.ts > DNS_CACHE_TTL_MS) {
+    log.warn(`[Proxy] Using stale DNS cache for ${hostname} (age: ${Math.round((Date.now() - entry.ts) / 1000)}s)`);
+  }
+  return entry.ip;
+}
+
+/**
  * Resolve a hostname to an IPv4 address.
  *
  * For googleapis.com hostnames, this bypasses the local hosts file by
@@ -134,6 +157,7 @@ export async function resolveGoogleIp(hostname: string): Promise<string> {
       const ip = pickBestAddress(result.value);
       if (ip) {
         log.info(`[Proxy] resolveGoogleIp using public DNS ${ip} for ${hostname}`);
+        cacheDnsResult(hostname, ip);
         return ip;
       }
     }
@@ -153,11 +177,19 @@ export async function resolveGoogleIp(hostname: string): Promise<string> {
     const ip = pickBestAddress(systemAddresses);
     if (ip) {
       log.info(`[Proxy] resolveGoogleIp using system DNS ${ip} for ${hostname}`);
+      cacheDnsResult(hostname, ip);
       return ip;
     }
     log.warn(`[Proxy] System DNS returned only loopback/private for ${hostname}:`, systemAddresses);
   } catch (err) {
     log.warn(`[Proxy] System DNS fallback failed for ${hostname}:`, (err as Error).message);
+  }
+
+  // 2.5. Try previously cached DNS result before hardcoded fallback.
+  const cachedIp = getCachedDns(hostname);
+  if (cachedIp) {
+    log.info(`[Proxy] resolveGoogleIp using cached DNS ${cachedIp} for ${hostname}`);
+    return cachedIp;
   }
 
   // 3. Last resort: use a cached/predefined fallback IP.

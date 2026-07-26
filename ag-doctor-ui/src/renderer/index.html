@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; img-src 'self' data:;" />
-  <title>Antigravity Doctor — Diagnostic &amp; Repair</title>
+  <title>ag-doctor — Diagnostic & Repair</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <!-- PERF: load Google Fonts as a non-render-blocking print stylesheet, then
@@ -42,7 +42,7 @@
         </div>
         <div class="brand-text">
           <span class="brand-name">Antigravity Doctor</span>
-          <span class="brand-tag">Diagnostic &amp; Repair</span>
+          <span class="brand-tag">Diagnostic & repair</span>
         </div>
       </div>
     </div>
@@ -53,79 +53,93 @@
   </header>
 
   <main class="app">
-    <!-- Activity Bar (VS Code-style vertical icon rail) -->
-    <aside class="activity-bar" aria-label="Activity">
-      <button class="activity-item active" data-activity="explorer" type="button" data-tooltip="Explorer (Ctrl+Shift+E)" aria-label="Explorer">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-7l-2-2H5a2 2 0 0 0-2 2z"/></svg>
-      </button>
-      <button class="activity-item" data-activity="search" type="button" data-tooltip="Search (Ctrl+Shift+F)" aria-label="Search">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      </button>
-      <button class="activity-item" data-activity="doctor" type="button" data-tooltip="Doctor" aria-label="Doctor">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-      </button>
-      <button class="activity-item" data-activity="models" type="button" data-tooltip="Models" aria-label="Models">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 10v6M4.22 4.22l4.24 4.24m7.08 7.08l4.24 4.24M1 12h6m10 0h6M4.22 19.78l4.24-4.24m7.08-7.08l4.24-4.24"/></svg>
-      </button>
-      <button class="activity-item" data-activity="logs" type="button" data-tooltip="Logs" aria-label="Logs">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-      </button>
-      <button class="activity-item" data-activity="mitm" type="button" data-tooltip="MITM Proxy" aria-label="MITM Proxy">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-      </button>
-      <div class="activity-spacer"></div>
-      <button class="activity-item" data-activity="settings" type="button" data-tooltip="Settings (Ctrl+,)" aria-label="Settings">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      </button>
-    </aside>
-
     <!-- Sidebar -->
     <nav class="sidebar" aria-label="Main navigation">
+      <div class="sidebar-brand-row">
+        <div class="brand-mark">
+          <svg viewBox="0 0 32 32" width="18" height="18" aria-hidden="true">
+            <defs>
+              <linearGradient id="agSide" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stop-color="#388bfd"/>
+                <stop offset="100%" stop-color="#a371f7"/>
+              </linearGradient>
+            </defs>
+            <path d="M16 3 L27 9 L27 23 L16 29 L5 23 L5 9 Z" fill="url(#agSide)"/>
+          </svg>
+        </div>
+        <div class="sidebar-brand-text">
+          <div class="sidebar-brand-name">Antigravity</div>
+          <div class="sidebar-brand-tag">Diagnostic · repair</div>
+        </div>
+      </div>
+
+      <div class="sidebar-cta-wrap">
+        <button class="btn sidebar-cta" id="sidebarRunBtn" type="button" aria-label="Run doctor diagnostic">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Run doctor
+        </button>
+      </div>
+
       <ul class="nav-list">
-        <li><button class="nav-item active" data-view="dashboard" type="button">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-          <span>Dashboard</span>
-        </button></li>
-        <li><button class="nav-item" data-view="antigravity" type="button">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-          <span>Antigravity</span>
-        </button></li>
-        <li><button class="nav-item" data-view="doctor" type="button">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-          <span>Diagnostic</span>
-        </button></li>
-        <li><button class="nav-item" data-view="models" type="button">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 10v6M4.22 4.22l4.24 4.24m7.08 7.08l4.24 4.24M1 12h6m10 0h6M4.22 19.78l4.24-4.24m7.08-7.08l4.24-4.24"/></svg>
-          <span>Models</span>
-        </button></li>
-        <li><button class="nav-item" data-view="mitm" type="button">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
-          <span>MITM Proxy</span>
-        </button></li>
-        <li><button class="nav-item" data-view="patch" type="button">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-          <span>Patch</span>
-        </button></li>
-        <li><button class="nav-item" data-view="logs" type="button">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-          <span>Logs</span>
-        </button></li>
-        <li><button class="nav-item" data-view="settings" type="button">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-          <span>Settings</span>
-        </button></li>
-        <li><button class="nav-item" data-view="info" type="button">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-          <span>System</span>
-        </button></li>
+        <div class="nav-group">
+          <li><span class="nav-group-label">Overview</span></li>
+          <li><button class="nav-item active" data-view="dashboard" type="button">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            <span>Dashboard</span>
+          </button></li>
+        </div>
+
+        <div class="nav-group">
+          <li><span class="nav-group-label">Diagnostics</span></li>
+          <li><button class="nav-item" data-view="doctor" type="button">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            <span>Diagnostic</span>
+          </button></li>
+          <li><button class="nav-item" data-view="logs" type="button">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            <span>Logs</span>
+          </button></li>
+          <li><button class="nav-item" data-view="patch" type="button">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+            <span>Patch</span>
+          </button></li>
+          <li><button class="nav-item" data-view="mitm" type="button">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+            <span>MITM Proxy</span>
+          </button></li>
+        </div>
+
+        <div class="nav-group">
+          <li><span class="nav-group-label">Configuration</span></li>
+          <li><button class="nav-item" data-view="models" type="button">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 10v6M4.22 4.22l4.24 4.24m7.08 7.08l4.24 4.24M1 12h6m10 0h6M4.22 19.78l4.24-4.24m7.08-7.08l4.24-4.24"/></svg>
+            <span>Models</span>
+          </button></li>
+          <li><button class="nav-item" data-view="antigravity" type="button">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+            <span>Antigravity</span>
+          </button></li>
+          <li><button class="nav-item" data-view="settings" type="button">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <span>Settings</span>
+          </button></li>
+        </div>
+
+        <div class="nav-group">
+          <li><span class="nav-group-label">About</span></li>
+          <li><button class="nav-item" data-view="info" type="button">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            <span>Antigravity</span>
+          </button></li>
+        </div>
       </ul>
+
       <div class="sidebar-footer">
-        <div class="footer-card">
-          <div class="footer-title">Quick action</div>
-          <button class="btn btn-primary btn-sm" id="quickRunBtn" type="button">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            Run diagnostic
-          </button>
+        <div class="sidebar-footer-card">
+          <div class="sidebar-footer-title">Antigravity doctor</div>
+          <p style="font-size:11px; color:var(--text-2); margin:0; line-height:1.5;">
+            One-click diagnostics and repair for your Antigravity install.
+          </p>
         </div>
       </div>
     </nav>
@@ -140,27 +154,27 @@
             <p class="subtitle">Antigravity diagnostic &amp; repair dashboard</p>
           </div>
           <div class="header-actions">
-            <button class="btn btn-ghost" id="refreshBtn" type="button">
+            <button class="btn btn-ghost" id="refreshBtn" type="button" aria-label="Refresh all panels">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-              Refresh
+              Refresh all
             </button>
-            <button class="btn btn-ghost" id="repairBtn" type="button">
+            <button class="btn btn-ghost" id="repairBtn" type="button" aria-label="Run repair">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
               Repair
             </button>
-            <button class="btn btn-warning" id="fixAllBtn" type="button" title="Run full auto-repair with admin elevation">
+            <button class="btn btn-warning" id="fixAllBtn" type="button" title="Run full auto-repair with admin elevation (UAC)" aria-label="Run full auto-repair with admin elevation">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4"/><path d="M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9c2.5 0 4.76 1.02 6.39 2.66"/></svg>
               Fix All
             </button>
-            <button class="btn btn-ghost" id="startStubBtn" type="button" title="Start emergency proxy stub on port 50999">
+            <button class="btn btn-ghost" id="startStubBtn" type="button" title="Start the emergency proxy stub on port 50999" aria-label="Start the emergency proxy stub on port 50999">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-              Start Stub
+              Start stub
             </button>
-            <button class="btn btn-ghost" id="dashboardAddModelBtn" type="button">
+            <button class="btn btn-ghost" id="dashboardAddModelBtn" type="button" aria-label="Add a custom model">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
               Add model
             </button>
-            <button class="btn btn-primary" id="runDoctorBtn" type="button">
+            <button class="btn btn-primary" id="runDoctorBtn" type="button" aria-label="Run doctor diagnostic">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
               Run doctor
             </button>
@@ -180,12 +194,12 @@
                 <span class="ag-hero-label" id="dashHeroLabel">Idle</span>
               </div>
               <h2 class="ag-hero-title" id="dashHeroTitle">ag-doctor</h2>
-              <p class="ag-hero-meta" id="dashHeroMeta">Click <strong>Run doctor</strong> to start a comprehensive diagnostic.</p>
+              <p class="ag-hero-meta" id="dashHeroMeta">Press <strong>Run doctor</strong> to scan Antigravity, MITM, patches, and models.</p>
             </div>
             <div class="ag-hero-actions">
-              <button class="btn btn-primary" id="quickRunBtn" type="button">
+              <button class="btn btn-primary" id="heroRunBtn" type="button" aria-label="Run doctor diagnostic">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                Run diagnostic
+                Run doctor
               </button>
             </div>
           </div>
@@ -196,8 +210,8 @@
             <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
           </div>
           <div class="home-intro-body">
-            <h2>System Objectives</h2>
-            <p>ag-doctor checks Antigravity status, manages the MITM proxy, applies binary patches, and ensures custom models function cleanly. Use the checklist below to track objective status.</p>
+            <h2>System objectives</h2>
+            <p>ag-doctor checks Antigravity, manages the MITM proxy, applies binary patches, and verifies your custom models. Use the checklist below to track each objective.</p>
           </div>
         </div>
 
@@ -225,7 +239,7 @@
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
             </div>
             <div class="stat-body">
-              <div class="stat-label">Errors</div>
+              <div class="stat-label">Issues</div>
               <div class="stat-value" id="statErr">—</div>
             </div>
           </div>
@@ -234,7 +248,7 @@
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/></svg>
             </div>
             <div class="stat-body">
-              <div class="stat-label">Models</div>
+              <div class="stat-label">Custom models</div>
               <div class="stat-value" id="statModels">—</div>
             </div>
           </div>
@@ -253,11 +267,11 @@
               </div>
               <div class="objective-item" id="obj-mitm">
                 <div class="objective-icon pending"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/></svg></div>
-                <div class="objective-body"><div class="objective-title">Verify &amp; manage MITM proxy status</div><div class="objective-status">Pending</div></div>
+                <div class="objective-body"><div class="objective-title">Verify &amp; manage MITM proxy</div><div class="objective-status">Pending</div></div>
               </div>
               <div class="objective-item" id="obj-doctor">
                 <div class="objective-icon pending"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/></svg></div>
-                <div class="objective-body"><div class="objective-title">Run system diagnostic (Doctor)</div><div class="objective-status">Pending</div></div>
+                <div class="objective-body"><div class="objective-title">Run system diagnostic</div><div class="objective-status">Pending</div></div>
               </div>
               <div class="objective-item" id="obj-patch">
                 <div class="objective-icon pending"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/></svg></div>
@@ -281,10 +295,10 @@
                 <div class="empty-icon">
                   <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
                 </div>
-                <p style="margin-bottom: 12px;">No diagnostic results yet. Run Doctor to scan your environment for issues.</p>
-                <button class="btn btn-primary btn-sm" id="emptyStateRunDoctorBtn" type="button">
+                <p style="margin-bottom: 12px;">No diagnostic results yet. We'll scan Antigravity, MITM, patches, and models — usually finishes in under 5 seconds.</p>
+                <button class="btn btn-primary btn-sm" id="emptyStateRunDoctorBtn" type="button" aria-label="Run doctor diagnostic">
                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                  Run diagnostic
+                  Run doctor
                 </button>
               </div>
             </div>
@@ -304,19 +318,19 @@
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
               Refresh
             </button>
-            <button class="btn btn-primary" id="agLaunchBtn" type="button">
+            <button class="btn btn-primary" id="agLaunchBtn" type="button" aria-label="Launch Antigravity">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
               Launch
             </button>
-            <button class="btn btn-primary" id="agLaunchLogsBtn" type="button" title="Launch Antigravity and follow logs">
+            <button class="btn btn-primary" id="agLaunchLogsBtn" type="button" title="Launch Antigravity and follow live logs" aria-label="Launch Antigravity and follow live logs">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-              Launch & Logs
+              Launch &amp; follow logs
             </button>
-            <button class="btn btn-ghost" id="agKillBtn" type="button">
+            <button class="btn btn-ghost" id="agKillBtn" type="button" aria-label="Close Antigravity">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12"/></svg>
-              Close
+              Close Antigravity
             </button>
-            <button class="btn btn-ghost" id="agRestartBtn" type="button">
+            <button class="btn btn-ghost" id="agRestartBtn" type="button" aria-label="Restart Antigravity">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
               Restart
             </button>
@@ -413,18 +427,18 @@
             <p class="subtitle">Manage the local TLS proxy and CA certificate</p>
           </div>
           <div class="header-actions">
-            <button class="btn btn-ghost" id="mitmInstallBtn" type="button">Install CA</button>
-            <button class="btn btn-ghost" id="mitmUninstallBtn" type="button">Uninstall CA</button>
-            <button class="btn btn-primary" id="mitmProxyOnBtn" type="button">Proxy ON</button>
-            <button class="btn btn-primary" id="mitmProxyOffBtn" type="button">Proxy OFF</button>
-            <button class="btn btn-ghost" id="mitmExportCaBtn" type="button">Export CA</button>
+            <button class="btn btn-ghost" id="mitmInstallBtn" type="button" aria-label="Install MITM CA certificate">Install CA certificate</button>
+            <button class="btn btn-ghost" id="mitmUninstallBtn" type="button" aria-label="Remove MITM CA certificate">Remove CA certificate</button>
+            <button class="btn btn-primary" id="mitmProxyOnBtn" type="button" aria-label="Enable MITM proxy">Enable proxy</button>
+            <button class="btn btn-primary" id="mitmProxyOffBtn" type="button" aria-label="Disable MITM proxy">Disable proxy</button>
+            <button class="btn btn-ghost" id="mitmExportCaBtn" type="button" aria-label="Export MITM CA certificate">Export CA certificate</button>
           </div>
         </div>
         <div class="patch-banner err" id="mitmRequiredBanner" role="alert" aria-live="polite" style="margin-bottom: 16px;">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
           <div class="patch-banner-body">
-            <div class="patch-banner-title">MITM on 443 Required (Antigravity 2.2.x)</div>
-            <div class="patch-banner-text">Antigravity 2.2.x <strong>REQUIRES</strong> MITM on port 443. Without it, the Language Server will continue to fail with <code>127.0.0.1:443 refused</code>. Ensure the proxy is listening on 443 and the CA certificate is installed.</div>
+            <div class="patch-banner-title">MITM on port 443 required for Antigravity 2.2.x</div>
+            <div class="patch-banner-text">Antigravity 2.2.x <strong>requires</strong> MITM on port 443. Without it, the language server fails with <code>127.0.0.1:443 refused</code>. Make sure the proxy is listening on 443 and the CA certificate is installed.</div>
           </div>
         </div>
         <div id="mitmStatus" class="mitm-status">
@@ -440,8 +454,8 @@
             <p class="subtitle">Detailed output from <code>ag-doctor doctor</code></p>
           </div>
           <div class="header-actions">
-            <button class="btn btn-ghost" id="doctorJsonBtn" type="button">JSON</button>
-            <button class="btn btn-primary" id="doctorRunBtn" type="button">Run again</button>
+            <button class="btn btn-ghost" id="doctorJsonBtn" type="button" title="Show the raw JSON returned by the doctor command" aria-label="Show raw JSON output">Show JSON</button>
+            <button class="btn btn-primary" id="doctorRunBtn" type="button" aria-label="Run doctor diagnostic again">Run doctor again</button>
           </div>
         </div>
         <div class="panel">
@@ -459,11 +473,11 @@
             <p class="subtitle">Configured providers and their status</p>
           </div>
           <div class="header-actions">
-            <button class="btn btn-ghost" id="modelsTestBtn" type="button">
+            <button class="btn btn-ghost" id="modelsTestBtn" type="button" aria-label="Test all custom models">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-              Test all
+              Test all models
             </button>
-            <button class="btn btn-primary" id="modelsAddBtn" type="button">
+            <button class="btn btn-primary" id="modelsAddBtn" type="button" aria-label="Add a custom model">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
               Add model
             </button>
@@ -476,7 +490,7 @@
                 <div class="empty-icon">
                   <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/></svg>
                 </div>
-                <p>Loading models…</p>
+                <p>No models configured yet. <strong>Add model</strong> to connect a custom OpenAI- or Anthropic-compatible provider.</p>
               </div>
             </div>
           </div>
@@ -491,8 +505,8 @@
             <p class="subtitle">Select the matching patch family to safely redirect <code>language_server</code> to the local proxy.</p>
           </div>
           <div class="header-actions">
-            <button class="btn btn-ghost" id="patchRestoreBtn" type="button">Restore</button>
-            <button class="btn btn-primary" id="patchApplyBtn" type="button">Apply patch</button>
+            <button class="btn btn-ghost" id="patchRestoreBtn" type="button" title="Restore the original binary from the most recent backup" aria-label="Restore original binary from backup">Restore from backup</button>
+            <button class="btn btn-primary" id="patchApplyBtn" type="button" aria-label="Apply binary patch">Apply patch</button>
           </div>
         </div>
 
@@ -505,11 +519,11 @@
                 <div class="patch-version-detector-version" id="patchDetectedVersion">—</div>
                 <div class="patch-version-detector-meta" id="patchDetectedMeta">
                   <span class="badge badge-muted" id="patchDetectedSource">analyzing…</span>
-                  <span class="badge badge-muted" id="patchRecommendedBadge">auto-detected</span>
+                  <span class="badge badge-muted" id="patchRecommendedBadge">recommended</span>
                 </div>
               </div>
               <div class="patch-version-detector-actions">
-                <button class="btn btn-ghost btn-sm" id="patchRescanBtn" type="button" title="Re-scan Antigravity installation">
+                <button class="btn btn-ghost btn-sm" id="patchRescanBtn" type="button" title="Re-scan the Antigravity installation" aria-label="Re-scan Antigravity installation">
                   <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                   Re-scan
                 </button>
@@ -556,7 +570,7 @@
                 <div class="patch-banner-title">Manual selection active</div>
                 <div class="patch-banner-text" id="patchOverrideBannerText">—</div>
               </div>
-              <button class="btn btn-ghost btn-sm" id="patchClearOverrideBtn" type="button">Reset to auto-detection</button>
+              <button class="btn btn-ghost btn-sm" id="patchClearOverrideBtn" type="button" aria-label="Reset patch selection to auto-detect">Reset to auto-detect</button>
             </div>
           </div>
         </div>
@@ -565,7 +579,7 @@
         <div class="panel">
           <div class="panel-body">
             <div id="patchStatus" class="patch-status">
-              <div class="empty-state"><p>Loading…</p></div>
+              <div class="empty-state"><p>Loading patch status…</p></div>
             </div>
           </div>
         </div>
@@ -576,14 +590,14 @@
         <div class="view-header">
           <div>
             <h1>Logs</h1>
-            <p class="subtitle"><code>language_server</code> output</p>
+            <p class="subtitle">Live output from <code>language_server</code> and related processes</p>
           </div>
           <div class="header-actions">
-            <button class="btn btn-ghost" id="logsClearBtn" type="button">Clear</button>
-            <button class="btn btn-ghost" id="logsCopyBtn" type="button">Copy</button>
-            <button class="btn btn-primary" id="logsFollowBtn" type="button">
+            <button class="btn btn-ghost" id="logsClearBtn" type="button" aria-label="Clear logs">Clear logs</button>
+            <button class="btn btn-ghost" id="logsCopyBtn" type="button" aria-label="Copy logs to clipboard">Copy logs</button>
+            <button class="btn btn-primary" id="logsFollowBtn" type="button" aria-label="Follow live logs">
               <span class="dot-live"></span>
-              Follow
+              Follow live
             </button>
           </div>
         </div>
@@ -632,11 +646,11 @@
             <p class="subtitle">Runtime, installation, and process management</p>
           </div>
           <div class="header-actions">
-            <button class="btn btn-ghost" id="agRefreshBtn" type="button">
+            <button class="btn btn-ghost" id="agRefreshBtn" type="button" aria-label="Refresh Antigravity status">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
               Refresh
             </button>
-            <button class="btn btn-primary" id="agOpenBtn" type="button">
+            <button class="btn btn-primary" id="agOpenBtn" type="button" aria-label="Open Antigravity">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
               Open Antigravity
             </button>
@@ -667,11 +681,11 @@
               <p class="ag-hero-meta" id="agHeroMeta">Detecting installation…</p>
             </div>
             <div class="ag-hero-actions">
-              <button class="btn btn-ghost btn-sm" id="agRestartBtn" type="button" title="Restart Antigravity">
+              <button class="btn btn-ghost btn-sm" id="agRestartBtn" type="button" title="Restart Antigravity" aria-label="Restart Antigravity">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/></svg>
                 Restart
               </button>
-              <button class="btn btn-ghost btn-sm" id="agRevealBtn" type="button" title="Reveal install directory">
+              <button class="btn btn-ghost btn-sm" id="agRevealBtn" type="button" title="Reveal install directory" aria-label="Reveal install directory in file explorer">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                 Reveal
               </button>
@@ -723,7 +737,7 @@
         <div class="panel">
           <div class="panel-header">
             <h2>Installation paths</h2>
-            <button class="btn btn-ghost btn-sm" id="agCopyPathsBtn" type="button">Copy all</button>
+            <button class="btn btn-ghost btn-sm" id="agCopyPathsBtn" type="button" aria-label="Copy all installation paths">Copy all</button>
           </div>
           <div class="panel-body">
             <div class="path-list" id="agPaths"></div>
@@ -737,13 +751,13 @@
               Installation detector
               <span class="badge badge-warn" id="installDetectorBadge" hidden>conflict</span>
             </h2>
-            <button class="btn btn-ghost btn-sm" id="installDetectorScanBtn" type="button">
+            <button class="btn btn-ghost btn-sm" id="installDetectorScanBtn" type="button" aria-label="Scan for Antigravity installations">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              Scan
+              Scan installations
             </button>
           </div>
           <div class="panel-body">
-            <p class="panel-subtitle" id="installDetectorSummary">Click "Scan" to detect Antigravity installations on this machine.</p>
+            <p class="panel-subtitle" id="installDetectorSummary">Click <strong>Scan installations</strong> to detect Antigravity installs on this machine.</p>
             <div class="install-grid" id="installDetectorGrid">
               <div class="skeleton-card skeleton-target"></div>
               <div class="skeleton-card skeleton-target"></div>
@@ -758,7 +772,7 @@
               Proxy monitor
               <span class="badge badge-ok" id="proxyMonitorBadge" hidden>live</span>
             </h2>
-            <button class="btn btn-ghost btn-sm" id="proxyMonitorToggleBtn" type="button">Start</button>
+            <button class="btn btn-ghost btn-sm" id="proxyMonitorToggleBtn" type="button" aria-label="Toggle proxy monitoring">Start monitoring</button>
           </div>
           <div class="panel-body">
             <div class="proxy-stats-row">
@@ -802,7 +816,7 @@
         <div class="panel">
           <div class="panel-header"><h2>Appearance</h2></div>
           <div class="panel-body">
-            <button class="btn btn-primary" id="themeToggle" type="button">Switch to light</button>
+            <button class="btn btn-primary" id="themeToggle" type="button" aria-label="Toggle light or dark theme">Switch to light theme</button>
           </div>
         </div>
         <div class="panel" style="margin-top:24px">
@@ -812,7 +826,7 @@
               <div class="patch-row-label">Path</div>
               <div class="patch-row-value" id="settingsConfigPath">—</div>
             </div>
-            <pre class="terminal" id="settingsConfigBody" style="margin-top:16px">Loading…</pre>
+            <pre class="terminal" id="settingsConfigBody" style="margin-top:16px">Loading config file…</pre>
             <div id="settingsConfigSkeleton" style="margin-top:16px; display:none">
               <div class="skeleton skeleton-line long"></div>
               <div class="skeleton skeleton-line medium"></div>
@@ -841,7 +855,7 @@
       <div class="statusbar-section statusbar-section-right">
         <span class="statusbar-item" id="statusTheme">
           <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-          <span>Dark</span>
+          <span>Dark theme</span>
         </span>
         <span class="statusbar-item" id="statusPlatform">
           <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
@@ -860,7 +874,7 @@
     <div class="modal palette-modal" role="dialog" aria-modal="true">
       <div class="palette-input-wrap">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input type="text" id="paletteInput" class="palette-input" placeholder="Type a command…" autocomplete="off" />
+        <input type="text" id="paletteInput" class="palette-input" placeholder="Search commands and models…" aria-label="Search commands and models" autocomplete="off" />
       </div>
       <div class="palette-results" id="paletteResults"></div>
       <div class="palette-footer">
@@ -882,98 +896,29 @@
       </div>
       <div class="modal-body" id="modalBody"></div>
       <div class="modal-footer">
-        <button class="btn btn-ghost" id="modalCancel" type="button">Cancel</button>
-        <button class="btn btn-primary" id="modalConfirm" type="button">Confirm</button>
+        <button class="btn btn-ghost" id="modalCancel" type="button" aria-label="Cancel">Cancel</button>
+        <button class="btn btn-primary" id="modalConfirm" type="button" aria-label="Confirm action">Confirm</button>
       </div>
     </div>
   </div>
 
-  <!-- Modal: Add Custom Model -->
-  <div class="modal-backdrop" id="addModelModalBackdrop" hidden>
+  <!-- Modal: Provider Manager -->
+  <div class="modal-backdrop" id="providerManagerModalBackdrop" hidden>
     <div class="modal modal-lg" role="dialog" aria-modal="true">
       <div class="modal-header">
-        <div class="modal-header-title-wrap">
-          <div class="modal-header-icon">+</div>
-          <h2>Add Custom Model</h2>
+        <div class="modal-header-title-wrap" style="display:flex; align-items:center; gap:8px;">
+          <div class="modal-header-icon" id="pmModalIcon">☁️</div>
+          <h2 id="pmModalTitle" style="margin:0; font-size:16px;">Provider Manager</h2>
         </div>
-        <button class="modal-close" id="addModelModalClose" type="button" aria-label="Close">
+        <button class="modal-close" id="providerManagerModalClose" type="button" aria-label="Close modal">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
       <div class="modal-body">
-        <!-- Step indicators -->
-        <div class="step-indicators">
-          <div id="addStep1Indicator" class="step-indicator active">
-            <div id="addStep1Badge" class="step-badge">1</div>
-            <div>
-              <div class="step-title">Configure API</div>
-              <div class="step-subtitle">Provider, URL &amp; key</div>
-            </div>
-          </div>
-          <div class="step-divider"></div>
-          <div id="addStep2Indicator" class="step-indicator inactive">
-            <div id="addStep2Badge" class="step-badge">2</div>
-            <div>
-              <div class="step-title">Select Models</div>
-              <div class="step-subtitle">Choose models to add</div>
-            </div>
-          </div>
-        </div>
-
-        <form id="addModelForm">
-          <!-- Step 1: Configure API -->
-          <div id="addStep1">
-            <div class="form-group">
-              <label for="modelProviderType">Provider Type</label>
-              <select id="modelProviderType" class="input" required>
-                <option value="openai">OpenAI Compatible</option>
-                <option value="anthropic">Anthropic Compatible</option>
-              </select>
-              <div class="form-hint">Select the API format your provider uses.</div>
-            </div>
-            <div class="form-group">
-              <label for="modelApiUrl">API URL</label>
-              <input type="url" id="modelApiUrl" class="input" placeholder="https://api.example.com/v1/chat/completions" required />
-              <div class="form-hint">The chat/completions or messages endpoint.</div>
-            </div>
-            <div class="form-group">
-              <label for="modelApiKey">API Key <span class="form-hint">(optional)</span></label>
-              <input type="password" id="modelApiKey" class="input" placeholder="sk-..." />
-            </div>
-            <div class="form-group form-group-checkbox">
-              <input type="checkbox" id="modelAllowUnauthorized" class="form-checkbox" />
-              <label for="modelAllowUnauthorized" class="form-label-inline">Allow self-signed / unauthorized certificates</label>
-            </div>
-            <div id="fetchModelsError" class="form-error-banner"></div>
-          </div>
-
-          <!-- Step 2: Select Models -->
-          <div id="addStep2" hidden>
-            <div class="form-group">
-              <label>Display Name Suffix <span class="form-hint">(optional)</span></label>
-              <input type="text" id="modelDisplayNameSuffix" class="input" placeholder="e.g. My Provider" />
-            </div>
-            <div class="form-group">
-              <div class="form-header-row">
-                <label>Available Models</label>
-                <button type="button" id="refetchModelsBtn" class="btn btn-ghost btn-sm">Refetch</button>
-              </div>
-              <div id="fetchedModelsList" class="fetched-models-container">
-                <div class="fetched-models-empty">
-                  Fetch models to see available options.
-                </div>
-              </div>
-            </div>
-            <div id="saveModelsError" class="form-error-banner"></div>
-          </div>
-        </form>
+        <div id="pmListContainer" class="modal-list"></div>
+        <form id="pmFormContainer" class="modal-form" style="display:none; flex-direction:column; gap:16px;"></form>
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" id="addModelModalCancel" type="button">Cancel</button>
-        <button class="btn btn-primary" id="addModelModalBack" type="button" hidden>Back</button>
-        <button class="btn btn-primary" id="addModelModalFetch" type="button">Fetch Models</button>
-        <button class="btn btn-primary" id="addModelModalSave" type="button" hidden>Add Selected Models</button>
-      </div>
+      <div class="modal-footer" id="pmModalFooter"></div>
     </div>
   </div>
 

@@ -47,9 +47,10 @@ const http = __importStar(require("http"));
 const https = __importStar(require("https"));
 const customScheme_1 = require("./customScheme");
 const tray_1 = require("./tray");
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const cryptoStore = require('./cryptoStore');
+const cryptoStore = __importStar(require("./cryptoStore"));
 const customModelStore = __importStar(require("./customModelStore"));
+const presets_1 = require("./presets");
+const configExchange = __importStar(require("./configExchange"));
 /**
  * Registers all IPC handlers for the main process.
  */
@@ -144,6 +145,34 @@ function registerIpcHandlers(storageManager) {
             ...p,
             apiKey: customModelStore.maskApiKey(p.apiKey)
         }));
+    });
+    electron_1.ipcMain.handle('storage:get-well-known-presets', async () => {
+        return presets_1.WELL_KNOWN_PRESETS;
+    });
+    electron_1.ipcMain.handle('storage:test-provider-health', async (_event, params) => {
+        return customModelStore.testProviderHealth(params);
+    });
+    electron_1.ipcMain.handle('storage:export-providers-base64', async () => {
+        try {
+            const providers = await customModelStore.loadProviders();
+            const base64 = configExchange.exportProvidersToBase64(providers);
+            return { success: true, base64, count: providers.length };
+        }
+        catch (err) {
+            return { success: false, error: err.message };
+        }
+    });
+    electron_1.ipcMain.handle('storage:import-providers-base64', async (_event, base64Str, strategy = 'merge') => {
+        try {
+            const incoming = configExchange.parseProvidersFromBase64(base64Str);
+            const existing = await customModelStore.loadProviders();
+            const res = configExchange.mergeProviderConfigs(existing, incoming, strategy);
+            await customModelStore.saveProviders(res.providers);
+            return res;
+        }
+        catch (err) {
+            return { success: false, error: err.message };
+        }
     });
     electron_1.ipcMain.handle('storage:save-provider', async (_event, newProvider) => {
         try {

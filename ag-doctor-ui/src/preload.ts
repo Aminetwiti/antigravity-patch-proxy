@@ -11,6 +11,14 @@ export interface RunResult {
 
 const api = {
   run: (args: string[]): Promise<RunResult> => ipcRenderer.invoke('ag:run', args),
+
+  // Provider Management APIs
+  providers: {
+    get: (): Promise<unknown[]> => ipcRenderer.invoke('ag:providers:get'),
+    save: (p: unknown): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('ag:providers:save', p),
+    delete: (id: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('ag:providers:delete', id),
+    test: (params: { apiUrl: string; apiKey: string }): Promise<{ success: boolean; status?: number; error?: string }> => ipcRenderer.invoke('ag:providers:test', params),
+  },
   info: (): Promise<{
     platform: string;
     arch: string;

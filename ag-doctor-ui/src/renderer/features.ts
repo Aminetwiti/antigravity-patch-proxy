@@ -74,12 +74,12 @@
     if (c.exists) {
       const it = document.createElement("span");
       it.className = "install-meta-item ok";
-      it.textContent = "✓ present";
+      it.textContent = "present";
       meta.appendChild(it);
     } else {
       const it = document.createElement("span");
       it.className = "install-meta-item warn";
-      it.textContent = "✗ missing";
+      it.textContent = "missing";
       meta.appendChild(it);
     }
     card.appendChild(meta);
@@ -105,7 +105,7 @@
     try {
       const bridge = (window as any).ag;
       if (!bridge || typeof bridge.detectInstallation !== "function") {
-        summary.textContent = "Bridge unavailable: window.ag.detectInstallation() missing.";
+        summary.textContent = "Bridge unavailable: window.ag.detectInstallation() is missing.";
         grid.innerHTML = "";
         return;
       }
@@ -116,7 +116,7 @@
 
       grid.innerHTML = "";
       if (candidates.length === 0) {
-        summary.textContent = "No Antigravity installations detected.";
+        summary.textContent = "No Antigravity installations detected on this device.";
         return;
       }
 
@@ -131,7 +131,7 @@
       summary.textContent =
         candidates.length + " installation(s) detected" +
         (recommended ? `, ${recommended} recommended` : "") +
-        (hasConflict ? " — ⚠ conflict between versions" : ".");
+        (hasConflict ? " — version conflict between ports." : ".");
 
       candidates
         .sort((a, b) => Number(!!b.recommended) - Number(!!a.recommended))
@@ -223,8 +223,8 @@
       }
       if (statEl) {
         statEl.textContent = stats.running
-          ? `running${typeof stats.port === "number" ? " :" + stats.port : ""}`
-          : "stopped";
+          ? `Running${typeof stats.port === "number" ? " on port " + stats.port : ""}`
+          : "Stopped";
         statEl.className = "proxy-stat-value" + (stats.running ? " ok" : " err");
       }
       if (upEl) upEl.textContent = formatUptimeSec(stats.uptimeSec);
@@ -236,7 +236,7 @@
       }
       if (typeof stats.latencyMs === "number") pushSpark(stats.latencyMs);
     } catch {
-      /* swallow — keep polling */
+      /* swallow — keep polling so transient errors self-heal */
     }
   }
 
@@ -244,7 +244,7 @@
     if (proxyRunning) return;
     proxyRunning = true;
     const btn = proxyToggleBtn();
-    if (btn) btn.textContent = "Stop";
+    if (btn) btn.textContent = "Stop monitoring";
     const badge = proxyBadge();
     if (badge) {
       badge.hidden = false;
@@ -262,7 +262,7 @@
       proxyTimer = null;
     }
     const btn = proxyToggleBtn();
-    if (btn) btn.textContent = "Start";
+    if (btn) btn.textContent = "Start monitoring";
     const badge = proxyBadge();
     if (badge) {
       badge.hidden = false;

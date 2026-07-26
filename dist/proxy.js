@@ -65,6 +65,10 @@ const modelLoader_1 = require("./proxy/modelLoader");
 const customModelStore_1 = require("./customModelStore");
 const errorClassifier_1 = require("./proxy/errorClassifier");
 const retryStrategy_1 = require("./proxy/retryStrategy");
+const circuitBreaker_1 = require("./proxy/circuitBreaker");
+const idleTimeout_1 = require("./proxy/idleTimeout");
+const agentPool_1 = require("./proxy/agentPool");
+const emptyStream_1 = require("./proxy/emptyStream");
 function generateGracefulMarkdown(diagnostic) {
     let md = `🚨 **${diagnostic.title}**\n\n${diagnostic.message}\n\n`;
     if (diagnostic.suggestions && diagnostic.suggestions.length > 0) {
@@ -299,9 +303,56 @@ function parseRetryAfter(headers) {
     return 0;
 }
 function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount = 0, fallbackDepth = 0) {
-    // P3-18: Configurable max retries per model (default 3, min 0, max 5)
+    // P3-18: Configurable max retries per model (default 1, min 0, max 5).
+    // Lowered from 3 to 1 to prevent retry storms saturating the proxy.
     const MAX_RETRIES = (0, urlBuilder_1.resolveMaxRetries)(model);
     const REQUEST_TIMEOUT_MS = (0, urlBuilder_1.resolveRequestTimeout)(model);
+    // Circuit breaker: if this model just failed hard, short-circuit before
+    // touching the upstream. This keeps the proxy responsive so the rest of
+    // the model dropdown (and fetchAvailableModels) keeps working.
+    const openBreaker = (0, circuitBreaker_1.getOpenBreaker)(model);
+    if (openBreaker && retryCount === 0 && fallbackDepth === 0) {
+        const cached = (0, errorClassifier_1.classifyError)(openBreaker.errorType === 'rate_limit' ? 429 : 500, openBreaker.errorType, undefined, model.provider);
+        electron_log_1.default.warn(`[Proxy] Circuit OPEN for ${model.name} (${openBreaker.errorType}, tripped ${Math.round((Date.now() - openBreaker.trippedAt) / 1000)}s ago). Short-circuiting request.`);
+        // attemptFallback is defined as a nested closure below; it shares
+        // res/model/geminiBody/isStream/fallbackDepth via lexical scope.
+        const breakerAttemptFallback = (res, _model, _body, _isStream, diagnostic, _depth) => {
+            if (fallbackDepth >= 2)
+                return false;
+            try {
+                const allModels = (0, modelLoader_1.loadCustomModels)();
+                for (const m of allModels) {
+                    if (m.name !== model.name && m.apiKey && !m.apiKey.startsWith('fallback:')) {
+                        const toName = m.displayName || m.name;
+                        electron_log_1.default.warn(`[Proxy] Circuit-OPEN fallback: ${model.name} -> ${toName} (reason: ${diagnostic.errorType})`);
+                        handleCustomModelRequest(res, m, _body, _isStream, 0, fallbackDepth + 1);
+                        return true;
+                    }
+                }
+            }
+            catch (e) {
+                electron_log_1.default.error('[Proxy] Circuit-OPEN fallback exception:', e);
+            }
+            return false;
+        };
+        if (breakerAttemptFallback(res, model, geminiBody, isStream, cached, fallbackDepth)) {
+            return;
+        }
+        const statusCode = openBreaker.errorType === 'rate_limit' ? 429 : 503;
+        if (safeWriteHead(res, statusCode, {
+            'Content-Type': 'application/json',
+            'X-AG-Error-Type': cached.errorType,
+            'X-AG-Circuit': 'open',
+        })) {
+            safeEnd(res, JSON.stringify({
+                error: {
+                    message: `Model ${model.name} is temporarily unavailable (${cached.title}). Retried shortly.`,
+                },
+                _agDiagnostic: cached,
+            }));
+        }
+        return;
+    }
     function attemptFallback(diagnostic) {
         if (fallbackDepth >= 2)
             return false;
@@ -316,7 +367,37 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
             const allModels = (0, modelLoader_1.loadCustomModels)();
             for (const m of allModels) {
                 if (m.name !== model.name && m.apiKey && !m.apiKey.startsWith('fallback:')) {
-                    electron_log_1.default.warn(`[Proxy] Model ${model.name} failed with ${diagnostic.errorType} (${diagnostic.title}). Auto-falling back to ${m.displayName || m.name}...`);
+                    const fromName = model.displayName || model.name;
+                    const toName = m.displayName || m.name;
+                    electron_log_1.default.warn(`[Proxy] Auto-fallback: ${fromName} → ${toName} (reason: ${diagnostic.errorType} — ${diagnostic.title})`);
+                    // L-1: Notify the user in the stream so the fallback is transparent.
+                    // We send a brief markdown notice as the first SSE event before
+                    // delegating to the fallback model handler.
+                    if (isStream && !res.headersSent) {
+                        if (safeWriteHead(res, 200, {
+                            'Content-Type': 'text/event-stream',
+                            'Cache-Control': 'no-cache',
+                            Connection: 'keep-alive',
+                            'X-Accel-Buffering': 'no',
+                            'X-AG-Fallback': 'true',
+                        })) {
+                            const notice = {
+                                response: {
+                                    candidates: [{
+                                            content: {
+                                                parts: [{ text: `> ⚠️ **Auto-fallback:** \`${fromName}\` failed (${diagnostic.errorType}). Retrying with \`${toName}\`…\n\n` }],
+                                                role: 'model',
+                                            },
+                                            finishReason: 'STOP',
+                                            index: 0,
+                                        }],
+                                },
+                                traceId: '',
+                                metadata: {},
+                            };
+                            res.write('data: ' + JSON.stringify(notice) + '\n\n');
+                        }
+                    }
                     handleCustomModelRequest(res, m, geminiBody, isStream, 0, fallbackDepth + 1);
                     return true;
                 }
@@ -328,17 +409,24 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
         return false;
     }
     const provider = (0, urlBuilder_1.resolveProvider)(model);
-    const payload = registry.translateRequest(provider, geminiBody, model.externalModelName);
-    const headers = registry.getProviderHeaders(provider, model.apiKey);
+    const cleanModelName = (0, urlBuilder_1.getBaseModelId)(model.externalModelName);
+    const payload = registry.translateRequest(provider, geminiBody, cleanModelName, model.extraBody);
+    const headers = registry.getProviderHeaders(provider, model.apiKey, model.extraHeaders);
     if (isStream && registry.supportsStreaming(provider)) {
         payload.stream = true;
     }
     const finalUrlStr = (0, urlBuilder_1.resolveCustomModelUrl)(model, isStream, (apiUrl, externalModelName, stream, translator) => registry.getProviderUrl(apiUrl, externalModelName, stream, translator));
     const url = new URL(finalUrlStr);
-    const client = url.protocol === 'https:' ? https : http;
+    // Phase 3: per-host connection pooling via the agent cache. This avoids
+    // a fresh TLS handshake on every chat turn (vendor pattern ported from
+    // vscode-unify-chat-provider's `undici.Agent` cache). Default Node
+    // globalAgent has keepAlive=false on Node 18+, so we use a stable,
+    // keep-alive enabled agent per (scheme, host, port) tuple.
+    const { client: pooledClient, agent } = (0, agentPool_1.resolveClientForUrl)(finalUrlStr, !!model.allowUnauthorized);
     const options = {
         method: 'POST',
         headers: headers,
+        agent,
     };
     // P0-2: SSL bypass ONLY when user explicitly opts in via allowUnauthorized.
     // Custom providers no longer bypass SSL automatically.
@@ -347,7 +435,7 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
         options.rejectUnauthorized = false;
     }
     electron_log_1.default.info(`[Proxy] Routing ${model.name} to ${model.provider} (${model.apiUrl}) (isStream: ${!!isStream})${retryCount > 0 ? ` (retry ${retryCount})` : ''}`);
-    const request = client.request(url, options, (apiRes) => {
+    const request = pooledClient.request(finalUrlStr, options, (apiRes) => {
         apiRes.on('error', (err) => {
             electron_log_1.default.error(`[Proxy] Upstream stream error for ${model.name}:`, err.message);
             const diagnostic = (0, errorClassifier_1.classifyError)(500, err, undefined, model.provider);
@@ -367,12 +455,13 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
         // Common causes: missing API key, wrong header name, expired token,
         // wrong endpoint URL, account suspended.
         if (status === 401) {
-            const apiKeyPreview = model.apiKey
-                ? `${model.apiKey.slice(0, 4)}…${model.apiKey.slice(-4)} (len=${model.apiKey.length})`
-                : '<empty>';
+            // S-2: Never log actual key material — only presence and length bucket.
+            const apiKeyInfo = model.apiKey && model.apiKey !== 'none'
+                ? `<set, len=${model.apiKey.length > 50 ? '>50' : model.apiKey.length <= 20 ? '≤20' : '21-50'}>`
+                : '<empty or none>';
             electron_log_1.default.error(`[Proxy] 401 Unauthorized from ${model.name} (${model.provider})`);
             electron_log_1.default.error(`[Proxy]   URL: ${finalUrlStr}`);
-            electron_log_1.default.error(`[Proxy]   API key: ${apiKeyPreview}`);
+            electron_log_1.default.error(`[Proxy]   API key: ${apiKeyInfo}`);
             electron_log_1.default.error(`[Proxy]   Headers sent: ${Object.keys(headers).join(', ')}`);
             electron_log_1.default.error(`[Proxy]   Possible causes:`);
             electron_log_1.default.error(`[Proxy]     - Missing or invalid API key (check custom_models.json)`);
@@ -389,12 +478,21 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                 apiRes.on('data', (chunk) => errorBody += chunk.toString());
                 apiRes.on('end', () => {
                     electron_log_1.default.error(`[Proxy] Stream API error (${apiRes.statusCode}) for ${model.name}: ${errorBody.substring(0, 300)}`);
+                    const streamDiagnostic = (0, errorClassifier_1.classifyError)(apiRes.statusCode, null, errorBody, model.provider);
+                    // Trip the breaker on the first hard failure so subsequent
+                    // requests short-circuit instead of piling up against a stuck upstream.
+                    if (streamDiagnostic.errorType === 'server' ||
+                        streamDiagnostic.errorType === 'rate_limit' ||
+                        streamDiagnostic.errorType === 'timeout' ||
+                        streamDiagnostic.errorType === 'network') {
+                        (0, circuitBreaker_1.recordFailure)(model, streamDiagnostic.errorType);
+                    }
                     if ((0, retryStrategy_1.shouldRetryStatus)(apiRes.statusCode, retryCount, MAX_RETRIES)) {
                         electron_log_1.default.warn(`[Proxy] Stream error, retrying (${retryCount + 1}/${MAX_RETRIES})...`);
                         setTimeout(() => handleCustomModelRequest(res, model, geminiBody, isStream, retryCount + 1), 1000 * (retryCount + 1));
                         return;
                     }
-                    const diagnostic = (0, errorClassifier_1.classifyError)(apiRes.statusCode, null, errorBody, model.provider);
+                    const diagnostic = streamDiagnostic;
                     if (attemptFallback(diagnostic))
                         return;
                     if (diagnostic.errorType === 'billing' || diagnostic.errorType === 'auth' || diagnostic.errorType === 'forbidden') {
@@ -442,6 +540,11 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                 });
                 return;
             }
+            if (apiRes.statusCode === 200) {
+                // Any successful response proves the upstream is healthy again;
+                // clear the breaker so subsequent requests don't short-circuit.
+                (0, circuitBreaker_1.recordSuccess)(model);
+            }
             if (!safeWriteHead(res, 200, {
                 'Content-Type': 'text/event-stream',
                 'Cache-Control': 'no-cache',
@@ -450,8 +553,32 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
             })) {
                 return;
             }
+            // Phase 2: Per-chunk idle timeout guard. Vendor pattern from
+            // `withIdleTimeout`'s stream wrapper. If no SSE chunk arrives for
+            // STREAM_IDLE_TIMEOUT_MS, treat the upstream as stuck and abort.
+            const idleGuard = new idleTimeout_1.IdleTimeoutGuard(apiRes, {
+                idleTimeoutMs: constants_1.STREAM_IDLE_TIMEOUT_MS,
+                label: model.name,
+                onTimeout: (err) => {
+                    electron_log_1.default.warn(`[Proxy] ${err.message} — aborting request for ${model.name}`);
+                    (0, circuitBreaker_1.recordFailure)(model, 'timeout');
+                    try {
+                        request.destroy(err);
+                    }
+                    catch { /* already destroyed */ }
+                },
+            });
+            // Phase 4: Empty-stream guard. Track raw chunks + SSE frames so we can
+            // detect a 200 OK stream that contains no usable content (e.g. upstream
+            // returns `[DONE]` immediately, or only keep-alive comments, or zero
+            // non-empty chunks). Vendor pattern: "did we get something useful?" AND
+            // gate from `vscode-unify-chat-provider`.
+            const emptyGuard = new emptyStream_1.EmptyStreamGuard();
             let buffer = '';
             apiRes.on('data', (chunk) => {
+                // Observe first, then forward. The guard splits SSE frames on
+                // newlines so a frame that spans two chunks is still counted.
+                emptyGuard.observe(chunk);
                 buffer += chunk.toString('utf-8');
                 const lines = buffer.split('\n');
                 buffer = lines.pop() || '';
@@ -483,6 +610,24 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                 }
             });
             apiRes.on('end', () => {
+                idleGuard.dispose();
+                emptyGuard.observe(Buffer.from('')); // no-op, but tightens API
+                // Phase 4: Detect empty streams BEFORE finalizing the response.
+                // An empty stream is a 200 OK response with no SSE data frames.
+                // We retry once (unless MAX_RETRIES is already exhausted) to give
+                // flaky upstreams a second chance before surfacing an error.
+                const verdict = emptyGuard.finalize({ statusCode: apiRes.statusCode ?? 0 });
+                if (verdict.isEmpty && retryCount < MAX_RETRIES) {
+                    electron_log_1.default.warn(`[Proxy] Empty stream from ${model.name}: ${verdict.reason} ` +
+                        `(0 frames, ${verdict.bytesReceived}B) — retrying (${retryCount + 1}/${MAX_RETRIES}).`);
+                    (0, circuitBreaker_1.recordFailure)(model, 'empty_stream');
+                    setTimeout(() => handleCustomModelRequest(res, model, geminiBody, isStream, retryCount + 1), 500 * (retryCount + 1));
+                    return;
+                }
+                if (verdict.isEmpty) {
+                    electron_log_1.default.warn(`[Proxy] Empty stream from ${model.name}: ${verdict.reason} ` +
+                        `(0 frames, ${verdict.bytesReceived}B) — max retries exhausted.`);
+                }
                 if (buffer.trim().startsWith('data: ')) {
                     const dataStr = buffer.trim().substring(6).trim();
                     if (dataStr !== '[DONE]') {
@@ -538,6 +683,14 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                     // P0-3: Only log status code and model name, NOT response body content
                     electron_log_1.default.error(`[Proxy] API error (${apiRes.statusCode}) for ${model.name}`);
                     const diagnostic = (0, errorClassifier_1.classifyError)(apiRes.statusCode, null, body, model.provider);
+                    // Trip the breaker on hard failures so subsequent requests
+                    // short-circuit instead of piling up against a stuck upstream.
+                    if (diagnostic.errorType === 'server' ||
+                        diagnostic.errorType === 'rate_limit' ||
+                        diagnostic.errorType === 'timeout' ||
+                        diagnostic.errorType === 'network') {
+                        (0, circuitBreaker_1.recordFailure)(model, diagnostic.errorType);
+                    }
                     if (attemptFallback(diagnostic))
                         return;
                     if (diagnostic.errorType === 'billing' || diagnostic.errorType === 'auth' || diagnostic.errorType === 'forbidden') {
@@ -598,6 +751,8 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                         traceId: '',
                         metadata: {},
                     };
+                    // Successful 2xx response — clear breaker for this model.
+                    (0, circuitBreaker_1.recordSuccess)(model);
                     if (safeWriteHead(res, 200, { 'Content-Type': 'application/json' })) {
                         safeEnd(res, JSON.stringify(cloudCodeResponse));
                     }
@@ -625,6 +780,9 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
     request.setTimeout(REQUEST_TIMEOUT_MS, () => {
         electron_log_1.default.error(`[Proxy] Request timeout (${REQUEST_TIMEOUT_MS}ms) for ${model.name}`);
         request.destroy();
+        // Trip the breaker immediately on timeout — these are the worst offender
+        // in retry storms (the request holds the proxy open for the full timeout).
+        (0, circuitBreaker_1.recordFailure)(model, 'timeout');
         if (retryCount < MAX_RETRIES) {
             electron_log_1.default.warn(`[Proxy] Timeout for ${model.name}, retrying (${retryCount + 1}/${MAX_RETRIES})...`);
             setTimeout(() => handleCustomModelRequest(res, model, geminiBody, isStream, retryCount + 1), 1000 * (retryCount + 1));
@@ -642,6 +800,13 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
     });
     request.on('error', (err) => {
         electron_log_1.default.error('[Proxy] Custom Model Request Error:', err);
+        // Trip the breaker on network errors so the proxy stops hammering the
+        // dead upstream. Use the error's code when present, default to 'network'.
+        const code = err.code?.toUpperCase();
+        const breakerType = code === 'ETIMEDOUT' || code === 'ESOCKETTIMEDOUT' ? 'timeout' :
+            code === 'ENOTFOUND' || code === 'EAI_AGAIN' ? 'dns' :
+                'network';
+        (0, circuitBreaker_1.recordFailure)(model, breakerType);
         if (retryCount < MAX_RETRIES) {
             electron_log_1.default.warn(`[Proxy] Network error for ${model.name}, retrying (${retryCount + 1}/${MAX_RETRIES})...`);
             setTimeout(() => handleCustomModelRequest(res, model, geminiBody, isStream, retryCount + 1), 1000 * (retryCount + 1));
@@ -750,7 +915,31 @@ function handleGetAvailableModelsProxy(res, reqBody, lsUrl) {
     lsReq.end();
 }
 // ─── Main Request Handler ─────────────────────────────────────────────────
+function isAllowedOrigin(req) {
+    const host = (req.headers.host || '').toLowerCase();
+    const origin = (req.headers.origin || req.headers.referer || '').toLowerCase();
+    // 1. Validate Host header — local loopback or googleapis upstream
+    const allowedHostPrefixes = ['127.0.0.1', 'localhost', '::1'];
+    const isHostAllowed = allowedHostPrefixes.some((h) => host.startsWith(h)) || host.endsWith('.googleapis.com');
+    if (!isHostAllowed)
+        return false;
+    // 2. Direct requests without Origin/Referer (Language Server Go, internal gRPC/HTTP)
+    if (!origin)
+        return true;
+    // 3. Validate Origin/Referer header against known trusted local and Google origins
+    return (origin.startsWith('https://127.0.0.1') ||
+        origin.startsWith('http://127.0.0.1') ||
+        origin.startsWith('http://localhost') ||
+        origin.includes('googleapis.com'));
+}
 function handleRequest(req, res) {
+    // CSRF / Origin Guard: Reject unauthorized external origins attempting local proxy abuse
+    if (!isAllowedOrigin(req)) {
+        electron_log_1.default.warn(`[Proxy] Blocked request with unauthorized Host/Origin: host=${req.headers.host} origin=${req.headers.origin}`);
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: { message: 'Forbidden: Unauthorized origin' } }));
+        return;
+    }
     // Health check — keep this FIRST so the LS sees a live port even if other
     // initialization (padding strip, model loading, etc.) is delayed or fails.
     if (req.method === 'GET' && (req.url === '/health' || req.url === '/healthz')) {
@@ -774,6 +963,34 @@ function handleRequest(req, res) {
             },
             timestamp: new Date().toISOString(),
         }));
+        return;
+    }
+    // Per-model health status — returns circuit breaker state for each custom
+    // model so the renderer dropdown can show live green/red indicators.
+    // Reads only in-memory state, no upstream calls, ~1ms response time.
+    if (req.method === 'GET' && req.url === '/model-health') {
+        const customModels = (0, modelLoader_1.loadCustomModels)();
+        const statuses = {};
+        for (const m of customModels) {
+            const placeholderId = (0, idGenerator_1.generateModelPlaceholderId)(m);
+            const breaker = (0, circuitBreaker_1.getOpenBreaker)(m);
+            if (breaker) {
+                statuses[placeholderId] = {
+                    status: 'error',
+                    errorType: breaker.errorType,
+                    trippedAt: breaker.trippedAt,
+                    failures: breaker.failures,
+                };
+            }
+            else {
+                statuses[placeholderId] = { status: 'healthy' };
+            }
+        }
+        res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+        });
+        res.end(JSON.stringify({ models: statuses, timestamp: Date.now() }));
         return;
     }
     req.url = req.url.replace(/^.*\/dummy_path_padding/, '');
@@ -864,11 +1081,14 @@ function handleRequest(req, res) {
                         const mappedCustom = {};
                         customModels.forEach((m) => {
                             const slug = (0, idGenerator_1.toSlug)(m);
+                            const pid = (0, idGenerator_1.generateModelPlaceholderId)(m);
                             mappedCustom[slug] = {
                                 displayName: m.displayName,
                                 maxTokens: 1048576,
                                 maxOutputTokens: 4096,
-                                model: (0, idGenerator_1.generateModelPlaceholderId)(m),
+                                model: pid,
+                                planModel: pid,
+                                requestedModel: pid,
                                 apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
                                 modelProvider: 'MODEL_PROVIDER_GOOGLE',
                             };
@@ -894,8 +1114,12 @@ function handleRequest(req, res) {
                             if (Array.isArray(target)) {
                                 const mapped = customModels.map((m) => {
                                     const cap = (0, modelUtils_1.detectModelCapabilities)(m, true);
+                                    const pid = (0, idGenerator_1.generateModelPlaceholderId)(m);
                                     return {
-                                        name: 'models/' + (0, idGenerator_1.generateModelPlaceholderId)(m),
+                                        name: 'models/' + pid,
+                                        model: pid,
+                                        planModel: pid,
+                                        requestedModel: pid,
                                         version: '1.0',
                                         displayName: m.displayName,
                                         description: m.description,
@@ -917,6 +1141,7 @@ function handleRequest(req, res) {
                                 customModels.forEach((m) => {
                                     const slug = (0, idGenerator_1.toSlug)(m);
                                     const cap = (0, modelUtils_1.detectModelCapabilities)(m, true);
+                                    const pid = (0, idGenerator_1.generateModelPlaceholderId)(m);
                                     const entry = {
                                         displayName: m.displayName,
                                         supportsImages: cap.supportsImages,
@@ -928,7 +1153,9 @@ function handleRequest(req, res) {
                                         maxTokens: cap.maxTokens,
                                         maxOutputTokens: cap.maxOutputTokens,
                                         tokenizerType: 'LLAMA_WITH_SPECIAL',
-                                        model: (0, idGenerator_1.generateModelPlaceholderId)(m),
+                                        model: pid,
+                                        planModel: pid,
+                                        requestedModel: pid,
                                         apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
                                         modelProvider: 'MODEL_PROVIDER_GOOGLE',
                                     };
@@ -1051,11 +1278,14 @@ function handleRequest(req, res) {
                         const mappedCustom = {};
                         customModels.forEach((m) => {
                             const slug = (0, idGenerator_1.toSlug)(m);
+                            const pid = (0, idGenerator_1.generateModelPlaceholderId)(m);
                             mappedCustom[slug] = {
                                 displayName: m.displayName,
                                 maxTokens: 1048576,
                                 maxOutputTokens: 4096,
-                                model: (0, idGenerator_1.generateModelPlaceholderId)(m),
+                                model: pid,
+                                planModel: pid,
+                                requestedModel: pid,
                                 apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
                                 modelProvider: 'MODEL_PROVIDER_GOOGLE',
                             };
@@ -1072,11 +1302,14 @@ function handleRequest(req, res) {
                     const mappedCustom = {};
                     customModels.forEach((m) => {
                         const slug = (0, idGenerator_1.toSlug)(m);
+                        const pid = (0, idGenerator_1.generateModelPlaceholderId)(m);
                         mappedCustom[slug] = {
                             displayName: m.displayName,
                             maxTokens: 1048576,
                             maxOutputTokens: 4096,
-                            model: (0, idGenerator_1.generateModelPlaceholderId)(m),
+                            model: pid,
+                            planModel: pid,
+                            requestedModel: pid,
                             apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
                             modelProvider: 'MODEL_PROVIDER_GOOGLE',
                         };
@@ -1217,17 +1450,36 @@ function handleRequest(req, res) {
         if (req.method === 'POST' && isCloudCodeStream) {
             try {
                 const reqJson = JSON.parse(bodyStr);
-                const modelName = reqJson.model;
-                const modelId = (reqJson.modelId || reqJson.model_id);
-                electron_log_1.default.info(`[Proxy] Cloud Code generation request model: ${modelName}, modelId: ${modelId}, url: ${req.url}, bodyKeys: ${Object.keys(reqJson).join(',')}`);
-                if (modelName) {
+                const targetReq = (reqJson.request || reqJson);
+                const candidateNames = [
+                    reqJson.model,
+                    reqJson.requestedModel,
+                    reqJson.planModel,
+                    reqJson.requested_model,
+                    reqJson.plan_model,
+                    reqJson.modelId,
+                    reqJson.model_id,
+                    targetReq.model,
+                    targetReq.requestedModel,
+                    targetReq.planModel,
+                    targetReq.requested_model,
+                    targetReq.plan_model,
+                    targetReq.modelId,
+                    targetReq.model_id,
+                ].filter((x) => typeof x === 'string' && Boolean(x));
+                electron_log_1.default.info(`[Proxy] Cloud Code generation request candidates: ${candidateNames.join(', ')}, url: ${req.url}, bodyKeys: ${Object.keys(reqJson).join(',')}`);
+                if (candidateNames.length > 0) {
                     const customModels = (0, modelLoader_1.loadCustomModels)();
                     const matchedCustomModel = customModels.find((m) => {
                         const enumName = (0, idGenerator_1.generateModelPlaceholderId)(m);
-                        return m.name === modelName || (0, idGenerator_1.toSlug)(m) === modelName || enumName === modelName || enumName === modelId;
+                        return candidateNames.some((cn) => m.name === cn ||
+                            (0, idGenerator_1.toSlug)(m) === cn ||
+                            enumName === cn ||
+                            `models/${enumName}` === cn ||
+                            cn.endsWith(enumName));
                     });
                     if (matchedCustomModel) {
-                        electron_log_1.default.info(`[Proxy] Intercepting Cloud Code generation for custom model: ${modelName} => ${matchedCustomModel.displayName}`);
+                        electron_log_1.default.info(`[Proxy] Intercepting Cloud Code generation for custom model: ${matchedCustomModel.displayName}`);
                         const isStream = req.url.includes('streamGenerateContent') || req.url.includes('alt=sse');
                         const actualGeminiBody = (reqJson.request || reqJson);
                         // Resolve fileData URIs then route to translator
@@ -1369,15 +1621,29 @@ function stopProxy() {
     return new Promise((resolve) => {
         // P1-9: Stop cleanup interval to prevent orphaned timers
         (0, shared_1.stopCleanupInterval)();
+        const finish = () => {
+            // Phase 3: close per-host https/http agent pools so file descriptors
+            // are released on graceful shutdown (mirrors undici.Agent.close()).
+            (0, agentPool_1.disposeAll)()
+                .then(() => resolve())
+                .catch((err) => {
+                electron_log_1.default.warn('[Proxy] Agent pool dispose error (non-fatal):', err);
+                resolve();
+            });
+        };
         if (server) {
+            // Forcefully close idle connections to release sockets immediately
+            if (typeof server.closeIdleConnections === 'function') {
+                server.closeIdleConnections();
+            }
             server.close(() => {
                 electron_log_1.default.info('[Proxy] Server stopped');
                 server = null;
-                resolve();
+                finish();
             });
         }
         else {
-            resolve();
+            finish();
         }
     });
 }

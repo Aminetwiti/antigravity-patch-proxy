@@ -7,6 +7,24 @@
 import { contextBridge, ipcRenderer, webFrame } from 'electron';
 import { generateModelPlaceholderId, toSlug } from './proxy/idGenerator';
 import { classifyError } from './proxy/errorClassifier';
+import { DETAILED_PROVIDER_PRESETS } from './constants';
+import { createLogger } from './logger';
+
+const preloadLog = createLogger('Preload');
+const preloadMetrics = {
+  inc: (name: string, labels: Record<string, string> = {}, n = 1): void => {
+    // lazy require to avoid loading the metrics module from preload-shim paths
+    // that may not include it (preload-shim is bundled standalone).
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { inc } = require('./metrics');
+      inc(name, labels, n);
+    } catch {
+      /* noop in preload-shim */
+    }
+  },
+};
+preloadLog.debug('Preload script loaded');
 
 // ─── Type Declarations for APIs exposed to renderer ──────────────────────────
 
@@ -402,166 +420,77 @@ window.addEventListener('DOMContentLoaded', () => {
     try {
       const models = await storageAPI.getCustomModels();
       if (!models || models.length === 0) {
-        const placeholder = document.createElement('div');
-        placeholder.style.display = 'flex';
-        placeholder.style.flexDirection = 'column';
-        placeholder.style.alignItems = 'center';
-        placeholder.style.justifyContent = 'center';
-        placeholder.style.padding = '24px';
-        placeholder.style.backgroundColor = '#18181b';
-        placeholder.style.border = '1px solid #27272a';
-        placeholder.style.borderRadius = '8px';
-        placeholder.style.textAlign = 'center';
-
-        placeholder.innerHTML = `
-                    <div style="font-size: 15px; font-weight: 600; color: #f4f4f5; margin-bottom: 4px;">No custom models yet</div>
-                    <div style="font-size: 13px; color: #a1a1aa;">You haven't added any custom models. Use "Provider Manager" above to connect one.</div>
-                `;
-        contentArea.appendChild(placeholder);
+        const empty = document.createElement('div');
+        empty.className = 'agy-empty-state';
+        empty.style.padding = '48px 24px';
+        empty.innerHTML = `
+          <div style="margin-bottom: 16px; color: var(--agy-ink-secondary);">
+            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/></svg>
+          </div>
+          <div style="font-size: 14px; font-weight: 500; color: var(--agy-ink-secondary);">No models configured. Add a custom provider to get started.</div>
+        `;
+        const addBtnEmpty = document.createElement('button');
+        addBtnEmpty.type = 'button';
+        addBtnEmpty.className = 'agy-btn-primary';
+        addBtnEmpty.style.marginTop = '16px';
+        addBtnEmpty.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add model`;
+        addBtnEmpty.addEventListener('click', () => openProviderManagerModal());
+        empty.appendChild(addBtnEmpty);
+        contentArea.appendChild(empty);
       } else {
+        const listContainer = document.createElement('div');
+        listContainer.style.display = 'flex';
+        listContainer.style.flexDirection = 'column';
+        listContainer.style.gap = '8px';
+
         models.forEach((model) => {
           const item = document.createElement('div');
-          item.style.display = 'flex';
-          item.style.justifyContent = 'space-between';
-          item.style.alignItems = 'center';
-          item.style.padding = '12px 16px';
-          item.style.backgroundColor = '#18181b';
-          item.style.border = '1px solid #27272a';
-          item.style.borderRadius = '8px';
-          item.style.transition = 'border-color 0.15s ease, background-color 0.15s ease';
-          item.style.marginBottom = '8px';
-          item.style.cursor = 'default';
-          item.tabIndex = 0;
-          item.setAttribute('role', 'listitem');
+          item.className = 'agy-provider-row';
+          
+          const header = document.createElement('div');
+          header.className = 'agy-row-header';
 
-          item.addEventListener('mouseenter', () => {
-            item.style.borderColor = '#3f3f46';
-            item.style.backgroundColor = '#1c1c1f';
-          });
-          item.addEventListener('mouseleave', () => {
-            item.style.borderColor = '#27272a';
-            item.style.backgroundColor = '#18181b';
-          });
-
-          // ─── Left: Provider icon + model info ────────────
-          const left = document.createElement('div');
-          left.style.display = 'flex';
-          left.style.alignItems = 'center';
-          left.style.gap = '12px';
-
-          // Provider icon bubble
-          const iconWrapper = document.createElement('div');
-          iconWrapper.style.width = '32px';
-          iconWrapper.style.height = '32px';
-          iconWrapper.style.borderRadius = '8px';
-          iconWrapper.style.display = 'flex';
-          iconWrapper.style.alignItems = 'center';
-          iconWrapper.style.justifyContent = 'center';
-          iconWrapper.style.backgroundColor = getProviderColor(model.provider as string) + '18';
-          iconWrapper.style.color = getProviderColor(model.provider as string);
-          iconWrapper.style.flexShrink = '0';
-          iconWrapper.innerHTML = getProviderIcon(model.provider as string);
-
-          // Text info
           const info = document.createElement('div');
-          info.style.display = 'flex';
-          info.style.flexDirection = 'column';
-          info.style.gap = '2px';
+          info.className = 'agy-row-info';
 
-          // Title row with status dot
-          const titleRow = document.createElement('div');
-          titleRow.style.display = 'flex';
-          titleRow.style.alignItems = 'center';
-          titleRow.style.gap = '6px';
-
-          // Status indicator dot
           const statusDot = document.createElement('span');
-          statusDot.style.width = '6px';
-          statusDot.style.height = '6px';
-          statusDot.style.borderRadius = '50%';
-          statusDot.style.flexShrink = '0';
-          statusDot.style.backgroundColor = '#71717a'; // neutral = unknown
+          statusDot.className = 'agy-status-dot agy-status-off';
           statusDot.title = 'Connection status unknown (test to verify)';
-          statusDot.style.transition = 'background-color 0.3s ease';
 
           const title = document.createElement('div');
-          title.style.fontSize = '14px';
-          title.style.fontWeight = '500';
-          title.style.color = '#f4f4f5';
+          title.className = 'agy-row-name';
           title.textContent = (model.displayName as string) || (model.name as string);
 
-          titleRow.appendChild(statusDot);
-          titleRow.appendChild(title);
-
-          // Subtitle with provider badge
-          const sub = document.createElement('div');
-          sub.style.fontSize = '12px';
-          sub.style.color = '#a1a1aa';
-          sub.style.display = 'flex';
-          sub.style.alignItems = 'center';
-          sub.style.gap = '8px';
-
-          // Provider badge
           const badge = document.createElement('span');
-          badge.style.fontSize = '10px';
-          badge.style.fontWeight = '600';
-          badge.style.textTransform = 'uppercase';
-          badge.style.letterSpacing = '0.5px';
-          badge.style.padding = '2px 6px';
-          badge.style.borderRadius = '4px';
+          badge.className = 'agy-badge';
           badge.style.backgroundColor = getProviderColor(model.provider as string) + '22';
           badge.style.color = getProviderColor(model.provider as string);
           badge.textContent = model.provider as string;
 
-          sub.appendChild(badge);
-          sub.appendChild(document.createTextNode(model.apiUrl as string));
+          const url = document.createElement('div');
+          url.className = 'agy-row-sub';
+          url.textContent = model.apiUrl as string;
 
-          info.appendChild(titleRow);
-          info.appendChild(sub);
+          info.appendChild(statusDot);
+          info.appendChild(title);
+          info.appendChild(badge);
+          info.appendChild(url);
 
-          left.appendChild(iconWrapper);
-          left.appendChild(info);
-
-          // ─── Right: Action buttons ──────────────────
           const actions = document.createElement('div');
-          actions.style.display = 'flex';
-          actions.style.gap = '4px';
-          actions.style.alignItems = 'center';
+          actions.className = 'agy-row-actions';
 
-          // Test Connection button
           const testBtn = document.createElement('button');
+          testBtn.className = 'agy-btn-ghost';
           testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`;
-          testBtn.style.background = 'transparent';
-          testBtn.style.border = 'none';
-          testBtn.style.color = '#a1a1aa';
-          testBtn.style.cursor = 'pointer';
-          testBtn.style.padding = '6px';
-          testBtn.style.borderRadius = '4px';
-          testBtn.style.display = 'flex';
-          testBtn.style.alignItems = 'center';
-          testBtn.style.justifyContent = 'center';
-          testBtn.style.transition = 'color 0.15s ease, background-color 0.15s ease';
           testBtn.title = 'Test connection';
-          testBtn.setAttribute('aria-label', `Test connection for ${(model.displayName as string) || (model.name as string)}`);
-
-          testBtn.addEventListener('mouseenter', () => {
-            testBtn.style.color = '#22c55e';
-            testBtn.style.backgroundColor = 'rgba(34, 197, 94, 0.1)';
-          });
-          testBtn.addEventListener('mouseleave', () => {
-            testBtn.style.color = '#a1a1aa';
-            testBtn.style.backgroundColor = 'transparent';
-          });
-
+          
           testBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
-            // Show loading spinner
             const originalHtml = testBtn.innerHTML;
             testBtn.style.color = '#fbbf24';
             testBtn.style.cursor = 'wait';
             testBtn.disabled = true;
-            const spinnerSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="${prefersReducedMotion() ? '' : 'animation: agy-spin 0.8s linear infinite;'}"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>`;
-            testBtn.innerHTML = spinnerSvg;
+            testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="${prefersReducedMotion() ? '' : 'animation: agy-spin 0.8s linear infinite;'}"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>`;
 
             try {
               const result = await storageAPI.testModelConnection({
@@ -572,97 +501,80 @@ window.addEventListener('DOMContentLoaded', () => {
               });
 
               if (result.success) {
-                statusDot.style.backgroundColor = '#22c55e'; // green
+                statusDot.className = 'agy-status-dot agy-status-on';
                 statusDot.title = result.message || 'Connected';
                 testBtn.title = 'Connected ✓';
-                testBtn.style.color = '#22c55e';
+                testBtn.style.color = 'var(--agy-success)';
                 testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`;
-                
-                // Auto-healing
                 const banner = document.getElementById('agy-persistent-banner');
                 if (banner) banner.remove();
                 failedModelDisplayNames.clear();
                 document.querySelectorAll('.ag-model-warning').forEach(el => el.remove());
               } else {
-                statusDot.style.backgroundColor = '#ef4444'; // red
+                statusDot.className = 'agy-status-dot';
+                statusDot.style.backgroundColor = 'var(--agy-danger)';
                 const errMsg = result.error || 'Connection failed';
                 statusDot.title = errMsg;
                 testBtn.title = errMsg;
-                testBtn.style.color = '#ef4444';
+                testBtn.style.color = 'var(--agy-danger)';
                 testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`;
               }
             } catch (err) {
-              statusDot.style.backgroundColor = '#ef4444';
+              statusDot.className = 'agy-status-dot';
+              statusDot.style.backgroundColor = 'var(--agy-danger)';
               statusDot.title = 'Connection test failed';
               testBtn.title = 'Connection test failed';
-              testBtn.style.color = '#ef4444';
+              testBtn.style.color = 'var(--agy-danger)';
               testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`;
             }
-
-            testBtn.style.cursor = 'pointer';
-
-            // Reset to neutral after 3 seconds
             setTimeout(() => {
               testBtn.disabled = false;
               testBtn.style.cursor = 'pointer';
-              testBtn.style.color = '#a1a1aa';
-              testBtn.style.borderColor = '#3f3f46';
+              testBtn.style.color = '';
               testBtn.innerHTML = originalHtml;
             }, 3000);
           });
 
-          // Delete button
           const deleteBtn = document.createElement('button');
-          deleteBtn.innerHTML = `
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <polyline points="3 6 5 6 21 6"></polyline>
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                            <line x1="10" y1="11" x2="10" y2="17"></line>
-                            <line x1="14" y1="11" x2="14" y2="17"></line>
-                        </svg>
-                    `;
-          deleteBtn.style.background = 'transparent';
-          deleteBtn.style.border = 'none';
-          deleteBtn.style.color = '#a1a1aa';
-          deleteBtn.style.cursor = 'pointer';
-          deleteBtn.style.padding = '6px';
-          deleteBtn.style.borderRadius = '4px';
-          deleteBtn.style.display = 'flex';
-          deleteBtn.style.alignItems = 'center';
-          deleteBtn.style.justifyContent = 'center';
-          deleteBtn.style.transition = 'color 0.15s ease, background-color 0.15s ease';
+          deleteBtn.className = 'agy-btn-ghost';
+          deleteBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>`;
           deleteBtn.setAttribute('aria-label', `Delete ${(model.displayName as string) || (model.name as string)}`);
-
-          deleteBtn.addEventListener('mouseenter', () => {
-            deleteBtn.style.color = '#ef4444';
-            deleteBtn.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
-          });
-          deleteBtn.addEventListener('mouseleave', () => {
-            deleteBtn.style.color = '#a1a1aa';
-            deleteBtn.style.backgroundColor = 'transparent';
-          });
-
           deleteBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
             if (window.confirm(`Delete "${model.displayName || model.name}"? This removes it from your model list.`)) {
               await storageAPI.deleteCustomModel(model.name as string);
               await renderCustomModelsList();
-
               const refreshBtn = findRefreshButton();
               if (refreshBtn) refreshBtn.click();
             }
           });
 
+
+          const editBtn = document.createElement('button');
+          editBtn.className = 'agy-btn-ghost';
+          editBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+          editBtn.title = 'Edit provider settings';
+          editBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const providers = await storageAPI.getProviders();
+            const p = providers.find(prov => prov.provider === model.provider || prov.name === model.provider);
+            if (p) {
+              openProviderManagerModal(p);
+            }
+          });
+          actions.appendChild(editBtn);
           actions.appendChild(testBtn);
           actions.appendChild(deleteBtn);
-
-          item.appendChild(left);
-          item.appendChild(actions);
-          contentArea.appendChild(item);
+          header.appendChild(info);
+          header.appendChild(actions);
+          item.appendChild(header);
+          listContainer.appendChild(item);
         });
+        
+        contentArea.appendChild(listContainer);
       }
     } catch (err) {
-      console.error('Failed to load custom models in list:', err);
+      preloadLog.error('Failed to load custom models in list:', err);
     }
   }
 
@@ -674,69 +586,64 @@ window.addEventListener('DOMContentLoaded', () => {
 
     if (document.getElementById('agy-custom-models-section')) return;
 
+    // Remove the old Antigravity Customizations header row to replace it with Doctor UI header
+    if (headerRow && headerRow.parentNode) {
+      headerRow.parentNode.removeChild(headerRow);
+    }
+    if (contentBlock && contentBlock.parentNode) {
+      contentBlock.parentNode.removeChild(contentBlock);
+    }
+
+    ensureAgyTokens(); // Ensure Doctor UI CSS tokens are injected
+
     const section = document.createElement('div');
     section.id = 'agy-custom-models-section';
-    section.style.marginTop = '24px';
-    section.style.display = 'flex';
-    section.style.flexDirection = 'column';
-    section.style.gap = '12px';
+    section.className = 'agy-view';
+    section.style.marginTop = '0px';
 
-    const newHeaderRow = document.createElement('div');
-    newHeaderRow.className = (headerRow as HTMLElement).className;
-    newHeaderRow.style.cssText = (headerRow as HTMLElement).style.cssText;
-    newHeaderRow.style.display = 'flex';
-    newHeaderRow.style.justifyContent = 'space-between';
-    newHeaderRow.style.alignItems = 'center';
-    newHeaderRow.style.marginBottom = '8px';
+    const viewHeader = document.createElement('div');
+    viewHeader.className = 'agy-view-header';
 
-    const originalHeading = headerRow.firstElementChild as HTMLElement;
-    const newHeading = document.createElement(originalHeading ? originalHeading.tagName : 'div');
-    if (originalHeading) {
-      newHeading.className = originalHeading.className;
-      newHeading.style.cssText = originalHeading.style.cssText;
-    }
-    newHeading.textContent = 'Custom Models';
+    const viewTitleGroup = document.createElement('div');
+    viewTitleGroup.innerHTML = `
+      <h1 class="agy-view-title">Custom models</h1>
+      <p class="agy-view-subtitle">Configured providers and their status</p>
+    `;
 
-    const newBtnGroup = document.createElement('div');
-    const originalBtnGroup = headerRow.lastElementChild as HTMLElement;
-    if (originalBtnGroup) {
-      newBtnGroup.className = originalBtnGroup.className;
-      newBtnGroup.style.cssText = originalBtnGroup.style.cssText;
-    }
-    newBtnGroup.style.display = 'flex';
-    newBtnGroup.style.gap = '8px';
-    newBtnGroup.style.alignItems = 'center';
+    const viewActions = document.createElement('div');
+    viewActions.className = 'agy-header-actions';
+
+    const testAllBtn = document.createElement('button');
+    testAllBtn.className = 'agy-btn-ghost';
+    testAllBtn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Test all`;
+    testAllBtn.addEventListener('click', () => {
+      const testBtns = document.querySelectorAll('#agy-custom-models-content .agy-row-actions .agy-btn-ghost[title="Test connection"]');
+      testBtns.forEach(btn => (btn as HTMLButtonElement).click());
+    });
 
     const addModelBtn = document.createElement('button');
-    addModelBtn.id = 'agy-add-model-btn';
-    addModelBtn.textContent = '☁️ Provider Manager';
-    const refreshBtn = findRefreshButton();
-    if (refreshBtn) {
-      addModelBtn.className = refreshBtn.className;
-      addModelBtn.style.cssText = refreshBtn.style.cssText;
-    }
-    addModelBtn.style.cursor = 'pointer';
+    addModelBtn.className = 'agy-btn-primary';
+    addModelBtn.innerHTML = `☁️ Provider Manager`;
     addModelBtn.addEventListener('click', () => {
       openProviderManagerModal();
     });
-    newBtnGroup.appendChild(addModelBtn);
-    newHeaderRow.appendChild(newHeading);
-    newHeaderRow.appendChild(newBtnGroup);
 
-    const contentArea = document.createElement('div');
-    contentArea.id = 'agy-custom-models-content';
-    contentArea.style.display = 'flex';
-    contentArea.style.flexDirection = 'column';
-    contentArea.style.gap = '8px';
+    viewActions.appendChild(testAllBtn);
+    viewActions.appendChild(addModelBtn);
+    viewHeader.appendChild(viewTitleGroup);
+    viewHeader.appendChild(viewActions);
 
-    section.appendChild(newHeaderRow);
-    section.appendChild(contentArea);
+    const panel = document.createElement('div');
+    panel.className = 'agy-panel';
+    const panelBody = document.createElement('div');
+    panelBody.className = 'agy-panel-body';
+    panelBody.id = 'agy-custom-models-content';
 
-    if (contentBlock && contentBlock.nextSibling) {
-      mainContainer.insertBefore(section, contentBlock.nextSibling);
-    } else {
-      mainContainer.appendChild(section);
-    }
+    panel.appendChild(panelBody);
+    section.appendChild(viewHeader);
+    section.appendChild(panel);
+
+    mainContainer.appendChild(section);
 
     await renderCustomModelsList();
   }
@@ -747,301 +654,227 @@ window.addEventListener('DOMContentLoaded', () => {
     const style = document.createElement('style');
     style.id = 'agy-style-tokens';
     style.textContent = `
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;600;700&display=swap');
+
       :root {
-        --agy-bg-base: #18181b;
-        --agy-bg-elevated: #1c1c1f;
-        --agy-bg-input: #27272a;
-        --agy-bg-input-hover: #2f2f33;
-        --agy-border: #3f3f46;
-        --agy-border-strong: #52525b;
-        --agy-ink-primary: #f4f4f5;
-        --agy-ink-secondary: #a1a1aa;
-        --agy-ink-muted: #71717a;
-        --agy-accent: #3b82f6;
-        --agy-accent-hover: #2563eb;
-        --agy-success: #22c55e;
-        --agy-success-hover: #16a34a;
-        --agy-warning: #facc15;
-        --agy-danger: #ef4444;
-        --agy-danger-hover: #dc2626;
-        --agy-warning-text: #854d0e;
-        --agy-overlay-bg: rgba(0, 0, 0, 0.6);
-        --agy-overlay-blur: blur(6px);
-        --agy-shadow-modal: 0 20px 25px -5px rgba(0,0,0,0.5), 0 8px 10px -6px rgba(0,0,0,0.4);
+        --agy-bg-base: #0d1117;
+        --agy-bg-surface: #161b22;
+        --agy-bg-elevated: #1c2128;
+        --agy-bg-input: #21262d;
+        --agy-bg-input-hover: #30363d;
+        --agy-border: #30363d;
+        --agy-border-strong: #484f58;
+        --agy-ink-primary: #f0f6fc;
+        --agy-ink-secondary: #8b949e;
+        --agy-ink-muted: #6e7681;
+        --agy-accent: #1f6feb;
+        --agy-accent-hover: #388bfd;
+        --agy-success: #3fb950;
+        --agy-success-hover: #2ea043;
+        --agy-warning: #d29922;
+        --agy-danger: #f85149;
+        --agy-danger-hover: #da3633;
+        --agy-overlay-bg: hsla(222, 47%, 3%, 0.7);
+        --agy-shadow-modal: 0 8px 24px hsla(0, 0%, 0%, 0.5);
         --agy-z-overlay: 100000;
         --agy-radius-sm: 4px;
         --agy-radius-md: 6px;
-        --agy-radius-lg: 8px;
-        --agy-radius-xl: 12px;
-        --agy-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        --agy-font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+        --agy-radius-lg: 10px;
+        --agy-radius-xl: 14px;
+        --agy-font: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        --agy-font-display: 'Outfit', 'Inter', sans-serif;
+        --agy-font-mono: 'JetBrains Mono', ui-monospace, "SF Mono", Menlo, monospace;
       }
 
       /* ── Overlay ────────────────────────────────────────────────── */
       .agy-overlay {
-        position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+        position: fixed; inset: 0;
         background: var(--agy-overlay-bg);
-        -webkit-backdrop-filter: var(--agy-overlay-blur);
-        backdrop-filter: var(--agy-overlay-blur);
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
+        display: grid; place-items: center;
         z-index: var(--agy-z-overlay);
-        display: flex; justify-content: center; align-items: center;
+        animation: agy-fade-in 180ms cubic-bezier(0.4, 0, 0.2, 1);
         font-family: var(--agy-font);
         color: var(--agy-ink-primary);
       }
-      @keyframes agy-modal-in {
-        from { opacity: 0; transform: scale(0.96) translateY(8px); }
-        to   { opacity: 1; transform: scale(1) translateY(0); }
-      }
-      @keyframes agy-overlay-in {
+      @keyframes agy-fade-in {
         from { opacity: 0; }
-        to   { opacity: 1; }
+        to { opacity: 1; }
       }
-      .agy-anim-in { animation: agy-overlay-in 180ms ease-out; }
-      .agy-anim-in .agy-modal { animation: agy-modal-in 220ms cubic-bezier(0.16, 1, 0.3, 1); }
-      .agy-no-motion, .agy-no-motion .agy-modal { animation: none !important; }
-
-      /* ── Modal ──────────────────────────────────────────────────── */
       .agy-modal {
-        background: var(--agy-bg-base);
-        border: 1px solid var(--agy-border);
-        border-radius: var(--agy-radius-xl);
-        width: min(650px, calc(100vw - 48px));
-        max-height: 85vh;
+        background: var(--agy-bg-surface);
+        border: 1px solid var(--agy-border-strong);
+        border-radius: var(--agy-radius-lg);
+        width: 90%; max-width: 560px;
+        max-height: min(680px, 88vh);
         display: flex; flex-direction: column;
         box-shadow: var(--agy-shadow-modal);
         overflow: hidden;
+        animation: agy-modal-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      @keyframes agy-modal-in {
+        from { opacity: 0; transform: translate3d(0, 8px, 0) scale(0.98); }
+        to   { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
       }
       .agy-modal-header {
-        padding: 16px 24px;
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 14px 18px;
         border-bottom: 1px solid var(--agy-border);
-        display: flex; justify-content: space-between; align-items: center;
-        gap: 12px;
+        background: var(--agy-bg-surface);
       }
-      .agy-modal-title { display: flex; align-items: center; gap: 8px; }
+      .agy-modal-title {
+        font-family: var(--agy-font-display);
+        font-size: 14px; font-weight: 600;
+        display: flex; align-items: center; gap: 8px;
+      }
       .agy-modal-body {
         display: flex; flex-direction: column; flex: 1; overflow: hidden; position: relative;
+        font-size: 13px; line-height: 1.6;
+        background: var(--agy-bg-base);
       }
       .agy-modal-list {
-        padding: 24px; overflow-y: auto; flex: 1;
-        display: flex; flex-direction: column; gap: 16px;
+        padding: 18px; overflow-y: auto; flex: 1;
+        display: flex; flex-direction: column; gap: 12px;
       }
       .agy-modal-form {
-        padding: 24px; overflow-y: auto; flex: 1;
+        padding: 18px; overflow-y: auto; flex: 1;
         display: none; flex-direction: column; gap: 16px;
         background: var(--agy-bg-elevated);
       }
 
-      /* ── Icon button (close) ────────────────────────────────────── */
+      /* ── Icon button (close) ──────────────── */
       .agy-icon-btn {
-        background: transparent;
-        border: none;
+        background: transparent; border: none;
+        width: 26px; height: 26px;
+        display: grid; place-items: center;
+        border-radius: var(--agy-radius-sm);
         color: var(--agy-ink-secondary);
         cursor: pointer;
-        padding: 6px;
-        border-radius: var(--agy-radius-md);
-        display: inline-flex; align-items: center; justify-content: center;
-        min-width: 32px; min-height: 32px;
-        transition: background-color 120ms ease, color 120ms ease;
+        transition: all 120ms cubic-bezier(0.4, 0, 0.2, 1);
       }
       .agy-icon-btn:hover { background: var(--agy-bg-input); color: var(--agy-ink-primary); }
-      .agy-icon-btn:focus-visible { outline: 2px solid var(--agy-accent); outline-offset: 2px; }
+      .agy-icon-btn:focus-visible { outline: 2px solid var(--agy-accent-hover); outline-offset: 2px; }
 
       /* ── Buttons ────────────────────────────────────────────────── */
-      .agy-btn-primary, .agy-btn-secondary, .agy-btn-success, .agy-btn-ghost {
+      .agy-btn-primary, .agy-btn-secondary, .agy-btn-success, .agy-btn-ghost, .agy-btn-confirm {
         font-family: var(--agy-font);
         border-radius: var(--agy-radius-md);
-        cursor: pointer;
-        font-weight: 500;
-        transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, transform 60ms ease;
-        min-height: 32px;
-        padding: 8px 14px;
-        font-size: 13px;
+        cursor: pointer; font-weight: 500;
+        transition: all 120ms ease;
+        padding: 6px 12px; font-size: 12.5px;
+        display: inline-flex; align-items: center; justify-content: center; gap: 6px;
       }
       .agy-btn-primary {
-        background: var(--agy-accent);
-        border: 1px solid var(--agy-accent);
-        color: white;
+        background: var(--agy-accent); border: 1px solid transparent; color: white;
       }
-      .agy-btn-primary:hover:not(:disabled) { background: var(--agy-accent-hover); border-color: var(--agy-accent-hover); }
+      .agy-btn-primary:hover:not(:disabled) { background: var(--agy-accent-hover); }
       .agy-btn-secondary {
-        background: var(--agy-bg-input);
-        border: 1px solid var(--agy-border-strong);
-        color: var(--agy-ink-primary);
+        background: var(--agy-bg-input); border: 1px solid var(--agy-border-strong); color: var(--agy-ink-primary);
       }
-      .agy-btn-secondary:hover:not(:disabled) { background: var(--agy-bg-input-hover); }
-      .agy-btn-success {
-        background: var(--agy-success);
-        border: 1px solid var(--agy-success);
-        color: white;
-        padding: 10px 20px;
-        font-size: 14px;
-      }
-      .agy-btn-success:hover:not(:disabled) { background: var(--agy-success-hover); border-color: var(--agy-success-hover); }
+      .agy-btn-secondary:hover:not(:disabled) { background: var(--agy-bg-input-hover); border-color: var(--agy-ink-muted); }
       .agy-btn-ghost {
-        background: transparent;
-        border: 1px solid var(--agy-border);
-        color: var(--agy-ink-secondary);
+        background: transparent; border: 1px solid transparent; color: var(--agy-ink-secondary);
       }
       .agy-btn-ghost:hover:not(:disabled) { background: var(--agy-bg-input); color: var(--agy-ink-primary); }
-      .agy-btn-danger { color: var(--agy-danger); }
-      .agy-btn-danger:hover:not(:disabled) { background: var(--agy-danger); color: white; border-color: var(--agy-danger); }
-      .agy-btn-confirm {
-        background: var(--agy-danger) !important;
-        color: white !important;
-        border-color: var(--agy-danger) !important;
-        padding: 6px 12px !important;
+      .agy-btn-success {
+        background: var(--agy-success); border: 1px solid transparent; color: white;
       }
-      .agy-btn-success:not(:disabled), .agy-btn-success.agy-btn-success { color: white; }
-      .agy-btn-success.agy-btn-success { background: var(--agy-success); }
-      .agy-btn-success.agy-btn-error { background: var(--agy-danger); border-color: var(--agy-danger); }
-      /* Make status variants that are applied to the secondary test button work */
-      .agy-btn-secondary.agy-btn-success { background: var(--agy-success); border-color: var(--agy-success); color: white; }
-      .agy-btn-secondary.agy-btn-error { background: var(--agy-danger); border-color: var(--agy-danger); color: white; }
-
+      .agy-btn-success:hover:not(:disabled) { background: var(--agy-success-hover); }
+      .agy-btn-danger, .agy-btn-confirm {
+        background: var(--agy-danger); color: white; border: 1px solid transparent;
+      }
+      .agy-btn-danger:hover:not(:disabled), .agy-btn-confirm:hover:not(:disabled) {
+        background: var(--agy-danger-hover);
+      }
       button:focus-visible, input:focus-visible, select:focus-visible {
-        outline: 2px solid var(--agy-accent);
-        outline-offset: 2px;
+        outline: 2px solid var(--agy-accent-hover); outline-offset: 2px;
       }
 
       /* ── List view ──────────────────────────────────────────────── */
-      .agy-list-topactions {
-        display: flex; justify-content: space-between; align-items: center;
-        gap: 12px; flex-wrap: wrap;
-      }
-      .agy-list-subtitle {
-        font-size: 14px; color: var(--agy-ink-secondary);
-      }
+      .agy-list-topactions { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+      .agy-list-subtitle { font-size: 13px; color: var(--agy-ink-secondary); }
       .agy-empty-state {
-        display: flex; flex-direction: column; align-items: center;
-        padding: 48px 24px; text-align: center;
-        border: 1px dashed var(--agy-border);
-        border-radius: var(--agy-radius-lg);
-        background: var(--agy-bg-input);
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        padding: 32px 18px; text-align: center;
+        border: 1px dashed var(--agy-border-strong); border-radius: var(--agy-radius-lg);
+        background: var(--agy-bg-input); color: var(--agy-ink-secondary); font-size: 13px;
       }
       .agy-provider-row {
-        background: var(--agy-bg-input);
+        background: var(--agy-bg-surface);
         border: 1px solid var(--agy-border);
         border-radius: var(--agy-radius-lg);
-        padding: 16px;
-        display: flex; flex-direction: column; gap: 12px;
-        transition: border-color 120ms ease;
+        padding: 14px 16px;
+        display: flex; flex-direction: column; gap: 10px;
+        transition: border-color 120ms ease, background-color 120ms ease;
       }
-      .agy-provider-row:hover { border-color: var(--agy-border-strong); }
-      .agy-row-header {
-        display: flex; justify-content: space-between; align-items: center; gap: 12px;
-        flex-wrap: wrap;
-      }
-      .agy-row-info {
-        display: flex; align-items: center; gap: 8px; min-width: 0;
-      }
-      .agy-row-name {
-        font-size: 15px;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-        max-width: 100%;
-      }
-      .agy-row-actions {
-        display: flex; gap: 8px; flex-wrap: wrap;
-      }
-      .agy-row-sub {
-        font-size: 12px; color: var(--agy-ink-secondary);
-      }
-      .agy-status-dot {
-        width: 10px; height: 10px; border-radius: 50%;
-        flex-shrink: 0;
-      }
-      .agy-status-on { background-color: var(--agy-success); }
+      .agy-provider-row:hover { border-color: var(--agy-border-strong); background: var(--agy-bg-elevated); }
+      .agy-row-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+      .agy-row-info { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .agy-row-name { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+      .agy-row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+      .agy-row-sub { font-size: 12px; color: var(--agy-ink-muted); }
+      
+      .agy-status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+      .agy-status-on { background-color: var(--agy-success); box-shadow: 0 0 6px hsla(136, 60%, 50%, 0.4); }
       .agy-status-off { background-color: var(--agy-ink-muted); }
 
-      /* ── Form view ──────────────────────────────────────────────── */
-      .agy-form-header {
-        display: flex; justify-content: space-between; align-items: center;
-        margin-bottom: 8px;
+      /* ── Form view (Doctor UI Style) ────────────────────────────── */
+      .agy-form-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+      .agy-form-title { font-size: 15px; font-weight: 600; font-family: var(--agy-font-display); }
+      .agy-form-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+      .agy-form-group label { font-size: 13px; font-weight: 500; color: var(--agy-ink-primary); display: flex; align-items: center; justify-content: space-between; }
+      .agy-form-hint { font-size: 11.5px; color: var(--agy-ink-secondary); line-height: 1.4; }
+      .agy-form-error-banner {
+        font-size: 12.5px; color: var(--agy-danger); background: hsla(0, 100%, 65%, 0.1);
+        border: 1px solid hsla(0, 100%, 65%, 0.2); border-radius: var(--agy-radius-md);
+        padding: 10px 14px; margin-top: 4px; display: none;
       }
-      .agy-form-title { font-size: 16px; font-weight: 600; }
-      .agy-form-field {
-        display: flex; flex-direction: column; gap: 6px;
-      }
-      .agy-form-label {
-        font-size: 13px; font-weight: 500; color: var(--agy-ink-secondary);
-      }
-      .agy-form-help {
-        font-size: 11px; color: var(--agy-ink-muted);
-      }
-      .agy-form-error {
-        font-size: 12px; color: var(--agy-danger);
-        min-height: 0; max-height: 0; overflow: hidden;
-        transition: max-height 160ms ease, margin 160ms ease;
-      }
-      .agy-form-error.agy-form-error-visible {
-        max-height: 32px; margin-top: 2px;
-      }
+      .agy-form-error-visible { display: block !important; }
+      
       .agy-input {
-        background-color: var(--agy-bg-input);
-        border: 1px solid var(--agy-border);
-        border-radius: var(--agy-radius-lg);
+        background-color: var(--agy-bg-base);
+        border: 1px solid var(--agy-border-strong);
+        border-radius: var(--agy-radius-md);
         color: var(--agy-ink-primary);
-        padding: 10px 12px;
-        font-size: 14px;
-        font-family: var(--agy-font);
-        outline: none;
-        transition: border-color 120ms ease, background-color 120ms ease;
-        min-height: 38px;
+        padding: 8px 12px; font-size: 13.5px; font-family: var(--agy-font-mono);
+        outline: none; transition: border-color 120ms ease, box-shadow 120ms ease;
       }
-      .agy-input:hover { border-color: var(--agy-border-strong); }
-      .agy-input:focus { border-color: var(--agy-accent); }
+      .agy-input:hover { border-color: var(--agy-ink-muted); }
+      .agy-input:focus { border-color: var(--agy-accent-hover); box-shadow: 0 0 0 1px var(--agy-accent-hover); }
       .agy-input:invalid:not(:placeholder-shown) { border-color: var(--agy-danger); }
-      .agy-form-checkbox {
-        display: flex; align-items: center; gap: 8px;
-        font-size: 13px; color: var(--agy-ink-secondary);
-        cursor: pointer;
+      
+      .agy-form-group-checkbox { flex-direction: row; align-items: center; gap: 8px; margin-bottom: 16px; }
+      .agy-form-checkbox { accent-color: var(--agy-accent); width: 14px; height: 14px; cursor: pointer; }
+      .agy-form-label-inline { font-size: 13px; color: var(--agy-ink-primary); cursor: pointer; font-weight: 400 !important; }
+      
+      .agy-form-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+      .agy-fetched-models-container {
+        border: 1px solid var(--agy-border-strong); border-radius: var(--agy-radius-md);
+        background: var(--agy-bg-base); overflow: hidden;
       }
-      .agy-form-checkbox input { accent-color: var(--agy-accent); }
-      .agy-form-status {
-        font-size: 12px; color: var(--agy-ink-secondary);
-        min-height: 14px;
+      .agy-fetched-models-list {
+        max-height: 220px; overflow-y: auto; display: flex; flex-direction: column;
       }
-      .agy-status-success { color: var(--agy-success); }
-      .agy-status-error { color: var(--agy-danger); }
-      .agy-status-warning { color: var(--agy-warning); }
+      .agy-fetched-models-list::-webkit-scrollbar { width: 6px; }
+      .agy-fetched-models-list::-webkit-scrollbar-thumb { background: var(--agy-border-strong); border-radius: 4px; }
+      .agy-fetched-models-empty { padding: 32px 24px; text-align: center; color: var(--agy-ink-secondary); font-size: 13px; }
+      .agy-fetched-model-row {
+        display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+        border-bottom: 1px solid var(--agy-border); cursor: pointer;
+        transition: background-color 120ms ease;
+      }
+      .agy-fetched-model-row:last-child { border-bottom: none; }
+      .agy-fetched-model-row:hover { background: var(--agy-bg-input); }
+      .agy-fetched-model-row input { accent-color: var(--agy-accent); }
+      .agy-fetched-model-row span { font-size: 13px; color: var(--agy-ink-primary); }
 
-      .agy-fetch-row {
-        display: flex; align-items: center; gap: 12px; margin-top: 8px;
-        flex-wrap: wrap;
-      }
-      .agy-models-list {
-        display: flex; flex-direction: column; gap: 8px;
-        max-height: 220px; overflow-y: auto;
-        background: var(--agy-bg-input);
-        border: 1px solid var(--agy-border);
-        border-radius: var(--agy-radius-lg);
-        padding: 8px;
-      }
-      .agy-model-row {
-        display: flex; align-items: center; gap: 10px;
-        cursor: pointer; padding: 6px 8px;
-        border-radius: var(--agy-radius-sm);
-        transition: background-color 80ms ease;
-      }
-      .agy-model-row:hover { background: var(--agy-bg-input-hover); }
-      .agy-model-row input { accent-color: var(--agy-accent); }
-      .agy-model-row-label {
-        font-size: 13px;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-        flex: 1; min-width: 0;
-      }
-      .agy-models-empty {
-        color: var(--agy-ink-secondary);
-        font-size: 13px;
-        text-align: center;
-        padding: 16px 10px;
-      }
       .agy-form-footer {
         display: flex; justify-content: flex-end; gap: 12px;
         margin-top: auto; padding-top: 16px;
         border-top: 1px solid var(--agy-border);
-        flex-wrap: wrap;
       }
-
+      
       /* ── Responsive ─────────────────────────────────────────────── */
       @media (max-width: 480px) {
         .agy-modal { width: calc(100vw - 24px); }
@@ -1058,10 +891,125 @@ window.addEventListener('DOMContentLoaded', () => {
       @media (prefers-reduced-motion: reduce) {
         .agy-overlay, .agy-modal, .agy-btn-primary, .agy-btn-secondary,
         .agy-btn-success, .agy-btn-ghost, .agy-icon-btn, .agy-input,
-        .agy-provider-row, .agy-form-error {
+        .agy-provider-row, .agy-form-error,
+        .ag-health-dot, .ag-health-refresh {
           transition: none !important;
           animation: none !important;
         }
+      }
+
+      /* ── Dropdown Health Indicators ──────────────────────────────── */
+      @keyframes ag-pulse-error {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+        50%      { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0); }
+      }
+      @keyframes ag-pulse-healthy {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+        50%      { box-shadow: 0 0 0 3px rgba(34, 197, 94, 0); }
+      }
+      @keyframes ag-spin {
+        from { transform: rotate(0deg); }
+        to   { transform: rotate(360deg); }
+      }
+      @keyframes ag-fade-in {
+        from { opacity: 0; transform: translateY(4px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      .ag-health-dot {
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+        flex-shrink: 0;
+        margin-left: 6px;
+        vertical-align: middle;
+        transition: background-color 300ms ease, box-shadow 300ms ease;
+      }
+      .ag-health-dot--healthy {
+        background-color: #22c55e;
+        animation: ag-pulse-healthy 2.5s ease-in-out infinite;
+      }
+      .ag-health-dot--error {
+        background-color: #ef4444;
+        animation: ag-pulse-error 1.8s ease-in-out infinite;
+      }
+      .ag-health-dot--unknown {
+        background-color: #6b7280;
+        opacity: 0.7;
+      }
+      .ag-health-refresh {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px; height: 18px;
+        margin-left: 4px;
+        padding: 2px;
+        border: none;
+        background: transparent;
+        color: #a1a1aa;
+        cursor: pointer;
+        border-radius: 50%;
+        transition: color 150ms ease, background-color 150ms ease;
+        vertical-align: middle;
+        flex-shrink: 0;
+      }
+      .ag-health-refresh:hover {
+        color: #f4f4f5;
+        background-color: rgba(63, 63, 70, 0.6);
+      }
+      .ag-health-refresh--spinning svg {
+        animation: ag-spin 0.8s linear infinite;
+      }
+      .ag-health-tooltip {
+        position: absolute;
+        z-index: 100001;
+        background: #1a1a1a;
+        border: 1px solid #3f3f46;
+        border-left: 3px solid #ef4444;
+        border-radius: 6px;
+        padding: 10px 14px;
+        max-width: 320px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 12px;
+        color: #e5e5e5;
+        line-height: 1.5;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        animation: ag-fade-in 150ms ease-out;
+        pointer-events: auto;
+      }
+      .ag-health-tooltip__title {
+        font-weight: 600;
+        font-size: 12px;
+        margin-bottom: 4px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .ag-health-tooltip__msg {
+        color: #a1a1aa;
+        font-size: 11px;
+        margin-bottom: 8px;
+      }
+      .ag-health-tooltip__action {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        font-weight: 500;
+        color: #3b82f6;
+        cursor: pointer;
+        background: none;
+        border: none;
+        padding: 0;
+        text-decoration: none;
+      }
+      .ag-health-tooltip__action:hover {
+        color: #60a5fa;
+        text-decoration: underline;
+      }
+      .ag-dropdown-error-overlay {
+        opacity: 0.55;
+        pointer-events: auto;
+        position: relative;
       }
     `;
     document.head.appendChild(style);
@@ -1082,25 +1030,20 @@ window.addEventListener('DOMContentLoaded', () => {
     );
   }
 
-  function openProviderManagerModal(): void {
+  function openProviderManagerModal(existingProvider?: ProviderFileEntry): void {
     const existing = document.getElementById('agy-modal-overlay');
     if (existing) existing.remove();
 
-    // Remember the trigger element so we can restore focus on close
     const triggerElement = document.activeElement as HTMLElement | null;
-
-    // Inject design tokens once (idempotent)
     ensureAgyTokens();
 
-    // ─── Overlay ──────────────────────────────────────────────────────────
     const overlay = document.createElement('div');
     overlay.id = 'agy-modal-overlay';
     overlay.className = 'agy-overlay';
     overlay.setAttribute('aria-hidden', 'true');
 
-    // ─── Modal ────────────────────────────────────────────────────────────
     const modal = document.createElement('div');
-    modal.className = 'agy-modal';
+    modal.className = 'agy-modal agy-modal-lg';
     modal.setAttribute('role', 'dialog');
     modal.setAttribute('aria-modal', 'true');
     modal.setAttribute('aria-labelledby', 'agy-modal-title');
@@ -1109,18 +1052,29 @@ window.addEventListener('DOMContentLoaded', () => {
     const header = document.createElement('div');
     header.className = 'agy-modal-header';
 
-    const titleRow = document.createElement('div');
-    titleRow.id = 'agy-modal-title';
-    titleRow.className = 'agy-modal-title';
-    titleRow.innerHTML = `<h3 style="margin:0; font-size:18px; font-weight:600; display:flex; align-items:center; gap:8px;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>Provider Manager</h3>`;
+    const titleWrap = document.createElement('div');
+    titleWrap.className = 'agy-modal-header-title-wrap';
+    titleWrap.style.display = 'flex';
+    titleWrap.style.alignItems = 'center';
+    titleWrap.style.gap = '8px';
+    const titleIcon = document.createElement('div');
+    titleIcon.className = 'agy-modal-header-icon';
+    titleIcon.textContent = '☁️';
+    const titleText = document.createElement('h2');
+    titleText.id = 'agy-modal-title';
+    titleText.textContent = 'Provider Manager';
+    titleText.style.margin = '0';
+    titleText.style.fontSize = '16px';
+    titleWrap.appendChild(titleIcon);
+    titleWrap.appendChild(titleText);
 
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
-    closeBtn.className = 'agy-icon-btn';
-    closeBtn.setAttribute('aria-label', 'Close Provider Manager');
-    closeBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+    closeBtn.className = 'agy-icon-btn modal-close';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
 
-    header.appendChild(titleRow);
+    header.appendChild(titleWrap);
     header.appendChild(closeBtn);
     modal.appendChild(header);
 
@@ -1130,18 +1084,23 @@ window.addEventListener('DOMContentLoaded', () => {
 
     const listContainer = document.createElement('div');
     listContainer.className = 'agy-modal-list';
-
-    const formContainer = document.createElement('div');
+    
+    const formContainer = document.createElement('form');
+    formContainer.id = 'agy-addModelForm';
     formContainer.className = 'agy-modal-form';
-    formContainer.setAttribute('aria-hidden', 'true');
-
+    
     body.appendChild(listContainer);
     body.appendChild(formContainer);
+
+    // ─── Footer ───────────────────────────────────────────────────────────
+    const footer = document.createElement('div');
+    footer.className = 'agy-modal-footer';
+    
     modal.appendChild(body);
+    modal.appendChild(footer);
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
-    // ─── Close with cleanup ───────────────────────────────────────────────
     const closeModal = (): void => {
       overlay.remove();
       document.removeEventListener('keydown', escHandler);
@@ -1155,60 +1114,45 @@ window.addEventListener('DOMContentLoaded', () => {
       if (ev.target === overlay) closeModal();
     });
 
-    // ─── Keyboard: Escape + focus trap ───────────────────────────────────
     const escHandler = (ev: KeyboardEvent): void => {
       if (ev.key === 'Escape') {
         ev.preventDefault();
         closeModal();
         return;
       }
-      if (ev.key === 'Tab') {
-        const focusables = getFocusableElements(modal);
-        if (focusables.length === 0) return;
-        const first = focusables[0];
-        const last = focusables[focusables.length - 1];
-        if (ev.shiftKey && document.activeElement === first) {
-          ev.preventDefault();
-          last.focus();
-        } else if (!ev.shiftKey && document.activeElement === last) {
-          ev.preventDefault();
-          first.focus();
-        }
-      }
     };
     document.addEventListener('keydown', escHandler);
 
-    // ─── Entrance animation ───────────────────────────────────────────────
     if (prefersReducedMotion()) {
       overlay.classList.add('agy-no-motion');
     } else {
       overlay.classList.add('agy-anim-in');
     }
 
-    // ─── Render: List view ────────────────────────────────────────────────
+    // ─── RENDER LIST VIEW ────────────────────────────────────────────────
     async function renderList(): Promise<void> {
       listContainer.style.display = 'flex';
       formContainer.style.display = 'none';
-      formContainer.setAttribute('aria-hidden', 'true');
       listContainer.setAttribute('aria-hidden', 'false');
+      formContainer.setAttribute('aria-hidden', 'true');
       listContainer.replaceChildren();
+      footer.replaceChildren();
 
       let providers: ProviderFileEntry[] = [];
       try {
         providers = await storageAPI.getProviders();
       } catch (err) {
         providers = [];
-        console.error('Failed to load providers:', err);
+        preloadLog.error('Failed to load providers:', err);
       }
 
-      // Empty state
       if (providers.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'agy-empty-state';
         empty.innerHTML = `
-          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: var(--ink-muted);"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
-          <div style="font-size: 14px; font-weight: 600; color: var(--ink-primary); margin-top: 12px;">No providers configured</div>
-          <div style="font-size: 13px; color: var(--ink-secondary); margin-top: 4px; max-width: 320px; text-align: center; line-height: 1.5;">Add a provider to connect OpenAI, Anthropic, Google AI, Ollama, OpenRouter, or any OpenAI-compatible endpoint.</div>
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: var(--agy-ink-muted);"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
+          <div style="font-size: 14px; font-weight: 600; color: var(--agy-ink-primary); margin-top: 12px;">No providers configured</div>
+          <div style="font-size: 13px; color: var(--agy-ink-secondary); margin-top: 4px; max-width: 320px; text-align: center; line-height: 1.5;">Add a provider to connect OpenAI, Anthropic, Google AI, Ollama, OpenRouter, or any compatible endpoint.</div>
         `;
         const addBtnEmpty = document.createElement('button');
         addBtnEmpty.type = 'button';
@@ -1218,151 +1162,207 @@ window.addEventListener('DOMContentLoaded', () => {
         addBtnEmpty.addEventListener('click', () => renderForm());
         empty.appendChild(addBtnEmpty);
         listContainer.appendChild(empty);
-        return;
-      }
+      } else {
+        const topActions = document.createElement('div');
+        topActions.className = 'agy-list-topactions';
+        topActions.style.display = 'flex';
+        topActions.style.justifyContent = 'space-between';
+        topActions.style.alignItems = 'center';
 
-      const topActions = document.createElement('div');
-      topActions.className = 'agy-list-topactions';
+        const subtitle = document.createElement('div');
+        subtitle.className = 'agy-list-subtitle';
+        subtitle.textContent = `${providers.length} provider${providers.length === 1 ? '' : 's'} configured`;
 
-      const subtitle = document.createElement('div');
-      subtitle.className = 'agy-list-subtitle';
-      subtitle.textContent = `${providers.length} provider${providers.length === 1 ? '' : 's'} configured`;
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'agy-btn-primary';
+        addBtn.textContent = '+ Add Provider';
+        addBtn.addEventListener('click', () => renderForm());
 
-      const addBtn = document.createElement('button');
-      addBtn.type = 'button';
-      addBtn.className = 'agy-btn-primary';
-      addBtn.textContent = '+ Add Provider';
-      addBtn.addEventListener('click', () => renderForm());
+        topActions.appendChild(subtitle);
+        topActions.appendChild(addBtn);
+        listContainer.appendChild(topActions);
 
-      topActions.appendChild(subtitle);
-      topActions.appendChild(addBtn);
-      listContainer.appendChild(topActions);
+        providers.forEach((p) => {
+          const row = document.createElement('div');
+          row.className = 'agy-provider-row';
+          row.style.display = 'flex';
+          row.style.flexDirection = 'column';
+          row.style.gap = '8px';
+          row.style.padding = '12px 16px';
+          row.style.background = 'var(--agy-bg-surface)';
+          row.style.border = '1px solid var(--agy-border)';
+          row.style.borderRadius = 'var(--agy-radius-md)';
 
-      providers.forEach((p) => {
-        const row = document.createElement('div');
-        row.className = 'agy-provider-row';
+          const headerRow = document.createElement('div');
+          headerRow.style.display = 'flex';
+          headerRow.style.justifyContent = 'space-between';
+          headerRow.style.alignItems = 'center';
 
-        const headerRow = document.createElement('div');
-        headerRow.className = 'agy-row-header';
+          const info = document.createElement('div');
+          info.style.display = 'flex';
+          info.style.alignItems = 'center';
+          info.style.gap = '8px';
+          
+          const toggleLbl = document.createElement('label');
+          toggleLbl.className = 'agy-form-checkbox';
+          toggleLbl.style.margin = '0';
+          toggleLbl.style.cursor = 'pointer';
+          toggleLbl.title = p.enabled ? 'Disable all models' : 'Enable all models';
+          const toggleChk = document.createElement('input');
+          toggleChk.type = 'checkbox';
+          toggleChk.checked = p.enabled !== false;
+          toggleChk.addEventListener('change', async (e) => {
+            const isEnabled = (e.target as HTMLInputElement).checked;
+            p.enabled = isEnabled;
+            // Optionally update all nested models
+            p.models.forEach(m => { m.enabled = isEnabled; });
+            await storageAPI.saveProvider(p);
+            await renderCustomModelsList();
+            await renderList();
+          });
+          toggleLbl.appendChild(toggleChk);
 
-        const info = document.createElement('div');
-        info.className = 'agy-row-info';
-        const indicator = document.createElement('span');
-        indicator.className = `agy-status-dot ${p.enabled ? 'agy-status-on' : 'agy-status-off'}`;
-        indicator.setAttribute('aria-label', p.enabled ? 'Enabled' : 'Disabled');
-        const name = document.createElement('strong');
-        name.className = 'agy-row-name';
-        name.textContent = p.name;
-        name.title = p.name;
-        info.appendChild(indicator);
-        info.appendChild(name);
+          const statusDot = document.createElement('span');
+          statusDot.className = `agy-status-dot ${p.enabled !== false ? 'agy-status-on' : 'agy-status-off'}`;
 
-        const actions = document.createElement('div');
-        actions.className = 'agy-row-actions';
+          const name = document.createElement('strong');
+          name.className = 'agy-row-name';
+          name.style.fontSize = '14px';
+          name.textContent = p.name;
+          name.title = p.name;
 
-        const testBtn = document.createElement('button');
-        testBtn.type = 'button';
-        testBtn.className = 'agy-btn-secondary';
-        testBtn.textContent = '🩺 Test Health';
+          const badge = document.createElement('span');
+          badge.className = 'agy-badge';
+          badge.style.fontSize = '10px';
+          badge.style.padding = '2px 6px';
+          badge.style.borderRadius = '12px';
+          badge.style.backgroundColor = getProviderColor(p.provider) + '22';
+          badge.style.color = getProviderColor(p.provider);
+          badge.textContent = p.provider;
 
-        const editBtn = document.createElement('button');
-        editBtn.type = 'button';
-        editBtn.className = 'agy-btn-secondary';
-        editBtn.textContent = '⚙️ Edit';
-        editBtn.addEventListener('click', () => renderForm(p));
+          info.appendChild(toggleLbl);
+          info.appendChild(statusDot);
+          info.appendChild(name);
+          info.appendChild(badge);
 
-        const delBtn = document.createElement('button');
-        delBtn.type = 'button';
-        delBtn.className = 'agy-btn-secondary agy-btn-danger';
-        delBtn.setAttribute('aria-label', `Delete provider ${p.name}`);
-        delBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>`;
+          const actions = document.createElement('div');
+          actions.className = 'agy-row-actions';
+          actions.style.display = 'flex';
+          actions.style.gap = '4px';
 
-        let confirmOpen = false;
-        const resetConfirm = (): void => {
-          confirmOpen = false;
-          delBtn.classList.remove('agy-btn-confirm');
-          delBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>`;
-          delBtn.setAttribute('aria-label', `Delete provider ${p.name}`);
-        };
-        let confirmTimer: ReturnType<typeof setTimeout> | null = null;
-        delBtn.addEventListener('click', async () => {
-          if (delBtn.disabled) return;
-          if (!confirmOpen) {
-            confirmOpen = true;
-            delBtn.classList.add('agy-btn-confirm');
-            delBtn.innerHTML = `<span style="font-size: 12px; font-weight: 500;">Confirm?</span>`;
-            delBtn.setAttribute('aria-label', `Confirm delete provider ${p.name}`);
-            if (confirmTimer) clearTimeout(confirmTimer);
-            confirmTimer = setTimeout(() => { if (confirmOpen) resetConfirm(); }, 3000);
-            return;
-          }
-          if (confirmTimer) clearTimeout(confirmTimer);
-          delBtn.disabled = true;
-          try {
-            await storageAPI.deleteProvider(p.id);
-          } catch (err) {
-            console.error('Delete failed:', err);
-          }
-          await renderList();
-        });
-
-        testBtn.addEventListener('click', async () => {
-          if (testBtn.disabled) return;
-          testBtn.disabled = true;
-          const originalLabel = testBtn.textContent;
-          testBtn.textContent = 'Testing...';
-          try {
-            const res = await storageAPI.testModelConnection({
-              apiUrl: p.apiUrl,
-              provider: p.provider,
-              apiKey: p.apiKey,
-              allowUnauthorized: p.allowUnauthorized,
-            });
-            testBtn.classList.remove('agy-btn-success', 'agy-btn-error');
-            if (res.success) {
-              testBtn.textContent = '✅ Healthy';
-              testBtn.classList.add('agy-btn-success');
-            } else {
-              testBtn.textContent = `❌ ${res.status || 'Error'}`;
-              testBtn.classList.add('agy-btn-error');
+          const testBtn = document.createElement('button');
+          testBtn.type = 'button';
+          testBtn.className = 'agy-btn-ghost';
+          testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`;
+          testBtn.title = 'Test connection';
+          testBtn.addEventListener('click', async () => {
+            if (testBtn.disabled) return;
+            testBtn.disabled = true;
+            testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>`;
+            testBtn.style.color = '#fbbf24';
+            try {
+              const res = await storageAPI.testModelConnection({
+                apiUrl: p.apiUrl,
+                provider: p.provider,
+                apiKey: p.apiKey,
+                allowUnauthorized: p.allowUnauthorized,
+              });
+              if (res.success) {
+                testBtn.style.color = 'var(--agy-success)';
+                testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`;
+              } else {
+                testBtn.style.color = 'var(--agy-danger)';
+                testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`;
+                testBtn.title = res.error || 'Connection failed';
+              }
+            } catch (err) {
+              testBtn.style.color = 'var(--agy-danger)';
+              testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`;
             }
-          } catch (err) {
-            testBtn.textContent = '❌ Failed';
-            testBtn.classList.add('agy-btn-error');
-          }
-          setTimeout(() => {
-            testBtn.textContent = originalLabel;
-            testBtn.classList.remove('agy-btn-success', 'agy-btn-error');
-            testBtn.disabled = false;
-          }, 3000);
+            setTimeout(() => {
+              testBtn.disabled = false;
+              testBtn.style.color = '';
+              testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`;
+              testBtn.title = 'Test connection';
+            }, 3000);
+          });
+
+          const renameBtn = document.createElement('button');
+          renameBtn.type = 'button';
+          renameBtn.className = 'agy-btn-ghost';
+          renameBtn.title = 'Rename';
+          renameBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>`;
+          renameBtn.addEventListener('click', async () => {
+            const newName = window.prompt('Enter new name for provider:', p.name);
+            if (newName && newName.trim() !== '' && newName !== p.name) {
+              p.name = newName.trim();
+              await storageAPI.saveProvider(p);
+              await renderCustomModelsList();
+              await renderList();
+            }
+          });
+
+          const editBtn = document.createElement('button');
+          editBtn.type = 'button';
+          editBtn.className = 'agy-btn-ghost';
+          editBtn.title = 'Edit Provider';
+          editBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
+          editBtn.addEventListener('click', () => renderForm(p));
+
+          const delBtn = document.createElement('button');
+          delBtn.type = 'button';
+          delBtn.className = 'agy-btn-ghost';
+          delBtn.style.color = 'var(--agy-danger)';
+          delBtn.title = 'Delete Provider';
+          delBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>`;
+          delBtn.addEventListener('click', async () => {
+            if (window.confirm(`Are you sure you want to delete "${p.name}"? This removes all its models.`)) {
+              await storageAPI.deleteProvider(p.id);
+              await renderCustomModelsList();
+              await renderList();
+              const refreshBtn = findRefreshButton();
+              if (refreshBtn) refreshBtn.click();
+            }
+          });
+
+          actions.appendChild(testBtn);
+          actions.appendChild(renameBtn);
+          actions.appendChild(editBtn);
+          actions.appendChild(delBtn);
+
+          headerRow.appendChild(info);
+          headerRow.appendChild(actions);
+
+          const subRow = document.createElement('div');
+          subRow.className = 'agy-row-sub';
+          subRow.style.fontSize = '12px';
+          subRow.style.color = 'var(--agy-ink-muted)';
+          subRow.style.marginTop = '4px';
+          const enabledCount = p.models.filter((m) => m.enabled).length;
+          subRow.textContent = `${p.apiUrl} • ${enabledCount} of ${p.models.length} model${p.models.length === 1 ? '' : 's'} enabled`;
+
+          row.appendChild(headerRow);
+          row.appendChild(subRow);
+          listContainer.appendChild(row);
         });
-
-        actions.appendChild(testBtn);
-        actions.appendChild(editBtn);
-        actions.appendChild(delBtn);
-
-        headerRow.appendChild(info);
-        headerRow.appendChild(actions);
-
-        const subRow = document.createElement('div');
-        subRow.className = 'agy-row-sub';
-        const enabledCount = p.models.filter((m) => m.enabled).length;
-        const displayProvider = p.provider.charAt(0).toUpperCase() + p.provider.slice(1);
-        subRow.textContent = `${displayProvider} • ${enabledCount} of ${p.models.length} model${p.models.length === 1 ? '' : 's'} enabled`;
-
-        row.appendChild(headerRow);
-        row.appendChild(subRow);
-        listContainer.appendChild(row);
-      });
+      }
+      titleText.textContent = 'Provider Manager';
+      titleIcon.textContent = '☁️';
     }
 
-    // ─── Render: Form view ────────────────────────────────────────────────
+    // ─── RENDER FORM VIEW ────────────────────────────────────────────────
     function renderForm(existingProvider?: ProviderFileEntry): void {
       listContainer.style.display = 'none';
       formContainer.style.display = 'flex';
+      formContainer.style.flexDirection = 'column';
       listContainer.setAttribute('aria-hidden', 'true');
       formContainer.setAttribute('aria-hidden', 'false');
       formContainer.replaceChildren();
+      footer.replaceChildren();
+
+      titleIcon.textContent = existingProvider ? '✎' : '+';
+      titleText.textContent = existingProvider ? 'Edit Custom Provider' : 'Add Custom Provider';
 
       const state = existingProvider
         ? JSON.parse(JSON.stringify(existingProvider))
@@ -1377,21 +1377,6 @@ window.addEventListener('DOMContentLoaded', () => {
             models: [] as ProviderModelEntry[],
           };
 
-      const headerRow = document.createElement('div');
-      headerRow.className = 'agy-form-header';
-      const backBtn = document.createElement('button');
-      backBtn.type = 'button';
-      backBtn.className = 'agy-btn-ghost';
-      backBtn.setAttribute('aria-label', 'Back to provider list');
-      backBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align: -2px; margin-right: 4px;"><polyline points="15 18 9 12 15 6"/></svg>Back`;
-      backBtn.addEventListener('click', () => renderList());
-      const title = document.createElement('div');
-      title.className = 'agy-form-title';
-      title.textContent = existingProvider ? 'Edit Provider' : 'Add New Provider';
-      headerRow.appendChild(backBtn);
-      headerRow.appendChild(title);
-      formContainer.appendChild(headerRow);
-
       const createInput = (
         labelStr: string,
         key: string,
@@ -1400,34 +1385,35 @@ window.addEventListener('DOMContentLoaded', () => {
         required: boolean = false,
       ): { wrapper: HTMLElement; input: HTMLInputElement; errorEl: HTMLElement } => {
         const w = document.createElement('div');
-        w.className = 'agy-form-field';
+        w.className = 'agy-form-group';
         const l = document.createElement('label');
-        l.textContent = labelStr + (required ? ' *' : '');
-        l.className = 'agy-form-label';
-        l.htmlFor = `agy-input-${key}`;
+        l.innerHTML = labelStr + (required ? '' : ' <span class="agy-form-hint">(optional)</span>');
+        l.htmlFor = 'agy-input-' + key;
         const i = document.createElement('input');
         i.type = type;
-        i.id = `agy-input-${key}`;
+        i.id = 'agy-input-' + key;
         i.value = state[key] || '';
         i.className = 'agy-input';
         if (required) i.setAttribute('required', 'true');
-        if (helpText) i.setAttribute('aria-describedby', `agy-help-${key}`);
         const errorEl = document.createElement('div');
-        errorEl.className = 'agy-form-error';
-        errorEl.id = `agy-error-${key}`;
-        errorEl.setAttribute('role', 'alert');
-        errorEl.setAttribute('aria-live', 'polite');
+        errorEl.className = 'agy-form-error-banner';
+        errorEl.id = 'agy-error-' + key;
+        
         if (existingProvider && key === 'apiKey') {
-          i.placeholder = '•••••••• (leave empty to keep, type to replace)';
+          i.placeholder = '•••••••• (leave empty to keep)';
         } else if (key === 'apiKey') {
-          i.placeholder = 'Paste your API key';
+          i.placeholder = 'sk-...';
+        } else if (key === 'apiUrl') {
+          i.placeholder = 'https://api.example.com/v1/chat/completions';
+        } else if (key === 'name') {
+          i.placeholder = 'e.g. My Provider';
         }
+        
         w.appendChild(l);
         w.appendChild(i);
         if (helpText) {
           const help = document.createElement('div');
-          help.id = `agy-help-${key}`;
-          help.className = 'agy-form-help';
+          help.className = 'agy-form-hint';
           help.textContent = helpText;
           w.appendChild(help);
         }
@@ -1436,13 +1422,10 @@ window.addEventListener('DOMContentLoaded', () => {
       };
 
       const providerWrap = document.createElement('div');
-      providerWrap.className = 'agy-form-field';
+      providerWrap.className = 'agy-form-group';
       const providerLabel = document.createElement('label');
       providerLabel.textContent = 'Provider Type';
-      providerLabel.className = 'agy-form-label';
-      providerLabel.htmlFor = 'agy-input-provider';
       const providerSelect = document.createElement('select');
-      providerSelect.id = 'agy-input-provider';
       providerSelect.className = 'agy-input';
       for (const preset of PROVIDER_PRESETS) {
         const opt = document.createElement('option');
@@ -1454,62 +1437,50 @@ window.addEventListener('DOMContentLoaded', () => {
       if (!PROVIDER_PRESETS.some((pp) => pp.id === state.provider)) {
         const opt = document.createElement('option');
         opt.value = state.provider;
-        opt.textContent = `${state.provider} (saved)`;
+        opt.textContent = state.provider + ' (saved)';
         opt.selected = true;
         providerSelect.appendChild(opt);
       }
-      providerSelect.addEventListener('change', (e) => {
-        const id = (e.target as HTMLSelectElement).value;
-        state.provider = id;
-        const preset = PROVIDER_PRESETS.find((pp) => pp.id === id);
-        if (preset && preset.defaultApiUrl && !state.apiUrl) {
-          urlInp.input.value = preset.defaultApiUrl;
-          state.apiUrl = preset.defaultApiUrl;
-        }
-      });
+      
+      const providerHint = document.createElement('div');
+      providerHint.className = 'agy-form-hint';
+      providerHint.textContent = 'Select the API format your provider uses.';
+
       providerWrap.appendChild(providerLabel);
       providerWrap.appendChild(providerSelect);
+      providerWrap.appendChild(providerHint);
 
-      const nameInp = createInput('Provider Name', 'name', 'text', 'e.g. My OpenRouter', true);
-      const urlInp = createInput('Base API URL', 'apiUrl', 'url', 'e.g. https://openrouter.ai/api/v1', true);
+      const nameInp = createInput('Provider Name', 'name', 'text', '', true);
+      const urlInp = createInput('API URL', 'apiUrl', 'url', 'The chat/completions or messages endpoint.', true);
 
       const keyWrap = document.createElement('div');
-      keyWrap.className = 'agy-form-field';
+      keyWrap.className = 'agy-form-group';
       const keyLabel = document.createElement('label');
-      keyLabel.textContent = 'API Key';
-      keyLabel.className = 'agy-form-label';
-      keyLabel.htmlFor = 'agy-input-apiKey';
+      keyLabel.innerHTML = 'API Key <span class="agy-form-hint">(optional)</span>';
       const keyInp = document.createElement('input');
       keyInp.type = 'password';
-      keyInp.id = 'agy-input-apiKey';
       keyInp.className = 'agy-input';
       keyInp.autocomplete = 'off';
       keyInp.spellcheck = false;
-      if (existingProvider) {
-        keyInp.placeholder = '•••••••• (leave empty to keep, type to replace)';
-      } else {
-        keyInp.placeholder = 'Paste your API key';
-      }
+      keyInp.placeholder = existingProvider ? '••••••••' : 'sk-...';
+
       let keyDirty = false;
       keyInp.addEventListener('input', () => { keyDirty = true; });
-      const keyHelp = document.createElement('div');
-      keyHelp.className = 'agy-form-help';
-      keyHelp.textContent = 'Leave empty to keep the existing key. Type a new value to replace it.';
       keyWrap.appendChild(keyLabel);
       keyWrap.appendChild(keyInp);
-      keyWrap.appendChild(keyHelp);
 
-      const tlsWrap = document.createElement('label');
-      tlsWrap.className = 'agy-form-checkbox';
+      const tlsWrap = document.createElement('div');
+      tlsWrap.className = 'agy-form-group agy-form-group-checkbox';
       const tlsChk = document.createElement('input');
       tlsChk.type = 'checkbox';
+      tlsChk.className = 'agy-form-checkbox';
       tlsChk.checked = !!state.allowUnauthorized;
-      tlsChk.id = 'agy-input-allowUnauthorized';
       tlsChk.addEventListener('change', (e) => {
         state.allowUnauthorized = (e.target as HTMLInputElement).checked;
       });
-      const tlsLbl = document.createElement('span');
-      tlsLbl.textContent = 'Allow self-signed certificates (insecure)';
+      const tlsLbl = document.createElement('label');
+      tlsLbl.className = 'agy-form-label-inline';
+      tlsLbl.textContent = 'Allow self-signed / unauthorized certificates';
       tlsWrap.appendChild(tlsChk);
       tlsWrap.appendChild(tlsLbl);
 
@@ -1521,78 +1492,92 @@ window.addEventListener('DOMContentLoaded', () => {
 
       const showError = (el: HTMLElement, msg: string): void => {
         el.textContent = msg;
-        el.classList.add('agy-form-error-visible');
+        el.style.display = 'block';
       };
       const clearError = (el: HTMLElement): void => {
         el.textContent = '';
-        el.classList.remove('agy-form-error-visible');
+        el.style.display = 'none';
       };
       const validateUrl = (url: string): boolean => {
-        try {
-          const u = new URL(url);
-          return u.protocol === 'http:' || u.protocol === 'https:';
-        } catch { return false; }
+        try { const u = new URL(url); return u.protocol === 'http:' || u.protocol === 'https:'; } catch { return false; }
       };
 
       const formStatus = document.createElement('div');
-      formStatus.className = 'agy-form-status';
-      formStatus.setAttribute('role', 'status');
-      formStatus.setAttribute('aria-live', 'polite');
+      formStatus.className = 'agy-form-error-banner';
       formContainer.appendChild(formStatus);
 
-      const fetchRow = document.createElement('div');
-      fetchRow.className = 'agy-fetch-row';
+      const step2 = document.createElement('div');
+      step2.style.marginTop = '24px';
+      step2.style.paddingTop = '24px';
+      step2.style.borderTop = '1px solid var(--agy-border)';
+
+      const modelsSection = document.createElement('div');
+      modelsSection.className = 'agy-form-group';
+      
+      const modelsHeader = document.createElement('div');
+      modelsHeader.className = 'agy-form-header-row';
+      const modelsLabel = document.createElement('label');
+      modelsLabel.textContent = 'Available Models';
       const fetchBtn = document.createElement('button');
       fetchBtn.type = 'button';
-      fetchBtn.className = 'agy-btn-secondary';
-      fetchBtn.textContent = '🔄 Fetch Available Models';
-      const fetchStatus = document.createElement('div');
-      fetchStatus.className = 'agy-form-status';
-      fetchStatus.setAttribute('role', 'status');
-      fetchStatus.setAttribute('aria-live', 'polite');
-      fetchRow.appendChild(fetchBtn);
-      fetchRow.appendChild(fetchStatus);
-      formContainer.appendChild(fetchRow);
+      fetchBtn.className = 'agy-btn-ghost';
+      fetchBtn.textContent = 'Refetch';
+      fetchBtn.style.padding = '4px 8px';
+      
+      modelsHeader.appendChild(modelsLabel);
+      modelsHeader.appendChild(fetchBtn);
+      modelsSection.appendChild(modelsHeader);
 
+      const listWrapper = document.createElement('div');
+      listWrapper.className = 'agy-fetched-models-container';
+      
       const modelsList = document.createElement('div');
-      modelsList.className = 'agy-models-list';
-      modelsList.setAttribute('role', 'group');
-      modelsList.setAttribute('aria-label', 'Available models');
-      formContainer.appendChild(modelsList);
+      modelsList.className = 'agy-fetched-models-list';
+      listWrapper.appendChild(modelsList);
+      modelsSection.appendChild(listWrapper);
+      
+      step2.appendChild(modelsSection);
+      formContainer.appendChild(step2);
 
-      const renderModelsList = (): void => {
+      function renderModelsList(): void {
         modelsList.replaceChildren();
+
         if (state.models.length === 0) {
           const empty = document.createElement('div');
-          empty.className = 'agy-models-empty';
-          empty.textContent = 'No models yet. Click "Fetch Available Models" or save the provider to apply.';
+          empty.className = 'agy-fetched-models-empty';
+          empty.textContent = 'Fetch models to see available options.';
           modelsList.appendChild(empty);
           return;
         }
-        state.models.forEach((m: ProviderModelEntry, idx: number) => {
+
+        state.models.forEach((m: ProviderModelEntry) => {
+          const realIdx = state.models.findIndex((item: ProviderModelEntry) => item.id === m.id);
           const row = document.createElement('label');
-          row.className = 'agy-model-row';
+          row.className = 'agy-fetched-model-row';
+          
           const chk = document.createElement('input');
           chk.type = 'checkbox';
+          chk.className = 'agy-form-checkbox';
           chk.checked = m.enabled;
           chk.addEventListener('change', (e) => {
-            state.models[idx].enabled = (e.target as HTMLInputElement).checked;
+            if (realIdx !== -1) {
+              state.models[realIdx].enabled = (e.target as HTMLInputElement).checked;
+            }
           });
+
           const lbl = document.createElement('span');
           lbl.textContent = m.displayName || m.id;
-          lbl.title = m.id;
-          lbl.className = 'agy-model-row-label';
           row.appendChild(chk);
           row.appendChild(lbl);
           modelsList.appendChild(row);
         });
-      };
+      }
+
       renderModelsList();
 
       fetchBtn.addEventListener('click', async () => {
         if (fetchBtn.disabled) return;
-        fetchStatus.textContent = '';
-        fetchStatus.className = 'agy-form-status';
+        clearError(formStatus);
         const url = urlInp.input.value.trim();
         if (!validateUrl(url)) {
           showError(urlInp.errorEl, 'Enter a valid http(s) URL');
@@ -1604,8 +1589,14 @@ window.addEventListener('DOMContentLoaded', () => {
         if (keyDirty) state.apiKey = keyInp.value;
 
         fetchBtn.disabled = true;
-        const originalText = fetchBtn.textContent;
         fetchBtn.textContent = 'Fetching...';
+        
+        modelsList.replaceChildren();
+        const empty = document.createElement('div');
+        empty.className = 'agy-fetched-models-empty';
+        empty.textContent = 'Loading models...';
+        modelsList.appendChild(empty);
+
         try {
           const res = await storageAPI.fetchModels({
             baseUrl: state.apiUrl,
@@ -1615,52 +1606,36 @@ window.addEventListener('DOMContentLoaded', () => {
             allowUnauthorized: state.allowUnauthorized,
           });
           if (res.success && res.models) {
-            fetchStatus.textContent = `Found ${res.models.length} model${res.models.length === 1 ? '' : 's'}.`;
-            fetchStatus.classList.add('agy-status-success');
-            const existingMap = new Map(state.models.map((x) => [x.id, x]));
-            state.models = res.models.map((m) => {
+            const existingMap = new Map(state.models.map((x: ProviderModelEntry) => [x.id, x]));
+            state.models = res.models.map((m: any) => {
               const ext = existingMap.get(m.id);
-              return ext ? ext : { id: m.id, displayName: m.displayName || m.id, enabled: false };
+              return ext ? ext : { id: m.id, displayName: m.displayName || m.id, enabled: true };
             });
             renderModelsList();
           } else {
-            fetchStatus.textContent = `Error: ${res.error || 'Unknown error'}`;
-            fetchStatus.classList.add('agy-status-error');
+            showError(formStatus, 'Error: ' + (res.error || 'Unknown error'));
+            renderModelsList();
           }
         } catch (err) {
-          fetchStatus.textContent = `Error: ${(err as Error).message}`;
-          fetchStatus.classList.add('agy-status-error');
+          showError(formStatus, 'Error: ' + (err as Error).message);
+          renderModelsList();
         } finally {
-          fetchBtn.textContent = originalText;
+          fetchBtn.textContent = 'Refetch';
           fetchBtn.disabled = false;
         }
       });
 
-      const saveRow = document.createElement('div');
-      saveRow.className = 'agy-form-footer';
-
-      const removeKeyBtn = document.createElement('button');
-      removeKeyBtn.type = 'button';
-      removeKeyBtn.className = 'agy-btn-ghost agy-btn-danger';
-      removeKeyBtn.textContent = '🗝 Remove key';
-      removeKeyBtn.addEventListener('click', () => {
-        keyInp.value = '';
-        keyDirty = true;
-        state.apiKey = '';
-        formStatus.textContent = 'Key will be removed on save.';
-        formStatus.className = 'agy-form-status agy-status-warning';
-      });
-
       const cancelBtn = document.createElement('button');
       cancelBtn.type = 'button';
-      cancelBtn.className = 'agy-btn-secondary';
-      cancelBtn.textContent = 'Cancel';
+      cancelBtn.className = 'agy-btn-ghost';
+      cancelBtn.textContent = 'Back';
       cancelBtn.addEventListener('click', () => renderList());
 
       const saveBtn = document.createElement('button');
       saveBtn.type = 'button';
-      saveBtn.className = 'agy-btn-success';
-      saveBtn.textContent = 'Save Provider';
+      saveBtn.className = 'agy-btn-primary';
+      saveBtn.textContent = existingProvider ? 'Save Changes' : 'Save Provider';
+      
       saveBtn.addEventListener('click', async () => {
         if (saveBtn.disabled) return;
         let valid = true;
@@ -1690,27 +1665,22 @@ window.addEventListener('DOMContentLoaded', () => {
         try {
           const res = await storageAPI.saveProvider(state);
           if (res.success) {
-            formStatus.textContent = 'Saved.';
-            formStatus.className = 'agy-form-status agy-status-success';
+            await renderCustomModelsList();
             renderList();
           } else {
-            formStatus.textContent = `Error: ${res.error || 'Unknown error'}`;
-            formStatus.className = 'agy-form-status agy-status-error';
+            showError(formStatus, 'Error: ' + (res.error || 'Unknown error'));
             saveBtn.textContent = originalText;
             saveBtn.disabled = false;
           }
         } catch (err) {
-          formStatus.textContent = `Error: ${(err as Error).message}`;
-          formStatus.className = 'agy-form-status agy-status-error';
+          showError(formStatus, 'Error: ' + (err as Error).message);
           saveBtn.textContent = originalText;
           saveBtn.disabled = false;
         }
       });
 
-      saveRow.appendChild(removeKeyBtn);
-      saveRow.appendChild(cancelBtn);
-      saveRow.appendChild(saveBtn);
-      formContainer.appendChild(saveRow);
+      footer.appendChild(cancelBtn);
+      footer.appendChild(saveBtn);
 
       requestAnimationFrame(() => {
         nameInp.input.focus();
@@ -1718,7 +1688,1042 @@ window.addEventListener('DOMContentLoaded', () => {
       });
     }
 
-    renderList();
+    // Start by deciding which view to show
+    if (existingProvider) {
+      renderForm(existingProvider);
+    } else {
+      renderList();
+    }
+  }
+  async function renderCustomModelsList(): Promise<void> {
+    const contentArea = document.getElementById('agy-custom-models-content');
+    if (!contentArea) return;
+
+    contentArea.innerHTML = '';
+
+    try {
+      const models = await storageAPI.getCustomModels();
+      if (!models || models.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'agy-empty-state';
+        empty.style.padding = '48px 24px';
+        empty.innerHTML = `
+          <div style="margin-bottom: 16px; color: var(--agy-ink-secondary);">
+            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/></svg>
+          </div>
+          <div style="font-size: 14px; font-weight: 500; color: var(--agy-ink-secondary);">No models configured. Add a custom provider to get started.</div>
+        `;
+        const addBtnEmpty = document.createElement('button');
+        addBtnEmpty.type = 'button';
+        addBtnEmpty.className = 'agy-btn-primary';
+        addBtnEmpty.style.marginTop = '16px';
+        addBtnEmpty.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add model`;
+        addBtnEmpty.addEventListener('click', () => openProviderManagerModal());
+        empty.appendChild(addBtnEmpty);
+        contentArea.appendChild(empty);
+      } else {
+        const listContainer = document.createElement('div');
+        listContainer.style.display = 'flex';
+        listContainer.style.flexDirection = 'column';
+        listContainer.style.gap = '8px';
+
+        models.forEach((model) => {
+          const item = document.createElement('div');
+          item.className = 'agy-provider-row';
+          
+          const header = document.createElement('div');
+          header.className = 'agy-row-header';
+
+          const info = document.createElement('div');
+          info.className = 'agy-row-info';
+
+          const statusDot = document.createElement('span');
+          statusDot.className = 'agy-status-dot agy-status-off';
+          statusDot.title = 'Connection status unknown (test to verify)';
+
+          const title = document.createElement('div');
+          title.className = 'agy-row-name';
+          title.textContent = (model.displayName as string) || (model.name as string);
+
+          const badge = document.createElement('span');
+          badge.className = 'agy-badge';
+          badge.style.backgroundColor = getProviderColor(model.provider as string) + '22';
+          badge.style.color = getProviderColor(model.provider as string);
+          badge.textContent = model.provider as string;
+
+          const url = document.createElement('div');
+          url.className = 'agy-row-sub';
+          url.textContent = model.apiUrl as string;
+
+          info.appendChild(statusDot);
+          info.appendChild(title);
+          info.appendChild(badge);
+          info.appendChild(url);
+
+          const actions = document.createElement('div');
+          actions.className = 'agy-row-actions';
+
+          const testBtn = document.createElement('button');
+          testBtn.className = 'agy-btn-ghost';
+          testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`;
+          testBtn.title = 'Test connection';
+          
+          testBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const originalHtml = testBtn.innerHTML;
+            testBtn.style.color = '#fbbf24';
+            testBtn.style.cursor = 'wait';
+            testBtn.disabled = true;
+            testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="${prefersReducedMotion() ? '' : 'animation: agy-spin 0.8s linear infinite;'}"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>`;
+
+            try {
+              const result = await storageAPI.testModelConnection({
+                apiUrl: model.apiUrl as string,
+                provider: model.provider as string,
+                apiKey: model.apiKey as string,
+                allowUnauthorized: model.allowUnauthorized as boolean | undefined,
+              });
+
+              if (result.success) {
+                statusDot.className = 'agy-status-dot agy-status-on';
+                statusDot.title = result.message || 'Connected';
+                testBtn.title = 'Connected ✓';
+                testBtn.style.color = 'var(--agy-success)';
+                testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`;
+                const banner = document.getElementById('agy-persistent-banner');
+                if (banner) banner.remove();
+                failedModelDisplayNames.clear();
+                document.querySelectorAll('.ag-model-warning').forEach(el => el.remove());
+              } else {
+                statusDot.className = 'agy-status-dot';
+                statusDot.style.backgroundColor = 'var(--agy-danger)';
+                const errMsg = result.error || 'Connection failed';
+                statusDot.title = errMsg;
+                testBtn.title = errMsg;
+                testBtn.style.color = 'var(--agy-danger)';
+                testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`;
+              }
+            } catch (err) {
+              statusDot.className = 'agy-status-dot';
+              statusDot.style.backgroundColor = 'var(--agy-danger)';
+              statusDot.title = 'Connection test failed';
+              testBtn.title = 'Connection test failed';
+              testBtn.style.color = 'var(--agy-danger)';
+              testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`;
+            }
+            setTimeout(() => {
+              testBtn.disabled = false;
+              testBtn.style.cursor = 'pointer';
+              testBtn.style.color = '';
+              testBtn.innerHTML = originalHtml;
+            }, 3000);
+          });
+
+          const deleteBtn = document.createElement('button');
+          deleteBtn.className = 'agy-btn-ghost';
+          deleteBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>`;
+          deleteBtn.setAttribute('aria-label', `Delete ${(model.displayName as string) || (model.name as string)}`);
+          deleteBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (window.confirm(`Delete "${model.displayName || model.name}"? This removes it from your model list.`)) {
+              await storageAPI.deleteCustomModel(model.name as string);
+              await renderCustomModelsList();
+              const refreshBtn = findRefreshButton();
+              if (refreshBtn) refreshBtn.click();
+            }
+          });
+
+
+          const editBtn = document.createElement('button');
+          editBtn.className = 'agy-btn-ghost';
+          editBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+          editBtn.title = 'Edit provider settings';
+          editBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const providers = await storageAPI.getProviders();
+            const p = providers.find(prov => prov.provider === model.provider || prov.name === model.provider);
+            if (p) {
+              openProviderManagerModal(p);
+            }
+          });
+          actions.appendChild(editBtn);
+          actions.appendChild(testBtn);
+          actions.appendChild(deleteBtn);
+          header.appendChild(info);
+          header.appendChild(actions);
+          item.appendChild(header);
+          listContainer.appendChild(item);
+        });
+        
+        contentArea.appendChild(listContainer);
+      }
+    } catch (err) {
+      preloadLog.error('Failed to load custom models in list:', err);
+    }
+  }
+
+  async function injectCustomModelsSection(): Promise<void> {
+    const layout = findMcpSectionContainer();
+    if (!layout) return;
+
+    const { mainContainer, headerRow, contentBlock } = layout;
+
+    if (document.getElementById('agy-custom-models-section')) return;
+
+    // Remove the old Antigravity Customizations header row to replace it with Doctor UI header
+    if (headerRow && headerRow.parentNode) {
+      headerRow.parentNode.removeChild(headerRow);
+    }
+    if (contentBlock && contentBlock.parentNode) {
+      contentBlock.parentNode.removeChild(contentBlock);
+    }
+
+    ensureAgyTokens(); // Ensure Doctor UI CSS tokens are injected
+
+    const section = document.createElement('div');
+    section.id = 'agy-custom-models-section';
+    section.className = 'agy-view';
+    section.style.marginTop = '0px';
+
+    const viewHeader = document.createElement('div');
+    viewHeader.className = 'agy-view-header';
+
+    const viewTitleGroup = document.createElement('div');
+    viewTitleGroup.innerHTML = `
+      <h1 class="agy-view-title">Custom models</h1>
+      <p class="agy-view-subtitle">Configured providers and their status</p>
+    `;
+
+    const viewActions = document.createElement('div');
+    viewActions.className = 'agy-header-actions';
+
+    const testAllBtn = document.createElement('button');
+    testAllBtn.className = 'agy-btn-ghost';
+    testAllBtn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Test all`;
+    testAllBtn.addEventListener('click', () => {
+      const testBtns = document.querySelectorAll('#agy-custom-models-content .agy-row-actions .agy-btn-ghost[title="Test connection"]');
+      testBtns.forEach(btn => (btn as HTMLButtonElement).click());
+    });
+
+    const addModelBtn = document.createElement('button');
+    addModelBtn.className = 'agy-btn-primary';
+    addModelBtn.innerHTML = `☁️ Provider Manager`;
+    addModelBtn.addEventListener('click', () => {
+      openProviderManagerModal();
+    });
+
+    viewActions.appendChild(testAllBtn);
+    viewActions.appendChild(addModelBtn);
+    viewHeader.appendChild(viewTitleGroup);
+    viewHeader.appendChild(viewActions);
+
+    const panel = document.createElement('div');
+    panel.className = 'agy-panel';
+    const panelBody = document.createElement('div');
+    panelBody.className = 'agy-panel-body';
+    panelBody.id = 'agy-custom-models-content';
+
+    panel.appendChild(panelBody);
+    section.appendChild(viewHeader);
+    section.appendChild(panel);
+
+    mainContainer.appendChild(section);
+
+    await renderCustomModelsList();
+  }
+
+  // ─── Helper: Inject design tokens + modal styles (idempotent) ──────────
+  function ensureAgyTokens(): void {
+    if (document.getElementById('agy-style-tokens')) return;
+    const style = document.createElement('style');
+    style.id = 'agy-style-tokens';
+    style.textContent = `
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;600;700&display=swap');
+
+      :root {
+        --agy-bg-base: #0d1117;
+        --agy-bg-surface: #161b22;
+        --agy-bg-elevated: #1c2128;
+        --agy-bg-input: #21262d;
+        --agy-bg-input-hover: #30363d;
+        --agy-border: #30363d;
+        --agy-border-strong: #484f58;
+        --agy-ink-primary: #f0f6fc;
+        --agy-ink-secondary: #8b949e;
+        --agy-ink-muted: #6e7681;
+        --agy-accent: #1f6feb;
+        --agy-accent-hover: #388bfd;
+        --agy-success: #3fb950;
+        --agy-success-hover: #2ea043;
+        --agy-warning: #d29922;
+        --agy-danger: #f85149;
+        --agy-danger-hover: #da3633;
+        --agy-overlay-bg: hsla(222, 47%, 3%, 0.7);
+        --agy-shadow-modal: 0 8px 24px hsla(0, 0%, 0%, 0.5);
+        --agy-z-overlay: 100000;
+        --agy-radius-sm: 4px;
+        --agy-radius-md: 6px;
+        --agy-radius-lg: 10px;
+        --agy-radius-xl: 14px;
+        --agy-font: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        --agy-font-display: 'Outfit', 'Inter', sans-serif;
+        --agy-font-mono: 'JetBrains Mono', ui-monospace, "SF Mono", Menlo, monospace;
+      }
+
+      /* ── Overlay ────────────────────────────────────────────────── */
+      .agy-overlay {
+        position: fixed; inset: 0;
+        background: var(--agy-overlay-bg);
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
+        display: grid; place-items: center;
+        z-index: var(--agy-z-overlay);
+        animation: agy-fade-in 180ms cubic-bezier(0.4, 0, 0.2, 1);
+        font-family: var(--agy-font);
+        color: var(--agy-ink-primary);
+      }
+      @keyframes agy-fade-in {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      .agy-modal {
+        background: var(--agy-bg-surface);
+        border: 1px solid var(--agy-border-strong);
+        border-radius: var(--agy-radius-lg);
+        width: 90%; max-width: 560px;
+        max-height: min(680px, 88vh);
+        display: flex; flex-direction: column;
+        box-shadow: var(--agy-shadow-modal);
+        overflow: hidden;
+        animation: agy-modal-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      @keyframes agy-modal-in {
+        from { opacity: 0; transform: translate3d(0, 8px, 0) scale(0.98); }
+        to   { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+      }
+      .agy-modal-header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--agy-border);
+        background: var(--agy-bg-surface);
+      }
+      .agy-modal-title {
+        font-family: var(--agy-font-display);
+        font-size: 14px; font-weight: 600;
+        display: flex; align-items: center; gap: 8px;
+      }
+      .agy-modal-body {
+        display: flex; flex-direction: column; flex: 1; overflow: hidden; position: relative;
+        font-size: 13px; line-height: 1.6;
+        background: var(--agy-bg-base);
+      }
+      .agy-modal-list {
+        padding: 18px; overflow-y: auto; flex: 1;
+        display: flex; flex-direction: column; gap: 12px;
+      }
+      .agy-modal-form {
+        padding: 18px; overflow-y: auto; flex: 1;
+        display: none; flex-direction: column; gap: 16px;
+        background: var(--agy-bg-elevated);
+      }
+
+      /* ── Icon button (close) ──────────────── */
+      .agy-icon-btn {
+        background: transparent; border: none;
+        width: 26px; height: 26px;
+        display: grid; place-items: center;
+        border-radius: var(--agy-radius-sm);
+        color: var(--agy-ink-secondary);
+        cursor: pointer;
+        transition: all 120ms cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      .agy-icon-btn:hover { background: var(--agy-bg-input); color: var(--agy-ink-primary); }
+      .agy-icon-btn:focus-visible { outline: 2px solid var(--agy-accent-hover); outline-offset: 2px; }
+
+      /* ── Buttons ────────────────────────────────────────────────── */
+      .agy-btn-primary, .agy-btn-secondary, .agy-btn-success, .agy-btn-ghost, .agy-btn-confirm {
+        font-family: var(--agy-font);
+        border-radius: var(--agy-radius-md);
+        cursor: pointer; font-weight: 500;
+        transition: all 120ms ease;
+        padding: 6px 12px; font-size: 12.5px;
+        display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      }
+      .agy-btn-primary {
+        background: var(--agy-accent); border: 1px solid transparent; color: white;
+      }
+      .agy-btn-primary:hover:not(:disabled) { background: var(--agy-accent-hover); }
+      .agy-btn-secondary {
+        background: var(--agy-bg-input); border: 1px solid var(--agy-border-strong); color: var(--agy-ink-primary);
+      }
+      .agy-btn-secondary:hover:not(:disabled) { background: var(--agy-bg-input-hover); border-color: var(--agy-ink-muted); }
+      .agy-btn-ghost {
+        background: transparent; border: 1px solid transparent; color: var(--agy-ink-secondary);
+      }
+      .agy-btn-ghost:hover:not(:disabled) { background: var(--agy-bg-input); color: var(--agy-ink-primary); }
+      .agy-btn-success {
+        background: var(--agy-success); border: 1px solid transparent; color: white;
+      }
+      .agy-btn-success:hover:not(:disabled) { background: var(--agy-success-hover); }
+      .agy-btn-danger, .agy-btn-confirm {
+        background: var(--agy-danger); color: white; border: 1px solid transparent;
+      }
+      .agy-btn-danger:hover:not(:disabled), .agy-btn-confirm:hover:not(:disabled) {
+        background: var(--agy-danger-hover);
+      }
+      button:focus-visible, input:focus-visible, select:focus-visible {
+        outline: 2px solid var(--agy-accent-hover); outline-offset: 2px;
+      }
+
+      /* ── List view ──────────────────────────────────────────────── */
+      .agy-list-topactions { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+      .agy-list-subtitle { font-size: 13px; color: var(--agy-ink-secondary); }
+      .agy-empty-state {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        padding: 32px 18px; text-align: center;
+        border: 1px dashed var(--agy-border-strong); border-radius: var(--agy-radius-lg);
+        background: var(--agy-bg-input); color: var(--agy-ink-secondary); font-size: 13px;
+      }
+      .agy-provider-row {
+        background: var(--agy-bg-surface);
+        border: 1px solid var(--agy-border);
+        border-radius: var(--agy-radius-lg);
+        padding: 14px 16px;
+        display: flex; flex-direction: column; gap: 10px;
+        transition: border-color 120ms ease, background-color 120ms ease;
+      }
+      .agy-provider-row:hover { border-color: var(--agy-border-strong); background: var(--agy-bg-elevated); }
+      .agy-row-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+      .agy-row-info { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .agy-row-name { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+      .agy-row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+      .agy-row-sub { font-size: 12px; color: var(--agy-ink-muted); }
+      
+      .agy-status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+      .agy-status-on { background-color: var(--agy-success); box-shadow: 0 0 6px hsla(136, 60%, 50%, 0.4); }
+      .agy-status-off { background-color: var(--agy-ink-muted); }
+
+      /* ── Form view (Doctor UI Style) ────────────────────────────── */
+      .agy-form-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+      .agy-form-title { font-size: 15px; font-weight: 600; font-family: var(--agy-font-display); }
+      .agy-form-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+      .agy-form-group label { font-size: 13px; font-weight: 500; color: var(--agy-ink-primary); display: flex; align-items: center; justify-content: space-between; }
+      .agy-form-hint { font-size: 11.5px; color: var(--agy-ink-secondary); line-height: 1.4; }
+      .agy-form-error-banner {
+        font-size: 12.5px; color: var(--agy-danger); background: hsla(0, 100%, 65%, 0.1);
+        border: 1px solid hsla(0, 100%, 65%, 0.2); border-radius: var(--agy-radius-md);
+        padding: 10px 14px; margin-top: 4px; display: none;
+      }
+      .agy-form-error-visible { display: block !important; }
+      
+      .agy-input {
+        background-color: var(--agy-bg-base);
+        border: 1px solid var(--agy-border-strong);
+        border-radius: var(--agy-radius-md);
+        color: var(--agy-ink-primary);
+        padding: 8px 12px; font-size: 13.5px; font-family: var(--agy-font-mono);
+        outline: none; transition: border-color 120ms ease, box-shadow 120ms ease;
+      }
+      .agy-input:hover { border-color: var(--agy-ink-muted); }
+      .agy-input:focus { border-color: var(--agy-accent-hover); box-shadow: 0 0 0 1px var(--agy-accent-hover); }
+      .agy-input:invalid:not(:placeholder-shown) { border-color: var(--agy-danger); }
+      
+      .agy-form-group-checkbox { flex-direction: row; align-items: center; gap: 8px; margin-bottom: 16px; }
+      .agy-form-checkbox { accent-color: var(--agy-accent); width: 14px; height: 14px; cursor: pointer; }
+      .agy-form-label-inline { font-size: 13px; color: var(--agy-ink-primary); cursor: pointer; font-weight: 400 !important; }
+      
+      .agy-form-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+      .agy-fetched-models-container {
+        border: 1px solid var(--agy-border-strong); border-radius: var(--agy-radius-md);
+        background: var(--agy-bg-base); overflow: hidden;
+      }
+      .agy-fetched-models-list {
+        max-height: 220px; overflow-y: auto; display: flex; flex-direction: column;
+      }
+      .agy-fetched-models-list::-webkit-scrollbar { width: 6px; }
+      .agy-fetched-models-list::-webkit-scrollbar-thumb { background: var(--agy-border-strong); border-radius: 4px; }
+      .agy-fetched-models-empty { padding: 32px 24px; text-align: center; color: var(--agy-ink-secondary); font-size: 13px; }
+      .agy-fetched-model-row {
+        display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+        border-bottom: 1px solid var(--agy-border); cursor: pointer;
+        transition: background-color 120ms ease;
+      }
+      .agy-fetched-model-row:last-child { border-bottom: none; }
+      .agy-fetched-model-row:hover { background: var(--agy-bg-input); }
+      .agy-fetched-model-row input { accent-color: var(--agy-accent); }
+      .agy-fetched-model-row span { font-size: 13px; color: var(--agy-ink-primary); }
+
+      .agy-form-footer {
+        display: flex; justify-content: flex-end; gap: 12px;
+        margin-top: auto; padding-top: 16px;
+        border-top: 1px solid var(--agy-border);
+      }
+      
+      /* ── Responsive ─────────────────────────────────────────────── */
+      @media (max-width: 480px) {
+        .agy-modal { width: calc(100vw - 24px); }
+        .agy-modal-header { padding: 12px 16px; }
+        .agy-modal-list, .agy-modal-form { padding: 16px; }
+        .agy-row-header { flex-direction: column; align-items: flex-start; }
+        .agy-row-actions { width: 100%; }
+        .agy-row-actions .agy-btn-secondary { flex: 1; min-width: 0; }
+        .agy-form-footer { justify-content: stretch; }
+        .agy-form-footer > button { flex: 1; }
+      }
+
+      /* ── Reduced motion ─────────────────────────────────────────── */
+      @media (prefers-reduced-motion: reduce) {
+        .agy-overlay, .agy-modal, .agy-btn-primary, .agy-btn-secondary,
+        .agy-btn-success, .agy-btn-ghost, .agy-icon-btn, .agy-input,
+        .agy-provider-row, .agy-form-error,
+        .ag-health-dot, .ag-health-refresh {
+          transition: none !important;
+          animation: none !important;
+        }
+      }
+
+      /* ── Dropdown Health Indicators ──────────────────────────────── */
+      @keyframes ag-pulse-error {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+        50%      { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0); }
+      }
+      @keyframes ag-pulse-healthy {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+        50%      { box-shadow: 0 0 0 3px rgba(34, 197, 94, 0); }
+      }
+      @keyframes ag-spin {
+        from { transform: rotate(0deg); }
+        to   { transform: rotate(360deg); }
+      }
+      @keyframes ag-fade-in {
+        from { opacity: 0; transform: translateY(4px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      .ag-health-dot {
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+        flex-shrink: 0;
+        margin-left: 6px;
+        vertical-align: middle;
+        transition: background-color 300ms ease, box-shadow 300ms ease;
+      }
+      .ag-health-dot--healthy {
+        background-color: #22c55e;
+        animation: ag-pulse-healthy 2.5s ease-in-out infinite;
+      }
+      .ag-health-dot--error {
+        background-color: #ef4444;
+        animation: ag-pulse-error 1.8s ease-in-out infinite;
+      }
+      .ag-health-dot--unknown {
+        background-color: #6b7280;
+        opacity: 0.7;
+      }
+      .ag-health-refresh {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px; height: 18px;
+        margin-left: 4px;
+        padding: 2px;
+        border: none;
+        background: transparent;
+        color: #a1a1aa;
+        cursor: pointer;
+        border-radius: 50%;
+        transition: color 150ms ease, background-color 150ms ease;
+        vertical-align: middle;
+        flex-shrink: 0;
+      }
+      .ag-health-refresh:hover {
+        color: #f4f4f5;
+        background-color: rgba(63, 63, 70, 0.6);
+      }
+      .ag-health-refresh--spinning svg {
+        animation: ag-spin 0.8s linear infinite;
+      }
+      .ag-health-tooltip {
+        position: absolute;
+        z-index: 100001;
+        background: #1a1a1a;
+        border: 1px solid #3f3f46;
+        border-left: 3px solid #ef4444;
+        border-radius: 6px;
+        padding: 10px 14px;
+        max-width: 320px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 12px;
+        color: #e5e5e5;
+        line-height: 1.5;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        animation: ag-fade-in 150ms ease-out;
+        pointer-events: auto;
+      }
+      .ag-health-tooltip__title {
+        font-weight: 600;
+        font-size: 12px;
+        margin-bottom: 4px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .ag-health-tooltip__msg {
+        color: #a1a1aa;
+        font-size: 11px;
+        margin-bottom: 8px;
+      }
+      .ag-health-tooltip__action {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        font-weight: 500;
+        color: #3b82f6;
+        cursor: pointer;
+        background: none;
+        border: none;
+        padding: 0;
+        text-decoration: none;
+      }
+      .ag-health-tooltip__action:hover {
+        color: #60a5fa;
+        text-decoration: underline;
+      }
+      .ag-dropdown-error-overlay {
+        opacity: 0.55;
+        pointer-events: auto;
+        position: relative;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  // ─── Helper: focusable elements inside a container ──────────────────
+  function getFocusableElements(root: HTMLElement): HTMLElement[] {
+    const selector = [
+      'a[href]',
+      'button:not([disabled])',
+      'input:not([disabled])',
+      'select:not([disabled])',
+      'textarea:not([disabled])',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(',');
+    return Array.from(root.querySelectorAll<HTMLElement>(selector)).filter(
+      (el) => !el.hasAttribute('inert') && el.offsetParent !== null,
+    );
+  }
+
+    function openProviderManagerModal(existingProvider?: ProviderFileEntry): void {
+    const existing = document.getElementById('agy-modal-overlay');
+    if (existing) existing.remove();
+
+    const triggerElement = document.activeElement as HTMLElement | null;
+    ensureAgyTokens();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'agy-modal-overlay';
+    overlay.className = 'agy-overlay';
+    overlay.setAttribute('aria-hidden', 'true');
+
+    const modal = document.createElement('div');
+    modal.className = 'agy-modal agy-modal-lg';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-labelledby', 'agy-modal-title');
+
+    // ─── Header ───────────────────────────────────────────────────────────
+    const header = document.createElement('div');
+    header.className = 'agy-modal-header';
+
+    const titleWrap = document.createElement('div');
+    titleWrap.className = 'agy-modal-header-title-wrap';
+    const titleIcon = document.createElement('div');
+    titleIcon.className = 'agy-modal-header-icon';
+    titleIcon.textContent = existingProvider ? '✎' : '+';
+    const titleText = document.createElement('h2');
+    titleText.id = 'agy-modal-title';
+    titleText.textContent = existingProvider ? 'Edit Custom Model' : 'Add Custom Model';
+    titleWrap.appendChild(titleIcon);
+    titleWrap.appendChild(titleText);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'agy-icon-btn modal-close';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+
+    header.appendChild(titleWrap);
+    header.appendChild(closeBtn);
+    modal.appendChild(header);
+
+    // ─── Body ─────────────────────────────────────────────────────────────
+    const body = document.createElement('div');
+    body.className = 'agy-modal-body';
+
+    const formContainer = document.createElement('form');
+    formContainer.id = 'agy-addModelForm';
+    body.appendChild(formContainer);
+
+    // ─── Footer ───────────────────────────────────────────────────────────
+    const footer = document.createElement('div');
+    footer.className = 'agy-modal-footer';
+    
+    modal.appendChild(body);
+    modal.appendChild(footer);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const closeModal = (): void => {
+      overlay.remove();
+      document.removeEventListener('keydown', escHandler);
+      if (triggerElement && typeof triggerElement.focus === 'function') {
+        try { triggerElement.focus(); } catch { /* no-op */ }
+      }
+    };
+
+    closeBtn.addEventListener('click', closeModal);
+    overlay.addEventListener('click', (ev) => {
+      if (ev.target === overlay) closeModal();
+    });
+
+    const escHandler = (ev: KeyboardEvent): void => {
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        closeModal();
+        return;
+      }
+    };
+    document.addEventListener('keydown', escHandler);
+
+    if (prefersReducedMotion()) {
+      overlay.classList.add('agy-no-motion');
+    } else {
+      overlay.classList.add('agy-anim-in');
+    }
+
+    // ─── Render Form ──────────────────────────────────────────────────────
+    const state = existingProvider
+      ? JSON.parse(JSON.stringify(existingProvider))
+      : {
+          id: 'provider-' + Date.now(),
+          name: '',
+          provider: 'openai',
+          apiUrl: 'https://api.openai.com/v1',
+          apiKey: '',
+          allowUnauthorized: false,
+          enabled: true,
+          models: [] as ProviderModelEntry[],
+        };
+
+    const createInput = (
+      labelStr: string,
+      key: string,
+      type: string = 'text',
+      helpText?: string,
+      required: boolean = false,
+    ): { wrapper: HTMLElement; input: HTMLInputElement; errorEl: HTMLElement } => {
+      const w = document.createElement('div');
+      w.className = 'agy-form-group';
+      const l = document.createElement('label');
+      l.innerHTML = labelStr + (required ? '' : ' <span class="agy-form-hint">(optional)</span>');
+      l.htmlFor = 'agy-input-' + key;
+      const i = document.createElement('input');
+      i.type = type;
+      i.id = 'agy-input-' + key;
+      i.value = state[key] || '';
+      i.className = 'agy-input';
+      if (required) i.setAttribute('required', 'true');
+      const errorEl = document.createElement('div');
+      errorEl.className = 'agy-form-error-banner';
+      errorEl.id = 'agy-error-' + key;
+      
+      if (existingProvider && key === 'apiKey') {
+        i.placeholder = '•••••••• (leave empty to keep)';
+      } else if (key === 'apiKey') {
+        i.placeholder = 'sk-...';
+      } else if (key === 'apiUrl') {
+        i.placeholder = 'https://api.example.com/v1/chat/completions';
+      } else if (key === 'name') {
+        i.placeholder = 'e.g. My Provider';
+      }
+      
+      w.appendChild(l);
+      w.appendChild(i);
+      if (helpText) {
+        const help = document.createElement('div');
+        help.className = 'agy-form-hint';
+        help.textContent = helpText;
+        w.appendChild(help);
+      }
+      w.appendChild(errorEl);
+      return { wrapper: w, input: i, errorEl };
+    };
+
+    const providerWrap = document.createElement('div');
+    providerWrap.className = 'agy-form-group';
+    const providerLabel = document.createElement('label');
+    providerLabel.textContent = 'Provider Type';
+    const providerSelect = document.createElement('select');
+    providerSelect.className = 'agy-input';
+    for (const preset of PROVIDER_PRESETS) {
+      const opt = document.createElement('option');
+      opt.value = preset.id;
+      opt.textContent = preset.label;
+      if (state.provider === preset.id) opt.selected = true;
+      providerSelect.appendChild(opt);
+    }
+    if (!PROVIDER_PRESETS.some((pp) => pp.id === state.provider)) {
+      const opt = document.createElement('option');
+      opt.value = state.provider;
+      opt.textContent = state.provider + ' (saved)';
+      opt.selected = true;
+      providerSelect.appendChild(opt);
+    }
+    
+    const providerHint = document.createElement('div');
+    providerHint.className = 'agy-form-hint';
+    providerHint.textContent = 'Select the API format your provider uses.';
+
+    providerWrap.appendChild(providerLabel);
+    providerWrap.appendChild(providerSelect);
+    providerWrap.appendChild(providerHint);
+
+    const nameInp = createInput('Provider Name', 'name', 'text', '', true);
+    const urlInp = createInput('API URL', 'apiUrl', 'url', 'The chat/completions or messages endpoint.', true);
+
+    const keyWrap = document.createElement('div');
+    keyWrap.className = 'agy-form-group';
+    const keyLabel = document.createElement('label');
+    keyLabel.innerHTML = 'API Key <span class="agy-form-hint">(optional)</span>';
+    const keyInp = document.createElement('input');
+    keyInp.type = 'password';
+    keyInp.className = 'agy-input';
+    keyInp.autocomplete = 'off';
+    keyInp.spellcheck = false;
+    keyInp.placeholder = existingProvider ? '••••••••' : 'sk-...';
+
+    let keyDirty = false;
+    keyInp.addEventListener('input', () => { keyDirty = true; });
+    keyWrap.appendChild(keyLabel);
+    keyWrap.appendChild(keyInp);
+
+    const tlsWrap = document.createElement('div');
+    tlsWrap.className = 'agy-form-group agy-form-group-checkbox';
+    const tlsChk = document.createElement('input');
+    tlsChk.type = 'checkbox';
+    tlsChk.className = 'agy-form-checkbox';
+    tlsChk.checked = !!state.allowUnauthorized;
+    tlsChk.addEventListener('change', (e) => {
+      state.allowUnauthorized = (e.target as HTMLInputElement).checked;
+    });
+    const tlsLbl = document.createElement('label');
+    tlsLbl.className = 'agy-form-label-inline';
+    tlsLbl.textContent = 'Allow self-signed / unauthorized certificates';
+    tlsWrap.appendChild(tlsChk);
+    tlsWrap.appendChild(tlsLbl);
+
+    formContainer.appendChild(providerWrap);
+    formContainer.appendChild(nameInp.wrapper);
+    formContainer.appendChild(urlInp.wrapper);
+    formContainer.appendChild(keyWrap);
+    formContainer.appendChild(tlsWrap);
+
+    const showError = (el: HTMLElement, msg: string): void => {
+      el.textContent = msg;
+      el.style.display = 'block';
+    };
+    const clearError = (el: HTMLElement): void => {
+      el.textContent = '';
+      el.style.display = 'none';
+    };
+    const validateUrl = (url: string): boolean => {
+      try { const u = new URL(url); return u.protocol === 'http:' || u.protocol === 'https:'; } catch { return false; }
+    };
+
+    const formStatus = document.createElement('div');
+    formStatus.className = 'agy-form-error-banner';
+    formContainer.appendChild(formStatus);
+
+    const step2 = document.createElement('div');
+    step2.style.marginTop = '24px';
+    step2.style.paddingTop = '24px';
+    step2.style.borderTop = '1px solid var(--agy-border-subtle)';
+
+    const modelsSection = document.createElement('div');
+    modelsSection.className = 'agy-form-group';
+    
+    const modelsHeader = document.createElement('div');
+    modelsHeader.className = 'agy-form-header-row';
+    const modelsLabel = document.createElement('label');
+    modelsLabel.textContent = 'Available Models';
+    const fetchBtn = document.createElement('button');
+    fetchBtn.type = 'button';
+    fetchBtn.className = 'agy-btn-ghost';
+    fetchBtn.textContent = 'Refetch';
+    
+    modelsHeader.appendChild(modelsLabel);
+    modelsHeader.appendChild(fetchBtn);
+    modelsSection.appendChild(modelsHeader);
+
+    const listWrapper = document.createElement('div');
+    listWrapper.className = 'agy-fetched-models-container';
+    
+    const modelsList = document.createElement('div');
+    modelsList.className = 'agy-fetched-models-list';
+    listWrapper.appendChild(modelsList);
+    modelsSection.appendChild(listWrapper);
+    
+    step2.appendChild(modelsSection);
+    formContainer.appendChild(step2);
+
+    function renderModelsList(): void {
+      modelsList.replaceChildren();
+
+      if (state.models.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'agy-fetched-models-empty';
+        empty.textContent = 'Fetch models to see available options.';
+        modelsList.appendChild(empty);
+        return;
+      }
+
+      state.models.forEach((m: ProviderModelEntry) => {
+        const realIdx = state.models.findIndex((item: ProviderModelEntry) => item.id === m.id);
+        const row = document.createElement('label');
+        row.className = 'agy-fetched-model-row';
+        
+        const chk = document.createElement('input');
+        chk.type = 'checkbox';
+        chk.className = 'agy-form-checkbox';
+        chk.checked = m.enabled;
+        chk.addEventListener('change', (e) => {
+          if (realIdx !== -1) {
+            state.models[realIdx].enabled = (e.target as HTMLInputElement).checked;
+          }
+        });
+
+        const lbl = document.createElement('span');
+        lbl.textContent = m.displayName || m.id;
+        row.appendChild(chk);
+        row.appendChild(lbl);
+        modelsList.appendChild(row);
+      });
+    }
+
+    renderModelsList();
+
+    fetchBtn.addEventListener('click', async () => {
+      if (fetchBtn.disabled) return;
+      clearError(formStatus);
+      const url = urlInp.input.value.trim();
+      if (!validateUrl(url)) {
+        showError(urlInp.errorEl, 'Enter a valid http(s) URL');
+        urlInp.input.focus();
+        return;
+      }
+      clearError(urlInp.errorEl);
+      state.apiUrl = url;
+      if (keyDirty) state.apiKey = keyInp.value;
+
+      fetchBtn.disabled = true;
+      fetchBtn.textContent = 'Fetching...';
+      
+      modelsList.replaceChildren();
+      const empty = document.createElement('div');
+      empty.className = 'agy-fetched-models-empty';
+      empty.textContent = 'Loading models...';
+      modelsList.appendChild(empty);
+
+      try {
+        const res = await storageAPI.fetchModels({
+          baseUrl: state.apiUrl,
+          apiUrl: state.apiUrl,
+          apiKey: state.apiKey,
+          provider: state.provider,
+          allowUnauthorized: state.allowUnauthorized,
+        });
+        if (res.success && res.models) {
+          const existingMap = new Map(state.models.map((x: ProviderModelEntry) => [x.id, x]));
+          state.models = res.models.map((m: any) => {
+            const ext = existingMap.get(m.id);
+            return ext ? ext : { id: m.id, displayName: m.displayName || m.id, enabled: true };
+          });
+          renderModelsList();
+        } else {
+          showError(formStatus, 'Error: ' + (res.error || 'Unknown error'));
+          renderModelsList();
+        }
+      } catch (err) {
+        showError(formStatus, 'Error: ' + (err as Error).message);
+        renderModelsList();
+      } finally {
+        fetchBtn.textContent = 'Refetch';
+        fetchBtn.disabled = false;
+      }
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'agy-btn-ghost';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => closeModal());
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.className = 'agy-btn-primary';
+    saveBtn.textContent = existingProvider ? 'Save Changes' : 'Add Selected Models';
+    
+    saveBtn.addEventListener('click', async () => {
+      if (saveBtn.disabled) return;
+      let valid = true;
+      const name = nameInp.input.value.trim();
+      const url = urlInp.input.value.trim();
+      if (!name) {
+        showError(nameInp.errorEl, 'Provider name is required');
+        valid = false;
+      } else {
+        clearError(nameInp.errorEl);
+      }
+      if (!validateUrl(url)) {
+        showError(urlInp.errorEl, 'Enter a valid http(s) URL');
+        valid = false;
+      } else {
+        clearError(urlInp.errorEl);
+      }
+      if (!valid) return;
+
+      state.name = name;
+      state.apiUrl = url;
+      if (keyDirty) state.apiKey = keyInp.value;
+
+      saveBtn.disabled = true;
+      const originalText = saveBtn.textContent;
+      saveBtn.textContent = 'Saving...';
+      try {
+        const res = await storageAPI.saveProvider(state);
+        if (res.success) {
+          renderCustomModelsList();
+          closeModal();
+        } else {
+          showError(formStatus, 'Error: ' + (res.error || 'Unknown error'));
+          saveBtn.textContent = originalText;
+          saveBtn.disabled = false;
+        }
+      } catch (err) {
+        showError(formStatus, 'Error: ' + (err as Error).message);
+        saveBtn.textContent = originalText;
+        saveBtn.disabled = false;
+      }
+    });
+
+    footer.appendChild(cancelBtn);
+    footer.appendChild(saveBtn);
+
+    requestAnimationFrame(() => {
+      nameInp.input.focus();
+      if (existingProvider) nameInp.input.select();
+    });
   }
 
   // Efficient DOM tracking via MutationObserver — instead of setInterval
@@ -2127,19 +3132,328 @@ window.addEventListener('DOMContentLoaded', () => {
 
   interface ModelHealth {
     status: 'healthy' | 'error' | 'unknown';
+    errorType?: string;
+    trippedAt?: number;
+    failures?: number;
     diagnostic?: any;
     lastChecked: number;
   }
   const modelHealthState = new Map<string, ModelHealth>();
   const failedModelDisplayNames = new Set<string>();
 
+  // --- Proxy port auto-detection ---
+  // We sniff the proxy port from intercepted XHR/fetch URLs that go to 127.0.0.1
+  let detectedProxyPort = 0;
 
+  function detectProxyPort(url: string): void {
+    if (detectedProxyPort > 0) return;
+    try {
+      const m = url.match(/127\.0\.0\.1:(\d+)/);
+      if (m) {
+        detectedProxyPort = parseInt(m[1], 10);
+      }
+    } catch { /* ignore */ }
+  }
 
+  // --- Fetch health from proxy /model-health endpoint ---
+  async function fetchModelHealthFromProxy(): Promise<Record<string, { status: string; errorType?: string; trippedAt?: number; failures?: number }> | null> {
+    if (detectedProxyPort <= 0) return null;
+    try {
+      const resp = await window.fetch(`http://127.0.0.1:${detectedProxyPort}/model-health`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!resp.ok) return null;
+      const data = await resp.json();
+      return data.models || null;
+    } catch {
+      return null;
+    }
+  }
 
+  // --- Build a display-name → model-id lookup for BOTH native and custom models ---
+  // Key = displayName, Value = { id, isCustom }
+  const allKnownModels = new Map<string, { id: string; isCustom: boolean }>();
+
+  // Called from XHR/fetch interceptors when we see GetAvailableModels
+  function ingestModelsFromResponse(modelsObj: Record<string, any>) {
+    if (!modelsObj) return;
+    for (const [key, val] of Object.entries(modelsObj)) {
+      if (val && typeof val === 'object' && typeof val.displayName === 'string') {
+        const id = val.model || val.requestedModel || val.planModel || key;
+        const isCustom = id.startsWith('MODEL_PLACEHOLDER_M');
+        allKnownModels.set(val.displayName, { id, isCustom });
+      }
+    }
+  }
+
+  async function refreshModelHealthState(): Promise<void> {
+    try {
+      // 1. Fetch custom models from proxy config
+      const customModels = await getCustomModelsForInjection();
+      if (customModels && customModels.length > 0) {
+        for (const m of customModels) {
+          const dn = m.displayName || m.name;
+          const pid = generateModelPlaceholderId(m);
+          allKnownModels.set(dn, { id: pid, isCustom: true });
+        }
+      }
+
+      // 2. Fetch live health for custom models from proxy
+      const proxyHealth = await fetchModelHealthFromProxy();
+      if (proxyHealth && customModels) {
+        failedModelDisplayNames.clear();
+        for (const m of customModels) {
+          const dn = m.displayName || m.name;
+          const pid = generateModelPlaceholderId(m);
+          const ph = proxyHealth[pid];
+          if (ph) {
+            const health: ModelHealth = {
+              status: ph.status === 'error' ? 'error' : 'healthy',
+              errorType: ph.errorType,
+              trippedAt: ph.trippedAt,
+              failures: ph.failures,
+              lastChecked: Date.now(),
+            };
+            modelHealthState.set(pid, health);
+            if (ph.status === 'error') failedModelDisplayNames.add(dn);
+          } else {
+            modelHealthState.set(pid, { status: 'healthy', lastChecked: Date.now() });
+          }
+        }
+      } else if (customModels) {
+        // Proxy unreachable: mark custom models as unknown
+        for (const m of customModels) {
+          const pid = generateModelPlaceholderId(m);
+          if (!modelHealthState.has(pid)) {
+            modelHealthState.set(pid, { status: 'unknown', lastChecked: Date.now() });
+          }
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  // --- SVG constants ---
+  const SVG_REFRESH = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>`;
+  const SVG_ALERT = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
+  const SVG_CHECK = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`;
+
+  // --- Provider Logo Helper ---
+  function getProviderLogo(name: string): string {
+    const norm = name.toLowerCase();
+    if (norm.includes('deepseek')) return '🐋';
+    if (norm.includes('openai') || norm.includes('gpt')) return '🟢';
+    if (norm.includes('anthropic') || norm.includes('claude')) return '🟠';
+    if (norm.includes('ollama')) return '🦙';
+    if (norm.includes('groq')) return '⚡';
+    if (norm.includes('mistral')) return '🔮';
+    if (norm.includes('kimi') || norm.includes('moonshot')) return '🌙';
+    if (norm.includes('openrouter')) return '🌐';
+    if (norm.includes('nvidia') || norm.includes('nim')) return '💚';
+    return '🤖';
+  }
+
+  // --- Auto-detect Local Ollama Service ---
+  async function checkOllamaLocalAutoDetect(): Promise<void> {
+    try {
+      const resp = await window.fetch('http://127.0.0.1:11434/api/tags', {
+        method: 'GET',
+        signal: AbortSignal.timeout(2000),
+      });
+      if (resp.ok) {
+        const providers = await storageAPI.getProviders();
+        const hasOllama = providers.some((p) => p.provider === 'ollama' || p.apiUrl.includes('11434'));
+        if (!hasOllama) {
+          showErrorToast({
+            title: '🦙 Ollama Local Detected',
+            message: 'Ollama is running on your machine. Would you like to connect it to Antigravity in 1 click?',
+            suggestions: ['Click "Configure Ollama" below to auto-register your local LLMs.'],
+            retryable: false,
+            severity: 'info',
+            errorType: 'unknown',
+          });
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Trigger Ollama detection check on startup
+  setTimeout(checkOllamaLocalAutoDetect, 4000);
+
+  // --- Error type to human-friendly label ---
+  function errorTypeLabel(errorType?: string): string {
+    switch (errorType) {
+      case 'billing': return '💳 Billing / Quota';
+      case 'auth': return '🔑 Authentication';
+      case 'forbidden': return '🚫 Access Denied';
+      case 'rate_limit': return '⏱ Rate Limited';
+      case 'server': return '🖥 Server Error';
+      case 'network': return '🌐 Network Error';
+      case 'dns': return '🔍 DNS Error';
+      case 'timeout': return '⏳ Timeout';
+      default: return '⚠ Error';
+    }
+  }
+
+  // --- Create/update health dot for a model item ---
+  function createHealthDot(health: ModelHealth): HTMLSpanElement {
+    const dot = document.createElement('span');
+    dot.className = 'ag-health-dot';
+    if (health.status === 'healthy') {
+      dot.classList.add('ag-health-dot--healthy');
+      dot.title = '✅ Online';
+    } else if (health.status === 'error') {
+      dot.classList.add('ag-health-dot--error');
+      dot.title = `❌ ${errorTypeLabel(health.errorType)}`;
+    } else {
+      dot.classList.add('ag-health-dot--unknown');
+      dot.title = '⏳ Status unknown';
+    }
+    return dot;
+  }
+
+  // --- Create refresh button ---
+  function createRefreshButton(onRefresh: () => void): HTMLButtonElement {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ag-health-refresh';
+    btn.title = 'Refresh health status';
+    btn.innerHTML = SVG_REFRESH;
+    btn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      btn.classList.add('ag-health-refresh--spinning');
+      onRefresh();
+      setTimeout(() => btn.classList.remove('ag-health-refresh--spinning'), 1500);
+    };
+    return btn;
+  }
+
+  // --- Show rich error tooltip ---
+  function showHealthTooltip(anchor: HTMLElement, health: ModelHealth, displayName: string): void {
+    // Remove any existing tooltip
+    const existing = document.querySelector('.ag-health-tooltip');
+    if (existing) existing.remove();
+
+    if (health.status !== 'error') return;
+
+    const tooltip = document.createElement('div');
+    tooltip.className = 'ag-health-tooltip';
+
+    const title = document.createElement('div');
+    title.className = 'ag-health-tooltip__title';
+    title.innerHTML = `${SVG_ALERT} ${errorTypeLabel(health.errorType)}`;
+    tooltip.appendChild(title);
+
+    const msg = document.createElement('div');
+    msg.className = 'ag-health-tooltip__msg';
+    if (health.diagnostic?.message) {
+      msg.textContent = health.diagnostic.message;
+    } else if (health.errorType) {
+      msg.textContent = `This model is experiencing ${health.errorType} issues. It may not respond correctly.`;
+    } else {
+      msg.textContent = `Model "${displayName}" is currently unavailable.`;
+    }
+    tooltip.appendChild(msg);
+
+    const action = document.createElement('button');
+    action.className = 'ag-health-tooltip__action';
+    action.textContent = '🔧 Fix in Provider Manager';
+    action.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      tooltip.remove();
+      openProviderManagerModal();
+    };
+    tooltip.appendChild(action);
+
+    // Position tooltip near the anchor
+    document.body.appendChild(tooltip);
+    const rect = anchor.getBoundingClientRect();
+    tooltip.style.top = `${rect.bottom + 4}px`;
+    tooltip.style.left = `${Math.max(8, rect.left - 60)}px`;
+
+    // Auto-dismiss on click outside
+    const dismiss = (ev: MouseEvent) => {
+      if (!tooltip.contains(ev.target as Node) && !anchor.contains(ev.target as Node)) {
+        tooltip.remove();
+        document.removeEventListener('click', dismiss, true);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', dismiss, true), 50);
+  }
+
+  // --- Dropdown health polling ---
+  let healthPollingInterval: ReturnType<typeof setInterval> | null = null;
+  let dropdownCurrentlyOpen = false;
+
+  function startHealthPolling(): void {
+    if (healthPollingInterval) return;
+    dropdownCurrentlyOpen = true;
+    healthPollingInterval = setInterval(async () => {
+      if (!dropdownCurrentlyOpen) {
+        stopHealthPolling();
+        return;
+      }
+      await refreshModelHealthState();
+      updateDropdownHealthBadges();
+    }, 10_000); // Poll every 10 seconds
+  }
+
+  function stopHealthPolling(): void {
+    dropdownCurrentlyOpen = false;
+    if (healthPollingInterval) {
+      clearInterval(healthPollingInterval);
+      healthPollingInterval = null;
+    }
+  }
+
+  // --- Update all health badges in current dropdown ---
+  function updateDropdownHealthBadges(): void {
+    if (allKnownModels.size === 0) return;
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+    let node;
+    while ((node = walker.nextNode())) {
+      const text = node.nodeValue?.trim();
+      if (!text || !allKnownModels.has(text)) continue;
+
+      const parent = node.parentNode as HTMLElement;
+      if (!parent) continue;
+
+      const modelInfo = allKnownModels.get(text)!;
+      // Default to healthy for native models unless we logged an error
+      const health = modelHealthState.get(modelInfo.id) || { status: 'healthy', lastChecked: Date.now() };
+
+      // Remove existing indicators
+      parent.querySelectorAll('.ag-health-dot, .ag-health-refresh, .ag-model-warning, .ag-status-badge').forEach(el => el.remove());
+      parent.classList.remove('ag-dropdown-error-overlay');
+
+      // Add health dot (applies to ALL models)
+      const dot = createHealthDot(health);
+      parent.appendChild(dot);
+
+      // For error models: add visual dimming, tooltip on hover
+      if (health.status === 'error') {
+        parent.classList.add('ag-dropdown-error-overlay');
+        const showTip = () => showHealthTooltip(parent, health, text);
+        dot.addEventListener('mouseenter', showTip);
+        dot.style.cursor = 'pointer';
+      }
+
+      // Add refresh button ONLY for custom models (native models can't be pinged by proxy)
+      if (modelInfo.isCustom) {
+        const refreshBtn = createRefreshButton(async () => {
+          await refreshModelHealthState();
+          updateDropdownHealthBadges();
+        });
+        parent.appendChild(refreshBtn);
+      }
+    }
+  }
+
+  // --- Dropdown observer: detect opens, inject health UI, manage polling ---
   let dropdownTimeout: any;
   const dropdownObserver = new MutationObserver((mutations) => {
-    if (failedModelDisplayNames.size === 0) return;
-    
     let hasNewNodes = false;
     for (const m of mutations) {
       if (m.addedNodes.length > 0) {
@@ -2150,37 +3464,71 @@ window.addEventListener('DOMContentLoaded', () => {
     if (!hasNewNodes) return;
 
     if (dropdownTimeout) clearTimeout(dropdownTimeout);
-    dropdownTimeout = setTimeout(() => {
-       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
-       let node;
-       while ((node = walker.nextNode())) {
-         const text = node.nodeValue?.trim();
-         if (text && failedModelDisplayNames.has(text)) {
-            const parent = node.parentNode as HTMLElement;
-            if (parent && !parent.querySelector('.ag-model-warning')) {
-               // Find error msg
-               let errMsg = "Provider Error. Click to resolve.";
-               for (const health of Array.from(modelHealthState.values())) {
-                  if (health.status === 'error' && health.diagnostic) {
-                     errMsg = health.diagnostic.errorType.toUpperCase() + ": " + health.diagnostic.message;
-                     break;
-                  }
-               }
-               const warning = document.createElement('span');
-               warning.className = 'ag-model-warning';
-               warning.style.cssText = 'cursor: pointer; margin-left: 6px; display: inline-flex; align-items: center; justify-content: center;';
-               warning.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#eab308" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
-               warning.title = errMsg + " (Click to fix)";
-               warning.onclick = (e) => {
-                 e.preventDefault();
-                 e.stopPropagation();
-                 openProviderManagerModal();
-               };
-               parent.appendChild(warning);
-            }
-         }
-       }
-    }, 150); // Debounce to prevent blocking the main thread
+    dropdownTimeout = setTimeout(async () => {
+      // Detect any dropdown or popup menu element in VS Code / Electron webview
+      const dropdownMenu = document.querySelector(
+        '[role="listbox"], [role="menu"], .monaco-select-box-dropdown-container, .dropdown-menu, .monaco-menu-container, .action-menu-container, .select-box-dropdown'
+      );
+
+      if (dropdownMenu) {
+        // Dropdown just opened — inject refresh bar if not already there
+        if (!dropdownMenu.querySelector('.ag-dropdown-refresh-bar')) {
+          const refreshBar = document.createElement('div');
+          refreshBar.className = 'ag-dropdown-refresh-bar';
+          refreshBar.style.cssText = `
+            padding: 6px 12px;
+            background: #141416;
+            border-bottom: 1px solid #2a2a2e;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            color: #a1a1aa;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          `;
+
+          const label = document.createElement('span');
+          label.style.cssText = 'display: flex; align-items: center; gap: 6px; font-weight: 500;';
+          label.innerHTML = `${SVG_CHECK} Models Health`;
+          refreshBar.appendChild(label);
+
+          const refreshBtn = createRefreshButton(async () => {
+            const lbl = refreshBar.querySelector('span')!;
+            lbl.innerHTML = `⏳ Checking...`;
+            await refreshModelHealthState();
+            updateDropdownHealthBadges();
+            lbl.innerHTML = `${SVG_CHECK} Models Health`;
+          });
+          refreshBar.appendChild(refreshBtn);
+
+          dropdownMenu.insertBefore(refreshBar, dropdownMenu.firstChild);
+        }
+
+        // Initial health check + badge injection
+        await refreshModelHealthState();
+        updateDropdownHealthBadges();
+
+        // Start live polling while dropdown is open
+        startHealthPolling();
+
+        // Watch for dropdown close (element removal)
+        const closeObserver = new MutationObserver(() => {
+          if (!document.querySelector('[role="listbox"], .monaco-select-box-dropdown-container, .dropdown-menu')) {
+            stopHealthPolling();
+            // Clean up tooltips
+            document.querySelectorAll('.ag-health-tooltip').forEach(el => el.remove());
+            closeObserver.disconnect();
+          }
+        });
+        closeObserver.observe(document.body, { childList: true, subtree: true });
+      } else {
+        // Not a dropdown event, but might be model text appearing elsewhere
+        // Update badges if we have health data
+        if (modelHealthState.size > 0 && allKnownModels.size > 0) {
+          updateDropdownHealthBadges();
+        }
+      }
+    }, 150); // Debounce
   });
 
   if (document && document.body) {
@@ -2312,18 +3660,30 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   async function handleModelError(url: string, diagnostic: any) {
-    const match = url.match(/models\/(MODEL_PLACEHOLDER_M[^:]+)/);
+    const match = url.match(/models\/([^:/]+)/);
     const modelId = match ? match[1] : null;
 
     if (diagnostic.errorType === 'billing' || diagnostic.errorType === 'auth' || diagnostic.errorType === 'forbidden') {
       if (modelId) {
-        const models = await getCustomModelsForInjection();
-        // generateModelPlaceholderId already returns the fully-prefixed id.
-        const m = models.find((x) => generateModelPlaceholderId(x) === modelId);
-        if (m) {
-          failedModelDisplayNames.add(m.displayName || m.name);
-          modelHealthState.set(generateModelPlaceholderId(m), { status: 'error', lastChecked: Date.now(), diagnostic });
+        let displayName = modelId;
+        // Find the displayName from allKnownModels
+        for (const [dn, info] of allKnownModels.entries()) {
+          if (info.id === modelId) {
+            displayName = dn;
+            break;
+          }
         }
+        
+        failedModelDisplayNames.add(displayName);
+        allKnownModels.set(displayName, { id: modelId, isCustom: modelId.startsWith('MODEL_PLACEHOLDER_M') });
+        modelHealthState.set(modelId, {
+          status: 'error',
+          errorType: diagnostic.errorType,
+          lastChecked: Date.now(),
+          diagnostic,
+        });
+        // Immediately update dropdown badges if visible
+        updateDropdownHealthBadges();
       }
       showPersistentBanner(diagnostic);
     } else {
@@ -2349,23 +3709,22 @@ window.addEventListener('DOMContentLoaded', () => {
   XMLHttpRequest.prototype.send = function (body?: Document | XMLHttpRequestBodyInit | null) {
     const xhr = this;
     const url: string = (xhr as any)._agy_url || '';
+    detectProxyPort(url);
 
     if (url.includes('GetAvailableModels') || url.includes('fetchAvailableModels')) {
       const origOnReady = xhr.onreadystatechange;
       xhr.onreadystatechange = async function (ev: Event) {
         if (xhr.readyState === 4 && xhr.status === 200) {
-          const customModels = await getCustomModelsForInjection();
-          if (customModels && customModels.length > 0) {
-            try {
-              const responseText = xhr.responseText;
-              if (responseText && responseText.length > 10) {
-                const parsed = JSON.parse(responseText) as Record<string, unknown>;
-                const modelsObj = (parsed.models || parsed.availableModels || parsed.available_models || {}) as Record<string, unknown>;
+          try {
+            const responseText = xhr.responseText;
+            if (responseText && responseText.length > 10) {
+              const parsed = JSON.parse(responseText) as Record<string, unknown>;
+              const modelsObj = (parsed.models || parsed.availableModels || parsed.available_models || {}) as Record<string, unknown>;
+              
+              const customModels = await getCustomModelsForInjection();
+              if (customModels && customModels.length > 0) {
                 for (const m of customModels) {
                   const slug = toSlug(m);
-                  // generateModelPlaceholderId already returns the full
-                  // "MODEL_PLACEHOLDER_M###" string — do NOT prefix it again
-                  // or routing in the proxy will not match.
                   const placeholderId = generateModelPlaceholderId(m);
                   (modelsObj as Record<string, unknown>)[slug] = {
                     displayName: m.displayName || m.name,
@@ -2374,16 +3733,19 @@ window.addEventListener('DOMContentLoaded', () => {
                     maxOutputTokens: 4096,
                     tokenizerType: 'LLAMA_WITH_SPECIAL',
                     model: placeholderId,
+                    planModel: placeholderId,
+                    requestedModel: placeholderId,
                     apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
                     modelProvider: 'MODEL_PROVIDER_GOOGLE',
                   };
                 }
-                // Override response
-                Object.defineProperty(xhr, 'responseText', { value: JSON.stringify(parsed), writable: true });
-                Object.defineProperty(xhr, 'response', { value: JSON.stringify(parsed), writable: true });
               }
-            } catch { /* ignore parse errors */ }
-          }
+              ingestModelsFromResponse(modelsObj);
+              // Override response
+              Object.defineProperty(xhr, 'responseText', { value: JSON.stringify(parsed), writable: true });
+              Object.defineProperty(xhr, 'response', { value: JSON.stringify(parsed), writable: true });
+            }
+          } catch { /* ignore parse errors */ }
         }
         if (origOnReady) origOnReady.call(xhr, ev);
       };
@@ -2427,22 +3789,22 @@ window.addEventListener('DOMContentLoaded', () => {
     } else {
       url = input.url;
     }
+    detectProxyPort(url);
     try {
       const response = await origFetch.call(window, input, init);
 
       if ((url.includes('GetAvailableModels') || url.includes('fetchAvailableModels')) && response.ok) {
-        const customModels = await getCustomModelsForInjection();
-        if (customModels && customModels.length > 0) {
-          try {
-            const cloned = response.clone();
-            const text = await cloned.text();
-            if (text && text.length > 10) {
-              const parsed = JSON.parse(text) as Record<string, unknown>;
-              const modelsObj = (parsed.models || parsed.availableModels || parsed.available_models || {}) as Record<string, unknown>;
+        try {
+          const cloned = response.clone();
+          const text = await cloned.text();
+          if (text && text.length > 10) {
+            const parsed = JSON.parse(text) as Record<string, unknown>;
+            const modelsObj = (parsed.models || parsed.availableModels || parsed.available_models || {}) as Record<string, unknown>;
+            
+            const customModels = await getCustomModelsForInjection();
+            if (customModels && customModels.length > 0) {
               for (const m of customModels) {
                 const slug = toSlug(m);
-                // generateModelPlaceholderId already returns the full
-                // "MODEL_PLACEHOLDER_M###" string — do NOT prefix it again.
                 const placeholderId = generateModelPlaceholderId(m);
                 (modelsObj as Record<string, unknown>)[slug] = {
                   displayName: m.displayName || m.name,
@@ -2451,18 +3813,23 @@ window.addEventListener('DOMContentLoaded', () => {
                   maxOutputTokens: 4096,
                   tokenizerType: 'LLAMA_WITH_SPECIAL',
                   model: placeholderId,
+                  planModel: placeholderId,
+                  requestedModel: placeholderId,
                   apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
                   modelProvider: 'MODEL_PROVIDER_GOOGLE',
                 };
               }
-              return new Response(JSON.stringify(parsed), {
-                status: response.status,
-                statusText: response.statusText,
-                headers: response.headers,
-              });
             }
-          } catch { /* ignore parse errors */ }
-        }
+            
+            ingestModelsFromResponse(modelsObj);
+            
+            return new Response(JSON.stringify(parsed), {
+              status: response.status,
+              statusText: response.statusText,
+              headers: response.headers,
+            });
+          }
+        } catch { /* ignore parse errors */ }
       } else if (url.includes('generateContent') || url.includes('streamGenerateContent')) {
         const errorTypeHeader = response.headers.get('X-AG-Error-Type');
         if (!response.ok || response.status >= 400 || errorTypeHeader) {

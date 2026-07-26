@@ -7,6 +7,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.detectModelCapabilities = detectModelCapabilities;
 exports.detectModelCapabilitiesByName = detectModelCapabilitiesByName;
 exports.mapApiModelToModeConfig = mapApiModelToModeConfig;
+exports.detectModelUXBadges = detectModelUXBadges;
 // ─── Detection ────────────────────────────────────────────────────────────
 const THINKING_PATTERN = /thinking|reasoning|reasoner|o1|o3|r1|opus-4|sonnet-4|claude-4|3-7|4-7|3\.7|4\.7/i;
 const DEEPSEEK_PATTERN = /deepseek/i;
@@ -100,6 +101,22 @@ function mapApiModelToModeConfig(apiModel, provider) {
         supportedReasoningEfforts,
         supportedThinkingBudgets,
         defaultMode,
+    };
+}
+/**
+ * Computes UX badges for a model (Vision 🖼️, Tools 🛠️, Thinking 🧠, Local 💻, Context Window Label).
+ */
+function detectModelUXBadges(m) {
+    const caps = detectModelCapabilities(m);
+    const isLocal = m.provider === 'ollama' || m.provider === 'lmstudio' || m.provider === 'llamacpp';
+    const supportsTools = true; // All proxy translators map tool calls
+    const contextWindowLabel = caps.maxTokens >= 1000000 ? '1M' : `${Math.round(caps.maxTokens / 1000)}k`;
+    return {
+        supportsVision: caps.supportsImages,
+        supportsTools,
+        supportsThinking: caps.isThinking,
+        isLocal,
+        contextWindowLabel,
     };
 }
 //# sourceMappingURL=modelUtils.js.map

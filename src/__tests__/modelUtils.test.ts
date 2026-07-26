@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { detectModelCapabilities, detectModelCapabilitiesByName } from '../proxy/modelUtils';
+import { detectModelCapabilities, detectModelCapabilitiesByName, detectModelUXBadges } from '../proxy/modelUtils';
+
 
 describe('detectModelCapabilities', () => {
   it('detects thinking for anthropic provider', () => {
@@ -133,3 +134,23 @@ describe('detectModelCapabilitiesByName', () => {
     expect(result.isThinkingModel).toBe(false);
   });
 });
+
+describe('detectModelUXBadges', () => {
+  it('computes UX badges for cloud models', () => {
+    const badges = detectModelUXBadges({ name: 'gpt-4o', provider: 'openai' });
+    expect(badges.supportsVision).toBe(true);
+    expect(badges.supportsTools).toBe(true);
+    expect(badges.supportsThinking).toBe(true);
+    expect(badges.isLocal).toBe(false);
+    expect(badges.contextWindowLabel).toBe('1M');
+  });
+
+  it('computes UX badges for local ollama models', () => {
+    const badges = detectModelUXBadges({ name: 'llama3', provider: 'ollama' });
+    expect(badges.supportsVision).toBe(false);
+    expect(badges.supportsTools).toBe(true);
+    expect(badges.isLocal).toBe(true);
+    expect(badges.contextWindowLabel).toBe('1M');
+  });
+});
+

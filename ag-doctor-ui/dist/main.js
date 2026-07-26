@@ -481,6 +481,119 @@ function getCliPool() {
 // ──────────────────────────────────────────────���──────────────────────────────
 // IPC handlers
 // ─────────────────────────────────────────────────────────────────────────────
+// --- Provider Management IPCs ---
+electron_1.ipcMain.handle('ag:providers:get', async () => {
+    try {
+        const p = path_1.default.join(electron_1.app.getPath('home'), '.gemini', 'antigravity', 'custom_models.json');
+        const c = await fs_1.default.promises.readFile(p, 'utf8');
+        const parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
+        if (parsed.providers)
+            return parsed.providers;
+        // Fallback for legacy models array
+        if (parsed.models && parsed.models.length > 0) {
+            const pm = new Map();
+            let pid = 1;
+            for (const m of parsed.models) {
+                const k = m.apiUrl + '|' + m.provider + '|' + m.apiKey;
+                if (!pm.has(k)) {
+                    pm.set(k, {
+                        id: 'provider-' + Date.now() + '-' + (pid++),
+                        name: 'Legacy ' + m.provider,
+                        provider: m.provider,
+                        apiUrl: m.apiUrl,
+                        apiKey: m.apiKey,
+                        enabled: true,
+                        models: []
+                    });
+                }
+                pm.get(k).models.push({
+                    id: m.externalModelName || m.name,
+                    displayName: m.displayName || m.name,
+                    enabled: true
+                });
+            }
+            return Array.from(pm.values());
+        }
+        return [];
+    }
+    catch (e) {
+        return [];
+    }
+});
+electron_1.ipcMain.handle('ag:providers:save', async (_, p) => {
+    try {
+        const fp = path_1.default.join(electron_1.app.getPath('home'), '.gemini', 'antigravity', 'custom_models.json');
+        let parsed = { providers: [], models: [] };
+        try {
+            const c = await fs_1.default.promises.readFile(fp, 'utf8');
+            parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
+        }
+        catch (e) { }
+        if (!parsed.providers)
+            parsed.providers = [];
+        const idx = parsed.providers.findIndex((x) => x.id === p.id);
+        if (idx !== -1)
+            parsed.providers[idx] = p;
+        else
+            parsed.providers.push(p);
+        await fs_1.default.promises.writeFile(fp, JSON.stringify(parsed, null, 2), 'utf8');
+        return { success: true };
+    }
+    catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+electron_1.ipcMain.handle('ag:providers:delete', async (_, id) => {
+    try {
+        const fp = path_1.default.join(electron_1.app.getPath('home'), '.gemini', 'antigravity', 'custom_models.json');
+        const c = await fs_1.default.promises.readFile(fp, 'utf8');
+        const parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
+        if (parsed.providers) {
+            parsed.providers = parsed.providers.filter((x) => x.id !== id);
+            await fs_1.default.promises.writeFile(fp, JSON.stringify(parsed, null, 2), 'utf8');
+        }
+        return { success: true };
+    }
+    catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+electron_1.ipcMain.handle('ag:providers:test', async (_evt, params) => {
+    try {
+        // Only test /models endpoint
+        const url = params.apiUrl + (params.apiUrl.endsWith('/') ? '' : '/') + 'models';
+        const { net } = require('electron');
+        return await new Promise((resolve) => {
+            const request = net.request({
+                url: url,
+                method: 'GET'
+            });
+            if (params.apiKey) {
+                request.setHeader('Authorization', 'Bearer ' + params.apiKey);
+            }
+            request.on('response', (response) => {
+                let data = '';
+                response.on('data', (chunk) => { data += chunk.toString(); });
+                response.on('end', () => {
+                    if (response.statusCode && response.statusCode >= 200 && response.statusCode < 300) {
+                        resolve({ success: true, status: response.statusCode });
+                    }
+                    else {
+                        resolve({ success: false, status: response.statusCode, error: data });
+                    }
+                });
+            });
+            request.on('error', (error) => {
+                resolve({ success: false, error: error.message });
+            });
+            request.end();
+        });
+    }
+    catch (e) {
+        const err = e;
+        return { success: false, error: err.message };
+    }
+});
 electron_1.ipcMain.handle('ag:run', async (_evt, args) => {
     return getCliPool().run(args);
 });

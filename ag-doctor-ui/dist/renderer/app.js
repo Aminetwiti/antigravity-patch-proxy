@@ -240,30 +240,10 @@ function confirmModal(title, body, opts) {
 // Navigation
 // ─────────────────────────────────────────────────────────────────────────────
 const navItems = $$('.nav-item');
-const activityItems = $$('.activity-item');
 const views = $$('.view');
-const ACTIVITY_TO_VIEW = {
-    explorer: 'dashboard',
-    search: 'doctor',
-    doctor: 'doctor',
-    models: 'models',
-    logs: 'logs',
-    mitm: 'mitm',
-    settings: 'settings',
-};
-function setActivity(name) {
-    activityItems.forEach((a) => a.classList.toggle('active', a.dataset.activity === name));
-}
 function navigate(viewName) {
     navItems.forEach((n) => n.classList.toggle('active', n.dataset.view === viewName));
     views.forEach((v) => v.classList.toggle('active', v.id === `view-${viewName}`));
-    // Sync activity bar with current view
-    const activityMap = {
-        dashboard: 'explorer', doctor: 'doctor', models: 'models',
-        logs: 'logs', mitm: 'mitm', settings: 'settings',
-        patch: 'doctor', info: 'explorer',
-    };
-    setActivity(activityMap[viewName] || 'explorer');
     // Trigger view-specific loaders
     if (viewName === 'models')
         void loadModels();
@@ -281,11 +261,11 @@ function navigate(viewName) {
         void loadAntigravity();
 }
 navItems.forEach((n) => n.addEventListener('click', () => navigate(n.dataset.view)));
-activityItems.forEach((a) => a.addEventListener('click', () => {
-    const target = ACTIVITY_TO_VIEW[a.dataset.activity || ''];
-    if (target)
-        navigate(target);
-}));
+// Persistent sidebar "Run diagnostic" CTA — mirrors the legacy quickRunBtn
+$('#sidebarRunBtn')?.addEventListener('click', () => {
+    navigate('doctor');
+    void runDoctor();
+});
 // ─────────────────────────────────────────────────────────────────────────────
 // Doctor / dashboard
 // ─────────────────────────────────────────────────────────────────────────────
@@ -312,7 +292,7 @@ function renderHealthList(results) {
         <div class="empty-icon">
           <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
         </div>
-        <p>Click <strong>Run doctor</strong> to start a diagnostic.</p>
+        <p>Click <strong>Run doctor</strong> to scan Antigravity, MITM, patches, and models.</p>
       </div>`;
         return;
     }
@@ -372,23 +352,24 @@ function updateDashHero(results) {
     const ok = results.filter((r) => r.status === 'ok').length;
     const total = results.length;
     if (hasError) {
-        setDashHero('err', `${results.filter((r) => r.status === 'error').length} error(s)`, `<strong>${total}</strong> checks · <strong>${ok}</strong> passed · review issues below`);
+        setDashHero('err', `${results.filter((r) => r.status === 'error').length} issue(s) found`, `<strong>${total}</strong> checks · <strong>${ok}</strong> passed · review issues below`);
     }
     else if (hasWarn) {
-        setDashHero('warn', `${results.filter((r) => r.status === 'warn').length} warning(s)`, `<strong>${total}</strong> checks · <strong>${ok}</strong> passed · some warnings detected`);
+        setDashHero('warn', `${results.filter((r) => r.status === 'warn').length} warning(s) found`, `<strong>${total}</strong> checks · <strong>${ok}</strong> passed · some warnings detected`);
     }
     else {
-        setDashHero('ok', 'All systems operational', `<strong>${total}</strong> checks passed · last run ${new Date().toLocaleTimeString()}`);
+        setDashHero('ok', 'All checks passed', `<strong>${total}</strong> checks passed · last run ${new Date().toLocaleTimeString()}`);
     }
     dashHeroTitle.textContent = 'ag-doctor';
 }
 async function runDoctor() {
-    setStatus('Running diagnostic…', 'busy');
+    setStatus('Running doctor…', 'busy');
     $('#runDoctorBtn')?.setAttribute('disabled', 'true');
     $('#refreshBtn')?.setAttribute('disabled', 'true');
-    $('#quickRunBtn')?.setAttribute('disabled', 'true');
-    setObjective('doctor', 'pending', 'Diagnostic en cours…');
-    setDashHero('busy', 'Running diagnostic…', 'Scanning Antigravity, MITM, patch and models…');
+    $('#sidebarRunBtn')?.setAttribute('disabled', 'true');
+    $('#heroRunBtn')?.setAttribute('disabled', 'true');
+    setObjective('doctor', 'pending', 'Running…');
+    setDashHero('busy', 'Running doctor…', 'Scanning Antigravity, MITM, patches, and models…');
     try {
         const result = await window.ag.run(['doctor', '--json']);
         if (result.code !== 0 && !result.stdout) {
@@ -401,7 +382,7 @@ async function runDoctor() {
             const newErrors = data.filter((r) => r.status === 'error' && !previousErrors.has(r.id));
             if (newErrors.length > 0) {
                 const titles = newErrors.map((r) => r.title).join(', ');
-                void window.ag.notify('ag-doctor · new issue', `${newErrors.length} new error(s): ${titles}`);
+                void window.ag.notify('ag-doctor · new issue', `${newErrors.length} new issue(s): ${titles}`);
             }
         }
         lastResults = data;
@@ -412,19 +393,20 @@ async function runDoctor() {
         const hasError = data.some((r) => r.status === 'error');
         const hasWarn = data.some((r) => r.status === 'warn');
         void window.ag.trayStatus(hasError ? 'err' : hasWarn ? 'warn' : 'ok');
-        toast(`Diagnostic complete · ${data.length} checks`, 'ok');
+        toast(`Doctor complete · ${data.length} checks`, 'ok');
         setStatus('Ready');
     }
     catch (e) {
-        toast(`Doctor failed: ${e.message}`, 'err', 5000);
+        toast(`Doctor failed: ${e.message}. Check the Logs tab for full output.`, 'err', 5000);
         setStatus('Error', 'err');
-        setObjective('doctor', 'error', 'Diagnostic échoué');
+        setObjective('doctor', 'error', 'Doctor failed');
         void window.ag.trayStatus('err');
     }
     finally {
         $('#runDoctorBtn')?.removeAttribute('disabled');
         $('#refreshBtn')?.removeAttribute('disabled');
-        $('#quickRunBtn')?.removeAttribute('disabled');
+        $('#sidebarRunBtn')?.removeAttribute('disabled');
+        $('#heroRunBtn')?.removeAttribute('disabled');
     }
 }
 function resultStatusToObjective(status) {
@@ -433,7 +415,7 @@ function resultStatusToObjective(status) {
 function updateObjectives(results) {
     const hasError = results.some((r) => r.status === 'error');
     const hasWarn = results.some((r) => r.status === 'warn');
-    setObjective('doctor', hasError ? 'error' : hasWarn ? 'warn' : 'ok', hasError ? 'Issues detected' : hasWarn ? 'Warnings found' : 'Diagnostic OK');
+    setObjective('doctor', hasError ? 'error' : hasWarn ? 'warn' : 'ok', hasError ? 'Issues detected' : hasWarn ? 'Warnings found' : 'Doctor OK');
     const antigravity = results.find((r) => r.id === 'antigravity' || r.id === 'version' || r.id === 'install');
     setObjective('antigravity', antigravity ? resultStatusToObjective(antigravity.status) : 'pending', antigravity?.message);
     const mitm = results.find((r) => r.id === 'mitm' || r.id === 'proxy' || r.id === 'ca');
@@ -444,7 +426,7 @@ function updateObjectives(results) {
     setObjective('logs', logs ? resultStatusToObjective(logs.status) : 'ok', logs?.message ?? 'Logs available');
 }
 $('#runDoctorBtn').addEventListener('click', () => void runDoctor());
-$('#quickRunBtn').addEventListener('click', () => void runDoctor());
+$('#heroRunBtn')?.addEventListener('click', () => void runDoctor());
 $('#emptyStateRunDoctorBtn')?.addEventListener('click', () => void runDoctor());
 $('#refreshBtn').addEventListener('click', () => void runDoctor());
 $('#repairBtn').addEventListener('click', () => void runRepair());
@@ -453,28 +435,27 @@ $('#fixAllBtn')?.addEventListener('click', () => void runFixAll());
 // Start Stub: emergency proxy stub on port 50999 (no admin needed)
 $('#startStubBtn')?.addEventListener('click', () => void runStartStub());
 async function runFixAll() {
-    const ok = await confirmModal('Fix All — Full Repair', 'This will launch <code>ag-doctor repair --yes --auto-elevate</code> with admin elevation (UAC). ' +
-        'All repair actions will be performed: patch, port 50999, proxy, CA cert.', { confirmLabel: 'Fix All', danger: true });
+    const ok = await confirmModal('Run full auto-repair?', 'This will launch <code>ag-doctor repair --yes --auto-elevate</code> with admin elevation (UAC). ' +
+        'All repair actions will run: patch, port 50999, proxy, CA certificate.', { confirmLabel: 'Run full repair', danger: true });
     if (!ok)
         return;
-    setStatus('Fix All — admin elevation…', 'busy');
+    setStatus('Full repair — admin elevation…', 'busy');
     $('#fixAllBtn')?.setAttribute('disabled', 'true');
     try {
-        // Use the existing IPC handler that spawns the elevated repair script
         const r = await window.ag.repairRun();
         if (r?.ok) {
-            toast('Fix All completed successfully', 'ok', 5000);
+            toast('Full repair completed. Re-running doctor to verify.', 'ok', 5000);
             setObjective('patch', 'ok', 'Full repair completed');
         }
         else {
-            toast(`Fix All failed: ${r?.error ?? 'unknown'}`, 'err', 6000);
+            toast(`Full repair failed: ${r?.error ?? 'unknown'}. Check the Logs tab for details.`, 'err', 6000);
             setObjective('patch', 'error', 'Full repair failed');
         }
-        setStatus('Refreshing diagnostic…', 'busy');
+        setStatus('Re-running doctor…', 'busy');
         await runDoctor();
     }
     catch (e) {
-        toast(`Fix All error: ${e.message}`, 'err');
+        toast(`Full repair error: ${e.message}`, 'err');
         setStatus('Error', 'err');
     }
     finally {
@@ -487,20 +468,20 @@ async function runStartStub() {
     try {
         const r = await window.ag.proxyStartStub();
         if (r?.ok) {
-            toast(`Proxy stub started (pid=${r.pid ?? '?'})`, 'ok', 5000);
+            toast(`Proxy stub started (pid=${r.pid ?? '?'}) on port 50999`, 'ok', 5000);
             setObjective('proxy', 'ok', 'Proxy stub active on 50999');
         }
         else {
-            toast(`Stub failed: ${r?.error ?? 'unknown'}`, 'err', 6000);
+            toast(`Proxy stub failed: ${r?.error ?? 'unknown'}`, 'err', 6000);
             setObjective('proxy', 'error', 'Proxy stub failed');
         }
     }
     catch (e) {
-        toast(`Stub error: ${e.message}`, 'err');
+        toast(`Proxy stub error: ${e.message}`, 'err');
     }
     finally {
         $('#startStubBtn')?.removeAttribute('disabled');
-        setStatus('Idle', 'ready');
+        setStatus('Ready', 'ready');
     }
 }
 // Reusable template for objective icons — avoids innerHTML on every doctor run
@@ -517,28 +498,28 @@ function setObjective(key, state, detail) {
     status.textContent = detail ?? (state === 'ok' ? 'Active' : state === 'pending' ? 'Pending' : state === 'warn' ? 'Warning' : 'Error');
 }
 async function runRepair() {
-    const ok = await confirmModal('Repair Antigravity', 'This will run <code>ag-doctor repair --yes</code> to automatically attempt repairing detected issues.', { confirmLabel: 'Repair' });
+    const ok = await confirmModal('Repair detected issues?', 'This runs <code>ag-doctor repair --yes</code> to attempt automatic repair of issues found by the doctor.', { confirmLabel: 'Run repair' });
     if (!ok)
         return;
-    setStatus('Repairing…', 'busy');
+    setStatus('Running repair…', 'busy');
     $('#repairBtn')?.setAttribute('disabled', 'true');
     try {
         const r = await window.ag.run(['repair', '--yes']);
         if (r.code === 0) {
-            toast('Repair completed successfully', 'ok', 5000);
+            toast('Repair completed. Re-running doctor to verify.', 'ok', 5000);
             setObjective('patch', 'ok', 'Repair completed');
         }
         else {
-            toast(`Repair failed: ${r.stderr || r.stdout}`, 'err', 6000);
+            toast(`Repair failed: ${r.stderr || r.stdout}. Check the Logs tab for details.`, 'err', 6000);
             setObjective('patch', 'error', 'Repair failed');
         }
-        setStatus('Refreshing diagnostic…', 'busy');
+        setStatus('Re-running doctor…', 'busy');
         await runDoctor();
     }
     catch (e) {
         toast(`Repair error: ${e.message}`, 'err');
         setStatus('Error', 'err');
-        setObjective('patch', 'error', 'Erreur');
+        setObjective('patch', 'error', 'Repair failed');
     }
     finally {
         $('#repairBtn')?.removeAttribute('disabled');
@@ -564,7 +545,7 @@ function ansiToHtml(s) {
 // Reusable template for doctor output — avoids creating a new <template> each run
 const doctorTpl = document.createElement('template');
 async function runDoctorView() {
-    setStatus('Running diagnostic…', 'busy');
+    setStatus('Running doctor…', 'busy');
     doctorOutput.textContent = '$ ag-doctor doctor\n';
     try {
         const result = await window.ag.run(['doctor']);
@@ -573,7 +554,7 @@ async function runDoctorView() {
         setStatus('Ready');
     }
     catch (e) {
-        doctorOutput.textContent = `Error: ${e.message}`;
+        doctorOutput.textContent = `Could not run doctor: ${e.message}`;
         setStatus('Error', 'err');
     }
 }
@@ -586,7 +567,7 @@ $('#doctorJsonBtn').addEventListener('click', async () => {
         setStatus('Ready');
     }
     catch (e) {
-        toast(`Failed: ${e.message}`, 'err');
+        toast(`Could not load doctor JSON: ${e.message}`, 'err');
         setStatus('Error', 'err');
     }
 });
@@ -608,7 +589,7 @@ async function loadModels() {
           <div class="empty-icon">
             <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/></svg>
           </div>
-          <p style="margin-bottom: 12px;">No models configured. Add a custom provider to get started.</p>
+          <p style="margin-bottom: 12px;">No models configured yet. <strong>Add model</strong> to connect a custom OpenAI- or Anthropic-compatible provider.</p>
           <button class="btn btn-primary btn-sm" id="emptyAddModelBtn" type="button">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             Add model
@@ -633,9 +614,9 @@ async function loadModels() {
                 </div>
               </div>
               <div class="model-actions">
-                <button class="btn btn-ghost btn-sm" data-action="test" data-name="${escapeHtml(m.name)}">Test</button>
-                <button class="btn btn-ghost btn-sm" data-action="reveal" data-url="${escapeHtml(m.apiUrl)}">Open URL</button>
-                <button class="btn btn-danger btn-sm" data-action="remove" data-name="${escapeHtml(m.name)}">Delete</button>
+                <button class="btn btn-ghost btn-sm" data-action="test" data-name="${escapeHtml(m.name)}">Test model</button>
+                <button class="btn btn-ghost btn-sm" data-action="reveal" data-url="${escapeHtml(m.apiUrl)}">Open endpoint</button>
+                <button class="btn btn-danger btn-sm" data-action="remove" data-name="${escapeHtml(m.name)}">Delete model</button>
               </div>
             </div>`;
             })
@@ -643,10 +624,10 @@ async function loadModels() {
             modelsTpl.innerHTML = html;
             modelsList.replaceChildren(modelsTpl.content);
         }
-        setStatus(`${data.models.length} model(s)`);
+        setStatus(`${data.models.length} model(s) loaded`);
     }
     catch (e) {
-        modelsList.innerHTML = `<div class="empty-state"><p>Error: ${escapeHtml(e.message)}</p></div>`;
+        modelsList.innerHTML = `<div class="empty-state"><p>Could not load models: ${escapeHtml(e.message)}</p></div>`;
         setStatus('Error', 'err');
     }
     finally {
@@ -657,7 +638,7 @@ async function loadModels() {
 modelsList.addEventListener('click', (e) => {
     const target = e.target;
     if (target.closest('#emptyAddModelBtn')) {
-        openAddModelModal();
+        openProviderManagerModal();
         return;
     }
     const btn = target.closest('[data-action]');
@@ -673,7 +654,7 @@ async function handleModelAction(btn) {
         setStatus(`Testing ${name}…`, 'busy');
         try {
             const r = await window.ag.run(['models', 'test', name]);
-            toast(r.stdout.includes('✓') || r.code === 0 ? `${name} reachable` : `${name} failed`, r.code === 0 ? 'ok' : 'err');
+            toast(r.stdout.includes('✓') || r.code === 0 ? `${name} is reachable` : `${name} failed — check the endpoint and API key`, r.code === 0 ? 'ok' : 'err');
             setStatus('Ready');
         }
         catch (e) {
@@ -685,17 +666,17 @@ async function handleModelAction(btn) {
         await window.ag.openExternal(url);
     }
     else if (action === 'remove') {
-        const ok = await confirmModal('Delete model', `Are you sure you want to delete <strong>${escapeHtml(name)}</strong>?`, { confirmLabel: 'Delete', danger: true });
+        const ok = await confirmModal('Delete this model?', `Delete <strong>${escapeHtml(name)}</strong> from this device? This only removes the saved provider — models on your remote account are unaffected.`, { confirmLabel: 'Delete model', danger: true });
         if (!ok)
             return;
-        setStatus('Removing…', 'busy');
+        setStatus('Removing model…', 'busy');
         const r = await window.ag.run(['models', 'remove', name, '--yes']);
         if (r.code === 0) {
             toast(`Removed ${name}`, 'ok');
             void loadModels();
         }
         else {
-            toast(`Failed: ${r.stderr || r.stdout}`, 'err');
+            toast(`Delete failed: ${r.stderr || r.stdout}. Check the Logs tab for details.`, 'err');
         }
         setStatus('Ready');
     }
@@ -704,7 +685,12 @@ $('#modelsTestBtn').addEventListener('click', async () => {
     setStatus('Testing all models…', 'busy');
     try {
         const r = await window.ag.run(['models', 'test']);
-        toast(r.code === 0 ? 'All models reachable' : 'Some models failed', r.code === 0 ? 'ok' : 'warn', 5000);
+        if (r.code === 0) {
+            toast('All models reachable', 'ok', 5000);
+        }
+        else {
+            toast('Some models failed. Open the Models view for details.', 'warn', 5000);
+        }
         setStatus('Ready');
     }
     catch (e) {
@@ -712,285 +698,6 @@ $('#modelsTestBtn').addEventListener('click', async () => {
         setStatus('Error', 'err');
     }
 });
-// Add Model Modal elements
-const addModelModalBackdrop = $('#addModelModalBackdrop');
-const addModelModalClose = $('#addModelModalClose');
-const addModelModalCancel = $('#addModelModalCancel');
-const addModelModalBack = $('#addModelModalBack');
-const addModelModalFetch = $('#addModelModalFetch');
-const addModelModalSave = $('#addModelModalSave');
-const addStep1 = $('#addStep1');
-const addStep2 = $('#addStep2');
-const addStep1Indicator = $('#addStep1Indicator');
-const addStep2Indicator = $('#addStep2Indicator');
-const addStep1Badge = $('#addStep1Badge');
-const addStep2Badge = $('#addStep2Badge');
-const modelProviderTypeInput = $('#modelProviderType');
-const modelApiUrlInput = $('#modelApiUrl');
-const modelApiKeyInput = $('#modelApiKey');
-const modelAllowUnauthorizedInput = $('#modelAllowUnauthorized');
-const modelDisplayNameSuffixInput = $('#modelDisplayNameSuffix');
-const fetchedModelsList = $('#fetchedModelsList');
-const fetchModelsError = $('#fetchModelsError');
-const saveModelsError = $('#saveModelsError');
-const refetchModelsBtn = $('#refetchModelsBtn');
-let fetchedModels = [];
-let currentStep = 1;
-// Unified fetch state for the add-model fetch cycle (mirrors the vendor's
-// OfficialModelsFetchState). Single source of truth for busy/error/ready.
-const addModelFetchState = createFetchState();
-function setAddStep(step) {
-    currentStep = step;
-    if (step === 1) {
-        addStep1.style.display = 'block';
-        addStep2.style.display = 'none';
-        addModelModalBack.style.display = 'none';
-        addModelModalFetch.style.display = 'inline-flex';
-        addModelModalSave.style.display = 'none';
-        addStep1Indicator.style.opacity = '1';
-        addStep2Indicator.style.opacity = '0.5';
-        addStep1Badge.style.backgroundColor = '#3b82f6';
-        addStep1Badge.style.color = '#ffffff';
-        addStep2Badge.style.backgroundColor = '#27272a';
-        addStep2Badge.style.color = '#a1a1aa';
-    }
-    else {
-        addStep1.style.display = 'none';
-        addStep2.style.display = 'block';
-        addModelModalBack.style.display = 'inline-flex';
-        addModelModalFetch.style.display = 'none';
-        addModelModalSave.style.display = 'inline-flex';
-        addStep1Indicator.style.opacity = '0.5';
-        addStep2Indicator.style.opacity = '1';
-        addStep1Badge.style.backgroundColor = '#27272a';
-        addStep1Badge.style.color = '#a1a1aa';
-        addStep2Badge.style.backgroundColor = '#3b82f6';
-        addStep2Badge.style.color = '#ffffff';
-    }
-}
-function resetAddModelModal() {
-    modelProviderTypeInput.value = 'openai';
-    modelApiUrlInput.value = '';
-    modelApiKeyInput.value = '';
-    modelAllowUnauthorizedInput.checked = false;
-    modelDisplayNameSuffixInput.value = '';
-    fetchedModels = [];
-    fetchedModelsList.innerHTML = `
-    <div style="text-align: center; padding: 24px; color: #a1a1aa; font-size: 13px;">
-      Fetch models to see available options.
-    </div>
-  `;
-    fetchModelsError.style.display = 'none';
-    saveModelsError.style.display = 'none';
-    setAddStep(1);
-}
-addModelModalClose.addEventListener('click', closeAddModelModal);
-addModelModalCancel.addEventListener('click', closeAddModelModal);
-// The add-model modal is owned by the shared ModalManager. We register it as a
-// non-blocking overlay so its Escape/backdrop handling is unified with the
-// confirm + palette modals (one key listener, no leaked handlers).
-modals.registerOverlay({
-    id: 'addModel',
-    backdrop: addModelModalBackdrop,
-    onOpen: () => {
-        resetAddModelModal();
-        setTimeout(() => modelApiUrlInput.focus(), 50);
-    },
-    onClose: () => {
-        /* nothing extra to tear down */
-    },
-});
-function openAddModelModal() {
-    modals.openOverlay('addModel');
-}
-function closeAddModelModal() {
-    modals.closeOverlay('addModel');
-}
-// Safety: ensure modal is hidden on script load
-addModelModalBackdrop.hidden = true;
-addModelModalBackdrop.style.display = 'none';
-function renderFetchedModels() {
-    if (fetchedModels.length === 0) {
-        fetchedModelsList.innerHTML = `
-      <div style="text-align: center; padding: 24px; color: #a1a1aa; font-size: 13px;">
-        No models found at this endpoint.
-      </div>
-    `;
-        return;
-    }
-    const allChecked = fetchedModels.length > 0;
-    let html = `
-    <div style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid #27272a; margin-bottom: 4px;">
-      <input type="checkbox" id="selectAllModels" style="width: 16px; height: 16px; accent-color: #3b82f6; cursor: pointer;" ${allChecked ? 'checked' : ''} />
-      <label for="selectAllModels" style="margin: 0; font-size: 12px; color: #a1a1aa; cursor: pointer;">Select all</label>
-    </div>
-  `;
-    for (const model of fetchedModels) {
-        const supportsImages = model.inputModalities?.includes('image') || false;
-        const supportsVideo = model.inputModalities?.includes('video') || false;
-        const modalityBadges = [];
-        if (supportsImages)
-            modalityBadges.push(`<span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background-color: #22c55e18; color: #22c55e;">image</span>`);
-        if (supportsVideo)
-            modalityBadges.push(`<span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background-color: #a855f718; color: #a855f7;">video</span>`);
-        html += `
-      <div style="display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 6px; transition: background-color 0.15s ease;" class="fetched-model-row" data-model-id="${escapeHtml(model.id)}">
-        <input type="checkbox" class="model-select-checkbox" value="${escapeHtml(model.id)}" checked style="width: 16px; height: 16px; accent-color: #3b82f6; cursor: pointer; flex-shrink: 0;" />
-        <div style="flex: 1; min-width: 0;">
-          <div style="font-size: 13px; color: #f4f4f5; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(model.id)}</div>
-          ${model.name !== model.id ? `<div style="font-size: 11px; color: #a1a1aa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(model.name)}</div>` : ''}
-        </div>
-        <div style="display: flex; gap: 4px; flex-shrink: 0;">${modalityBadges.join('')}</div>
-      </div>
-    `;
-    }
-    fetchedModelsList.innerHTML = html;
-    const selectAll = $('#selectAllModels');
-    selectAll?.addEventListener('change', () => {
-        document.querySelectorAll('.model-select-checkbox').forEach((cb) => {
-            cb.checked = selectAll.checked;
-        });
-    });
-}
-async function fetchModels() {
-    const provider = modelProviderTypeInput.value;
-    const url = modelApiUrlInput.value.trim();
-    const key = modelApiKeyInput.value.trim();
-    const allowUnauthorized = modelAllowUnauthorizedInput.checked;
-    if (!url) {
-        fetchModelsError.textContent = 'API URL is required';
-        fetchModelsError.style.display = 'block';
-        modelApiUrlInput.focus();
-        return;
-    }
-    addModelModalFetch.setAttribute('disabled', 'true');
-    addModelModalFetch.textContent = 'Fetching…';
-    fetchModelsError.style.display = 'none';
-    setStatus('Fetching models…', 'busy');
-    addModelFetchState.isFetching = true;
-    try {
-        const args = [
-            'models',
-            'fetch',
-            '--provider', provider,
-            '--url', url,
-            '--json',
-        ];
-        if (key) {
-            args.push('--key', key);
-        }
-        if (allowUnauthorized) {
-            args.push('--allow-unauthorized');
-        }
-        const r = await window.ag.run(args);
-        if (r.code !== 0) {
-            let msg = r.stderr || r.stdout || 'Failed to fetch models';
-            try {
-                const parsed = JSON.parse(msg);
-                if (parsed.error)
-                    msg = parsed.error;
-            }
-            catch {
-                // keep raw msg
-            }
-            fetchModelsError.textContent = msg;
-            fetchModelsError.style.display = 'block';
-            recordFetchFailure(addModelFetchState, msg);
-            setStatus('Ready');
-            return;
-        }
-        const result = JSON.parse(r.stdout);
-        if (!result.success) {
-            fetchModelsError.textContent = result.error || 'Failed to fetch models';
-            fetchModelsError.style.display = 'block';
-            recordFetchFailure(addModelFetchState, result.error || 'Failed to fetch models');
-            setStatus('Ready');
-            return;
-        }
-        fetchedModels = result.models || [];
-        renderFetchedModels();
-        setAddStep(2);
-        recordFetchSuccess(addModelFetchState);
-        setStatus('Ready');
-    }
-    catch (e) {
-        fetchModelsError.textContent = `Error: ${e.message}`;
-        fetchModelsError.style.display = 'block';
-        recordFetchFailure(addModelFetchState, e.message);
-        setStatus('Error', 'err');
-    }
-    finally {
-        addModelModalFetch.removeAttribute('disabled');
-        addModelModalFetch.textContent = 'Fetch Models';
-    }
-}
-addModelModalFetch.addEventListener('click', fetchModels);
-refetchModelsBtn.addEventListener('click', fetchModels);
-addModelModalBack.addEventListener('click', () => setAddStep(1));
-addModelModalSave.addEventListener('click', async () => {
-    const selected = Array.from(document.querySelectorAll('.model-select-checkbox:checked')).map((cb) => cb.value);
-    if (selected.length === 0) {
-        saveModelsError.textContent = 'Please select at least one model';
-        saveModelsError.style.display = 'block';
-        return;
-    }
-    const provider = modelProviderTypeInput.value;
-    const url = modelApiUrlInput.value.trim();
-    const key = modelApiKeyInput.value.trim();
-    const suffix = modelDisplayNameSuffixInput.value.trim();
-    addModelModalSave.setAttribute('disabled', 'true');
-    addModelModalSave.textContent = 'Adding…';
-    saveModelsError.style.display = 'none';
-    setStatus(`Adding ${selected.length} model(s)…`, 'busy');
-    let added = 0;
-    let failed = 0;
-    const errors = [];
-    for (const modelId of selected) {
-        const name = `models/${modelId}`;
-        const display = suffix ? `${modelId} (${suffix})` : modelId;
-        const args = [
-            'models',
-            'add',
-            '--provider', provider,
-            '--name', name,
-            '--external', modelId,
-            '--url', url,
-            '--key', key || '',
-            '--display', display,
-            '--yes'
-        ];
-        try {
-            const r = await window.ag.run(args);
-            if (r.code === 0) {
-                added++;
-            }
-            else {
-                failed++;
-                errors.push(`${modelId}: ${r.stderr || r.stdout}`);
-            }
-        }
-        catch (e) {
-            failed++;
-            errors.push(`${modelId}: ${e.message}`);
-        }
-    }
-    addModelModalSave.removeAttribute('disabled');
-    addModelModalSave.textContent = 'Add Selected Models';
-    if (failed === 0) {
-        toast(`Successfully added ${added} model(s)`, 'ok');
-        closeAddModelModal();
-        void loadModels();
-    }
-    else {
-        saveModelsError.textContent = `Added ${added}, failed ${failed}. ${errors.slice(0, 3).join('; ')}`;
-        saveModelsError.style.display = 'block';
-        toast(`Added ${added} model(s), ${failed} failed`, 'warn', 6000);
-        setStatus('Ready');
-        if (added > 0)
-            void loadModels();
-    }
-});
-$('#modelsAddBtn')?.addEventListener('click', () => openAddModelModal());
 // ─────────────────────────────────────────────────────────────────────────────
 // MITM view
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1009,14 +716,14 @@ async function loadMitmStatus() {
            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
            <div class="patch-banner-body">
              <div class="patch-banner-title">CA certificate installed</div>
-             <div class="patch-banner-text">System trusts the local MITM CA.</div>
+             <div class="patch-banner-text">Your system trusts the local MITM certificate.</div>
            </div>
          </div>`
                 : `<div class="patch-banner warn">
            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
            <div class="patch-banner-body">
              <div class="patch-banner-title">${s.ca.isExpired ? 'CA certificate expired' : 'CA certificate not installed'}</div>
-             <div class="patch-banner-text">${s.ca.isExpired ? 'The certificate has expired. Use Repair All to regenerate it.' : 'Install the CA to avoid TLS errors in intercepted applications.'}</div>
+             <div class="patch-banner-text">${s.ca.isExpired ? 'The certificate has expired. Run Repair all to regenerate it.' : 'Install the CA to avoid TLS errors in intercepted apps.'}</div>
            </div>
          </div>`;
             const proxyBanner = s.proxy.redirected
@@ -1024,14 +731,14 @@ async function loadMitmStatus() {
            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
            <div class="patch-banner-body">
              <div class="patch-banner-title">System proxy active</div>
-             <div class="patch-banner-text">Traffic is redirected to ${escapeHtml(s.proxy.host ?? 'localhost')}:${s.proxy.port ?? '—'}.</div>
+             <div class="patch-banner-text">Traffic is being redirected to ${escapeHtml(s.proxy.host ?? 'localhost')}:${s.proxy.port ?? '—'}.</div>
            </div>
          </div>`
                 : `<div class="patch-banner warn">
            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
            <div class="patch-banner-body">
              <div class="patch-banner-title">System proxy inactive</div>
-             <div class="patch-banner-text">Toggle Proxy ON to start redirecting traffic.</div>
+             <div class="patch-banner-text">Click <strong>Proxy ON</strong> above to start redirecting traffic.</div>
            </div>
          </div>`;
             const interceptionBanner = s.interception.reachable
@@ -1039,20 +746,20 @@ async function loadMitmStatus() {
            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
            <div class="patch-banner-body">
              <div class="patch-banner-title">Interception reachable</div>
-             <div class="patch-banner-text">The proxy is listening and responding.</div>
+             <div class="patch-banner-text">The proxy is listening and responding to requests.</div>
            </div>
          </div>`
                 : `<div class="patch-banner err">
            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
            <div class="patch-banner-body">
              <div class="patch-banner-title">Interception unreachable</div>
-             <div class="patch-banner-text">The proxy does not appear to be listening.</div>
+             <div class="patch-banner-text">The proxy does not appear to be listening. Try Repair all.</div>
            </div>
          </div>`;
             mitmTpl.innerHTML = `
       <div class="mitm-grid">
         <div class="mitm-card">
-          <div class="mitm-card-header"><h3>CA Certificate</h3><span class="badge ${s.ca.installed ? 'ok' : 'warn'}">${s.ca.installed ? 'installed' : 'not installed'}</span></div>
+          <div class="mitm-card-header"><h3>CA certificate</h3><span class="badge ${s.ca.installed ? 'ok' : 'warn'}">${s.ca.installed ? 'installed' : 'not installed'}</span></div>
           <div class="mitm-card-body">
             <div class="patch-row"><div class="patch-row-label">Generated</div><div class="patch-row-value ${s.ca.generated ? 'ok' : ''}">${s.ca.generated ? 'yes' : 'no'}</div></div>
             <div class="patch-row"><div class="patch-row-label">Expires</div><div class="patch-row-value ${s.ca.isExpired ? 'err' : ''}">${escapeHtml(s.ca.expiresAt ?? '—')}</div></div>
@@ -1062,7 +769,7 @@ async function loadMitmStatus() {
           ${caBanner}
         </div>
         <div class="mitm-card">
-          <div class="mitm-card-header"><h3>System Proxy</h3><span class="badge ${s.proxy.redirected ? 'ok' : 'warn'}">${s.proxy.redirected ? 'redirected' : 'off'}</span></div>
+          <div class="mitm-card-header"><h3>System proxy</h3><span class="badge ${s.proxy.redirected ? 'ok' : 'warn'}">${s.proxy.redirected ? 'redirected' : 'off'}</span></div>
           <div class="mitm-card-body">
             <div class="patch-row"><div class="patch-row-label">Host</div><div class="patch-row-value">${escapeHtml(s.proxy.host ?? '—')}</div></div>
             <div class="patch-row"><div class="patch-row-label">Port</div><div class="patch-row-value">${s.proxy.port ?? '—'}</div></div>
@@ -1070,7 +777,7 @@ async function loadMitmStatus() {
           ${proxyBanner}
         </div>
         <div class="mitm-card">
-          <div class="mitm-card-header"><h3>Interception Status</h3><span class="badge ${s.interception.reachable ? 'ok' : 'err'}">${s.interception.reachable ? 'reachable' : 'unreachable'}</span></div>
+          <div class="mitm-card-header"><h3>Interception status</h3><span class="badge ${s.interception.reachable ? 'ok' : 'err'}">${s.interception.reachable ? 'reachable' : 'unreachable'}</span></div>
           <div class="mitm-card-body">
             <div class="patch-row"><div class="patch-row-label">Listening</div><div class="patch-row-value ${s.interception.listening ? 'ok' : ''}">${s.interception.listening ? 'yes' : 'no'}</div></div>
             <div class="patch-row"><div class="patch-row-label">Connectivity</div><div class="patch-row-value ${s.interception.reachable ? 'ok' : 'err'}">${s.interception.reachable ? 'ok' : 'failed'}</div></div>
@@ -1082,37 +789,38 @@ async function loadMitmStatus() {
       <div style="margin-top: 20px; text-align: center;">
         <button id="repair-all-btn" class="btn btn-primary" style="padding: 10px 20px; font-size: 14px;">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: text-bottom; margin-right: 6px;"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 9.36l-7.1 7.1a1 1 0 0 1-1.4 0l-2.8-2.8a1 1 0 0 1 0-1.4l7.1-7.1a6 6 0 0 1 9.36-7.94z"/></svg>
-          Repair All (Requires Admin)
+          Repair all (needs admin)
         </button>
       </div>
       ` : ''}`;
             mitmStatusEl.replaceChildren(mitmTpl.content);
             const repairBtn = document.getElementById('repair-all-btn');
             if (repairBtn) {
+                repairBtn.setAttribute('aria-label', 'Repair all MITM issues (requires administrator)');
                 repairBtn.addEventListener('click', async () => {
                     repairBtn.setAttribute('disabled', 'true');
-                    repairBtn.innerHTML = 'Repairing... Please check UAC prompt.';
-                    setStatus('Repairing MITM...', 'busy');
+                    repairBtn.textContent = 'Repairing — approve the UAC prompt…';
+                    setStatus('Repairing MITM…', 'busy');
                     try {
                         const res = await window.ag.repairRun();
                         if (res.ok) {
-                            toast('✅ Repair script completed successfully.', 'ok', 3000);
-                            // Auto-start the proxy server after successful repair
+                            toast('Repair script completed successfully.', 'ok', 3000);
+                            // Auto-start the proxy server after a successful repair
                             console.log('[MITM] Auto-starting proxy server after repair...');
                             const startResult = await window.ag.proxyStart();
                             if (startResult.ok) {
-                                toast('✅ Proxy server started automatically', 'ok', 3000);
+                                toast('Proxy server started automatically.', 'ok', 3000);
                             }
                             else {
-                                toast(`⚠️ Repair succeeded but proxy server failed to start: ${startResult.message}`, 'warn', 6000);
+                                toast(`Repair succeeded but proxy server failed to start: ${startResult.message}`, 'warn', 6000);
                             }
                         }
                         else {
-                            toast('❌ Repair failed: ' + res.error, 'err', 6000);
+                            toast(`Repair failed: ${res.error}`, 'err', 6000);
                         }
                     }
                     catch (err) {
-                        toast('❌ Repair IPC error: ' + err.message, 'err', 6000);
+                        toast(`Repair IPC error: ${err.message}`, 'err', 6000);
                     }
                     finally {
                         void loadMitmStatus();
@@ -1122,7 +830,7 @@ async function loadMitmStatus() {
             setStatus('Ready');
         }
         catch (e) {
-            mitmStatusEl.innerHTML = `<div class="empty-state"><p>Error: ${escapeHtml(e.message)}</p></div>`;
+            mitmStatusEl.innerHTML = `<div class="empty-state"><p>Could not load MITM status: ${escapeHtml(e.message)}</p></div>`;
             setStatus('Error', 'err');
         }
         finally {
@@ -1143,21 +851,20 @@ async function mitmAction(args, successMsg, refresh = true, preStatus) {
                 void loadMitmStatus();
         }
         else {
-            // Enhanced error message with diagnostic hints
             const errorMsg = r.stderr || r.stdout || 'Unknown error';
             const operation = args.slice(1).join(' ');
-            // Check for common failure patterns
+            // Match common failure patterns with actionable guidance.
             if (errorMsg.toLowerCase().includes('uac') || errorMsg.toLowerCase().includes('cancelled')) {
-                toast(`❌ ${operation} failed: UAC prompt was declined. Please click "Yes" when prompted.`, 'err', 8000);
+                toast(`${operation} failed: UAC prompt was declined. Click "Yes" when prompted.`, 'err', 8000);
             }
             else if (errorMsg.toLowerCase().includes('access denied') || r.code === 5) {
-                toast(`❌ ${operation} failed: Access denied. Try running as Administrator.`, 'err', 8000);
+                toast(`${operation} failed: access denied. Try running as Administrator.`, 'err', 8000);
             }
             else if (errorMsg.toLowerCase().includes('not found')) {
-                toast(`❌ ${operation} failed: Required system tool not found. Check your PATH.`, 'err', 8000);
+                toast(`${operation} failed: required system tool not found. Check your PATH.`, 'err', 8000);
             }
             else {
-                toast(`❌ ${operation} failed: ${errorMsg.substring(0, 150)}`, 'err', 8000);
+                toast(`${operation} failed: ${errorMsg.substring(0, 150)}`, 'err', 8000);
             }
             console.error(`[MITM Action Failed]`, { args, code: r.code, stderr: r.stderr, stdout: r.stdout });
             setStatus('Error', 'err');
@@ -1165,7 +872,7 @@ async function mitmAction(args, successMsg, refresh = true, preStatus) {
     }
     catch (e) {
         const operation = args.slice(1).join(' ');
-        toast(`❌ ${operation} error: ${e.message}`, 'err', 8000);
+        toast(`${operation} error: ${e.message}`, 'err', 8000);
         console.error(`[MITM Action Exception]`, { args, error: e });
         setStatus('Error', 'err');
     }
@@ -1181,15 +888,15 @@ async function maybeUacPreStatus(subcommand) {
     return `Waiting for UAC prompt — click "Yes" to allow ${subcommand}…`;
 }
 $('#mitmInstallBtn').addEventListener('click', async () => {
-    const pre = await maybeUacPreStatus('install CA');
-    void mitmAction(['mitm', 'install', '--yes'], 'CA installed', true, pre);
+    const pre = await maybeUacPreStatus('install CA certificate');
+    void mitmAction(['mitm', 'install', '--yes'], 'CA certificate installed', true, pre);
 });
 $('#mitmUninstallBtn').addEventListener('click', async () => {
-    const pre = await maybeUacPreStatus('uninstall CA');
-    void mitmAction(['mitm', 'uninstall', '--yes'], 'CA uninstalled', true, pre);
+    const pre = await maybeUacPreStatus('uninstall CA certificate');
+    void mitmAction(['mitm', 'uninstall', '--yes'], 'CA certificate uninstalled', true, pre);
 });
 $('#mitmProxyOnBtn').addEventListener('click', async () => {
-    setStatus('Enabling proxy...', 'busy');
+    setStatus('Enabling proxy…', 'busy');
     try {
         // Step 1: Start the proxy server
         console.log('[MITM] Starting proxy server...');
@@ -1198,75 +905,75 @@ $('#mitmProxyOnBtn').addEventListener('click', async () => {
         if (!startResult.ok) {
             const decoded = decodeError(startResult.message ?? '', '');
             if (decoded.matched) {
-                toast(`❌ Failed to start proxy server — ${decoded.pattern}`, 'err', 8000);
+                toast(`Failed to start proxy server — ${decoded.pattern}`, 'err', 8000);
                 toast(decoded.hint, 'warn', 8000);
                 runErrorAction(decoded.action);
             }
             else {
-                toast(`❌ Failed to start proxy server: ${startResult.message}`, 'err', 8000);
+                toast(`Failed to start proxy server: ${startResult.message}`, 'err', 8000);
             }
             setStatus('Error', 'err');
             return;
         }
-        toast(`✅ Proxy server started (PID: ${startResult.pid})`, 'ok', 3000);
+        toast(`Proxy server started (PID: ${startResult.pid})`, 'ok', 3000);
         // Step 2: Configure Windows to use the proxy
         const pre = await maybeUacPreStatus('enable proxy');
         setStatus(pre, 'busy');
         const r = await window.ag.run(['mitm', 'proxy-on']);
         if (r.code === 0) {
-            toast('✅ Proxy enabled and running', 'ok', 5000);
+            toast('Proxy enabled and running', 'ok', 5000);
             void loadMitmStatus();
         }
         else {
             const errorMsg = r.stderr || r.stdout || 'Unknown error';
-            toast(`❌ Failed to configure proxy: ${errorMsg}`, 'err', 8000);
+            toast(`Failed to configure proxy: ${errorMsg}`, 'err', 8000);
             setStatus('Error', 'err');
             // Try to stop the proxy server since configuration failed
             await window.ag.proxyStop();
         }
     }
     catch (e) {
-        toast(`❌ Proxy enable error: ${e.message}`, 'err', 8000);
+        toast(`Proxy enable error: ${e.message}`, 'err', 8000);
         console.error(`[MITM] Proxy enable exception:`, e);
         setStatus('Error', 'err');
     }
 });
 $('#mitmProxyOffBtn').addEventListener('click', async () => {
-    setStatus('Disabling proxy...', 'busy');
+    setStatus('Disabling proxy…', 'busy');
     try {
         // Step 1: Disable Windows proxy configuration
         const pre = await maybeUacPreStatus('disable proxy');
         setStatus(pre, 'busy');
         const r = await window.ag.run(['mitm', 'proxy-off']);
         if (r.code === 0) {
-            toast('✅ Proxy disabled', 'ok', 3000);
+            toast('Proxy disabled', 'ok', 3000);
         }
         else {
             const errorMsg = r.stderr || r.stdout || 'Unknown error';
-            toast(`⚠️ Proxy disable warning: ${errorMsg}`, 'warn', 5000);
+            toast(`Proxy disable warning: ${errorMsg}`, 'warn', 5000);
         }
         // Step 2: Stop the proxy server (even if config failed)
         console.log('[MITM] Stopping proxy server...');
         const stopResult = await window.ag.proxyStop();
         console.log('[MITM] Proxy stop result:', stopResult);
         if (stopResult.ok) {
-            toast('✅ Proxy server stopped', 'ok', 3000);
+            toast('Proxy server stopped', 'ok', 3000);
         }
         else {
             const decoded = decodeError(stopResult.message ?? '', '');
             if (decoded.matched) {
-                toast(`⚠️ Failed to stop proxy server — ${decoded.pattern}`, 'warn', 5000);
+                toast(`Failed to stop proxy server — ${decoded.pattern}`, 'warn', 5000);
                 toast(decoded.hint, 'warn', 8000);
                 runErrorAction(decoded.action);
             }
             else {
-                toast(`⚠️ Failed to stop proxy server: ${stopResult.message}`, 'warn', 5000);
+                toast(`Failed to stop proxy server: ${stopResult.message}`, 'warn', 5000);
             }
         }
         void loadMitmStatus();
     }
     catch (e) {
-        toast(`❌ Proxy disable error: ${e.message}`, 'err', 8000);
+        toast(`Proxy disable error: ${e.message}`, 'err', 8000);
         console.error(`[MITM] Proxy disable exception:`, e);
         setStatus('Error', 'err');
     }
@@ -1292,11 +999,11 @@ function patchBadge(label, tone = 'muted') {
 }
 function patchSourceLabel(s) {
     if (s.overrideActive)
-        return 'sélection manuelle';
+        return 'Manual selection';
     if (s.antigravityVersionSource && s.antigravityVersionSource !== 'unknown') {
-        return `version read from ${s.antigravityVersionSource}`;
+        return `Version read from ${s.antigravityVersionSource}`;
     }
-    return 'uncertain detection';
+    return 'Uncertain detection';
 }
 function patchFamilyLabel(range) {
     if (range.includes('2.3'))
@@ -1307,10 +1014,10 @@ function patchFamilyLabel(range) {
 }
 function patchConfidenceLabel(confidence) {
     if (confidence === 'high')
-        return 'high confidence';
+        return 'High confidence';
     if (confidence === 'medium')
-        return 'medium confidence';
-    return 'low confidence';
+        return 'Medium confidence';
+    return 'Low confidence';
 }
 function patchConfidenceTone(confidence) {
     if (confidence === 'high')
@@ -1321,10 +1028,10 @@ function patchConfidenceTone(confidence) {
 }
 function patchSignatureLabel(s) {
     if (s.binarySignatureState === 'patched')
-        return 'binary signature: patch already present';
+        return 'Binary signature: patch already present';
     if (s.binarySignatureState === 'original')
-        return 'binary signature: stock binary detected';
-    return 'binary signature missing';
+        return 'Binary signature: stock binary detected';
+    return 'Binary signature missing';
 }
 function patchOverlayLabel(s) {
     if (!s.overlayFingerprintDetected || !s.overlayFingerprintRange)
@@ -1435,7 +1142,7 @@ async function loadPatchStatus() {
                 ? `<div class="patch-banner ok">
              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
              <div class="patch-banner-body">
-               <div class="patch-banner-title">Patch Active</div>
+               <div class="patch-banner-title">Patch active</div>
                <div class="patch-banner-text"><code>language_server</code> is redirecting requests to the local proxy.</div>
              </div>
            </div>`
@@ -1443,14 +1150,14 @@ async function loadPatchStatus() {
                     ? `<div class="patch-banner warn">
                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                <div class="patch-banner-body">
-                 <div class="patch-banner-title">Patch Not Applied</div>
+                 <div class="patch-banner-title">Patch not applied</div>
                  <div class="patch-banner-text">Custom models will not appear in the menu until this step is applied.</div>
                </div>
              </div>`
                     : `<div class="patch-banner err">
                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
                <div class="patch-banner-body">
-                 <div class="patch-banner-title">Binary Not Found</div>
+                 <div class="patch-banner-title">Binary not found</div>
                  <div class="patch-banner-text">Could not locate <code>language_server</code> in the Antigravity installation.</div>
                </div>
              </div>`;
@@ -1458,7 +1165,7 @@ async function loadPatchStatus() {
       <div class="patch-confidence patch-confidence-${patchConfidenceTone(s.detectionConfidence)}">
         <div class="patch-confidence-eyebrow">Confidence level</div>
         <div class="patch-confidence-value">${escapeHtml(patchConfidenceLabel(s.detectionConfidence))}</div>
-        <div class="patch-confidence-text">${escapeHtml(s.detectionReason ?? 'No detailed explanation provided by auto-detection.')}</div>
+        <div class="patch-confidence-text">${escapeHtml(s.detectionReason ?? 'No detailed explanation provided by auto-detection yet.')}</div>
       </div>`;
             const metadataWithoutBinaryBanner = patchNeedsMetadataWithoutBinaryWarning(s)
                 ? `<div class="patch-banner err">
@@ -1578,7 +1285,7 @@ async function loadPatchStatus() {
             setStatus('Ready');
         }
         catch (e) {
-            patchStatusEl.innerHTML = `<div class="empty-state"><p>Error: ${escapeHtml(e.message)}</p></div>`;
+            patchStatusEl.innerHTML = `<div class="empty-state"><p>Could not load patch status: ${escapeHtml(e.message)}</p></div>`;
         }
         finally {
             hideSkeleton(patchStatusEl);
@@ -1598,12 +1305,10 @@ patchRangeGridEl.addEventListener('click', (event) => {
     void applyPatchRangeSelection(range);
 });
 $('#patchApplyBtn').addEventListener('click', async () => {
-    // P1.3 (subset) — Pré-validation delta size avant d'ouvrir la confirmation.
-    // On récupère le statut patch actuel et on valide l'état du binaire
-    // (existence, compatibilité, présence d'un backup, patch recommandé connu)
-    // AVANT de risquer une modification destructive. C'est l'équivalent côté UI
-    // d'un "delta size check" : on s'assure que le delta (backup → binaire
-    // patché) est dans un état cohérent avant de l'appliquer.
+    // P1.3 (subset) — Validate the binary state (existence, compatibility,
+    // backup presence, known recommended patch) BEFORE risking a destructive
+    // change. The UI equivalent of a "delta size check": confirm the delta
+    // (backup → patched binary) is in a consistent state before applying.
     let preflight = null;
     try {
         setStatus('Preflight check…', 'busy');
@@ -1612,35 +1317,35 @@ $('#patchApplyBtn').addEventListener('click', async () => {
     }
     catch (e) {
         setStatus('Ready');
-        toast(`❌ Preflight failed: cannot read patch status (${e.message})`, 'err', 6000);
+        toast(`Preflight failed: cannot read patch status (${e.message})`, 'err', 6000);
         return;
     }
     if (!preflight.exists) {
         setStatus('Ready');
-        toast('❌ Preflight failed: language_server binary not found. Nothing to patch.', 'err', 6000);
+        toast('Preflight failed: language_server binary not found. Nothing to patch.', 'err', 6000);
         return;
     }
     if (!preflight.compatible) {
         setStatus('Ready');
-        toast('❌ Preflight failed: Antigravity version is not compatible with the known patch.', 'err', 6000);
+        toast('Preflight failed: Antigravity version is not compatible with the known patch.', 'err', 6000);
         return;
     }
     if (!preflight.recommendedPatch) {
         setStatus('Ready');
-        toast('❌ Preflight failed: no recommended patch available for this version.', 'err', 6000);
+        toast('Preflight failed: no recommended patch available for this version.', 'err', 6000);
         return;
     }
     if (preflight.applied) {
         setStatus('Ready');
-        toast('⚠️ Patch is already applied. Use Restore first if you want to re-apply.', 'warn', 5000);
+        toast('Patch is already applied. Use Restore first if you want to re-apply.', 'warn', 5000);
         return;
     }
     if (!preflight.backupExists) {
-        // Non-bloquant : on prévient l'utilisateur mais on laisse confirmer
+        // Non-blocking: warn the user but still allow them to confirm.
         console.warn('[patch] No backup found — applying patch will not be reversible');
     }
-    // Construit le détail affiché dans la modale (inclut la "taille" du delta
-    // quand le backend la renseigne via le champ optionnel deltaSizeBytes).
+    // Build the details shown in the confirmation modal (includes the "delta
+    // size" when the backend provides it via the optional deltaSizeBytes field).
     const sizeInfo = typeof preflight.deltaSizeBytes === 'number' && preflight.deltaSizeBytes > 0
         ? `<br><br><strong>Estimated delta size:</strong> ${escapeHtml(formatBytes(preflight.deltaSizeBytes))}`
         : '';
@@ -1658,7 +1363,7 @@ $('#patchApplyBtn').addEventListener('click', async () => {
         const verdictLabel = (verdict ?? 'unknown').toUpperCase();
         const rows = validateReport.checks
             .map((c) => {
-            const icon = c.status === 'ok' ? '✅' : '❌';
+            const icon = c.status === 'ok' ? '✓' : '✗';
             const tag = c.required ? 'required' : 'advisory';
             const detail = c.detail ? ` — <span class="patch-row-detail">${escapeHtml(c.detail)}</span>` : '';
             return `<li>${icon} <strong>${escapeHtml(c.label)}</strong> <em>(${tag})</em>${detail}</li>`;
@@ -1675,7 +1380,7 @@ $('#patchApplyBtn').addEventListener('click', async () => {
     }
     if (verdict === 'block') {
         setStatus('Ready');
-        toast('❌ Asar validation failed (verdict=block). Patch cannot be applied — see preflight modal.', 'err', 8000);
+        toast('Asar validation failed (verdict=block). Patch cannot be applied — see preflight modal.', 'err', 8000);
         // Open the confirmation modal anyway so the user can read the verdict,
         // but the Apply button will be disabled below.
     }
@@ -1705,7 +1410,7 @@ $('#patchApplyBtn').addEventListener('click', async () => {
         setStatus('Ready');
     }
     catch (e) {
-        toast(`Error: ${e.message}`, 'err');
+        toast(`Could not apply patch: ${e.message}`, 'err');
         setStatus('Error', 'err');
     }
 });
@@ -1734,7 +1439,7 @@ $('#patchRestoreBtn').addEventListener('click', async () => {
         setStatus('Ready');
     }
     catch (e) {
-        toast(`Error: ${e.message}`, 'err');
+        toast(`Could not restore: ${e.message}`, 'err');
         setStatus('Error', 'err');
     }
 });
@@ -1797,7 +1502,7 @@ async function loadLogs() {
         setStatus('Ready');
     }
     catch (e) {
-        logsOutput.textContent = `Error: ${e.message}`;
+        logsOutput.textContent = `Could not load logs: ${e.message}`;
         setStatus('Error', 'err');
     }
     finally {
@@ -2088,7 +1793,7 @@ async function loadAntigravityStatus() {
         }
         catch (e) {
             setAgHero('err', 'Error', e.message);
-            infoTable.innerHTML = `<div class="empty-state"><p>Error: ${escapeHtml(e.message)}</p></div>`;
+            infoTable.innerHTML = `<div class="empty-state"><p>Could not load Antigravity info: ${escapeHtml(e.message)}</p></div>`;
             setStatus('Error', 'err');
         }
     });
@@ -2381,7 +2086,7 @@ async function loadAntigravity() {
             setStatus('Ready');
         }
         catch (e) {
-            toast(`Error: ${e.message}`, 'err');
+            toast(`Could not load Antigravity status: ${e.message}`, 'err');
             setStatus('Error', 'err');
         }
     });
@@ -2400,7 +2105,7 @@ $('#agLaunchBtn').addEventListener('click', async () => {
         await loadAntigravity();
     }
     catch (e) {
-        toast(`Error: ${e.message}`, 'err');
+        toast(`Could not launch Antigravity: ${e.message}`, 'err');
         setStatus('Error', 'err');
     }
 });
@@ -2441,7 +2146,7 @@ $('#agLaunchLogsBtn').addEventListener('click', async () => {
         toast('Antigravity launched — following logs', 'ok', 2000);
     }
     catch (e) {
-        toast(`Error: ${e.message}`, 'err');
+        toast(`Could not launch with logs: ${e.message}`, 'err');
         setStatus('Error', 'err');
     }
 });
@@ -2461,7 +2166,7 @@ $('#agKillBtn').addEventListener('click', async () => {
         await loadAntigravity();
     }
     catch (e) {
-        toast(`Error: ${e.message}`, 'err');
+        toast(`Could not close Antigravity: ${e.message}`, 'err');
         setStatus('Error', 'err');
     }
 });
@@ -2478,8 +2183,280 @@ $('#agRestartBtn').addEventListener('click', async () => {
         await loadAntigravity();
     }
     catch (e) {
-        toast(`Error: ${e.message}`, 'err');
+        toast(`Could not restart Antigravity: ${e.message}`, 'err');
         setStatus('Error', 'err');
     }
 });
+const pmBackdrop = $('#providerManagerModalBackdrop');
+const pmClose = $('#providerManagerModalClose');
+const pmListContainer = $('#pmListContainer');
+const pmFormContainer = $('#pmFormContainer');
+const pmAddBtn = $('#pmAddBtn');
+const pmFormBack = $('#pmFormBack');
+const pmFormTitle = $('#pmFormTitle');
+const pmFormName = $('#pmFormName');
+const pmFormType = $('#pmFormType');
+const pmFormUrl = $('#pmFormUrl');
+const pmFormKey = $('#pmFormKey');
+const pmFormInsecure = $('#pmFormInsecure');
+const pmFormSave = $('#pmFormSave');
+const pmFormError = $('#pmFormError');
+const pmModelsList = $('#pmModelsList');
+let providersCache = [];
+let editingProviderId = null;
+function showPmView(view) {
+    if (view === 'list') {
+        pmListContainer.style.display = 'block';
+        pmFormContainer.style.display = 'none';
+    }
+    else {
+        pmListContainer.style.display = 'none';
+        pmFormContainer.style.display = 'block';
+    }
+}
+function renderProviderStatus(p) {
+    if (!p.enabled) {
+        return `<span class="agy-pill agy-pill-muted">Disabled</span>`;
+    }
+    return `<span class="agy-pill agy-pill-ok">
+    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+    Enabled
+  </span>`;
+}
+async function renderProviderList() {
+    providersCache = (await window.ag.providers.get());
+    if (!providersCache || providersCache.length === 0) {
+        pmListContainer.innerHTML = `
+      <div class="agy-empty-state">
+        <div class="agy-empty-icon">
+          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+        </div>
+        <div class="agy-empty-title">No providers yet</div>
+        <div class="agy-empty-text">Add a custom OpenAI-compatible provider to get started.</div>
+      </div>
+    `;
+        return;
+    }
+    let html = `<div class="agy-provider-list">`;
+    for (const p of providersCache) {
+        html += `
+      <div class="agy-provider-row" data-id="${escapeHtml(p.id)}">
+        <div class="agy-provider-row-main">
+          <div class="agy-provider-row-name">${escapeHtml(p.name)}</div>
+          <div class="agy-provider-row-meta">
+            <span>${escapeHtml(p.provider)}</span>
+            <span class="agy-dot">Â·</span>
+            <span>${escapeHtml(p.apiUrl.replace(/^https?:\/\//, ''))}</span>
+            <span class="agy-dot">Â·</span>
+            <span>${p.models.length} model${p.models.length === 1 ? '' : 's'}</span>
+          </div>
+        </div>
+        <div class="agy-provider-row-status">${renderProviderStatus(p)}</div>
+        <div class="agy-provider-row-actions">
+          <button class="agy-icon-btn pm-test" title="Test connection">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          </button>
+          <button class="agy-icon-btn pm-toggle" title="${p.enabled ? 'Disable' : 'Enable'} provider">
+            ${p.enabled
+            ? `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>`
+            : `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.64 18.36a9 9 0 1 0 12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/><polyline points="16 8 12 12 8 8"/></svg>`}
+          </button>
+          <button class="agy-icon-btn pm-edit" title="Edit provider">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="agy-icon-btn pm-delete" title="Delete provider">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+          </button>
+        </div>
+      </div>
+    `;
+    }
+    html += `</div>`;
+    pmListContainer.innerHTML = html;
+    pmListContainer.querySelectorAll('.pm-test').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+            const row = e.currentTarget.closest('.agy-provider-row');
+            const id = row.dataset.id;
+            const p = providersCache.find((x) => x.id === id);
+            if (!p)
+                return;
+            btn.setAttribute('disabled', 'true');
+            const orig = btn.innerHTML;
+            btn.innerHTML = `<span class="spinner"></span>`;
+            try {
+                const r = (await window.ag.providers.test({ apiUrl: p.apiUrl, apiKey: p.apiKey }));
+                if (r.success) {
+                    toast(`Reachable (${r.status ?? 200})`, 'ok');
+                }
+                else {
+                    toast(`Failed: ${r.error || r.status}`, 'err', 6000);
+                }
+            }
+            catch (err) {
+                toast(`Test error: ${err.message}`, 'err');
+            }
+            finally {
+                btn.removeAttribute('disabled');
+                btn.innerHTML = orig;
+            }
+        });
+    });
+    pmListContainer.querySelectorAll('.pm-toggle').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+            const row = e.currentTarget.closest('.agy-provider-row');
+            const id = row.dataset.id;
+            const p = providersCache.find((x) => x.id === id);
+            if (!p)
+                return;
+            p.enabled = !p.enabled;
+            const r = (await window.ag.providers.save(p));
+            if (r.success) {
+                toast(p.enabled ? 'Provider enabled' : 'Provider disabled', 'ok');
+                await renderProviderList();
+            }
+            else {
+                toast(`Save failed: ${r.error}`, 'err');
+                p.enabled = !p.enabled; // revert
+            }
+        });
+    });
+    pmListContainer.querySelectorAll('.pm-edit').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+            const row = e.currentTarget.closest('.agy-provider-row');
+            const id = row.dataset.id;
+            openProviderForm(id);
+        });
+    });
+    pmListContainer.querySelectorAll('.pm-delete').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+            const row = e.currentTarget.closest('.agy-provider-row');
+            const id = row.dataset.id;
+            const p = providersCache.find((x) => x.id === id);
+            if (!p)
+                return;
+            if (!confirm(`Delete provider "${p.name}"?`))
+                return;
+            const r = (await window.ag.providers.delete(id));
+            if (r.success) {
+                toast('Provider deleted', 'ok');
+                await renderProviderList();
+            }
+            else {
+                toast(`Delete failed: ${r.error}`, 'err');
+            }
+        });
+    });
+}
+function resetProviderForm() {
+    pmFormName.value = '';
+    pmFormType.value = 'openai';
+    pmFormUrl.value = '';
+    pmFormKey.value = '';
+    pmFormInsecure.checked = false;
+    pmModelsList.innerHTML = '';
+    pmFormError.style.display = 'none';
+    editingProviderId = null;
+}
+function openProviderForm(existingId) {
+    resetProviderForm();
+    if (existingId) {
+        const p = providersCache.find((x) => x.id === existingId);
+        if (!p)
+            return;
+        editingProviderId = existingId;
+        pmFormTitle.textContent = 'Edit provider';
+        pmFormName.value = p.name;
+        pmFormType.value = p.provider;
+        pmFormUrl.value = p.apiUrl;
+        pmFormKey.value = p.apiKey;
+        pmFormInsecure.checked = !!p.allowUnauthorized;
+        if (p.models && p.models.length > 0) {
+            let html = '<div class="agy-model-chips">';
+            for (const m of p.models) {
+                const checked = m.enabled ? 'checked' : '';
+                html += `<label class="agy-chip">
+          <input type="checkbox" data-model-id="${escapeHtml(m.id)}" ${checked} />
+          <span>${escapeHtml(m.displayName || m.id)}</span>
+        </label>`;
+            }
+            html += '</div>';
+            pmModelsList.innerHTML = html;
+        }
+        else {
+            pmModelsList.innerHTML = '<div style="color: #71717a; font-size: 12px;">No models loaded. Click "Fetch models" to load the list.</div>';
+        }
+    }
+    else {
+        pmFormTitle.textContent = 'Add provider';
+        pmModelsList.innerHTML = '<div style="color: #71717a; font-size: 12px;">Save the provider first, then fetch models to populate the list.</div>';
+    }
+    showPmView('form');
+    setTimeout(() => pmFormName.focus(), 50);
+}
+function getSelectedProviderModels() {
+    const checkboxes = pmModelsList.querySelectorAll('input[type="checkbox"][data-model-id]');
+    const models = [];
+    checkboxes.forEach((cb) => {
+        models.push({ id: cb.dataset.modelId, displayName: cb.dataset.modelId, enabled: cb.checked });
+    });
+    return models;
+}
+pmAddBtn.addEventListener('click', () => openProviderForm());
+pmFormBack.addEventListener('click', async () => {
+    showPmView('list');
+    await renderProviderList();
+});
+pmClose.addEventListener('click', () => {
+    pmBackdrop.hidden = true;
+    pmBackdrop.style.display = 'none';
+});
+pmFormSave.addEventListener('click', async () => {
+    const name = pmFormName.value.trim();
+    const provider = pmFormType.value;
+    const apiUrl = pmFormUrl.value.trim();
+    const apiKey = pmFormKey.value.trim();
+    if (!name || !provider || !apiUrl) {
+        pmFormError.textContent = 'Name, type and URL are required';
+        pmFormError.style.display = 'block';
+        return;
+    }
+    pmFormSave.setAttribute('disabled', 'true');
+    pmFormSave.textContent = 'Savingâ€¦';
+    try {
+        const id = editingProviderId ?? `provider-${Date.now()}`;
+        const existing = providersCache.find((x) => x.id === id);
+        const providerEntry = {
+            id,
+            name,
+            provider,
+            apiUrl,
+            apiKey,
+            enabled: existing?.enabled ?? true,
+            allowUnauthorized: pmFormInsecure.checked,
+            models: editingProviderId ? getSelectedProviderModels() : (existing?.models ?? [])
+        };
+        const r = (await window.ag.providers.save(providerEntry));
+        if (!r.success)
+            throw new Error(r.error || 'Save failed');
+        toast(editingProviderId ? 'Provider updated' : 'Provider added', 'ok');
+        showPmView('list');
+        await renderProviderList();
+    }
+    catch (err) {
+        pmFormError.textContent = err.message;
+        pmFormError.style.display = 'block';
+    }
+    finally {
+        pmFormSave.removeAttribute('disabled');
+        pmFormSave.textContent = 'Save provider';
+    }
+});
+async function openProviderManagerModal() {
+    pmBackdrop.hidden = false;
+    pmBackdrop.style.display = 'flex';
+    showPmView('list');
+    await renderProviderList();
+}
+$('#modelsAddBtn')?.addEventListener('click', openProviderManagerModal);
+$('#providerManagerBtn')?.addEventListener('click', openProviderManagerModal);
 //# sourceMappingURL=app.js.map

@@ -3,7 +3,19 @@
  * Replaces ~9 duplicate regex blocks across proxy.ts.
  */
 
-// ─── Types ────────────────────────────────────────────────────────────────
+/** Helpers re-exported from src/presets/reasoningEffort.ts (single source of truth). */
+import { isReasoningLikeModel } from '../presets/reasoningEffort';
+export {
+  REASONING_EFFORTS,
+  THINKING_BUDGETS,
+  adaptiveReasoningEffort,
+  budgetReasoningEffort,
+  coerceReasoningEffort,
+  coerceThinkingBudget,
+  isReasoningLikeModel,
+  type ReasoningEffort as AdaptiveReasoningEffort,
+  type ThinkingBudget as AdaptiveThinkingBudget,
+} from '../presets/reasoningEffort';
 
 export interface CustomModelConfig {
   name: string;
@@ -25,6 +37,15 @@ export interface ModelNameCapabilities {
   isClaudeThinkingModel: boolean;
   isThinkingModel: boolean;
 }
+
+export interface ModelUXBadges {
+  supportsVision: boolean;
+  supportsTools: boolean;
+  supportsThinking: boolean;
+  isLocal: boolean;
+  contextWindowLabel: string;
+}
+
 
 // ─── Reasoning Modes (fetched dynamically from /v1/models) ───────────────────────
 // These modes are NOT hardcoded — they are returned from the API endpoint
@@ -186,3 +207,125 @@ export function mapApiModelToModeConfig(apiModel: { id: string; name: string }, 
     defaultMode,
   };
 }
+
+/**
+ * Computes UX badges for a model (Vision 🖼️, Tools 🛠️, Thinking 🧠, Local 💻, Context Window Label).
+ */
+export function detectModelUXBadges(m: CustomModelConfig): ModelUXBadges {
+  const caps = detectModelCapabilities(m);
+  const isLocal = m.provider === 'ollama' || m.provider === 'lmstudio' || m.provider === 'llamacpp';
+  const supportsTools = true; // All proxy translators map tool calls
+  const contextWindowLabel = caps.maxTokens >= 1_000_000 ? '1M' : `${Math.round(caps.maxTokens / 1000)}k`;
+
+  return {
+    supportsVision: caps.supportsImages,
+    supportsTools,
+    supportsThinking: caps.isThinking,
+    isLocal,
+    contextWindowLabel,
+  };
+}
+
+/**
+ * Merge two `ModelModeConfig` records into a single one.
+ *
+ * Rules:
+ *  - `id`/`name`/`provider` come from `base`.
+ *  - `supportsReasoning` and `supportsImages` OR-combined.
+ *  - `maxTokens` and `maxOutputTokens` take the larger value.
+ *  - `supportedReasoningEfforts` / `supportedThinkingBudgets` are the union
+ *    of both inputs (deduplicated, preserving order).
+ *  - `defaultMode` is preferred when set, otherwise undefined.
+ *
+ * @example
+ * mergeModelCapabilities(apiModel, presetModel)
+ */
+export function mergeModelCapabilities(
+  base: ModelModeConfig,
+  override: ModelModeConfig,
+): ModelModeConfig {
+  const mergedReasoning: ReasoningEffort[] | undefined = mergeReasoningList(
+    base.supportedReasoningEfforts,
+    override.supportedReasoningEfforts,
+  );
+  const mergedBudgets: ThinkingBudget[] | undefined = mergeThinkingList(
+    base.supportedThinkingBudgets,
+    override.supportedThinkingBudgets,
+  );
+
+  return {
+    id: base.id,
+    name: base.name,
+    provider: base.provider,
+    supportsReasoning: Boolean(base.supportsReasoning || override.supportsReasoning),
+    supportsImages: Boolean(base.supportsImages && override.supportsImages),
+    maxOutputTokens: Math.max(base.maxOutputTokens, override.maxOutputTokens),
+    maxTokens: Math.max(base.maxTokens, override.maxTokens),
+    supportedReasoningEfforts: mergedReasoning,
+    supportedThinkingBudgets: mergedBudgets,
+    defaultMode: base.defaultMode ?? override.defaultMode,
+  };
+}
+
+function mergeReasoningList(
+  a?: readonly ReasoningEffort[],
+  b?: readonly ReasoningEffort[],
+): ReasoningEffort[] | undefined {
+  if (!a && !b) return undefined;
+  const seen = new Set<string>();
+  const out: ReasoningEffort[] = [];
+  for (const list of [a, b]) {
+    if (!list) continue;
+    for (const item of list) {
+      if (!seen.has(item)) {
+        seen.add(item);
+        out.push(item);
+      }
+    }
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+function mergeThinkingList(
+  a?: readonly ThinkingBudget[],
+  b?: readonly ThinkingBudget[],
+): ThinkingBudget[] | undefined {
+  if (!a && !b) return undefined;
+  const seen = new Set<string>();
+  const out: ThinkingBudget[] = [];
+  for (const list of [a, b]) {
+    if (!list) continue;
+    for (const item of list) {
+      if (!seen.has(item)) {
+        seen.add(item);
+        out.push(item);
+      }
+    }
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+/**
+ * Returns the preferred mode for a model, falling back to a deterministic
+ * default based on capabilities. Inspired by the UCP preset-templates
+ * `resolvePresetTemplateConfigurationDefault` helper.
+ */
+export function resolveDefaultMode(model: ModelModeConfig): ModelMode {
+  if (model.defaultMode) {
+    return model.defaultMode;
+  }
+  if (model.supportsReasoning) {
+    return 'auto';
+  }
+  return 'non-thinking';
+}
+
+/**
+ * Detects whether a model config string is a "thinking" or "reasoning" one.
+ * Convenience wrapper around `isReasoningLikeModel`.
+ */
+export function modelHasReasoningCapability(modelName: string): boolean {
+  return isReasoningLikeModel(modelName);
+}
+
+
