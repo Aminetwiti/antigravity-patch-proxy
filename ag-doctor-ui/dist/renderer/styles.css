@@ -1863,3 +1863,257 @@ body {
   content-visibility: auto;
   contain-intrinsic-size: auto 60px;
 }
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+   Provider Manager (styles synchronized with Antigravity)
+   â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+
+.agy-provider-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agy-provider-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md, 8px);
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+
+.agy-provider-row:hover {
+  background: var(--bg-3);
+  border-color: var(--border-strong);
+}
+
+.agy-provider-row-main {
+  min-width: 0;
+}
+
+.agy-provider-row-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agy-provider-row-meta {
+  font-size: 11px;
+  color: var(--text-2);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.agy-provider-row-meta .agy-dot {
+  color: var(--text-3);
+}
+
+.agy-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.agy-pill-ok {
+  background: hsla(140, 60%, 45%, 0.15);
+  color: hsl(140, 60%, 60%);
+  border: 1px solid hsla(140, 60%, 50%, 0.3);
+}
+
+.agy-pill-muted {
+  background: var(--bg-3);
+  color: var(--text-3);
+  border: 1px solid var(--border);
+}
+
+.agy-pill-err {
+  background: hsla(0, 75%, 55%, 0.15);
+  color: hsl(0, 75%, 65%);
+  border: 1px solid hsla(0, 75%, 60%, 0.3);
+}
+
+.agy-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+  gap: 12px;
+}
+
+.agy-empty-icon {
+  color: var(--text-3);
+}
+
+.agy-empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.agy-empty-text {
+  font-size: 12px;
+  color: var(--text-3);
+  max-width: 320px;
+}
+
+.agy-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm, 6px);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: all var(--t-fast) var(--ease);
+}
+
+.agy-icon-btn:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+  border-color: var(--border);
+}
+
+.agy-icon-btn:active {
+  transform: scale(0.94);
+}
+
+.agy-icon-btn[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.agy-icon-btn .spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: agy-spin 0.7s linear infinite;
+}
+
+@keyframes agy-spin {
+  to { transform: rotate(360deg); }
+}
+
+.agy-model-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm, 6px);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.agy-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  transition: all var(--t-fast) var(--ease);
+}
+
+.agy-chip:hover {
+  background: var(--bg-3);
+  border-color: var(--border-strong);
+}
+
+.agy-chip input[type="checkbox"] {
+  margin: 0;
+  width: 12px;
+  height: 12px;
+  accent-color: var(--accent-blue);
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-field > span {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.form-field input,
+.form-field select {
+  padding: 8px 12px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm, 6px);
+  color: var(--text-0);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color var(--t-fast) var(--ease);
+}
+
+.form-field input:focus,
+.form-field select:focus {
+  border-color: var(--accent-blue);
+  background: var(--bg-2);
+}
+
+.form-field input::placeholder {
+  color: var(--text-3);
+}
+
+.form-field-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm, 6px);
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.form-field-inline input[type="checkbox"] {
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent-blue);
+  cursor: pointer;
+}
+
+.form-error {
+  padding: 10px 12px;
+  background: hsla(0, 75%, 55%, 0.1);
+  border: 1px solid hsla(0, 75%, 55%, 0.3);
+  border-radius: var(--r-sm, 6px);
+  color: hsl(0, 75%, 65%);
+  font-size: 12px;
+}

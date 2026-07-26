@@ -4,10 +4,24 @@
  * Replaces ~9 duplicate regex blocks across proxy.ts.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.isReasoningLikeModel = exports.coerceThinkingBudget = exports.coerceReasoningEffort = exports.budgetReasoningEffort = exports.adaptiveReasoningEffort = exports.THINKING_BUDGETS = exports.REASONING_EFFORTS = void 0;
 exports.detectModelCapabilities = detectModelCapabilities;
 exports.detectModelCapabilitiesByName = detectModelCapabilitiesByName;
 exports.mapApiModelToModeConfig = mapApiModelToModeConfig;
 exports.detectModelUXBadges = detectModelUXBadges;
+exports.mergeModelCapabilities = mergeModelCapabilities;
+exports.resolveDefaultMode = resolveDefaultMode;
+exports.modelHasReasoningCapability = modelHasReasoningCapability;
+/** Helpers re-exported from src/presets/reasoningEffort.ts (single source of truth). */
+const reasoningEffort_1 = require("../presets/reasoningEffort");
+var reasoningEffort_2 = require("../presets/reasoningEffort");
+Object.defineProperty(exports, "REASONING_EFFORTS", { enumerable: true, get: function () { return reasoningEffort_2.REASONING_EFFORTS; } });
+Object.defineProperty(exports, "THINKING_BUDGETS", { enumerable: true, get: function () { return reasoningEffort_2.THINKING_BUDGETS; } });
+Object.defineProperty(exports, "adaptiveReasoningEffort", { enumerable: true, get: function () { return reasoningEffort_2.adaptiveReasoningEffort; } });
+Object.defineProperty(exports, "budgetReasoningEffort", { enumerable: true, get: function () { return reasoningEffort_2.budgetReasoningEffort; } });
+Object.defineProperty(exports, "coerceReasoningEffort", { enumerable: true, get: function () { return reasoningEffort_2.coerceReasoningEffort; } });
+Object.defineProperty(exports, "coerceThinkingBudget", { enumerable: true, get: function () { return reasoningEffort_2.coerceThinkingBudget; } });
+Object.defineProperty(exports, "isReasoningLikeModel", { enumerable: true, get: function () { return reasoningEffort_2.isReasoningLikeModel; } });
 // ─── Detection ────────────────────────────────────────────────────────────
 const THINKING_PATTERN = /thinking|reasoning|reasoner|o1|o3|r1|opus-4|sonnet-4|claude-4|3-7|4-7|3\.7|4\.7/i;
 const DEEPSEEK_PATTERN = /deepseek/i;
@@ -118,5 +132,90 @@ function detectModelUXBadges(m) {
         isLocal,
         contextWindowLabel,
     };
+}
+/**
+ * Merge two `ModelModeConfig` records into a single one.
+ *
+ * Rules:
+ *  - `id`/`name`/`provider` come from `base`.
+ *  - `supportsReasoning` and `supportsImages` OR-combined.
+ *  - `maxTokens` and `maxOutputTokens` take the larger value.
+ *  - `supportedReasoningEfforts` / `supportedThinkingBudgets` are the union
+ *    of both inputs (deduplicated, preserving order).
+ *  - `defaultMode` is preferred when set, otherwise undefined.
+ *
+ * @example
+ * mergeModelCapabilities(apiModel, presetModel)
+ */
+function mergeModelCapabilities(base, override) {
+    const mergedReasoning = mergeReasoningList(base.supportedReasoningEfforts, override.supportedReasoningEfforts);
+    const mergedBudgets = mergeThinkingList(base.supportedThinkingBudgets, override.supportedThinkingBudgets);
+    return {
+        id: base.id,
+        name: base.name,
+        provider: base.provider,
+        supportsReasoning: Boolean(base.supportsReasoning || override.supportsReasoning),
+        supportsImages: Boolean(base.supportsImages && override.supportsImages),
+        maxOutputTokens: Math.max(base.maxOutputTokens, override.maxOutputTokens),
+        maxTokens: Math.max(base.maxTokens, override.maxTokens),
+        supportedReasoningEfforts: mergedReasoning,
+        supportedThinkingBudgets: mergedBudgets,
+        defaultMode: base.defaultMode ?? override.defaultMode,
+    };
+}
+function mergeReasoningList(a, b) {
+    if (!a && !b)
+        return undefined;
+    const seen = new Set();
+    const out = [];
+    for (const list of [a, b]) {
+        if (!list)
+            continue;
+        for (const item of list) {
+            if (!seen.has(item)) {
+                seen.add(item);
+                out.push(item);
+            }
+        }
+    }
+    return out.length > 0 ? out : undefined;
+}
+function mergeThinkingList(a, b) {
+    if (!a && !b)
+        return undefined;
+    const seen = new Set();
+    const out = [];
+    for (const list of [a, b]) {
+        if (!list)
+            continue;
+        for (const item of list) {
+            if (!seen.has(item)) {
+                seen.add(item);
+                out.push(item);
+            }
+        }
+    }
+    return out.length > 0 ? out : undefined;
+}
+/**
+ * Returns the preferred mode for a model, falling back to a deterministic
+ * default based on capabilities. Inspired by the UCP preset-templates
+ * `resolvePresetTemplateConfigurationDefault` helper.
+ */
+function resolveDefaultMode(model) {
+    if (model.defaultMode) {
+        return model.defaultMode;
+    }
+    if (model.supportsReasoning) {
+        return 'auto';
+    }
+    return 'non-thinking';
+}
+/**
+ * Detects whether a model config string is a "thinking" or "reasoning" one.
+ * Convenience wrapper around `isReasoningLikeModel`.
+ */
+function modelHasReasoningCapability(modelName) {
+    return (0, reasoningEffort_1.isReasoningLikeModel)(modelName);
 }
 //# sourceMappingURL=modelUtils.js.map

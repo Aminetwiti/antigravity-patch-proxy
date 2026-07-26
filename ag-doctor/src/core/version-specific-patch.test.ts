@@ -37,6 +37,7 @@ vi.mock('./config', () => ({
 const electronAsarPath = require.resolve('@electron/asar');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const electronAsarReal = require('@electron/asar');
+// @ts-ignore
 require.cache[electronAsarPath] = {
   id: electronAsarPath,
   filename: electronAsarPath,

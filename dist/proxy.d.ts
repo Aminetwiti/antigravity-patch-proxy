@@ -8,6 +8,18 @@ export { generateModelPlaceholderId, toSlug };
  */
 export declare function parseRetryAfter(headers: Record<string, string | string[] | undefined>): number;
 export declare function startProxy(): Promise<number>;
+/**
+ * Reads the persisted state file and applies it to the live singletons.
+ * Called once on startup. Safe to call again — re-loads idempotently.
+ */
+export declare function loadPersistedState(): void;
+/**
+ * Persist the current in-memory retry budget + breaker state to disk.
+ * Throttled by `MIN_FLUSH_INTERVAL_MS` unless `force` is set.
+ */
+export declare function flushPersistedState(opts?: {
+    force?: boolean;
+}): void;
 export declare function stopProxy(): Promise<void>;
 export declare function getProxyPort(): number;
 //# sourceMappingURL=proxy.d.ts.map

@@ -64,10 +64,31 @@ export function loadCustomModels(filePath?: string): CustomModelsFile {
   try {
     const raw = fs.readFileSync(fp, 'utf-8').replace(/^\uFEFF/, '');
     const parsed = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.models)) {
-      return { models: [] };
+    if (!parsed) return { models: [] };
+
+    const models: CustomModel[] = Array.isArray(parsed.models) ? [...parsed.models] : [];
+
+    if (Array.isArray(parsed.providers)) {
+      for (const p of parsed.providers) {
+        if (!p || p.enabled === false) continue;
+        const pModels = Array.isArray(p.models) ? p.models : [];
+        for (const m of pModels) {
+          if (!m || m.enabled === false) continue;
+          const name = m.id?.startsWith('models/') ? m.id : `models/${m.id ?? ''}`;
+          models.push({
+            name,
+            displayName: m.displayName || m.id || name,
+            provider: p.provider || 'openai',
+            apiKey: p.apiKey || 'none',
+            apiUrl: p.apiUrl || '',
+            externalModelName: m.id || '',
+            allowUnauthorized: p.allowUnauthorized,
+          });
+        }
+      }
     }
-    return { models: parsed.models as CustomModel[] };
+
+    return { models };
   } catch (e) {
     // Corrupt JSON should not crash the CLI — log and return empty.
     console.warn(`[custom-models] failed to parse ${fp}: ${(e as Error).message}`);

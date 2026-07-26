@@ -12,6 +12,7 @@
  * and preventing cryptic UI errors.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.normalizeModelName = normalizeModelName;
 exports.validateCandidate = validateCandidate;
 exports.validateGenerateContentResponse = validateGenerateContentResponse;
 exports.validateCloudCodeEnvelope = validateCloudCodeEnvelope;
@@ -21,6 +22,15 @@ exports.validateGenerateContentRequest = validateGenerateContentRequest;
 exports.validateOpenAiChunk = validateOpenAiChunk;
 exports.validateAnthropicEvent = validateAnthropicEvent;
 const constants_1 = require("./constants");
+const modelIdUtils_1 = require("./wellKnown/modelIdUtils");
+/**
+ * Normalizes a model name through the modelIdUtils pipeline.
+ * Exposed for callers that want to read the canonical form alongside
+ * the user's original input.
+ */
+function normalizeModelName(name) {
+    return (0, modelIdUtils_1.normalizeModelId)(name);
+}
 /**
  * Validates a Gemini candidate object structure.
  */
@@ -94,14 +104,25 @@ function validateCustomModel(model) {
         }
     }
     const name = m.name;
-    // Validate model name format: should start with "models/" or be a valid path
-    if (!name.startsWith('models/') && !name.includes('/')) {
-        return { valid: false, error: 'Model name must start with "models/"' };
+    // Normalize the model name (e.g. "GPT-4o", "gpt 4o", "models/gpt-4o" -> "gpt-4o").
+    // The normalized form is used as the canonical key downstream.
+    const normalizedName = (0, modelIdUtils_1.normalizeModelId)(name);
+    if (!normalizedName) {
+        return { valid: false, error: 'Model name normalizes to an empty slug' };
     }
+    // The name must still carry enough information to be a valid model identifier.
+    if (!name.startsWith('models/') && !name.includes('/') && normalizedName.length < 2) {
+        return { valid: false, error: 'Model name must start with "models/" or be a valid path' };
+    }
+    // Persist the canonical slug back on the input shape for downstream callers.
+    m.normalizedName = normalizedName;
     const provider = m.provider;
     // Validate provider is one of the supported types
     if (!constants_1.ALL_PROVIDERS.includes(provider)) {
-        return { valid: false, error: `Unsupported provider: ${provider}. Must be one of: ${constants_1.ALL_PROVIDERS.join(', ')}` };
+        return {
+            valid: false,
+            error: `Unsupported provider: ${provider}. Must be one of: ${constants_1.ALL_PROVIDERS.join(', ')}`,
+        };
     }
     const apiUrl = m.apiUrl;
     // Validate API URL format

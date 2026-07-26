@@ -15,6 +15,12 @@ interface ValidationResult {
     error?: string;
 }
 /**
+ * Normalizes a model name through the modelIdUtils pipeline.
+ * Exposed for callers that want to read the canonical form alongside
+ * the user's original input.
+ */
+export declare function normalizeModelName(name: string): string;
+/**
  * Validates a Gemini candidate object structure.
  */
 export declare function validateCandidate(candidate: unknown): ValidationResult;

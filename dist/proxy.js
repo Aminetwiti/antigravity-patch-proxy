@@ -40,6 +40,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.toSlug = exports.generateModelPlaceholderId = void 0;
 exports.parseRetryAfter = parseRetryAfter;
 exports.startProxy = startProxy;
+exports.loadPersistedState = loadPersistedState;
+exports.flushPersistedState = flushPersistedState;
 exports.stopProxy = stopProxy;
 exports.getProxyPort = getProxyPort;
 const http = __importStar(require("http"));
@@ -48,6 +50,14 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 const electron_log_1 = __importDefault(require("electron-log"));
+const logger_1 = require("./logger");
+const metrics_1 = require("./metrics");
+const crypto_1 = require("crypto");
+const proxyLog = (0, logger_1.createLogger)('Proxy');
+/** 16-char hex request id used for tracing. Cheap, sortable by time. */
+function newTraceId() {
+    return (0, crypto_1.randomBytes)(8).toString('hex');
+}
 let server = null;
 let proxyPort = 0;
 const constants_1 = require("./constants");
@@ -69,6 +79,11 @@ const circuitBreaker_1 = require("./proxy/circuitBreaker");
 const idleTimeout_1 = require("./proxy/idleTimeout");
 const agentPool_1 = require("./proxy/agentPool");
 const emptyStream_1 = require("./proxy/emptyStream");
+const retryBudget_1 = require("./proxy/retryBudget");
+const diagnostics_1 = require("./proxy/diagnostics");
+const persistedState_1 = require("./proxy/persistedState");
+const metricsRoute_1 = require("./proxy/metricsRoute");
+const circuitBreaker_2 = require("./proxy/circuitBreaker");
 function generateGracefulMarkdown(diagnostic) {
     let md = `🚨 **${diagnostic.title}**\n\n${diagnostic.message}\n\n`;
     if (diagnostic.suggestions && diagnostic.suggestions.length > 0) {
@@ -123,18 +138,25 @@ function safeEnd(res, data) {
 // generateModelPlaceholderId and toSlug are now in ./proxy/idGenerator.ts (re-exported above)
 // ─── Google Proxy ─────────────────────────────────────────────────────────
 async function proxyToGoogle(req, res, reqBody) {
+    const traceId = newTraceId();
     const isCloudCodeUrl = req.url.includes('v1internal') || req.url.includes('daily-cloudcode');
     const targetHost = isCloudCodeUrl ? 'daily-cloudcode-pa.googleapis.com' : 'generativelanguage.googleapis.com';
     const targetUrl = `https://${targetHost}`;
     const parsedUrl = new URL(req.url, targetUrl);
+    const endTimer = (0, metrics_1.startTimer)('proxy_request_ms', { upstream: targetHost });
+    const traceLog = proxyLog;
+    proxyLog.debug('req', traceId, req.method, req.url, '→', targetHost);
     try {
         const realIp = await (0, dnsResolver_1.resolveGoogleIp)(targetHost);
         parsedUrl.hostname = realIp;
     }
     catch (e) {
+        (0, metrics_1.inc)('proxy_errors_total', { upstream: targetHost, stage: 'dns', trace_id: traceId });
+        const ms = endTimer();
+        traceLog.error('DNS resolution failed for', targetHost, 'traceId=', traceId, '(in', ms, 'ms)');
         electron_log_1.default.error(`[Proxy] Could not resolve upstream IP for ${targetHost}:`, e);
         if (safeWriteHead(res, 500, { 'Content-Type': 'application/json' })) {
-            safeEnd(res, JSON.stringify({ error: { message: 'DNS resolution failed for ' + targetHost } }));
+            safeEnd(res, JSON.stringify({ error: { message: 'DNS resolution failed for ' + targetHost, traceId } }));
         }
         return;
     }
@@ -212,10 +234,18 @@ async function proxyToGoogle(req, res, reqBody) {
         }
     });
     proxyReq.on('error', (err) => {
+        (0, metrics_1.inc)('proxy_errors_total', { upstream: targetHost, stage: 'forward', trace_id: traceId });
+        const ms = endTimer();
+        traceLog.error('Google forwarding error traceId=', traceId, 'after', ms, 'ms:', err.message);
         electron_log_1.default.error('[Proxy] Google Forwarding Error:', err);
         if (safeWriteHead(res, 500, { 'Content-Type': 'application/json' })) {
-            safeEnd(res, JSON.stringify({ error: { message: 'Proxy forwarding failed: ' + err.message } }));
+            safeEnd(res, JSON.stringify({ error: { message: 'Proxy forwarding failed: ' + err.message, traceId } }));
         }
+    });
+    proxyReq.on('close', () => {
+        const ms = endTimer();
+        (0, metrics_1.observe)('proxy_upstream_ms', ms, { upstream: targetHost, trace_id: traceId });
+        traceLog.debug('Upstream request closed traceId=', traceId, 'after', ms, 'ms');
     });
     if (reqBody) {
         proxyReq.write(reqBody);
@@ -305,7 +335,11 @@ function parseRetryAfter(headers) {
 function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount = 0, fallbackDepth = 0) {
     // P3-18: Configurable max retries per model (default 1, min 0, max 5).
     // Lowered from 3 to 1 to prevent retry storms saturating the proxy.
-    const MAX_RETRIES = (0, urlBuilder_1.resolveMaxRetries)(model);
+    // P5-2: Seed the per-model retry budget from the configured value. The
+    // budget then scales that base according to observed trust — flaky models
+    // get fewer retries, consistent models get more.
+    const CONFIGURED_MAX_RETRIES = (0, urlBuilder_1.resolveMaxRetries)(model);
+    const MAX_RETRIES = (0, retryBudget_1.getRetryBudget)().getMaxRetries(model, CONFIGURED_MAX_RETRIES || retryBudget_1.RETRY_BUDGET_BASE);
     const REQUEST_TIMEOUT_MS = (0, urlBuilder_1.resolveRequestTimeout)(model);
     // Circuit breaker: if this model just failed hard, short-circuit before
     // touching the upstream. This keeps the proxy responsive so the rest of
@@ -486,6 +520,9 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                         streamDiagnostic.errorType === 'timeout' ||
                         streamDiagnostic.errorType === 'network') {
                         (0, circuitBreaker_1.recordFailure)(model, streamDiagnostic.errorType);
+                        // P5-2: feed the per-model retry budget so future requests can
+                        // adapt (flaky models get fewer retries).
+                        (0, retryBudget_1.getRetryBudget)().recordFailure(model);
                     }
                     if ((0, retryStrategy_1.shouldRetryStatus)(apiRes.statusCode, retryCount, MAX_RETRIES)) {
                         electron_log_1.default.warn(`[Proxy] Stream error, retrying (${retryCount + 1}/${MAX_RETRIES})...`);
@@ -562,6 +599,8 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                 onTimeout: (err) => {
                     electron_log_1.default.warn(`[Proxy] ${err.message} — aborting request for ${model.name}`);
                     (0, circuitBreaker_1.recordFailure)(model, 'timeout');
+                    // P5-2: feed the retry budget so future requests see this stall.
+                    (0, retryBudget_1.getRetryBudget)().recordFailure(model);
                     try {
                         request.destroy(err);
                     }
@@ -621,12 +660,17 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                     electron_log_1.default.warn(`[Proxy] Empty stream from ${model.name}: ${verdict.reason} ` +
                         `(0 frames, ${verdict.bytesReceived}B) — retrying (${retryCount + 1}/${MAX_RETRIES}).`);
                     (0, circuitBreaker_1.recordFailure)(model, 'empty_stream');
+                    // P5-2: feed the per-model retry budget so future requests adapt.
+                    (0, retryBudget_1.getRetryBudget)().recordFailure(model);
                     setTimeout(() => handleCustomModelRequest(res, model, geminiBody, isStream, retryCount + 1), 500 * (retryCount + 1));
                     return;
                 }
                 if (verdict.isEmpty) {
                     electron_log_1.default.warn(`[Proxy] Empty stream from ${model.name}: ${verdict.reason} ` +
                         `(0 frames, ${verdict.bytesReceived}B) — max retries exhausted.`);
+                    // Final attempt exhausted: count it as a failure so the budget
+                    // can downgrade the model's trust on the next request.
+                    (0, retryBudget_1.getRetryBudget)().recordFailure(model);
                 }
                 if (buffer.trim().startsWith('data: ')) {
                     const dataStr = buffer.trim().substring(6).trim();
@@ -690,6 +734,8 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                         diagnostic.errorType === 'timeout' ||
                         diagnostic.errorType === 'network') {
                         (0, circuitBreaker_1.recordFailure)(model, diagnostic.errorType);
+                        // P5-2: feed the per-model retry budget.
+                        (0, retryBudget_1.getRetryBudget)().recordFailure(model);
                     }
                     if (attemptFallback(diagnostic))
                         return;
@@ -753,6 +799,9 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                     };
                     // Successful 2xx response — clear breaker for this model.
                     (0, circuitBreaker_1.recordSuccess)(model);
+                    // P5-2: feed the per-model retry budget a success sample so the
+                    // model's trust score recovers after a hard stretch of failures.
+                    (0, retryBudget_1.getRetryBudget)().recordSuccess(model);
                     if (safeWriteHead(res, 200, { 'Content-Type': 'application/json' })) {
                         safeEnd(res, JSON.stringify(cloudCodeResponse));
                     }
@@ -783,6 +832,8 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
         // Trip the breaker immediately on timeout — these are the worst offender
         // in retry storms (the request holds the proxy open for the full timeout).
         (0, circuitBreaker_1.recordFailure)(model, 'timeout');
+        // P5-2: feed the retry budget.
+        (0, retryBudget_1.getRetryBudget)().recordFailure(model);
         if (retryCount < MAX_RETRIES) {
             electron_log_1.default.warn(`[Proxy] Timeout for ${model.name}, retrying (${retryCount + 1}/${MAX_RETRIES})...`);
             setTimeout(() => handleCustomModelRequest(res, model, geminiBody, isStream, retryCount + 1), 1000 * (retryCount + 1));
@@ -807,6 +858,8 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
             code === 'ENOTFOUND' || code === 'EAI_AGAIN' ? 'dns' :
                 'network';
         (0, circuitBreaker_1.recordFailure)(model, breakerType);
+        // P5-2: feed the retry budget so future requests can adapt.
+        (0, retryBudget_1.getRetryBudget)().recordFailure(model);
         if (retryCount < MAX_RETRIES) {
             electron_log_1.default.warn(`[Proxy] Network error for ${model.name}, retrying (${retryCount + 1}/${MAX_RETRIES})...`);
             setTimeout(() => handleCustomModelRequest(res, model, geminiBody, isStream, retryCount + 1), 1000 * (retryCount + 1));
@@ -964,6 +1017,65 @@ function handleRequest(req, res) {
             timestamp: new Date().toISOString(),
         }));
         return;
+    }
+    if (req.method === 'GET' && (req.url === '/__diag__' || req.url?.startsWith('/__diag__?'))) {
+        try {
+            const accept = String(req.headers['accept'] ?? '');
+            const snapshot = (0, diagnostics_1.snapshot)();
+            if (accept.includes('text/markdown') || accept.includes('text/plain')) {
+                res.writeHead(200, {
+                    'Content-Type': 'text/markdown; charset=utf-8',
+                    'Cache-Control': 'no-store',
+                });
+                res.end((0, diagnostics_1.formatSnapshot)(snapshot));
+                return;
+            }
+            res.writeHead(200, {
+                'Content-Type': 'application/json',
+                'Cache-Control': 'no-store',
+            });
+            res.end(JSON.stringify(snapshot, null, 2));
+            return;
+        }
+        catch (e) {
+            proxyLog.error('Failed to render /__diag__', e.message);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'failed to render diagnostics', detail: e.message }));
+            return;
+        }
+    }
+    // Phase 7.1: live counter / histogram inspection. Off by default;
+    // enable with AG_METRICS_ENABLED=1 when debugging a noisy upstream.
+    if (req.method === 'GET' && req.url === '/__metrics__') {
+        try {
+            if (!(0, metricsRoute_1.metricsEnabled)()) {
+                res.writeHead(404, { 'Content-Type': 'text/plain' });
+                res.end('Not enabled. Set AG_METRICS_ENABLED=1 to expose /__metrics__.\n');
+                return;
+            }
+            const accept = req.headers['accept'] ? String(req.headers['accept']) : undefined;
+            const ct = (0, metricsRoute_1.negotiateContentType)(accept);
+            if (ct === 'text/plain') {
+                res.writeHead(200, {
+                    'Content-Type': 'text/plain; version=0.0.4; charset=utf-8',
+                    'Cache-Control': 'no-store',
+                });
+                res.end((0, metricsRoute_1.formatPrometheus)((0, metricsRoute_1.getMetricsSnapshot)()));
+                return;
+            }
+            res.writeHead(200, {
+                'Content-Type': 'application/json',
+                'Cache-Control': 'no-store',
+            });
+            res.end(JSON.stringify((0, metricsRoute_1.getMetricsSnapshot)(), null, 2));
+            return;
+        }
+        catch (e) {
+            proxyLog.error('Failed to render /__metrics__', e.message);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'failed to render metrics', detail: e.message }));
+            return;
+        }
     }
     // Per-model health status — returns circuit breaker state for each custom
     // model so the renderer dropdown can show live green/red indicators.
@@ -1609,6 +1721,11 @@ function startProxy() {
                 }
             });
             primaryPort = portCandidates[0];
+            // Hot-reload persisted state from disk before we start accepting
+            // requests. This restores any breakers that were tripped before the
+            // last shutdown, so the proxy doesn't immediately re-fail on a
+            // model the user already determined was broken.
+            loadPersistedState();
             tryListen(primaryPort, primaryHost);
         }
         catch (err) {
@@ -1617,11 +1734,49 @@ function startProxy() {
         }
     });
 }
+/**
+ * Reads the persisted state file and applies it to the live singletons.
+ * Called once on startup. Safe to call again — re-loads idempotently.
+ */
+function loadPersistedState() {
+    try {
+        const path = (0, persistedState_1.stateFilePath)();
+        const file = (0, persistedState_1.loadOrInit)(path);
+        const { retryBudgetPatch, breakerPatch } = (0, persistedState_1.fromFile)(file, Date.now(), circuitBreaker_2.CIRCUIT_BREAKER_RESET_MS);
+        (0, persistedState_1.applyBudgetPatch)(retryBudgetPatch);
+        (0, persistedState_1.applyBreakerPatch)(breakerPatch);
+        electron_log_1.default.info(`[Proxy] loaded persisted state: budget=${retryBudgetPatch.size} breakers=${breakerPatch.size}`);
+    }
+    catch (err) {
+        electron_log_1.default.warn('[Proxy] could not restore persisted state:', err);
+    }
+}
+/**
+ * Persist the current in-memory retry budget + breaker state to disk.
+ * Throttled by `MIN_FLUSH_INTERVAL_MS` unless `force` is set.
+ */
+function flushPersistedState(opts = {}) {
+    try {
+        const path = (0, persistedState_1.stateFilePath)();
+        const file = (0, persistedState_1.gather)();
+        const ok = (0, persistedState_1.flush)(path, file);
+        if (!ok && !opts.force) {
+            // Throttled — that's fine. The next mutation will flush.
+            return;
+        }
+    }
+    catch (err) {
+        electron_log_1.default.warn('[Proxy] could not persist state:', err);
+    }
+}
 function stopProxy() {
     return new Promise((resolve) => {
         // P1-9: Stop cleanup interval to prevent orphaned timers
         (0, shared_1.stopCleanupInterval)();
         const finish = () => {
+            // Phase 6.3: flush any pending persisted state (force, ignore throttle)
+            // so the next startProxy() can re-load the same breakers / budgets.
+            flushPersistedState({ force: true });
             // Phase 3: close per-host https/http agent pools so file descriptors
             // are released on graceful shutdown (mirrors undici.Agent.close()).
             (0, agentPool_1.disposeAll)()
