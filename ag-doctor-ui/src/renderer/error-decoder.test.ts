@@ -8,7 +8,45 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { decodeError, formatBytes } from './error-decoder';
+import { decodeCustomProviderError, decodeError, formatBytes, parseResetSeconds } from './error-decoder';
+
+describe('parseResetSeconds', () => {
+  it('parses "retry-after: 45"', () => {
+    expect(parseResetSeconds('retry-after: 45')).toBe(45);
+  });
+
+  it('parses "reset in 120s"', () => {
+    expect(parseResetSeconds('Rate limit reached, reset in 120s')).toBe(120);
+  });
+
+  it('returns undefined when no duration is present', () => {
+    expect(parseResetSeconds('Generic rate limit error')).toBeUndefined();
+  });
+});
+
+describe('decodeCustomProviderError', () => {
+  it('decodes HTTP 429 Rate Limit error with smart-fallback action', () => {
+    const res = decodeCustomProviderError('Rate limit exceeded. Retry in 60s', 429, 'OpenAI');
+    expect(res.category).toBe('quota_429');
+    expect(res.title).toBe('OpenAI Quota Reached');
+    expect(res.resetSeconds).toBe(60);
+    expect(res.action).toBe('smart-fallback');
+  });
+
+  it('decodes HTTP 401 Auth Error with edit-key action', () => {
+    const res = decodeCustomProviderError('Unauthorized - Incorrect API key', 401, 'Anthropic');
+    expect(res.category).toBe('auth_401');
+    expect(res.title).toBe('Anthropic Auth Error');
+    expect(res.action).toBe('edit-key');
+  });
+
+  it('decodes ECONNREFUSED error with start-stub action', () => {
+    const res = decodeCustomProviderError('connect ECONNREFUSED 127.0.0.1:11434', undefined, 'Ollama');
+    expect(res.category).toBe('offline_econn');
+    expect(res.title).toBe('Ollama Server Offline');
+    expect(res.action).toBe('start-stub');
+  });
+});
 
 describe('formatBytes', () => {
   it('returns "0 B" for 0', () => {

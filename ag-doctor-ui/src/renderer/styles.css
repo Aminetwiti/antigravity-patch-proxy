@@ -1645,6 +1645,85 @@ body {
 :root[data-theme="light"] .stat-card::before { opacity: 0.6; }
 :root[data-theme="light"] .home-intro::before { opacity: 0.4; }
 
+.agy-provider-row-meta {
+  font-size: 11px;
+  color: var(--text-2);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.agy-provider-row-meta .agy-dot {
+  color: var(--text-3);
+}
+
+.agy-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.agy-pill-ok {
+  background: var(--bg-3);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+}
+
+.agy-pill-muted {
+  background: var(--bg-3);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+}
+
+.agy-pill-err {
+  background: var(--err-bg);
+  color: var(--err);
+  border: 1px solid var(--err-border);
+}
+
+.agy-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+  gap: 12px;
+}
+
+.agy-empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-0);
+}
+
+.agy-empty-text {
+  font-size: 12px;
+  color: var(--text-2);
+  max-width: 320px;
+}
+
+.agy-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm, 6px);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: all var(--t-fast) var(--ease);
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    Command palette
    ───────────────────────────────────────────────────────────────────────── */

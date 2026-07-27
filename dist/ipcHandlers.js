@@ -77,6 +77,12 @@ function registerIpcHandlers(storageManager) {
         }
         electron_updater_1.autoUpdater.quitAndInstall();
     });
+    // IDE bridge (2.3.1+) — exposed via window.ide.isInstalled() in the preload.
+    // The renderer asks the main process whether the IDE is installed; since this
+    // IS the IDE process, we always answer true. Without this handler the renderer
+    // hits "No handler registered for 'ide:is-installed'" and stays on a black
+    // screen because the mount path throws before React can render.
+    electron_1.ipcMain.handle('ide:is-installed', () => true);
     // Notifications
     electron_1.ipcMain.handle('notification:send', (_event, options) => {
         const notification = new electron_1.Notification({
@@ -247,6 +253,32 @@ function registerIpcHandlers(storageManager) {
             }
             await fs.writeFile(saveResult.filePath, JSON.stringify({ providers }, null, 2), 'utf-8');
             return { success: true, count: providers.length };
+        }
+        catch (err) {
+            return { success: false, error: err.message };
+        }
+    });
+    // Symmetric counterpart to storage:export-providers. The renderer calls this
+    // channel (not the -base64 variant) when the user picks "Import" from the UI,
+    // so the main process must open a file dialog, parse the JSON, and merge it
+    // into the existing provider store.
+    electron_1.ipcMain.handle('storage:import-providers', async () => {
+        try {
+            const openResult = await electron_1.dialog.showOpenDialog({
+                title: 'Import Provider Configuration',
+                properties: ['openFile'],
+                filters: [{ name: 'JSON Files', extensions: ['json'] }],
+            });
+            if (openResult.canceled || openResult.filePaths.length === 0) {
+                return { success: false, error: 'Cancelled' };
+            }
+            const raw = await fs.readFile(openResult.filePaths[0], 'utf-8');
+            const parsed = JSON.parse(raw);
+            const incoming = parsed.providers ?? [];
+            const existing = await customModelStore.loadProviders();
+            const res = configExchange.mergeProviderConfigs(existing, incoming, 'merge');
+            await customModelStore.saveProviders(res.providers);
+            return { success: true, count: incoming.length };
         }
         catch (err) {
             return { success: false, error: err.message };

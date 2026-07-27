@@ -76,7 +76,7 @@ function classifyError(status, errorObj, responseBody, provider) {
 `;
 
 function removeSandboxedPreloadLocalImports(source) {
-  if (source.includes(SANDBOXED_PRELOAD_MARKER)) return source;
+  if (source.includes(SANDBOXED_PRELOAD_MARKER) || !/require\(["']\.\/proxy\//.test(source)) return source;
   let patched = source
     .replace(/^const idGenerator_1 = require\(["']\.\/proxy\/idGenerator["']\);\r?\n/m, '')
     .replace(/^const errorClassifier_1 = require\(["']\.\/proxy\/errorClassifier["']\);\r?\n/m, '')

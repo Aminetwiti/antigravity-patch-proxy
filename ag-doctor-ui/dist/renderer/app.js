@@ -2204,6 +2204,38 @@ const pmFormError = $('#pmFormError');
 const pmModelsList = $('#pmModelsList');
 let providersCache = [];
 let editingProviderId = null;
+// Smart Banner Manager instance
+const smartBanner = new SmartBannerManager('globalSmartBanner');
+function triggerSmartFailover(failingProviderId) {
+    const fallback = providersCache.find((p) => p.enabled && p.id !== failingProviderId && (p.status === 'healthy' || !p.status));
+    if (fallback) {
+        toast(`Switched to fallback provider ${fallback.name}`, 'ok');
+    }
+    else {
+        toast(`No alternative healthy provider available`, 'warn');
+    }
+}
+function handleProviderError(errorMsg, status, p) {
+    const decoded = decodeCustomProviderError(errorMsg, status, p?.name);
+    smartBanner.show({
+        category: decoded.category,
+        title: decoded.title,
+        hint: decoded.hint,
+        resetSeconds: decoded.resetSeconds,
+        providerName: decoded.providerName,
+        onFallback: () => triggerSmartFailover(p?.id),
+        onEditKey: () => {
+            if (p)
+                openProviderForm(p.id);
+            else
+                openProviderManagerModal();
+        },
+        onStartStub: () => {
+            window.location.hash = '#mitm';
+            navigate('mitm');
+        }
+    });
+}
 function showPmView(view) {
     if (view === 'list') {
         pmListContainer.style.display = 'block';
@@ -2307,17 +2339,21 @@ async function renderProviderList() {
                     p.status = r.healthStatus ?? 'healthy';
                     p.latencyMs = r.latencyMs;
                     toast(`Healthy (${r.latencyMs ?? 0}ms)`, 'ok');
+                    smartBanner.dismiss();
                 }
                 else {
                     p.status = r.healthStatus ?? 'offline';
                     p.latencyMs = r.latencyMs;
                     p.lastError = r.error;
                     toast(`Failed: ${r.error || r.status}`, 'err', 6000);
+                    handleProviderError(r.error || `HTTP ${r.status}`, r.status, p);
                 }
                 await renderProviderList();
             }
             catch (err) {
-                toast(`Test error: ${err.message}`, 'err');
+                const errorMsg = err.message;
+                toast(`Test error: ${errorMsg}`, 'err');
+                handleProviderError(errorMsg, undefined, p);
             }
             finally {
                 btn.removeAttribute('disabled');

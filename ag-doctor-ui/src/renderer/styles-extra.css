@@ -182,3 +182,81 @@
 .agy-latency-badge.healthy { color: var(--ok); border-color: var(--ok-border); background: var(--ok-bg); }
 .agy-latency-badge.degraded { color: var(--warn); border-color: var(--warn-border); background: var(--warn-bg); }
 .agy-latency-badge.offline { color: var(--err); border-color: var(--err-border); background: var(--err-bg); }
+
+/* Smart Banner System */
+.smart-banner-container {
+  width: 100%;
+  position: relative;
+  z-index: 100;
+}
+.smart-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1);
+  animation: bannerSlideDown var(--t-base) var(--ease-out);
+}
+@keyframes bannerSlideDown {
+  from { transform: translateY(-100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.smart-banner.quota_429 {
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+  color: var(--text-0);
+}
+.smart-banner.auth_401, .smart-banner.credits_402 {
+  background: var(--err-bg);
+  border-color: var(--err-border);
+  color: var(--text-0);
+}
+.smart-banner.offline_econn {
+  background: hsla(269, 79%, 65%, 0.15);
+  border-color: hsla(269, 79%, 65%, 0.3);
+  color: var(--text-0);
+}
+
+.smart-banner-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.smart-banner.quota_429 .smart-banner-icon { color: var(--warn); }
+.smart-banner.auth_401 .smart-banner-icon, .smart-banner.credits_402 .smart-banner-icon { color: var(--err); }
+.smart-banner.offline_econn .smart-banner-icon { color: var(--accent-purple-bright); }
+
+.smart-banner-body {
+  flex: 1;
+  min-width: 0;
+}
+.smart-banner-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.smart-banner-countdown {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-3);
+  color: var(--accent-blue-bright);
+}
+.smart-banner-text {
+  font-size: 12px;
+  color: var(--text-1);
+  line-height: 1.4;
+}
+.smart-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}

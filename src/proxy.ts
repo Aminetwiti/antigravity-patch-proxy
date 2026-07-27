@@ -112,39 +112,8 @@ export { generateModelPlaceholderId, toSlug };
 import { resolveGoogleIp } from './proxy/dnsResolver';
 
 // ─── Safe Response Helpers ─────────────────────────────────────────────────
-// Guard flag pattern to prevent ERR_HTTP_HEADERS_SENT when timeout and
-// upstream response race. Returns true if the operation succeeded, false if
-// the response was already terminated.
-
-function safeWriteHead(
-  res: http.ServerResponse,
-  status: number,
-  headers?: Record<string, string>,
-): boolean {
-  if (res.headersSent || res.writableEnded) {
-    return false;
-  }
-  try {
-    res.writeHead(status, headers);
-    return true;
-  } catch (err) {
-    log.warn('[Proxy] safeWriteHead failed:', (err as Error).message);
-    return false;
-  }
-}
-
-function safeEnd(res: http.ServerResponse, data?: string | Buffer): boolean {
-  if (res.writableEnded) {
-    return false;
-  }
-  try {
-    res.end(data);
-    return true;
-  } catch (err) {
-    log.warn('[Proxy] safeEnd failed:', (err as Error).message);
-    return false;
-  }
-}
+import { safeWriteHead, safeEnd } from './proxy/httpUtils';
+import { mergeModels, getMappedCustomModels, getCustomModelsList } from './proxy/modelInjector';
 
 // ─── Model Helpers ────────────────────────────────────────────────────────
 
@@ -226,7 +195,10 @@ async function proxyToGoogle(req: http.IncomingMessage, res: http.ServerResponse
             text = zlib.gunzipSync(fullResBody).toString('utf-8');
           } catch (e) {
             log.error('[Proxy] gunzipSync failed:', e);
-            text = fullResBody.toString('utf-8');
+            if (safeHead(502, { 'Content-Type': 'application/json' })) {
+              safeEnd(res, JSON.stringify({ error: { message: `Failed to decompress upstream response: ${(e as Error).message}` } }));
+            }
+            return;
           }
         } else {
           text = fullResBody.toString('utf-8');
@@ -1391,115 +1363,17 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
 
             log.info(`[Proxy] Loaded custom models count: ${customModels.length}`);
 
-            const mergeModels = (target: unknown): unknown => {
-              if (Array.isArray(target)) {
-                const mapped = customModels.map((m) => {
-                  const cap = detectModelCapabilities(m, true);
-                  const pid = generateModelPlaceholderId(m);
-                  return {
-                    name: 'models/' + pid,
-                    model: pid,
-                    planModel: pid,
-                    requestedModel: pid,
-                    version: '1.0',
-                    displayName: m.displayName,
-                    description: m.description,
-                    inputTokenLimit: cap.maxTokens,
-                    outputTokenLimit: cap.maxOutputTokens,
-                    supportedGenerationMethods: ['generateContent', 'countTokens'],
-                    temperature: cap.isThinking ? undefined : 0.7,
-                    topP: cap.isThinking ? undefined : 0.9,
-                    topK: cap.isThinking ? undefined : 40,
-                    reasoningEffort: m.reasoningEffort || undefined,
-                    thinkingBudget: m.thinkingBudget || undefined,
-                    mode: m.mode || undefined,
-                  };
-                });
-                return [...mapped, ...target];
-              } else if (target && typeof target === 'object') {
-                const result = { ...(target as Record<string, unknown>) };
-                customModels.forEach((m) => {
-                  const slug = toSlug(m);
-                  const cap = detectModelCapabilities(m, true);
-                  const pid = generateModelPlaceholderId(m);
-                  const entry: Record<string, unknown> = {
-                    displayName: m.displayName,
-                    supportsImages: cap.supportsImages,
-                    supportsThinking: cap.isThinking,
-                    reasoningEffort: m.reasoningEffort || undefined,
-                    thinkingBudget: m.thinkingBudget || undefined,
-                    mode: m.mode || undefined,
-                    recommended: true,
-                    maxTokens: cap.maxTokens,
-                    maxOutputTokens: cap.maxOutputTokens,
-                    tokenizerType: 'LLAMA_WITH_SPECIAL',
-                    model: pid,
-                    planModel: pid,
-                    requestedModel: pid,
-                    apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
-                    modelProvider: 'MODEL_PROVIDER_GOOGLE',
-                  };
-                  if (cap.supportsImages) {
-                    entry.supportsVideo = false;
-                    entry.supportedMimeTypes = {
-                      'image/png': true,
-                      'image/jpeg': true,
-                      'image/webp': true,
-                      'image/gif': true,
-                      'image/heic': true,
-                      'image/heif': true,
-                      'text/plain': true,
-                      'text/markdown': true,
-                      'text/html': true,
-                      'text/css': true,
-                      'text/xml': true,
-                      'text/csv': true,
-                      'application/json': true,
-                      'application/pdf': true,
-                      'application/x-javascript': true,
-                      'application/x-typescript': true,
-                      'application/x-python-code': true,
-                      'application/x-ipynb+json': true,
-                    };
-                  } else {
-                    entry.supportsVideo = false;
-                    entry.supportedMimeTypes = {
-                      'text/plain': true,
-                      'text/markdown': true,
-                      'text/html': true,
-                      'text/css': true,
-                      'text/xml': true,
-                      'text/csv': true,
-                      'application/json': true,
-                      'application/pdf': true,
-                      'application/x-javascript': true,
-                      'application/x-typescript': true,
-                      'application/x-python-code': true,
-                      'application/x-ipynb+json': true,
-                    };
-                  }
-                  (result as Record<string, unknown>)[slug] = entry;
-                  m._slug = slug;
-                  log.info(
-                    `[Proxy] Custom model "${m.displayName}" => slug: ${slug} => model: ${generateModelPlaceholderId(m)} => thinking: ${cap.isThinking} => images: ${cap.supportsImages}`,
-                  );
-                });
-                return result;
-              }
-              return target;
-            };
-
             let merged = false;
             if (googleJson.models) {
-              googleJson.models = mergeModels(googleJson.models);
+              googleJson.models = mergeModels(googleJson.models, customModels);
               merged = true;
             }
             if (googleJson.availableModels) {
-              googleJson.availableModels = mergeModels(googleJson.availableModels);
+              googleJson.availableModels = mergeModels(googleJson.availableModels, customModels);
               merged = true;
             }
             if (googleJson.available_models) {
-              googleJson.available_models = mergeModels(googleJson.available_models);
+              googleJson.available_models = mergeModels(googleJson.available_models, customModels);
               merged = true;
             }
 
@@ -1558,26 +1432,10 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
             safeWriteHead(res, 200, { 'Content-Type': 'application/json' });
             safeEnd(res, JSON.stringify(googleJson));
           } catch (err) {
-            log.error('[Proxy] Parsing fetchAvailableModels failed, returning custom models:', err);
+            log.error('[Proxy] Parsing fetchAvailableModels failed:', err);
             if (res.headersSent || res.writableEnded) return;
-            const customModels = loadCustomModels();
-            const mappedCustom: Record<string, unknown> = {};
-            customModels.forEach((m) => {
-              const slug = toSlug(m);
-              const pid = generateModelPlaceholderId(m);
-              mappedCustom[slug] = {
-                displayName: m.displayName,
-                maxTokens: 1048576,
-                maxOutputTokens: 4096,
-                model: pid,
-                planModel: pid,
-                requestedModel: pid,
-                apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
-                modelProvider: 'MODEL_PROVIDER_GOOGLE',
-              };
-            });
-            safeWriteHead(res, 200, { 'Content-Type': 'application/json' });
-            safeEnd(res, JSON.stringify({ models: mappedCustom }));
+            safeWriteHead(res, 502, { 'Content-Type': 'application/json' });
+            safeEnd(res, JSON.stringify({ error: { message: `Upstream parse error: ${(err as Error).message}` } }));
           }
         });
       });
@@ -1706,20 +1564,10 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
             safeWriteHead(res, 200, { 'Content-Type': 'application/json' });
             safeEnd(res, JSON.stringify(googleJson));
           } catch (err) {
-            log.error('[Proxy] Google list models failed, returning custom models list only:', err);
+            log.error('[Proxy] Google list models failed:', err);
             if (res.headersSent || res.writableEnded) return;
-            const customModels = loadCustomModels();
-            const mappedCustom = customModels.map((m) => ({
-              name: 'models/' + generateModelPlaceholderId(m),
-              version: '1.0',
-              displayName: m.displayName,
-              description: m.description,
-              inputTokenLimit: 1048576,
-              outputTokenLimit: 4096,
-              supportedGenerationMethods: ['generateContent', 'countTokens'],
-            }));
-            safeWriteHead(res, 200, { 'Content-Type': 'application/json' });
-            safeEnd(res, JSON.stringify({ models: mappedCustom }));
+            safeWriteHead(res, 502, { 'Content-Type': 'application/json' });
+            safeEnd(res, JSON.stringify({ error: { message: `Upstream models parse error: ${(err as Error).message}` } }));
           }
         });
       });

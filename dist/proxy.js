@@ -64,8 +64,6 @@ const constants_1 = require("./constants");
 // ─── Module Imports ───────────────────────────────────────────────────────
 // Shared cross-turn state
 const shared_1 = require("./proxy/shared");
-// Model configuration & capability detection
-const modelUtils_1 = require("./proxy/modelUtils");
 // Provider translator registry (auto-discovers translators from proxy/translators/)
 const registry = __importStar(require("./proxy/registry"));
 // Protobuf injection (extracted from proxy.ts)
@@ -105,35 +103,8 @@ Object.defineProperty(exports, "toSlug", { enumerable: true, get: function () { 
 // DNS resolution bypasses the poisoned hosts file (extracted from proxy.ts)
 const dnsResolver_1 = require("./proxy/dnsResolver");
 // ─── Safe Response Helpers ─────────────────────────────────────────────────
-// Guard flag pattern to prevent ERR_HTTP_HEADERS_SENT when timeout and
-// upstream response race. Returns true if the operation succeeded, false if
-// the response was already terminated.
-function safeWriteHead(res, status, headers) {
-    if (res.headersSent || res.writableEnded) {
-        return false;
-    }
-    try {
-        res.writeHead(status, headers);
-        return true;
-    }
-    catch (err) {
-        electron_log_1.default.warn('[Proxy] safeWriteHead failed:', err.message);
-        return false;
-    }
-}
-function safeEnd(res, data) {
-    if (res.writableEnded) {
-        return false;
-    }
-    try {
-        res.end(data);
-        return true;
-    }
-    catch (err) {
-        electron_log_1.default.warn('[Proxy] safeEnd failed:', err.message);
-        return false;
-    }
-}
+const httpUtils_1 = require("./proxy/httpUtils");
+const modelInjector_1 = require("./proxy/modelInjector");
 // ─── Model Helpers ────────────────────────────────────────────────────────
 // generateModelPlaceholderId and toSlug are now in ./proxy/idGenerator.ts (re-exported above)
 // ─── Google Proxy ─────────────────────────────────────────────────────────
@@ -155,8 +126,8 @@ async function proxyToGoogle(req, res, reqBody) {
         const ms = endTimer();
         traceLog.error('DNS resolution failed for', targetHost, 'traceId=', traceId, '(in', ms, 'ms)');
         electron_log_1.default.error(`[Proxy] Could not resolve upstream IP for ${targetHost}:`, e);
-        if (safeWriteHead(res, 500, { 'Content-Type': 'application/json' })) {
-            safeEnd(res, JSON.stringify({ error: { message: 'DNS resolution failed for ' + targetHost, traceId } }));
+        if ((0, httpUtils_1.safeWriteHead)(res, 500, { 'Content-Type': 'application/json' })) {
+            (0, httpUtils_1.safeEnd)(res, JSON.stringify({ error: { message: 'DNS resolution failed for ' + targetHost, traceId } }));
         }
         return;
     }
@@ -177,13 +148,13 @@ async function proxyToGoogle(req, res, reqBody) {
         servername: targetHost,
     };
     // Guard flag to prevent ERR_HTTP_HEADERS_SENT when timeout and response race
-    const safeHead = (status, headers) => safeWriteHead(res, status, headers);
+    const safeHead = (status, headers) => (0, httpUtils_1.safeWriteHead)(res, status, headers);
     const proxyReq = https.request(parsedUrl, options, (proxyRes) => {
         proxyReq.setTimeout(constants_1.GOOGLE_PROXY_TIMEOUT_MS, () => {
             electron_log_1.default.error(`[Proxy] Google proxy request timed out after ${constants_1.GOOGLE_PROXY_TIMEOUT_MS / 1000}s`);
             proxyReq.destroy();
             if (safeHead(504, { 'Content-Type': 'application/json' })) {
-                safeEnd(res, JSON.stringify({ error: { message: 'Google API request timed out' } }));
+                (0, httpUtils_1.safeEnd)(res, JSON.stringify({ error: { message: 'Google API request timed out' } }));
             }
         });
         if (shouldBufferAndModify) {
@@ -204,7 +175,10 @@ async function proxyToGoogle(req, res, reqBody) {
                     }
                     catch (e) {
                         electron_log_1.default.error('[Proxy] gunzipSync failed:', e);
-                        text = fullResBody.toString('utf-8');
+                        if (safeHead(502, { 'Content-Type': 'application/json' })) {
+                            (0, httpUtils_1.safeEnd)(res, JSON.stringify({ error: { message: `Failed to decompress upstream response: ${e.message}` } }));
+                        }
+                        return;
                     }
                 }
                 else {
@@ -222,8 +196,8 @@ async function proxyToGoogle(req, res, reqBody) {
                 delete modifiedHeaders['transfer-encoding'];
                 const modifiedBuffer = Buffer.from(text, 'utf-8');
                 modifiedHeaders['content-length'] = String(modifiedBuffer.length);
-                if (safeWriteHead(res, proxyRes.statusCode || 200, modifiedHeaders)) {
-                    safeEnd(res, modifiedBuffer);
+                if ((0, httpUtils_1.safeWriteHead)(res, proxyRes.statusCode || 200, modifiedHeaders)) {
+                    (0, httpUtils_1.safeEnd)(res, modifiedBuffer);
                 }
             });
         }
@@ -238,8 +212,8 @@ async function proxyToGoogle(req, res, reqBody) {
         const ms = endTimer();
         traceLog.error('Google forwarding error traceId=', traceId, 'after', ms, 'ms:', err.message);
         electron_log_1.default.error('[Proxy] Google Forwarding Error:', err);
-        if (safeWriteHead(res, 500, { 'Content-Type': 'application/json' })) {
-            safeEnd(res, JSON.stringify({ error: { message: 'Proxy forwarding failed: ' + err.message, traceId } }));
+        if ((0, httpUtils_1.safeWriteHead)(res, 500, { 'Content-Type': 'application/json' })) {
+            (0, httpUtils_1.safeEnd)(res, JSON.stringify({ error: { message: 'Proxy forwarding failed: ' + err.message, traceId } }));
         }
     });
     proxyReq.on('close', () => {
@@ -373,12 +347,12 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
             return;
         }
         const statusCode = openBreaker.errorType === 'rate_limit' ? 429 : 503;
-        if (safeWriteHead(res, statusCode, {
+        if ((0, httpUtils_1.safeWriteHead)(res, statusCode, {
             'Content-Type': 'application/json',
             'X-AG-Error-Type': cached.errorType,
             'X-AG-Circuit': 'open',
         })) {
-            safeEnd(res, JSON.stringify({
+            (0, httpUtils_1.safeEnd)(res, JSON.stringify({
                 error: {
                     message: `Model ${model.name} is temporarily unavailable (${cached.title}). Retried shortly.`,
                 },
@@ -408,7 +382,7 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                     // We send a brief markdown notice as the first SSE event before
                     // delegating to the fallback model handler.
                     if (isStream && !res.headersSent) {
-                        if (safeWriteHead(res, 200, {
+                        if ((0, httpUtils_1.safeWriteHead)(res, 200, {
                             'Content-Type': 'text/event-stream',
                             'Cache-Control': 'no-cache',
                             Connection: 'keep-alive',
@@ -473,14 +447,14 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
         apiRes.on('error', (err) => {
             electron_log_1.default.error(`[Proxy] Upstream stream error for ${model.name}:`, err.message);
             const diagnostic = (0, errorClassifier_1.classifyError)(500, err, undefined, model.provider);
-            if (safeWriteHead(res, 500, {
+            if ((0, httpUtils_1.safeWriteHead)(res, 500, {
                 'Content-Type': 'application/json',
                 'X-AG-Error-Type': diagnostic.errorType
             })) {
-                safeEnd(res, JSON.stringify({ error: { message: 'Upstream connection error: ' + err.message }, _agDiagnostic: diagnostic }));
+                (0, httpUtils_1.safeEnd)(res, JSON.stringify({ error: { message: 'Upstream connection error: ' + err.message }, _agDiagnostic: diagnostic }));
             }
             else if (!res.writableEnded) {
-                safeEnd(res);
+                (0, httpUtils_1.safeEnd)(res);
             }
         });
         const status = apiRes.statusCode || 0;
@@ -547,14 +521,14 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                             metadata: {},
                             _agDiagnostic: diagnostic
                         };
-                        if (safeWriteHead(res, 200, {
+                        if ((0, httpUtils_1.safeWriteHead)(res, 200, {
                             'Content-Type': 'text/event-stream',
                             'Cache-Control': 'no-cache',
                             Connection: 'keep-alive',
                             'X-AG-Error-Type': diagnostic.errorType
                         })) {
                             res.write('data: ' + JSON.stringify(errResponse) + '\n\n');
-                            safeEnd(res);
+                            (0, httpUtils_1.safeEnd)(res);
                         }
                         return;
                     }
@@ -568,11 +542,11 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                     if (typeof responseJson === 'object' && responseJson !== null) {
                         responseJson._agDiagnostic = diagnostic;
                     }
-                    if (safeWriteHead(res, apiRes.statusCode, {
+                    if ((0, httpUtils_1.safeWriteHead)(res, apiRes.statusCode, {
                         'Content-Type': 'application/json',
                         'X-AG-Error-Type': diagnostic.errorType
                     })) {
-                        safeEnd(res, JSON.stringify(responseJson));
+                        (0, httpUtils_1.safeEnd)(res, JSON.stringify(responseJson));
                     }
                 });
                 return;
@@ -582,7 +556,7 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                 // clear the breaker so subsequent requests don't short-circuit.
                 (0, circuitBreaker_1.recordSuccess)(model);
             }
-            if (!safeWriteHead(res, 200, {
+            if (!(0, httpUtils_1.safeWriteHead)(res, 200, {
                 'Content-Type': 'text/event-stream',
                 'Cache-Control': 'no-cache',
                 Connection: 'keep-alive',
@@ -754,11 +728,11 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                             metadata: {},
                             _agDiagnostic: diagnostic
                         };
-                        if (safeWriteHead(res, 200, {
+                        if ((0, httpUtils_1.safeWriteHead)(res, 200, {
                             'Content-Type': 'application/json',
                             'X-AG-Error-Type': diagnostic.errorType
                         })) {
-                            safeEnd(res, JSON.stringify(errResponse));
+                            (0, httpUtils_1.safeEnd)(res, JSON.stringify(errResponse));
                         }
                         return;
                     }
@@ -772,11 +746,11 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                     if (typeof responseJson === 'object' && responseJson !== null) {
                         responseJson._agDiagnostic = diagnostic;
                     }
-                    if (safeWriteHead(res, apiRes.statusCode, {
+                    if ((0, httpUtils_1.safeWriteHead)(res, apiRes.statusCode, {
                         'Content-Type': 'application/json',
                         'X-AG-Error-Type': diagnostic.errorType
                     })) {
-                        safeEnd(res, JSON.stringify(responseJson));
+                        (0, httpUtils_1.safeEnd)(res, JSON.stringify(responseJson));
                     }
                     return;
                 }
@@ -802,8 +776,8 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                     // P5-2: feed the per-model retry budget a success sample so the
                     // model's trust score recovers after a hard stretch of failures.
                     (0, retryBudget_1.getRetryBudget)().recordSuccess(model);
-                    if (safeWriteHead(res, 200, { 'Content-Type': 'application/json' })) {
-                        safeEnd(res, JSON.stringify(cloudCodeResponse));
+                    if ((0, httpUtils_1.safeWriteHead)(res, 200, { 'Content-Type': 'application/json' })) {
+                        (0, httpUtils_1.safeEnd)(res, JSON.stringify(cloudCodeResponse));
                     }
                 }
                 catch (e) {
@@ -816,11 +790,11 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                     const diagnostic = (0, errorClassifier_1.classifyError)(500, e, body, model.provider);
                     if (attemptFallback(diagnostic))
                         return;
-                    if (safeWriteHead(res, 500, {
+                    if ((0, httpUtils_1.safeWriteHead)(res, 500, {
                         'Content-Type': 'application/json',
                         'X-AG-Error-Type': diagnostic.errorType
                     })) {
-                        safeEnd(res, JSON.stringify({ error: { message: 'Failed to translate model response' }, _agDiagnostic: diagnostic }));
+                        (0, httpUtils_1.safeEnd)(res, JSON.stringify({ error: { message: 'Failed to translate model response' }, _agDiagnostic: diagnostic }));
                     }
                 }
             });
@@ -842,11 +816,11 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
         const diagnostic = (0, errorClassifier_1.classifyError)(504, 'ETIMEDOUT', undefined, model.provider);
         if (attemptFallback(diagnostic))
             return;
-        if (safeWriteHead(res, 504, {
+        if ((0, httpUtils_1.safeWriteHead)(res, 504, {
             'Content-Type': 'application/json',
             'X-AG-Error-Type': diagnostic.errorType
         })) {
-            safeEnd(res, JSON.stringify({ error: { message: `Request timeout after ${REQUEST_TIMEOUT_MS / 1000}s` }, _agDiagnostic: diagnostic }));
+            (0, httpUtils_1.safeEnd)(res, JSON.stringify({ error: { message: `Request timeout after ${REQUEST_TIMEOUT_MS / 1000}s` }, _agDiagnostic: diagnostic }));
         }
     });
     request.on('error', (err) => {
@@ -884,20 +858,20 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                     metadata: {},
                     _agDiagnostic: diagnostic
                 };
-                safeWriteHead(res, 502, {
+                (0, httpUtils_1.safeWriteHead)(res, 502, {
                     'Content-Type': 'text/event-stream',
                     'X-AG-Error-Type': diagnostic.errorType
                 });
                 res.write('data: ' + JSON.stringify(errResponse) + '\n\n');
             }
-            safeEnd(res);
+            (0, httpUtils_1.safeEnd)(res);
         }
         else {
-            if (safeWriteHead(res, 502, {
+            if ((0, httpUtils_1.safeWriteHead)(res, 502, {
                 'Content-Type': 'application/json',
                 'X-AG-Error-Type': diagnostic.errorType
             })) {
-                safeEnd(res, JSON.stringify({ error: { message: 'Custom model request failed: ' + err.message }, _agDiagnostic: diagnostic }));
+                (0, httpUtils_1.safeEnd)(res, JSON.stringify({ error: { message: 'Custom model request failed: ' + err.message }, _agDiagnostic: diagnostic }));
             }
         }
     });
@@ -926,8 +900,8 @@ function handleGetAvailableModelsProxy(res, reqBody, lsUrl) {
             lsResErrored = true;
             electron_log_1.default.error('[Proxy] LS error for GetAvailableModels:', err.message);
             if (!res.headersSent && !res.writableEnded) {
-                safeWriteHead(res, 502);
-                safeEnd(res);
+                (0, httpUtils_1.safeWriteHead)(res, 502);
+                (0, httpUtils_1.safeEnd)(res);
             }
         });
         const chunks = [];
@@ -941,11 +915,11 @@ function handleGetAvailableModelsProxy(res, reqBody, lsUrl) {
             const responseBuf = Buffer.concat(chunks);
             const customModels = (0, modelLoader_1.loadCustomModels)();
             const { buffer: modifiedBuf } = (0, protoInjector_1.injectCustomModelsIntoResponse)(responseBuf, customModels);
-            if (safeWriteHead(res, lsRes.statusCode || 200, {
+            if ((0, httpUtils_1.safeWriteHead)(res, lsRes.statusCode || 200, {
                 'Content-Type': 'application/grpc-web+proto',
                 'Content-Length': String(modifiedBuf.length),
             })) {
-                safeEnd(res, modifiedBuf);
+                (0, httpUtils_1.safeEnd)(res, modifiedBuf);
             }
         });
     });
@@ -953,15 +927,15 @@ function handleGetAvailableModelsProxy(res, reqBody, lsUrl) {
         electron_log_1.default.error('[Proxy] GetAvailableModels forward timed out');
         lsReq.destroy();
         if (!res.headersSent && !res.writableEnded) {
-            safeWriteHead(res, 504);
-            safeEnd(res);
+            (0, httpUtils_1.safeWriteHead)(res, 504);
+            (0, httpUtils_1.safeEnd)(res);
         }
     });
     lsReq.on('error', (err) => {
         electron_log_1.default.error('[Proxy] GetAvailableModels forward error:', err.message);
         if (!res.headersSent && !res.writableEnded) {
-            safeWriteHead(res, 502);
-            safeEnd(res);
+            (0, httpUtils_1.safeWriteHead)(res, 502);
+            (0, httpUtils_1.safeEnd)(res);
         }
     });
     lsReq.write(reqBody);
@@ -1143,8 +1117,8 @@ function handleRequest(req, res) {
                 handleGetAvailableModelsProxy(res, fullBody, lsUrl);
                 return;
             }
-            if (safeWriteHead(res, 400, { 'Content-Type': 'application/json' })) {
-                safeEnd(res, JSON.stringify({ error: 'Missing ls parameter' }));
+            if ((0, httpUtils_1.safeWriteHead)(res, 400, { 'Content-Type': 'application/json' })) {
+                (0, httpUtils_1.safeEnd)(res, JSON.stringify({ error: 'Missing ls parameter' }));
             }
             return;
         }
@@ -1161,8 +1135,8 @@ function handleRequest(req, res) {
             }
             catch (e) {
                 electron_log_1.default.error(`[Proxy] Could not resolve upstream IP for ${targetHost}:`, e);
-                if (safeWriteHead(res, 500, { 'Content-Type': 'application/json' })) {
-                    safeEnd(res, JSON.stringify({ error: { message: 'DNS resolution failed for ' + targetHost } }));
+                if ((0, httpUtils_1.safeWriteHead)(res, 500, { 'Content-Type': 'application/json' })) {
+                    (0, httpUtils_1.safeEnd)(res, JSON.stringify({ error: { message: 'DNS resolution failed for ' + targetHost } }));
                 }
                 return;
             }
@@ -1205,8 +1179,8 @@ function handleRequest(req, res) {
                                 modelProvider: 'MODEL_PROVIDER_GOOGLE',
                             };
                         });
-                        safeWriteHead(res, 200, { 'Content-Type': 'application/json' });
-                        safeEnd(res, JSON.stringify({ models: mappedCustom }));
+                        (0, httpUtils_1.safeWriteHead)(res, 200, { 'Content-Type': 'application/json' });
+                        (0, httpUtils_1.safeEnd)(res, JSON.stringify({ models: mappedCustom }));
                     }
                 });
                 let googleBody = '';
@@ -1222,114 +1196,17 @@ function handleRequest(req, res) {
                         const googleJson = JSON.parse(googleBody);
                         const customModels = (0, modelLoader_1.loadCustomModels)();
                         electron_log_1.default.info(`[Proxy] Loaded custom models count: ${customModels.length}`);
-                        const mergeModels = (target) => {
-                            if (Array.isArray(target)) {
-                                const mapped = customModels.map((m) => {
-                                    const cap = (0, modelUtils_1.detectModelCapabilities)(m, true);
-                                    const pid = (0, idGenerator_1.generateModelPlaceholderId)(m);
-                                    return {
-                                        name: 'models/' + pid,
-                                        model: pid,
-                                        planModel: pid,
-                                        requestedModel: pid,
-                                        version: '1.0',
-                                        displayName: m.displayName,
-                                        description: m.description,
-                                        inputTokenLimit: cap.maxTokens,
-                                        outputTokenLimit: cap.maxOutputTokens,
-                                        supportedGenerationMethods: ['generateContent', 'countTokens'],
-                                        temperature: cap.isThinking ? undefined : 0.7,
-                                        topP: cap.isThinking ? undefined : 0.9,
-                                        topK: cap.isThinking ? undefined : 40,
-                                        reasoningEffort: m.reasoningEffort || undefined,
-                                        thinkingBudget: m.thinkingBudget || undefined,
-                                        mode: m.mode || undefined,
-                                    };
-                                });
-                                return [...mapped, ...target];
-                            }
-                            else if (target && typeof target === 'object') {
-                                const result = { ...target };
-                                customModels.forEach((m) => {
-                                    const slug = (0, idGenerator_1.toSlug)(m);
-                                    const cap = (0, modelUtils_1.detectModelCapabilities)(m, true);
-                                    const pid = (0, idGenerator_1.generateModelPlaceholderId)(m);
-                                    const entry = {
-                                        displayName: m.displayName,
-                                        supportsImages: cap.supportsImages,
-                                        supportsThinking: cap.isThinking,
-                                        reasoningEffort: m.reasoningEffort || undefined,
-                                        thinkingBudget: m.thinkingBudget || undefined,
-                                        mode: m.mode || undefined,
-                                        recommended: true,
-                                        maxTokens: cap.maxTokens,
-                                        maxOutputTokens: cap.maxOutputTokens,
-                                        tokenizerType: 'LLAMA_WITH_SPECIAL',
-                                        model: pid,
-                                        planModel: pid,
-                                        requestedModel: pid,
-                                        apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
-                                        modelProvider: 'MODEL_PROVIDER_GOOGLE',
-                                    };
-                                    if (cap.supportsImages) {
-                                        entry.supportsVideo = false;
-                                        entry.supportedMimeTypes = {
-                                            'image/png': true,
-                                            'image/jpeg': true,
-                                            'image/webp': true,
-                                            'image/gif': true,
-                                            'image/heic': true,
-                                            'image/heif': true,
-                                            'text/plain': true,
-                                            'text/markdown': true,
-                                            'text/html': true,
-                                            'text/css': true,
-                                            'text/xml': true,
-                                            'text/csv': true,
-                                            'application/json': true,
-                                            'application/pdf': true,
-                                            'application/x-javascript': true,
-                                            'application/x-typescript': true,
-                                            'application/x-python-code': true,
-                                            'application/x-ipynb+json': true,
-                                        };
-                                    }
-                                    else {
-                                        entry.supportsVideo = false;
-                                        entry.supportedMimeTypes = {
-                                            'text/plain': true,
-                                            'text/markdown': true,
-                                            'text/html': true,
-                                            'text/css': true,
-                                            'text/xml': true,
-                                            'text/csv': true,
-                                            'application/json': true,
-                                            'application/pdf': true,
-                                            'application/x-javascript': true,
-                                            'application/x-typescript': true,
-                                            'application/x-python-code': true,
-                                            'application/x-ipynb+json': true,
-                                        };
-                                    }
-                                    result[slug] = entry;
-                                    m._slug = slug;
-                                    electron_log_1.default.info(`[Proxy] Custom model "${m.displayName}" => slug: ${slug} => model: ${(0, idGenerator_1.generateModelPlaceholderId)(m)} => thinking: ${cap.isThinking} => images: ${cap.supportsImages}`);
-                                });
-                                return result;
-                            }
-                            return target;
-                        };
                         let merged = false;
                         if (googleJson.models) {
-                            googleJson.models = mergeModels(googleJson.models);
+                            googleJson.models = (0, modelInjector_1.mergeModels)(googleJson.models, customModels);
                             merged = true;
                         }
                         if (googleJson.availableModels) {
-                            googleJson.availableModels = mergeModels(googleJson.availableModels);
+                            googleJson.availableModels = (0, modelInjector_1.mergeModels)(googleJson.availableModels, customModels);
                             merged = true;
                         }
                         if (googleJson.available_models) {
-                            googleJson.available_models = mergeModels(googleJson.available_models);
+                            googleJson.available_models = (0, modelInjector_1.mergeModels)(googleJson.available_models, customModels);
                             merged = true;
                         }
                         if (!merged) {
@@ -1379,31 +1256,15 @@ function handleRequest(req, res) {
                             electron_log_1.default.warn(`[Proxy] fetchAvailableModels: stripping upstream error from response (status: ${googleRes.statusCode})`);
                             delete googleJson.error;
                         }
-                        safeWriteHead(res, 200, { 'Content-Type': 'application/json' });
-                        safeEnd(res, JSON.stringify(googleJson));
+                        (0, httpUtils_1.safeWriteHead)(res, 200, { 'Content-Type': 'application/json' });
+                        (0, httpUtils_1.safeEnd)(res, JSON.stringify(googleJson));
                     }
                     catch (err) {
-                        electron_log_1.default.error('[Proxy] Parsing fetchAvailableModels failed, returning custom models:', err);
+                        electron_log_1.default.error('[Proxy] Parsing fetchAvailableModels failed:', err);
                         if (res.headersSent || res.writableEnded)
                             return;
-                        const customModels = (0, modelLoader_1.loadCustomModels)();
-                        const mappedCustom = {};
-                        customModels.forEach((m) => {
-                            const slug = (0, idGenerator_1.toSlug)(m);
-                            const pid = (0, idGenerator_1.generateModelPlaceholderId)(m);
-                            mappedCustom[slug] = {
-                                displayName: m.displayName,
-                                maxTokens: 1048576,
-                                maxOutputTokens: 4096,
-                                model: pid,
-                                planModel: pid,
-                                requestedModel: pid,
-                                apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
-                                modelProvider: 'MODEL_PROVIDER_GOOGLE',
-                            };
-                        });
-                        safeWriteHead(res, 200, { 'Content-Type': 'application/json' });
-                        safeEnd(res, JSON.stringify({ models: mappedCustom }));
+                        (0, httpUtils_1.safeWriteHead)(res, 502, { 'Content-Type': 'application/json' });
+                        (0, httpUtils_1.safeEnd)(res, JSON.stringify({ error: { message: `Upstream parse error: ${err.message}` } }));
                     }
                 });
             });
@@ -1426,8 +1287,8 @@ function handleRequest(req, res) {
                             modelProvider: 'MODEL_PROVIDER_GOOGLE',
                         };
                     });
-                    safeWriteHead(res, 200, { 'Content-Type': 'application/json' });
-                    safeEnd(res, JSON.stringify({ models: mappedCustom }));
+                    (0, httpUtils_1.safeWriteHead)(res, 200, { 'Content-Type': 'application/json' });
+                    (0, httpUtils_1.safeEnd)(res, JSON.stringify({ models: mappedCustom }));
                 }
             });
             if (fullBody && fullBody.length > 0) {
@@ -1449,8 +1310,8 @@ function handleRequest(req, res) {
             }
             catch (e) {
                 electron_log_1.default.error(`[Proxy] Could not resolve upstream IP for ${targetHost}:`, e);
-                if (safeWriteHead(res, 500, { 'Content-Type': 'application/json' })) {
-                    safeEnd(res, JSON.stringify({ error: { message: 'DNS resolution failed for ' + targetHost } }));
+                if ((0, httpUtils_1.safeWriteHead)(res, 500, { 'Content-Type': 'application/json' })) {
+                    (0, httpUtils_1.safeEnd)(res, JSON.stringify({ error: { message: 'DNS resolution failed for ' + targetHost } }));
                 }
                 return;
             }
@@ -1477,8 +1338,8 @@ function handleRequest(req, res) {
                     googleReq.destroy();
                     if (!res.headersSent && !res.writableEnded) {
                         const customModels = (0, modelLoader_1.loadCustomModels)();
-                        safeWriteHead(res, 200, { 'Content-Type': 'application/json' });
-                        safeEnd(res, JSON.stringify({
+                        (0, httpUtils_1.safeWriteHead)(res, 200, { 'Content-Type': 'application/json' });
+                        (0, httpUtils_1.safeEnd)(res, JSON.stringify({
                             models: customModels.map((m) => ({
                                 name: m.name,
                                 displayName: m.displayName,
@@ -1517,25 +1378,15 @@ function handleRequest(req, res) {
                         else {
                             googleJson.models = mappedCustom;
                         }
-                        safeWriteHead(res, 200, { 'Content-Type': 'application/json' });
-                        safeEnd(res, JSON.stringify(googleJson));
+                        (0, httpUtils_1.safeWriteHead)(res, 200, { 'Content-Type': 'application/json' });
+                        (0, httpUtils_1.safeEnd)(res, JSON.stringify(googleJson));
                     }
                     catch (err) {
-                        electron_log_1.default.error('[Proxy] Google list models failed, returning custom models list only:', err);
+                        electron_log_1.default.error('[Proxy] Google list models failed:', err);
                         if (res.headersSent || res.writableEnded)
                             return;
-                        const customModels = (0, modelLoader_1.loadCustomModels)();
-                        const mappedCustom = customModels.map((m) => ({
-                            name: 'models/' + (0, idGenerator_1.generateModelPlaceholderId)(m),
-                            version: '1.0',
-                            displayName: m.displayName,
-                            description: m.description,
-                            inputTokenLimit: 1048576,
-                            outputTokenLimit: 4096,
-                            supportedGenerationMethods: ['generateContent', 'countTokens'],
-                        }));
-                        safeWriteHead(res, 200, { 'Content-Type': 'application/json' });
-                        safeEnd(res, JSON.stringify({ models: mappedCustom }));
+                        (0, httpUtils_1.safeWriteHead)(res, 502, { 'Content-Type': 'application/json' });
+                        (0, httpUtils_1.safeEnd)(res, JSON.stringify({ error: { message: `Upstream models parse error: ${err.message}` } }));
                     }
                 });
             });
@@ -1543,8 +1394,8 @@ function handleRequest(req, res) {
                 electron_log_1.default.error('[Proxy] Google models list request error:', err);
                 if (!res.headersSent && !res.writableEnded) {
                     const customModels = (0, modelLoader_1.loadCustomModels)();
-                    safeWriteHead(res, 200, { 'Content-Type': 'application/json' });
-                    safeEnd(res, JSON.stringify({
+                    (0, httpUtils_1.safeWriteHead)(res, 200, { 'Content-Type': 'application/json' });
+                    (0, httpUtils_1.safeEnd)(res, JSON.stringify({
                         models: customModels.map((m) => ({
                             name: m.name,
                             displayName: m.displayName,
@@ -1631,8 +1482,8 @@ function handleRequest(req, res) {
                 }
                 catch (e) {
                     electron_log_1.default.error('[Proxy] JSON parse error in request body:', e);
-                    if (safeWriteHead(res, 400, { 'Content-Type': 'application/json' })) {
-                        safeEnd(res, JSON.stringify({ error: { message: 'Invalid JSON request body' } }));
+                    if ((0, httpUtils_1.safeWriteHead)(res, 400, { 'Content-Type': 'application/json' })) {
+                        (0, httpUtils_1.safeEnd)(res, JSON.stringify({ error: { message: 'Invalid JSON request body' } }));
                     }
                     return;
                 }

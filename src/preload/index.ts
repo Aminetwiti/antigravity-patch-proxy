@@ -1,8 +1,6 @@
-import { registerApiBridge } from './api';
-
-export function initPreload(): void {
-  registerApiBridge();
-}
+/**
+ * Preload module exports.
+ */
 
 export * from './api';
 export * from './types';

@@ -92,16 +92,18 @@ if (!electron_1.app.commandLine.hasSwitch('remote-debugging-port')) {
 }
 // ─── Application Lifecycle ─────────────────────────────────────────────────
 let pendingDeepLink = null;
+function focusMainWindow(win) {
+    if (win.isMinimized())
+        win.restore();
+    win.show();
+    win.focus();
+    electron_1.app.focus({ steal: true });
+}
 function handleDeepLink(url) {
     const wins = electron_1.BrowserWindow.getAllWindows();
     // This block handles deep links when windows are already open.
     if (wins.length > 0) {
-        if (wins[0].isMinimized()) {
-            wins[0].restore();
-        }
-        wins[0].show();
-        wins[0].focus();
-        electron_1.app.focus({ steal: true });
+        focusMainWindow(wins[0]);
         wins[0].webContents.send('deep-link', url);
     }
     else {
@@ -111,12 +113,7 @@ function handleDeepLink(url) {
 electron_1.app.on('second-instance', (_event, commandLine) => {
     const wins = electron_1.BrowserWindow.getAllWindows();
     if (wins.length > 0) {
-        if (wins[0].isMinimized()) {
-            wins[0].restore();
-        }
-        wins[0].show();
-        wins[0].focus();
-        electron_1.app.focus({ steal: true });
+        focusMainWindow(wins[0]);
     }
     const url = commandLine.find((arg) => arg.startsWith('antigravity://'));
     if (url) {
@@ -325,7 +322,8 @@ electron_1.app
     }
     hasStartedMainApplication = true;
 })
-    .catch(() => {
+    .catch((err) => {
+    main_1.default.error('[Main] Failed to initialize main application:', err);
     hasStartedMainApplication = true;
 });
 /**

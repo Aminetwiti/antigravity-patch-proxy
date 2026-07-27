@@ -190,7 +190,6 @@ export async function loadProviders(): Promise<ProviderFileEntry[]> {
          });
        }
        const migratedProviders = Array.from(providerMap.values());
-       saveProviders(migratedProviders).catch(e => log.error('Failed to save migration', e));
        return migratedProviders;
     }
     return [];

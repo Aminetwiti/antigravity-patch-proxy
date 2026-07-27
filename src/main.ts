@@ -74,16 +74,18 @@ if (!app.commandLine.hasSwitch('remote-debugging-port')) {
 
 let pendingDeepLink: string | null = null;
 
+function focusMainWindow(win: InstanceType<typeof BrowserWindow>) {
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  app.focus({ steal: true });
+}
+
 function handleDeepLink(url: string): void {
   const wins = BrowserWindow.getAllWindows();
   // This block handles deep links when windows are already open.
   if (wins.length > 0) {
-    if (wins[0].isMinimized()) {
-      wins[0].restore();
-    }
-    wins[0].show();
-    wins[0].focus();
-    app.focus({ steal: true });
+    focusMainWindow(wins[0]);
     wins[0].webContents.send('deep-link', url);
   } else {
     pendingDeepLink = url;
@@ -93,12 +95,7 @@ function handleDeepLink(url: string): void {
 app.on('second-instance', (_event, commandLine: string[]) => {
   const wins = BrowserWindow.getAllWindows();
   if (wins.length > 0) {
-    if (wins[0].isMinimized()) {
-      wins[0].restore();
-    }
-    wins[0].show();
-    wins[0].focus();
-    app.focus({ steal: true });
+    focusMainWindow(wins[0]);
   }
   const url = commandLine.find((arg) => arg.startsWith('antigravity://'));
   if (url) {
@@ -321,7 +318,8 @@ app
     }
     hasStartedMainApplication = true;
   })
-  .catch(() => {
+  .catch((err) => {
+    log.error('[Main] Failed to initialize main application:', err);
     hasStartedMainApplication = true;
   });
 
