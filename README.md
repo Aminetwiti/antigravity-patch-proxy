@@ -557,7 +557,7 @@ $fs.Close()
 
 ## Configuration
 
-Models are stored in your home directory at `~/.gemini/antigravity/custom_models.json`. You can easily add them via the **"Add Model"** modal in Settings, or edit the JSON file directly. 
+Models are stored in your home directory at `~/.gemini/antigravity/custom_models.json`. You can easily add them via the **"Add Model"** modal in Settings, or edit the JSON file directly.
 
 Here is an example of a **fully loaded** `custom_models.json` file configuring **multiple models across all providers at the same time**:
 

@@ -30,7 +30,7 @@ interface AgAPI {
     get(): Promise<unknown[]>;
     save(p: unknown): Promise<{ success: boolean; error?: string }>;
     delete(id: string): Promise<{ success: boolean; error?: string }>;
-    test(params: { apiUrl: string; apiKey: string }): Promise<{ success: boolean; status?: number; error?: string }>;
+    test(params: { apiUrl: string; apiKey: string; id?: string }): Promise<{ success: boolean; status?: number; latencyMs?: number; healthStatus?: 'healthy' | 'degraded' | 'offline'; error?: string }>;
   };
 
   // MITM Proxy Server Management

@@ -20,7 +20,7 @@ export interface ProxyServerStatus {
 
 class ProxyManager {
   private proxyProcess: ChildProcess | null = null;
-  private port: number = 51000;
+  private port: number = 50999;
   private host: string = '127.0.0.1';
   private scriptPath: string;
   

@@ -595,13 +595,13 @@ function getCliPool(): CliWorkerPool {
     }
   });
 
-  ipcMain.handle('ag:providers:test', async (_evt: Electron.IpcMainInvokeEvent, params: { apiUrl: string; apiKey: string }) => {
+  ipcMain.handle('ag:providers:test', async (_evt: Electron.IpcMainInvokeEvent, params: { apiUrl: string; apiKey: string; id?: string }) => {
      try {
-       // Only test /models endpoint
        const url = params.apiUrl + (params.apiUrl.endsWith('/') ? '' : '/') + 'models';
        const { net } = require('electron') as typeof import('electron');
+       const startTime = Date.now();
 
-       return await new Promise<{ success: boolean; status?: number; error?: string }>((resolve) => {
+       const result = await new Promise<{ success: boolean; status?: number; latencyMs?: number; healthStatus: 'healthy' | 'degraded' | 'offline'; error?: string }>((resolve) => {
          const request = net.request({
            url: url,
            method: 'GET'
@@ -615,23 +615,49 @@ function getCliPool(): CliWorkerPool {
            let data = '';
            response.on('data', (chunk: Buffer) => { data += chunk.toString(); });
            response.on('end', () => {
-             if (response.statusCode && response.statusCode >= 200 && response.statusCode < 300) {
-                resolve({ success: true, status: response.statusCode });
+             const latencyMs = Date.now() - startTime;
+             const statusCode = response.statusCode ?? 500;
+             if (statusCode >= 200 && statusCode < 300) {
+               const healthStatus = latencyMs >= 1500 ? 'degraded' : 'healthy';
+               resolve({ success: true, status: statusCode, latencyMs, healthStatus });
              } else {
-                resolve({ success: false, status: response.statusCode, error: data });
+               const healthStatus = statusCode === 429 ? 'degraded' : 'offline';
+               resolve({ success: false, status: statusCode, latencyMs, healthStatus, error: data || `HTTP ${statusCode}` });
              }
            });
          });
 
          request.on('error', (error: Error) => {
-           resolve({ success: false, error: error.message });
+           const latencyMs = Date.now() - startTime;
+           resolve({ success: false, latencyMs, healthStatus: 'offline', error: error.message });
          });
 
          request.end();
        });
+
+       // Persist health metadata back to custom_models.json if provider ID is supplied
+       if (params.id) {
+         try {
+           const fp = path.join(app.getPath('home'), '.gemini', 'antigravity', 'custom_models.json');
+           const c = await fs.promises.readFile(fp, 'utf8');
+           const parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
+           if (parsed.providers && Array.isArray(parsed.providers)) {
+             const idx = parsed.providers.findIndex((x: any) => x.id === params.id);
+             if (idx !== -1) {
+               parsed.providers[idx].status = result.healthStatus;
+               parsed.providers[idx].latencyMs = result.latencyMs;
+               parsed.providers[idx].lastTestedAt = new Date().toISOString();
+               parsed.providers[idx].lastError = result.error;
+               await fs.promises.writeFile(fp, JSON.stringify(parsed, null, 2), 'utf8');
+             }
+           }
+         } catch { /* ignore disk persist errors */ }
+       }
+
+       return result;
      } catch(e) {
        const err = e as Error;
-       return { success: false, error: err.message };
+       return { success: false, healthStatus: 'offline', error: err.message };
      }
   });
   

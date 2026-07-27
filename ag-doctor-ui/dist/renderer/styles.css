@@ -58,7 +58,7 @@
   --text-1: #c9d1d9;
   --text-2: #8b949e;
   --text-3: #6e7681;
-  --text-4: #484f58;
+  --text-4: #768390;
 
   /* Typography (Antigravity uses Inter as primary) */
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
@@ -419,10 +419,16 @@ body {
   cursor: pointer;
   transition: background var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
   white-space: nowrap;
+  position: relative;
 }
-.statusbar-item:first-child { padding-left: 0; }
-.statusbar-section-right .statusbar-item:last-child { padding-right: 0; }
-.statusbar-item:hover { background: hsla(0, 0%, 100%, 0.12); opacity: 1; }
+.statusbar-item::before {
+  content: '';
+  position: absolute;
+  top: -4px; bottom: -4px; left: 0; right: 0;
+}
+.statusbar-item:first-child { padding-left: 4px; }
+.statusbar-section-right .statusbar-item:last-child { padding-right: 4px; }
+.statusbar-item:hover { background: hsla(0, 0%, 100%, 0.12); opacity: 1; border-radius: var(--r-sm); }
 .statusbar-item svg { width: 11px; height: 11px; }
 .statusbar-item-branch svg { color: #ffffff; }
 
@@ -1514,7 +1520,7 @@ body {
 
 @media (max-width: 900px) {
   .app { grid-template-columns: 64px 1fr; }
-  .nav-item span, .sidebar-brand-text, .nav-group-label, .sidebar-cta-wrap { display: none; }
+  .nav-item span, .sidebar-brand-text, .nav-group-label, .sidebar-cta-wrap, .sidebar-footer { display: none; }
   .nav-item { justify-content: center; padding: 10px; }
   .sidebar { padding: 14px 6px; gap: 10px; }
   .sidebar-brand-row { justify-content: center; }
@@ -1593,7 +1599,7 @@ body {
   --text-1: #424a53;
   --text-2: #656d76;
   --text-3: #848d97;
-  --text-4: #afb8c1;
+  --text-4: #6e7781;
 
   /* Accents (slightly darker for light bg contrast) */
   --accent-blue: #0969da;

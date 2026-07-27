@@ -145,6 +145,7 @@ export async function renderCustomModelsList(): Promise<void> {
         testBtn.className = 'agy-btn-ghost';
         testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`;
         testBtn.title = 'Test connection';
+        testBtn.setAttribute('aria-label', `Test connection for ${(model.displayName as string) || (model.name as string)}`);
 
         testBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
@@ -152,7 +153,7 @@ export async function renderCustomModelsList(): Promise<void> {
           testBtn.style.color = '#fbbf24';
           testBtn.style.cursor = 'wait';
           testBtn.disabled = true;
-          testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="${prefersReducedMotion() ? '' : 'animation: agy-spin 0.8s linear infinite;'}"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>`;
+          testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="${prefersReducedMotion() ? '' : 'animation: ag-spin 0.8s linear infinite;'}"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>`;
 
           try {
             const result = await storageAPI.testModelConnection({
@@ -215,6 +216,7 @@ export async function renderCustomModelsList(): Promise<void> {
         editBtn.className = 'agy-btn-ghost';
         editBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
         editBtn.title = 'Edit provider settings';
+        editBtn.setAttribute('aria-label', `Edit ${(model.displayName as string) || (model.name as string)}`);
         editBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
           const providers = await storageAPI.getProviders();
@@ -449,7 +451,7 @@ export function ensureAgyTokens(): void {
     .agy-row-info { display: flex; align-items: center; gap: 8px; min-width: 0; }
     .agy-row-name { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
     .agy-row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-    .agy-row-sub { font-size: 12px; color: var(--agy-ink-muted); }
+    .agy-row-sub { font-size: 12px; color: var(--agy-ink-secondary); }
     .agy-status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
     .agy-status-on { background-color: var(--agy-success); box-shadow: 0 0 6px hsla(136, 60%, 50%, 0.4); }
     .agy-status-off { background-color: var(--agy-ink-muted); }
@@ -607,7 +609,7 @@ export function openProviderManagerModal(existingProvider?: ProviderFileEntry): 
   const overlay = document.createElement('div');
   overlay.id = 'agy-modal-overlay';
   overlay.className = 'agy-overlay';
-  overlay.setAttribute('aria-hidden', 'true');
+
 
   const modal = document.createElement('div');
   modal.className = 'agy-modal agy-modal-lg';
@@ -656,7 +658,7 @@ export function openProviderManagerModal(existingProvider?: ProviderFileEntry): 
 
   const closeModal = (): void => {
     overlay.remove();
-    document.removeEventListener('keydown', escHandler);
+    document.removeEventListener('keydown', keyHandler);
     if (triggerElement && typeof triggerElement.focus === 'function') {
       try { triggerElement.focus(); } catch { /* no-op */ }
     }
@@ -667,13 +669,28 @@ export function openProviderManagerModal(existingProvider?: ProviderFileEntry): 
     if (ev.target === overlay) closeModal();
   });
 
-  const escHandler = (ev: KeyboardEvent): void => {
+  const keyHandler = (ev: KeyboardEvent): void => {
     if (ev.key === 'Escape') {
       ev.preventDefault();
       closeModal();
+      return;
+    }
+    // Focus trap: keep Tab cycling inside the modal
+    if (ev.key === 'Tab') {
+      const focusable = getFocusableElements(modal);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (ev.shiftKey && document.activeElement === first) {
+        ev.preventDefault();
+        last.focus();
+      } else if (!ev.shiftKey && document.activeElement === last) {
+        ev.preventDefault();
+        first.focus();
+      }
     }
   };
-  document.addEventListener('keydown', escHandler);
+  document.addEventListener('keydown', keyHandler);
 
   if (prefersReducedMotion()) {
     overlay.classList.add('agy-no-motion');

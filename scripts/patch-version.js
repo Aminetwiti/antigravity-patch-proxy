@@ -26,18 +26,22 @@ if (!asarIn || !buildDir || !asarOut) {
   console.error('usage: node patch-version.js <asar-in> <build-dir> <asar-out>');
   process.exit(1);
 }
-if (!fs.existsSync(asarIn)) {
-  console.error(`[patch-version] asar-in not found: ${asarIn}`);
+let actualAsarIn = asarIn;
+if (path.resolve(asarIn) === path.resolve(asarOut) && fs.existsSync(`${asarIn}.bak`)) {
+  actualAsarIn = `${asarIn}.bak`;
+}
+if (!fs.existsSync(actualAsarIn)) {
+  console.error(`[patch-version] asar-in not found: ${actualAsarIn}`);
   process.exit(1);
 }
 
-console.log(`[patch-version] reading ${asarIn} ...`);
+console.log(`[patch-version] reading ${actualAsarIn} ...`);
 
 // Extract to a temp dir to read package.json
 const probeDir = path.join(path.dirname(asarOut), `_probe-${Date.now()}`);
 fs.mkdirSync(probeDir, { recursive: true });
 try {
-  asar.extractAll(asarIn, probeDir);
+  asar.extractAll(actualAsarIn, probeDir);
 } catch (err) {
   console.error(`[patch-version] extract failed: ${err.message}`);
   process.exit(1);
@@ -85,7 +89,7 @@ if (!fs.existsSync(targetScript)) {
 
 // Spawn the version-specific patcher
 const { spawnSync } = require('child_process');
-const result = spawnSync(process.execPath, [targetScript, asarIn, buildDir, asarOut], {
+const result = spawnSync(process.execPath, [targetScript, actualAsarIn, buildDir, asarOut], {
   stdio: 'inherit',
 });
 exitCode = result.status ?? 1;

@@ -62,7 +62,7 @@ if exist "%AG_ASAR%.bak" (
   echo   Backup created: %AG_ASAR%.bak
 )
 
-node "%SCRIPT_DIR%scripts\patch-version.js" "%AG_ASAR%" "%STAGING_DIR%" "%AG_ASAR%"
+node "%SCRIPT_DIR%scripts\patch-version.js" "%AG_ASAR%.bak" "%STAGING_DIR%" "%AG_ASAR%"
 if errorlevel 1 (
   echo   [ERROR] Patch failed. Restoring backup...
   copy /Y "%AG_ASAR%.bak" "%AG_ASAR%" >nul
@@ -82,7 +82,7 @@ if exist "%AG_BIN_LS%" (
 
 REM -- 6. Start MITM 443 (requires admin UAC)
 echo [6/7] Starting MITM on port 443 (admin required)...
-powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%scripts\mitm\start_mitm_443.ps1"
+powershell -Command "Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \"%SCRIPT_DIR%scripts\mitm\start_mitm_443.ps1\"'"
 echo   (close this MITM window with Ctrl+C when done)
 
 REM -- 7. Launch Antigravity

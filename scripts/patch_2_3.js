@@ -119,18 +119,41 @@ const MISSING_JS_MODULES = [
   'cryptoStore',
   'customModelStore',
   'schemaValidator',
+  // New repo modules not present in v2.3.x original asar
+  'presets',
+  'presets/reasoningEffort',
+  'logger',
+  'configExchange',
+  'metrics',
+  'preload/api',
+  'preload/doctor-ui',
+  'preload/logger',
+  'preload/types',
+  'wellKnown/modelIdUtils',
   // Main proxy entry point
   'proxy',
   // Proxy submodules
+  'proxy/agentPool',
+  'proxy/backoff',
+  'proxy/circuitBreaker',
+  'proxy/diagnostics',
   'proxy/dnsResolver',
+  'proxy/emptyStream',
   'proxy/errorClassifier',
   'proxy/idGenerator',
+  'proxy/idleTimeout',
   'proxy/jsonRepair',
+  'proxy/logThrottle',
+  'proxy/metricsRoute',
   'proxy/modelLoader',
+  'proxy/modelTimeBudget',
   'proxy/modelUtils',
+  'proxy/persistedState',
   'proxy/protoInjector',
   'proxy/protobuf',
+  'proxy/providerGate',
   'proxy/registry',
+  'proxy/retryBudget',
   'proxy/retryStrategy',
   'proxy/shared',
   'proxy/types',
@@ -151,6 +174,22 @@ const OVERWRITE_FILES = [
   'dist/ipcHandlers.js',
   'dist/preload.js',
   'dist/constants.js',
+  'dist/utils.js',
+  'dist/loadingOverlay.js',
+  'dist/keybindings.js',
+  'dist/menu.js',
+  'dist/tray.js',
+  'dist/paths.js',
+  'dist/storage.js',
+  'dist/customScheme.js',
+  'dist/updater.js',
+  'dist/services/settingsService.js',
+  'dist/ideInstall/index.js',
+  'dist/ideInstall/constants.js',
+  'dist/ideInstall/service.js',
+  'dist/ideInstall/wizard.js',
+  'dist/ideInstall/wizardHtml.js',
+  'dist/ideInstall/wizardPreload.js',
 ];
 
 // IPC channels that are registered TWICE in the repo's v2.2.x ipcHandlers.js.
@@ -176,6 +215,16 @@ function buildPatchManifest(repoDir) {
     'dist/cryptoStore.js',
     'dist/customModelStore.js',
     'dist/schemaValidator.js',
+    'dist/presets.js',
+    'dist/presets/reasoningEffort.js',
+    'dist/logger.js',
+    'dist/configExchange.js',
+    'dist/metrics.js',
+    'dist/preload/api.js',
+    'dist/preload/doctor-ui.js',
+    'dist/preload/logger.js',
+    'dist/preload/types.js',
+    'dist/wellKnown/modelIdUtils.js',
     ...OVERWRITE_FILES,
     ...NEW_ROOT_FILES,
   ])].sort();
@@ -526,8 +575,8 @@ async function main() {
   // NEXT TO asarOut BEFORE createPackage, so the packer never sees those
   // files. After repack we validate that the asar is clean and that the
   // unpacked folder landed where expected.
-  console.log('[patch_2_3] step 6/6 — repack');
-  if (fs.existsSync(asarOut)) fs.unlinkSync(asarOut);
+  // ponytail: write to temp then rename — avoids EBUSY when AV/indexer holds a read lock on asarOut
+  const asarTmp = asarOut + '.tmp';
   // Pre-create the asar-out directory if it doesn't exist yet so the
   // move-aside target is valid (moveUnpackedAside renames across the
   // build/asar-out boundary).
@@ -537,9 +586,13 @@ async function main() {
     console.log(`            > moved app.asar.unpacked/ next to ${path.basename(asarOut)}`);
   }
   try {
-    await asar.createPackage(buildDir, asarOut);
-    validateAsarInventory(asarOut, manifest, asar);
-    assertAsarExcludesUnpacked(asarOut, UNPACKED_LAYOUT, asar);
+    await asar.createPackage(buildDir, asarTmp);
+    validateAsarInventory(asarTmp, manifest, asar);
+    assertAsarExcludesUnpacked(asarTmp, UNPACKED_LAYOUT, asar);
+    // ponytail: copyFileSync uses Windows CopyFile API which can overwrite
+    // read-locked files (AV/indexer) where rename/unlink cannot
+    fs.copyFileSync(asarTmp, asarOut);
+    try { fs.unlinkSync(asarTmp); } catch (_) {}
     console.log(`[patch_2_3] candidate validated: ${manifest.length} required JavaScript files present`);
     console.log('            + asar confirmed free of MITM unpacked paths');
     if (finalUnpacked) {
@@ -547,6 +600,7 @@ async function main() {
       console.log(`            + app.asar.unpacked/mitm deployed next to ${path.basename(asarOut)}`);
     }
   } catch (err) {
+    try { fs.unlinkSync(asarTmp); } catch (_) {}
     die(`asar.createPackage failed: ${err.stack || err.message}`, 3);
   }
 

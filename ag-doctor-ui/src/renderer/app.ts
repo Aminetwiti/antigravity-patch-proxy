@@ -2583,6 +2583,10 @@ interface ProviderEntry {
   enabled: boolean;
   allowUnauthorized?: boolean;
   models: ProviderModel[];
+  status?: 'healthy' | 'degraded' | 'offline' | 'untested';
+  latencyMs?: number;
+  lastTestedAt?: string;
+  lastError?: string;
 }
 
 const pmBackdrop = $('#providerManagerModalBackdrop') as HTMLDivElement;
@@ -2612,6 +2616,23 @@ function showPmView(view: 'list' | 'form'): void {
     pmListContainer.style.display = 'none';
     pmFormContainer.style.display = 'block';
   }
+}
+
+function renderHealthStatusIndicator(p: ProviderEntry): string {
+  const status = p.status || 'untested';
+  const titleText = status === 'healthy'
+    ? `Healthy · ${p.latencyMs ?? 0}ms response time`
+    : status === 'degraded'
+    ? `Degraded · ${p.latencyMs ?? 0}ms response time (Slow)`
+    : status === 'offline'
+    ? `Offline · ${p.lastError || 'Unreachable'}`
+    : 'Untested connection';
+
+  let html = `<span class="agy-status-dot ${status}" title="${escapeHtml(titleText)}"></span>`;
+  if (typeof p.latencyMs === 'number' && status !== 'untested') {
+    html += `<span class="agy-latency-badge ${status}" title="${escapeHtml(titleText)}">${p.latencyMs} ms</span>`;
+  }
+  return html;
 }
 
 function renderProviderStatus(p: ProviderEntry): string {
@@ -2644,30 +2665,33 @@ async function renderProviderList(): Promise<void> {
     html += `
       <div class="agy-provider-row" data-id="${escapeHtml(p.id)}">
         <div class="agy-provider-row-main">
-          <div class="agy-provider-row-name">${escapeHtml(p.name)}</div>
+          <div class="agy-provider-row-name" style="display:flex; align-items:center;">
+            ${renderHealthStatusIndicator(p)}
+            <span>${escapeHtml(p.name)}</span>
+          </div>
           <div class="agy-provider-row-meta">
             <span>${escapeHtml(p.provider)}</span>
-            <span class="agy-dot">Â·</span>
+            <span class="agy-dot">·</span>
             <span>${escapeHtml(p.apiUrl.replace(/^https?:\/\//, ''))}</span>
-            <span class="agy-dot">Â·</span>
+            <span class="agy-dot">·</span>
             <span>${p.models.length} model${p.models.length === 1 ? '' : 's'}</span>
           </div>
         </div>
         <div class="agy-provider-row-status">${renderProviderStatus(p)}</div>
         <div class="agy-provider-row-actions">
-          <button class="agy-icon-btn pm-test" title="Test connection">
+          <button class="agy-icon-btn pm-test" title="Test connection" aria-label="Test connection for ${escapeHtml(p.name)}">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
           </button>
-          <button class="agy-icon-btn pm-toggle" title="${p.enabled ? 'Disable' : 'Enable'} provider">
+          <button class="agy-icon-btn pm-toggle" title="${p.enabled ? 'Disable' : 'Enable'} provider" aria-label="${p.enabled ? 'Disable' : 'Enable'} provider ${escapeHtml(p.name)}">
             ${p.enabled
               ? `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>`
               : `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.64 18.36a9 9 0 1 0 12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/><polyline points="16 8 12 12 8 8"/></svg>`
             }
           </button>
-          <button class="agy-icon-btn pm-edit" title="Edit provider">
+          <button class="agy-icon-btn pm-edit" title="Edit provider" aria-label="Edit provider ${escapeHtml(p.name)}">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
-          <button class="agy-icon-btn pm-delete" title="Delete provider">
+          <button class="agy-icon-btn pm-delete" title="Delete provider" aria-label="Delete provider ${escapeHtml(p.name)}">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
           </button>
         </div>
@@ -2687,12 +2711,24 @@ async function renderProviderList(): Promise<void> {
       const orig = btn.innerHTML;
       btn.innerHTML = `<span class="spinner"></span>`;
       try {
-        const r = (await window.ag.providers.test({ apiUrl: p.apiUrl, apiKey: p.apiKey })) as { success: boolean; status?: number; error?: string };
+        const r = (await window.ag.providers.test({ apiUrl: p.apiUrl, apiKey: p.apiKey, id: p.id })) as {
+          success: boolean;
+          status?: number;
+          latencyMs?: number;
+          healthStatus?: 'healthy' | 'degraded' | 'offline';
+          error?: string;
+        };
         if (r.success) {
-          toast(`Reachable (${r.status ?? 200})`, 'ok');
+          p.status = r.healthStatus ?? 'healthy';
+          p.latencyMs = r.latencyMs;
+          toast(`Healthy (${r.latencyMs ?? 0}ms)`, 'ok');
         } else {
+          p.status = r.healthStatus ?? 'offline';
+          p.latencyMs = r.latencyMs;
+          p.lastError = r.error;
           toast(`Failed: ${r.error || r.status}`, 'err', 6000);
         }
+        await renderProviderList();
       } catch (err) {
         toast(`Test error: ${(err as Error).message}`, 'err');
       } finally {
@@ -2781,11 +2817,11 @@ function openProviderForm(existingId?: string): void {
       html += '</div>';
       pmModelsList.innerHTML = html;
     } else {
-      pmModelsList.innerHTML = '<div style="color: #71717a; font-size: 12px;">No models loaded. Click "Fetch models" to load the list.</div>';
+      pmModelsList.innerHTML = '<div style="color: var(--text-2); font-size: 12px;">No models loaded. Click "Fetch models" to load the list.</div>';
     }
   } else {
     pmFormTitle.textContent = 'Add provider';
-    pmModelsList.innerHTML = '<div style="color: #71717a; font-size: 12px;">Save the provider first, then fetch models to populate the list.</div>';
+    pmModelsList.innerHTML = '<div style="color: var(--text-2); font-size: 12px;">Save the provider first, then fetch models to populate the list.</div>';
   }
   showPmView('form');
   setTimeout(() => pmFormName.focus(), 50);
@@ -2805,9 +2841,29 @@ pmFormBack.addEventListener('click', async () => {
   showPmView('list');
   await renderProviderList();
 });
-pmClose.addEventListener('click', () => {
+function closeProviderManagerModal(): void {
   pmBackdrop.hidden = true;
   pmBackdrop.style.display = 'none';
+}
+
+pmClose.addEventListener('click', closeProviderManagerModal);
+$('#pmModalClose2')?.addEventListener('click', closeProviderManagerModal);
+$('#pmFormBack2')?.addEventListener('click', async () => {
+  showPmView('list');
+  await renderProviderList();
+});
+$('#pmFormBack3')?.addEventListener('click', async () => {
+  showPmView('list');
+  await renderProviderList();
+});
+$('#pmFormSave2')?.addEventListener('click', () => pmFormSave.click());
+pmBackdrop.addEventListener('click', (e) => {
+  if (e.target === pmBackdrop) closeProviderManagerModal();
+});
+document.addEventListener('keydown', (e: KeyboardEvent) => {
+  if (e.key === 'Escape' && !pmBackdrop.hidden) {
+    closeProviderManagerModal();
+  }
 });
 
 pmFormSave.addEventListener('click', async () => {

@@ -658,22 +658,70 @@ window.addEventListener('DOMContentLoaded', () => {
         }
       }
 
-      /* ── Dropdown Health Indicators ──────────────────────────────── */
+      /* ── Impeccable Dropdown Styling & High-Contrast Polish ──────────────── */
+      [role="listbox"], [role="menu"], .monaco-select-box-dropdown-container, .dropdown-menu, .select-box-dropdown {
+        overflow-y: auto !important;
+        max-height: 440px !important;
+        border-radius: 10px !important;
+        border: 1px solid rgba(255, 255, 255, 0.14) !important;
+        background-color: rgba(24, 24, 27, 0.94) !important;
+        backdrop-filter: blur(16px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.05) !important;
+        padding: 5px !important;
+      }
+      [role="option"], [role="menuitem"], .monaco-list-row {
+        color: #f4f4f5 !important;
+        font-size: 13px !important;
+        font-weight: 450 !important;
+        line-height: 1.4 !important;
+        padding: 7px 10px !important;
+        border-radius: 6px !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 8px !important;
+        transition: background-color 180ms cubic-bezier(0.16, 1, 0.3, 1), color 180ms cubic-bezier(0.16, 1, 0.3, 1), transform 180ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+      }
+      [role="option"]:hover, [role="menuitem"]:hover, .monaco-list-row.focused, .monaco-list-row.selected {
+        background-color: rgba(255, 255, 255, 0.1) !important;
+        color: #ffffff !important;
+      }
+
+      .ag-dropdown-refresh-bar {
+        position: sticky !important;
+        top: 0 !important;
+        z-index: 99 !important;
+        background: rgba(20, 20, 22, 0.95) !important;
+        backdrop-filter: blur(12px) !important;
+        -webkit-backdrop-filter: blur(12px) !important;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35) !important;
+        margin-bottom: 4px !important;
+        padding: 6px 12px !important;
+        display: flex !important;
+        justify-content: space-between !important;
+        align-items: center !important;
+        font-size: 12px !important;
+        color: #a1a1aa !important;
+        border-radius: 6px 6px 0 0 !important;
+      }
+
+      /* ── Dropdown Health Indicators & Micro-Interactions ──────────────── */
       @keyframes ag-pulse-error {
         0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
-        50%      { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0); }
+        50%      { box-shadow: 0 0 0 5px rgba(239, 68, 68, 0); }
       }
       @keyframes ag-pulse-healthy {
         0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
-        50%      { box-shadow: 0 0 0 3px rgba(34, 197, 94, 0); }
+        50%      { box-shadow: 0 0 0 4px rgba(34, 197, 94, 0); }
       }
       @keyframes ag-spin {
         from { transform: rotate(0deg); }
         to   { transform: rotate(360deg); }
       }
       @keyframes ag-fade-in {
-        from { opacity: 0; transform: translateY(4px); }
-        to   { opacity: 1; transform: translateY(0); }
+        from { opacity: 0; transform: translateY(4px) scale(0.98); }
+        to   { opacity: 1; transform: translateY(0) scale(1); }
       }
       .ag-health-dot {
         width: 8px; height: 8px;
@@ -682,7 +730,7 @@ window.addEventListener('DOMContentLoaded', () => {
         flex-shrink: 0;
         margin-left: 6px;
         vertical-align: middle;
-        transition: background-color 300ms ease, box-shadow 300ms ease;
+        transition: background-color 250ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 250ms cubic-bezier(0.16, 1, 0.3, 1);
       }
       .ag-health-dot--healthy {
         background-color: #22c55e;
@@ -700,41 +748,57 @@ window.addEventListener('DOMContentLoaded', () => {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 18px; height: 18px;
-        margin-left: 4px;
+        width: 20px; height: 20px;
+        margin-left: 6px;
+        margin-right: 2px;
         padding: 2px;
         border: none;
         background: transparent;
         color: #a1a1aa;
         cursor: pointer;
         border-radius: 50%;
-        transition: color 150ms ease, background-color 150ms ease;
+        transition: color 180ms cubic-bezier(0.16, 1, 0.3, 1), background-color 180ms cubic-bezier(0.16, 1, 0.3, 1), transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
         vertical-align: middle;
         flex-shrink: 0;
       }
       .ag-health-refresh:hover {
-        color: #f4f4f5;
-        background-color: rgba(63, 63, 70, 0.6);
+        color: #ffffff;
+        background-color: rgba(255, 255, 255, 0.12);
+        transform: scale(1.15);
+      }
+      .ag-health-refresh:active {
+        transform: scale(0.95);
       }
       .ag-health-refresh--spinning svg {
-        animation: ag-spin 0.8s linear infinite;
+        animation: ag-spin 0.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
       }
       .ag-health-tooltip {
         position: absolute;
         z-index: 100001;
-        background: #1a1a1a;
-        border: 1px solid #3f3f46;
+        background: #1a1a1e;
+        border: 1px solid rgba(255, 255, 255, 0.12);
         border-left: 3px solid #ef4444;
-        border-radius: 6px;
+        border-radius: 8px;
         padding: 10px 14px;
         max-width: 320px;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         font-size: 12px;
         color: #e5e5e5;
         line-height: 1.5;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-        animation: ag-fade-in 150ms ease-out;
+        box-shadow: 0 12px 28px rgba(0,0,0,0.5);
+        animation: ag-fade-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
         pointer-events: auto;
+      }
+
+      /* ── Reduced Motion Accessibility Override ── */
+      @media (prefers-reduced-motion: reduce) {
+        .ag-health-dot--healthy,
+        .ag-health-dot--error,
+        .ag-health-refresh--spinning svg,
+        .ag-health-tooltip {
+          animation: none !important;
+          transition: none !important;
+        }
       }
       .ag-health-tooltip__title {
         font-weight: 600;
@@ -1844,13 +1908,16 @@ window.addEventListener('DOMContentLoaded', () => {
                 dot.addEventListener('mouseenter', showTip);
                 dot.style.cursor = 'pointer';
             }
-            // Add refresh button ONLY for custom models (native models can't be pinged by proxy)
+            // Add refresh button ONLY for custom models inside an active dropdown/menu container
             if (modelInfo.isCustom) {
-                const refreshBtn = createRefreshButton(async () => {
-                    await refreshModelHealthState();
-                    updateDropdownHealthBadges();
-                });
-                parent.appendChild(refreshBtn);
+                const isInDropdownMenu = !!parent.closest('[role="listbox"], [role="menu"], .monaco-select-box-dropdown-container, .dropdown-menu, .select-box-dropdown');
+                if (isInDropdownMenu) {
+                    const refreshBtn = createRefreshButton(async () => {
+                        await refreshModelHealthState();
+                        updateDropdownHealthBadges();
+                    });
+                    parent.appendChild(refreshBtn);
+                }
             }
         }
     }
