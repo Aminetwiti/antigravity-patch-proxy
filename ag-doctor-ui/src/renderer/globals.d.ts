@@ -68,17 +68,8 @@ interface Window {
   ag: AgAPI;
 }
 
-declare class SmartBannerManager {
-  constructor(containerId?: string);
-  show(options: {
-    category: 'quota_429' | 'auth_401' | 'credits_402' | 'offline_econn' | 'context_400' | 'generic';
-    title: string;
-    hint: string;
-    resetSeconds?: number;
-    providerName?: string;
-    onFallback?: () => void;
-    onEditKey?: () => void;
-    onStartStub?: () => void;
-  }): void;
-  dismiss(): void;
-}
+// NOTE: SmartBannerManager is declared as a top-level class in
+// src/renderer/smart-banner.ts (script-mode → global). We intentionally do
+// NOT redeclare it here to avoid TS2300 "Duplicate identifier" when both
+// files are compiled together. Consumers that need the type can refer to
+// it directly from smart-banner.ts via a triple-slash reference or import.

@@ -4,14 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; img-src 'self' data:;" />
-  <title>ag-doctor — Diagnostic & Repair</title>
+  <title>ag-doctor — Diagnostic &amp; Repair</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <!-- PERF: load Google Fonts as a non-render-blocking print stylesheet, then
-       promote to "all" once it loads. Avoids the redundant <link rel=preload>
-       + <link rel=stylesheet> race that fetched the same URL twice. -->
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" />
-  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" /></noscript>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" />
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" /></noscript>
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="styles-extra.css" />
 </head>
@@ -37,7 +34,7 @@
         </div>
         <div class="brand-text">
           <span class="brand-name">Antigravity Doctor</span>
-          <span class="brand-tag">Diagnostic & repair</span>
+          <span class="brand-tag">Diagnostic &amp; repair</span>
         </div>
       </div>
     </div>
@@ -125,7 +122,7 @@
 
         <div class="nav-group">
           <li><span class="nav-group-label">About</span></li>
-          <li><button class="nav-item" data-view="info" type="button" title="Antigravity">
+          <li><button class="nav-item" data-view="antigravity" type="button" title="Antigravity">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
             <span>Antigravity</span>
           </button></li>
@@ -176,30 +173,6 @@
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
               Run doctor
             </button>
-          </div>
-        </div>
-
-        <!-- Dashboard hero: live system status -->
-        <div class="ag-hero" id="dashHero">
-          <div class="ag-hero-bg"></div>
-          <div class="ag-hero-content">
-            <div class="ag-hero-icon">
-              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-            </div>
-            <div class="ag-hero-body">
-              <div class="ag-hero-status">
-                <span class="ag-hero-dot pending" id="dashHeroDot"></span>
-                <span class="ag-hero-label" id="dashHeroLabel">Idle</span>
-              </div>
-              <h2 class="ag-hero-title" id="dashHeroTitle">ag-doctor</h2>
-              <p class="ag-hero-meta" id="dashHeroMeta">Press <strong>Run doctor</strong> to scan Antigravity, MITM, patches, and models.</p>
-            </div>
-            <div class="ag-hero-actions">
-              <button class="btn btn-primary" id="heroRunBtn" type="button" aria-label="Run doctor diagnostic">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                Run doctor
-              </button>
-            </div>
           </div>
         </div>
 
@@ -458,7 +431,7 @@
         </div>
         <div class="panel">
           <div class="panel-body">
-            <pre class="terminal" id="doctorOutput">$ ag-doctor doctor</pre>
+            <pre class="terminal" id="doctorOutput" tabindex="0" role="region" aria-label="Diagnostic terminal output">$ ag-doctor doctor</pre>
           </div>
         </div>
       </div>
@@ -602,21 +575,46 @@
 
         <!-- Tabs for log sources -->
         <div class="tabs" role="tablist" id="logsTabs">
-          <button class="tab active" role="tab" data-source="language_server" type="button">
+          <button class="tab active" role="tab" aria-selected="true" data-source="language_server" type="button">
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
             language_server
           </button>
-          <button class="tab" role="tab" data-source="ag-doctor" type="button">
+          <button class="tab" role="tab" aria-selected="false" data-source="ag-doctor" type="button">
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
             ag-doctor
           </button>
-          <button class="tab" role="tab" data-source="proxy" type="button">
+          <button class="tab" role="tab" aria-selected="false" data-source="proxy" type="button">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            Proxy
+          </button>
+        </div>
+
+        <div class="panel">
+          <div class="panel-body panel-body-flush">
+            <pre class="terminal terminal-flush" id="logsOutput" tabindex="0" role="region" aria-label="Log stream output">$ ag-doctor logs -n 100</pre>
+            <div id="logsSkeleton" style="display:none; padding:16px">
+              <div class="skeleton skeleton-line long"></div>
+              <div class="skeleton skeleton-line medium"></div>
+              <div class="skeleton skeleton-line short"></div>
+              <div class="skeleton skeleton-line long"></div>
+              <div class="skeleton skeleton-line medium"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings view -->
+      <div class="view" id="view-settings">
+        <div class="view-header">
+          <div>
+            <h1>Settings</h1>
+            <p class="subtitle">Appearance and configuration</p>
           </div>
         </div>
         <div class="panel">
           <div class="panel-header"><h2>Appearance</h2></div>
           <div class="panel-body">
-            <button class="btn btn-primary" id="themeToggle" type="button" aria-label="Toggle light or dark theme">Switch to light theme</button>
+            <button class="btn btn-primary" id="themeToggle" type="button" role="switch" aria-pressed="false" aria-label="Toggle light or dark theme">Switch to light theme</button>
           </div>
         </div>
         <div class="panel" style="margin-top:24px">
@@ -626,7 +624,7 @@
               <div class="patch-row-label">Path</div>
               <div class="patch-row-value" id="settingsConfigPath">—</div>
             </div>
-            <pre class="terminal" id="settingsConfigBody" style="margin-top:16px">Loading config file…</pre>
+            <pre class="terminal" id="settingsConfigBody" tabindex="0" role="region" aria-label="Configuration file content" style="margin-top:16px">Loading config file…</pre>
             <div id="settingsConfigSkeleton" style="margin-top:16px; display:none">
               <div class="skeleton skeleton-line long"></div>
               <div class="skeleton skeleton-line medium"></div>
@@ -762,12 +760,12 @@
           <div class="form-field">
             <span style="display:flex; align-items:center; justify-content:space-between;">
               <span>Models</span>
-              <span style="color: #71717a; font-size:11px;">Save the provider first, then fetch models.</span>
+              <span style="color: var(--text-2); font-size:11px;">Save the provider first, then fetch models.</span>
             </span>
             <div id="pmModelsList"></div>
           </div>
 
-          <div id="pmFormError" class="form-error" style="display:none;"></div>
+          <div id="pmFormError" class="form-error" role="alert" style="display:none;"></div>
 
           <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:8px;">
             <button type="button" class="btn btn-ghost" id="pmFormBack2">Cancel</button>

@@ -224,6 +224,7 @@ export const PROVIDERS = {
   LLAMACPP: 'llamacpp',
   WAFER: 'wafer',
   ZAI: 'zai',
+  MINIMAX: 'minimax',
   // Native
   GOOGLE: 'google',
 } as const;
@@ -280,6 +281,7 @@ export const PROVIDER_DEFAULT_URLS: Record<ProviderName, string> = {
   [PROVIDERS.CODESTRAL]: 'https://codestral.mistral.ai/v1',
   [PROVIDERS.WAFER]: '',
   [PROVIDERS.ZAI]: '',
+  [PROVIDERS.MINIMAX]: 'https://api.minimaxi.chat/v1/chat/completions',
 };
 
 export interface SuggestedModel {

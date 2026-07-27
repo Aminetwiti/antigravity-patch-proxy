@@ -163,6 +163,7 @@ export declare const PROVIDERS: {
     readonly LLAMACPP: "llamacpp";
     readonly WAFER: "wafer";
     readonly ZAI: "zai";
+    readonly MINIMAX: "minimax";
     readonly GOOGLE: "google";
 };
 export type ProviderName = (typeof PROVIDERS)[keyof typeof PROVIDERS];

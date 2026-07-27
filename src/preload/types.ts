@@ -182,6 +182,7 @@ export interface ProviderPreset {
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
   { id: 'openai', label: 'OpenAI-compatible', defaultApiUrl: 'https://api.openai.com/v1' },
+  { id: 'minimax', label: 'MiniMax (Global)', defaultApiUrl: 'https://api.minimaxi.chat/v1' },
   { id: 'openrouter', label: 'OpenRouter', defaultApiUrl: 'https://openrouter.ai/api/v1' },
   { id: 'anthropic', label: 'Anthropic', defaultApiUrl: 'https://api.anthropic.com' },
   { id: 'google', label: 'Google AI Studio', defaultApiUrl: 'https://generativelanguage.googleapis.com' },

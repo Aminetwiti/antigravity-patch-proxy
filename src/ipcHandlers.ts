@@ -172,7 +172,7 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
       // - Otherwise treat as a new plaintext value and encrypt.
       const rawKey = newProvider.apiKey;
       const isExplicitClear = !rawKey || rawKey === 'none' || rawKey === '';
-      const isMasked = !isExplicitClear && (rawKey.includes('...') || rawKey.startsWith('***') || rawKey === '********');
+      const isMasked = !isExplicitClear && customModelStore.isMaskedApiKey(rawKey);
 
       if (isExplicitClear) {
         newProvider.apiKey = 'none';
@@ -532,8 +532,8 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
         // Trim trailing slashes
         baseUrl = baseUrl.replace(/\/+$/, '');
 
-        // For Google-style URLs that already end with /models, return as-is
-        if (isGooglePath && baseUrl.endsWith('/models')) {
+        // For URLs that already end with /models, return as-is
+        if (baseUrl.endsWith('/models')) {
           // keep as-is
         } else if (baseUrl.endsWith('/v1')) {
           baseUrl += '/models';

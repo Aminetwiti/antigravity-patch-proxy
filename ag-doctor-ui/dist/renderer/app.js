@@ -113,8 +113,10 @@ function iconForObjective(state) {
 // ─────────────────────────────────────────────────────────────────────────────
 const $ = (sel) => {
     const el = document.querySelector(sel);
-    if (!el)
-        throw new Error(`Missing element: ${sel}`);
+    if (!el) {
+        console.warn(`[ag-doctor] Missing element: ${sel}`);
+        return document.createElement('div');
+    }
     return el;
 };
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));

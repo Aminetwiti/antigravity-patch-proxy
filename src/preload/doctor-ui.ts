@@ -59,29 +59,56 @@ interface McpLayout {
 
 function findRefreshButton(): HTMLButtonElement | null {
   const buttons = Array.from(document.querySelectorAll('button'));
-  return (buttons.find((b) => b.textContent?.trim() === 'Refresh') as HTMLButtonElement) || null;
+  return (
+    (buttons.find((b) => {
+      const text = b.textContent?.trim() || '';
+      return text.includes('Refresh') || text.includes('Open MCP Config');
+    }) as HTMLButtonElement) || null
+  );
 }
 
-function findMcpSectionContainer(): McpLayout | null {
-  const refreshBtn = findRefreshButton();
-  if (!refreshBtn) return null;
+function findMcpSectionContainer(): Node | null {
+  // Strategy 1: Look for "Open MCP Config", "Add MCP", or "Refresh" buttons
+  const buttons = Array.from(document.querySelectorAll('button'));
+  const mcpBtn = buttons.find((b) => {
+    const text = b.textContent?.trim() || '';
+    return text.includes('Open MCP Config') || text.includes('Add MCP') || text.includes('Refresh');
+  });
 
-  const btnGroup = refreshBtn.parentNode;
-  if (!btnGroup) return null;
+  if (mcpBtn && mcpBtn.parentNode) {
+    let curr: Node | null = mcpBtn;
+    while (curr && curr.parentNode && curr.parentNode !== document.body) {
+      const parent = curr.parentNode as HTMLElement;
+      if (parent && parent.children && parent.children.length >= 2) {
+        // Return section container
+        if (parent.tagName === 'SECTION' || parent.classList?.length > 0 || parent.children.length >= 3) {
+          return parent;
+        }
+      }
+      curr = curr.parentNode;
+    }
+  }
 
-  const headerRow = btnGroup.parentNode as Element;
-  if (!headerRow) return null;
+  // Strategy 2: Look for heading containing "Installed MCP Servers" or "Build With Google Plugins"
+  const elements = Array.from(document.querySelectorAll('div, h2, h3, span, p'));
+  const mcpHeader = elements.find((el) => {
+    const txt = el.textContent?.trim() || '';
+    return txt.includes('Installed MCP Servers') || txt.includes('Build With Google Plugins');
+  });
 
-  const mainContainer = headerRow.parentNode;
-  if (!mainContainer) return null;
+  if (mcpHeader && mcpHeader.parentNode) {
+    let curr: Node | null = mcpHeader.parentNode;
+    while (curr && curr.parentNode && curr.parentNode !== document.body) {
+      const parent = curr.parentNode as HTMLElement;
+      if (parent && parent.children && parent.children.length >= 2) {
+        return parent;
+      }
+      curr = curr.parentNode;
+    }
+    return mcpHeader.parentNode;
+  }
 
-  const contentBlock = headerRow.nextElementSibling;
-
-  return {
-    mainContainer,
-    headerRow,
-    contentBlock,
-  };
+  return null;
 }
 
 export function ensureAgyTokens(): void {
@@ -303,10 +330,8 @@ export function ensureAgyTokens(): void {
 }
 
 export async function injectCustomModelsSection(): Promise<void> {
-  const layout = findMcpSectionContainer();
-  if (!layout) return;
-
-  const { mainContainer, headerRow } = layout;
+  const mainContainer = findMcpSectionContainer();
+  if (!mainContainer) return;
 
   if (document.getElementById('agy-custom-models-section')) return;
 

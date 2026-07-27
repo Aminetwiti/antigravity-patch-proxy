@@ -320,7 +320,10 @@ function iconForObjective(state: 'pending' | 'ok' | 'warn' | 'error'): string {
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel);
-  if (!el) throw new Error(`Missing element: ${sel}`);
+  if (!el) {
+    console.warn(`[ag-doctor] Missing element: ${sel}`);
+    return document.createElement('div') as unknown as T;
+  }
   return el;
 };
 
@@ -1791,17 +1794,16 @@ let logsFlushScheduled = false;
 const flushLogs = () => {
   logsFlushScheduled = false;
   if (logsPendingChunk) {
-    // Append as text (no HTML parsing needed for ANSI-stripped output).
-    logsOutput.insertAdjacentText('beforeend', logsPendingChunk);
+    logsTpl.innerHTML = ansiToHtml(logsPendingChunk);
+    logsOutput.appendChild(logsTpl.content.cloneNode(true));
     logsPendingChunk = null;
   }
-  // Bound the DOM: when the rendered text grows past the cap, drop the
-  // oldest content while keeping the latest keep-window.
+  const isNearBottom = logsOutput.scrollHeight - logsOutput.scrollTop - logsOutput.clientHeight < 100;
   if (logsOutput.textContent && logsOutput.textContent.length > LOGS_MAX_BYTES) {
     const trimmed = logsOutput.textContent.slice(-LOGS_KEEP_BYTES);
     logsOutput.textContent = trimmed;
     logsOutput.scrollTop = logsOutput.scrollHeight;
-  } else {
+  } else if (isNearBottom) {
     logsOutput.scrollTop = logsOutput.scrollHeight;
   }
 };
@@ -1824,6 +1826,7 @@ async function loadLogs(): Promise<void> {
     const r = await window.ag.run(['logs', '-n', '100', '--source', currentLogSource]);
     logsTpl.innerHTML = ansiToHtml(r.stdout || r.stderr || '(empty)');
     logsOutput.replaceChildren(logsTpl.content);
+    logsOutput.scrollTop = logsOutput.scrollHeight;
     setStatus('Ready');
   } catch (e) {
     logsOutput.textContent = `Could not load logs: ${(e as Error).message}`;
@@ -1842,14 +1845,10 @@ async function startLogStream(): Promise<void> {
   logsStreamId = `logs-${Date.now()}`;
 
   window.ag.onStreamData(logsStreamId, (chunk) => {
-    // PERF: accumulate RAW chunks and run ansiToHtml exactly once per flush.
-    // The previous code called ansiToHtml on every chunk (N regex passes
-    // per flush window when chunks arrive in quick bursts).
     logsPendingChunk = (logsPendingChunk ?? '') + chunk;
     scheduleLogsFlush();
   });
   window.ag.onStreamClose(logsStreamId, (code) => {
-    // Flush any pending chunks before signaling closure
     flushLogs();
     logsStreaming = false;
     logsFollowBtn.innerHTML = '<span class="dot-live"></span> Follow';
@@ -1858,10 +1857,10 @@ async function startLogStream(): Promise<void> {
   window.ag.onStreamError(logsStreamId, (err) => {
     flushLogs();
     toast(`Stream error: ${err}`, 'err');
-    stopLogStream();
+    void stopLogStream();
   });
 
-  await window.ag.startStream(['logs', '-f'], logsStreamId);
+  await window.ag.startStream(['logs', '-f', '--source', currentLogSource], logsStreamId);
 }
 
 async function stopLogStream(): Promise<void> {
@@ -1880,9 +1879,13 @@ logsFollowBtn.addEventListener('click', () => {
 });
 logsClearBtn.addEventListener('click', () => {
   logsOutput.textContent = '';
+  toast('Logs cleared', 'info', 1500);
 });
 logsCopyBtn.addEventListener('click', async () => {
   await navigator.clipboard.writeText(logsOutput.textContent ?? '');
+  const origText = logsCopyBtn.innerHTML;
+  logsCopyBtn.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Copied!';
+  setTimeout(() => { logsCopyBtn.innerHTML = origText; }, 2000);
   toast('Logs copied to clipboard', 'ok', 2000);
 });
 
@@ -1899,7 +1902,11 @@ logsTabs.forEach((tab) => {
       t.setAttribute('aria-selected', isActive ? 'true' : 'false');
     });
     currentLogSource = source;
-    void loadLogs();
+    if (logsStreaming) {
+      void stopLogStream().then(() => void startLogStream());
+    } else {
+      void loadLogs();
+    }
   });
 });
 

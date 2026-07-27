@@ -179,6 +179,7 @@ exports.PROVIDERS = {
     LLAMACPP: 'llamacpp',
     WAFER: 'wafer',
     ZAI: 'zai',
+    MINIMAX: 'minimax',
     // Native
     GOOGLE: 'google',
 };
@@ -229,6 +230,7 @@ exports.PROVIDER_DEFAULT_URLS = {
     [exports.PROVIDERS.CODESTRAL]: 'https://codestral.mistral.ai/v1',
     [exports.PROVIDERS.WAFER]: '',
     [exports.PROVIDERS.ZAI]: '',
+    [exports.PROVIDERS.MINIMAX]: 'https://api.minimaxi.chat/v1/chat/completions',
 };
 exports.DETAILED_PROVIDER_PRESETS = [
     {
