@@ -148,10 +148,7 @@ body {
 /* Subtle background grid (very faint, IDE-like) */
 .bg-aurora {
   position: fixed; inset: 0; z-index: -1; overflow: hidden;
-  background:
-    radial-gradient(ellipse 80% 50% at 50% -20%, hsla(217, 91%, 60%, 0.08), transparent 60%),
-    radial-gradient(ellipse 60% 40% at 100% 100%, hsla(269, 79%, 65%, 0.06), transparent 60%),
-    var(--bg-0);
+  background: var(--bg-0);
 }
 .aurora, .grid-overlay { display: none; }
 
@@ -252,7 +249,7 @@ body {
   border-bottom: 1px solid var(--glass-border-tier-1);
 }
 .sidebar-brand-name {
-  font-family: 'Outfit', 'Inter', sans-serif;
+  font-family: var(--font-sans);
   font-weight: 600;
   font-size: var(--fs-md);
   letter-spacing: -0.01em;
@@ -492,15 +489,15 @@ body {
   gap: 16px;
 }
 .view-header h1 {
-  font-family: 'Outfit', 'Inter', sans-serif;
-  font-size: var(--fs-3xl);
-  font-weight: 700;
-  letter-spacing: -0.025em;
+  font-size: 1.4rem;
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.01em;
   color: var(--text-0);
+  font-family: var(--font-sans);
   text-wrap: balance;
 }
 .subtitle { color: var(--text-2); font-size: 12.5px; margin-top: 4px; }
-.header-actions { display: flex; gap: 6px; align-items: center; }
+.header-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 
 /* ─────────────────────────────────────────────────────────────────────────
    Buttons
@@ -608,8 +605,9 @@ body {
 .stat-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .stat-label { font-size: 10.5px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
 .stat-value {
-  font-family: 'Outfit', sans-serif;
-  font-size: 24px; font-weight: 600;
+  font-size: 20px;
+  font-weight: 700;
+  font-family: var(--font-sans);
   color: var(--text-0);
   line-height: 1.1;
   letter-spacing: -0.3px;
@@ -634,10 +632,11 @@ body {
   background: var(--bg-1);
 }
 .panel-header h2 {
-  font-family: 'Outfit', 'Inter', sans-serif;
-  font-size: 13px; font-weight: 600;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.01em;
   color: var(--text-0);
-  letter-spacing: 0.1px;
+  font-family: var(--font-sans);
 }
 .panel-body { padding: 16px; }
 .panel-body-flush { padding: 0; }
@@ -677,10 +676,11 @@ body {
   box-shadow: var(--shadow-glow);
 }
 .home-intro-body h2 {
-  font-family: 'Outfit', 'Inter', sans-serif;
-  font-size: 14px; font-weight: 600;
-  margin-bottom: 4px;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
   color: var(--text-0);
+  margin-bottom: 4px;
+  font-family: var(--font-sans);
 }
 .home-intro-body p {
   font-size: 12.5px; color: var(--text-2); line-height: 1.55;
@@ -738,7 +738,7 @@ body {
   display: flex; align-items: center; justify-content: space-between;
 }
 .mitm-card-header h3 {
-  font-family: 'Outfit', 'Inter', sans-serif;
+  font-family: var(--font-sans);
   font-size: 13px; font-weight: 600;
 }
 .mitm-card-body { display: flex; flex-direction: column; gap: 6px; }
@@ -906,7 +906,7 @@ body {
   background: transparent;
   border: none;
   border-radius: var(--r-sm);
-  font-family: inherit;
+  font-family: var(--font-sans);
   font-size: var(--fs-sm);
   font-weight: var(--fw-medium);
   color: var(--text-2);
@@ -992,7 +992,7 @@ body {
   border-radius: var(--r-sm);
   color: white;
   font-weight: 700;
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-sans);
   font-size: 12px;
   flex-shrink: 0;
 }
@@ -1292,7 +1292,7 @@ body {
   border-bottom: 1px solid var(--border);
 }
 .modal-header h2 {
-  font-family: 'Outfit', 'Inter', sans-serif;
+  font-family: var(--font-sans);
   font-size: 14px; font-weight: 600;
 }
 .modal-close {
@@ -1479,7 +1479,7 @@ body {
   border-radius: var(--r-sm);
   background: var(--bg-3);
   border: 1px solid var(--border);
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-sans);
   font-size: 10px; font-weight: 700;
   color: var(--accent-blue-bright);
 }
@@ -1590,16 +1590,20 @@ body {
 
   /* Glass tokens (light theme) */
   --glass-bg: hsla(220, 14%, 100%, 0.7);
+  --glass-bg-tier-1: hsla(220, 14%, 96%, 0.85);   /* sidebar nav rail */
+  --glass-bg-tier-2: hsla(220, 14%, 98%, 0.75);   /* hero, panels */
   --glass-bg-strong: hsla(220, 14%, 100%, 0.9);
   --glass-border: hsla(220, 13%, 30%, 0.12);
   --glass-border-strong: hsla(220, 13%, 30%, 0.22);
+  --glass-border-tier-1: hsla(220, 13%, 30%, 0.10);
+  --glass-inner-highlight: hsla(220, 50%, 100%, 0.5);
 
-  /* Text (Antigravity light text scale) */
+  /* Text (Antigravity light text scale) — WCAG AA compliant */
   --text-0: #1f2328;
   --text-1: #424a53;
-  --text-2: #656d76;
-  --text-3: #848d97;
-  --text-4: #6e7781;
+  --text-2: #57606a;
+  --text-3: #57606a;
+  --text-4: #57606a;
 
   /* Accents (slightly darker for light bg contrast) */
   --accent-blue: #0969da;
@@ -1883,10 +1887,10 @@ body {
   50% { opacity: 0.6; transform: scale(1.15); }
 }
 .ag-hero-title {
-  font-size: var(--fs-2xl);
+  font-size: var(--fs-xl);
   font-weight: var(--fw-bold);
-  letter-spacing: -0.02em;
   color: var(--text-0);
+  font-family: var(--font-sans);
   margin: 0 0 4px;
 }
 .ag-hero-meta {

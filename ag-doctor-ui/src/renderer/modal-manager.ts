@@ -92,8 +92,23 @@ class ModalManager {
     };
 
     return new Promise<T>((resolve, reject) => {
+      let previouslyFocused: HTMLElement | null = document.activeElement as HTMLElement | null;
       let settled = false;
       let result: T;
+
+      const cleanup = () => {
+        this.backdrop.hidden = true;
+        this.confirmBtn.disabled = false;
+        this.confirmBtn.removeEventListener('click', onConfirm);
+        this.cancelBtn.removeEventListener('click', onCancel);
+        this.closeBtn.removeEventListener('click', onCancel);
+        this.backdrop.removeEventListener('click', onBackdrop);
+        document.removeEventListener('keydown', onKey);
+        this.active = null;
+        if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+          previouslyFocused.focus();
+        }
+      };
 
       const finish = (value: T) => {
         if (settled) return;
@@ -115,18 +130,23 @@ class ModalManager {
         if (e.key === 'Escape') {
           e.preventDefault();
           finish(result);
+        } else if (e.key === 'Tab') {
+          const focusables = Array.from(
+            this.backdrop.querySelectorAll<HTMLElement>(
+              'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+            )
+          ).filter((el) => !el.hasAttribute('disabled') && el.offsetParent !== null);
+          if (focusables.length === 0) return;
+          const first = focusables[0];
+          const last = focusables[focusables.length - 1];
+          if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
         }
-      };
-
-      const cleanup = () => {
-        this.backdrop.hidden = true;
-        this.confirmBtn.disabled = false;
-        this.confirmBtn.removeEventListener('click', onConfirm);
-        this.cancelBtn.removeEventListener('click', onCancel);
-        this.closeBtn.removeEventListener('click', onCancel);
-        this.backdrop.removeEventListener('click', onBackdrop);
-        document.removeEventListener('keydown', onKey);
-        this.active = null;
       };
 
       this.active = { cleanup, resolve: (v) => finish(v as T) };
@@ -139,6 +159,12 @@ class ModalManager {
       document.addEventListener('keydown', onKey);
 
       this.backdrop.hidden = false;
+      setTimeout(() => {
+        const firstFocusable = this.backdrop.querySelector<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])'
+        );
+        firstFocusable?.focus();
+      }, 50);
 
       // Run setup (may be async). If it throws, reject and close.
       try {

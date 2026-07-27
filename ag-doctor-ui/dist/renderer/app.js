@@ -278,9 +278,12 @@ const lastRunBadge = $('#lastRunBadge');
 let lastResults = [];
 // Event delegation: bind once for expand toggles (avoids N listeners per item)
 healthList.addEventListener('click', (e) => {
-    const target = e.target;
-    if (target.classList.contains('health-expand')) {
-        target.closest('.health-item')?.classList.toggle('expanded');
+    const target = e.target.closest('.health-expand');
+    if (target) {
+        const item = target.closest('.health-item');
+        const isExpanded = item?.classList.toggle('expanded') ?? false;
+        target.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+        target.textContent = isExpanded ? 'Hide details' : 'Show details';
     }
 });
 // Reusable template for health list — avoids creating a new <template> each render
@@ -301,7 +304,7 @@ function renderHealthList(results) {
         .map((r, i) => {
         const icon = iconForStatus(r.status);
         const detailsHtml = r.details
-            ? `<div class="health-details">${escapeHtml(r.details)}</div><div class="health-expand">Show details</div>`
+            ? `<div class="health-details">${escapeHtml(r.details)}</div><button class="health-expand" type="button" aria-expanded="false">Show details</button>`
             : '';
         return `
         <div class="health-item" style="animation-delay:${i * 40}ms" data-id="${r.id}">
@@ -1568,7 +1571,11 @@ logsTabs.forEach((tab) => {
         const source = tab.dataset.source ?? 'language_server';
         if (source === currentLogSource)
             return;
-        logsTabs.forEach((t) => t.classList.toggle('active', t === tab));
+        logsTabs.forEach((t) => {
+            const isActive = t === tab;
+            t.classList.toggle('active', isActive);
+            t.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        });
         currentLogSource = source;
         void loadLogs();
     });
@@ -1841,7 +1848,8 @@ themeToggle.addEventListener('click', async () => {
 });
 async function setTheme(theme) {
     document.documentElement.dataset.theme = theme;
-    themeToggle.textContent = theme === 'dark' ? 'Switch to light' : 'Switch to dark';
+    themeToggle.textContent = theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
+    themeToggle.setAttribute('aria-pressed', theme === 'light' ? 'true' : 'false');
     updateStatusBarTheme(theme);
     // Invalidate config cache so the next loadSettings() picks up the new theme
     invalidateCache('config');

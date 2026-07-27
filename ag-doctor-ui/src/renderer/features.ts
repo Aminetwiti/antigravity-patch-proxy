@@ -155,14 +155,36 @@
   // Axe 2 — Real-time Proxy Monitor
   // ─────────────────────────────────────────────────────────────────────────────
 
-  const proxyLatencyEl = () => document.getElementById("proxyLatency");
-  const proxyStatusEl = () => document.getElementById("proxyStatus");
-  const proxyUptimeEl = () => document.getElementById("proxyUptime");
-  const proxySparkLine = () =>
-    document.getElementById("proxySparkLine") as unknown as SVGPolylineElement | null;
-  const proxyBadge = () => document.getElementById("proxyMonitorBadge");
-  const proxyToggleBtn = () =>
-    document.getElementById("proxyMonitorToggleBtn") as HTMLButtonElement | null;
+  let _proxyLatencyEl: HTMLElement | null = null;
+  let _proxyStatusEl: HTMLElement | null = null;
+  let _proxyUptimeEl: HTMLElement | null = null;
+  let _proxySparkLine: SVGPolylineElement | null = null;
+  let _proxyBadge: HTMLElement | null = null;
+  let _proxyToggleBtn: HTMLButtonElement | null = null;
+
+  function getProxyElements() {
+    if (!_proxyLatencyEl) _proxyLatencyEl = document.getElementById("proxyLatency");
+    if (!_proxyStatusEl) _proxyStatusEl = document.getElementById("proxyStatus");
+    if (!_proxyUptimeEl) _proxyUptimeEl = document.getElementById("proxyUptime");
+    if (!_proxySparkLine) _proxySparkLine = document.getElementById("proxySparkLine") as unknown as SVGPolylineElement | null;
+    if (!_proxyBadge) _proxyBadge = document.getElementById("proxyMonitorBadge");
+    if (!_proxyToggleBtn) _proxyToggleBtn = document.getElementById("proxyMonitorToggleBtn") as HTMLButtonElement | null;
+    return {
+      latency: _proxyLatencyEl,
+      status: _proxyStatusEl,
+      uptime: _proxyUptimeEl,
+      sparkLine: _proxySparkLine,
+      badge: _proxyBadge,
+      toggleBtn: _proxyToggleBtn,
+    };
+  }
+
+  const proxyLatencyEl = () => getProxyElements().latency;
+  const proxyStatusEl = () => getProxyElements().status;
+  const proxyUptimeEl = () => getProxyElements().uptime;
+  const proxySparkLine = () => getProxyElements().sparkLine;
+  const proxyBadge = () => getProxyElements().badge;
+  const proxyToggleBtn = () => getProxyElements().toggleBtn;
 
   const SPARK_MAX = 60;
   const sparkBuffer: number[] = [];

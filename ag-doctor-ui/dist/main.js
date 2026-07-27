@@ -252,11 +252,23 @@ function createWindow() {
     mainWindow.webContents.on('render-process-gone', (_e, details) => {
         console.error(`[main] render-process-gone: ${JSON.stringify(details)}`);
     });
-    // Only forward console messages in dev mode (saves IPC overhead in prod)
+    // Dev mode diagnostics: console logging and periodic heap memory monitoring
     if (isDev) {
-        mainWindow.webContents.on('console-message', (_e, level, message) => {
+        mainWindow.webContents.on('console-message', (_e, _level, message) => {
             console.log(`[renderer] ${message}`);
         });
+        // Monitor process memory usage every 60 seconds in dev mode
+        const memInterval = setInterval(() => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                const mem = process.memoryUsage();
+                const heapMb = Math.round((mem.heapUsed / 1024 / 1024) * 100) / 100;
+                const rssMb = Math.round((mem.rss / 1024 / 1024) * 100) / 100;
+                console.log(`[PERF:main] Heap Used: ${heapMb} MB | RSS: ${rssMb} MB`);
+            }
+            else {
+                clearInterval(memInterval);
+            }
+        }, 60000);
     }
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
         electron_1.shell.openExternal(url);
@@ -505,6 +517,20 @@ try {
     });
 }
 catch { /* ignore watcher errors */ }
+// Secure External Link IPC Handler
+electron_1.ipcMain.handle('ag:open-external', async (_event, url) => {
+    try {
+        if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
+            await electron_1.shell.openExternal(url);
+        }
+        else {
+            console.warn(`[IPC] Blocked unsafe external URL opening attempt: ${url}`);
+        }
+    }
+    catch (err) {
+        console.error('[IPC] Failed to open external URL:', err);
+    }
+});
 // --- Provider Management IPCs ---
 electron_1.ipcMain.handle('ag:providers:get', async () => {
     try {

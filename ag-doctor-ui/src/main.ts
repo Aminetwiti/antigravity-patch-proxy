@@ -544,6 +544,19 @@ function getCliPool(): CliWorkerPool {
     });
   } catch { /* ignore watcher errors */ }
 
+  // Secure External Link IPC Handler
+  ipcMain.handle('ag:open-external', async (_event, url: string) => {
+    try {
+      if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
+        await shell.openExternal(url);
+      } else {
+        console.warn(`[IPC] Blocked unsafe external URL opening attempt: ${url}`);
+      }
+    } catch (err) {
+      console.error('[IPC] Failed to open external URL:', err);
+    }
+  });
+
   // --- Provider Management IPCs ---
   ipcMain.handle('ag:providers:get', async () => {
     try {

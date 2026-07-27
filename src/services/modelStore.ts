@@ -90,55 +90,57 @@ export interface ProviderFileEntry {
   };
 }
 
+let _providersCache: ProviderFileEntry[] | null = null;
+let _providersCacheTime = 0;
+const CACHE_TTL_MS = 60_000;
+
+export function invalidateModelStoreCache(): void {
+  _providersCache = null;
+  _providersCacheTime = 0;
+}
+
 export function getCustomModelsPath(): string {
   const geminiDir = path.join(app.getPath('home'), '.gemini', 'antigravity');
   return path.join(geminiDir, 'custom_models.json');
 }
 
 export async function loadCustomModels(): Promise<CustomModelFileEntry[]> {
-  const filePath = getCustomModelsPath();
+  const providers = await loadProviders();
+  if (providers && providers.length > 0) {
+    const flatModels: CustomModelFileEntry[] = [];
+    for (const p of providers) {
+      if (!p || p.enabled === false) continue;
+      const models = Array.isArray(p.models) ? p.models : [];
+      for (const m of models) {
+        if (!m || m.enabled === false) continue;
+        const mergedHeaders = { ...p.extraHeaders, ...m.extraHeaders };
+        const mergedBody = { ...p.extraBody, ...m.extraBody };
 
+        flatModels.push({
+          name: `${p.id || 'provider-unknown'}-${m.id}`,
+          displayName: m.displayName || m.id,
+          provider: p.provider || 'openai',
+          apiKey: p.apiKey || 'none',
+          apiUrl: p.apiUrl || '',
+          externalModelName: m.id,
+          allowUnauthorized: p.allowUnauthorized,
+          encrypted: p.encrypted,
+          useRawBaseUrl: p.useRawBaseUrl,
+          extraHeaders: Object.keys(mergedHeaders).length > 0 ? mergedHeaders : undefined,
+          extraBody: Object.keys(mergedBody).length > 0 ? mergedBody : undefined,
+        });
+      }
+    }
+    return flatModels;
+  }
+
+  const filePath = getCustomModelsPath();
   try {
     const content = await fs.readFile(filePath, 'utf-8');
-    const parsed = JSON.parse(stripBom(content)) as { models?: CustomModelFileEntry[], providers?: ProviderFileEntry[] };
-
-    if (parsed.models && !parsed.providers) {
-      return parsed.models;
-    }
-
-    if (parsed.providers) {
-      const flatModels: CustomModelFileEntry[] = [];
-      for (const p of parsed.providers) {
-        if (!p) continue;
-        if (p.enabled === false) continue;
-        const models = Array.isArray(p.models) ? p.models : [];
-        for (const m of models) {
-          if (!m || m.enabled === false) continue;
-          const mergedHeaders = { ...p.extraHeaders, ...m.extraHeaders };
-          const mergedBody = { ...p.extraBody, ...m.extraBody };
-
-          flatModels.push({
-             name: `${p.id || 'provider-unknown'}-${m.id}`,
-             displayName: m.displayName || m.id,
-             provider: p.provider || 'openai',
-             apiKey: p.apiKey || 'none',
-             apiUrl: p.apiUrl || '',
-             externalModelName: m.id,
-             allowUnauthorized: p.allowUnauthorized,
-             encrypted: p.encrypted,
-             useRawBaseUrl: p.useRawBaseUrl,
-             extraHeaders: Object.keys(mergedHeaders).length > 0 ? mergedHeaders : undefined,
-             extraBody: Object.keys(mergedBody).length > 0 ? mergedBody : undefined,
-          });
-        }
-      }
-      return flatModels;
-    }
-
-    return [];
+    const parsed = JSON.parse(stripBom(content)) as { models?: CustomModelFileEntry[] };
+    return parsed.models || [];
   } catch (error) {
     if (isNodeError(error) && error.code === 'ENOENT') {
-      log.info('[CustomModelStore] custom_models.json not found, returning empty list');
       return [];
     }
     log.error('[CustomModelStore] Failed to load custom_models.json:', error);
@@ -147,6 +149,7 @@ export async function loadCustomModels(): Promise<CustomModelFileEntry[]> {
 }
 
 export async function saveCustomModels(models: CustomModelFileEntry[]): Promise<void> {
+  invalidateModelStoreCache();
   const filePath = getCustomModelsPath();
   const existing = readExistingJson(filePath);
   existing.models = models;
@@ -154,13 +157,20 @@ export async function saveCustomModels(models: CustomModelFileEntry[]): Promise<
 }
 
 export async function loadProviders(): Promise<ProviderFileEntry[]> {
+  const now = Date.now();
+  if (_providersCache && now - _providersCacheTime < CACHE_TTL_MS) {
+    return _providersCache;
+  }
+
   const filePath = getCustomModelsPath();
   try {
     const content = await fs.readFile(filePath, 'utf-8');
     const parsed = JSON.parse(stripBom(content)) as { models?: CustomModelFileEntry[], providers?: ProviderFileEntry[] };
 
     if (parsed.providers) {
-       return parsed.providers;
+      _providersCache = parsed.providers;
+      _providersCacheTime = now;
+      return _providersCache;
     }
 
     if (parsed.models && parsed.models.length > 0) {

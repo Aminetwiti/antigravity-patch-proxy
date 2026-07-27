@@ -1,9 +1,26 @@
 /**
  * ag-doctor UI — Smart Banner Manager
- * Cause-specific error banners, live rate-limit reset countdown, and 1-click fallback router.
+ * Cause-specific error banners, live rate-limit reset countdown, 1-click fallback router,
+ * and Patch Verdict evaluator (P0.1).
  */
 
-interface SmartBannerOptions {
+export interface SystemPatchState {
+  proxyListening: boolean;
+  proxyResponding: boolean;
+  mitmListening: boolean;
+  mitmCaInstalled: boolean;
+  customModelsLoaded: number;
+  startProxyErrors: number;
+}
+
+export interface PatchVerdict {
+  label: string;
+  severity: 'ok' | 'warn' | 'error';
+  action?: 'patch' | 'launch-mitm' | 'repair' | 'install-ca' | 'add-model';
+  message: string;
+}
+
+export interface SmartBannerOptions {
   category: 'quota_429' | 'auth_401' | 'credits_402' | 'offline_econn' | 'context_400' | 'generic';
   title: string;
   hint: string;
@@ -14,13 +31,35 @@ interface SmartBannerOptions {
   onStartStub?: () => void;
 }
 
-class SmartBannerManager {
+export class SmartBannerManager {
   private containerEl: HTMLElement | null = null;
   private timerId: number | null = null;
   private remainingSeconds = 0;
 
   constructor(containerId = 'globalSmartBanner') {
     this.containerEl = document.getElementById(containerId);
+  }
+
+  /**
+   * Computes unified patch state verdict (P0.1 recommendation).
+   */
+  public static computeVerdict(state: SystemPatchState): PatchVerdict {
+    if (!state.proxyListening) {
+      return { label: 'Proxy OFF', severity: 'error', action: 'patch', message: 'Local proxy is down. Run repair to start proxy.' };
+    }
+    if (!state.mitmListening) {
+      return { label: 'MITM REQUIS', severity: 'error', action: 'launch-mitm', message: 'MITM proxy on port 443 is required but not listening.' };
+    }
+    if (state.startProxyErrors > 0) {
+      return { label: 'PATCH KAPUT', severity: 'error', action: 'repair', message: 'Proxy startup errors detected in main.log.' };
+    }
+    if (!state.mitmCaInstalled) {
+      return { label: 'CA NOT TRUSTED', severity: 'warn', action: 'install-ca', message: 'MITM root CA certificate is not installed in OS trust store.' };
+    }
+    if (state.customModelsLoaded === 0) {
+      return { label: 'NO CUSTOM MODELS', severity: 'warn', action: 'add-model', message: 'No custom model providers configured.' };
+    }
+    return { label: 'PATCH OK', severity: 'ok', message: 'System is fully operational.' };
   }
 
   public show(options: SmartBannerOptions): void {
@@ -36,7 +75,6 @@ class SmartBannerManager {
     banner.className = `smart-banner ${options.category}`;
     banner.setAttribute('role', 'alert');
 
-    // Title & Hint
     const contentHtml = `
       <div class="smart-banner-icon">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -58,7 +96,6 @@ class SmartBannerManager {
     banner.innerHTML = contentHtml;
     const actionsEl = banner.querySelector('#sbActions') as HTMLElement;
 
-    // Action button 1: Fallback Model
     if (options.onFallback || options.category === 'quota_429' || options.category === 'context_400') {
       const btn = document.createElement('button');
       btn.className = 'btn btn-primary btn-sm';
@@ -70,7 +107,6 @@ class SmartBannerManager {
       actionsEl.appendChild(btn);
     }
 
-    // Action button 2: Edit Key
     if (options.category === 'auth_401' || options.category === 'credits_402') {
       const btn = document.createElement('button');
       btn.className = 'btn btn-ghost btn-sm';
@@ -82,7 +118,6 @@ class SmartBannerManager {
       actionsEl.appendChild(btn);
     }
 
-    // Action button 3: Start Proxy Stub
     if (options.category === 'offline_econn') {
       const btn = document.createElement('button');
       btn.className = 'btn btn-ghost btn-sm';
@@ -94,7 +129,6 @@ class SmartBannerManager {
       actionsEl.appendChild(btn);
     }
 
-    // Dismiss button
     const dismissBtn = document.createElement('button');
     dismissBtn.className = 'btn btn-ghost btn-sm';
     dismissBtn.textContent = 'Dismiss';
@@ -104,7 +138,6 @@ class SmartBannerManager {
     this.containerEl.innerHTML = '';
     this.containerEl.appendChild(banner);
 
-    // Live countdown timer ticker
     if (this.remainingSeconds > 0) {
       this.timerId = window.setInterval(() => {
         this.remainingSeconds--;

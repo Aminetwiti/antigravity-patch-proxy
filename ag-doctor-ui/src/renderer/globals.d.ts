@@ -67,3 +67,18 @@ interface AgAPI {
 interface Window {
   ag: AgAPI;
 }
+
+declare class SmartBannerManager {
+  constructor(containerId?: string);
+  show(options: {
+    category: 'quota_429' | 'auth_401' | 'credits_402' | 'offline_econn' | 'context_400' | 'generic';
+    title: string;
+    hint: string;
+    resetSeconds?: number;
+    providerName?: string;
+    onFallback?: () => void;
+    onEditKey?: () => void;
+    onStartStub?: () => void;
+  }): void;
+  dismiss(): void;
+}
