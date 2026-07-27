@@ -12,6 +12,11 @@ const api = {
         save: (p) => electron_1.ipcRenderer.invoke('ag:providers:save', p),
         delete: (id) => electron_1.ipcRenderer.invoke('ag:providers:delete', id),
         test: (params) => electron_1.ipcRenderer.invoke('ag:providers:test', params),
+        onChanged: (handler) => {
+            const listener = () => handler();
+            electron_1.ipcRenderer.on('ag:providers:changed', listener);
+            return () => electron_1.ipcRenderer.removeListener('ag:providers:changed', listener);
+        },
     },
     info: () => electron_1.ipcRenderer.invoke('ag:info'),
     config: () => electron_1.ipcRenderer.invoke('ag:config'),

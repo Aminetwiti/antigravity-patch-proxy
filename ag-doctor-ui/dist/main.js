@@ -481,10 +481,34 @@ function getCliPool() {
 // ──────────────────────────────────────────────���──────────────────────────────
 // IPC handlers
 // ─────────────────────────────────────────────────────────────────────────────
+function getCustomModelsPath() {
+    return path_1.default.join(electron_1.app.getPath('home'), '.gemini', 'antigravity', 'custom_models.json');
+}
+// Real-time File Watcher: Synchronize Provider changes between Antigravity and Doctor UI
+let watcherDebounce = null;
+try {
+    const customModelsPath = getCustomModelsPath();
+    const customModelsDir = path_1.default.dirname(customModelsPath);
+    if (!fs_1.default.existsSync(customModelsDir)) {
+        fs_1.default.mkdirSync(customModelsDir, { recursive: true });
+    }
+    fs_1.default.watch(customModelsDir, (_eventType, filename) => {
+        if (filename && filename.includes('custom_models.json')) {
+            if (watcherDebounce)
+                clearTimeout(watcherDebounce);
+            watcherDebounce = setTimeout(() => {
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('ag:providers:changed');
+                }
+            }, 300);
+        }
+    });
+}
+catch { /* ignore watcher errors */ }
 // --- Provider Management IPCs ---
 electron_1.ipcMain.handle('ag:providers:get', async () => {
     try {
-        const p = path_1.default.join(electron_1.app.getPath('home'), '.gemini', 'antigravity', 'custom_models.json');
+        const p = getCustomModelsPath();
         const c = await fs_1.default.promises.readFile(p, 'utf8');
         const parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
         if (parsed.providers)
@@ -522,7 +546,7 @@ electron_1.ipcMain.handle('ag:providers:get', async () => {
 });
 electron_1.ipcMain.handle('ag:providers:save', async (_, p) => {
     try {
-        const fp = path_1.default.join(electron_1.app.getPath('home'), '.gemini', 'antigravity', 'custom_models.json');
+        const fp = getCustomModelsPath();
         let parsed = { providers: [], models: [] };
         try {
             const c = await fs_1.default.promises.readFile(fp, 'utf8');
@@ -545,7 +569,7 @@ electron_1.ipcMain.handle('ag:providers:save', async (_, p) => {
 });
 electron_1.ipcMain.handle('ag:providers:delete', async (_, id) => {
     try {
-        const fp = path_1.default.join(electron_1.app.getPath('home'), '.gemini', 'antigravity', 'custom_models.json');
+        const fp = getCustomModelsPath();
         const c = await fs_1.default.promises.readFile(fp, 'utf8');
         const parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
         if (parsed.providers) {
@@ -596,7 +620,7 @@ electron_1.ipcMain.handle('ag:providers:test', async (_evt, params) => {
         // Persist health metadata back to custom_models.json if provider ID is supplied
         if (params.id) {
             try {
-                const fp = path_1.default.join(electron_1.app.getPath('home'), '.gemini', 'antigravity', 'custom_models.json');
+                const fp = getCustomModelsPath();
                 const c = await fs_1.default.promises.readFile(fp, 'utf8');
                 const parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
                 if (parsed.providers && Array.isArray(parsed.providers)) {

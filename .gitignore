@@ -44,3 +44,5 @@ scripts/freebuff/pkce-output.txt
 
 *.txt
 ag-doctor-ui/dist/*
+dist/
+ag-doctor-ui/dist/

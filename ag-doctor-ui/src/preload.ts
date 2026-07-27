@@ -18,6 +18,11 @@ const api = {
     save: (p: unknown): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('ag:providers:save', p),
     delete: (id: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('ag:providers:delete', id),
     test: (params: { apiUrl: string; apiKey: string }): Promise<{ success: boolean; status?: number; error?: string }> => ipcRenderer.invoke('ag:providers:test', params),
+    onChanged: (handler: () => void): (() => void) => {
+      const listener = () => handler();
+      ipcRenderer.on('ag:providers:changed', listener);
+      return () => ipcRenderer.removeListener('ag:providers:changed', listener);
+    },
   },
   info: (): Promise<{
     platform: string;

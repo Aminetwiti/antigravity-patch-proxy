@@ -2955,3 +2955,8 @@ async function openProviderManagerModal(): Promise<void> {
 
 $('#modelsAddBtn')?.addEventListener('click', openProviderManagerModal);
 $('#providerManagerBtn')?.addEventListener('click', openProviderManagerModal);
+
+// Real-time synchronization listener: re-render provider list whenever custom_models.json changes
+window.ag.providers.onChanged(() => {
+  void renderProviderList();
+});

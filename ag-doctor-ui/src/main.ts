@@ -520,10 +520,34 @@ function getCliPool(): CliWorkerPool {
 // ─────────────────────────────────────────────────────────────────────────────
 
 
+  function getCustomModelsPath(): string {
+    return path.join(app.getPath('home'), '.gemini', 'antigravity', 'custom_models.json');
+  }
+
+  // Real-time File Watcher: Synchronize Provider changes between Antigravity and Doctor UI
+  let watcherDebounce: NodeJS.Timeout | null = null;
+  try {
+    const customModelsPath = getCustomModelsPath();
+    const customModelsDir = path.dirname(customModelsPath);
+    if (!fs.existsSync(customModelsDir)) {
+      fs.mkdirSync(customModelsDir, { recursive: true });
+    }
+    fs.watch(customModelsDir, (_eventType, filename) => {
+      if (filename && filename.includes('custom_models.json')) {
+        if (watcherDebounce) clearTimeout(watcherDebounce);
+        watcherDebounce = setTimeout(() => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('ag:providers:changed');
+          }
+        }, 300);
+      }
+    });
+  } catch { /* ignore watcher errors */ }
+
   // --- Provider Management IPCs ---
   ipcMain.handle('ag:providers:get', async () => {
     try {
-      const p = path.join(app.getPath('home'), '.gemini', 'antigravity', 'custom_models.json');
+      const p = getCustomModelsPath();
       const c = await fs.promises.readFile(p, 'utf8');
       const parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
       if (parsed.providers) return parsed.providers;
@@ -561,7 +585,7 @@ function getCliPool(): CliWorkerPool {
 
   ipcMain.handle('ag:providers:save', async (_, p) => {
     try {
-      const fp = path.join(app.getPath('home'), '.gemini', 'antigravity', 'custom_models.json');
+      const fp = getCustomModelsPath();
       let parsed: { providers: any[]; models: any[] } = { providers: [], models: [] };
       try {
         const c = await fs.promises.readFile(fp, 'utf8');
@@ -582,7 +606,7 @@ function getCliPool(): CliWorkerPool {
 
   ipcMain.handle('ag:providers:delete', async (_, id) => {
     try {
-      const fp = path.join(app.getPath('home'), '.gemini', 'antigravity', 'custom_models.json');
+      const fp = getCustomModelsPath();
       const c = await fs.promises.readFile(fp, 'utf8');
       const parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
       if (parsed.providers) {
@@ -638,7 +662,7 @@ function getCliPool(): CliWorkerPool {
        // Persist health metadata back to custom_models.json if provider ID is supplied
        if (params.id) {
          try {
-           const fp = path.join(app.getPath('home'), '.gemini', 'antigravity', 'custom_models.json');
+           const fp = getCustomModelsPath();
            const c = await fs.promises.readFile(fp, 'utf8');
            const parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
            if (parsed.providers && Array.isArray(parsed.providers)) {
