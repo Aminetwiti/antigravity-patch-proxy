@@ -4,7 +4,7 @@
  * and Patch Verdict evaluator (P0.1).
  */
 
-export interface SystemPatchState {
+interface SystemPatchState {
   proxyListening: boolean;
   proxyResponding: boolean;
   mitmListening: boolean;
@@ -13,14 +13,14 @@ export interface SystemPatchState {
   startProxyErrors: number;
 }
 
-export interface PatchVerdict {
+interface PatchVerdict {
   label: string;
   severity: 'ok' | 'warn' | 'error';
   action?: 'patch' | 'launch-mitm' | 'repair' | 'install-ca' | 'add-model';
   message: string;
 }
 
-export interface SmartBannerOptions {
+interface SmartBannerOptions {
   category: 'quota_429' | 'auth_401' | 'credits_402' | 'offline_econn' | 'context_400' | 'generic';
   title: string;
   hint: string;
@@ -31,7 +31,7 @@ export interface SmartBannerOptions {
   onStartStub?: () => void;
 }
 
-export class SmartBannerManager {
+class SmartBannerManager {
   private containerEl: HTMLElement | null = null;
   private timerId: number | null = null;
   private remainingSeconds = 0;

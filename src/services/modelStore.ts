@@ -158,7 +158,7 @@ export async function saveCustomModels(models: CustomModelFileEntry[]): Promise<
 
 export async function loadProviders(): Promise<ProviderFileEntry[]> {
   const now = Date.now();
-  if (_providersCache && now - _providersCacheTime < CACHE_TTL_MS) {
+  if (!process.env.VITEST && _providersCache && now - _providersCacheTime < CACHE_TTL_MS) {
     return _providersCache;
   }
 
@@ -229,6 +229,7 @@ function readExistingJson(filePath: string): Record<string, unknown> {
 }
 
 export async function saveProviders(providers: ProviderFileEntry[]): Promise<void> {
+  invalidateModelStoreCache();
   const filePath = getCustomModelsPath();
   const existing = readExistingJson(filePath);
   existing.providers = providers;

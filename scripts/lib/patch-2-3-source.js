@@ -81,8 +81,11 @@ function removeSandboxedPreloadLocalImports(source) {
     .replace(/^const idGenerator_1 = require\(["']\.\/proxy\/idGenerator["']\);\r?\n/m, '')
     .replace(/^const errorClassifier_1 = require\(["']\.\/proxy\/errorClassifier["']\);\r?\n/m, '')
     .replace(/\(0, idGenerator_1\.generateModelPlaceholderId\)\(/g, 'generateModelPlaceholderId(')
+    .replace(/idGenerator_1\.generateModelPlaceholderId\(/g, 'generateModelPlaceholderId(')
     .replace(/\(0, idGenerator_1\.toSlug\)\(/g, 'toSlug(')
-    .replace(/\(0, errorClassifier_1\.classifyError\)\(/g, 'classifyError(');
+    .replace(/idGenerator_1\.toSlug\(/g, 'toSlug(')
+    .replace(/\(0, errorClassifier_1\.classifyError\)\(/g, 'classifyError(')
+    .replace(/errorClassifier_1\.classifyError\(/g, 'classifyError(');
   if (patched === source || /require\(["']\.\/proxy\//.test(patched)) {
     throw new Error('Unable to make preload sandbox-safe: expected local proxy imports were not removed.');
   }

@@ -739,10 +739,6 @@ ipcMain.handle('ag:tray-status', async (_evt, status: 'ok' | 'warn' | 'err') => 
   updateTray(status);
 });
 
-ipcMain.handle('ag:open-external', async (_evt, url: string) => {
-  await shell.openExternal(url);
-});
-
 ipcMain.handle('ag:reveal', async (_evt, p: string) => {
   shell.showItemInFolder(p);
 });
