@@ -988,11 +988,13 @@ ipcMain.handle('ag:config:restore-backup', async () => {
     if (!fs.existsSync(bakPath)) {
       return { success: false, error: 'No backup file (.bak) found' };
     }
+    const content = fs.readFileSync(bakPath, 'utf8');
+    JSON.parse(content); // Validate JSON before restoring
     fs.copyFileSync(bakPath, customModelsPath);
     invalidateConfigCache();
     return { success: true };
   } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to restore backup' };
+    return { success: false, error: err.message || 'Failed to restore backup (invalid JSON format)' };
   }
 });
 

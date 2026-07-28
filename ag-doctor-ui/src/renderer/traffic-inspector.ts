@@ -25,6 +25,8 @@ export function sanitizePayload(payload?: string): string {
   return payload
     .replace(/(sk-[a-zA-Z0-9_-]{6})[a-zA-Z0-9_-]+/g, '$1...[REDACTED]')
     .replace(/(gai-[a-zA-Z0-9_-]{6})[a-zA-Z0-9_-]+/g, '$1...[REDACTED]')
+    .replace(/(AIzaSy[a-zA-Z0-9_-]{6})[a-zA-Z0-9_-]+/g, '$1...[REDACTED]')
+    .replace(/("x-api-key"\s*:\s*")[^"]+(")/gi, '$1[REDACTED]$2')
     .replace(/("apiKey"\s*:\s*")[^"]+(")/gi, '$1enc:redacted...$2')
     .replace(/("api-key"\s*:\s*")[^"]+(")/gi, '$1enc:redacted...$2')
     .replace(/("authorization"\s*:\s*"Bearer\s+)[^"]+(")/gi, '$1[REDACTED]$2');

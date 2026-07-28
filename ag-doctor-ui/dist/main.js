@@ -929,12 +929,14 @@ electron_1.ipcMain.handle('ag:config:restore-backup', async () => {
         if (!fs_1.default.existsSync(bakPath)) {
             return { success: false, error: 'No backup file (.bak) found' };
         }
+        const content = fs_1.default.readFileSync(bakPath, 'utf8');
+        JSON.parse(content); // Validate JSON before restoring
         fs_1.default.copyFileSync(bakPath, customModelsPath);
         invalidateConfigCache();
         return { success: true };
     }
     catch (err) {
-        return { success: false, error: err.message || 'Failed to restore backup' };
+        return { success: false, error: err.message || 'Failed to restore backup (invalid JSON format)' };
     }
 });
 // Snapshot of the proxy-error ring buffer (read-only, most-recent first).
