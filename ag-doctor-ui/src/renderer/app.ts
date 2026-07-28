@@ -321,7 +321,6 @@ function iconForObjective(state: 'pending' | 'ok' | 'warn' | 'error'): string {
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel);
   if (!el) {
-    console.warn(`[ag-doctor] Missing element: ${sel}`);
     return document.createElement('div') as unknown as T;
   }
   return el;
@@ -2908,12 +2907,62 @@ $('#pmFormBack3')?.addEventListener('click', async () => {
   await renderProviderList();
 });
 $('#pmFormSave2')?.addEventListener('click', () => pmFormSave.click());
-pmBackdrop.addEventListener('click', (e) => {
-  if (e.target === pmBackdrop) closeProviderManagerModal();
+// Quick Presets listeners for Provider Manager
+$('#presetOllama')?.addEventListener('click', () => {
+  pmFormName.value = 'Ollama (Local)';
+  pmFormType.value = 'custom';
+  pmFormUrl.value = 'http://localhost:11434/v1';
+  pmFormKey.value = 'ollama';
 });
-document.addEventListener('keydown', (e: KeyboardEvent) => {
-  if (e.key === 'Escape' && !pmBackdrop.hidden) {
-    closeProviderManagerModal();
+$('#presetLMStudio')?.addEventListener('click', () => {
+  pmFormName.value = 'LM Studio (Local)';
+  pmFormType.value = 'openai';
+  pmFormUrl.value = 'http://localhost:1234/v1';
+  pmFormKey.value = 'lm-studio';
+});
+$('#presetOpenRouter')?.addEventListener('click', () => {
+  pmFormName.value = 'OpenRouter AI';
+  pmFormType.value = 'openai';
+  pmFormUrl.value = 'https://openrouter.ai/api/v1';
+  pmFormKey.value = '';
+});
+$('#presetLocalAI')?.addEventListener('click', () => {
+  pmFormName.value = 'LocalAI';
+  pmFormType.value = 'custom';
+  pmFormUrl.value = 'http://localhost:8000/v1';
+  pmFormKey.value = '';
+});
+
+// Test connection button handler
+const pmFormTestBtn = $('#pmFormTest') as HTMLButtonElement;
+pmFormTestBtn?.addEventListener('click', async () => {
+  const apiUrl = pmFormUrl.value.trim();
+  const apiKey = pmFormKey.value.trim();
+  if (!apiUrl) {
+    pmFormError.textContent = 'API URL is required to test connection';
+    pmFormError.style.display = 'block';
+    return;
+  }
+  pmFormError.style.display = 'none';
+  const origText = pmFormTestBtn.textContent;
+  pmFormTestBtn.setAttribute('disabled', 'true');
+  pmFormTestBtn.textContent = 'Testing…';
+
+  try {
+    const res = await window.ag.providers.test({ apiUrl, apiKey, id: editingProviderId ?? undefined });
+    if (res.success) {
+      toast(`Connection successful (${res.status ?? 200})`, 'ok');
+    } else {
+      pmFormError.textContent = `Connection failed: ${res.error ?? 'Unreachable'}`;
+      pmFormError.style.display = 'block';
+      toast(`Connection failed: ${res.error ?? 'Unreachable'}`, 'err');
+    }
+  } catch (err) {
+    pmFormError.textContent = `Test error: ${(err as Error).message}`;
+    pmFormError.style.display = 'block';
+  } finally {
+    pmFormTestBtn.removeAttribute('disabled');
+    pmFormTestBtn.textContent = origText;
   }
 });
 

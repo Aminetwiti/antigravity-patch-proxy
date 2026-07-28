@@ -95,7 +95,7 @@ export interface ProbeOptions {
 
 /** Build auth headers for a provider/apiKey pair. Returns empty for encrypted keys. */
 export function authHeaders(provider: string | undefined, apiKey: string | undefined): Record<string, string> {
-  if (!apiKey || apiKey === 'none' || apiKey.startsWith('enc:')) return {};
+  if (!apiKey || apiKey.startsWith('enc:')) return {};
   if (provider === 'anthropic') {
     return { 'x-api-key': apiKey, 'anthropic-version': '2025-04-01' };
   }

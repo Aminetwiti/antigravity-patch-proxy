@@ -65,9 +65,8 @@ describe('classifyError', () => {
 });
 
 describe('authHeaders', () => {
-  it('returns empty for missing, "none", or encrypted keys', () => {
+  it('returns empty for missing or encrypted keys', () => {
     expect(authHeaders('openai', undefined)).toEqual({});
-    expect(authHeaders('openai', 'none')).toEqual({});
     expect(authHeaders('openai', 'enc:vaultblob')).toEqual({});
     expect(authHeaders('openai', '')).toEqual({});
   });

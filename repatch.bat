@@ -61,6 +61,12 @@ if exist "%AG_ASAR%.bak" (
   copy /Y "%AG_ASAR%" "%AG_ASAR%.bak" >nul
   echo   Backup created: %AG_ASAR%.bak
 )
+if exist "%AG_ASAR%.unpacked" (
+  if not exist "%AG_ASAR%.bak.unpacked" (
+    xcopy /E /I /H /Y "%AG_ASAR%.unpacked" "%AG_ASAR%.bak.unpacked" >nul
+    echo   Backup created: %AG_ASAR%.bak.unpacked
+  )
+)
 
 node "%SCRIPT_DIR%scripts\patch-version.js" "%AG_ASAR%.bak" "%STAGING_DIR%" "%AG_ASAR%"
 if errorlevel 1 (

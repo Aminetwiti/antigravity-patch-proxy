@@ -114,7 +114,6 @@ function iconForObjective(state) {
 const $ = (sel) => {
     const el = document.querySelector(sel);
     if (!el) {
-        console.warn(`[ag-doctor] Missing element: ${sel}`);
         return document.createElement('div');
     }
     return el;
@@ -1470,18 +1469,17 @@ let logsFlushScheduled = false;
 const flushLogs = () => {
     logsFlushScheduled = false;
     if (logsPendingChunk) {
-        // Append as text (no HTML parsing needed for ANSI-stripped output).
-        logsOutput.insertAdjacentText('beforeend', logsPendingChunk);
+        logsTpl.innerHTML = ansiToHtml(logsPendingChunk);
+        logsOutput.appendChild(logsTpl.content.cloneNode(true));
         logsPendingChunk = null;
     }
-    // Bound the DOM: when the rendered text grows past the cap, drop the
-    // oldest content while keeping the latest keep-window.
+    const isNearBottom = logsOutput.scrollHeight - logsOutput.scrollTop - logsOutput.clientHeight < 100;
     if (logsOutput.textContent && logsOutput.textContent.length > LOGS_MAX_BYTES) {
         const trimmed = logsOutput.textContent.slice(-LOGS_KEEP_BYTES);
         logsOutput.textContent = trimmed;
         logsOutput.scrollTop = logsOutput.scrollHeight;
     }
-    else {
+    else if (isNearBottom) {
         logsOutput.scrollTop = logsOutput.scrollHeight;
     }
 };
@@ -1504,6 +1502,7 @@ async function loadLogs() {
         const r = await window.ag.run(['logs', '-n', '100', '--source', currentLogSource]);
         logsTpl.innerHTML = ansiToHtml(r.stdout || r.stderr || '(empty)');
         logsOutput.replaceChildren(logsTpl.content);
+        logsOutput.scrollTop = logsOutput.scrollHeight;
         setStatus('Ready');
     }
     catch (e) {
@@ -1523,14 +1522,10 @@ async function startLogStream() {
     setStatus('Streaming logs…', 'busy');
     logsStreamId = `logs-${Date.now()}`;
     window.ag.onStreamData(logsStreamId, (chunk) => {
-        // PERF: accumulate RAW chunks and run ansiToHtml exactly once per flush.
-        // The previous code called ansiToHtml on every chunk (N regex passes
-        // per flush window when chunks arrive in quick bursts).
         logsPendingChunk = (logsPendingChunk ?? '') + chunk;
         scheduleLogsFlush();
     });
     window.ag.onStreamClose(logsStreamId, (code) => {
-        // Flush any pending chunks before signaling closure
         flushLogs();
         logsStreaming = false;
         logsFollowBtn.innerHTML = '<span class="dot-live"></span> Follow';
@@ -1539,9 +1534,9 @@ async function startLogStream() {
     window.ag.onStreamError(logsStreamId, (err) => {
         flushLogs();
         toast(`Stream error: ${err}`, 'err');
-        stopLogStream();
+        void stopLogStream();
     });
-    await window.ag.startStream(['logs', '-f'], logsStreamId);
+    await window.ag.startStream(['logs', '-f', '--source', currentLogSource], logsStreamId);
 }
 async function stopLogStream() {
     if (logsStreamId) {
@@ -1560,9 +1555,13 @@ logsFollowBtn.addEventListener('click', () => {
 });
 logsClearBtn.addEventListener('click', () => {
     logsOutput.textContent = '';
+    toast('Logs cleared', 'info', 1500);
 });
 logsCopyBtn.addEventListener('click', async () => {
     await navigator.clipboard.writeText(logsOutput.textContent ?? '');
+    const origText = logsCopyBtn.innerHTML;
+    logsCopyBtn.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Copied!';
+    setTimeout(() => { logsCopyBtn.innerHTML = origText; }, 2000);
     toast('Logs copied to clipboard', 'ok', 2000);
 });
 // Logs tabs: switch between log sources
@@ -1579,7 +1578,12 @@ logsTabs.forEach((tab) => {
             t.setAttribute('aria-selected', isActive ? 'true' : 'false');
         });
         currentLogSource = source;
-        void loadLogs();
+        if (logsStreaming) {
+            void stopLogStream().then(() => void startLogStream());
+        }
+        else {
+            void loadLogs();
+        }
     });
 });
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2491,13 +2495,63 @@ $('#pmFormBack3')?.addEventListener('click', async () => {
     await renderProviderList();
 });
 $('#pmFormSave2')?.addEventListener('click', () => pmFormSave.click());
-pmBackdrop.addEventListener('click', (e) => {
-    if (e.target === pmBackdrop)
-        closeProviderManagerModal();
+// Quick Presets listeners for Provider Manager
+$('#presetOllama')?.addEventListener('click', () => {
+    pmFormName.value = 'Ollama (Local)';
+    pmFormType.value = 'custom';
+    pmFormUrl.value = 'http://localhost:11434/v1';
+    pmFormKey.value = 'ollama';
 });
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !pmBackdrop.hidden) {
-        closeProviderManagerModal();
+$('#presetLMStudio')?.addEventListener('click', () => {
+    pmFormName.value = 'LM Studio (Local)';
+    pmFormType.value = 'openai';
+    pmFormUrl.value = 'http://localhost:1234/v1';
+    pmFormKey.value = 'lm-studio';
+});
+$('#presetOpenRouter')?.addEventListener('click', () => {
+    pmFormName.value = 'OpenRouter AI';
+    pmFormType.value = 'openai';
+    pmFormUrl.value = 'https://openrouter.ai/api/v1';
+    pmFormKey.value = '';
+});
+$('#presetLocalAI')?.addEventListener('click', () => {
+    pmFormName.value = 'LocalAI';
+    pmFormType.value = 'custom';
+    pmFormUrl.value = 'http://localhost:8000/v1';
+    pmFormKey.value = '';
+});
+// Test connection button handler
+const pmFormTestBtn = $('#pmFormTest');
+pmFormTestBtn?.addEventListener('click', async () => {
+    const apiUrl = pmFormUrl.value.trim();
+    const apiKey = pmFormKey.value.trim();
+    if (!apiUrl) {
+        pmFormError.textContent = 'API URL is required to test connection';
+        pmFormError.style.display = 'block';
+        return;
+    }
+    pmFormError.style.display = 'none';
+    const origText = pmFormTestBtn.textContent;
+    pmFormTestBtn.setAttribute('disabled', 'true');
+    pmFormTestBtn.textContent = 'Testing…';
+    try {
+        const res = await window.ag.providers.test({ apiUrl, apiKey, id: editingProviderId ?? undefined });
+        if (res.success) {
+            toast(`Connection successful (${res.status ?? 200})`, 'ok');
+        }
+        else {
+            pmFormError.textContent = `Connection failed: ${res.error ?? 'Unreachable'}`;
+            pmFormError.style.display = 'block';
+            toast(`Connection failed: ${res.error ?? 'Unreachable'}`, 'err');
+        }
+    }
+    catch (err) {
+        pmFormError.textContent = `Test error: ${err.message}`;
+        pmFormError.style.display = 'block';
+    }
+    finally {
+        pmFormTestBtn.removeAttribute('disabled');
+        pmFormTestBtn.textContent = origText;
     }
 });
 pmFormSave.addEventListener('click', async () => {

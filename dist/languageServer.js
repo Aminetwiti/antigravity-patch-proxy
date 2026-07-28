@@ -210,7 +210,13 @@ function startLanguageServer(port, csrf, headless) {
     return new Promise(async (resolve, reject) => {
         electron_log_1.default.info('[LS] Cleaning up any zombie processes before startup...');
         await killZombieLanguageServers();
-        const logStream = fs.createWriteStream((0, paths_1.getLsLogPath)(), { flags: 'w' });
+        const logPath = (0, paths_1.getLsLogPath)();
+        try {
+            fs.mkdirSync(path_1.default.dirname(logPath), { recursive: true });
+        }
+        catch { /* ignore if exists */ }
+        const logStream = fs.createWriteStream(logPath, { flags: 'w' });
+        logStream.on('error', (err) => electron_log_1.default.error('[LS] Log stream error:', err));
         let proxyPort;
         try {
             electron_log_1.default.info('[LS] before startProxy');

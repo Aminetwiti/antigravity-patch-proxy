@@ -12,12 +12,12 @@ import path from 'path';
 
 let tmpHome: string;
 
-beforeEach(() => {
+beforeEach(async () => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-doctor-cfg-'));
-  // The config module reads from getAntigravityDataDir() → ~/.gemini/antigravity
-  // Override by pointing HOME at our tmp dir.
   process.env.HOME = tmpHome;
   process.env.USERPROFILE = tmpHome;
+  const { setPatchVersionOverride } = await import('./config');
+  setPatchVersionOverride(null);
 });
 
 afterEach(() => {

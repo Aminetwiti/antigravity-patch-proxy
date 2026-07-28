@@ -66,7 +66,10 @@ export function loadCustomModels(filePath?: string): CustomModelsFile {
     const parsed = JSON.parse(raw);
     if (!parsed) return { models: [] };
 
-    const models: CustomModel[] = Array.isArray(parsed.models) ? [...parsed.models] : [];
+    const models: CustomModel[] = [];
+    // ponytail: track keys we've seen from providers to avoid duplicates
+    // when models[] and providers[] both contain the same model
+    const seen = new Set<string>();
 
     if (Array.isArray(parsed.providers)) {
       for (const p of parsed.providers) {
@@ -75,15 +78,28 @@ export function loadCustomModels(filePath?: string): CustomModelsFile {
         for (const m of pModels) {
           if (!m || m.enabled === false) continue;
           const name = m.id?.startsWith('models/') ? m.id : `models/${m.id ?? ''}`;
-          models.push({
+          const model: CustomModel = {
             name,
             displayName: m.displayName || m.id || name,
             provider: p.provider || 'openai',
-            apiKey: p.apiKey || 'none',
+            apiKey: p.apiKey || '',
             apiUrl: p.apiUrl || '',
             externalModelName: m.id || '',
             allowUnauthorized: p.allowUnauthorized,
-          });
+          };
+          models.push(model);
+          seen.add(modelKey(model));
+        }
+      }
+    }
+
+    // Legacy models — only add if not already covered by a provider
+    if (Array.isArray(parsed.models)) {
+      for (const m of parsed.models) {
+        const key = modelKey(m);
+        if (!seen.has(key)) {
+          models.push(m);
+          seen.add(key);
         }
       }
     }
@@ -102,7 +118,16 @@ export function saveCustomModels(
 ): void {
   const fp = filePath ?? getCustomModelsPath();
   fs.mkdirSync(path.dirname(fp), { recursive: true });
-  fs.writeFileSync(fp, JSON.stringify(file, null, 2), 'utf-8');
+
+  // Preserve the providers array (written by the UI) — only update models.
+  let existing: Record<string, unknown> = {};
+  try {
+    const raw = fs.readFileSync(fp, 'utf-8').replace(/^\uFEFF/, '');
+    existing = JSON.parse(raw) ?? {};
+  } catch { /* new file or corrupt — start fresh */ }
+
+  existing.models = file.models;
+  fs.writeFileSync(fp, JSON.stringify(existing, null, 2), 'utf-8');
 }
 
 /**

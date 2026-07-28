@@ -309,6 +309,16 @@ async function main() {
   console.log('[patch_2_3] step 1/4 — extract');
   rimraf(buildDir);
   ensureDir(buildDir);
+
+  const unpackedForIn = `${asarIn}.unpacked`;
+  if (!fs.existsSync(unpackedForIn)) {
+    const primaryUnpacked = path.join(path.dirname(asarIn), 'app.asar.unpacked');
+    if (fs.existsSync(primaryUnpacked)) {
+      fs.cpSync(primaryUnpacked, unpackedForIn, { recursive: true });
+      console.log(`[patch_2_3] synced ${primaryUnpacked} -> ${unpackedForIn}`);
+    }
+  }
+
   asar.extractAll(asarIn, buildDir);
 
   // Step 2: inject the 25 missing JS modules

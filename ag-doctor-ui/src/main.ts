@@ -16,7 +16,6 @@ import fs from 'fs';
 import { getProxyManager } from './proxy-manager';
 
 const isDev = !app.isPackaged;
-const isProd = !isDev;
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 const activeStreams = new Map<string, ChildProcess>();
@@ -109,20 +108,6 @@ function getTrayIcon(status: 'ok' | 'warn' | 'err'): NativeImage {
   return img;
 }
 
-function readUiTheme(): 'dark' | 'light' {
-  try {
-    const raw = fs.readFileSync(getConfigPath(), 'utf-8');
-    const cfg = JSON.parse(raw);
-    return cfg?.ui?.theme === 'light' ? 'light' : 'dark';
-  } catch {
-    return 'dark';
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Cached IPC payloads — eliminate redundant disk reads and object construction
-// ─────────────────────────────────────────────────────────────────────────────
-
 // `info` is static for the session lifetime (platform/versions/CLI path don't change)
 const infoCache = {
   platform: process.platform,
@@ -131,7 +116,7 @@ const infoCache = {
   electron: process.versions.electron,
   node: process.versions.node,
   chrome: process.versions.chrome,
-  cliPath: '' as string, // populated lazily by getCliPath()
+  cliPath: '' as string,
 };
 let infoCacheReady = false;
 function getInfoPayload() {
@@ -154,6 +139,7 @@ function getConfigPayload(): Record<string, unknown> {
   }
   return configCache;
 }
+
 function invalidateConfigCache(): void {
   configCache = null;
 }
@@ -263,7 +249,7 @@ function createWindow(): void {
 
   // Only forward console messages in dev mode (saves IPC overhead in prod)
   if (isDev) {
-    mainWindow.webContents.on('console-message', (_e, level, message) => {
+    mainWindow.webContents.on('console-message', (_e, _level, message) => {
       console.log(`[renderer] ${message}`);
     });
   }

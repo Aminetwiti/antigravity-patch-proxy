@@ -20,7 +20,6 @@ const child_process_1 = require("child_process");
 const fs_1 = __importDefault(require("fs"));
 const proxy_manager_1 = require("./proxy-manager");
 const isDev = !electron_1.app.isPackaged;
-const isProd = !isDev;
 let mainWindow = null;
 let tray = null;
 const activeStreams = new Map();
@@ -106,19 +105,6 @@ function getTrayIcon(status) {
     trayIconCache.set(status, img);
     return img;
 }
-function readUiTheme() {
-    try {
-        const raw = fs_1.default.readFileSync(getConfigPath(), 'utf-8');
-        const cfg = JSON.parse(raw);
-        return cfg?.ui?.theme === 'light' ? 'light' : 'dark';
-    }
-    catch {
-        return 'dark';
-    }
-}
-// ─────────────────────────────────────────────────────────────────────────────
-// Cached IPC payloads — eliminate redundant disk reads and object construction
-// ─────────────────────────────────────────────────────────────────────────────
 // `info` is static for the session lifetime (platform/versions/CLI path don't change)
 const infoCache = {
     platform: process.platform,
@@ -127,7 +113,7 @@ const infoCache = {
     electron: process.versions.electron,
     node: process.versions.node,
     chrome: process.versions.chrome,
-    cliPath: '', // populated lazily by getCliPath()
+    cliPath: '',
 };
 let infoCacheReady = false;
 function getInfoPayload() {
@@ -254,7 +240,7 @@ function createWindow() {
     });
     // Only forward console messages in dev mode (saves IPC overhead in prod)
     if (isDev) {
-        mainWindow.webContents.on('console-message', (_e, level, message) => {
+        mainWindow.webContents.on('console-message', (_e, _level, message) => {
             console.log(`[renderer] ${message}`);
         });
     }

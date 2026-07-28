@@ -35,6 +35,16 @@ if (!fs.existsSync(actualAsarIn)) {
   process.exit(1);
 }
 
+// Ensure .unpacked folder exists for actualAsarIn if app.asar.unpacked exists
+const unpackedForIn = `${actualAsarIn}.unpacked`;
+if (!fs.existsSync(unpackedForIn)) {
+  const primaryUnpacked = path.join(path.dirname(actualAsarIn), 'app.asar.unpacked');
+  if (fs.existsSync(primaryUnpacked)) {
+    fs.cpSync(primaryUnpacked, unpackedForIn, { recursive: true });
+    console.log(`[patch-version] synced ${primaryUnpacked} -> ${unpackedForIn}`);
+  }
+}
+
 console.log(`[patch-version] reading ${actualAsarIn} ...`);
 
 // Extract to a temp dir to read package.json
@@ -65,9 +75,9 @@ console.log(`[patch-version] detected Antigravity version: ${version}`);
 const scriptsDir = __dirname;
 let targetScript;
 let exitCode = 0;
-if (version.startsWith('2.3.')) {
+if (version.startsWith('2.3.') || version.startsWith('2.4.') || /^2\.[3-9]\./.test(version)) {
   targetScript = path.join(scriptsDir, 'patch_2_3.js');
-  console.log(`[patch-version] dispatching to patch_2_3.js (full overlay + 25 modules + 5 overwrites)`);
+  console.log(`[patch-version] dispatching to patch_2_3.js (full overlay + modular JS modules) for Antigravity ${version}`);
 } else if (version.startsWith('2.2.')) {
   targetScript = path.join(scriptsDir, 'patch_2_2_1.js');
   console.log(`[patch-version] dispatching to patch_2_2_1.js (3 missing modules)`);
@@ -77,8 +87,8 @@ if (version.startsWith('2.3.')) {
   process.exit(1);
 } else {
   console.error(`[patch-version] Unsupported Antigravity version: ${version}`);
-  console.error('  Known versions: 2.0.x, 2.1.x, 2.2.x, 2.3.x');
-  console.error('  Update scripts/patch-version.js + create a new patch_<version>.js.');
+  console.error('  Known versions: 2.0.x, 2.1.x, 2.2.x, 2.3.x, 2.4.x');
+  console.error('  Update scripts/patch-version.js + create a new patch_<version>.js if needed.');
   process.exit(1);
 }
 
