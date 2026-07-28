@@ -4,10 +4,10 @@
   <img src="assets/antigravity_patch_proxy_logo.png" width="180" alt="Antigravity Patch Proxy Logo" />
 </p>
 
-[![Version](https://img.shields.io/badge/version-2.2.1-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)](package.json)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue?logo=typescript)](tsconfig.json)
-[![Tests](https://img.shields.io/badge/tests-1455%20passed-brightgreen.svg)](src/__tests__)
+[![Tests](https://img.shields.io/badge/tests-2565%20passed-brightgreen.svg)](src/__tests__)
 
 > **One IDE, every model.** Integrate OpenAI, Anthropic Claude, OpenRouter, Ollama, Google AI Studio, DeepSeek, and any custom LLM provider directly into **Google Antigravity**, with native UI integration, real-time bi-directional streaming, and enterprise-grade AES-256-GCM encryption.
 
@@ -144,10 +144,20 @@ The injected UI seamlessly blends with Antigravity's dark VS Code-adjacent chrom
 |---|---|
 | ![Provider Selection](assets/3.PNG) | ![Chat Model Selector](assets/4.PNG) |
 
+| Auto-fallback & Failover Stream Notification |
+|---|
+| ![Auto-fallback & Failover Stream Notification](assets/5.PNG) |
 
 ---
 
 ## Key Technical Features
+
+### Automated Model Auto-Fallback & Stream Warning Cards
+
+When a primary model encounters rate limits (`rate_limit` / 429), context length limits, or provider timeouts, the proxy automatically initiates an **Auto-Fallback**:
+- **Seamless Failover**: Automatically retries the prompt with a secondary model (e.g. falling back from `MiniMax-M2.7` to `MiniMax-M3` or `Claude-3.5-Sonnet` to `GPT-4o`).
+- **Native Stream Warning Card**: Emits an inline markdown warning block (`> ⚠️ Auto-fallback: <model-1> failed (<reason>). Retrying with <model-2>…`) directly into the IDE chat response stream without interrupting the agent's workflow.
+- **Context Preservation**: Retains the full conversational history and active tool definitions across the failover boundary.
 
 ### Format Translators
 

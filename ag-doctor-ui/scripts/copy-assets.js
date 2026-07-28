@@ -16,6 +16,19 @@ function shouldCopy(filename) {
   return COPY_EXT.has(path.extname(filename).toLowerCase());
 }
 
+function safeCopyFileSync(s, d) {
+  try {
+    fs.copyFileSync(s, d);
+  } catch {
+    try {
+      const data = fs.readFileSync(s);
+      fs.writeFileSync(d, data);
+    } catch (e2) {
+      console.warn(`Warning: Could not copy ${s} to ${d}: ${e2.message || String(e2)}`);
+    }
+  }
+}
+
 function copyRecursive(src, dst) {
   if (!fs.existsSync(src)) return;
   fs.mkdirSync(dst, { recursive: true });
@@ -24,7 +37,7 @@ function copyRecursive(src, dst) {
     const s = path.join(src, entry.name);
     const d = path.join(dst, entry.name);
     if (entry.isDirectory()) copyRecursive(s, d);
-    else fs.copyFileSync(s, d);
+    else safeCopyFileSync(s, d);
   }
 }
 
@@ -33,11 +46,14 @@ copyRecursive(SRC, DST);
 // Copy top-level assets (icons, tray icons)
 const ASSETS_SRC = path.join(ROOT, 'assets');
 const ASSETS_DST = path.join(ROOT, 'dist', 'assets');
+const RENDERER_ASSETS_DST = path.join(ROOT, 'dist', 'renderer', 'assets');
 if (fs.existsSync(ASSETS_SRC)) {
   fs.mkdirSync(ASSETS_DST, { recursive: true });
+  fs.mkdirSync(RENDERER_ASSETS_DST, { recursive: true });
   for (const entry of fs.readdirSync(ASSETS_SRC, { withFileTypes: true })) {
     if (!shouldCopy(entry.name)) continue;
-    fs.copyFileSync(path.join(ASSETS_SRC, entry.name), path.join(ASSETS_DST, entry.name));
+    safeCopyFileSync(path.join(ASSETS_SRC, entry.name), path.join(ASSETS_DST, entry.name));
+    safeCopyFileSync(path.join(ASSETS_SRC, entry.name), path.join(RENDERER_ASSETS_DST, entry.name));
   }
 }
 

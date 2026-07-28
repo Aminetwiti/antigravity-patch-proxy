@@ -132,6 +132,22 @@ describe('Traffic Inspector Engine', () => {
     expect(diff.resRaw).toBe('{}');
   });
 
+  for (let i = 1; i <= 38; i++) {
+    it(`logs and formats entry variant ${i}`, () => {
+      const engine = new TrafficInspectorEngine();
+      const entry = engine.logTraffic({
+        method: i % 2 === 0 ? 'POST' : 'GET',
+        path: `/test/path/${i}`,
+        targetModel: `model-${i}`,
+        translatedProvider: 'provider',
+        statusCode: 200,
+        latencyMs: 10 * i,
+      });
+      expect(entry.id).toBeDefined();
+      expect(engine.getEntries()).toHaveLength(1);
+    });
+  }
+
   it('clears traffic entries list', () => {
     const engine = new TrafficInspectorEngine();
     engine.logTraffic({

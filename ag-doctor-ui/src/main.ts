@@ -981,6 +981,21 @@ ipcMain.handle('ag:config:set-notify', async (_evt, enabled: boolean) => {
   }
 });
 
+ipcMain.handle('ag:config:restore-backup', async () => {
+  try {
+    const customModelsPath = path.join(app.getPath('home'), '.gemini', 'antigravity', 'custom_models.json');
+    const bakPath = `${customModelsPath}.bak`;
+    if (!fs.existsSync(bakPath)) {
+      return { success: false, error: 'No backup file (.bak) found' };
+    }
+    fs.copyFileSync(bakPath, customModelsPath);
+    invalidateConfigCache();
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to restore backup' };
+  }
+});
+
 // Snapshot of the proxy-error ring buffer (read-only, most-recent first).
 ipcMain.handle('ag:proxy-error-history', async () => {
   return proxyErrorHistory.slice().reverse();

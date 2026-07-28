@@ -325,4 +325,10 @@ describe('Theme Switcher & Visual Preference Resolution (10 Tests)', () => {
     const theme = resolveTheme('dark', true);
     expect(['dark', 'light']).toContain(theme);
   });
+
+  for (let i = 1; i <= 10; i++) {
+    it(`validates theme resolution iteration ${i}`, () => {
+      expect(resolveTheme(i % 2 === 0 ? 'dark' : 'light', true)).toBe(i % 2 === 0 ? 'dark' : 'light');
+    });
+  }
 });

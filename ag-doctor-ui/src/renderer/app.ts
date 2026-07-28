@@ -472,6 +472,8 @@ function confirmModal(title: string, body: string, opts?: ConfirmModalOpts): Pro
 // ─────────────────────────────────────────────────────────────────────────────
 
 const navItems = $$<HTMLButtonElement>('.nav-item');
+const views = $$<HTMLDivElement>('.view');
+
 function loadFailures(): void {
   const w = window as unknown as { AgFailureShowcase?: { renderFailureScenariosShowcase: (s?: string) => number; wireShowcaseAutoRender: () => void } };
   if (w.AgFailureShowcase?.wireShowcaseAutoRender) {
@@ -492,7 +494,7 @@ function navigate(viewName: string): void {
   if (viewName === 'logs') void loadLogs();
   if (viewName === 'mitm') void loadMitmStatus();
   if (viewName === 'settings') void loadSettings();
-  if (viewName === 'antigravity') void loadAntigravity();
+  if (viewName === 'antigravity') void loadAntigravityStatus();
   if (viewName === 'traffic') void loadTraffic();
   if (viewName === 'failures') loadFailures();
 }
@@ -1152,7 +1154,10 @@ async function loadModels(): Promise<void> {
             <div class="model-card">
               <div class="model-avatar">${escapeHtml(initials)}</div>
               <div class="model-body">
-                <div class="model-name">${escapeHtml(m.displayName ?? m.name)}</div>
+                <div class="model-name">
+                  <span class="status-dot" id="status-dot-${escapeHtml(m.name)}"></span>
+                  ${escapeHtml(m.displayName ?? m.name)}
+                </div>
                 <div class="model-meta">
                   <code>${escapeHtml(m.name)}</code> · ${escapeHtml(m.provider)} · ${escapeHtml(m.externalModelName)}
                 </div>
@@ -2259,13 +2264,14 @@ function startUptimeTicker(): void {
     agUptimeTimer = null;
   }
   agStartedAt = Date.now();
-  agUptimeTimer = window.setInterval(() => {
+agUptimeTimer = window.setInterval(() => {
     if (agStartedAt) agUptime.textContent = formatUptime(Date.now() - agStartedAt);
   }, 1000);
 }
 
 // Reusable template for paths — avoids creating a new <template> each render
 const pathsTpl = document.createElement('template');
+
 
 function renderPaths(paths: Array<[string, string]>): void {
   const html = paths
@@ -2285,11 +2291,10 @@ function renderPaths(paths: Array<[string, string]>): void {
       </div>
     `).join('');
   pathsTpl.innerHTML = html;
-  agPaths.replaceChildren(pathsTpl.content);
 }
 
 // Event delegation for path actions
-agPaths.addEventListener('click', async (e) => {
+$('#agPaths')?.addEventListener('click', async (e) => {
   const target = e.target as HTMLElement;
   const copyBtn = target.closest<HTMLElement>('[data-copy]');
   if (copyBtn) {
@@ -2803,7 +2808,46 @@ interface AntigravityStatus {
   appAsar: string | null;
   appAsarPath: string | null;
   binaryPath: string | null;
-  custconst pmBackdrop = $('#providerManagerModalBackdrop') as HTMLDivElement;
+  customModelsPath: string | null;
+  lsLogPath: string | null;
+  version: string | null;
+  versionInfo: AntigravityVersionInfo | null;
+  displayName: string | null;
+  running: boolean;
+  pid: number | null;
+  pids: number[];
+  languageServerRunning: boolean;
+  languageServerPids: number[];
+  proxyPort: number;
+  proxyReachable: boolean;
+  username?: string;
+  homedir?: string;
+  cpu?: string;
+  memory?: string;
+}
+
+interface ProviderModel {
+  id: string;
+  displayName?: string;
+  enabled: boolean;
+}
+
+interface ProviderEntry {
+  id: string;
+  name: string;
+  provider: string;
+  apiUrl: string;
+  apiKey: string;
+  enabled: boolean;
+  allowUnauthorized?: boolean;
+  models: ProviderModel[];
+  status?: 'healthy' | 'degraded' | 'offline' | 'untested';
+  latencyMs?: number;
+  lastTestedAt?: string;
+  lastError?: string;
+}
+
+const pmBackdrop = $('#providerManagerModalBackdrop') as HTMLDivElement;
 const pmClose = $('#providerManagerModalClose') as HTMLButtonElement;
 const pmListContainer = $('#pmListContainer') as HTMLDivElement;
 const pmFormContainer = $('#pmFormContainer') as HTMLDivElement;
@@ -3311,256 +3355,6 @@ $('#providerManagerBtn')?.addEventListener('click', openProviderManagerModal);
 $('#emptyAddModelBtn')?.addEventListener('click', openProviderManagerModal);
 
 // Real-time synchronization listener: re-render provider list whenever custom_models.json changes
-window.ag.providers.onChanged(() => {
-  void renderProviderList();
-});
-lse {
-          p.status = r.healthStatus ?? 'offline';
-          p.latencyMs = r.latencyMs;
-          p.lastError = r.error;
-          toast(`Failed: ${r.error || r.status}`, 'err', 6000);
-          handleProviderError(r.error || `HTTP ${r.status}`, r.status, p);
-        }
-        await renderProviderList();
-      } catch (err) {
-        const errorMsg = (err as Error).message;
-        toast(`Test error: ${errorMsg}`, 'err');
-        handleProviderError(errorMsg, undefined, p);
-      } finally {
-        btn.removeAttribute('disabled');
-        btn.innerHTML = orig;
-      }
-    });
-  });
-
-  pmListContainer.querySelectorAll<HTMLButtonElement>('.pm-toggle').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
-      const row = (e.currentTarget as HTMLElement).closest('.agy-provider-row') as HTMLElement;
-      const id = row.dataset.id!;
-      const p = providersCache.find((x) => x.id === id);
-      if (!p) return;
-      p.enabled = !p.enabled;
-      const r = (await window.ag.providers.save(p)) as { success: boolean; error?: string };
-      if (r.success) {
-        toast(p.enabled ? 'Provider enabled' : 'Provider disabled', 'ok');
-        await renderProviderList();
-      } else {
-        toast(`Save failed: ${r.error}`, 'err');
-        p.enabled = !p.enabled; // revert
-      }
-    });
-  });
-
-  pmListContainer.querySelectorAll<HTMLButtonElement>('.pm-edit').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      const row = (e.currentTarget as HTMLElement).closest('.agy-provider-row') as HTMLElement;
-      const id = row.dataset.id!;
-      openProviderForm(id);
-    });
-  });
-
-  pmListContainer.querySelectorAll<HTMLButtonElement>('.pm-delete').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
-      const row = (e.currentTarget as HTMLElement).closest('.agy-provider-row') as HTMLElement;
-      const id = row.dataset.id!;
-      const p = providersCache.find((x) => x.id === id);
-      if (!p) return;
-      const ok = await modals.confirm(
-        'Delete provider?',
-        `Delete <strong>${escapeHtml(p.name)}</strong>? This cannot be undone.`,
-        { danger: true, confirmLabel: 'Delete' },
-      );
-      if (!ok) return;
-      const r = (await window.ag.providers.delete(id)) as { success: boolean; error?: string };
-      if (r.success) {
-        toast('Provider deleted', 'ok');
-        await renderProviderList();
-      } else {
-        toast(`Delete failed: ${r.error}`, 'err');
-      }
-    });
-  });
-}
-
-function resetProviderForm(): void {
-  pmFormName.value = '';
-  pmFormType.value = 'openai';
-  pmFormUrl.value = '';
-  pmFormKey.value = '';
-  pmFormInsecure.checked = false;
-  pmModelsList.innerHTML = '';
-  pmFormError.style.display = 'none';
-  editingProviderId = null;
-}
-
-function openProviderForm(existingId?: string): void {
-  resetProviderForm();
-  if (existingId) {
-    const p = providersCache.find((x) => x.id === existingId);
-    if (!p) return;
-    editingProviderId = existingId;
-    pmFormTitle.textContent = 'Edit provider';
-    pmFormName.value = p.name;
-    pmFormType.value = p.provider;
-    pmFormUrl.value = p.apiUrl;
-    pmFormKey.value = p.apiKey;
-    pmFormInsecure.checked = !!p.allowUnauthorized;
-    if (p.models && p.models.length > 0) {
-      let html = '<div class="agy-model-chips">';
-      for (const m of p.models) {
-        const checked = m.enabled ? 'checked' : '';
-        html += `<label class="agy-chip">
-          <input type="checkbox" data-model-id="${escapeHtml(m.id)}" ${checked} />
-          <span>${escapeHtml(m.displayName || m.id)}</span>
-        </label>`;
-      }
-      html += '</div>';
-      pmModelsList.innerHTML = html;
-    } else {
-      pmModelsList.innerHTML = '<div style="color: var(--text-2); font-size: 12px;">No models loaded. Click "Fetch models" to load the list.</div>';
-    }
-  } else {
-    pmFormTitle.textContent = 'Add provider';
-    pmModelsList.innerHTML = '<div style="color: var(--text-2); font-size: 12px;">Save the provider first, then fetch models to populate the list.</div>';
-  }
-  showPmView('form');
-  setTimeout(() => pmFormName.focus(), 50);
-}
-
-function getSelectedProviderModels(): ProviderModel[] {
-  const checkboxes = pmModelsList.querySelectorAll<HTMLInputElement>('input[type="checkbox"][data-model-id]');
-  const models: ProviderModel[] = [];
-  checkboxes.forEach((cb) => {
-    models.push({ id: cb.dataset.modelId!, displayName: cb.dataset.modelId!, enabled: cb.checked });
-  });
-  return models;
-}
-
-pmAddBtn.addEventListener('click', () => openProviderForm());
-pmFormBack.addEventListener('click', async () => {
-  showPmView('list');
-  await renderProviderList();
-});
-function closeProviderManagerModal(): void {
-  pmBackdrop.hidden = true;
-  pmBackdrop.style.display = 'none';
-}
-
-pmClose.addEventListener('click', closeProviderManagerModal);
-// Quick Presets listeners for Provider Manager
-$('#presetOllama')?.addEventListener('click', () => {
-  pmFormName.value = 'Ollama (Local)';
-  pmFormType.value = 'custom';
-  pmFormUrl.value = 'http://localhost:11434/v1';
-  pmFormKey.value = 'ollama';
-});
-$('#presetLMStudio')?.addEventListener('click', () => {
-  pmFormName.value = 'LM Studio (Local)';
-  pmFormType.value = 'openai';
-  pmFormUrl.value = 'http://localhost:1234/v1';
-  pmFormKey.value = 'lm-studio';
-});
-$('#presetOpenRouter')?.addEventListener('click', () => {
-  pmFormName.value = 'OpenRouter AI';
-  pmFormType.value = 'openai';
-  pmFormUrl.value = 'https://openrouter.ai/api/v1';
-  pmFormKey.value = '';
-});
-$('#presetLocalAI')?.addEventListener('click', () => {
-  pmFormName.value = 'LocalAI';
-  pmFormType.value = 'custom';
-  pmFormUrl.value = 'http://localhost:8000/v1';
-  pmFormKey.value = '';
-});
-
-// Test connection button handler
-const pmFormTestBtn = $('#pmFormTest') as HTMLButtonElement;
-pmFormTestBtn?.addEventListener('click', async () => {
-  const apiUrl = pmFormUrl.value.trim();
-  const apiKey = pmFormKey.value.trim();
-  if (!apiUrl) {
-    pmFormError.textContent = 'API URL is required to test connection';
-    pmFormError.style.display = 'block';
-    return;
-  }
-  pmFormError.style.display = 'none';
-  const origText = pmFormTestBtn.textContent;
-  pmFormTestBtn.setAttribute('disabled', 'true');
-  pmFormTestBtn.textContent = 'Testing…';
-
-  try {
-    const res = await window.ag.providers.test({ apiUrl, apiKey, id: editingProviderId ?? undefined });
-    if (res.success) {
-      toast(`Connection successful (${res.status ?? 200})`, 'ok');
-    } else {
-      pmFormError.textContent = `Connection failed: ${res.error ?? 'Unreachable'}`;
-      pmFormError.style.display = 'block';
-      toast(`Connection failed: ${res.error ?? 'Unreachable'}`, 'err');
-    }
-  } catch (err) {
-    pmFormError.textContent = `Test error: ${(err as Error).message}`;
-    pmFormError.style.display = 'block';
-  } finally {
-    pmFormTestBtn.removeAttribute('disabled');
-    pmFormTestBtn.textContent = origText;
-  }
-});
-
-pmFormSave.addEventListener('click', async () => {
-  const name = pmFormName.value.trim();
-  const provider = pmFormType.value;
-  const apiUrl = pmFormUrl.value.trim();
-  const apiKey = pmFormKey.value.trim();
-
-  if (!name || !provider || !apiUrl) {
-    pmFormError.textContent = 'Name, type and URL are required';
-    pmFormError.style.display = 'block';
-    return;
-  }
-
-  pmFormSave.setAttribute('disabled', 'true');
-  pmFormSave.textContent = 'Savingâ€¦';
-
-  try {
-    const id = editingProviderId ?? `provider-${Date.now()}`;
-    const existing = providersCache.find((x) => x.id === id);
-    const providerEntry: ProviderEntry = {
-      id,
-      name,
-      provider,
-      apiUrl,
-      apiKey,
-      enabled: existing?.enabled ?? true,
-      allowUnauthorized: pmFormInsecure.checked,
-      models: editingProviderId ? getSelectedProviderModels() : (existing?.models ?? [])
-    };
-
-    const r = (await window.ag.providers.save(providerEntry)) as { success: boolean; error?: string };
-    if (!r.success) throw new Error(r.error || 'Save failed');
-
-    toast(editingProviderId ? 'Provider updated' : 'Provider added', 'ok');
-    showPmView('list');
-    await renderProviderList();
-  } catch (err) {
-    pmFormError.textContent = (err as Error).message;
-    pmFormError.style.display = 'block';
-  } finally {
-    pmFormSave.removeAttribute('disabled');
-    pmFormSave.textContent = 'Save provider';
-  }
-});
-
-async function openProviderManagerModal(): Promise<void> {
-  pmBackdrop.hidden = false;
-  pmBackdrop.style.display = 'flex';
-  showPmView('list');
-  await renderProviderList();
-}
-
-$('#modelsAddBtn')?.addEventListener('click', openProviderManagerModal);
-$('#providerManagerBtn')?.addEventListener('click', openProviderManagerModal);
-
-// Real-time synchronization listener: re-render provider list whenever custom_models.json changes
-window.ag.providers.onChanged(() => {
+window.ag?.providers?.onChanged(() => {
   void renderProviderList();
 });

@@ -21,16 +21,7 @@
     <div class="titlebar-drag">
       <div class="brand">
         <div class="brand-mark">
-          <svg viewBox="0 0 32 32" width="14" height="14" aria-hidden="true">
-            <defs>
-              <linearGradient id="ag" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stop-color="#388bfd"/>
-                <stop offset="100%" stop-color="#a371f7"/>
-              </linearGradient>
-            </defs>
-            <path d="M16 3 L27 9 L27 23 L16 29 L5 23 L5 9 Z" fill="url(#ag)"/>
-            <path d="M16 3 L27 9 L27 23 L16 29 L5 23 L5 9 Z" fill="none" stroke="white" stroke-width="0.5" stroke-opacity="0.4"/>
-          </svg>
+          <img src="assets/icon-32.png" width="18" height="18" alt="Logo" style="border-radius:4px; display:block;" />
         </div>
         <div class="brand-text">
           <span class="brand-name">Antigravity Doctor</span>
@@ -52,15 +43,7 @@
     <nav class="sidebar" aria-label="Main navigation">
       <div class="sidebar-brand-row">
         <div class="brand-mark">
-          <svg viewBox="0 0 32 32" width="18" height="18" aria-hidden="true">
-            <defs>
-              <linearGradient id="agSide" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stop-color="#388bfd"/>
-                <stop offset="100%" stop-color="#a371f7"/>
-              </linearGradient>
-            </defs>
-            <path d="M16 3 L27 9 L27 23 L16 29 L5 23 L5 9 Z" fill="url(#agSide)"/>
-          </svg>
+          <img src="assets/icon-64.png" width="24" height="24" alt="Logo" style="border-radius:5px; display:block;" />
         </div>
         <div class="sidebar-brand-text">
           <div class="sidebar-brand-name">Antigravity</div>
@@ -102,11 +85,11 @@
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
             <span>MITM Proxy</span>
           </button></li>
-          <li><button class="nav-item" data-view="traffic" type="button" title="Traffic Inspector">
+          <li style="display:none;"><button class="nav-item" data-view="traffic" type="button" title="Traffic Inspector">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             <span>Traffic Inspector</span>
           </button></li>
-          <li><button class="nav-item" data-view="failures" type="button" title="Failure Scenarios" id="openFailureShowcaseBtn">
+          <li style="display:none;"><button class="nav-item" data-view="failures" type="button" title="Failure Scenarios" id="openFailureShowcaseBtn">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
             <span>Failure Scenarios</span>
           </button></li>
@@ -186,7 +169,7 @@
 
         <div class="home-intro">
           <div class="home-intro-icon">
-            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+            <img src="assets/icon-128.png" width="32" height="32" alt="Logo" style="border-radius:6px; display:block;" />
           </div>
           <div class="home-intro-body">
             <h2>System objectives</h2>
@@ -668,9 +651,10 @@
           </div>
         <div class="panel" style="margin-top:24px">
           <div class="panel-header"><h2>Backup & Restore</h2></div>
-          <div class="panel-body" style="display:flex; gap:12px;">
+          <div class="panel-body" style="display:flex; gap:12px; flex-wrap:wrap;">
             <button class="btn btn-ghost" id="exportProvidersBtn" type="button">Export Providers (.json)</button>
             <button class="btn btn-primary" id="importProvidersBtn" type="button">Import Providers (.json)</button>
+            <button class="btn btn-warning" id="restoreBackupBtn" type="button" title="Restore previous valid custom_models.json configuration from .bak file">Restore Backup (.bak)</button>
           </div>
         </div>
       </div>

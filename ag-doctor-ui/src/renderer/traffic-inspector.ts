@@ -13,8 +13,21 @@ export interface TrafficEntry {
   translatedProvider: string;
   statusCode: number;
   latencyMs: number;
+  timeToFirstTokenMs?: number;
+  totalTokens?: number;
+  tokensPerSec?: number;
   requestPayload?: string;
   responsePayload?: string;
+}
+
+export function sanitizePayload(payload?: string): string {
+  if (!payload) return '{}';
+  return payload
+    .replace(/(sk-[a-zA-Z0-9_-]{6})[a-zA-Z0-9_-]+/g, '$1...[REDACTED]')
+    .replace(/(gai-[a-zA-Z0-9_-]{6})[a-zA-Z0-9_-]+/g, '$1...[REDACTED]')
+    .replace(/("apiKey"\s*:\s*")[^"]+(")/gi, '$1enc:redacted...$2')
+    .replace(/("api-key"\s*:\s*")[^"]+(")/gi, '$1enc:redacted...$2')
+    .replace(/("authorization"\s*:\s*"Bearer\s+)[^"]+(")/gi, '$1[REDACTED]$2');
 }
 
 export class TrafficInspectorEngine {
@@ -22,8 +35,13 @@ export class TrafficInspectorEngine {
   private maxEntries = 200;
 
   public logTraffic(entry: Omit<TrafficEntry, 'id' | 'timestamp'>): TrafficEntry {
+    let tokSec = entry.tokensPerSec;
+    if (!tokSec && entry.totalTokens && entry.latencyMs > 0) {
+      tokSec = Math.round((entry.totalTokens / (entry.latencyMs / 1000)) * 10) / 10;
+    }
     const fullEntry: TrafficEntry = {
       ...entry,
+      tokensPerSec: tokSec,
       id: `tr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       timestamp: Date.now(),
     };
@@ -93,8 +111,8 @@ export class TrafficInspectorEngine {
 
   public generateDiffView(entry: TrafficEntry): { reqRaw: string; resRaw: string; isError: boolean } {
     return {
-      reqRaw: entry.requestPayload || '{}',
-      resRaw: entry.responsePayload || '{}',
+      reqRaw: sanitizePayload(entry.requestPayload),
+      resRaw: sanitizePayload(entry.responsePayload),
       isError: entry.statusCode >= 400,
     };
   }

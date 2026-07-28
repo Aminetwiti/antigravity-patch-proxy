@@ -922,6 +922,21 @@ electron_1.ipcMain.handle('ag:config:set-notify', async (_evt, enabled) => {
         return false;
     }
 });
+electron_1.ipcMain.handle('ag:config:restore-backup', async () => {
+    try {
+        const customModelsPath = path_1.default.join(electron_1.app.getPath('home'), '.gemini', 'antigravity', 'custom_models.json');
+        const bakPath = `${customModelsPath}.bak`;
+        if (!fs_1.default.existsSync(bakPath)) {
+            return { success: false, error: 'No backup file (.bak) found' };
+        }
+        fs_1.default.copyFileSync(bakPath, customModelsPath);
+        invalidateConfigCache();
+        return { success: true };
+    }
+    catch (err) {
+        return { success: false, error: err.message || 'Failed to restore backup' };
+    }
+});
 // Snapshot of the proxy-error ring buffer (read-only, most-recent first).
 electron_1.ipcMain.handle('ag:proxy-error-history', async () => {
     return proxyErrorHistory.slice().reverse();

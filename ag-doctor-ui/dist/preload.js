@@ -23,6 +23,7 @@ const api = {
     config: () => electron_1.ipcRenderer.invoke('ag:config'),
     setTheme: (theme) => electron_1.ipcRenderer.invoke('ag:config:set-theme', theme),
     setNotifyEnabled: (enabled) => electron_1.ipcRenderer.invoke('ag:config:set-notify', enabled),
+    restoreBackup: () => electron_1.ipcRenderer.invoke('ag:config:restore-backup'),
     getProxyErrorHistory: () => electron_1.ipcRenderer.invoke('ag:proxy-error-history'),
     notify: (title, body) => electron_1.ipcRenderer.invoke('ag:notify', title, body),
     trayStatus: (status) => electron_1.ipcRenderer.invoke('ag:tray-status', status),

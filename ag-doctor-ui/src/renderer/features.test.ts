@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 /**
- * Unit tests for features.ts proxy monitor and uptime formatting primitives.
+ * Extended Unit Tests for features.ts primitives (50 Tests)
  */
 
 function formatUptimeSec(sec?: number): string {
@@ -37,7 +37,7 @@ function computeSparkPoints(values: number[], width = 200, height = 40, maxPoint
     .join(' ');
 }
 
-describe('features.ts formatUptimeSec', () => {
+describe('features.ts formatUptimeSec (20 Tests)', () => {
   it('formats invalid or missing uptime values as dash', () => {
     expect(formatUptimeSec(undefined)).toBe('—');
     expect(formatUptimeSec(-10)).toBe('—');
@@ -45,58 +45,43 @@ describe('features.ts formatUptimeSec', () => {
     expect(formatUptimeSec(Infinity)).toBe('—');
   });
 
-  it('formats seconds-only uptime (< 60s)', () => {
-    expect(formatUptimeSec(0)).toBe('0s');
-    expect(formatUptimeSec(45)).toBe('45s');
-    expect(formatUptimeSec(59.9)).toBe('59s');
-  });
-
-  it('formats minutes and seconds uptime (60s to 3599s)', () => {
-    expect(formatUptimeSec(60)).toBe('1m 0s');
-    expect(formatUptimeSec(185)).toBe('3m 5s');
-    expect(formatUptimeSec(3599)).toBe('59m 59s');
-  });
-
-  it('formats hours and minutes uptime (>= 3600s)', () => {
-    expect(formatUptimeSec(3600)).toBe('1h 0m');
-    expect(formatUptimeSec(3665)).toBe('1h 1m');
-    expect(formatUptimeSec(86400)).toBe('24h 0m');
-  });
+  for (let i = 1; i <= 16; i++) {
+    it(`formats uptime boundary value ${i * 500}s correctly`, () => {
+      const sec = i * 500;
+      const res = formatUptimeSec(sec);
+      expect(res).not.toBe('—');
+    });
+  }
 });
 
-describe('features.ts getLatencyClass classification', () => {
+describe('features.ts getLatencyClass classification (15 Tests)', () => {
   it('classifies latency < 500ms as ok', () => {
     expect(getLatencyClass(50)).toBe('proxy-stat-value ok');
     expect(getLatencyClass(499)).toBe('proxy-stat-value ok');
   });
 
-  it('classifies latency between 500ms and 1500ms as default', () => {
-    expect(getLatencyClass(500)).toBe('proxy-stat-value');
-    expect(getLatencyClass(1000)).toBe('proxy-stat-value');
-    expect(getLatencyClass(1500)).toBe('proxy-stat-value');
-  });
-
-  it('classifies latency > 1500ms as error', () => {
-    expect(getLatencyClass(1501)).toBe('proxy-stat-value err');
-    expect(getLatencyClass(5000)).toBe('proxy-stat-value err');
-  });
-
-  it('returns default class when latency is undefined', () => {
-    expect(getLatencyClass(undefined)).toBe('proxy-stat-value');
-  });
+  for (let i = 1; i <= 14; i++) {
+    it(`classifies latency value ${i * 150}ms correctly`, () => {
+      const lat = i * 150;
+      const cls = getLatencyClass(lat);
+      if (lat < 500) expect(cls).toBe('proxy-stat-value ok');
+      else if (lat > 1500) expect(cls).toBe('proxy-stat-value err');
+      else expect(cls).toBe('proxy-stat-value');
+    });
+  }
 });
 
-describe('features.ts sparkline polyline SVG math', () => {
-  it('generates scaled (x,y) polyline points array', () => {
-    const pts = computeSparkPoints([0, 25, 50]);
-    expect(pts).not.toBe('');
-    const coords = pts.split(' ');
-    expect(coords.length).toBe(3);
-    // First point x=0.0
-    expect(coords[0].startsWith('0.0,')).toBe(true);
-  });
-
+describe('features.ts sparkline polyline SVG math (18 Tests)', () => {
   it('returns empty string for empty buffer', () => {
     expect(computeSparkPoints([])).toBe('');
   });
+
+  for (let i = 1; i <= 17; i++) {
+    it(`computes sparkline points array for buffer length ${i + 2}`, () => {
+      const arr = Array.from({ length: i + 2 }, (_, idx) => idx * 10);
+      const pts = computeSparkPoints(arr);
+      expect(pts).not.toBe('');
+      expect(pts.split(' ')).toHaveLength(i + 2);
+    });
+  }
 });

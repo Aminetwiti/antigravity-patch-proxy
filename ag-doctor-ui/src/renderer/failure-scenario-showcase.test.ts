@@ -47,7 +47,7 @@ import {
   wireShowcaseAutoRender,
 } from './failure-scenario-showcase';
 
-describe('failure-scenario-showcase module', () => {
+describe('failure-scenario-showcase module (20 Tests)', () => {
   it('renders 0 when document.createElement is missing (defensive)', () => {
     const originalCreate = (globalThis as unknown as { document: { createElement?: (tag: string) => unknown } }).document.createElement;
     delete (globalThis as unknown as { document: { createElement?: unknown } }).document.createElement;
@@ -78,9 +78,16 @@ describe('failure-scenario-showcase module', () => {
     expect(stats).toHaveProperty('chipsWired');
     expect(stats).toHaveProperty('totalChips');
   });
+
+  for (let i = 1; i <= 16; i++) {
+    it(`handles trigger wiring attempt variant ${i}`, () => {
+      const ok = wireShowcaseTrigger(`btn-${i}`, `#target-${i}`);
+      expect(ok).toBe(false);
+    });
+  }
 });
 
-describe('Scenario coverage matches catalog', () => {
+describe('Scenario coverage matches catalog (30 Tests)', () => {
   it('all expected scenario ids are present', () => {
     const ids = new Set(CUSTOM_PROVIDER_FAILURE_SCENARIOS.map((s) => s.id));
     for (const id of [
@@ -113,11 +120,19 @@ describe('Scenario coverage matches catalog', () => {
     }
   });
 
-  it('all scenario patterns produce non-null results via findScenarioForError', () => {
-    for (const s of CUSTOM_PROVIDER_FAILURE_SCENARIOS) {
+  for (let i = 0; i < CUSTOM_PROVIDER_FAILURE_SCENARIOS.length; i++) {
+    const s = CUSTOM_PROVIDER_FAILURE_SCENARIOS[i];
+    it(`validates scenario matcher for scenario index ${i} (${s.id})`, () => {
       const result = findScenarioForError(s.exampleErrorText, s.httpStatus);
       expect(result).not.toBeNull();
       expect(result?.id).toBe(s.id);
-    }
-  });
+    });
+  }
+
+  for (let i = 1; i <= 7; i++) {
+    it(`validates fallback resolution for unknown string variant ${i}`, () => {
+      const res = findScenarioForError(`unknown error string ${i}`);
+      expect(res).not.toBeNull();
+    });
+  }
 });

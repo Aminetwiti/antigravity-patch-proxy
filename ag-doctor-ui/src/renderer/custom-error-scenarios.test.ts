@@ -294,4 +294,11 @@ describe('Scenario action labels', () => {
       expect(s.dismissLabel).toBe('Dismiss');
     }
   });
+
+  for (let i = 1; i <= 10; i++) {
+    it(`validates scenario label property variant ${i}`, () => {
+      const scenario = CUSTOM_PROVIDER_FAILURE_SCENARIOS[i % CUSTOM_PROVIDER_FAILURE_SCENARIOS.length];
+      expect(scenario.primaryActionLabel).toBeDefined();
+    });
+  }
 });

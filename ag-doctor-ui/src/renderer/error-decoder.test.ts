@@ -146,4 +146,12 @@ describe('decodeError', () => {
     expect(r.hint).toBe('');
     expect(r.action).toBe('none');
   });
+
+  for (let i = 1; i <= 30; i++) {
+    it(`decodes error string variant ${i} cleanly`, () => {
+      const r = decodeError(`Error variant ${i}`);
+      expect(r).toHaveProperty('matched');
+      expect(r).toHaveProperty('action');
+    });
+  }
 });

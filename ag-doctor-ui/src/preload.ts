@@ -37,6 +37,7 @@ const api = {
   config: (): Promise<Record<string, unknown>> => ipcRenderer.invoke('ag:config'),
   setTheme: (theme: 'dark' | 'light'): Promise<boolean> => ipcRenderer.invoke('ag:config:set-theme', theme),
   setNotifyEnabled: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('ag:config:set-notify', enabled),
+  restoreBackup: (): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('ag:config:restore-backup'),
   getProxyErrorHistory: (): Promise<Array<{
     traceId: string;
     provider: string;

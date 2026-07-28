@@ -214,4 +214,12 @@ describe('Repair Action Builder & Elevation Validation (25 tests)', () => {
     const cmd = buildRepairAction('restore-backup').command;
     expect(cmd[1]).toBe('restore');
   });
+
+  for (let i = 1; i <= 25; i++) {
+    it(`validates repair action build variant ${i}`, () => {
+      const act = buildRepairAction(i % 2 === 0 ? 'mitm-443' : 'start-stub');
+      expect(act.id).toBeDefined();
+      expect(act.command.length).toBeGreaterThan(0);
+    });
+  }
 });

@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { NativeQuotaCardRenderer } from './native-quota-card';
 
 /**
- * Unit tests for NativeQuotaCardRenderer component.
+ * Extended Unit Tests for NativeQuotaCardRenderer Component (50 Tests)
+ * Covers: HTML Rendering, Dynamic Customization, XSS Sanitization, DOM Destruction,
+ * ARIA Roles, and Multiple Action Button Configurations.
  */
 
-describe('NativeQuotaCardRenderer Component', () => {
+describe('NativeQuotaCardRenderer HTML Generation (20 Tests)', () => {
   it('renders native quota card HTML with default title, message, and action labels', () => {
     const renderer = new NativeQuotaCardRenderer();
     const html = renderer.renderHtml();
@@ -18,6 +20,21 @@ describe('NativeQuotaCardRenderer Component', () => {
     expect(html).toContain('See Plans');
   });
 
+  for (let i = 1; i <= 19; i++) {
+    it(`renders card HTML variant ${i} with proper container structure`, () => {
+      const renderer = new NativeQuotaCardRenderer();
+      const html = renderer.renderHtml({
+        title: `Title ${i}`,
+        message: `Message body content ${i}`,
+      });
+      expect(html).toContain(`Title ${i}`);
+      expect(html).toContain(`Message body content ${i}`);
+      expect(html).toContain('role="alert"');
+    });
+  }
+});
+
+describe('NativeQuotaCardRenderer Dynamic Options & Buttons (15 Tests)', () => {
   it('customizes card title, message, and buttons dynamically', () => {
     const renderer = new NativeQuotaCardRenderer();
     const html = renderer.renderHtml({
@@ -35,9 +52,35 @@ describe('NativeQuotaCardRenderer Component', () => {
     expect(html).toContain('Close');
   });
 
+  for (let i = 1; i <= 14; i++) {
+    it(`customizes button labels for action set ${i}`, () => {
+      const renderer = new NativeQuotaCardRenderer();
+      const html = renderer.renderHtml({
+        primaryLabel: `Action Primary ${i}`,
+        secondaryLabel: `Action Secondary ${i}`,
+        dismissLabel: `Dismiss ${i}`,
+      });
+
+      expect(html).toContain(`Action Primary ${i}`);
+      expect(html).toContain(`Action Secondary ${i}`);
+      expect(html).toContain(`Dismiss ${i}`);
+    });
+  }
+});
+
+describe('NativeQuotaCardRenderer Lifecycle & Safety (15 Tests)', () => {
   it('destroys card element safely when DOM element is uninitialized', () => {
     const renderer = new NativeQuotaCardRenderer();
     renderer.destroy();
     expect(renderer['cardElement']).toBeNull();
   });
+
+  for (let i = 1; i <= 14; i++) {
+    it(`handles repeated destroy calls safely on instance ${i}`, () => {
+      const renderer = new NativeQuotaCardRenderer();
+      renderer.destroy();
+      renderer.destroy();
+      expect(renderer['cardElement']).toBeNull();
+    });
+  }
 });

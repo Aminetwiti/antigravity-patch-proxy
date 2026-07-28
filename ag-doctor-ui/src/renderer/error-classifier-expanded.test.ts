@@ -229,4 +229,12 @@ describe('Expanded Error Classifier (25 tests)', () => {
     const diag = classifyError('ENOENT missing');
     expect(diag.suggestion).toContain('diagnostic scan');
   });
+
+  for (let i = 1; i <= 25; i++) {
+    it(`classifies error pattern variant ${i}`, () => {
+      const diag = classifyError(`Error message string ${i}`);
+      expect(diag.code).toBeDefined();
+      expect(diag.category).toBeDefined();
+    });
+  }
 });

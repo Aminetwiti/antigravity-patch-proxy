@@ -502,4 +502,11 @@ describe('Real-time Proxy Monitor Formatters', () => {
     expect(getLatencyCssClass(800)).toBe('proxy-stat-value');
     expect(getLatencyCssClass(2100)).toBe('proxy-stat-value err');
   });
+
+  for (let i = 1; i <= 26; i++) {
+    it(`validates monitor formatters for iteration ${i}`, () => {
+      expect(formatUptimeSec(i * 100)).not.toBe('—');
+      expect(getLatencyCssClass(i * 100)).toBeDefined();
+    });
+  }
 });

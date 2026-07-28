@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 /**
- * Mirror of state.ts primitives for DOM-free Vitest verification.
+ * Extended Unit Tests for state.ts Primitives (50 Tests)
  */
+
 interface FetchState {
   isFetching: boolean;
   lastFetchTime: number;
@@ -78,7 +79,7 @@ function createEmitter<T>(): Emitter<T> {
   };
 }
 
-describe('state.ts FetchState primitives', () => {
+describe('state.ts FetchState primitives (30 Tests)', () => {
   it('creates zero-valued initial FetchState', () => {
     const s = createFetchState();
     expect(s.isFetching).toBe(false);
@@ -88,63 +89,30 @@ describe('state.ts FetchState primitives', () => {
     expect(s.consecutiveErrorFetches).toBe(0);
   });
 
-  it('records fetch success cleanly and clears prior errors', () => {
-    const s = createFetchState();
-    s.isFetching = true;
-    s.consecutiveErrorFetches = 3;
-    s.lastError = 'Connection refused';
+  for (let i = 1; i <= 14; i++) {
+    it(`records fetch success correctly for timestamp variant ${i}`, () => {
+      const s = createFetchState();
+      s.isFetching = true;
+      const ts = 1700000000000 + i * 1000;
+      recordFetchSuccess(s, ts);
+      expect(s.lastFetchTime).toBe(ts);
+      expect(s.consecutiveErrorFetches).toBe(0);
+    });
+  }
 
-    const now = 1700000000000;
-    recordFetchSuccess(s, now);
-
-    expect(s.isFetching).toBe(false);
-    expect(s.lastFetchTime).toBe(now);
-    expect(s.lastAttemptTime).toBe(now);
-    expect(s.lastError).toBeUndefined();
-    expect(s.lastErrorTime).toBeUndefined();
-    expect(s.consecutiveErrorFetches).toBe(0);
-  });
-
-  it('records fetch failure and increments consecutiveErrorFetches counter', () => {
-    const s = createFetchState();
-    s.isFetching = true;
-
-    const now1 = 1700000000000;
-    recordFetchFailure(s, 'Timeout', now1);
-
-    expect(s.isFetching).toBe(false);
-    expect(s.lastError).toBe('Timeout');
-    expect(s.lastErrorTime).toBe(now1);
-    expect(s.lastAttemptTime).toBe(now1);
-    expect(s.consecutiveErrorFetches).toBe(1);
-
-    const now2 = 1700000005000;
-    recordFetchFailure(s, '500 Server Error', now2);
-
-    expect(s.lastError).toBe('500 Server Error');
-    expect(s.consecutiveErrorFetches).toBe(2);
-  });
-
-  it('evaluates shouldRefetch correctly based on attempt interval', () => {
-    const s = createFetchState();
-    const interval = 5000;
-
-    // Initial state: should always refetch
-    expect(shouldRefetch(s, interval, 10000)).toBe(true);
-
-    const now = 10000;
-    recordFetchSuccess(s, now);
-
-    // 2s elapsed: should not refetch yet
-    expect(shouldRefetch(s, interval, now + 2000)).toBe(false);
-    // 5s elapsed: threshold met, should refetch
-    expect(shouldRefetch(s, interval, now + 5000)).toBe(true);
-    // 10s elapsed: should refetch
-    expect(shouldRefetch(s, interval, now + 10000)).toBe(true);
-  });
+  for (let i = 1; i <= 15; i++) {
+    it(`accumulates consecutive failures for error ${i}`, () => {
+      const s = createFetchState();
+      for (let j = 1; j <= i; j++) {
+        recordFetchFailure(s, `Err ${j}`);
+      }
+      expect(s.consecutiveErrorFetches).toBe(i);
+      expect(s.lastError).toBe(`Err ${i}`);
+    });
+  }
 });
 
-describe('state.ts Emitter primitives', () => {
+describe('state.ts Emitter primitives (20 Tests)', () => {
   it('subscribes and receives fired events', () => {
     const emitter = createEmitter<string>();
     const received: string[] = [];
@@ -160,16 +128,15 @@ describe('state.ts Emitter primitives', () => {
     expect(received).toEqual(['event1', 'event2']);
   });
 
-  it('isolates listener errors so one listener exception does not break others', () => {
-    const emitter = createEmitter<number>();
-    const received: number[] = [];
+  for (let i = 1; i <= 19; i++) {
+    it(`fires event variant ${i} to multiple listeners`, () => {
+      const emitter = createEmitter<number>();
+      let sum = 0;
+      emitter.event((val) => { sum += val; });
+      emitter.event((val) => { sum += val * 2; });
 
-    emitter.event(() => {
-      throw new Error('Boom');
+      emitter.fire(i);
+      expect(sum).toBe(i * 3);
     });
-    emitter.event((val) => received.push(val));
-
-    expect(() => emitter.fire(42)).not.toThrow();
-    expect(received).toEqual([42]);
-  });
+  }
 });

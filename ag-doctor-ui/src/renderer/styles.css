@@ -2226,3 +2226,140 @@ body {
 .pm-presets-row     { display: flex; flex-wrap: wrap; gap: 6px; }
 .pm-form-actions    { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
 .pm-models-hint     { color: var(--text-2); font-size: 11px; }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Impeccable Quiet Console Design Overrides
+   Applied to Models Page and Provider Manager Modal
+   ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --qc-surface-base: #18181b;
+  --qc-surface-raised: #1c1c1f;
+  --qc-surface-input: #27272a;
+  --qc-border-subtle: #27272a;
+  --qc-border-strong: #3f3f46;
+  --qc-ink-primary: #f4f4f5;
+  --qc-ink-secondary: #a1a1aa;
+  --qc-ink-muted: #71717a;
+  --qc-accent-blue: #3b82f6;
+  --qc-accent-blue-hover: #2563eb;
+  --qc-positive: #22c55e;
+  --qc-danger: #ef4444;
+}
+
+/* Models Page - Model Card */
+#view-models .model-card {
+  background-color: var(--qc-surface-base) !important;
+  border: 1px solid var(--qc-border-subtle) !important;
+  border-radius: 8px !important;
+  padding: 12px 16px !important;
+  box-shadow: none !important;
+  transition: all 0.2s ease !important;
+}
+
+#view-models .model-card:hover {
+  background-color: var(--qc-surface-raised) !important;
+  border-color: var(--qc-border-strong) !important;
+}
+
+#view-models .model-name {
+  color: var(--qc-ink-primary) !important;
+  font-weight: 500 !important;
+  font-size: 14px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+#view-models .model-meta {
+  color: var(--qc-ink-secondary) !important;
+  font-weight: 400 !important;
+}
+
+#view-models .model-meta code {
+  color: var(--qc-ink-muted) !important;
+  background: transparent !important;
+}
+
+/* Status Dot (for custom models connection status) */
+.status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--qc-ink-muted); /* untested */
+  transition: background-color 0.3s ease;
+}
+.status-dot.connected { background-color: var(--qc-positive); }
+.status-dot.failed { background-color: var(--qc-danger); }
+
+/* Provider Manager Modal & Backdrop */
+#providerManagerModalBackdrop {
+  background: rgba(0, 0, 0, 0.4) !important; /* Darken background */
+}
+
+#providerManagerModalBackdrop .modal {
+  background-color: var(--qc-surface-base) !important;
+  border: 1px solid var(--qc-border-strong) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5) !important;
+  max-width: 650px !important;
+  max-height: 85vh !important;
+  color: var(--qc-ink-primary) !important;
+}
+
+#providerManagerModalBackdrop .modal-header {
+  border-bottom: 1px solid var(--qc-border-subtle) !important;
+}
+
+#providerManagerModalBackdrop .pm-modal-title {
+  color: var(--qc-ink-primary) !important;
+  font-weight: 600 !important;
+  font-size: 18px !important;
+}
+
+/* Modal Inputs */
+#providerManagerModalBackdrop .form-field input,
+#providerManagerModalBackdrop .form-field select {
+  background-color: var(--qc-surface-input) !important;
+  border: 1px solid var(--qc-border-strong) !important;
+  border-radius: 4px !important;
+  padding: 8px 12px !important;
+  color: var(--qc-ink-primary) !important;
+}
+
+#providerManagerModalBackdrop .form-field input:focus,
+#providerManagerModalBackdrop .form-field select:focus {
+  border-color: var(--qc-border-strong) !important;
+  background-color: var(--qc-surface-raised) !important;
+}
+
+/* Modal Buttons */
+#providerManagerModalBackdrop .btn-primary {
+  background-color: var(--qc-accent-blue) !important;
+  color: #ffffff !important;
+  border-radius: 4px !important;
+  padding: 6px 12px !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  border: none !important;
+}
+
+#providerManagerModalBackdrop .btn-primary:hover {
+  background-color: var(--qc-accent-blue-hover) !important;
+}
+
+/* Provider Chips */
+.agy-chip {
+  background-color: rgba(168, 85, 247, 0.13) !important; /* provider custom low opacity */
+  color: #a855f7 !important;
+  border: none !important;
+  border-radius: 4px !important;
+  padding: 2px 6px !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+}
