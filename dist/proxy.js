@@ -104,6 +104,11 @@ Object.defineProperty(exports, "generateModelPlaceholderId", { enumerable: true,
 Object.defineProperty(exports, "toSlug", { enumerable: true, get: function () { return idGenerator_1.toSlug; } });
 // DNS resolution bypasses the poisoned hosts file (extracted from proxy.ts)
 const dnsResolver_1 = require("./proxy/dnsResolver");
+// Smart model routing and rate-limit tracking
+const modelRouter_1 = require("./proxy/modelRouter");
+const contextTrimmer_1 = require("./proxy/contextTrimmer");
+const modelHealthChecker_1 = require("./proxy/modelHealthChecker");
+const recentModelsStore_1 = require("./proxy/recentModelsStore");
 let proxyErrorEmitter = null;
 function setProxyErrorEmitter(fn) {
     proxyErrorEmitter = fn;
@@ -352,7 +357,8 @@ function parseRetryAfter(headers) {
     }
     return 0;
 }
-function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount = 0, fallbackDepth = 0) {
+function handleCustomModelRequest(res, model, rawGeminiBody, isStream, retryCount = 0, fallbackDepth = 0) {
+    const geminiBody = (0, contextTrimmer_1.trimContextPayload)(rawGeminiBody);
     const traceId = geminiBody?.requestId || '';
     // P3-18: Configurable max retries per model (default 1, min 0, max 5).
     // Lowered from 3 to 1 to prevent retry storms saturating the proxy.
@@ -376,8 +382,16 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                 return false;
             try {
                 const allModels = (0, modelLoader_1.loadCustomModels)();
+                // ponytail: skip same-provider on rate_limit — shared quota, fallback is a no-op
+                const sameProviderRateLimit = diagnostic.errorType === 'rate_limit'
+                    ? new URL(model.apiUrl).hostname
+                    : null;
                 for (const m of allModels) {
                     if (m.name !== model.name && m.apiKey && !m.apiKey.startsWith('fallback:')) {
+                        if (sameProviderRateLimit && new URL(m.apiUrl).hostname === sameProviderRateLimit) {
+                            electron_log_1.default.warn(`[Proxy] Circuit-OPEN: skipping same-provider fallback ${m.displayName || m.name} (shared quota, rate_limit)`);
+                            continue;
+                        }
                         const toName = m.displayName || m.name;
                         electron_log_1.default.warn(`[Proxy] Circuit-OPEN fallback: ${model.name} -> ${toName} (reason: ${diagnostic.errorType})`);
                         handleCustomModelRequest(res, m, _body, _isStream, 0, fallbackDepth + 1);
@@ -420,8 +434,16 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
             return false;
         try {
             const allModels = (0, modelLoader_1.loadCustomModels)();
+            // ponytail: skip same-provider on rate_limit — shared quota, fallback is a no-op
+            const sameProviderRateLimit = diagnostic.errorType === 'rate_limit'
+                ? new URL(model.apiUrl).hostname
+                : null;
             for (const m of allModels) {
                 if (m.name !== model.name && m.apiKey && !m.apiKey.startsWith('fallback:')) {
+                    if (sameProviderRateLimit && new URL(m.apiUrl).hostname === sameProviderRateLimit) {
+                        electron_log_1.default.warn(`[Proxy] Auto-fallback: skipping ${m.displayName || m.name} (same provider ${sameProviderRateLimit}, shared quota)`);
+                        continue;
+                    }
                     const fromName = model.displayName || model.name;
                     const toName = m.displayName || m.name;
                     electron_log_1.default.warn(`[Proxy] Auto-fallback: ${fromName} → ${toName} (reason: ${diagnostic.errorType} — ${diagnostic.title})`);
@@ -436,11 +458,12 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                             'X-Accel-Buffering': 'no',
                             'X-AG-Fallback': 'true',
                         })) {
+                            const noticeText = `> ⚡ **Smart Proxy Switch**\n> \`Provider Notice\`: \`${fromName}\` is temporarily rate-limited (${diagnostic.errorType}).\n> 🔄 **Rerouted to**: \`${toName}\` (Zero downtime, uninterrupted session)\n\n`;
                             const notice = {
                                 response: {
                                     candidates: [{
                                             content: {
-                                                parts: [{ text: `> ⚠️ **Auto-fallback:** \`${fromName}\` failed (${diagnostic.errorType}). Retrying with \`${toName}\`…\n\n` }],
+                                                parts: [{ text: noticeText }],
                                                 role: 'model',
                                             },
                                             finishReason: 'STOP',
@@ -490,6 +513,7 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
         options.rejectUnauthorized = false;
     }
     electron_log_1.default.info(`[Proxy] Routing ${model.name} to ${model.provider} (${model.apiUrl}) (isStream: ${!!isStream})${retryCount > 0 ? ` (retry ${retryCount})` : ''}`);
+    (0, recentModelsStore_1.recordRecentModel)(model.name);
     const request = pooledClient.request(finalUrlStr, options, (apiRes) => {
         apiRes.on('error', (err) => {
             electron_log_1.default.error(`[Proxy] Upstream stream error for ${model.name}:`, err.message);
@@ -543,9 +567,11 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                         streamDiagnostic.errorType === 'timeout' ||
                         streamDiagnostic.errorType === 'network') {
                         (0, circuitBreaker_1.recordFailure)(model, streamDiagnostic.errorType);
-                        // P5-2: feed the per-model retry budget so future requests can
-                        // adapt (flaky models get fewer retries).
+                        // P5-2: feed the per-model retry budget so future requests can adapt
                         (0, retryBudget_1.getRetryBudget)().recordFailure(model);
+                        if (streamDiagnostic.errorType === 'rate_limit') {
+                            (0, modelRouter_1.markProviderRateLimited)(model.apiUrl);
+                        }
                     }
                     if ((0, retryStrategy_1.shouldRetryStatus)(apiRes.statusCode, retryCount, MAX_RETRIES)) {
                         electron_log_1.default.warn(`[Proxy] Stream error, retrying (${retryCount + 1}/${MAX_RETRIES})...`);
@@ -965,13 +991,24 @@ function handleGetAvailableModelsProxy(res, reqBody, lsUrl) {
             }
             const responseBuf = Buffer.concat(chunks);
             const customModels = (0, modelLoader_1.loadCustomModels)();
-            const { buffer: modifiedBuf } = (0, protoInjector_1.injectCustomModelsIntoResponse)(responseBuf, customModels);
-            if ((0, httpUtils_1.safeWriteHead)(res, lsRes.statusCode || 200, {
-                'Content-Type': 'application/grpc-web+proto',
-                'Content-Length': String(modifiedBuf.length),
-            })) {
-                (0, httpUtils_1.safeEnd)(res, modifiedBuf);
-            }
+            // Run concurrent health checks (cached with 30s TTL, max 800ms wait)
+            (0, modelHealthChecker_1.checkAllModelsHealth)(customModels).then((healthMap) => {
+                const { buffer: modifiedBuf } = (0, protoInjector_1.injectCustomModelsIntoResponse)(responseBuf, customModels, healthMap);
+                if ((0, httpUtils_1.safeWriteHead)(res, lsRes.statusCode || 200, {
+                    'Content-Type': 'application/grpc-web+proto',
+                    'Content-Length': String(modifiedBuf.length),
+                })) {
+                    (0, httpUtils_1.safeEnd)(res, modifiedBuf);
+                }
+            }).catch(() => {
+                const { buffer: modifiedBuf } = (0, protoInjector_1.injectCustomModelsIntoResponse)(responseBuf, customModels);
+                if ((0, httpUtils_1.safeWriteHead)(res, lsRes.statusCode || 200, {
+                    'Content-Type': 'application/grpc-web+proto',
+                    'Content-Length': String(modifiedBuf.length),
+                })) {
+                    (0, httpUtils_1.safeEnd)(res, modifiedBuf);
+                }
+            });
         });
     });
     lsReq.setTimeout(30000, () => {

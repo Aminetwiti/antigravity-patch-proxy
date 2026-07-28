@@ -500,7 +500,12 @@ export function translateToolCallToNative(name: string, args: ToolCallArgs): Tra
  */
 export function formatTranslatedResponse(translatedInfo: TranslatedCallInfo, responseData: unknown): string {
   const { translatedName, cmd } = translatedInfo;
-  log.info(`[Proxy] Formatting native response back to CLI for translated tool "${translatedName}" (Cmd: "${cmd}")`);
+  // S-3: Redact secrets before logging — SSH passwords, Bearer tokens, API keys.
+  const safeCmd = cmd
+    .replace(/(-pw\s+|--password[= ])\S+/gi, '$1[REDACTED]')
+    .replace(/(Authorization:\s*(?:Bearer|Basic)\s+)\S+/gi, '$1[REDACTED]')
+    .replace(/(apikey|api_key|api-key)[=: ]+\S+/gi, '$1=[REDACTED]');
+  log.info(`[Proxy] Formatting native response back to CLI for translated tool "${translatedName}" (Cmd: "${safeCmd}")`);
 
   if (translatedName === 'list_dir') {
     if (Array.isArray(responseData)) {

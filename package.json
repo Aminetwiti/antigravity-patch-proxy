@@ -5,9 +5,9 @@
   "description": "Antigravity Patch Proxy — Multi-Provider AI Model Proxy for Google Antigravity",
   "homepage": "https://antigravity.google",
   "author": {
-    "name": "Google",
-    "email": "antigravity-support@google.com"
+    "name": "Amine Twiti"
   },
+  "license": "Apache-2.0",
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc",

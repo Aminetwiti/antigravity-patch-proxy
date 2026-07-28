@@ -4,66 +4,66 @@
    ───────────────────────────────────────────────────────────────────────── */
 
 :root {
-  /* Canvas (Antigravity dark = GitHub dark slate) */
-  --bg-0: #0d1117;          /* deepest canvas */
-  --bg-1: #161b22;          /* app surface (sidebar, panels) */
-  --bg-2: #1c2128;          /* panel surface */
-  --bg-3: #21262d;          /* raised surface (hover) */
-  --bg-4: #30363d;          /* strong hover / borders */
+  /* Canvas (Antigravity dark = Zinc dark chrome) */
+  --bg-0: #09090b;          /* deepest canvas */
+  --bg-1: #18181b;          /* app surface (sidebar, panels) */
+  --bg-2: #27272a;          /* panel surface */
+  --bg-3: #3f3f46;          /* raised surface (hover) */
+  --bg-4: #52525b;          /* strong hover / borders */
 
-  /* Borders (Antigravity uses very subtle slate borders) */
-  --border: #30363d;
-  --border-strong: #484f58;
-  --border-faint: #21262d;
+  /* Borders (Antigravity Zinc borders) */
+  --border: #27272a;
+  --border-strong: #3f3f46;
+  --border-faint: #18181b;
 
-  /* Glass tokens — premium glassmorphism (translucent surfaces) */
-  --glass-bg: hsla(220, 13%, 10%, 0.65);
-  --glass-bg-tier-1: hsla(220, 14%, 12%, 0.72);   /* sidebar nav rail */
-  --glass-bg-tier-2: hsla(220, 14%, 10%, 0.55);   /* hero, panels */
-  --glass-bg-strong: hsla(220, 13%, 14%, 0.85);
-  --glass-border: hsla(220, 13%, 50%, 0.12);
-  --glass-border-strong: hsla(220, 13%, 60%, 0.22);
-  --glass-border-tier-1: hsla(220, 50%, 80%, 0.10);
-  --glass-inner-highlight: hsla(220, 50%, 95%, 0.04);
+  /* Glass tokens — subtle flat translucent surfaces */
+  --glass-bg: rgba(24, 24, 27, 0.85);
+  --glass-bg-tier-1: rgba(24, 24, 27, 0.90);   /* sidebar nav rail */
+  --glass-bg-tier-2: rgba(39, 39, 42, 0.75);   /* hero, panels */
+  --glass-bg-strong: rgba(39, 39, 42, 0.95);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-border-strong: rgba(255, 255, 255, 0.15);
+  --glass-border-tier-1: rgba(255, 255, 255, 0.08);
+  --glass-inner-highlight: rgba(255, 255, 255, 0.03);
 
-  /* Antigravity signature accents (blue→purple) */
-  --accent-blue: #1f6feb;
-  --accent-blue-bright: #388bfd;
-  --accent-purple: #a371f7;
-  --accent-purple-bright: #b692ff;
-  --accent-cyan: #39c5cf;
+  /* Antigravity signature accents (restrained blue) */
+  --accent-blue: #2563eb;
+  --accent-blue-bright: #3b82f6;
+  --accent-purple: #8b5cf6;
+  --accent-purple-bright: #a78bfa;
+  --accent-cyan: #06b6d4;
 
   /* Gradients */
-  --gradient-primary: linear-gradient(135deg, #1f6feb 0%, #6e40c9 100%);
-  --gradient-accent: linear-gradient(135deg, #1f6feb 0%, #a371f7 100%);
-  --gradient-glow: linear-gradient(135deg, hsla(217, 91%, 60%, 0.18), hsla(269, 79%, 65%, 0.18));
-  --gradient-header: linear-gradient(180deg, #161b22 0%, #0d1117 100%);
+  --gradient-primary: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  --gradient-accent: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+  --gradient-glow: none;
+  --gradient-header: linear-gradient(180deg, #18181b 0%, #09090b 100%);
 
-  /* Status colors (GitHub-style, used by Antigravity) */
-  --ok: #3fb950;
-  --ok-bg: hsla(136, 60%, 50%, 0.15);
-  --ok-border: hsla(136, 60%, 50%, 0.3);
-  --warn: #d29922;
-  --warn-bg: hsla(40, 80%, 50%, 0.15);
-  --warn-border: hsla(40, 80%, 50%, 0.3);
-  --err: #f85149;
-  --err-bg: hsla(355, 80%, 60%, 0.15);
-  --err-border: hsla(355, 80%, 60%, 0.3);
-  --info: #58a6ff;
-  --info-bg: hsla(217, 91%, 60%, 0.15);
-  --info-border: hsla(217, 91%, 60%, 0.3);
+  /* Status colors */
+  --ok: #22c55e;
+  --ok-bg: rgba(34, 197, 94, 0.12);
+  --ok-border: rgba(34, 197, 94, 0.25);
+  --warn: #eab308;
+  --warn-bg: rgba(234, 179, 8, 0.12);
+  --warn-border: rgba(234, 179, 8, 0.25);
+  --err: #ef4444;
+  --err-bg: rgba(239, 68, 68, 0.12);
+  --err-border: rgba(239, 68, 68, 0.25);
+  --info: #3b82f6;
+  --info-bg: rgba(59, 130, 246, 0.12);
+  --info-border: rgba(59, 130, 246, 0.25);
 
-  /* Text (Antigravity dark text scale) */
-  --text-0: #f0f6fc;
-  --text-1: #c9d1d9;
-  --text-2: #8b949e;
-  --text-3: #6e7681;
-  --text-4: #768390;
+  /* Text (WCAG AA compliant contrast scale) */
+  --text-0: #f4f4f5;
+  --text-1: #e4e4e7;
+  --text-2: #a1a1aa;
+  --text-3: #919baf;          /* elevated for >= 4.5:1 contrast */
+  --text-4: #71717a;
 
-  /* Typography (Antigravity uses Inter as primary) */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --font-display: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  /* Typography (Native System Font Stack) */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   --fs-xs: 11px;
   --fs-sm: 12px;
   --fs-base: 13px;
@@ -1289,7 +1289,7 @@ body {
 .toast-container {
   position: fixed; bottom: 16px; right: 16px;
   display: flex; flex-direction: column; gap: 6px;
-  z-index: 1000;
+  z-index: 1100;
   pointer-events: none;
 }
 .toast {

@@ -148,10 +148,12 @@ export async function resolveGoogleIp(hostname: string): Promise<string> {
 
   const deadline = Date.now() + DNS_RESOLUTION_TIMEOUT_MS;
 
+  const tStart = Date.now();
   // 1. Query public DNS servers in parallel; use the first good answer.
   const publicResults = await Promise.allSettled(
     PUBLIC_DNS_SERVERS.map((server) => resolveWithServer(hostname, server)),
   );
+  log.info(`[Proxy] [dns-timing] public DNS parallel query took ${Date.now() - tStart}ms (${PUBLIC_DNS_SERVERS.length} servers)`);
   for (const result of publicResults) {
     if (result.status === 'fulfilled') {
       const ip = pickBestAddress(result.value);
