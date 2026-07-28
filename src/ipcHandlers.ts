@@ -6,6 +6,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as http from 'http';
 import * as https from 'https';
+import { setProxyErrorEmitter, type ProxyErrorPayload } from './proxy';
 import { extensionAuthorities } from './customScheme';
 import { updateTrayAgentCount } from './tray';
 import { StorageManager } from './storage';
@@ -24,6 +25,17 @@ import * as configExchange from './configExchange';
  * Registers all IPC handlers for the main process.
  */
 export function registerIpcHandlers(storageManager: StorageManager): void {
+  // Fan-out proxy errors from proxy.ts to every BrowserWindow via the
+  // 'proxy:error' IPC channel. The renderer subscribes through preload.ts
+  // (window.ag.onProxyError) and renders the matching native quota card.
+  setProxyErrorEmitter((payload: ProxyErrorPayload) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('proxy:error', payload);
+      }
+    }
+  });
+
   // Dialog
   ipcMain.handle('dialog:open-workspace', async () => {
     const result = await dialog.showOpenDialog({

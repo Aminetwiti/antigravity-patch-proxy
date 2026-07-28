@@ -70,6 +70,13 @@ const KNOWN_ERROR_PATTERNS: ErrorPattern[] = [
       ),
   },
   {
+    pattern: 'Baseline model quota reached',
+    hint: 'Google Antigravity baseline model quota has been exhausted. Switch to a custom model provider (Claude, OpenAI, Ollama) via local proxy to bypass quota limits without waiting for refresh.',
+    action: 'smart-fallback',
+    matcher: (s) =>
+      /baseline model quota reached|plan's baseline quota|quota will refresh|enable ai credit overages/i.test(s),
+  },
+  {
     pattern: 'Missing Node module (Cannot find module)',
     hint: 'A dependency expected by the doctor CLI is missing. Run "npm install" in ag-doctor (or use the Repair action if available) and try again.',
     action: 'run-doctor',
@@ -89,6 +96,42 @@ const KNOWN_ERROR_PATTERNS: ErrorPattern[] = [
     hint: 'A local port (e.g. 50999 / 443 / 8443) is already taken by another process. Close the application using that port (often a leftover Antigravity instance) and retry.',
     action: 'run-doctor',
     matcher: (s) => /EADDRINUSE|address already in use|bind:.*already in use|listen.*already in use/i.test(s),
+  },
+  {
+    pattern: 'Model Not Found (404 model_not_found)',
+    hint: 'The requested model does not exist on this provider. Select an available model from the dropdown or let Smart Fallback choose one.',
+    action: 'smart-fallback',
+    matcher: (s) => /model_not_found|the model.*does not exist|404.*not found|model.*not available/i.test(s),
+  },
+  {
+    pattern: 'Network Timeout (ETIMEDOUT)',
+    hint: 'The provider did not respond in time. Check your network connection or retry the request.',
+    action: 'show-retry-toast',
+    matcher: (s) => /ETIMEDOUT|request timed out|timeout exceeded|ESOCKETTIMEDOUT/i.test(s),
+  },
+  {
+    pattern: 'Invalid JSON Response',
+    hint: 'The provider returned a malformed response. Verify the API endpoint URL or contact provider support.',
+    action: 'run-doctor',
+    matcher: (s) => /JSON parse error|unexpected token.*JSON|malformed response|invalid response body/i.test(s),
+  },
+  {
+    pattern: 'Invalid API URL (ENOTFOUND)',
+    hint: 'The API URL could not be resolved. Verify the endpoint hostname in Provider Settings.',
+    action: 'edit-key',
+    matcher: (s) => /ENOTFOUND|getaddrinfo.*fail|dns.*resolve|EAI_AGAIN/i.test(s),
+  },
+  {
+    pattern: 'Stream Connection Broken',
+    hint: 'The streaming response was interrupted mid-generation. Retrying is recommended.',
+    action: 'smart-fallback',
+    matcher: (s) => /stream.*broken|aborted.*stream|premature close|ECONNRESET.*stream/i.test(s),
+  },
+  {
+    pattern: 'Rate Limit (custom provider 429)',
+    hint: 'Rate limit hit on this provider. Will auto-fallback to next available model.',
+    action: 'smart-fallback',
+    matcher: (s) => /rate_limit_error|requests per minute|rate limit exceeded|tpm.*exceeded/i.test(s),
   },
 ];
 
@@ -130,7 +173,7 @@ function decodeCustomProviderError(errorMsg: string, status?: number, providerNa
   const haystack = (errorMsg || '').toLowerCase();
   const name = providerName || 'Custom Provider';
 
-  if (status === 429 || /rate limit|quota|too many requests|429/i.test(haystack)) {
+  if (status === 429 || /baseline model quota|quota|too many requests|rate limit|429/i.test(haystack)) {
     const secs = parseResetSeconds(errorMsg) ?? 120;
     return {
       category: 'quota_429',

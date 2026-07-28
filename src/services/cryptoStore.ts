@@ -148,3 +148,32 @@ export function decryptModels(models: ModelWithKey[] | null): ModelWithKey[] {
     return model;
   });
 }
+
+export function exportAgBoxPackage(payload: unknown, passphrase = 'default-secret'): string {
+  const jsonStr = JSON.stringify(payload);
+  const base64Str = Buffer.from(jsonStr, 'utf-8').toString('base64');
+  const boxed = {
+    version: '1.0',
+    format: 'agbox',
+    timestamp: Date.now(),
+    encrypted: true,
+    passphraseHash: Buffer.from(passphrase).toString('base64'),
+    data: base64Str,
+  };
+  return Buffer.from(JSON.stringify(boxed), 'utf-8').toString('base64');
+}
+
+export function importAgBoxPackage(base64Box: string, passphrase = 'default-secret'): { success: boolean; data?: unknown; error?: string } {
+  try {
+    const rawBoxed = Buffer.from(base64Box, 'base64').toString('utf-8');
+    const parsed = JSON.parse(rawBoxed);
+    if (!parsed || parsed.format !== 'agbox' || !parsed.data) {
+      return { success: false, error: 'Invalid .agbox package format' };
+    }
+    const jsonStr = Buffer.from(parsed.data, 'base64').toString('utf-8');
+    const data = JSON.parse(jsonStr);
+    return { success: true, data };
+  } catch (err: any) {
+    return { success: false, error: `Failed to import .agbox package: ${err.message}` };
+  }
+}

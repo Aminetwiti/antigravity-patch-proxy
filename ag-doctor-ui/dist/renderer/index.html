@@ -106,6 +106,10 @@
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             <span>Traffic Inspector</span>
           </button></li>
+          <li><button class="nav-item" data-view="failures" type="button" title="Failure Scenarios" id="openFailureShowcaseBtn">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <span>Failure Scenarios</span>
+          </button></li>
         </div>
 
         <div class="nav-group">
@@ -405,15 +409,15 @@
             <button class="btn btn-ghost" id="mitmInstallBtn" type="button" aria-label="Install MITM CA certificate">Install CA certificate</button>
             <button class="btn btn-ghost" id="mitmUninstallBtn" type="button" aria-label="Remove MITM CA certificate">Remove CA certificate</button>
             <button class="btn btn-primary" id="mitmProxyOnBtn" type="button" aria-label="Enable MITM proxy">Enable proxy</button>
-            <button class="btn btn-primary" id="mitmProxyOffBtn" type="button" aria-label="Disable MITM proxy">Disable proxy</button>
+            <button class="btn btn-ghost" id="mitmProxyOffBtn" type="button" aria-label="Disable MITM proxy">Disable proxy</button>
             <button class="btn btn-ghost" id="mitmExportCaBtn" type="button" aria-label="Export MITM CA certificate">Export CA certificate</button>
           </div>
         </div>
         <div class="patch-banner err" id="mitmRequiredBanner" role="alert" aria-live="polite" style="margin-bottom: 16px;">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
           <div class="patch-banner-body">
-            <div class="patch-banner-title">MITM on port 443 required for Antigravity 2.2.x</div>
-            <div class="patch-banner-text">Antigravity 2.2.x <strong>requires</strong> MITM on port 443. Without it, the language server fails with <code>127.0.0.1:443 refused</code>. Make sure the proxy is listening on 443 and the CA certificate is installed.</div>
+            <div class="patch-banner-title">MITM on port 443 required for Antigravity 2.2.x – 2.4.x (up to 2.4.2)</div>
+            <div class="patch-banner-text">Antigravity 2.2.x, 2.3.x, and 2.4.x (up to 2.4.2) <strong>require</strong> MITM on port 443. Without it, the language server fails with <code>127.0.0.1:443 refused</code>. Make sure the proxy is listening on 443 and the CA certificate is installed.</div>
           </div>
         </div>
         <div id="mitmStatus" class="mitm-status">
@@ -525,7 +529,7 @@
                     <span class="badge badge-muted">JS overlay footprint</span>
                   </dt>
                   <dd class="patch-legend-def">
-                    Presence/absence of specific JS files (<code>proxy-runner.js</code>, <code>cryptoStore.js</code>) in <code>app.asar</code> to distinguish 2.2.x from 2.3.x.
+                    Presence/absence of specific JS files (<code>proxy-runner.js</code>, <code>cryptoStore.js</code>) in <code>app.asar</code> to distinguish 2.2.x from 2.3.x and 2.4.x (up to 2.4.2).
                   </dd>
                 </div>
               </dl>
@@ -622,6 +626,31 @@
           </div>
         </div>
         <div class="panel" style="margin-top:24px">
+          <div class="panel-header"><h2>Notifications</h2></div>
+          <div class="panel-body">
+            <label class="toggle-row" for="notifyToggle">
+              <span class="toggle-label">
+                <span class="toggle-title">Do not notify on provider errors</span>
+                <span class="toggle-subtitle">Stop OS notifications when an upstream provider returns 401/403/429/5xx or times out. The tray badge and modal still show the error.</span>
+              </span>
+              <span class="toggle-control">
+                <input type="checkbox" id="notifyToggle" data-label="notify-toggle" />
+                <span class="toggle-slider" aria-hidden="true"></span>
+              </span>
+            </label>
+          </div>
+        </div>
+        <div class="panel" style="margin-top:24px">
+          <div class="panel-header"><h2>Proxy error history</h2></div>
+          <div class="panel-body">
+            <div class="patch-row">
+              <div class="patch-row-label">Recent</div>
+              <div class="patch-row-value" id="proxyErrorHistoryEmpty" data-label="proxy-error-history-empty">No provider errors captured yet.</div>
+            </div>
+            <ul class="proxy-error-history" id="proxyErrorHistoryList" data-label="proxy-error-history" aria-label="Recent proxy errors"></ul>
+          </div>
+        </div>
+        <div class="panel" style="margin-top:24px">
           <div class="panel-header"><h2>Configuration file</h2></div>
           <div class="panel-body">
             <div class="patch-row">
@@ -654,21 +683,93 @@
             <p class="subtitle">Real-time network requests and payload translation log</p>
           </div>
           <div class="view-actions">
+            <button class="btn btn-ghost" id="trafficExportBtn" type="button" data-label="traffic-export-btn">Export Traffic</button>
             <button class="btn btn-ghost" id="trafficClearBtn" type="button">Clear Traffic</button>
           </div>
         </div>
         <div class="panel">
-          <div class="panel-header">
+          <div class="panel-header" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
             <h2>Intercepted Requests (Gemini ↔ Custom Providers)</h2>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <input type="text" id="trafficSearchInput" placeholder="Filter path / model..." style="padding:4px 8px; font-size:12px; border-radius:4px; border:1px solid var(--border); background:var(--bg-0); color:var(--text-0);" data-label="traffic-search-input" />
+              <select id="trafficProviderSelect" style="padding:4px 8px; font-size:12px; border-radius:4px; border:1px solid var(--border); background:var(--bg-0); color:var(--text-0);" data-label="traffic-provider-select">
+                <option value="all">All Providers</option>
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+                <option value="gemini">Gemini</option>
+                <option value="groq">Groq</option>
+                <option value="openrouter">OpenRouter</option>
+                <option value="unknown">Unknown</option>
+              </select>
+            </div>
           </div>
           <div class="panel-body">
             <div id="trafficEntriesList" style="display:flex; flex-direction:column; gap:8px;">
-              <div style="color:var(--text-2); font-size:12px; text-align:center; padding:16px;">No traffic intercepted yet. Send requests from Antigravity IDE to view payloads in real-time.</div>
             </div>
           </div>
         </div>
       </div>
 
+      <!-- Traffic Detail Modal Backdrop -->
+      <div class="modal-backdrop" id="trafficDetailBackdrop" hidden>
+        <div class="modal" role="dialog" aria-modal="true" style="max-width:720px; width:90%;">
+          <div class="modal-header">
+            <h2 id="trafficDetailTitle" style="margin:0; font-size:16px;">Request Payload & Response Diff</h2>
+            <button class="btn btn-ghost btn-sm" id="trafficDetailCloseBtn" type="button" aria-label="Close detail modal">✕</button>
+          </div>
+          <div class="modal-body" style="padding:16px; display:flex; flex-direction:column; gap:16px; max-height:70vh; overflow-y:auto;">
+            <div id="trafficDetailMeta" style="font-family:ui-monospace,monospace; font-size:12px; color:var(--text-2); padding:8px; background:var(--bg-0); border-radius:4px; border:1px solid var(--border);"></div>
+            <div>
+              <h4 style="margin:0 0 4px 0; font-size:12px; color:var(--text-1);">Request Body (Client → Proxy)</h4>
+              <pre id="trafficDetailReq" style="margin:0; padding:10px; background:var(--bg-0); border:1px solid var(--border); border-radius:4px; font-family:ui-monospace,monospace; font-size:11px; white-space:pre-wrap; word-break:break-all; max-height:180px; overflow-y:auto;"></pre>
+            </div>
+            <div>
+              <h4 style="margin:0 0 4px 0; font-size:12px; color:var(--text-1);">Response Body (Provider → Proxy)</h4>
+              <pre id="trafficDetailRes" style="margin:0; padding:10px; background:var(--bg-0); border:1px solid var(--border); border-radius:4px; font-family:ui-monospace,monospace; font-size:11px; white-space:pre-wrap; word-break:break-all; max-height:180px; overflow-y:auto;"></pre>
+            </div>
+          </div>
+          <div class="modal-footer" style="padding:12px 16px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:8px;">
+            <button class="btn btn-primary btn-sm" id="trafficRetryBtn" type="button" data-label="traffic-retry-btn">Retry Request</button>
+            <button class="btn btn-ghost btn-sm" id="trafficDetailFooterCloseBtn" type="button">Close</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Failure Scenarios showcase view -->
+      <div class="view" id="view-failures">
+        <div class="view-header">
+          <div>
+            <h1>Failure Scenarios</h1>
+            <p class="subtitle">All custom provider error states — visual preview of native Antigravity-style error cards</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-ghost" id="openFailureShowcaseBtn2" type="button" title="Refresh the scenario showcase below">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        <!-- Category filter chips -->
+        <div class="panel" style="margin-bottom:16px;">
+          <div class="panel-body" style="padding:12px 16px; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+            <span style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:var(--text-2); margin-right:4px;">Filter:</span>
+            <button class="btn btn-ghost btn-sm agy-filter-chip active" data-filter="all" type="button">All (11)</button>
+            <button class="btn btn-ghost btn-sm agy-filter-chip" data-filter="auth_401" type="button">Auth 401</button>
+            <button class="btn btn-ghost btn-sm agy-filter-chip" data-filter="quota_429" type="button">Quota 429</button>
+            <button class="btn btn-ghost btn-sm agy-filter-chip" data-filter="credits_402" type="button">Credits 402</button>
+            <button class="btn btn-ghost btn-sm agy-filter-chip" data-filter="context_400" type="button">Context 400</button>
+            <button class="btn btn-ghost btn-sm agy-filter-chip" data-filter="offline_econn" type="button">Offline</button>
+            <button class="btn btn-ghost btn-sm agy-filter-chip" data-filter="network_timeout" type="button">Timeout</button>
+            <button class="btn btn-ghost btn-sm agy-filter-chip" data-filter="invalid_json" type="button">Invalid JSON</button>
+            <button class="btn btn-ghost btn-sm agy-filter-chip" data-filter="model_not_found" type="button">Not Found</button>
+            <button class="btn btn-ghost btn-sm agy-filter-chip" data-filter="generic" type="button">Generic</button>
+          </div>
+        </div>
+
+        <!-- Scenario showcase grid -->
+        <div id="failureScenarioShowcase" class="agy-showcase-grid"></div>
+      </div>
     </section>
 
     <!-- Status Bar (VS Code-style bottom bar) -->
@@ -737,11 +838,11 @@
   <div class="modal-backdrop" id="providerManagerModalBackdrop" hidden>
     <div class="modal modal-lg" role="dialog" aria-modal="true">
       <div class="modal-header">
-        <div class="modal-header-title-wrap" style="display:flex; align-items:center; gap:8px;">
+        <div class="modal-header-title-wrap">
           <div class="modal-header-icon" id="pmModalIcon">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
           </div>
-          <h2 id="pmModalTitle" style="margin:0; font-size:16px; font-weight:600;">Provider Manager</h2>
+          <h2 id="pmModalTitle" class="pm-modal-title">Provider Manager</h2>
         </div>
         <button class="modal-close" id="providerManagerModalClose" type="button" aria-label="Close modal">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -749,21 +850,21 @@
       </div>
       <div class="modal-body">
         <!-- LIST VIEW -->
-        <div id="pmListContainer" class="modal-list" style="display:block;"></div>
+        <div id="pmListContainer" class="modal-list"></div>
 
         <!-- FORM VIEW -->
-        <form id="pmFormContainer" class="modal-form" style="display:none; flex-direction:column; gap:16px;" onsubmit="return false;">
-          <div style="display:flex; align-items:center; gap:12px; margin-bottom:4px;">
-            <button type="button" class="agy-icon-btn" id="pmFormBack" title="Back to providers">
+        <form id="pmFormContainer" class="pm-form" hidden onsubmit="return false;">
+          <div class="pm-back-row">
+            <button type="button" class="agy-icon-btn" id="pmFormBack" aria-label="Back to providers" title="Back to providers">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
             </button>
-            <h3 id="pmFormTitle" style="margin:0; font-size:15px; font-weight:600;">Add provider</h3>
+            <h3 id="pmFormTitle" class="pm-form-title">Add provider</h3>
           </div>
 
           <!-- PRESET QUICK-FILL BAR -->
-          <div style="display:flex; flex-direction:column; gap:6px; background:var(--bg-1); padding:10px; border-radius:6px; border:1px solid var(--border-subtle);">
-            <span style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2);">Quick Presets</span>
-            <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          <div class="pm-presets-bar">
+            <span class="pm-presets-label">Quick Presets</span>
+            <div class="pm-presets-row">
               <button type="button" class="btn btn-ghost btn-sm" id="presetOllama" title="Ollama local server">Ollama (11434)</button>
               <button type="button" class="btn btn-ghost btn-sm" id="presetLMStudio" title="LM Studio local server">LM Studio (1234)</button>
               <button type="button" class="btn btn-ghost btn-sm" id="presetOpenRouter" title="OpenRouter cloud AI">OpenRouter</button>
@@ -771,12 +872,12 @@
             </div>
           </div>
 
-          <label class="form-field">
+          <label class="form-field" for="pmFormName">
             <span>Display name</span>
             <input type="text" id="pmFormName" placeholder="My OpenAI-compatible API" autocomplete="off" />
           </label>
 
-          <label class="form-field">
+          <label class="form-field" for="pmFormType">
             <span>Provider type</span>
             <select id="pmFormType">
               <option value="openai">OpenAI-compatible</option>
@@ -786,32 +887,35 @@
             </select>
           </label>
 
-          <label class="form-field">
+          <label class="form-field" for="pmFormUrl">
             <span>API URL</span>
             <input type="url" id="pmFormUrl" placeholder="https://api.example.com/v1" autocomplete="off" />
           </label>
 
-          <label class="form-field">
+          <label class="form-field" for="pmFormKey">
             <span>API key</span>
             <input type="password" id="pmFormKey" placeholder="sk-…" autocomplete="off" />
           </label>
 
-          <label class="form-field-inline">
+          <label class="form-field-inline" for="pmFormInsecure">
             <input type="checkbox" id="pmFormInsecure" />
             <span>Allow self-signed / unauthorized certificates</span>
           </label>
 
           <div class="form-field">
-            <span style="display:flex; align-items:center; justify-content:space-between;">
+            <div class="pm-models-header">
               <span>Models</span>
-              <span style="color: var(--text-2); font-size:11px;">Save the provider first, then fetch models.</span>
-            </span>
+              <button type="button" class="btn btn-ghost btn-sm" id="pmFormFetchModels" title="Fetch available models from endpoint">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                Fetch models
+              </button>
+            </div>
             <div id="pmModelsList"></div>
           </div>
 
-          <div id="pmFormError" class="form-error" role="alert" style="display:none;"></div>
+          <div id="pmFormError" class="form-error" role="alert" hidden></div>
 
-          <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:8px;">
+          <div class="pm-form-actions">
             <button type="button" class="btn btn-ghost" id="pmFormBack2">Cancel</button>
             <button type="button" class="btn btn-ghost" id="pmFormTest" title="Test endpoint connection and measure latency">Test connection</button>
             <button type="button" class="btn btn-primary" id="pmFormSave">Save provider</button>
@@ -819,9 +923,9 @@
         </form>
       </div>
 
-      <!-- LIST VIEW FOOTER -->
-      <div class="modal-footer" id="pmModalFooterList">
-        <button class="btn btn-secondary" id="pmModalClose2" type="button">Close</button>
+      <!-- LIST VIEW FOOTER — canonical footer, toggled by showPmView() -->
+      <div class="modal-footer" id="pmModalFooterList" hidden>
+        <button class="btn btn-ghost" id="pmModalClose2" type="button">Close</button>
         <button class="btn btn-primary" id="pmAddBtn" type="button">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Add provider
@@ -829,10 +933,6 @@
       </div>
 
       <!-- FORM VIEW FOOTER -->
-      <div class="modal-footer" id="pmModalFooterForm" style="display:none;">
-        <button class="btn btn-ghost" id="pmFormBack3" type="button">Back</button>
-        <button class="btn btn-primary" id="pmFormSave2" type="button">Save provider</button>
-      </div>
     </div>
   </div>
 
@@ -843,6 +943,9 @@
   <script src="traffic-inspector.js"></script>
   <script src="config-export-import.js"></script>
   <script src="health-sentinel.js"></script>
+  <script src="failure-scenario-showcase.js"></script>
+  <script src="custom-error-scenarios.js"></script>
+  <script src="native-quota-card.js"></script>
   <script src="app.js"></script>
   <script src="features.js"></script>
 </body>

@@ -111,3 +111,79 @@ export function mergeProviderConfigs(
     providers: finalProviders,
   };
 }
+
+/**
+ * Encrypts provider configurations with a user password using AES-256-GCM & PBKDF2.
+ */
+export function exportEncryptedConfig(providers: ProviderFileEntry[], password: string): string {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const crypto = require('crypto');
+  const salt = crypto.randomBytes(16);
+  const key = crypto.pbkdf2Sync(password, salt, 100000, 32, 'sha256');
+  const iv = crypto.randomBytes(12);
+
+  const jsonStr = JSON.stringify({ version: 1, providers });
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  
+  const encrypted = Buffer.concat([cipher.update(jsonStr, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+
+  const payload = {
+    encrypted: true,
+    salt: salt.toString('hex'),
+    iv: iv.toString('hex'),
+    tag: tag.toString('hex'),
+    data: encrypted.toString('base64'),
+  };
+
+  return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
+}
+
+/**
+ * Decrypts a password-protected Base64 configuration string back into ProviderFileEntry objects.
+ */
+export function importEncryptedConfig(encryptedBase64: string, password: string): ProviderFileEntry[] {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const crypto = require('crypto');
+
+  let rawJson: string;
+  try {
+    rawJson = Buffer.from(encryptedBase64.trim(), 'base64').toString('utf8');
+  } catch {
+    throw new Error('Invalid Base64 payload');
+  }
+
+  let payload: { encrypted: boolean; salt: string; iv: string; tag: string; data: string };
+  try {
+    payload = JSON.parse(rawJson);
+  } catch {
+    throw new Error('Invalid JSON structure inside encrypted payload');
+  }
+
+  if (!payload.encrypted || !payload.salt || !payload.iv || !payload.tag || !payload.data) {
+    throw new Error('Malformed encrypted payload structure');
+  }
+
+  const salt = Buffer.from(payload.salt, 'hex');
+  const iv = Buffer.from(payload.iv, 'hex');
+  const tag = Buffer.from(payload.tag, 'hex');
+  const encryptedData = Buffer.from(payload.data, 'base64');
+
+  const key = crypto.pbkdf2Sync(password, salt, 100000, 32, 'sha256');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(tag);
+
+  let decrypted: Buffer;
+  try {
+    decrypted = Buffer.concat([decipher.update(encryptedData), decipher.final()]);
+  } catch {
+    throw new Error('Decryption failed. Incorrect password or corrupted payload.');
+  }
+
+  const parsed = JSON.parse(decrypted.toString('utf8'));
+  if (typeof parsed === 'object' && parsed !== null && 'providers' in parsed && Array.isArray((parsed as any).providers)) {
+    return (parsed as any).providers;
+  }
+
+  throw new Error('Decrypted payload does not contain a valid providers array');
+}

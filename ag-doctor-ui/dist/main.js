@@ -140,14 +140,106 @@ function getConfigPayload() {
 function invalidateConfigCache() {
     configCache = null;
 }
+// ─────────────────────────────────────────────────────────────────────────────
+// Tray + proxy-error bridge
+// ─────────────────────────────────────────────────────────────────────────────
+// Latest proxy error (most recent). Exposed to the tray menu and used to
+// build the dynamic tooltip. Capped to a few KB so a noisy provider can't
+// bloat the tooltip.
+let lastProxyError = null;
+const TOOLTIP_TITLE_MAX = 60;
+const TOOLTIP_MSG_MAX = 80;
+// Ring buffer of the last N proxy errors. Lets the dashboard re-open an
+// older modal without having to re-trigger the upstream failure. Capacity
+// is small (50) so the in-memory footprint stays under a few KB.
+const PROXY_ERROR_HISTORY_MAX = 50;
+const proxyErrorHistory = [];
+function pushProxyErrorHistory(p) {
+    proxyErrorHistory.push(p);
+    if (proxyErrorHistory.length > PROXY_ERROR_HISTORY_MAX) {
+        proxyErrorHistory.splice(0, proxyErrorHistory.length - PROXY_ERROR_HISTORY_MAX);
+    }
+}
+// Read the user preference for OS notifications. Default = true. The user
+// can flip this off from the Settings UI; the renderer persists it via
+// `ag:config:set-notify`. Returns false silently if the config file is
+// unreadable — that's safer than crashing the listener.
+function isNotifyEnabled() {
+    try {
+        const cfg = getConfigPayload();
+        const ui = cfg.ui;
+        if (ui && typeof ui.notifyEnabled === 'boolean')
+            return ui.notifyEnabled;
+    }
+    catch {
+        // fall through
+    }
+    return true;
+}
+// De-dup: the same proxy error payload (same traceId) firing repeatedly
+// shouldn't spam the OS with a notification each time. We remember the last
+// traceId+at combo we notified for. Reset on app boot.
+let lastNotifiedTraceId = null;
+let lastNotifiedAt = 0;
+const NOTIFY_DEDUP_MS = 2000; // within 2 s, same traceId is collapsed
+// Emit a native OS notification for an `err`-severity proxy error. Click
+// brings the dashboard forward and replays the cached payload into the
+// modal so the user sees the details without re-hitting the proxy.
+function notifyProxyError(p) {
+    if (!electron_1.Notification.isSupported())
+        return;
+    // Skip when the dashboard is already visible — the user already saw the
+    // modal. This keeps the tray+modal pair quiet when the window is open.
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && mainWindow.isFocused())
+        return;
+    // De-dup so a flapping provider doesn't blow up the notification center.
+    if (p.traceId === lastNotifiedTraceId && Date.now() - lastNotifiedAt < NOTIFY_DEDUP_MS)
+        return;
+    lastNotifiedTraceId = p.traceId;
+    lastNotifiedAt = Date.now();
+    const n = new electron_1.Notification({
+        title: `${p.provider}: ${p.title}`.slice(0, 120),
+        body: (p.message || '').slice(0, 180) || 'A provider request failed — open ag-doctor for details.',
+        silent: false,
+        urgency: 'critical',
+    });
+    n.on('click', () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            if (mainWindow.isMinimized())
+                mainWindow.restore();
+            mainWindow.show();
+            mainWindow.focus();
+            mainWindow.webContents.send('proxy:error', {
+                traceId: p.traceId || 'notify',
+                provider: p.provider,
+                errorType: 'notification-replay',
+                rawError: p.message,
+                title: p.title,
+                message: p.message,
+                suggestions: [],
+            });
+        }
+    });
+    n.show();
+}
 function updateTray(status) {
     if (!tray)
         return;
     tray.setImage(getTrayIcon(status));
-    tray.setToolTip(`ag-doctor · ${status.toUpperCase()}`);
+    // When the proxy has surfaced a real error, override the tooltip with the
+    // provider + title so the user can see why the tray turned red even when
+    // the dashboard is hidden.
+    const tooltip = lastProxyError && status !== 'ok'
+        ? `ag-doctor · ${status.toUpperCase()} · ${lastProxyError.provider}: ${lastProxyError.title.slice(0, TOOLTIP_TITLE_MAX)}`
+        : `ag-doctor · ${status.toUpperCase()}`;
+    tray.setToolTip(tooltip);
+    // Rebuild the menu so the "Latest provider error" entry stays in sync.
+    tray.setContextMenu(buildTrayMenu());
 }
 function buildTrayMenu() {
-    return electron_1.Menu.buildFromTemplate([
+    // Dynamic "latest provider error" sub-entry. Always present so users have a
+    // visible "what just happened" affordance; disabled when no error is known.
+    const items = [
         {
             label: 'Open dashboard',
             click: () => {
@@ -171,13 +263,47 @@ function buildTrayMenu() {
             },
         },
         { type: 'separator' },
-        {
-            label: 'Quit',
+    ];
+    if (lastProxyError) {
+        items.push({
+            label: `Last error: ${lastProxyError.provider} — ${lastProxyError.title.slice(0, TOOLTIP_TITLE_MAX)}`,
+            enabled: false,
+        });
+        items.push({
+            label: 'Show details',
             click: () => {
-                electron_1.app.quit();
+                if (mainWindow) {
+                    mainWindow.show();
+                    mainWindow.focus();
+                    // Surface the latest error to the dashboard so the modal renders.
+                    mainWindow.webContents.send('proxy:error', {
+                        traceId: 'tray',
+                        provider: lastProxyError.provider,
+                        errorType: 'tray-replay',
+                        rawError: lastProxyError.message,
+                        title: lastProxyError.title,
+                        message: lastProxyError.message.slice(0, TOOLTIP_MSG_MAX),
+                        suggestions: [],
+                    });
+                }
             },
+        });
+        items.push({
+            label: 'Clear error',
+            click: () => {
+                lastProxyError = null;
+                updateTray('ok');
+            },
+        });
+        items.push({ type: 'separator' });
+    }
+    items.push({
+        label: 'Quit',
+        click: () => {
+            electron_1.app.quit();
         },
-    ]);
+    });
+    return electron_1.Menu.buildFromTemplate(items);
 }
 function createTray() {
     tray = new electron_1.Tray(getTrayIcon('ok'));
@@ -199,6 +325,7 @@ function createWindow() {
         height: 820,
         minWidth: 960,
         minHeight: 640,
+        icon: path_1.default.join(getAssetsPath(), 'icon.png'),
         backgroundColor: '#0a0e1a',
         titleBarStyle: 'hidden',
         titleBarOverlay: {
@@ -582,41 +709,146 @@ electron_1.ipcMain.handle('ag:providers:delete', async (_, id) => {
         return { success: false, error: e.message };
     }
 });
-electron_1.ipcMain.handle('ag:providers:test', async (_evt, params) => {
+electron_1.ipcMain.handle('ag:providers:fetch-models', async (_evt, params) => {
     try {
-        const url = params.apiUrl + (params.apiUrl.endsWith('/') ? '' : '/') + 'models';
         const { net } = require('electron');
-        const startTime = Date.now();
-        const result = await new Promise((resolve) => {
-            const request = net.request({
-                url: url,
-                method: 'GET'
-            });
-            if (params.apiKey) {
-                request.setHeader('Authorization', 'Bearer ' + params.apiKey);
+        const baseUrl = params.apiUrl.replace(/\/+$/, '');
+        const url = baseUrl.endsWith('/models') ? baseUrl : `${baseUrl}/models`;
+        return new Promise((resolve) => {
+            const req = net.request({ url, method: 'GET' });
+            if (params.apiKey && !params.apiKey.startsWith('enc:')) {
+                req.setHeader('Authorization', 'Bearer ' + params.apiKey);
             }
-            request.on('response', (response) => {
+            req.on('response', (res) => {
                 let data = '';
-                response.on('data', (chunk) => { data += chunk.toString(); });
-                response.on('end', () => {
-                    const latencyMs = Date.now() - startTime;
-                    const statusCode = response.statusCode ?? 500;
-                    if (statusCode >= 200 && statusCode < 300) {
-                        const healthStatus = latencyMs >= 1500 ? 'degraded' : 'healthy';
-                        resolve({ success: true, status: statusCode, latencyMs, healthStatus });
+                res.on('data', (chunk) => { data += chunk.toString(); });
+                res.on('end', () => {
+                    if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+                        try {
+                            const parsed = JSON.parse(data);
+                            let rawList = [];
+                            if (Array.isArray(parsed.data))
+                                rawList = parsed.data;
+                            else if (Array.isArray(parsed.models))
+                                rawList = parsed.models;
+                            else if (Array.isArray(parsed))
+                                rawList = parsed;
+                            const models = rawList.map((m) => {
+                                const id = typeof m === 'string' ? m : (m.id || m.name || 'unknown');
+                                const displayName = typeof m === 'string' ? m : (m.displayName || m.name || m.id || 'unknown');
+                                return { id, displayName, enabled: true };
+                            });
+                            resolve({ success: true, models });
+                        }
+                        catch (e) {
+                            resolve({ success: false, error: 'Invalid JSON response from /models endpoint' });
+                        }
                     }
                     else {
-                        const healthStatus = statusCode === 429 ? 'degraded' : 'offline';
-                        resolve({ success: false, status: statusCode, latencyMs, healthStatus, error: data || `HTTP ${statusCode}` });
+                        resolve({ success: false, error: `HTTP ${res.statusCode}: ${data ? data.slice(0, 150) : 'Failed to fetch models'}` });
                     }
                 });
             });
-            request.on('error', (error) => {
-                const latencyMs = Date.now() - startTime;
-                resolve({ success: false, latencyMs, healthStatus: 'offline', error: error.message });
-            });
-            request.end();
+            req.on('error', (err) => resolve({ success: false, error: err.message }));
+            req.end();
         });
+    }
+    catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+electron_1.ipcMain.handle('ag:providers:test', async (_evt, params) => {
+    try {
+        const { net } = require('electron');
+        const startTime = Date.now();
+        // Helper to perform an HTTP request via Electron's net module
+        const doRequest = (targetUrl, method, body) => {
+            return new Promise((resolve, reject) => {
+                const req = net.request({ url: targetUrl, method });
+                if (params.apiKey && !params.apiKey.startsWith('enc:')) {
+                    req.setHeader('Authorization', 'Bearer ' + params.apiKey);
+                }
+                if (body) {
+                    req.setHeader('Content-Type', 'application/json');
+                }
+                req.on('response', (res) => {
+                    let data = '';
+                    res.on('data', (chunk) => { data += chunk.toString(); });
+                    res.on('end', () => {
+                        resolve({ statusCode: res.statusCode ?? 500, data, latencyMs: Date.now() - startTime });
+                    });
+                });
+                req.on('error', (err) => reject(err));
+                if (body)
+                    req.write(body);
+                req.end();
+            });
+        };
+        const baseUrl = params.apiUrl.replace(/\/+$/, '');
+        let statusCode = 500;
+        let responseData = '';
+        let latencyMs = 0;
+        // 1. Try GET /models first
+        try {
+            const res = await doRequest(`${baseUrl}/models`, 'GET');
+            statusCode = res.statusCode;
+            responseData = res.data;
+            latencyMs = res.latencyMs;
+        }
+        catch (err) {
+            responseData = err.message;
+        }
+        // 2. Fallback to POST /chat/completions if GET /models failed or returned non-200
+        if (statusCode < 200 || statusCode >= 300) {
+            // Find a candidate model ID to test
+            let testModel = params.modelId;
+            if (!testModel && params.id) {
+                try {
+                    const fp = getCustomModelsPath();
+                    const c = await fs_1.default.promises.readFile(fp, 'utf8');
+                    const parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
+                    const prov = (parsed.providers || []).find((x) => x.id === params.id);
+                    if (prov && prov.models && prov.models.length > 0) {
+                        testModel = prov.models[0].id || prov.models[0].name;
+                    }
+                }
+                catch { /* ignore */ }
+            }
+            if (!testModel)
+                testModel = 'MiniMax-M3';
+            try {
+                const postBody = JSON.stringify({
+                    model: testModel,
+                    messages: [{ role: 'user', content: 'ping' }],
+                    max_tokens: 1
+                });
+                const postRes = await doRequest(`${baseUrl}/chat/completions`, 'POST', postBody);
+                // If POST returns 200, or a model parameter error (400), authentication worked!
+                if (postRes.statusCode >= 200 && postRes.statusCode < 300) {
+                    statusCode = postRes.statusCode;
+                    responseData = postRes.data;
+                    latencyMs = postRes.latencyMs;
+                }
+                else if (postRes.statusCode === 401 || postRes.statusCode === 403) {
+                    // Auth failed on chat completions — report exact auth failure
+                    statusCode = postRes.statusCode;
+                    responseData = postRes.data;
+                    latencyMs = postRes.latencyMs;
+                }
+            }
+            catch { /* keep original GET result if POST fails completely */ }
+        }
+        const isSuccess = statusCode >= 200 && statusCode < 300;
+        const healthStatus = isSuccess
+            ? (latencyMs >= 1500 ? 'degraded' : 'healthy')
+            : (statusCode === 429 ? 'degraded' : 'offline');
+        const result = {
+            success: isSuccess,
+            status: statusCode,
+            latencyMs,
+            healthStatus,
+            error: isSuccess ? undefined : (responseData || `HTTP ${statusCode}`)
+        };
         // Persist health metadata back to custom_models.json if provider ID is supplied
         if (params.id) {
             try {
@@ -669,6 +901,78 @@ electron_1.ipcMain.handle('ag:config:set-theme', async (_evt, theme) => {
     }
     catch {
         return false;
+    }
+});
+// Persists the user's "Do not notify" preference. Mirrors set-theme so the
+// Settings UI toggle survives app restart.
+electron_1.ipcMain.handle('ag:config:set-notify', async (_evt, enabled) => {
+    try {
+        const cfgPath = getConfigPath();
+        let cfg = {};
+        if (fs_1.default.existsSync(cfgPath)) {
+            cfg = JSON.parse(fs_1.default.readFileSync(cfgPath, 'utf-8'));
+        }
+        cfg.ui = { ...(typeof cfg.ui === 'object' && cfg.ui !== null ? cfg.ui : {}), notifyEnabled: !!enabled };
+        fs_1.default.mkdirSync(path_1.default.dirname(cfgPath), { recursive: true });
+        fs_1.default.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n');
+        configCache = cfg;
+        return true;
+    }
+    catch {
+        return false;
+    }
+});
+// Snapshot of the proxy-error ring buffer (read-only, most-recent first).
+electron_1.ipcMain.handle('ag:proxy-error-history', async () => {
+    return proxyErrorHistory.slice().reverse();
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// Proxy-error channel listener — turns the tray red and updates lastProxyError
+// (set by buildProxyErrorPayload() in src/proxy.ts and broadcast by
+// ipcHandlers.ts over the `proxy:error` IPC channel). We also re-broadcast
+// to every BrowserWindow in case the renderer was added after boot.
+// ─────────────────────────────────────────────────────────────────────────────
+electron_1.ipcMain.on('proxy:error', (_evt, payload) => {
+    if (!payload || !payload.title)
+        return;
+    // Severity: 4xx other than 429 is "warn"; 5xx/timeout/auth/quota are "err".
+    const sev = payload.status && payload.status >= 500
+        || payload.errorType === 'auth_401' || payload.errorType === 'auth_403'
+        || payload.errorType === 'quota_429' || payload.errorType === 'timeout'
+        ? 'err'
+        : 'warn';
+    lastProxyError = {
+        title: payload.title,
+        provider: payload.provider,
+        message: payload.message || payload.rawError,
+        at: Date.now(),
+        traceId: payload.traceId,
+    };
+    updateTray(sev);
+    // Push every payload into the ring buffer so the dashboard can re-open
+    // any historical error. Cap is enforced inside pushProxyErrorHistory.
+    pushProxyErrorHistory({
+        traceId: payload.traceId,
+        provider: payload.provider,
+        status: payload.status,
+        errorType: payload.errorType,
+        rawError: payload.rawError,
+        title: payload.title,
+        message: payload.message,
+        suggestions: payload.suggestions ?? [],
+        actionUrl: payload.actionUrl,
+        at: Date.now(),
+    });
+    // Fire a native OS notification for `err`-severity only. De-duped inside
+    // notifyProxyError() so flapping providers stay quiet. Honors the user's
+    // "Do not notify" preference from the Settings UI.
+    if (sev === 'err' && isNotifyEnabled()) {
+        notifyProxyError({
+            traceId: payload.traceId,
+            provider: payload.provider,
+            title: payload.title,
+            message: payload.message || payload.rawError,
+        });
     }
 });
 electron_1.ipcMain.handle('ag:notify', async (_evt, title, body) => {

@@ -11,6 +11,7 @@ const api = {
         get: () => electron_1.ipcRenderer.invoke('ag:providers:get'),
         save: (p) => electron_1.ipcRenderer.invoke('ag:providers:save', p),
         delete: (id) => electron_1.ipcRenderer.invoke('ag:providers:delete', id),
+        fetchModels: (params) => electron_1.ipcRenderer.invoke('ag:providers:fetch-models', params),
         test: (params) => electron_1.ipcRenderer.invoke('ag:providers:test', params),
         onChanged: (handler) => {
             const listener = () => handler();
@@ -21,6 +22,8 @@ const api = {
     info: () => electron_1.ipcRenderer.invoke('ag:info'),
     config: () => electron_1.ipcRenderer.invoke('ag:config'),
     setTheme: (theme) => electron_1.ipcRenderer.invoke('ag:config:set-theme', theme),
+    setNotifyEnabled: (enabled) => electron_1.ipcRenderer.invoke('ag:config:set-notify', enabled),
+    getProxyErrorHistory: () => electron_1.ipcRenderer.invoke('ag:proxy-error-history'),
     notify: (title, body) => electron_1.ipcRenderer.invoke('ag:notify', title, body),
     trayStatus: (status) => electron_1.ipcRenderer.invoke('ag:tray-status', status),
     openExternal: (url) => electron_1.ipcRenderer.invoke('ag:open-external', url),
@@ -85,6 +88,22 @@ const api = {
         const listener = (_, err) => handler(err);
         electron_1.ipcRenderer.on(channel, listener);
         return () => electron_1.ipcRenderer.removeListener(channel, listener);
+    },
+    // MITM traffic fan-out — emitted once per intercepted request when the
+    // proxy (mitm_443.js) writes a `mitm:traffic` JSON line on stdout.
+    // payload.id is unique per call; payload.ts is Date.now() at the proxy.
+    onMitmTraffic: (handler) => {
+        const listener = (_, payload) => handler(payload);
+        electron_1.ipcRenderer.on('mitm:traffic', listener);
+        return () => electron_1.ipcRenderer.removeListener('mitm:traffic', listener);
+    },
+    // Real-time proxy error fan-out from the main process. The renderer
+    // receives a ProxyErrorPayload (see src/proxy.ts) and renders the matching
+    // native quota/error card via NativeQuotaCardRenderer.
+    onProxyError: (handler) => {
+        const listener = (_, payload) => handler(payload);
+        electron_1.ipcRenderer.on('proxy:error', listener);
+        return () => electron_1.ipcRenderer.removeListener('proxy:error', listener);
     },
 };
 electron_1.contextBridge.exposeInMainWorld('ag', api);

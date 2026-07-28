@@ -1,7 +1,21 @@
 import type { CustomModel, GeminiRequestBody, GeminiCandidate, CloudCodeResponse } from './proxy/types';
 export type { CustomModel, GeminiRequestBody, GeminiCandidate, CloudCodeResponse };
+import { type ErrorType } from './proxy/errorClassifier';
 import { generateModelPlaceholderId, toSlug } from './proxy/idGenerator';
 export { generateModelPlaceholderId, toSlug };
+export type ProxyErrorPayload = {
+    traceId: string;
+    provider: string;
+    status?: number;
+    errorType: ErrorType;
+    rawError: string;
+    title: string;
+    message: string;
+    suggestions: string[];
+    actionUrl?: string;
+};
+export declare function setProxyErrorEmitter(fn: ((p: ProxyErrorPayload) => void) | null): void;
+export declare function buildProxyErrorPayload(traceId: string, status: number | undefined, bodyOrErr: unknown, provider: string | undefined, fallbackMessage?: string): ProxyErrorPayload;
 /**
  * Parses the Retry-After header from upstream responses (RFC 7231 §7.1.3).
  * Returns delay in milliseconds, or 0 if no valid header is present.

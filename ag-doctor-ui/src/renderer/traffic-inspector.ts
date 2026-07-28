@@ -57,8 +57,52 @@ export class TrafficInspectorEngine {
   public clear(): void {
     this.entries = [];
   }
+
+  public async replayEntry(id: string, executor: (entry: TrafficEntry) => Promise<{ statusCode: number; latencyMs: number }>): Promise<TrafficEntry | null> {
+    const original = this.entries.find((e) => e.id === id);
+    if (!original) return null;
+
+    const start = Date.now();
+    try {
+      const res = await executor(original);
+      const replayed = this.logTraffic({
+        method: original.method,
+        path: original.path + ' (Replayed)',
+        targetModel: original.targetModel,
+        translatedProvider: original.translatedProvider,
+        statusCode: res.statusCode,
+        latencyMs: res.latencyMs || (Date.now() - start),
+        requestPayload: original.requestPayload,
+        responsePayload: 'Replayed response payload',
+      });
+      return replayed;
+    } catch (err: any) {
+      const replayed = this.logTraffic({
+        method: original.method,
+        path: original.path + ' (Replayed Fail)',
+        targetModel: original.targetModel,
+        translatedProvider: original.translatedProvider,
+        statusCode: 500,
+        latencyMs: Date.now() - start,
+        requestPayload: original.requestPayload,
+        responsePayload: JSON.stringify({ error: err.message }),
+      });
+      return replayed;
+    }
+  }
+
+  public generateDiffView(entry: TrafficEntry): { reqRaw: string; resRaw: string; isError: boolean } {
+    return {
+      reqRaw: entry.requestPayload || '{}',
+      resRaw: entry.responsePayload || '{}',
+      isError: entry.statusCode >= 400,
+    };
+  }
 }
 
-if (typeof exports !== 'undefined') {
-  Object.assign(exports, { TrafficInspectorEngine });
+// CJS/global hookup for <script> tag use (no bundler required in renderer).
+if (typeof window !== 'undefined') {
+  (window as unknown as { AgTraffic?: unknown }).AgTraffic = {
+    TrafficInspectorEngine,
+  };
 }

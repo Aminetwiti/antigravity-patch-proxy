@@ -45,6 +45,7 @@ const fs = __importStar(require("fs/promises"));
 const path = __importStar(require("path"));
 const http = __importStar(require("http"));
 const https = __importStar(require("https"));
+const proxy_1 = require("./proxy");
 const customScheme_1 = require("./customScheme");
 const tray_1 = require("./tray");
 const cryptoStore = __importStar(require("./cryptoStore"));
@@ -55,6 +56,16 @@ const configExchange = __importStar(require("./configExchange"));
  * Registers all IPC handlers for the main process.
  */
 function registerIpcHandlers(storageManager) {
+    // Fan-out proxy errors from proxy.ts to every BrowserWindow via the
+    // 'proxy:error' IPC channel. The renderer subscribes through preload.ts
+    // (window.ag.onProxyError) and renders the matching native quota card.
+    (0, proxy_1.setProxyErrorEmitter)((payload) => {
+        for (const win of electron_1.BrowserWindow.getAllWindows()) {
+            if (!win.isDestroyed()) {
+                win.webContents.send('proxy:error', payload);
+            }
+        }
+    });
     // Dialog
     electron_1.ipcMain.handle('dialog:open-workspace', async () => {
         const result = await electron_1.dialog.showOpenDialog({

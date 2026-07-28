@@ -411,3 +411,5 @@ export async function testProviderHealth(params: TestModelParams): Promise<Conne
     req.end();
   });
 }
+
+export const testModelConnection = testProviderHealth;

@@ -23,7 +23,7 @@ interface ConfirmOptions {
 }
 
 function resolveConfirmClass(opts?: ConfirmOptions): string {
-  return `btn ${opts?.danger ? 'btn-danger' : opts?.confirmDisabled ? 'btn-muted' : 'btn-primary'}`;
+  return `btn ${opts?.danger ? 'btn-danger' : 'btn-primary'}`;
 }
 
 function resolveConfirmLabel(opts?: ConfirmOptions): string {
@@ -33,6 +33,12 @@ function resolveConfirmLabel(opts?: ConfirmOptions): string {
 function resolveCancelLabel(opts?: ConfirmOptions): string {
   return opts?.cancelLabel ?? 'Cancel';
 }
+
+// ── Mirror of ModalManager confirm/cancel resolution ───────────────────────────
+//
+// After the fix to ModalManager.onConfirm, clicking Confirm resolves with `true`,
+// Cancel / Escape / backdrop resolve with whatever `setup` returned (the confirm
+// helper returns `false`). The Promise therefore distinguishes the two paths.
 
 describe('ModalManager.confirm option resolution', () => {
   it('defaults to Confirm / Cancel and btn-primary', () => {
@@ -45,17 +51,15 @@ describe('ModalManager.confirm option resolution', () => {
     expect(resolveConfirmClass({ danger: true })).toBe('btn btn-danger');
   });
 
-  it('maps confirmDisabled to btn-muted', () => {
-    expect(resolveConfirmClass({ confirmDisabled: true })).toBe('btn btn-muted');
+  it('ignores confirmDisabled for class (no btn-muted)', () => {
+    // confirmDisabled still disables the button via setConfirmEnabled;
+    // the visual class stays primary so the action remains identifiable.
+    expect(resolveConfirmClass({ confirmDisabled: true })).toBe('btn btn-primary');
   });
 
   it('uses custom labels when provided', () => {
     expect(resolveConfirmLabel({ confirmLabel: 'Delete' })).toBe('Delete');
     expect(resolveCancelLabel({ cancelLabel: 'Keep' })).toBe('Keep');
-  });
-
-  it('danger takes precedence over confirmDisabled in class', () => {
-    expect(resolveConfirmClass({ danger: true, confirmDisabled: true })).toBe('btn btn-danger');
   });
 });
 

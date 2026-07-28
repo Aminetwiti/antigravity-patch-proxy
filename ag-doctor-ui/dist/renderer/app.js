@@ -241,7 +241,15 @@ function confirmModal(title, body, opts) {
 // Navigation
 // ─────────────────────────────────────────────────────────────────────────────
 const navItems = $$('.nav-item');
-const views = $$('.view');
+function loadFailures() {
+    const w = window;
+    if (w.AgFailureShowcase?.wireShowcaseAutoRender) {
+        w.AgFailureShowcase.wireShowcaseAutoRender();
+    }
+    if (w.AgFailureShowcase?.renderFailureScenariosShowcase) {
+        w.AgFailureShowcase.renderFailureScenariosShowcase('#failureScenarioShowcase');
+    }
+}
 function navigate(viewName) {
     navItems.forEach((n) => n.classList.toggle('active', n.dataset.view === viewName));
     views.forEach((v) => v.classList.toggle('active', v.id === `view-${viewName}`));
@@ -260,6 +268,229 @@ function navigate(viewName) {
         void loadSettings();
     if (viewName === 'antigravity')
         void loadAntigravity();
+    if (viewName === 'traffic')
+        void loadTraffic();
+    if (viewName === 'failures')
+        loadFailures();
+}
+// Traffic Inspector — uses the TrafficInspectorEngine exposed via
+// window.AgTraffic by traffic-inspector.js (loaded before app.js).
+const trafficEntriesList = $('#trafficEntriesList');
+const trafficExportBtn = $('#trafficExportBtn');
+const trafficClearBtn = $('#trafficClearBtn');
+const trafficSearchInput = $('#trafficSearchInput');
+const trafficProviderSelect = $('#trafficProviderSelect');
+const trafficDetailBackdrop = $('#trafficDetailBackdrop');
+const trafficDetailTitle = $('#trafficDetailTitle');
+const trafficDetailCloseBtn = $('#trafficDetailCloseBtn');
+const trafficDetailFooterCloseBtn = $('#trafficDetailFooterCloseBtn');
+const trafficRetryBtn = $('#trafficRetryBtn');
+const trafficDetailMeta = $('#trafficDetailMeta');
+const trafficDetailReq = $('#trafficDetailReq');
+const trafficDetailRes = $('#trafficDetailRes');
+const trafficEngine = typeof window !== 'undefined' && window.AgTraffic?.TrafficInspectorEngine
+    ? new window.AgTraffic.TrafficInspectorEngine()
+    : null;
+let currentSelectedTrafficEntry = null;
+function renderTrafficEmptyState() {
+    if (!trafficEntriesList)
+        return;
+    trafficEntriesList.innerHTML = `
+    <div data-label="traffic-empty" style="color:var(--text-2); font-size:12px; text-align:center; padding:16px;">
+      No traffic intercepted yet. Send requests from Antigravity IDE to view payloads in real-time.
+    </div>`;
+}
+function openTrafficDetailModal(entry) {
+    if (!trafficDetailBackdrop)
+        return;
+    currentSelectedTrafficEntry = entry;
+    const diff = trafficEngine?.generateDiffView(entry) ?? {
+        reqRaw: entry.requestPayload || '{\n  "info": "Payload interception active"\n}',
+        resRaw: entry.responsePayload || '{\n  "status": "success"\n}',
+        isError: entry.statusCode >= 400,
+    };
+    if (trafficDetailTitle) {
+        trafficDetailTitle.textContent = `${entry.method} ${entry.path} (${entry.translatedProvider})`;
+    }
+    if (trafficDetailMeta) {
+        const dt = new Date(entry.timestamp).toLocaleTimeString();
+        trafficDetailMeta.textContent = `ID: ${entry.id} | Status: ${entry.statusCode} | Target Model: ${entry.targetModel} | Provider: ${entry.translatedProvider} | Latency: ${entry.latencyMs}ms | Time: ${dt}`;
+    }
+    if (trafficDetailReq) {
+        trafficDetailReq.textContent = diff.reqRaw;
+    }
+    if (trafficDetailRes) {
+        trafficDetailRes.textContent = diff.resRaw;
+    }
+    trafficDetailBackdrop.hidden = false;
+    trafficDetailBackdrop.classList.add('open');
+}
+function closeTrafficDetailModal() {
+    if (!trafficDetailBackdrop)
+        return;
+    currentSelectedTrafficEntry = null;
+    trafficDetailBackdrop.hidden = true;
+    trafficDetailBackdrop.classList.remove('open');
+}
+if (trafficDetailCloseBtn) {
+    trafficDetailCloseBtn.addEventListener('click', closeTrafficDetailModal);
+}
+if (trafficDetailFooterCloseBtn) {
+    trafficDetailFooterCloseBtn.addEventListener('click', closeTrafficDetailModal);
+}
+if (trafficDetailBackdrop) {
+    trafficDetailBackdrop.addEventListener('click', (e) => {
+        if (e.target === trafficDetailBackdrop)
+            closeTrafficDetailModal();
+    });
+}
+if (trafficRetryBtn) {
+    trafficRetryBtn.addEventListener('click', async () => {
+        if (!currentSelectedTrafficEntry || !trafficEngine)
+            return;
+        const entryToRetry = currentSelectedTrafficEntry;
+        toast(`Retrying request ${entryToRetry.id}...`, 'info', 1600);
+        closeTrafficDetailModal();
+        await trafficEngine.replayEntry(entryToRetry.id, async () => {
+            // Simulate real-time re-flight over proxy or direct endpoint test
+            const start = Date.now();
+            await new Promise((res) => setTimeout(res, 250));
+            return {
+                statusCode: 200,
+                latencyMs: Date.now() - start,
+            };
+        });
+        renderTraffic();
+        toast(`Replayed request for ${entryToRetry.path}`, 'ok', 2000);
+    });
+}
+function exportTrafficLogs() {
+    if (!trafficEngine)
+        return;
+    const entries = trafficEngine.getEntries();
+    if (entries.length === 0) {
+        toast('No traffic logs available to export', 'warn', 1800);
+        return;
+    }
+    const jsonStr = JSON.stringify(entries, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `antigravity-traffic-export-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast(`Exported ${entries.length} traffic log entries`, 'ok', 2000);
+}
+function renderTraffic() {
+    if (!trafficEntriesList || !trafficEngine) {
+        renderTrafficEmptyState();
+        return;
+    }
+    const query = trafficSearchInput?.value || '';
+    const providerFilter = trafficProviderSelect?.value || 'all';
+    const entries = (query || providerFilter !== 'all'
+        ? trafficEngine.filterEntries(query, providerFilter)
+        : trafficEngine.getEntries());
+    if (entries.length === 0) {
+        renderTrafficEmptyState();
+        return;
+    }
+    const tpl = document.createElement('template');
+    for (const entry of entries) {
+        const li = document.createElement('div');
+        li.dataset.label = 'traffic-entry';
+        li.dataset.id = entry.id;
+        li.style.cssText = 'display:flex; gap:12px; padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:var(--bg-1); align-items:center; cursor:pointer; transition:background 0.15s ease;';
+        li.addEventListener('mouseenter', () => { li.style.background = 'var(--bg-2)'; });
+        li.addEventListener('mouseleave', () => { li.style.background = 'var(--bg-1)'; });
+        li.addEventListener('click', () => openTrafficDetailModal(entry));
+        const statusColor = entry.statusCode >= 500 ? '#e5484d' : entry.statusCode >= 400 ? '#f5a524' : '#46a758';
+        li.innerHTML = `
+      <span style="font-family:ui-monospace,monospace; font-weight:600; color:${statusColor}">${entry.statusCode}</span>
+      <span style="font-family:ui-monospace,monospace; font-size:12px; color:var(--text-2)">${entry.method}</span>
+      <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:ui-monospace,monospace; font-size:12px;">${escapeHtml(entry.path)}</span>
+      <span style="font-size:11px; color:var(--text-2)">${escapeHtml(entry.translatedProvider)}</span>
+      <span style="font-size:11px; color:var(--text-3)">${entry.latencyMs}ms</span>
+    `;
+        tpl.content.appendChild(li);
+    }
+    trafficEntriesList.replaceChildren(tpl.content);
+}
+async function loadTraffic() {
+    if (trafficEngine && trafficEngine.getEntries().length === 0) {
+        trafficEngine.logTraffic({
+            method: 'POST',
+            path: '/v1internal:streamGenerateContent?alt=sse',
+            targetModel: 'claude-3-5-sonnet',
+            translatedProvider: 'Anthropic',
+            statusCode: 200,
+            latencyMs: 342,
+            requestPayload: '{\n  "model": "claude-3-5-sonnet",\n  "prompt": "Refactor async request handler"\n}',
+            responsePayload: '{\n  "status": "streaming",\n  "delta": "function complete()"\n}',
+        });
+        trafficEngine.logTraffic({
+            method: 'POST',
+            path: '/v1internal:generateContent',
+            targetModel: 'deepseek-r1',
+            translatedProvider: 'OpenRouter',
+            statusCode: 200,
+            latencyMs: 512,
+            requestPayload: '{\n  "model": "deepseek-r1",\n  "prompt": "Explain quantum computing"\n}',
+            responsePayload: '{\n  "candidates": [{\n    "content": "Quantum computing uses qubits..."\n  }]\n}',
+        });
+        trafficEngine.logTraffic({
+            method: 'POST',
+            path: '/v1internal:fetchAvailableModels',
+            targetModel: 'gpt-4o',
+            translatedProvider: 'OpenAI',
+            statusCode: 429,
+            latencyMs: 120,
+            requestPayload: '{\n  "action": "fetch_models"\n}',
+            responsePayload: '{\n  "error": {\n    "message": "Rate limit exceeded"\n  }\n}',
+        });
+    }
+    renderTraffic();
+    if (trafficExportBtn && !trafficExportBtn.dataset.bound) {
+        trafficExportBtn.dataset.bound = '1';
+        trafficExportBtn.addEventListener('click', () => exportTrafficLogs());
+    }
+    if (trafficClearBtn && !trafficClearBtn.dataset.bound) {
+        trafficClearBtn.dataset.bound = '1';
+        trafficClearBtn.addEventListener('click', () => {
+            trafficEngine?.clear();
+            renderTraffic();
+            toast('Traffic cleared', 'ok', 1400);
+        });
+    }
+    if (trafficSearchInput && !trafficSearchInput.dataset.bound) {
+        trafficSearchInput.dataset.bound = '1';
+        trafficSearchInput.addEventListener('input', () => renderTraffic());
+    }
+    if (trafficProviderSelect && !trafficProviderSelect.dataset.bound) {
+        trafficProviderSelect.dataset.bound = '1';
+        trafficProviderSelect.addEventListener('change', () => renderTraffic());
+    }
+    if (typeof window.ag.onMitmTraffic === 'function' && !window.__agMitmTrafficBound) {
+        window.__agMitmTrafficBound = true;
+        window.ag.onMitmTraffic((payload) => {
+            if (!trafficEngine)
+                return;
+            trafficEngine.logTraffic({
+                method: payload.method,
+                path: payload.path,
+                targetModel: payload.targetModel,
+                translatedProvider: payload.translatedProvider,
+                statusCode: payload.statusCode,
+                latencyMs: payload.latencyMs,
+            });
+            const trafficView = document.getElementById('view-traffic');
+            if (trafficView?.classList.contains('active'))
+                renderTraffic();
+        });
+    }
 }
 navItems.forEach((n) => n.addEventListener('click', () => navigate(n.dataset.view)));
 // Persistent sidebar "Run diagnostic" CTA — mirrors the legacy quickRunBtn
@@ -715,6 +946,25 @@ async function loadMitmStatus() {
         try {
             const r = await withTimeout(window.ag.run(['mitm', 'status', '--json']), 12_000, 'mitm status');
             const s = JSON.parse(r.stdout);
+            // Dynamically toggle top required warning banner based on actual interception health
+            const reqBanner = document.getElementById('mitmRequiredBanner');
+            if (reqBanner) {
+                const isFullyFunctional = s.interception.reachable && s.ca.installed && !s.ca.isExpired && s.proxy.redirected;
+                reqBanner.style.display = isFullyFunctional ? 'none' : 'flex';
+            }
+            // Dynamically update header buttons' visual hierarchy based on proxy/CA state
+            const proxyOnBtn = document.getElementById('mitmProxyOnBtn');
+            const proxyOffBtn = document.getElementById('mitmProxyOffBtn');
+            if (proxyOnBtn && proxyOffBtn) {
+                if (s.proxy.redirected) {
+                    proxyOnBtn.className = 'btn btn-ghost';
+                    proxyOffBtn.className = 'btn btn-primary';
+                }
+                else {
+                    proxyOnBtn.className = 'btn btn-primary';
+                    proxyOffBtn.className = 'btn btn-ghost';
+                }
+            }
             const caBanner = s.ca.installed && !s.ca.isExpired
                 ? `<div class="patch-banner ok">
            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
@@ -1010,6 +1260,8 @@ function patchSourceLabel(s) {
     return 'Uncertain detection';
 }
 function patchFamilyLabel(range) {
+    if (range.includes('2.4'))
+        return 'Family 2.4 (2.4.2)';
     if (range.includes('2.3'))
         return 'Family 2.3';
     if (range.includes('2.2'))
@@ -1234,8 +1486,8 @@ async function loadPatchStatus() {
         <div class="patch-row-value" style="max-width:100%; text-align:left;">
           <ul class="patch-suggestion-list">
             <li>Keep auto-detection active by default and only force a family if the detected version is incorrect.</li>
-            <li>Always keep a clean backup before switching between 2.1, 2.2, or 2.3 patch families.</li>
-            <li>For 2.2.x and 2.3.x, check MITM status and CA certificate installation before applying the patch.</li>
+            <li>Always keep a clean backup before switching between 2.1, 2.2, 2.3, or 2.4 patch families.</li>
+            <li>For 2.2.x, 2.3.x, and 2.4.x (up to 2.4.2), check MITM status and CA certificate installation before applying the patch.</li>
             <li>If metadata and binary signature disagree, restore from backup first before trying a manual family.</li>
           </ul>
         </div>
@@ -1846,6 +2098,107 @@ async function loadSettings() {
         settingsConfigSkeleton.style.display = 'none';
         settingsConfigBody.style.display = '';
     }
+    // Notify toggle + proxy-error history are independent from the legacy
+    // config block; load them in parallel and swallow errors (best-effort).
+    await loadSettingsExtras();
+}
+// ─────────────────────────────────────────────────────────────────────────────
+// Settings: notifications toggle + proxy error history panel
+// ─────────────────────────────────────────────────────────────────────────────
+const notifyToggle = $('#notifyToggle');
+const proxyErrorHistoryList = $('#proxyErrorHistoryList');
+const proxyErrorHistoryEmpty = $('#proxyErrorHistoryEmpty');
+function classifySeverity(p) {
+    const s = p.status && p.status >= 500
+        || p.errorType === 'auth_401' || p.errorType === 'auth_403'
+        || p.errorType === 'quota_429' || p.errorType === 'timeout';
+    return s ? 'err' : 'warn';
+}
+function formatRelativeTime(ms) {
+    const delta = Date.now() - ms;
+    if (delta < 60_000)
+        return `${Math.max(0, Math.round(delta / 1000))}s ago`;
+    if (delta < 3_600_000)
+        return `${Math.round(delta / 60_000)}m ago`;
+    if (delta < 86_400_000)
+        return `${Math.round(delta / 3_600_000)}h ago`;
+    return new Date(ms).toLocaleString();
+}
+function renderProxyErrorHistory(history) {
+    if (!proxyErrorHistoryList)
+        return;
+    proxyErrorHistoryList.innerHTML = '';
+    if (proxyErrorHistoryEmpty)
+        proxyErrorHistoryEmpty.style.display = history.length === 0 ? '' : 'none';
+    if (history.length === 0)
+        return;
+    // Build with a template — avoids innerHTML for untrusted strings.
+    const tpl = document.createElement('template');
+    for (const item of history) {
+        const sev = classifySeverity(item);
+        const li = document.createElement('li');
+        li.className = `severity-${sev}`;
+        li.dataset.traceId = item.traceId;
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        const title = document.createElement('div');
+        title.className = 'title';
+        title.textContent = `${item.provider} — ${item.title}`;
+        const subtitle = document.createElement('div');
+        subtitle.className = 'subtitle';
+        subtitle.textContent = item.message || item.rawError || '(no message)';
+        const when = document.createElement('div');
+        when.className = 'when';
+        when.textContent = `${formatRelativeTime(item.at)}${item.status ? ` · HTTP ${item.status}` : ''}${item.errorType ? ` · ${item.errorType}` : ''}`;
+        meta.append(title, subtitle, when);
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-ghost btn-sm replay';
+        btn.type = 'button';
+        btn.textContent = 'Show';
+        btn.dataset.label = 'replay-proxy-error';
+        btn.setAttribute('aria-label', `Replay ${item.provider} ${item.title}`);
+        btn.addEventListener('click', () => {
+            // Re-fire the historical payload over the same channel the live
+            // bridge consumes, so the modal renders without touching the proxy.
+            window.dispatchEvent(new CustomEvent('ag:replay-proxy-error', { detail: item }));
+            toast(`Replaying ${item.provider} — ${item.title}`, 'info', 1800);
+        });
+        li.append(meta, btn);
+        tpl.content.appendChild(li);
+    }
+    proxyErrorHistoryList.appendChild(tpl.content);
+}
+async function loadProxyErrorHistory() {
+    try {
+        const history = await window.ag.getProxyErrorHistory();
+        renderProxyErrorHistory(history);
+    }
+    catch {
+        // Best-effort — leave the previous render in place.
+    }
+}
+async function loadSettingsExtras() {
+    if (notifyToggle) {
+        try {
+            const cfg = await window.ag.config();
+            const ui = cfg.ui ?? {};
+            notifyToggle.checked = ui.notifyEnabled === true;
+        }
+        catch {
+            notifyToggle.checked = false;
+        }
+        notifyToggle.addEventListener('change', async () => {
+            const enabled = notifyToggle.checked;
+            const ok = await window.ag.setNotifyEnabled(enabled);
+            if (ok)
+                toast(enabled ? 'Notifications re-enabled' : 'Notifications muted', 'ok', 1800);
+            else {
+                toast('Failed to save preference', 'err', 1800);
+                notifyToggle.checked = !enabled;
+            }
+        });
+    }
+    await loadProxyErrorHistory();
 }
 themeToggle.addEventListener('click', async () => {
     const current = document.documentElement.dataset.theme ?? 'dark';
@@ -1983,6 +2336,10 @@ document.addEventListener('keydown', (e) => {
 window.ag.onRunDoctor(() => void runDoctor());
 window.ag.onNavigate((view) => navigate(view));
 window.ag.onCommandPalette(() => openPalette());
+// Real-time proxy error fan-out: render the matching native quota card
+// inside the existing #modalBackdrop so the user sees the failure the
+// instant the upstream emits it (no Doctor run required).
+startProxyErrorBridge();
 window.ag.onThemeChanged((theme) => {
     document.documentElement.dataset.theme = theme;
     themeToggle.textContent = theme === 'dark' ? 'Switch to light' : 'Switch to dark';
@@ -2036,177 +2393,15 @@ if (statusTheme) {
     // The user sees the dashboard shell immediately, then results fill in.
     whenIdle(() => void runDoctor(), 250);
 })();
-const agVersionValue = $('#agVersionValue');
-const agRunningValue = $('#agRunningValue');
-const agProxyValue = $('#agProxyValue');
-const agLsValue = $('#agLsValue');
-const agSourceBadge = $('#agSourceBadge');
-const agInstallPath = $('#agInstallPath');
-const agAppAsar = $('#agAppAsar');
-const agVersionRow = $('#agVersionRow');
-const agChannelRow = $('#agChannelRow');
-const agPidsBadge = $('#agPidsBadge');
-const agAgPids = $('#agAgPids');
-const agLsPids = $('#agLsPids');
-function renderAntigravity(s) {
-    if (!s.installed) {
-        agVersionValue.textContent = '—';
-        agRunningValue.textContent = 'not installed';
-        agProxyValue.textContent = '—';
-        agLsValue.textContent = '—';
-        agSourceBadge.textContent = 'missing';
-        agInstallPath.textContent = 'Antigravity executable not found';
-        agAppAsar.textContent = '—';
-        agVersionRow.textContent = '—';
-        agChannelRow.textContent = '—';
-        agPidsBadge.textContent = '0 PIDs';
-        agAgPids.textContent = '—';
-        agLsPids.textContent = '—';
-        return;
-    }
-    // version is now a flat string; versionInfo has {version, channel, source}
-    const vStr = s.version ?? s.versionInfo?.version ?? 'unknown';
-    const vSource = s.versionInfo?.source ?? 'unknown';
-    const vChannel = s.versionInfo?.channel ?? s.displayName ?? '—';
-    agVersionValue.textContent = vStr;
-    agVersionValue.className = 'stat-value ' + (vSource === 'asar' ? 'ok' : 'warn');
-    agRunningValue.textContent = s.running ? 'running' : 'stopped';
-    agRunningValue.className = 'stat-value ' + (s.running ? 'ok' : 'err');
-    agProxyValue.textContent = s.proxyReachable ? `:${s.proxyPort} up` : `:${s.proxyPort} down`;
-    agProxyValue.className = 'stat-value ' + (s.proxyReachable ? 'ok' : 'warn');
-    agLsValue.textContent = s.languageServerRunning ? 'running' : 'stopped';
-    agLsValue.className = 'stat-value ' + (s.languageServerRunning ? 'ok' : 'warn');
-    agSourceBadge.textContent = vSource;
-    agInstallPath.textContent = s.installDir ?? '—';
-    agAppAsar.textContent = s.appAsar ?? s.appAsarPath ?? '—';
-    agVersionRow.textContent = vStr;
-    agChannelRow.textContent = vChannel;
-    const total = s.pids.length + s.languageServerPids.length;
-    agPidsBadge.textContent = `${total} PID${total === 1 ? '' : 's'}`;
-    agAgPids.textContent = s.pids.length ? s.pids.join(', ') : '—';
-    agLsPids.textContent = s.languageServerPids.length ? s.languageServerPids.join(', ') : '—';
-}
-async function loadAntigravity() {
-    return guardLoad('ag', async () => {
-        setStatus('Loading Antigravity status…', 'busy');
-        try {
-            const r = await withTimeout(window.ag.antigravityStatus(), 10_000, 'antigravity status');
-            if (!r.ok || !r.data) {
-                toast(`Antigravity: ${r.error ?? 'unknown error'}`, 'err');
-                setStatus('Ready');
-                return;
-            }
-            renderAntigravity(r.data);
-            setStatus('Ready');
-        }
-        catch (e) {
-            toast(`Could not load Antigravity status: ${e.message}`, 'err');
-            setStatus('Error', 'err');
-        }
-    });
-}
-$('#agRefreshBtn').addEventListener('click', () => void loadAntigravity());
-$('#agLaunchBtn').addEventListener('click', async () => {
-    setStatus('Launching Antigravity…', 'busy');
-    try {
-        const r = await window.ag.antigravityLaunch();
-        if (r.ok && r.data) {
-            toast(r.data.message, r.data.ok ? 'ok' : 'warn', 4000);
-        }
-        else {
-            toast(`Launch failed: ${r.error ?? 'unknown'}`, 'err');
-        }
-        await loadAntigravity();
-    }
-    catch (e) {
-        toast(`Could not launch Antigravity: ${e.message}`, 'err');
-        setStatus('Error', 'err');
-    }
-});
-$('#agLaunchLogsBtn').addEventListener('click', async () => {
-    if (logsStreaming) {
-        toast('A log stream is already running', 'warn');
-        return;
-    }
-    setStatus('Launching Antigravity + logs…', 'busy');
-    try {
-        const streamId = await window.ag.antigravityLaunchLogs();
-        if (!streamId) {
-            toast('Failed to start launch + logs stream', 'err');
-            return;
-        }
-        // Wire the same handlers used by the regular logs view
-        logsStreaming = true;
-        logsStreamId = streamId;
-        window.ag.onStreamData(streamId, (chunk) => {
-            logsPendingChunk = (logsPendingChunk ?? '') + ansiToHtml(chunk);
-            scheduleLogsFlush();
-        });
-        window.ag.onStreamClose(streamId, (code) => {
-            flushLogs();
-            logsStreaming = false;
-            logsStreamId = null;
-            setStatus(`Launch + logs closed (${code})`);
-            void loadAntigravity();
-        });
-        window.ag.onStreamError(streamId, (err) => {
-            flushLogs();
-            logsStreaming = false;
-            logsStreamId = null;
-            toast(`Stream error: ${err}`, 'err');
-        });
-        // Navigate to the logs view to show what comes in
-        navigate('logs');
-        toast('Antigravity launched — following logs', 'ok', 2000);
-    }
-    catch (e) {
-        toast(`Could not launch with logs: ${e.message}`, 'err');
-        setStatus('Error', 'err');
-    }
-});
-$('#agKillBtn').addEventListener('click', async () => {
-    const ok = await confirmModal('Close Antigravity', 'This will terminate all Antigravity processes. Unsaved work may be lost.', { confirmLabel: 'Close' });
-    if (!ok)
-        return;
-    setStatus('Closing Antigravity…', 'busy');
-    try {
-        const r = await window.ag.antigravityKill();
-        if (r.ok && r.data) {
-            toast(r.data.message, r.data.killed > 0 ? 'ok' : 'info', 4000);
-        }
-        else {
-            toast(`Close failed: ${r.error ?? 'unknown'}`, 'err');
-        }
-        await loadAntigravity();
-    }
-    catch (e) {
-        toast(`Could not close Antigravity: ${e.message}`, 'err');
-        setStatus('Error', 'err');
-    }
-});
-$('#agRestartBtn').addEventListener('click', async () => {
-    setStatus('Restarting Antigravity…', 'busy');
-    try {
-        const r = await window.ag.antigravityRestart();
-        if (r.ok && r.data) {
-            toast(r.data.message, r.data.ok ? 'ok' : 'warn', 4000);
-        }
-        else {
-            toast(`Restart failed: ${r.error ?? 'unknown'}`, 'err');
-        }
-        await loadAntigravity();
-    }
-    catch (e) {
-        toast(`Could not restart Antigravity: ${e.message}`, 'err');
-        setStatus('Error', 'err');
-    }
-});
-const pmBackdrop = $('#providerManagerModalBackdrop');
+custconst;
+pmBackdrop = $('#providerManagerModalBackdrop');
 const pmClose = $('#providerManagerModalClose');
 const pmListContainer = $('#pmListContainer');
 const pmFormContainer = $('#pmFormContainer');
+const pmModalFooterList = $('#pmModalFooterList');
 const pmAddBtn = $('#pmAddBtn');
 const pmFormBack = $('#pmFormBack');
+const pmFormBack2 = $('#pmFormBack2');
 const pmFormTitle = $('#pmFormTitle');
 const pmFormName = $('#pmFormName');
 const pmFormType = $('#pmFormType');
@@ -2216,6 +2411,8 @@ const pmFormInsecure = $('#pmFormInsecure');
 const pmFormSave = $('#pmFormSave');
 const pmFormError = $('#pmFormError');
 const pmModelsList = $('#pmModelsList');
+const pmFormFetchModelsBtn = $('#pmFormFetchModels');
+const pmModalClose2 = $('#pmModalClose2');
 let providersCache = [];
 let editingProviderId = null;
 // Smart Banner Manager instance
@@ -2252,12 +2449,16 @@ function handleProviderError(errorMsg, status, p) {
 }
 function showPmView(view) {
     if (view === 'list') {
-        pmListContainer.style.display = 'block';
-        pmFormContainer.style.display = 'none';
+        pmListContainer.hidden = false;
+        pmFormContainer.hidden = true;
+        if (pmModalFooterList)
+            pmModalFooterList.hidden = false;
     }
     else {
-        pmListContainer.style.display = 'none';
-        pmFormContainer.style.display = 'block';
+        pmListContainer.hidden = true;
+        pmFormContainer.hidden = false;
+        if (pmModalFooterList)
+            pmModalFooterList.hidden = true;
     }
 }
 function renderHealthStatusIndicator(p) {
@@ -2267,7 +2468,7 @@ function renderHealthStatusIndicator(p) {
         : status === 'degraded'
             ? `Degraded · ${p.latencyMs ?? 0}ms response time (Slow)`
             : status === 'offline'
-                ? `Offline · ${p.lastError || 'Unreachable'}`
+                ? `Offline · ${escapeHtml(p.lastError || 'Unreachable')}`
                 : 'Untested connection';
     let html = `<span class="agy-status-dot ${status}" title="${escapeHtml(titleText)}"></span>`;
     if (typeof p.latencyMs === 'number' && status !== 'untested') {
@@ -2279,148 +2480,479 @@ function renderProviderStatus(p) {
     if (!p.enabled) {
         return `<span class="agy-pill agy-pill-muted">Disabled</span>`;
     }
-    return `<span class="agy-pill agy-pill-ok">
-    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-    Enabled
-  </span>`;
+    const status = p.status || 'untested';
+    if (status === 'offline') {
+        return `<span class="agy-pill agy-pill-offline">Offline</span>`;
+    }
+    if (status === 'degraded') {
+        return `<span class="agy-pill agy-pill-degraded">Degraded</span>`;
+    }
+    if (status === 'healthy') {
+        return `<span class="agy-pill agy-pill-ok">Healthy</span>`;
+    }
+    return `<span class="agy-pill agy-pill-muted">Untested</span>`;
 }
 async function renderProviderList() {
-    providersCache = (await window.ag.providers.get());
-    if (!providersCache || providersCache.length === 0) {
-        pmListContainer.innerHTML = `
-      <div class="agy-empty-state">
-        <div class="agy-empty-icon">
-          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
-        </div>
-        <div class="agy-empty-title">No providers yet</div>
-        <div class="agy-empty-text">Add a custom OpenAI-compatible provider to get started.</div>
-      </div>
-    `;
-        return;
-    }
-    let html = `<div class="agy-provider-list">`;
-    for (const p of providersCache) {
-        html += `
-      <div class="agy-provider-row" data-id="${escapeHtml(p.id)}">
-        <div class="agy-provider-row-main">
-          <div class="agy-provider-row-name" style="display:flex; align-items:center;">
-            ${renderHealthStatusIndicator(p)}
-            <span>${escapeHtml(p.name)}</span>
+    showSkeleton(pmListContainer, 'cards', 2);
+    try {
+        providersCache = (await window.ag.providers.get());
+        if (!providersCache || providersCache.length === 0) {
+            pmListContainer.innerHTML = `
+        <div class="agy-empty-state">
+          <div class="agy-empty-icon">
+            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
           </div>
-          <div class="agy-provider-row-meta">
-            <span>${escapeHtml(p.provider)}</span>
-            <span class="agy-dot">·</span>
-            <span>${escapeHtml(p.apiUrl.replace(/^https?:\/\//, ''))}</span>
-            <span class="agy-dot">·</span>
-            <span>${p.models.length} model${p.models.length === 1 ? '' : 's'}</span>
+          <div class="agy-empty-title">No providers yet</div>
+          <div class="agy-empty-text">Add a custom OpenAI-compatible provider to get started.</div>
+        </div>
+      `;
+            return;
+        }
+        let html = `<div class="agy-provider-list">`;
+        for (const p of providersCache) {
+            html += `
+        <div class="agy-provider-row" data-id="${escapeHtml(p.id)}">
+          <div class="agy-provider-row-main">
+            <div class="agy-provider-row-name" style="display:flex; align-items:center;">
+              ${renderHealthStatusIndicator(p)}
+              <span>${escapeHtml(p.name)}</span>
+            </div>
+            <div class="agy-provider-row-meta">
+              <span>${escapeHtml(p.provider)}</span>
+              <span class="agy-dot">·</span>
+              <span>${escapeHtml(p.apiUrl.replace(/^https?:\/\//, ''))}</span>
+              <span class="agy-dot">·</span>
+              <span>${p.models.length} model${p.models.length === 1 ? '' : 's'}</span>
+            </div>
+          </div>
+          <div class="agy-provider-row-status">${renderProviderStatus(p)}</div>
+          <div class="agy-provider-row-actions">
+            <button class="agy-icon-btn pm-test" title="Test connection" aria-label="Test connection for ${escapeHtml(p.name)}">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            </button>
+            <button class="agy-icon-btn pm-toggle" title="${p.enabled ? 'Disable' : 'Enable'} provider" aria-label="${p.enabled ? 'Disable' : 'Enable'} provider ${escapeHtml(p.name)}">
+              ${p.enabled
+                ? `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>`
+                : `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.64 18.36a9 9 0 1 0 12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/><polyline points="16 8 12 12 8 8"/></svg>`}
+            </button>
+            <button class="agy-icon-btn pm-edit" title="Edit provider" aria-label="Edit provider ${escapeHtml(p.name)}">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+            <button class="agy-icon-btn pm-delete" title="Delete provider" aria-label="Delete provider ${escapeHtml(p.name)}">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+            </button>
           </div>
         </div>
-        <div class="agy-provider-row-status">${renderProviderStatus(p)}</div>
-        <div class="agy-provider-row-actions">
-          <button class="agy-icon-btn pm-test" title="Test connection" aria-label="Test connection for ${escapeHtml(p.name)}">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-          </button>
-          <button class="agy-icon-btn pm-toggle" title="${p.enabled ? 'Disable' : 'Enable'} provider" aria-label="${p.enabled ? 'Disable' : 'Enable'} provider ${escapeHtml(p.name)}">
-            ${p.enabled
-            ? `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>`
-            : `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.64 18.36a9 9 0 1 0 12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/><polyline points="16 8 12 12 8 8"/></svg>`}
-          </button>
-          <button class="agy-icon-btn pm-edit" title="Edit provider" aria-label="Edit provider ${escapeHtml(p.name)}">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </button>
-          <button class="agy-icon-btn pm-delete" title="Delete provider" aria-label="Delete provider ${escapeHtml(p.name)}">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
-          </button>
-        </div>
-      </div>
-    `;
-    }
-    html += `</div>`;
-    pmListContainer.innerHTML = html;
-    pmListContainer.querySelectorAll('.pm-test').forEach((btn) => {
-        btn.addEventListener('click', async (e) => {
-            const row = e.currentTarget.closest('.agy-provider-row');
-            const id = row.dataset.id;
-            const p = providersCache.find((x) => x.id === id);
-            if (!p)
-                return;
-            btn.setAttribute('disabled', 'true');
-            const orig = btn.innerHTML;
-            btn.innerHTML = `<span class="spinner"></span>`;
-            try {
-                const r = (await window.ag.providers.test({ apiUrl: p.apiUrl, apiKey: p.apiKey, id: p.id }));
+      `;
+        }
+        html += `</div>`;
+        pmListContainer.innerHTML = html;
+        pmListContainer.querySelectorAll('.pm-test').forEach((btn) => {
+            btn.addEventListener('click', async (e) => {
+                const row = e.currentTarget.closest('.agy-provider-row');
+                const id = row.dataset.id;
+                const p = providersCache.find((x) => x.id === id);
+                if (!p)
+                    return;
+                btn.setAttribute('disabled', 'true');
+                const orig = btn.innerHTML;
+                btn.innerHTML = `<span class="spinner"></span>`;
+                try {
+                    const r = (await window.ag.providers.test({ apiUrl: p.apiUrl, apiKey: p.apiKey, id: p.id }));
+                    if (r.success) {
+                        p.status = r.healthStatus ?? 'healthy';
+                        p.latencyMs = r.latencyMs;
+                        toast(`Healthy (${r.latencyMs ?? 0}ms)`, 'ok');
+                        smartBanner.dismiss();
+                    }
+                    else {
+                        p.status = r.healthStatus ?? 'offline';
+                        p.latencyMs = r.latencyMs;
+                        p.lastError = r.error;
+                        toast(`Failed: ${r.error || r.status}`, 'err', 6000);
+                        handleProviderError(r.error || `HTTP ${r.status}`, r.status, p);
+                    }
+                    await renderProviderList();
+                }
+                catch (err) {
+                    const errorMsg = err.message;
+                    toast(`Test error: ${errorMsg}`, 'err');
+                    handleProviderError(errorMsg, undefined, p);
+                }
+                finally {
+                    btn.removeAttribute('disabled');
+                    btn.innerHTML = orig;
+                }
+            });
+        });
+        pmListContainer.querySelectorAll('.pm-toggle').forEach((btn) => {
+            btn.addEventListener('click', async (e) => {
+                const row = e.currentTarget.closest('.agy-provider-row');
+                const id = row.dataset.id;
+                const p = providersCache.find((x) => x.id === id);
+                if (!p)
+                    return;
+                p.enabled = !p.enabled;
+                const r = (await window.ag.providers.save(p));
                 if (r.success) {
-                    p.status = r.healthStatus ?? 'healthy';
-                    p.latencyMs = r.latencyMs;
-                    toast(`Healthy (${r.latencyMs ?? 0}ms)`, 'ok');
-                    smartBanner.dismiss();
+                    toast(p.enabled ? 'Provider enabled' : 'Provider disabled', 'ok');
+                    await renderProviderList();
                 }
                 else {
-                    p.status = r.healthStatus ?? 'offline';
-                    p.latencyMs = r.latencyMs;
-                    p.lastError = r.error;
-                    toast(`Failed: ${r.error || r.status}`, 'err', 6000);
-                    handleProviderError(r.error || `HTTP ${r.status}`, r.status, p);
+                    toast(`Save failed: ${r.error}`, 'err');
+                    p.enabled = !p.enabled; // revert
                 }
-                await renderProviderList();
-            }
-            catch (err) {
-                const errorMsg = err.message;
-                toast(`Test error: ${errorMsg}`, 'err');
-                handleProviderError(errorMsg, undefined, p);
-            }
-            finally {
-                btn.removeAttribute('disabled');
-                btn.innerHTML = orig;
-            }
+            });
         });
-    });
-    pmListContainer.querySelectorAll('.pm-toggle').forEach((btn) => {
-        btn.addEventListener('click', async (e) => {
-            const row = e.currentTarget.closest('.agy-provider-row');
-            const id = row.dataset.id;
-            const p = providersCache.find((x) => x.id === id);
-            if (!p)
-                return;
-            p.enabled = !p.enabled;
-            const r = (await window.ag.providers.save(p));
-            if (r.success) {
-                toast(p.enabled ? 'Provider enabled' : 'Provider disabled', 'ok');
-                await renderProviderList();
-            }
-            else {
-                toast(`Save failed: ${r.error}`, 'err');
-                p.enabled = !p.enabled; // revert
-            }
+        pmListContainer.querySelectorAll('.pm-edit').forEach((btn) => {
+            btn.addEventListener('click', (e) => {
+                const row = e.currentTarget.closest('.agy-provider-row');
+                const id = row.dataset.id;
+                openProviderForm(id);
+            });
         });
-    });
-    pmListContainer.querySelectorAll('.pm-edit').forEach((btn) => {
-        btn.addEventListener('click', (e) => {
-            const row = e.currentTarget.closest('.agy-provider-row');
-            const id = row.dataset.id;
-            openProviderForm(id);
+        pmListContainer.querySelectorAll('.pm-delete').forEach((btn) => {
+            btn.addEventListener('click', async (e) => {
+                const row = e.currentTarget.closest('.agy-provider-row');
+                const id = row.dataset.id;
+                const p = providersCache.find((x) => x.id === id);
+                if (!p)
+                    return;
+                const ok = await modals.confirm('Delete provider?', `Delete <strong>${escapeHtml(p.name)}</strong>? This cannot be undone.`, { danger: true, confirmLabel: 'Delete' });
+                if (!ok)
+                    return;
+                const r = (await window.ag.providers.delete(id));
+                if (r.success) {
+                    toast('Provider deleted', 'ok');
+                    await renderProviderList();
+                }
+                else {
+                    toast(`Delete failed: ${r.error}`, 'err');
+                }
+            });
         });
-    });
-    pmListContainer.querySelectorAll('.pm-delete').forEach((btn) => {
-        btn.addEventListener('click', async (e) => {
-            const row = e.currentTarget.closest('.agy-provider-row');
-            const id = row.dataset.id;
-            const p = providersCache.find((x) => x.id === id);
-            if (!p)
-                return;
-            if (!confirm(`Delete provider "${p.name}"?`))
-                return;
-            const r = (await window.ag.providers.delete(id));
-            if (r.success) {
-                toast('Provider deleted', 'ok');
-                await renderProviderList();
-            }
-            else {
-                toast(`Delete failed: ${r.error}`, 'err');
-            }
-        });
-    });
+    }
+    finally {
+        hideSkeleton(pmListContainer);
+    }
 }
+function resetProviderForm() {
+    pmFormName.value = '';
+    pmFormType.value = 'openai';
+    pmFormUrl.value = '';
+    pmFormKey.value = '';
+    pmFormInsecure.checked = false;
+    pmModelsList.innerHTML = '';
+    pmFormError.hidden = true;
+    pmFormError.textContent = '';
+    editingProviderId = null;
+}
+function openProviderForm(existingId) {
+    resetProviderForm();
+    if (existingId) {
+        const p = providersCache.find((x) => x.id === existingId);
+        if (!p)
+            return;
+        editingProviderId = existingId;
+        pmFormTitle.textContent = 'Edit provider';
+        pmFormName.value = p.name;
+        pmFormType.value = p.provider;
+        pmFormUrl.value = p.apiUrl;
+        pmFormKey.value = p.apiKey;
+        pmFormInsecure.checked = !!p.allowUnauthorized;
+        if (p.models && p.models.length > 0) {
+            let html = '<div class="agy-model-chips">';
+            for (const m of p.models) {
+                const checked = m.enabled ? 'checked' : '';
+                html += `<label class="agy-chip">
+          <input type="checkbox" data-model-id="${escapeHtml(m.id)}" ${checked} />
+          <span>${escapeHtml(m.displayName || m.id)}</span>
+        </label>`;
+            }
+            html += '</div>';
+            pmModelsList.innerHTML = html;
+        }
+        else {
+            pmModelsList.innerHTML = '<div class="pm-models-hint">No models loaded. Click "Fetch models" to load the list.</div>';
+        }
+    }
+    else {
+        pmFormTitle.textContent = 'Add provider';
+        pmModelsList.innerHTML = '<div class="pm-models-hint">Fill in the API URL and click "Fetch models" to load available models.</div>';
+    }
+    showPmView('form');
+    setTimeout(() => pmFormName.focus(), 50);
+}
+function getSelectedProviderModels() {
+    const checkboxes = pmModelsList.querySelectorAll('input[type="checkbox"][data-model-id]');
+    const models = [];
+    checkboxes.forEach((cb) => {
+        models.push({ id: cb.dataset.modelId, displayName: cb.dataset.modelId, enabled: cb.checked });
+    });
+    return models;
+}
+// Fetch models button handler
+pmFormFetchModelsBtn?.addEventListener('click', async () => {
+    const apiUrl = pmFormUrl.value.trim();
+    const apiKey = pmFormKey.value.trim();
+    if (!apiUrl) {
+        pmFormError.textContent = 'API URL is required to fetch models';
+        pmFormError.hidden = false;
+        return;
+    }
+    pmFormError.hidden = true;
+    const origBtnHtml = pmFormFetchModelsBtn.innerHTML;
+    pmFormFetchModelsBtn.setAttribute('disabled', 'true');
+    pmFormFetchModelsBtn.textContent = 'Fetching…';
+    pmModelsList.innerHTML = '<div class="pm-models-hint">Fetching available models…</div>';
+    try {
+        const res = await window.ag.providers.fetchModels({ apiUrl, apiKey });
+        if (res.success && res.models && res.models.length > 0) {
+            let html = '<div class="agy-model-chips">';
+            for (const m of res.models) {
+                html += `<label class="agy-chip">
+          <input type="checkbox" data-model-id="${escapeHtml(m.id)}" checked />
+          <span>${escapeHtml(m.displayName || m.id)}</span>
+        </label>`;
+            }
+            html += '</div>';
+            pmModelsList.innerHTML = html;
+            toast(`Fetched ${res.models.length} model(s)`, 'ok');
+        }
+        else {
+            const errMsg = res.error || 'No models returned from endpoint';
+            pmFormError.textContent = `Fetch failed: ${errMsg}`;
+            pmFormError.hidden = false;
+            pmModelsList.innerHTML = `<div style="color: var(--err); font-size: 12px; padding: 4px 0;">Could not load models: ${escapeHtml(errMsg)}</div>`;
+            toast(`Fetch failed: ${errMsg}`, 'err');
+        }
+    }
+    catch (err) {
+        const errMsg = err.message;
+        pmFormError.textContent = `Fetch error: ${errMsg}`;
+        pmFormError.hidden = false;
+        pmModelsList.innerHTML = `<div style="color: var(--err); font-size: 12px; padding: 4px 0;">Error: ${escapeHtml(errMsg)}</div>`;
+    }
+    finally {
+        pmFormFetchModelsBtn.removeAttribute('disabled');
+        pmFormFetchModelsBtn.innerHTML = origBtnHtml;
+    }
+});
+// Clear error state when input values change
+[pmFormName, pmFormUrl, pmFormKey, pmFormType].forEach((el) => {
+    el?.addEventListener('input', () => {
+        pmFormError.hidden = true;
+    });
+});
+pmAddBtn.addEventListener('click', () => openProviderForm());
+pmFormBack.addEventListener('click', async () => {
+    showPmView('list');
+    await renderProviderList();
+});
+pmFormBack2?.addEventListener('click', async () => {
+    showPmView('list');
+    await renderProviderList();
+});
+// Register Provider Manager Overlay with ModalManager for modal backdrop, Escape key, and focus trap support
+modals.registerOverlay({
+    id: 'providerManagerModal',
+    backdrop: pmBackdrop,
+    onOpen: () => {
+        showPmView('list');
+        void renderProviderList();
+    },
+    onClose: () => {
+        resetProviderForm();
+    }
+});
+function openProviderManagerModal() {
+    modals.openOverlay('providerManagerModal');
+}
+function closeProviderManagerModal() {
+    modals.closeOverlay('providerManagerModal');
+}
+pmClose.addEventListener('click', closeProviderManagerModal);
+pmModalClose2?.addEventListener('click', closeProviderManagerModal);
+// Quick Presets listeners for Provider Manager
+$('#presetOllama')?.addEventListener('click', () => {
+    pmFormName.value = 'Ollama (Local)';
+    pmFormType.value = 'custom';
+    pmFormUrl.value = 'http://localhost:11434/v1';
+    pmFormKey.value = 'ollama';
+    pmFormError.hidden = true;
+});
+$('#presetLMStudio')?.addEventListener('click', () => {
+    pmFormName.value = 'LM Studio (Local)';
+    pmFormType.value = 'openai';
+    pmFormUrl.value = 'http://localhost:1234/v1';
+    pmFormKey.value = 'lm-studio';
+    pmFormError.hidden = true;
+});
+$('#presetOpenRouter')?.addEventListener('click', () => {
+    pmFormName.value = 'OpenRouter AI';
+    pmFormType.value = 'openai';
+    pmFormUrl.value = 'https://openrouter.ai/api/v1';
+    pmFormKey.value = '';
+    pmFormError.hidden = true;
+});
+$('#presetLocalAI')?.addEventListener('click', () => {
+    pmFormName.value = 'LocalAI';
+    pmFormType.value = 'custom';
+    pmFormUrl.value = 'http://localhost:8000/v1';
+    pmFormKey.value = '';
+    pmFormError.hidden = true;
+});
+// Test connection button handler
+const pmFormTestBtn = $('#pmFormTest');
+pmFormTestBtn?.addEventListener('click', async () => {
+    const apiUrl = pmFormUrl.value.trim();
+    const apiKey = pmFormKey.value.trim();
+    if (!apiUrl) {
+        pmFormError.textContent = 'API URL is required to test connection';
+        pmFormError.hidden = false;
+        return;
+    }
+    pmFormError.hidden = true;
+    const origText = pmFormTestBtn.textContent;
+    pmFormTestBtn.setAttribute('disabled', 'true');
+    pmFormTestBtn.textContent = 'Testing…';
+    try {
+        const res = await window.ag.providers.test({ apiUrl, apiKey, id: editingProviderId ?? undefined });
+        if (res.success) {
+            toast(`Connection successful (${res.status ?? 200})`, 'ok');
+        }
+        else {
+            pmFormError.textContent = `Connection failed: ${res.error ?? 'Unreachable'}`;
+            pmFormError.hidden = false;
+            toast(`Connection failed: ${res.error ?? 'Unreachable'}`, 'err');
+        }
+    }
+    catch (err) {
+        pmFormError.textContent = `Test error: ${err.message}`;
+        pmFormError.hidden = false;
+    }
+    finally {
+        pmFormTestBtn.removeAttribute('disabled');
+        pmFormTestBtn.textContent = origText;
+    }
+});
+pmFormSave.addEventListener('click', async () => {
+    const name = pmFormName.value.trim();
+    const provider = pmFormType.value;
+    const apiUrl = pmFormUrl.value.trim();
+    const apiKey = pmFormKey.value.trim();
+    if (!name || !provider || !apiUrl) {
+        pmFormError.textContent = 'Name, type and URL are required';
+        pmFormError.hidden = false;
+        return;
+    }
+    pmFormSave.setAttribute('disabled', 'true');
+    pmFormSave.textContent = 'Saving…';
+    try {
+        const id = editingProviderId ?? `provider-${Date.now()}`;
+        const existing = providersCache.find((x) => x.id === id);
+        const providerEntry = {
+            id,
+            name,
+            provider,
+            apiUrl,
+            apiKey,
+            enabled: existing?.enabled ?? true,
+            allowUnauthorized: pmFormInsecure.checked,
+            models: editingProviderId ? getSelectedProviderModels() : (existing?.models ?? [])
+        };
+        const r = (await window.ag.providers.save(providerEntry));
+        if (!r.success)
+            throw new Error(r.error || 'Save failed');
+        toast(editingProviderId ? 'Provider updated' : 'Provider added', 'ok');
+        showPmView('list');
+        await renderProviderList();
+    }
+    catch (err) {
+        pmFormError.textContent = err.message;
+        pmFormError.hidden = false;
+    }
+    finally {
+        pmFormSave.removeAttribute('disabled');
+        pmFormSave.textContent = 'Save provider';
+    }
+});
+// Bind all Add Model buttons across views
+$('#dashboardAddModelBtn')?.addEventListener('click', openProviderManagerModal);
+$('#modelsAddBtn')?.addEventListener('click', openProviderManagerModal);
+$('#providerManagerBtn')?.addEventListener('click', openProviderManagerModal);
+$('#emptyAddModelBtn')?.addEventListener('click', openProviderManagerModal);
+// Real-time synchronization listener: re-render provider list whenever custom_models.json changes
+window.ag.providers.onChanged(() => {
+    void renderProviderList();
+});
+lse;
+{
+    p.status = r.healthStatus ?? 'offline';
+    p.latencyMs = r.latencyMs;
+    p.lastError = r.error;
+    toast(`Failed: ${r.error || r.status}`, 'err', 6000);
+    handleProviderError(r.error || `HTTP ${r.status}`, r.status, p);
+}
+await renderProviderList();
+try { }
+catch (err) {
+    const errorMsg = err.message;
+    toast(`Test error: ${errorMsg}`, 'err');
+    handleProviderError(errorMsg, undefined, p);
+}
+finally {
+    btn.removeAttribute('disabled');
+    btn.innerHTML = orig;
+}
+;
+;
+pmListContainer.querySelectorAll('.pm-toggle').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+        const row = e.currentTarget.closest('.agy-provider-row');
+        const id = row.dataset.id;
+        const p = providersCache.find((x) => x.id === id);
+        if (!p)
+            return;
+        p.enabled = !p.enabled;
+        const r = (await window.ag.providers.save(p));
+        if (r.success) {
+            toast(p.enabled ? 'Provider enabled' : 'Provider disabled', 'ok');
+            await renderProviderList();
+        }
+        else {
+            toast(`Save failed: ${r.error}`, 'err');
+            p.enabled = !p.enabled; // revert
+        }
+    });
+});
+pmListContainer.querySelectorAll('.pm-edit').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+        const row = e.currentTarget.closest('.agy-provider-row');
+        const id = row.dataset.id;
+        openProviderForm(id);
+    });
+});
+pmListContainer.querySelectorAll('.pm-delete').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+        const row = e.currentTarget.closest('.agy-provider-row');
+        const id = row.dataset.id;
+        const p = providersCache.find((x) => x.id === id);
+        if (!p)
+            return;
+        const ok = await modals.confirm('Delete provider?', `Delete <strong>${escapeHtml(p.name)}</strong>? This cannot be undone.`, { danger: true, confirmLabel: 'Delete' });
+        if (!ok)
+            return;
+        const r = (await window.ag.providers.delete(id));
+        if (r.success) {
+            toast('Provider deleted', 'ok');
+            await renderProviderList();
+        }
+        else {
+            toast(`Delete failed: ${r.error}`, 'err');
+        }
+    });
+});
 function resetProviderForm() {
     pmFormName.value = '';
     pmFormType.value = 'openai';
@@ -2485,16 +3017,6 @@ function closeProviderManagerModal() {
     pmBackdrop.style.display = 'none';
 }
 pmClose.addEventListener('click', closeProviderManagerModal);
-$('#pmModalClose2')?.addEventListener('click', closeProviderManagerModal);
-$('#pmFormBack2')?.addEventListener('click', async () => {
-    showPmView('list');
-    await renderProviderList();
-});
-$('#pmFormBack3')?.addEventListener('click', async () => {
-    showPmView('list');
-    await renderProviderList();
-});
-$('#pmFormSave2')?.addEventListener('click', () => pmFormSave.click());
 // Quick Presets listeners for Provider Manager
 $('#presetOllama')?.addEventListener('click', () => {
     pmFormName.value = 'Ollama (Local)';

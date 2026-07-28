@@ -24,6 +24,47 @@ describe('Traffic Inspector Engine', () => {
     expect(engine.getEntries()[0].statusCode).toBe(200);
   });
 
+  it('replays a traffic entry and logs replayed result', async () => {
+    const engine = new TrafficInspectorEngine();
+    const orig = engine.logTraffic({
+      method: 'POST',
+      path: '/v1/chat/completions',
+      targetModel: 'gpt-4o',
+      translatedProvider: 'OpenAI',
+      statusCode: 200,
+      latencyMs: 100,
+      requestPayload: '{"prompt":"hello"}',
+    });
+
+    const replayed = await engine.replayEntry(orig.id, async () => ({
+      statusCode: 200,
+      latencyMs: 120,
+    }));
+
+    expect(replayed).not.toBeNull();
+    expect(replayed?.path).toContain('(Replayed)');
+    expect(engine.getEntries()).toHaveLength(2);
+  });
+
+  it('generates raw diff payload view', () => {
+    const engine = new TrafficInspectorEngine();
+    const entry = engine.logTraffic({
+      method: 'POST',
+      path: '/v1/messages',
+      targetModel: 'claude-3-5-sonnet',
+      translatedProvider: 'Anthropic',
+      statusCode: 500,
+      latencyMs: 300,
+      requestPayload: '{"model":"claude"}',
+      responsePayload: '{"error":"Internal Error"}',
+    });
+
+    const diff = engine.generateDiffView(entry);
+    expect(diff.isError).toBe(true);
+    expect(diff.reqRaw).toBe('{"model":"claude"}');
+    expect(diff.resRaw).toBe('{"error":"Internal Error"}');
+  });
+
   it('filters traffic entries by provider name or search query', () => {
     const engine = new TrafficInspectorEngine();
     engine.logTraffic({
@@ -50,6 +91,45 @@ describe('Traffic Inspector Engine', () => {
     const allAnthropic = engine.filterEntries('', 'Anthropic');
     expect(allAnthropic).toHaveLength(1);
     expect(allAnthropic[0].translatedProvider).toBe('Anthropic');
+  });
+
+  it('handles replay failure for 429/5xx errors gracefully', async () => {
+    const engine = new TrafficInspectorEngine();
+    const orig = engine.logTraffic({
+      method: 'POST',
+      path: '/v1/chat/completions',
+      targetModel: 'gpt-4o',
+      translatedProvider: 'OpenAI',
+      statusCode: 429,
+      latencyMs: 150,
+      requestPayload: '{"prompt":"rate limit test"}',
+    });
+
+    const replayed = await engine.replayEntry(orig.id, async () => {
+      throw new Error('HTTP 429 Rate Limit Exceeded');
+    });
+
+    expect(replayed).not.toBeNull();
+    expect(replayed?.path).toContain('(Replayed Fail)');
+    expect(replayed?.statusCode).toBe(500);
+    expect(replayed?.responsePayload).toContain('HTTP 429 Rate Limit Exceeded');
+  });
+
+  it('provides fallback values for empty payloads in diff view', () => {
+    const engine = new TrafficInspectorEngine();
+    const entry = engine.logTraffic({
+      method: 'GET',
+      path: '/v1/models',
+      targetModel: 'default',
+      translatedProvider: 'OpenAI',
+      statusCode: 200,
+      latencyMs: 50,
+    });
+
+    const diff = engine.generateDiffView(entry);
+    expect(diff.isError).toBe(false);
+    expect(diff.reqRaw).toBe('{}');
+    expect(diff.resRaw).toBe('{}');
   });
 
   it('clears traffic entries list', () => {

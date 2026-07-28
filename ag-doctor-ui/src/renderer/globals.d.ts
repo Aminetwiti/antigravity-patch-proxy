@@ -19,7 +19,30 @@ interface AgAPI {
     cliPath: string;
   }>;
   config(): Promise<Record<string, unknown>>;
+  onMitmTraffic(handler: (payload: {
+    id: string;
+    ts: number;
+    method: string;
+    path: string;
+    targetModel: string;
+    translatedProvider: string;
+    statusCode: number;
+    latencyMs: number;
+  }) => void): () => void;
   setTheme(theme: 'dark' | 'light'): Promise<boolean>;
+  setNotifyEnabled(enabled: boolean): Promise<boolean>;
+  getProxyErrorHistory(): Promise<Array<{
+    traceId: string;
+    provider: string;
+    status?: number;
+    errorType: string;
+    rawError: string;
+    title: string;
+    message: string;
+    suggestions: string[];
+    actionUrl?: string;
+    at: number;
+  }>>;
   notify(title: string, body: string): Promise<void>;
   trayStatus(status: 'ok' | 'warn' | 'err'): Promise<void>;
   openExternal(url: string): Promise<void>;
@@ -30,6 +53,7 @@ interface AgAPI {
     get(): Promise<unknown[]>;
     save(p: unknown): Promise<{ success: boolean; error?: string }>;
     delete(id: string): Promise<{ success: boolean; error?: string }>;
+    fetchModels(params: { apiUrl: string; apiKey: string }): Promise<{ success: boolean; models?: Array<{ id: string; displayName?: string; enabled?: boolean }>; error?: string }>;
     test(params: { apiUrl: string; apiKey: string; id?: string }): Promise<{ success: boolean; status?: number; latencyMs?: number; healthStatus?: 'healthy' | 'degraded' | 'offline'; error?: string }>;
     onChanged(handler: () => void): () => void;
   };
@@ -50,6 +74,21 @@ interface AgAPI {
   onStreamClose(streamId: string, handler: (code: number) => void): () => void;
   onStreamError(streamId: string, handler: (err: string) => void): () => void;
 
+  // Real-time proxy error fan-out (see preload.ts). The renderer receives a
+  // payload from src/proxy.ts:buildProxyErrorPayload() and renders the
+  // matching native quota/error card via NativeQuotaCardRenderer.
+  onProxyError(handler: (payload: {
+    traceId: string;
+    provider: string;
+    status?: number;
+    errorType: string;
+    rawError: string;
+    title: string;
+    message: string;
+    suggestions: string[];
+    actionUrl?: string;
+  }) => void): () => void;
+
   // Antigravity lifecycle
   antigravityStatus(): Promise<{ ok: boolean; data?: unknown; error?: string }>;
   antigravityVersion(): Promise<{ ok: boolean; data?: { version: string }; error?: string }>;
@@ -67,6 +106,9 @@ interface AgAPI {
 interface Window {
   ag: AgAPI;
 }
+
+// Real-time proxy error bridge — defined in native-quota-card.ts.
+declare function startProxyErrorBridge(): () => void;
 
 // NOTE: SmartBannerManager is declared as a top-level class in
 // src/renderer/smart-banner.ts (script-mode → global). We intentionally do

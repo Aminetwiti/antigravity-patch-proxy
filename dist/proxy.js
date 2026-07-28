@@ -38,6 +38,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.toSlug = exports.generateModelPlaceholderId = void 0;
+exports.setProxyErrorEmitter = setProxyErrorEmitter;
+exports.buildProxyErrorPayload = buildProxyErrorPayload;
 exports.parseRetryAfter = parseRetryAfter;
 exports.startProxy = startProxy;
 exports.loadPersistedState = loadPersistedState;
@@ -102,6 +104,50 @@ Object.defineProperty(exports, "generateModelPlaceholderId", { enumerable: true,
 Object.defineProperty(exports, "toSlug", { enumerable: true, get: function () { return idGenerator_1.toSlug; } });
 // DNS resolution bypasses the poisoned hosts file (extracted from proxy.ts)
 const dnsResolver_1 = require("./proxy/dnsResolver");
+let proxyErrorEmitter = null;
+function setProxyErrorEmitter(fn) {
+    proxyErrorEmitter = fn;
+}
+function emitProxyError(p) {
+    // 1) In-process fan-out (Electron main → renderer via setProxyErrorEmitter).
+    if (proxyErrorEmitter)
+        proxyErrorEmitter(p);
+    // 2) Mirror to stderr as a single-line JSON payload so the proxy child
+    //    spawned by ag-doctor-ui's ProxyManager reaches the same handler.
+    //    Pure JSON, no whitespace, so a `line.startsWith('{')` filter in the
+    //    consumer can route the structured payload while leaving human logs
+    //    alone. Safe to ignore if the host doesn't watch stderr.
+    try {
+        process.stderr.write(JSON.stringify(p) + '\n');
+    }
+    catch {
+        // stdio might be closed in unit tests — swallow.
+    }
+}
+// Build a payload from a raw error triple + provider. Used at the 6 sites
+// in proxy.ts where classifyError() is called and the diagnostic is
+// considered "notable" (i.e. surfaced to the user via the response). We
+// keep this single function so the emission contract is identical across
+// all call sites.
+function buildProxyErrorPayload(traceId, status, bodyOrErr, provider, fallbackMessage) {
+    const rawText = typeof bodyOrErr === 'string'
+        ? bodyOrErr
+        : bodyOrErr instanceof Error
+            ? bodyOrErr.message
+            : fallbackMessage ?? '';
+    const diagnostic = (0, errorClassifier_1.classifyError)(status, bodyOrErr, typeof bodyOrErr === 'string' ? bodyOrErr : undefined, provider);
+    return {
+        traceId,
+        provider: provider ?? 'unknown',
+        status,
+        errorType: diagnostic.errorType,
+        rawError: rawText,
+        title: diagnostic.title,
+        message: diagnostic.message,
+        suggestions: diagnostic.suggestions ?? [],
+        actionUrl: diagnostic.actionUrl,
+    };
+}
 // ─── Safe Response Helpers ─────────────────────────────────────────────────
 const httpUtils_1 = require("./proxy/httpUtils");
 const modelInjector_1 = require("./proxy/modelInjector");
@@ -307,6 +353,7 @@ function parseRetryAfter(headers) {
     return 0;
 }
 function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount = 0, fallbackDepth = 0) {
+    const traceId = geminiBody?.requestId || '';
     // P3-18: Configurable max retries per model (default 1, min 0, max 5).
     // Lowered from 3 to 1 to prevent retry storms saturating the proxy.
     // P5-2: Seed the per-model retry budget from the configured value. The
@@ -447,6 +494,7 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
         apiRes.on('error', (err) => {
             electron_log_1.default.error(`[Proxy] Upstream stream error for ${model.name}:`, err.message);
             const diagnostic = (0, errorClassifier_1.classifyError)(500, err, undefined, model.provider);
+            emitProxyError(buildProxyErrorPayload(traceId, 500, err, model.provider));
             if ((0, httpUtils_1.safeWriteHead)(res, 500, {
                 'Content-Type': 'application/json',
                 'X-AG-Error-Type': diagnostic.errorType
@@ -487,6 +535,7 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                 apiRes.on('end', () => {
                     electron_log_1.default.error(`[Proxy] Stream API error (${apiRes.statusCode}) for ${model.name}: ${errorBody.substring(0, 300)}`);
                     const streamDiagnostic = (0, errorClassifier_1.classifyError)(apiRes.statusCode, null, errorBody, model.provider);
+                    emitProxyError(buildProxyErrorPayload(traceId, apiRes.statusCode, errorBody, model.provider));
                     // Trip the breaker on the first hard failure so subsequent
                     // requests short-circuit instead of piling up against a stuck upstream.
                     if (streamDiagnostic.errorType === 'server' ||
@@ -701,6 +750,7 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
                     // P0-3: Only log status code and model name, NOT response body content
                     electron_log_1.default.error(`[Proxy] API error (${apiRes.statusCode}) for ${model.name}`);
                     const diagnostic = (0, errorClassifier_1.classifyError)(apiRes.statusCode, null, body, model.provider);
+                    emitProxyError(buildProxyErrorPayload(traceId, apiRes.statusCode, body, model.provider));
                     // Trip the breaker on hard failures so subsequent requests
                     // short-circuit instead of piling up against a stuck upstream.
                     if (diagnostic.errorType === 'server' ||
@@ -840,6 +890,7 @@ function handleCustomModelRequest(res, model, geminiBody, isStream, retryCount =
             return;
         }
         const diagnostic = (0, errorClassifier_1.classifyError)(undefined, err, undefined, model.provider);
+        emitProxyError(buildProxyErrorPayload(traceId, undefined, err, model.provider));
         if (attemptFallback(diagnostic))
             return;
         if (isStream) {

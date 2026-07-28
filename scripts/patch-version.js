@@ -19,6 +19,22 @@
 
 const fs = require('fs');
 const path = require('path');
+
+// v2.4.x patch: Monkey-patch fs.readFileSync to bypass ENOENT on missing unpacked files 
+// (e.g. chrome-devtools-mcp which is declared in ASAR header but missing from disk in v2.4.2)
+// MUST BE BEFORE require('@electron/asar') because it caches fs methods
+const originalReadFileSync = fs.readFileSync;
+fs.readFileSync = function(pathStr, options) {
+  try {
+    return originalReadFileSync.apply(this, arguments);
+  } catch (err) {
+    if (err.code === 'ENOENT' && typeof pathStr === 'string' && pathStr.includes('.unpacked')) {
+      return Buffer.alloc(0);
+    }
+    throw err;
+  }
+};
+
 const asar = require('@electron/asar');
 
 const [, , asarIn, buildDir, asarOut] = process.argv;

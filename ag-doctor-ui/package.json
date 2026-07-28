@@ -4,9 +4,9 @@
   "description": "Premium Electron UI for the ag-doctor CLI",
   "main": "dist/main.js",
   "scripts": {
-    "build": "node scripts/copy-assets.js && tsc -p tsconfig.json && tsc -p tsconfig.renderer.json",
+    "build": "node scripts/copy-assets.js && tsc -p tsconfig.json && tsc -p tsconfig.renderer.json && node scripts/strip-module-syntax.js",
     "build:cli": "cd ../ag-doctor && npm install && npm run build",
-    "prebuild": "node scripts/copy-assets.js && tsc -p tsconfig.json && tsc -p tsconfig.renderer.json",
+    "prebuild": "node scripts/copy-assets.js && tsc -p tsconfig.json && tsc -p tsconfig.renderer.json && node scripts/strip-module-syntax.js",
     "prepack": "npm run build && cd ../ag-doctor && npm install && npm run build && npm prune --omit=dev",
     "watch": "tsc -p tsconfig.json --watch",
     "start": "npm run build && electron .",

@@ -260,3 +260,16 @@
   gap: 8px;
   flex-shrink: 0;
 }
+
+.agy-showcase-grid { display:flex; flex-direction:column; gap:16px; padding:0; }
+.agy-showcase-card { background:var(--bg-1); border:1px solid var(--border-subtle); border-radius:10px; overflow:hidden; transition:border-color .2s ease; }
+.agy-showcase-card:hover { border-color:rgba(120,130,145,.35); }
+.agy-showcase-meta { display:flex; align-items:center; gap:8px; padding:8px 14px; background:rgba(255,255,255,.025); border-bottom:1px solid var(--border-subtle); font-size:11px; }
+.agy-showcase-badge { padding:3px 8px; border-radius:4px; background:rgba(125,90,220,.18); color:#c4a3ff; font-weight:600; text-transform:uppercase; letter-spacing:.4px; font-size:10px; }
+.agy-showcase-provider { padding:3px 8px; border-radius:4px; background:rgba(56,139,253,.16); color:#79b8ff; font-weight:500; }
+.agy-showcase-status { padding:3px 8px; border-radius:4px; background:rgba(255,138,0,.14); color:#ffa657; font-weight:500; font-family:var(--font-mono); font-size:10.5px; }
+.agy-showcase-card-inner { padding:16px; }
+.agy-showcase-raw { padding:8px 14px; background:rgba(0,0,0,.25); border-top:1px solid var(--border-subtle); font-family:var(--font-mono); font-size:11px; color:var(--text-2); white-space:pre-wrap; word-break:break-all; }
+.agy-filter-chip { font-size:11px; padding:4px 10px; border-radius:14px; }
+.agy-filter-chip.active { background:var(--accent-blue); color:white; border-color:var(--accent-blue); }
+.agy-filter-chip.active:hover { background:var(--accent-blue-bright); }

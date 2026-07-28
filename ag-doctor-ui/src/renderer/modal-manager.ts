@@ -120,7 +120,7 @@ class ModalManager {
 
       const onConfirm = () => {
         if (this.confirmBtn.disabled) return;
-        finish(result);
+        finish(true as T);
       };
       const onCancel = () => finish(result);
       const onBackdrop = (e: MouseEvent) => {
@@ -194,7 +194,7 @@ class ModalManager {
       handle.bodyEl.innerHTML = bodyHtml;
       handle.confirmBtn.textContent = opts?.confirmLabel ?? 'Confirm';
       handle.cancelBtn.textContent = opts?.cancelLabel ?? 'Cancel';
-      handle.confirmBtn.className = `btn ${opts?.danger ? 'btn-danger' : opts?.confirmDisabled ? 'btn-muted' : 'btn-primary'}`;
+      handle.confirmBtn.className = `btn ${opts?.danger ? 'btn-danger' : 'btn-primary'}`;
       handle.setConfirmEnabled(!opts?.confirmDisabled);
       opts?.onMount?.(handle);
       return false; // default result; flipped to true on confirm
@@ -266,9 +266,30 @@ class ModalManager {
   };
 
   private onOverlayKey = (e: KeyboardEvent): void => {
-    if (e.key === 'Escape' && this.activeOverlayKey) {
+    const key = this.activeOverlayKey;
+    if (!key) return;
+    const overlay = this.overlays.get(key);
+    if (!overlay) return;
+
+    if (e.key === 'Escape') {
       e.preventDefault();
-      this.closeOverlay(this.activeOverlayKey);
+      this.closeOverlay(key);
+    } else if (e.key === 'Tab') {
+      const focusables = Array.from(
+        overlay.backdrop.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((el) => el.offsetParent !== null || getComputedStyle(el).display !== 'none');
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     }
   };
 }

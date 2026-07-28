@@ -153,3 +153,30 @@ export function startTimer(
     return ms;
   };
 }
+
+export function trackTokenUsage(provider: string, promptTokens: number, completionTokens: number): void {
+  inc('prompt_tokens_total', { provider }, promptTokens);
+  inc('completion_tokens_total', { provider }, completionTokens);
+  inc('tokens_total', { provider }, promptTokens + completionTokens);
+}
+
+export function getRealtimeStats(): {
+  totalRequests: number;
+  totalTokens: number;
+  avgLatencyMs: number;
+  successRate: number;
+} {
+  const snap = snapshot();
+  const reqCounter = snap.counters.find((c) => c.name === 'proxy_requests_total');
+  const errCounter = snap.counters.find((c) => c.name === 'proxy_errors_total');
+  const tokenCounters = snap.counters.filter((c) => c.name === 'tokens_total');
+  const latencyHisto = snap.histograms.find((h) => h.name === 'proxy_request_ms');
+
+  const totalRequests = reqCounter?.value || 0;
+  const totalErrors = errCounter?.value || 0;
+  const totalTokens = tokenCounters.reduce((acc, c) => acc + c.value, 0);
+  const avgLatencyMs = latencyHisto ? Math.round(latencyHisto.avg) : 0;
+  const successRate = totalRequests > 0 ? Math.round(((totalRequests - totalErrors) / totalRequests) * 100) : 100;
+
+  return { totalRequests, totalTokens, avgLatencyMs, successRate };
+}

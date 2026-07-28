@@ -482,6 +482,19 @@ body {
   from { opacity: 0; transform: translate3d(0, 8px, 0) scale(0.98); }
   to   { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
 }
+@media (prefers-reduced-motion: reduce) {
+  .modal,
+  .modal-backdrop,
+  .modal-lg,
+  .modal-list,
+  .agy-provider-row,
+  .agy-icon-btn,
+  .pm-title,
+  .pm-form-title {
+    animation: none !important;
+    transition: none !important;
+  }
+}
 
 .view-header {
   display: flex; align-items: flex-start; justify-content: space-between;
@@ -640,6 +653,63 @@ body {
 }
 .panel-body { padding: 16px; }
 .panel-body-flush { padding: 0; }
+
+/* Notifications toggle row (used by the new "Do not notify" setting). */
+.toggle-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.toggle-label { display: flex; flex-direction: column; gap: 4px; max-width: 70%; }
+.toggle-title { font-size: var(--fs-md); font-weight: var(--fw-semibold); color: var(--text-0); }
+.toggle-subtitle { font-size: var(--fs-sm); color: var(--text-2); line-height: 1.4; }
+.toggle-control { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
+.toggle-control input[type="checkbox"] { opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.toggle-slider {
+  position: absolute; inset: 0;
+  background: var(--border);
+  border-radius: 999px;
+  transition: background 160ms var(--ease);
+}
+.toggle-slider::before {
+  content: '';
+  position: absolute; left: 3px; top: 3px;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--bg-0);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+  transition: transform 160ms var(--ease);
+}
+.toggle-control input:checked + .toggle-slider { background: var(--accent); }
+.toggle-control input:checked + .toggle-slider::before { transform: translateX(20px); }
+.toggle-control input:focus-visible + .toggle-slider { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Proxy error history list (Settings → Proxy error history). */
+.proxy-error-history {
+  list-style: none; padding: 0; margin: 12px 0 0 0;
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 320px; overflow-y: auto;
+}
+.proxy-error-history:empty { display: none; }
+.proxy-error-history li {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+}
+.proxy-error-history li.severity-err { border-left: 3px solid var(--danger, #e5484d); }
+.proxy-error-history li.severity-warn { border-left: 3px solid var(--warn, #f5a524); }
+.proxy-error-history li button.replay {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  font-size: var(--fs-sm);
+}
+.proxy-error-history li .meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.proxy-error-history li .meta .title { color: var(--text-0); font-weight: var(--fw-semibold); }
+.proxy-error-history li .meta .subtitle { color: var(--text-2); font-size: var(--fs-sm); }
+.proxy-error-history li .meta .when { color: var(--text-3, #888); font-size: var(--fs-xs, 12px); }
 
 
 
@@ -1328,8 +1398,16 @@ body {
 
 /* Modal extensions */
 .modal-lg {
-  width: 560px;
+  width: 650px;
   max-width: 95vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+.modal-lg .modal-body {
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0; /* flex child needs 0 min-size to shrink */
 }
 .modal-header-title-wrap {
   display: flex;
@@ -1348,55 +1426,7 @@ body {
   font-weight: var(--fw-semibold);
   font-family: var(--font-sans);
 }
-.step-indicators {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 24px;
-  padding: 0 4px;
-}
-.step-indicator {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1;
-  transition: opacity var(--t-fast) var(--ease);
-}
-.step-indicator.inactive {
-  opacity: 0.5;
-}
-.step-badge {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-3);
-  color: var(--text-2);
-  font-weight: var(--fw-semibold);
-  font-size: 13px;
-  border: 1px solid var(--border);
-}
-.step-indicator.active .step-badge {
-  background: var(--accent-blue);
-  color: #ffffff;
-  border-color: var(--accent-blue);
-}
-.step-title {
-  font-weight: var(--fw-semibold);
-  font-size: 13px;
-  color: var(--text-0);
-}
-.step-subtitle {
-  font-size: 11px;
-  color: var(--text-2);
-}
-.step-divider {
-  width: 32px;
-  height: 2px;
-  background: var(--border);
-}
+/* Step-indicator wizard CSS removed — add when wizard 2-step flow is implemented */
 .form-group-checkbox {
   display: flex;
   align-items: center;
@@ -1649,50 +1679,7 @@ body {
 :root[data-theme="light"] .stat-card::before { opacity: 0.6; }
 :root[data-theme="light"] .home-intro::before { opacity: 0.4; }
 
-.agy-provider-row-meta {
-  font-size: 11px;
-  color: var(--text-2);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
-  flex-wrap: wrap;
-}
-
-.agy-provider-row-meta .agy-dot {
-  color: var(--text-3);
-}
-
-.agy-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.agy-pill-ok {
-  background: var(--bg-3);
-  color: var(--text-2);
-  border: 1px solid var(--border);
-}
-
-.agy-pill-muted {
-  background: var(--bg-3);
-  color: var(--text-2);
-  border: 1px solid var(--border);
-}
-
-.agy-pill-err {
-  background: var(--err-bg);
-  color: var(--err);
-  border: 1px solid var(--err-border);
-}
-
+/* Provider Manager pill + row styles declared canonically in the PM section below */
 .agy-empty-state {
   display: flex;
   flex-direction: column;
@@ -1902,6 +1889,22 @@ body {
 
 /* Path list (install paths) */
 .path-list { display: flex; flex-direction: column; gap: 4px; }
+/* ── Provider Manager utilities ──────────────────────────────────────────── */
+.pm-modal-title     { margin: 0; font-size: 16px; font-weight: 600; }
+.pm-title           { font-size: var(--fs-md); font-weight: var(--fw-semibold); margin: 0; }
+.pm-form            { display: flex; flex-direction: column; gap: 16px; }
+.pm-form-title      { font-size: 15px; font-weight: 600; margin: 0; }
+.pm-back-row        { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+.pm-presets-bar     { display: flex; flex-direction: column; gap: 6px; background: var(--bg-1); padding: 10px; border-radius: 6px; border: 1px solid var(--border); }
+.pm-presets-label   { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-2); }
+.pm-presets-row     { display: flex; flex-wrap: wrap; gap: 6px; }
+.pm-models-header   { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.pm-models-hint     { color: var(--text-2); font-size: 11px; }
+.pm-form-actions    { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+.agy-model-chips    { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.agy-chip           { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-pill, 999px); font-size: 11.5px; cursor: pointer; transition: all var(--t-fast) var(--ease); }
+.agy-chip:hover     { background: var(--bg-3); border-color: var(--border-strong); }
+.agy-chip input     { accent-color: var(--accent-blue); cursor: pointer; }
 .path-row {
   display: grid;
   grid-template-columns: 160px 1fr auto;
@@ -1952,9 +1955,10 @@ body {
   content-visibility: auto;
   contain-intrinsic-size: auto 60px;
 }
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+/* ─────────────────────────────────────────────────────────────────────────────
    Provider Manager (styles synchronized with Antigravity)
-   â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+   ───────────────────────────────────────────────────────────────────────────── */
 
 .agy-provider-list {
   display: flex;
@@ -2030,20 +2034,26 @@ body {
   border: 1px solid var(--border);
 }
 
+.agy-provider-row:hover .agy-pill-muted {
+  color: var(--text-2);
+}
+
 .agy-pill-err {
   background: hsla(0, 75%, 55%, 0.15);
   color: hsl(0, 75%, 65%);
   border: 1px solid hsla(0, 75%, 60%, 0.3);
 }
 
-.agy-empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 60px 20px;
-  text-align: center;
-  gap: 12px;
+.agy-pill-degraded {
+  background: hsla(45, 85%, 50%, 0.12);
+  color: hsl(45, 85%, 62%);
+  border: 1px solid hsla(45, 85%, 55%, 0.3);
+}
+
+.agy-pill-offline {
+  background: hsla(0, 75%, 55%, 0.12);
+  color: hsl(0, 75%, 62%);
+  border: 1px solid hsla(0, 75%, 55%, 0.3);
 }
 
 .agy-empty-icon {
@@ -2206,3 +2216,13 @@ body {
   color: hsl(0, 75%, 65%);
   font-size: 12px;
 }
+
+/* ── Provider Manager utilities ──────────────────────────────────────────── */
+.pm-title           { font-size: var(--fs-md); font-weight: var(--fw-semibold); margin: 0; }
+.pm-form-title      { font-size: var(--fs-sm); font-weight: var(--fw-semibold); margin: 0; }
+.pm-back-row        { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+.pm-presets-bar     { display: flex; flex-direction: column; gap: 6px; background: var(--bg-1); padding: 10px; border-radius: 6px; border: 1px solid var(--border-subtle); }
+.pm-presets-label   { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-2); }
+.pm-presets-row     { display: flex; flex-wrap: wrap; gap: 6px; }
+.pm-form-actions    { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+.pm-models-hint     { color: var(--text-2); font-size: 11px; }

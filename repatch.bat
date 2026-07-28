@@ -60,6 +60,9 @@ if exist "%AG_ASAR%.bak" (
 ) else (
   copy /Y "%AG_ASAR%" "%AG_ASAR%.bak" >nul
   echo   Backup created: %AG_ASAR%.bak
+  if exist "%AG_ASAR%.bak.unpacked" (
+    rmdir /S /Q "%AG_ASAR%.bak.unpacked"
+  )
 )
 if exist "%AG_ASAR%.unpacked" (
   if not exist "%AG_ASAR%.bak.unpacked" (

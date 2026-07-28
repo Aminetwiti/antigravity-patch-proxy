@@ -329,3 +329,65 @@
     boot();
   }
 })();
+
+/**
+ * ag-doctor UI — Failure Scenarios Showcase Auto-Wire
+ * Renders the visual showcase of all known provider error cards when the
+ * "Failure Scenarios" view becomes active. Lazy, idempotent.
+ */
+(function () {
+  "use strict";
+  const VIEW_SEL = "#view-failures";
+  const TARGET_SEL = "#failureScenarioShowcase";
+
+  function bootShowcase() {
+    const view = document.querySelector(VIEW_SEL);
+    const target = document.querySelector(TARGET_SEL);
+    if (!view || !target) return;
+
+    const render = () => {
+      // Lazy-load via the global bridge; safe to call multiple times.
+      const w = window as unknown as { AgFailureShowcase?: { renderFailureScenariosShowcase: (s?: string) => number } };
+      if (w.AgFailureShowcase && typeof w.AgFailureShowcase.renderFailureScenariosShowcase === "function") {
+        w.AgFailureShowcase.renderFailureScenariosShowcase(TARGET_SEL);
+      }
+    };
+
+    if (view.classList.contains("active")) render();
+
+    document.body.addEventListener("click", (ev) => {
+      const t = ev.target as HTMLElement | null;
+      if (!t) return;
+      const btn = t.closest('.nav-item[data-view="failures"]');
+      if (btn) setTimeout(render, 30);
+    });
+
+    const refreshBtn = document.getElementById("openFailureShowcaseBtn2");
+    if (refreshBtn) refreshBtn.addEventListener("click", render);
+
+    // Filter chips
+    const chips = Array.from(document.querySelectorAll(".agy-filter-chip"));
+    if (chips.length) {
+      chips.forEach((chip) => {
+        chip.addEventListener("click", () => {
+          chips.forEach((c) => c.classList.remove("active"));
+          chip.classList.add("active");
+          const filter = chip.getAttribute("data-filter") || "all";
+          render();
+          if (target) {
+            Array.from(target.children).forEach((el) => {
+              const id = (el as HTMLElement).getAttribute("data-scenario-id") || "";
+              (el as HTMLElement).style.display = filter === "all" || id === filter ? "" : "none";
+            });
+          }
+        });
+      });
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bootShowcase);
+  } else {
+    bootShowcase();
+  }
+})();

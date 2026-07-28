@@ -391,7 +391,7 @@ function translateToolCallToNative(name, args) {
     const cmd = args.CommandLine.trim();
     const cwd = args.Cwd || process.cwd();
     // 1. list_dir translation
-    const isListDir = /^(ls|dir)(\s+[\w\-\/\.\*]+)*$/i.test(cmd);
+    const isListDir = /^(ls|dir)(\s+[\w\-\/\\\.\*]+)*$/i.test(cmd);
     if (isListDir) {
         let dirPath = cwd;
         const tokens = cmd.split(/\s+/).slice(1);

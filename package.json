@@ -1,8 +1,8 @@
 {
-  "name": "antigravity",
-  "productName": "Antigravity",
+  "name": "antigravity-patch-proxy",
+  "productName": "Antigravity Patch Proxy",
   "version": "2.2.1",
-  "description": "Antigravity - Agentic Desktop Application",
+  "description": "Antigravity Patch Proxy — Multi-Provider AI Model Proxy for Google Antigravity",
   "homepage": "https://antigravity.google",
   "author": {
     "name": "Google",
@@ -39,6 +39,7 @@
   },
   "devDependencies": {
     "@electron/asar": "^3.4.1",
+    "patch-package": "^8.0.1",
     "vitest": "^4.1.10"
   }
 }

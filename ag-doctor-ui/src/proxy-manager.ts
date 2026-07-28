@@ -7,6 +7,7 @@
  * - Handle errors and automatic restarts
  */
 
+import { BrowserWindow } from 'electron';
 import { ChildProcess, spawn } from 'child_process';
 import path from 'path';
 import net from 'net';
@@ -112,16 +113,50 @@ class ProxyManager {
         const pid = this.proxyProcess.pid;
         console.log(`[ProxyManager] Spawned proxy process with PID: ${pid}`);
 
-        // Capture stdout
+        // Capture stdout — MITM uses this channel to emit one JSON line per
+        // intercepted request (`kind: 'mitm:traffic'`). We fan it out to every
+        // BrowserWindow as `mitm:traffic` IPC so the Traffic Inspector view can
+        // paint in real time. Non-JSON lines are passed through to the console.
         this.proxyProcess.stdout?.on('data', (data) => {
-          const output = data.toString().trim();
-          console.log(`[ProxyServer] ${output}`);
+          const output = data.toString();
+          for (const line of output.split('\n')) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            if (trimmed.startsWith('{')) {
+              try {
+                const payload = JSON.parse(trimmed);
+                if (payload && payload.kind === 'mitm:traffic') {
+                  for (const win of BrowserWindow.getAllWindows()) {
+                    if (!win.isDestroyed()) win.webContents.send('mitm:traffic', payload);
+                  }
+                  continue;
+                }
+              } catch {
+                // Not valid JSON — fall through to the console log below.
+              }
+            }
+            console.log(`[ProxyServer] ${trimmed}`);
+          }
         });
 
-        // Capture stderr
+        // Capture stderr — the proxy uses this channel to emit structured
+        // JSON proxy errors (one per line) so the tray/renderer can react.
         this.proxyProcess.stderr?.on('data', (data) => {
           const output = data.toString().trim();
           console.error(`[ProxyServer] ERROR: ${output}`);
+          for (const line of output.split('\n')) {
+            if (!line.startsWith('{')) continue;
+            try {
+              const payload = JSON.parse(line);
+              if (payload && payload.provider && payload.title) {
+                for (const win of BrowserWindow.getAllWindows()) {
+                  if (!win.isDestroyed()) win.webContents.send('proxy:error', payload);
+                }
+              }
+            } catch {
+              // Not JSON — leave it for the console log.
+            }
+          }
         });
 
         // Handle process exit
