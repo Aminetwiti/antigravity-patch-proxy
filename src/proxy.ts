@@ -115,7 +115,7 @@ import { resolveGoogleIp } from './proxy/dnsResolver';
 import { markProviderRateLimited, isProviderRateLimited, selectBestModel } from './proxy/modelRouter';
 import { trimContextPayload } from './proxy/contextTrimmer';
 import { checkAllModelsHealth } from './proxy/modelHealthChecker';
-import { recordRecentModel } from './proxy/recentModelsStore';
+import { recordRecentModel, restoreRecentModels } from './proxy/recentModelsStore';
 
 // ─── Proxy Error Emitter ──────────────────────────────────────────────────
 // Lets the main process fan-out notable diagnostics to the renderer without
@@ -1397,6 +1397,14 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
     if (req.url!.includes('/v1internal:fetchAvailableModels')) {
       log.info('[Proxy] Intercepting fetchAvailableModels request');
 
+      // Fire async health check (non-blocking)
+      const customModelsForHealth = loadCustomModels();
+      if (customModelsForHealth.length > 0) {
+        checkAllModelsHealth(customModelsForHealth).catch((err) => {
+          log.error('[Proxy] Background health check failed:', err);
+        });
+      }
+
       const targetHost = 'daily-cloudcode-pa.googleapis.com';
       const targetUrl = `https://${targetHost}`;
       let parsedUrl: URL;
@@ -1921,6 +1929,9 @@ export function loadPersistedState(): void {
     );
     applyBudgetPatch(retryBudgetPatch);
     applyBreakerPatch(breakerPatch);
+    if (file.recentModels) {
+      restoreRecentModels(file.recentModels);
+    }
     log.info(
       `[Proxy] loaded persisted state: budget=${retryBudgetPatch.size} breakers=${breakerPatch.size}`,
     );

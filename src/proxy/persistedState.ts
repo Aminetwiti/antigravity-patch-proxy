@@ -109,6 +109,7 @@ export interface PersistedStateFile {
   savedAt: number;
   retryBudget: Record<string, PersistedBudgetSample>;
   breakers: Record<string, PersistedBreaker>;
+  recentModels?: string[];
 }
 
 const DEFAULT_STATE: PersistedStateFile = Object.freeze({
@@ -116,6 +117,7 @@ const DEFAULT_STATE: PersistedStateFile = Object.freeze({
   savedAt: 0,
   retryBudget: {},
   breakers: {},
+  recentModels: [],
 });
 
 /**
@@ -444,6 +446,8 @@ export function applyBreakerPatch(patch: Map<string, CachedDiagnostic>): void {
   _applyBreakerPatch(patch);
 }
 
+import { getRecentModels } from './recentModelsStore';
+
 /**
  * Collect the current in-memory state, ready to be written by `flush()`.
  * Phase 7.2: the result is run through `compact()` so the on-disk file
@@ -460,6 +464,7 @@ export function gather(args?: {
     breakerSnap,
     rawBudgetCounts: retryBudgetRaw,
   });
+  file.recentModels = getRecentModels();
   return compact(file, {
     now: Date.now(),
     breakerResetMs: CIRCUIT_BREAKER_RESET_MS,

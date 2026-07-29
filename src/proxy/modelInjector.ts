@@ -2,16 +2,73 @@ import log from 'electron-log';
 import { loadCustomModels } from './modelLoader';
 import { detectModelCapabilities } from './modelUtils';
 import { generateModelPlaceholderId, toSlug } from './idGenerator';
+import { getCachedHealth, ModelHealthResult } from './modelHealthChecker';
+import { isRecentModel } from './recentModelsStore';
 import type { CustomModel } from './types';
 
+function getHealthScore(health: ModelHealthResult | null): number {
+  if (!health) return 2; // pending
+  if (health.status === 'healthy') return 0;
+  if (health.status === 'slow') return 1;
+  if (health.status === 'cooldown') return 3;
+  return 4; // unhealthy
+}
+
+function sortCustomModels(models: CustomModel[]): CustomModel[] {
+  return [...models].sort((a, b) => {
+    const favA = isRecentModel(a.name) ? 1 : 0;
+    const favB = isRecentModel(b.name) ? 1 : 0;
+    if (favA !== favB) return favB - favA;
+
+    const healthA = getCachedHealth(a.name);
+    const healthB = getCachedHealth(b.name);
+    
+    const scoreA = getHealthScore(healthA);
+    const scoreB = getHealthScore(healthB);
+    
+    if (scoreA !== scoreB) return scoreA - scoreB;
+    
+    if (healthA?.status === 'healthy' && healthB?.status === 'healthy') {
+       return (healthA.latencyMs || 0) - (healthB.latencyMs || 0);
+    }
+    
+    return 0;
+  });
+}
+
+function formatDisplayName(m: CustomModel): string {
+  const health = getCachedHealth(m.name);
+  const isFav = isRecentModel(m.name);
+  
+  if (!health) {
+    const favTag = isFav ? '⭐ ' : '';
+    return `${favTag}🟢 --ms • ${m.displayName}`;
+  }
+  
+  if (health.status === 'healthy') {
+    const favTag = isFav ? '⭐ ' : '';
+    return `${favTag}🟢 ${health.latencyMs}ms • ${m.displayName}`;
+  }
+  
+  if (health.status === 'slow') {
+    const favTag = isFav ? '⭐ ' : '';
+    return `${favTag}🟡 ${health.latencyMs}ms • ${m.displayName}`;
+  }
+  
+  // For unhealthy models, display error tag cleanly
+  const favTag = isFav ? '⭐ ' : '';
+  const err = health.error || 'Offline';
+  return `${favTag}🔴 [${err}] • ${m.displayName}`;
+}
+
 export function getMappedCustomModels() {
-  const customModels = loadCustomModels();
+  const customModels = sortCustomModels(loadCustomModels());
   const mappedCustom: Record<string, unknown> = {};
   customModels.forEach((m) => {
     const slug = toSlug(m);
     const pid = generateModelPlaceholderId(m);
     mappedCustom[slug] = {
-      displayName: m.displayName,
+      displayName: formatDisplayName(m),
       maxTokens: 1048576,
       maxOutputTokens: 4096,
       model: pid,
@@ -25,11 +82,11 @@ export function getMappedCustomModels() {
 }
 
 export function getCustomModelsList() {
-  const customModels = loadCustomModels();
+  const customModels = sortCustomModels(loadCustomModels());
   return customModels.map((m) => ({
     name: 'models/' + generateModelPlaceholderId(m),
     version: '1.0',
-    displayName: m.displayName,
+    displayName: formatDisplayName(m),
     description: m.description,
     inputTokenLimit: 1048576,
     outputTokenLimit: 4096,
@@ -41,8 +98,9 @@ export function getCustomModelsList() {
 }
 
 export function mergeModels(target: unknown, customModels: CustomModel[]): unknown {
+  const sortedCustomModels = sortCustomModels(customModels);
   if (Array.isArray(target)) {
-    const mapped = customModels.map((m) => {
+    const mapped = sortedCustomModels.map((m) => {
       const cap = detectModelCapabilities(m, true);
       const pid = generateModelPlaceholderId(m);
       return {
@@ -51,7 +109,7 @@ export function mergeModels(target: unknown, customModels: CustomModel[]): unkno
         planModel: pid,
         requestedModel: pid,
         version: '1.0',
-        displayName: m.displayName,
+        displayName: formatDisplayName(m),
         description: m.description,
         inputTokenLimit: cap.maxTokens,
         outputTokenLimit: cap.maxOutputTokens,
@@ -67,12 +125,12 @@ export function mergeModels(target: unknown, customModels: CustomModel[]): unkno
     return [...mapped, ...target];
   } else if (target && typeof target === 'object') {
     const result = { ...(target as Record<string, unknown>) };
-    customModels.forEach((m) => {
+    sortedCustomModels.forEach((m) => {
       const slug = toSlug(m);
       const cap = detectModelCapabilities(m, true);
       const pid = generateModelPlaceholderId(m);
       const entry: Record<string, unknown> = {
-        displayName: m.displayName,
+        displayName: formatDisplayName(m),
         supportsImages: cap.supportsImages,
         supportsThinking: cap.isThinking,
         reasoningEffort: m.reasoningEffort || undefined,

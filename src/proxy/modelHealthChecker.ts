@@ -10,7 +10,7 @@ import log from 'electron-log';
 import type { CustomModel } from './types';
 
 export interface ModelHealthResult {
-  status: 'healthy' | 'slow' | 'unhealthy';
+  status: 'healthy' | 'slow' | 'unhealthy' | 'cooldown';
   statusCode?: number;
   latencyMs: number;
   error?: string;
@@ -20,6 +20,17 @@ export interface ModelHealthResult {
 const healthCache = new Map<string, { result: ModelHealthResult; expiresAt: number }>();
 const CACHE_TTL_MS = 30_000;
 const HEALTH_CHECK_TIMEOUT_MS = 800;
+
+/** Synchronous getter for cached health status */
+export function getCachedHealth(modelName: string): ModelHealthResult | null {
+  const cached = healthCache.get(modelName);
+  // Stale-while-revalidate: always return the cached result if it exists.
+  // The background check will update it for the next fetch.
+  if (cached) {
+    return cached.result;
+  }
+  return null;
+}
 
 /** Ping a single custom model endpoint with strict timeout */
 export function pingCustomModel(model: CustomModel): Promise<ModelHealthResult> {
@@ -43,7 +54,7 @@ export function pingCustomModel(model: CustomModel): Promise<ModelHealthResult> 
       finish({
         status: 'unhealthy',
         latencyMs: Date.now() - startTime,
-        error: 'Timeout (>800ms)',
+        error: 'Timeout',
       });
     }, HEALTH_CHECK_TIMEOUT_MS);
 
@@ -67,11 +78,12 @@ export function pingCustomModel(model: CustomModel): Promise<ModelHealthResult> 
           clearTimeout(timer);
           const latencyMs = Date.now() - startTime;
           const statusCode = res.statusCode || 0;
-          // Consume response body to free socket
-          res.resume();
+          // Abort request to save bandwidth (we only need headers/status)
+          res.destroy();
+          req.destroy();
 
           if (statusCode === 429) {
-            finish({ status: 'unhealthy', statusCode, latencyMs, error: 'Rate Limited (429)' });
+            finish({ status: 'cooldown', statusCode, latencyMs, error: 'Cooldown (429)' });
           } else if (statusCode === 401 || statusCode === 403) {
             finish({ status: 'unhealthy', statusCode, latencyMs, error: 'Auth Error' });
           } else if (statusCode >= 500) {
@@ -118,3 +130,21 @@ export async function checkAllModelsHealth(models: CustomModel[]): Promise<Map<s
   await Promise.allSettled(checks);
   return results;
 }
+
+// Background auto-refresh to pre-warm cache and keep it fresh
+import { loadCustomModels } from './modelLoader';
+setInterval(() => {
+  const models = loadCustomModels();
+  if (models.length > 0) {
+    checkAllModelsHealth(models).catch(() => {});
+  }
+}, 30_000);
+
+// Initial pre-warm on module load
+setTimeout(() => {
+  const models = loadCustomModels();
+  if (models.length > 0) {
+    checkAllModelsHealth(models).catch(() => {});
+  }
+}, 2000);
+

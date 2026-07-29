@@ -1,7 +1,7 @@
-# Antigravity Patch Proxy — Advanced Technical Guide
+# Google Antigravity Custom Model Proxy — Add Claude, OpenAI, DeepSeek & Ollama to Antigravity IDE
 
 <p align="center">
-  <img src="assets/antigravity_patch_proxy_logo.png" width="180" alt="Antigravity Patch Proxy Logo" />
+  <img src="assets/antigravity_patch_proxy_logo.png" width="180" alt="Google Antigravity Custom Model Proxy Logo" />
 </p>
 
 [![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)](package.json)
@@ -9,7 +9,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue?logo=typescript)](tsconfig.json)
 [![Tests](https://img.shields.io/badge/tests-2565%20passed-brightgreen.svg)](src/__tests__)
 
-> **One IDE, every model.** Integrate OpenAI, Anthropic Claude, OpenRouter, Ollama, Google AI Studio, DeepSeek, and any custom LLM provider directly into **Google Antigravity**, with native UI integration, real-time bi-directional streaming, and enterprise-grade AES-256-GCM encryption.
+> **One IDE, every custom LLM model.** Enable **Anthropic Claude 3.5 Sonnet**, **OpenAI GPT-4o**, **DeepSeek R1 / V3**, **OpenRouter**, **Ollama**, **Google AI Studio**, **Groq**, **Mistral**, and custom local or cloud AI models directly inside **Google Antigravity IDE**. Features native UI dropdown integration, real-time bi-directional SSE streaming, tool calling, and enterprise-grade AES-256-GCM encryption.
 
 ---
 
@@ -35,7 +35,7 @@
   - [macOS & Linux Setup](#macos--linux-setup)
   - [Enterprise MITM HTTPS Mode](#enterprise-mitm-https-mode)
 - [`ag-doctor` Diagnostic CLI](#ag-doctor-diagnostic-cli)
-- [Provider Configuration Matrix](#provider-configuration-matrix)
+- [Supported LLM Providers & Matrix](#supported-llm-providers--matrix)
 - [`custom_models.json` Schema Reference](#custom_modelsjson-schema-reference)
 - [Developer Guide](#developer-guide)
   - [Codebase Structure](#codebase-structure)
@@ -43,13 +43,14 @@
   - [Running Tests](#running-tests)
   - [Adding a New Translator Module](#adding-a-new-translator-module)
 - [Troubleshooting & Diagnostics](#troubleshooting--diagnostics)
+- [Frequently Asked Questions (FAQ)](#frequently-asked-questions-faq)
 - [License & Acknowledgments](#license--acknowledgments)
 
 ---
 
 ## Overview
 
-**Antigravity Custom Model Enabler** is an advanced proxy patch for Google Antigravity. It intercepts internal communication between the IDE's Language Server (Go binary) and Google's internal Cloud Code infrastructure. By injecting a local reverse proxy (`127.0.0.1:50999`), it translates Google Cloud Code API requests into compatible payloads for 19+ LLM providers, while maintaining native UI dropdowns, streaming tokens, and tool calls.
+**Google Antigravity Custom Model Enabler** is an advanced proxy patch for Google Antigravity. It intercepts internal communication between the IDE's Language Server (Go binary) and Google's internal Cloud Code infrastructure. By injecting a local reverse proxy (`127.0.0.1:50999`), it translates Google Cloud Code API requests into compatible payloads for 19+ LLM providers, while maintaining native UI dropdowns, streaming tokens, and tool calls.
 
 ---
 
@@ -138,15 +139,15 @@ The injected UI seamlessly blends with Antigravity's dark VS Code-adjacent chrom
 
 | Custom Models Dashboard | Add Model Modal |
 |---|---|
-| ![Custom Models Dashboard](assets/1.PNG) | ![Add Custom Model Modal](assets/2.PNG) |
+| ![Google Antigravity Custom Models Dashboard Settings](assets/1.PNG) | ![Add Custom LLM Model Modal in Google Antigravity IDE](assets/2.PNG) |
 
-| Provider Selection | Model Selector in Chat |
+| Provider Selection (Claude, OpenAI, DeepSeek, Ollama) | Model Selector in Antigravity Chat UI |
 |---|---|
-| ![Provider Selection](assets/3.PNG) | ![Chat Model Selector](assets/4.PNG) |
+| ![Supported LLM Providers Selection in Google Antigravity](assets/3.PNG) | ![Google Antigravity Model Selector Dropdown Interface](assets/4.PNG) |
 
 | Auto-fallback & Failover Stream Notification |
 |---|
-| ![Auto-fallback & Failover Stream Notification](assets/5.PNG) |
+| ![Google Antigravity Custom Model Auto-fallback Failover Stream Notification](assets/5.PNG) |
 
 ---
 
@@ -428,6 +429,30 @@ To add support for a new LLM provider format:
 | SSL / Certificate error | Corporate proxy SSL interception | Enable MITM mode via `"Start Antigravity MITM.bat"` |
 
 Full troubleshooting guides are detailed in [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
+---
+
+## Frequently Asked Questions (FAQ)
+
+### How do I add Anthropic Claude 3.5 Sonnet or DeepSeek R1 to Google Antigravity IDE?
+You can add Claude 3.5 Sonnet, DeepSeek R1, OpenAI GPT-4o, or any custom LLM model by opening the custom model settings modal in Google Antigravity IDE, entering your API key and provider base URL, and running the automatic patcher (`repatch.bat` on Windows or `npm run repack:mac` on macOS).
+
+### Are my provider API keys secure?
+Yes. All custom model configurations and API keys are stored locally and encrypted at rest using **AES-256-GCM** via Electron `safeStorage` (backed by Windows DPAPI, macOS Keychain, or Linux Secret Service). Keys are never sent to third-party tracking servers.
+
+### Can I run local LLMs with Ollama or LM Studio in Google Antigravity?
+Yes. Set the provider to `ollama` or `openai` with endpoint `http://localhost:11434` (Ollama) or `http://localhost:1234/v1` (LM Studio). No API keys are required for offline local inference.
+
+### How does auto-fallback and failover work?
+If a primary custom model returns a `429 Rate Limit`, quota overage, or timeout, the proxy automatically retries the prompt with your configured secondary fallback model and renders a native warning banner in the chat stream without breaking conversation history.
+
+---
+
+## GitHub Search & Topics Metadata
+
+For maximum repository discoverability on GitHub Search and Google SERP, ensure the following repository topics are assigned under **GitHub Repository Settings > About**:
+
+`google-antigravity` • `antigravity-ide` • `custom-models` • `claude-3-5-sonnet` • `deepseek-r1` • `openai-gpt4o` • `ollama` • `openrouter` • `llm-proxy` • `cloudcode-patch`
 
 ---
 

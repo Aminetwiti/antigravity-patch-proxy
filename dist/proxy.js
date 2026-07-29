@@ -1213,6 +1213,13 @@ function handleRequest(req, res) {
         // 1. Intercept /v1internal:fetchAvailableModels
         if (req.url.includes('/v1internal:fetchAvailableModels')) {
             electron_log_1.default.info('[Proxy] Intercepting fetchAvailableModels request');
+            // Fire async health check (non-blocking)
+            const customModelsForHealth = (0, modelLoader_1.loadCustomModels)();
+            if (customModelsForHealth.length > 0) {
+                (0, modelHealthChecker_1.checkAllModelsHealth)(customModelsForHealth).catch((err) => {
+                    electron_log_1.default.error('[Proxy] Background health check failed:', err);
+                });
+            }
             const targetHost = 'daily-cloudcode-pa.googleapis.com';
             const targetUrl = `https://${targetHost}`;
             let parsedUrl;
@@ -1684,6 +1691,9 @@ function loadPersistedState() {
         const { retryBudgetPatch, breakerPatch } = (0, persistedState_1.fromFile)(file, Date.now(), circuitBreaker_2.CIRCUIT_BREAKER_RESET_MS);
         (0, persistedState_1.applyBudgetPatch)(retryBudgetPatch);
         (0, persistedState_1.applyBreakerPatch)(breakerPatch);
+        if (file.recentModels) {
+            (0, recentModelsStore_1.restoreRecentModels)(file.recentModels);
+        }
         electron_log_1.default.info(`[Proxy] loaded persisted state: budget=${retryBudgetPatch.size} breakers=${breakerPatch.size}`);
     }
     catch (err) {
