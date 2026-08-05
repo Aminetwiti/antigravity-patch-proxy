@@ -46,6 +46,8 @@ export interface CustomModel {
   extraHeaders?: Record<string, string>;
   extraBody?: Record<string, unknown>;
   _slug?: string;
+  /** Internal: effort suffix appended by effortExpander for unique placeholder IDs. */
+  _effortSuffix?: string;
   timeout?: number;
   maxRetries?: number;
   /**

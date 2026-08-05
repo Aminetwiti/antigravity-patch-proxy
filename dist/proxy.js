@@ -41,6 +41,8 @@ exports.toSlug = exports.generateModelPlaceholderId = void 0;
 exports.setProxyErrorEmitter = setProxyErrorEmitter;
 exports.buildProxyErrorPayload = buildProxyErrorPayload;
 exports.parseRetryAfter = parseRetryAfter;
+exports.setupCustomModelsWatcher = setupCustomModelsWatcher;
+exports.stopCustomModelsWatcher = stopCustomModelsWatcher;
 exports.startProxy = startProxy;
 exports.loadPersistedState = loadPersistedState;
 exports.flushPersistedState = flushPersistedState;
@@ -72,6 +74,8 @@ const registry = __importStar(require("./proxy/registry"));
 const protoInjector_1 = require("./proxy/protoInjector");
 // Custom model loading (extracted from proxy.ts)
 const modelLoader_1 = require("./proxy/modelLoader");
+const modelStore_1 = require("./services/modelStore");
+const modelHealthChecker_1 = require("./proxy/modelHealthChecker");
 const customModelStore_1 = require("./customModelStore");
 const errorClassifier_1 = require("./proxy/errorClassifier");
 const retryStrategy_1 = require("./proxy/retryStrategy");
@@ -102,12 +106,13 @@ const urlBuilder_1 = require("./proxy/urlBuilder");
 const idGenerator_1 = require("./proxy/idGenerator");
 Object.defineProperty(exports, "generateModelPlaceholderId", { enumerable: true, get: function () { return idGenerator_1.generateModelPlaceholderId; } });
 Object.defineProperty(exports, "toSlug", { enumerable: true, get: function () { return idGenerator_1.toSlug; } });
+const effortExpander_1 = require("./proxy/effortExpander");
 // DNS resolution bypasses the poisoned hosts file (extracted from proxy.ts)
 const dnsResolver_1 = require("./proxy/dnsResolver");
 // Smart model routing and rate-limit tracking
 const modelRouter_1 = require("./proxy/modelRouter");
 const contextTrimmer_1 = require("./proxy/contextTrimmer");
-const modelHealthChecker_1 = require("./proxy/modelHealthChecker");
+const modelHealthChecker_2 = require("./proxy/modelHealthChecker");
 const recentModelsStore_1 = require("./proxy/recentModelsStore");
 let proxyErrorEmitter = null;
 function setProxyErrorEmitter(fn) {
@@ -992,7 +997,7 @@ function handleGetAvailableModelsProxy(res, reqBody, lsUrl) {
             const responseBuf = Buffer.concat(chunks);
             const customModels = (0, modelLoader_1.loadCustomModels)();
             // Run concurrent health checks (cached with 30s TTL, max 800ms wait)
-            (0, modelHealthChecker_1.checkAllModelsHealth)(customModels).then((healthMap) => {
+            (0, modelHealthChecker_2.checkAllModelsHealth)(customModels).then((healthMap) => {
                 const { buffer: modifiedBuf } = (0, protoInjector_1.injectCustomModelsIntoResponse)(responseBuf, customModels, healthMap);
                 if ((0, httpUtils_1.safeWriteHead)(res, lsRes.statusCode || 200, {
                     'Content-Type': 'application/grpc-web+proto',
@@ -1216,7 +1221,7 @@ function handleRequest(req, res) {
             // Fire async health check (non-blocking)
             const customModelsForHealth = (0, modelLoader_1.loadCustomModels)();
             if (customModelsForHealth.length > 0) {
-                (0, modelHealthChecker_1.checkAllModelsHealth)(customModelsForHealth).catch((err) => {
+                (0, modelHealthChecker_2.checkAllModelsHealth)(customModelsForHealth).catch((err) => {
                     electron_log_1.default.error('[Proxy] Background health check failed:', err);
                 });
             }
@@ -1527,7 +1532,7 @@ function handleRequest(req, res) {
                 ].filter((x) => typeof x === 'string' && Boolean(x));
                 electron_log_1.default.info(`[Proxy] Cloud Code generation request candidates: ${candidateNames.join(', ')}, url: ${req.url}, bodyKeys: ${Object.keys(reqJson).join(',')}`);
                 if (candidateNames.length > 0) {
-                    const customModels = (0, modelLoader_1.loadCustomModels)();
+                    const customModels = (0, effortExpander_1.expandModelsWithEffort)((0, modelLoader_1.loadCustomModels)());
                     const matchedCustomModel = customModels.find((m) => {
                         const enumName = (0, idGenerator_1.generateModelPlaceholderId)(m);
                         return candidateNames.some((cn) => m.name === cn ||
@@ -1559,7 +1564,7 @@ function handleRequest(req, res) {
         const isStandardStream = !!streamMatch;
         if (req.method === 'POST' && (isGenerate || isStandardStream)) {
             const matchedModelName = isGenerate ? generateMatch[1] : streamMatch[1];
-            const customModels = (0, modelLoader_1.loadCustomModels)();
+            const customModels = (0, effortExpander_1.expandModelsWithEffort)((0, modelLoader_1.loadCustomModels)());
             const matchedCustomModel = customModels.find((m) => {
                 const enumName = (0, idGenerator_1.generateModelPlaceholderId)(m);
                 return (m.name === matchedModelName ||
@@ -1587,6 +1592,58 @@ function handleRequest(req, res) {
         // 5. Fallback: transparent proxy to Google
         await proxyToGoogle(req, res, fullBody);
     });
+}
+// ─── File Watcher for custom_models.json ──────────────────────────────────
+let customModelsWatcher = null;
+let customModelsWatcherDebounce = null;
+function setupCustomModelsWatcher() {
+    try {
+        const customModelsPath = (0, modelLoader_1.getCustomModelsPath)();
+        const customModelsDir = path.dirname(customModelsPath);
+        if (!fs.existsSync(customModelsDir)) {
+            fs.mkdirSync(customModelsDir, { recursive: true });
+        }
+        if (customModelsWatcher) {
+            customModelsWatcher.close();
+            customModelsWatcher = null;
+        }
+        customModelsWatcher = fs.watch(customModelsDir, (_eventType, filename) => {
+            if (filename && filename.includes('custom_models.json')) {
+                if (customModelsWatcherDebounce)
+                    clearTimeout(customModelsWatcherDebounce);
+                customModelsWatcherDebounce = setTimeout(() => {
+                    electron_log_1.default.info('[Proxy] custom_models.json changed on disk. Invalidating model caches...');
+                    (0, modelStore_1.invalidateModelStoreCache)();
+                    (0, modelHealthChecker_1.invalidateHealthCache)();
+                    try {
+                        const models = (0, modelLoader_1.loadCustomModels)();
+                        if (models.length > 0) {
+                            (0, modelHealthChecker_2.checkAllModelsHealth)(models).catch(() => { });
+                        }
+                    }
+                    catch (err) {
+                        electron_log_1.default.warn('[Proxy] Failed to reload/health-check models after file change:', err);
+                    }
+                }, 200);
+            }
+        });
+    }
+    catch (err) {
+        electron_log_1.default.warn('[Proxy] Failed to setup custom_models.json watcher:', err);
+    }
+}
+function stopCustomModelsWatcher() {
+    if (customModelsWatcherDebounce) {
+        clearTimeout(customModelsWatcherDebounce);
+        customModelsWatcherDebounce = null;
+    }
+    if (customModelsWatcher) {
+        try {
+            customModelsWatcher.close();
+        }
+        catch { }
+        customModelsWatcher = null;
+    }
 }
 // ─── Server Start/Stop ────────────────────────────────────────────────────
 function startProxy() {
@@ -1639,6 +1696,7 @@ function startProxy() {
                     // so that failures here don't prevent the port from binding.
                     try {
                         (0, shared_1.startCleanupInterval)();
+                        setupCustomModelsWatcher();
                     }
                     catch (err) {
                         electron_log_1.default.error('[Proxy] Failed to start cleanup interval:', err);
@@ -1722,6 +1780,7 @@ function stopProxy() {
     return new Promise((resolve) => {
         // P1-9: Stop cleanup interval to prevent orphaned timers
         (0, shared_1.stopCleanupInterval)();
+        stopCustomModelsWatcher();
         const finish = () => {
             // Phase 6.3: flush any pending persisted state (force, ignore throttle)
             // so the next startProxy() can re-load the same breakers / budgets.

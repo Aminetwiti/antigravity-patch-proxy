@@ -15,6 +15,7 @@ import log from 'electron-log';
 import type { CustomModel } from './types';
 import { isRecentModel } from './recentModelsStore';
 import type { ModelHealthResult } from './modelHealthChecker';
+import { expandModelsWithEffort } from './effortExpander';
 
 /**
  * Result of injecting custom models into a GetAvailableModels protobuf response.
@@ -26,6 +27,18 @@ export interface InjectionResult {
   injectedCount: number;
   /** Whether the buffer was modified. */
   modified: boolean;
+}
+
+export function buildGrpcWebFrame(flags: number, body: Buffer): Buffer {
+  const header = Buffer.alloc(5);
+  header[0] = flags;
+  header.writeUInt32BE(body.length, 1);
+  return Buffer.concat([header, body]);
+}
+
+export function parseGrpcWebHeader(buf: Buffer): { flags: number; msgLen: number } | null {
+  if (buf.length < 5) return null;
+  return { flags: buf[0], msgLen: buf.readUInt32BE(1) };
 }
 
 /**
@@ -93,9 +106,19 @@ export function injectCustomModelsIntoResponse(
     const fieldMapping = extractFieldMapping(sampleEntry.value);
     const newParts: Buffer[] = [msgBody];
 
-    for (const m of customModels) {
-      const placeholderId = generateModelPlaceholderId(m);
+    let injectedCount = 0;
+
+    const expandedModels = expandModelsWithEffort(customModels);
+
+    for (const m of expandedModels) {
       const health = healthMap?.get(m.name);
+      
+      // Do not inject unhealthy models into the dropdown (per user request)
+      if (health?.status === 'unhealthy') {
+        continue;
+      }
+
+      const placeholderId = generateModelPlaceholderId(m);
       const formattedName = formatModelDisplayName(m, health);
       const entry = encodeModelEntryForGetModels(
         `models/${placeholderId}`,
@@ -105,6 +128,11 @@ export function injectCustomModelsIntoResponse(
       const tagBuf = encodeVarint(modelTag);
       const lenBuf = encodeVarint(entry.length);
       newParts.push(tagBuf, lenBuf, entry);
+      injectedCount++;
+    }
+
+    if (injectedCount === 0) {
+      return { buffer: responseBuf, injectedCount: 0, modified: false };
     }
 
     const newMsgBody = Buffer.concat(newParts);
@@ -113,7 +141,7 @@ export function injectCustomModelsIntoResponse(
     newHeader.writeUInt32BE(newMsgBody.length, 1);
     const modifiedBuf = Buffer.concat([newHeader, newMsgBody]);
 
-    return { buffer: modifiedBuf, injectedCount: customModels.length, modified: true };
+    return { buffer: modifiedBuf, injectedCount, modified: true };
   } catch (err) {
     log.warn('[ProtoInjector] Injection failed, returning original buffer:', (err as Error).message);
     return { buffer: responseBuf, injectedCount: 0, modified: false };

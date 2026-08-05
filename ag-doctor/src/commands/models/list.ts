@@ -7,14 +7,15 @@ import { getCustomModelsPath } from '../../core/paths';
 import { c, header, ok, info } from '../../cli/output';
 
 function maskKey(k?: string): string {
-  if (!k) return '(none)';
+  if (!k || k === 'none') return '(none)';
+  if (k.startsWith('gcm:v1:') || k.startsWith('base64:')) return '[encrypted]';
   if (k.length <= 8) return '***';
   return `${k.slice(0, 3)}...${k.slice(-4)}`;
 }
 
 export function runModelsList(ctx: CommandContext): number {
   if (!ctx.json) header('Custom models');
-  const file = loadCustomModels();
+  const file = loadCustomModels(undefined, { includeDisabled: !!ctx.json });
   const encrypted = looksEncrypted();
 
   if (ctx.json) {

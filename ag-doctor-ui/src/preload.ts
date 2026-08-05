@@ -18,7 +18,8 @@ const api = {
     save: (p: unknown): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('ag:providers:save', p),
     delete: (id: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('ag:providers:delete', id),
     fetchModels: (params: { apiUrl: string; apiKey: string }): Promise<{ success: boolean; models?: Array<{ id: string; displayName?: string; enabled?: boolean }>; error?: string }> => ipcRenderer.invoke('ag:providers:fetch-models', params),
-    test: (params: { apiUrl: string; apiKey: string }): Promise<{ success: boolean; status?: number; error?: string }> => ipcRenderer.invoke('ag:providers:test', params),
+    test: (params: { apiUrl: string; apiKey: string; id?: string; modelId?: string }): Promise<{ success: boolean; status?: number; latencyMs?: number; healthStatus?: 'healthy' | 'degraded' | 'offline'; error?: string }> =>
+      ipcRenderer.invoke('ag:providers:test', params),
     onChanged: (handler: () => void): (() => void) => {
       const listener = () => handler();
       ipcRenderer.on('ag:providers:changed', listener);

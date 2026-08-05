@@ -5,11 +5,12 @@ import { app } from 'electron';
 import log from 'electron-log/main';
 
 import * as cryptoStore from '../cryptoStore';
-
+import { generateModelPlaceholderId } from '../proxy/idGenerator';
 import {
   CUSTOM_MODEL_MAX_TOKENS,
   CUSTOM_MODEL_MAX_OUTPUT_TOKENS,
   PROVIDERS,
+  type ProviderName,
 } from '../constants';
 
 let _writeLock: Promise<void> = Promise.resolve();
@@ -149,11 +150,13 @@ export async function loadCustomModels(): Promise<CustomModelFileEntry[]> {
 }
 
 export async function saveCustomModels(models: CustomModelFileEntry[]): Promise<void> {
-  invalidateModelStoreCache();
-  const filePath = getCustomModelsPath();
-  const existing = readExistingJson(filePath);
-  existing.models = models;
-  await atomicWriteJson(filePath, existing);
+  return withWriteLock(async () => {
+    invalidateModelStoreCache();
+    const filePath = getCustomModelsPath();
+    const existing = readExistingJson(filePath);
+    existing.models = models;
+    await atomicWriteJson(filePath, existing);
+  });
 }
 
 export async function loadProviders(): Promise<ProviderFileEntry[]> {
@@ -228,12 +231,16 @@ function readExistingJson(filePath: string): Record<string, unknown> {
   }
 }
 
-export async function saveProviders(providers: ProviderFileEntry[]): Promise<void> {
+async function saveProvidersInternal(providers: ProviderFileEntry[]): Promise<void> {
   invalidateModelStoreCache();
   const filePath = getCustomModelsPath();
   const existing = readExistingJson(filePath);
   existing.providers = providers;
   await atomicWriteJson(filePath, existing);
+}
+
+export async function saveProviders(providers: ProviderFileEntry[]): Promise<void> {
+  return withWriteLock(() => saveProvidersInternal(providers));
 }
 
 export async function recordProviderUsage(providerId: string, promptTokens: number = 0, completionTokens: number = 0): Promise<void> {
@@ -251,7 +258,7 @@ export async function recordProviderUsage(providerId: string, promptTokens: numb
       target.usage.totalRequests += 1;
       target.usage.lastUsed = Date.now();
 
-      await saveProviders(providers);
+      await saveProvidersInternal(providers);
     } catch (err) {
       log.error('[CustomModelStore] Failed to record provider usage:', err);
     }
@@ -259,26 +266,62 @@ export async function recordProviderUsage(providerId: string, promptTokens: numb
 }
 
 export async function deleteCustomModel(modelName: string): Promise<void> {
-  const providers = await loadProviders();
-  let mutated = false;
-  for (const p of providers) {
-    const prefix = `${p.id}-`;
-    if (modelName.startsWith(prefix)) {
-      const modelId = modelName.slice(prefix.length);
+  return withWriteLock(async () => {
+    const providers = await loadProviders();
+    let mutated = false;
+    const cleanName = modelName.startsWith('models/') ? modelName.slice(7) : modelName;
+
+    for (const p of providers) {
+      if (!p || !Array.isArray(p.models)) continue;
+      const prefix = `${p.id}-`;
+      const stripped = cleanName.startsWith(prefix) ? cleanName.slice(prefix.length) : cleanName;
       const before = p.models.length;
-      p.models = p.models.filter((m) => m.id !== modelId);
+
+      p.models = p.models.filter((m) => {
+        if (!m) return false;
+        const placeholderId = generateModelPlaceholderId({
+          name: m.id,
+          displayName: m.displayName || m.id,
+          description: (m as any).description || '',
+          provider: (p.provider ?? 'openai') as ProviderName,
+          apiKey: p.apiKey ?? '',
+          apiUrl: p.apiUrl ?? '',
+          externalModelName: m.id,
+        });
+
+        const isMatch =
+          m.id === modelName ||
+          m.displayName === modelName ||
+          m.id === cleanName ||
+          m.displayName === cleanName ||
+          m.id === stripped ||
+          m.displayName === stripped ||
+          placeholderId === cleanName ||
+          placeholderId === stripped ||
+          `MODEL_PLACEHOLDER_${placeholderId}` === cleanName;
+
+        return !isMatch;
+      });
+
       if (p.models.length !== before) {
         mutated = true;
       }
     }
-  }
-  if (mutated) {
-    await saveProviders(providers);
-    return;
-  }
-  const models = await loadCustomModels();
-  const filtered = models.filter((model) => model.name !== modelName);
-  await saveCustomModels(filtered);
+
+    if (mutated) {
+      await saveProvidersInternal(providers);
+    }
+
+    invalidateModelStoreCache();
+    const filePath = getCustomModelsPath();
+    const existing = readExistingJson(filePath);
+    if (Array.isArray(existing.models)) {
+      existing.models = existing.models.filter(
+        (model: { name?: string }) => model.name !== modelName && model.name !== cleanName
+      );
+    }
+    await atomicWriteJson(filePath, existing);
+  });
 }
 
 export function maskApiKey(encryptedKey: string): string {
@@ -360,8 +403,14 @@ export async function testProviderHealth(params: TestModelParams): Promise<Conne
     'User-Agent': 'Antigravity-HealthProbe/2.2',
   };
 
-  if (apiKey && apiKey !== 'none' && !isMaskedApiKey(apiKey)) {
-    headers['Authorization'] = `Bearer ${apiKey}`;
+  let rawKey = apiKey;
+  if (rawKey && rawKey !== 'none' && !isMaskedApiKey(rawKey)) {
+    try {
+      rawKey = cryptoStore.decryptString(rawKey);
+    } catch {
+      // If decryption fails, keep rawKey as is
+    }
+    headers['Authorization'] = `Bearer ${rawKey}`;
   }
 
   return new Promise((resolve) => {

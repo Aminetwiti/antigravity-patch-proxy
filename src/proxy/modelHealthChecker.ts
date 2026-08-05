@@ -19,7 +19,7 @@ export interface ModelHealthResult {
 /** Health check results cache (model name -> result) with 30s TTL */
 const healthCache = new Map<string, { result: ModelHealthResult; expiresAt: number }>();
 const CACHE_TTL_MS = 30_000;
-const HEALTH_CHECK_TIMEOUT_MS = 800;
+const HEALTH_CHECK_TIMEOUT_MS = 3000;
 
 /** Synchronous getter for cached health status */
 export function getCachedHealth(modelName: string): ModelHealthResult | null {
@@ -31,6 +31,16 @@ export function getCachedHealth(modelName: string): ModelHealthResult | null {
   }
   return null;
 }
+
+/** Clear health check cache (entire cache or specific model) */
+export function invalidateHealthCache(modelName?: string): void {
+  if (modelName) {
+    healthCache.delete(modelName);
+  } else {
+    healthCache.clear();
+  }
+}
+
 
 /** Ping a single custom model endpoint with strict timeout */
 export function pingCustomModel(model: CustomModel): Promise<ModelHealthResult> {

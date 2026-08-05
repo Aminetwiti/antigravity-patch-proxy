@@ -26,6 +26,7 @@ export interface CustomModel {
   allowUnauthorized?: boolean;
   timeout?: number;
   maxRetries?: number;
+  enabled?: boolean;
 }
 
 export interface CustomModelsFile {

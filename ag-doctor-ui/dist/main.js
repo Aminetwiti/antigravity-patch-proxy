@@ -660,7 +660,7 @@ electron_1.ipcMain.handle('ag:providers:get', async () => {
                 pm.get(k).models.push({
                     id: m.externalModelName || m.name,
                     displayName: m.displayName || m.name,
-                    enabled: true
+                    enabled: m.enabled !== false
                 });
             }
             return Array.from(pm.values());
@@ -687,7 +687,25 @@ electron_1.ipcMain.handle('ag:providers:save', async (_, p) => {
             parsed.providers[idx] = p;
         else
             parsed.providers.push(p);
+        if (Array.isArray(parsed.models) && Array.isArray(p.models)) {
+            for (const pm of p.models) {
+                const pmId = pm.id || pm.displayName;
+                if (!pmId)
+                    continue;
+                const cleanId = pmId.startsWith('models/') ? pmId.slice(7) : pmId;
+                const mIdx = parsed.models.findIndex(m => {
+                    const mClean = (m.name || '').startsWith('models/') ? (m.name || '').slice(7) : (m.name || '');
+                    const urlMatch = !p.apiUrl || !m.apiUrl || p.apiUrl.toLowerCase() === m.apiUrl.toLowerCase();
+                    return (m.name === pmId || m.name === `models/${pmId}` || mClean === cleanId) && urlMatch;
+                });
+                if (mIdx !== -1) {
+                    parsed.models[mIdx].enabled = pm.enabled !== false && p.enabled !== false;
+                }
+            }
+        }
         await fs_1.default.promises.writeFile(fp, JSON.stringify(parsed, null, 2), 'utf8');
+        if (mainWindow && !mainWindow.isDestroyed())
+            mainWindow.webContents.send('ag:providers:changed');
         return { success: true };
     }
     catch (e) {
@@ -702,6 +720,8 @@ electron_1.ipcMain.handle('ag:providers:delete', async (_, id) => {
         if (parsed.providers) {
             parsed.providers = parsed.providers.filter((x) => x.id !== id);
             await fs_1.default.promises.writeFile(fp, JSON.stringify(parsed, null, 2), 'utf8');
+            if (mainWindow && !mainWindow.isDestroyed())
+                mainWindow.webContents.send('ag:providers:changed');
         }
         return { success: true };
     }
@@ -788,55 +808,74 @@ electron_1.ipcMain.handle('ag:providers:test', async (_evt, params) => {
         let statusCode = 500;
         let responseData = '';
         let latencyMs = 0;
-        // 1. Try GET /models first
-        try {
-            const res = await doRequest(`${baseUrl}/models`, 'GET');
-            statusCode = res.statusCode;
-            responseData = res.data;
-            latencyMs = res.latencyMs;
-        }
-        catch (err) {
-            responseData = err.message;
-        }
-        // 2. Fallback to POST /chat/completions if GET /models failed or returned non-200
-        if (statusCode < 200 || statusCode >= 300) {
-            // Find a candidate model ID to test
-            let testModel = params.modelId;
-            if (!testModel && params.id) {
-                try {
-                    const fp = getCustomModelsPath();
-                    const c = await fs_1.default.promises.readFile(fp, 'utf8');
-                    const parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
-                    const prov = (parsed.providers || []).find((x) => x.id === params.id);
-                    if (prov && prov.models && prov.models.length > 0) {
-                        testModel = prov.models[0].id || prov.models[0].name;
-                    }
-                }
-                catch { /* ignore */ }
-            }
-            if (!testModel)
-                testModel = 'MiniMax-M3';
+        // If modelId is explicitly supplied, test that specific model directly via /chat/completions
+        if (params.modelId) {
             try {
                 const postBody = JSON.stringify({
-                    model: testModel,
+                    model: params.modelId,
                     messages: [{ role: 'user', content: 'ping' }],
                     max_tokens: 1
                 });
                 const postRes = await doRequest(`${baseUrl}/chat/completions`, 'POST', postBody);
-                // If POST returns 200, or a model parameter error (400), authentication worked!
-                if (postRes.statusCode >= 200 && postRes.statusCode < 300) {
-                    statusCode = postRes.statusCode;
-                    responseData = postRes.data;
-                    latencyMs = postRes.latencyMs;
-                }
-                else if (postRes.statusCode === 401 || postRes.statusCode === 403) {
-                    // Auth failed on chat completions — report exact auth failure
-                    statusCode = postRes.statusCode;
-                    responseData = postRes.data;
-                    latencyMs = postRes.latencyMs;
-                }
+                statusCode = postRes.statusCode;
+                responseData = postRes.data;
+                latencyMs = postRes.latencyMs;
             }
-            catch { /* keep original GET result if POST fails completely */ }
+            catch (err) {
+                responseData = err.message;
+            }
+        }
+        else {
+            // 1. Try GET /models first for general provider connectivity
+            try {
+                const res = await doRequest(`${baseUrl}/models`, 'GET');
+                statusCode = res.statusCode;
+                responseData = res.data;
+                latencyMs = res.latencyMs;
+            }
+            catch (err) {
+                responseData = err.message;
+            }
+            // 2. Fallback to POST /chat/completions if GET /models failed or returned non-200
+            if (statusCode < 200 || statusCode >= 300) {
+                // Find a candidate model ID to test
+                let testModel = undefined;
+                if (params.id) {
+                    try {
+                        const fp = getCustomModelsPath();
+                        const c = await fs_1.default.promises.readFile(fp, 'utf8');
+                        const parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
+                        const prov = (parsed.providers || []).find((x) => x.id === params.id);
+                        if (prov && prov.models && prov.models.length > 0) {
+                            testModel = prov.models[0].id || prov.models[0].name;
+                        }
+                    }
+                    catch { /* ignore */ }
+                }
+                if (!testModel)
+                    testModel = 'MiniMax-M3';
+                try {
+                    const postBody = JSON.stringify({
+                        model: testModel,
+                        messages: [{ role: 'user', content: 'ping' }],
+                        max_tokens: 1
+                    });
+                    const postRes = await doRequest(`${baseUrl}/chat/completions`, 'POST', postBody);
+                    // If POST returns 200, or a model parameter error (400), authentication worked!
+                    if (postRes.statusCode >= 200 && postRes.statusCode < 300) {
+                        statusCode = postRes.statusCode;
+                        responseData = postRes.data;
+                        latencyMs = postRes.latencyMs;
+                    }
+                    else if (postRes.statusCode === 401 || postRes.statusCode === 403) {
+                        // Auth failed on chat completions — report exact auth failure
+                        statusCode = postRes.statusCode;
+                        responseData = postRes.data;
+                        latencyMs = postRes.latencyMs;
+                    }
+                }
+                catch { /* keep original GET result if POST fails completely */ }
+            }
         }
         const isSuccess = statusCode >= 200 && statusCode < 300;
         const healthStatus = isSuccess

@@ -21,6 +21,8 @@ export declare function buildProxyErrorPayload(traceId: string, status: number |
  * Returns delay in milliseconds, or 0 if no valid header is present.
  */
 export declare function parseRetryAfter(headers: Record<string, string | string[] | undefined>): number;
+export declare function setupCustomModelsWatcher(): void;
+export declare function stopCustomModelsWatcher(): void;
 export declare function startProxy(): Promise<number>;
 /**
  * Reads the persisted state file and applies it to the live singletons.

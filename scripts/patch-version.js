@@ -7,7 +7,8 @@
  *
  *   2.0.x / 2.1.x  → full-overlay patch (repack.ps1 handles this)
  *   2.2.x          → scripts/patch_2_2_1.js  (3 missing modules)
- *   2.3.x          → scripts/patch_2_3.js    (25 missing + 5 overwrites + 1 new)
+ *   2.3.x / 2.4.x  → scripts/patch_2_3.js    (25 missing + 5 overwrites + 1 new)
+ *   2.5.x          → scripts/patch_2_5.js    (25 missing + 5 overwrites + 1 new)
  *   other          → error with guidance
  *
  * Usage:
@@ -91,7 +92,10 @@ console.log(`[patch-version] detected Antigravity version: ${version}`);
 const scriptsDir = __dirname;
 let targetScript;
 let exitCode = 0;
-if (version.startsWith('2.3.') || version.startsWith('2.4.') || /^2\.[3-9]\./.test(version)) {
+if (version.startsWith('2.5.')) {
+  targetScript = path.join(scriptsDir, 'patch_2_5.js');
+  console.log(`[patch-version] dispatching to patch_2_5.js (full overlay + modular JS modules) for Antigravity ${version}`);
+} else if (version.startsWith('2.3.') || version.startsWith('2.4.') || /^2\.[3-4]\./.test(version)) {
   targetScript = path.join(scriptsDir, 'patch_2_3.js');
   console.log(`[patch-version] dispatching to patch_2_3.js (full overlay + modular JS modules) for Antigravity ${version}`);
 } else if (version.startsWith('2.2.')) {
@@ -103,7 +107,7 @@ if (version.startsWith('2.3.') || version.startsWith('2.4.') || /^2\.[3-9]\./.te
   process.exit(1);
 } else {
   console.error(`[patch-version] Unsupported Antigravity version: ${version}`);
-  console.error('  Known versions: 2.0.x, 2.1.x, 2.2.x, 2.3.x, 2.4.x');
+  console.error('  Known versions: 2.0.x, 2.1.x, 2.2.x, 2.3.x, 2.4.x, 2.5.x');
   console.error('  Update scripts/patch-version.js + create a new patch_<version>.js if needed.');
   process.exit(1);
 }

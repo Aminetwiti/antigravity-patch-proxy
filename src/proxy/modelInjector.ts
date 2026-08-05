@@ -5,6 +5,7 @@ import { generateModelPlaceholderId, toSlug } from './idGenerator';
 import { getCachedHealth, ModelHealthResult } from './modelHealthChecker';
 import { isRecentModel } from './recentModelsStore';
 import type { CustomModel } from './types';
+import { expandModelsWithEffort } from './effortExpander';
 
 function getHealthScore(health: ModelHealthResult | null): number {
   if (!health) return 2; // pending
@@ -62,7 +63,7 @@ function formatDisplayName(m: CustomModel): string {
 }
 
 export function getMappedCustomModels() {
-  const customModels = sortCustomModels(loadCustomModels());
+  const customModels = sortCustomModels(expandModelsWithEffort(loadCustomModels()));
   const mappedCustom: Record<string, unknown> = {};
   customModels.forEach((m) => {
     const slug = toSlug(m);
@@ -82,7 +83,7 @@ export function getMappedCustomModels() {
 }
 
 export function getCustomModelsList() {
-  const customModels = sortCustomModels(loadCustomModels());
+  const customModels = sortCustomModels(expandModelsWithEffort(loadCustomModels()));
   return customModels.map((m) => ({
     name: 'models/' + generateModelPlaceholderId(m),
     version: '1.0',
@@ -98,7 +99,7 @@ export function getCustomModelsList() {
 }
 
 export function mergeModels(target: unknown, customModels: CustomModel[]): unknown {
-  const sortedCustomModels = sortCustomModels(customModels);
+  const sortedCustomModels = sortCustomModels(expandModelsWithEffort(customModels));
   if (Array.isArray(target)) {
     const mapped = sortedCustomModels.map((m) => {
       const cap = detectModelCapabilities(m, true);

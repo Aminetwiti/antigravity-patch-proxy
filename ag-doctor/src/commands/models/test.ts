@@ -9,7 +9,7 @@ import { Spinner } from '../../cli/spinner';
 
 export async function runModelsTest(ctx: CommandContext, name?: string): Promise<number> {
   if (!ctx.json) header('Test model connectivity');
-  const file = loadCustomModels();
+  const file = loadCustomModels(undefined, { includeDisabled: true });
   let targets = file.models;
   if (name) {
     targets = targets.filter((m) => m.name === name);
@@ -17,6 +17,8 @@ export async function runModelsTest(ctx: CommandContext, name?: string): Promise
       error(`Model "${name}" not found`);
       return 2;
     }
+  } else {
+    targets = targets.filter((m) => m.enabled !== false);
   }
   if (targets.length === 0) {
     info('No models to test');

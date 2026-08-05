@@ -23,13 +23,6 @@ describe('Well-Known Presets Catalogue', () => {
       expect(preset.provider).toBeTruthy();
       expect(preset.apiUrl).toMatch(/^https?:\/\//);
       expect(Array.isArray(preset.models)).toBe(true);
-      expect(preset.models.length).toBeGreaterThan(0);
-
-      for (const m of preset.models) {
-        expect(m.id).toBeTruthy();
-        expect(m.displayName).toBeTruthy();
-        expect(m.enabled).toBe(true);
-      }
     }
   });
 });

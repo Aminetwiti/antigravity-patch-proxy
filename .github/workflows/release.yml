@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    branches: [main, master]
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Release (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+          - os: macos-latest
+            platform: mac
+          - os: ubuntu-latest
+            platform: linux
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci --no-audit --no-fund
+          cd ag-doctor && npm install && npm run build
+          cd ../ag-doctor-ui && npm install && npm run build
+
+      - name: Auto-generate Release Tag (if pushing to branch)
+        id: tagger
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "TAG_NAME=${github.ref_name}" >> $GITHUB_ENV
+          else
+            VERSION=$(node -p "require('./ag-doctor-ui/package.json').version")
+            TAG_NAME="v${VERSION}-build.${{ github.run_number }}"
+            echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_ENV
+          fi
+
+      - name: Build & Publish Electron App
+        cwd: ag-doctor-ui
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npx electron-builder --${{ matrix.platform }} --publish always

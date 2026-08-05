@@ -202,6 +202,7 @@ interface CustomModel {
   apiUrl: string;
   externalModelName: string;
   encrypted?: boolean;
+  enabled?: boolean;
 }
 
 interface ModelsFile {
@@ -853,44 +854,6 @@ function updateStats(results: CheckResult[]): void {
   lastRunBadge.textContent = new Date().toLocaleTimeString();
 }
 
-// Dashboard hero card
-const dashHeroDot = $('#dashHeroDot') as HTMLSpanElement;
-const dashHeroLabel = $('#dashHeroLabel') as HTMLSpanElement;
-const dashHeroTitle = $('#dashHeroTitle') as HTMLHeadingElement;
-const dashHeroMeta = $('#dashHeroMeta') as HTMLParagraphElement;
-
-// Reusable template for the runtime details table — avoids creating a new <template> each load
-const infoTableTpl = document.createElement('template');
-
-// Reusable template for the dashboard hero meta — avoids innerHTML on every doctor run
-const dashHeroMetaTpl = document.createElement('template');
-
-function setDashHero(state: 'pending' | 'ok' | 'warn' | 'err' | 'busy', label: string, meta: string): void {
-  dashHeroDot.className = `ag-hero-dot ${state}`;
-  dashHeroLabel.textContent = label;
-  dashHeroMetaTpl.innerHTML = meta;
-  dashHeroMeta.replaceChildren(dashHeroMetaTpl.content);
-}
-
-function updateDashHero(results: CheckResult[]): void {
-  const hasError = results.some((r) => r.status === 'error');
-  const hasWarn = results.some((r) => r.status === 'warn');
-  const ok = results.filter((r) => r.status === 'ok').length;
-  const total = results.length;
-
-  if (hasError) {
-    setDashHero('err', `${results.filter((r) => r.status === 'error').length} issue(s) found`,
-      `<strong>${total}</strong> checks · <strong>${ok}</strong> passed · review issues below`);
-  } else if (hasWarn) {
-    setDashHero('warn', `${results.filter((r) => r.status === 'warn').length} warning(s) found`,
-      `<strong>${total}</strong> checks · <strong>${ok}</strong> passed · some warnings detected`);
-  } else {
-    setDashHero('ok', 'All checks passed',
-      `<strong>${total}</strong> checks passed · last run ${new Date().toLocaleTimeString()}`);
-  }
-  dashHeroTitle.textContent = 'ag-doctor';
-}
-
 async function runDoctor(): Promise<void> {
   setStatus('Running doctor…', 'busy');
   $('#runDoctorBtn')?.setAttribute('disabled', 'true');
@@ -898,42 +861,24 @@ async function runDoctor(): Promise<void> {
   $('#sidebarRunBtn')?.setAttribute('disabled', 'true');
   $('#heroRunBtn')?.setAttribute('disabled', 'true');
   setObjective('doctor', 'pending', 'Running…');
-  setDashHero('busy', 'Running doctor…', 'Scanning Antigravity, MITM, patches, and models…');
+  if (lastRunBadge) lastRunBadge.textContent = 'Running...';
 
   try {
     const result = await window.ag.run(['doctor', '--json']);
     if (result.code !== 0 && !result.stdout) {
-      throw new Error(result.stderr || `Exit ${result.code}`);
+      throw new Error(result.stderr || `Exited with code ${result.code}`);
     }
-    const data = JSON.parse(result.stdout) as CheckResult[];
-
-    // Diff against previous results for native notifications
-    if (lastResults.length > 0) {
-      const previousErrors = new Set(lastResults.filter((r) => r.status === 'error').map((r) => r.id));
-      const newErrors = data.filter((r) => r.status === 'error' && !previousErrors.has(r.id));
-      if (newErrors.length > 0) {
-        const titles = newErrors.map((r) => r.title).join(', ');
-        void window.ag.notify('ag-doctor · new issue', `${newErrors.length} new issue(s): ${titles}`);
-      }
-    }
-
-    lastResults = data;
-    renderHealthList(data);
-    updateStats(data);
-    updateObjectives(data);
-    updateDashHero(data);
-
-    const hasError = data.some((r) => r.status === 'error');
-    const hasWarn = data.some((r) => r.status === 'warn');
-    void window.ag.trayStatus(hasError ? 'err' : hasWarn ? 'warn' : 'ok');
-
-    toast(`Doctor complete · ${data.length} checks`, 'ok');
-    setStatus('Ready');
+    const results = JSON.parse(result.stdout) as CheckResult[];
+    updateStats(results);
+    updateObjectives(results);
+    
+    setStatus('Ready', 'ready');
   } catch (e) {
     toast(`Doctor failed: ${(e as Error).message}. Check the Logs tab for full output.`, 'err', 5000);
     setStatus('Error', 'err');
     setObjective('doctor', 'error', 'Doctor failed');
     void window.ag.trayStatus('err');
+    if (lastRunBadge) lastRunBadge.textContent = 'Failed';
   } finally {
     $('#runDoctorBtn')?.removeAttribute('disabled');
     $('#refreshBtn')?.removeAttribute('disabled');
@@ -968,13 +913,41 @@ $('#runDoctorBtn').addEventListener('click', () => void runDoctor());
 $('#heroRunBtn')?.addEventListener('click', () => void runDoctor());
 $('#emptyStateRunDoctorBtn')?.addEventListener('click', () => void runDoctor());
 $('#refreshBtn').addEventListener('click', () => void runDoctor());
-$('#repairBtn').addEventListener('click', () => void runRepair());
+$('#repairBtn').addEventListener('click', () => void handleRepair());
 
 // Fix All: full auto-repair with admin elevation (UAC prompt will appear)
 $('#fixAllBtn')?.addEventListener('click', () => void runFixAll());
 
 // Start Stub: emergency proxy stub on port 50999 (no admin needed)
 $('#startStubBtn')?.addEventListener('click', () => void runStartStub());
+
+async function runRepair(): Promise<void> {
+  const ok = await confirmModal(
+    'Apply diagnostic repair?',
+    'Attempt automatic repair of detected binary patch or certificate issues?',
+    { confirmLabel: 'Run repair', danger: true },
+  );
+  if (!ok) return;
+  setStatus('Repairing…', 'busy');
+  $('#repairBtn')?.setAttribute('disabled', 'true');
+  try {
+    const r = await window.ag.run(['doctor', 'repair', '--yes']);
+    if (r.code === 0) {
+      toast('Repair completed. Re-running doctor to verify.', 'ok', 5000);
+      setObjective('patch', 'ok', 'Patch repaired');
+    } else {
+      toast(`Repair failed: ${r.stderr || r.stdout}. Check the Logs tab for details.`, 'err', 6000);
+      setObjective('patch', 'error', 'Repair failed');
+    }
+    setStatus('Re-running doctor…', 'busy');
+    await runDoctor();
+  } catch (e) {
+    toast(`Repair error: ${(e as Error).message}`, 'err');
+    setStatus('Error', 'err');
+  } finally {
+    $('#repairBtn')?.removeAttribute('disabled');
+  }
+}
 
 async function runFixAll(): Promise<void> {
   const ok = await confirmModal(
@@ -1031,28 +1004,23 @@ const objectiveIconTpl = document.createElement('template');
 function setObjective(key: ObjectiveKey, state: 'pending' | 'ok' | 'warn' | 'error', detail?: string): void {
   const el = document.getElementById(`obj-${key}`);
   if (!el) return;
-  const icon = el.querySelector('.objective-icon') as HTMLDivElement;
-  const status = el.querySelector('.objective-status') as HTMLDivElement;
-  icon.className = `objective-icon ${state}`;
-  objectiveIconTpl.innerHTML = iconForObjective(state);
-  icon.replaceChildren(objectiveIconTpl.content);
-  status.textContent = detail ?? (state === 'ok' ? 'Active' : state === 'pending' ? 'Pending' : state === 'warn' ? 'Warning' : 'Error');
+  el.className = `status-icon ${state}`;
+  if (detail) el.title = detail;
+  el.replaceChildren(objectiveIconTpl.content.cloneNode(true));
+  const iconSpan = el.querySelector('span');
+  if (iconSpan) {
+    iconSpan.className = `status-icon ${state}`;
+  }
 }
 
-async function runRepair(): Promise<void> {
-  const ok = await confirmModal(
-    'Repair detected issues?',
-    'This runs <code>ag-doctor repair --yes</code> to attempt automatic repair of issues found by the doctor.',
-    { confirmLabel: 'Run repair' },
-  );
-  if (!ok) return;
-  setStatus('Running repair…', 'busy');
+async function handleRepair(): Promise<void> {
+  setStatus('Repairing patch…', 'busy');
   $('#repairBtn')?.setAttribute('disabled', 'true');
   try {
-    const r = await window.ag.run(['repair', '--yes']);
+    const r = await window.ag.run(['doctor', '--repair']);
     if (r.code === 0) {
-      toast('Repair completed. Re-running doctor to verify.', 'ok', 5000);
-      setObjective('patch', 'ok', 'Repair completed');
+      toast('Repair complete', 'ok');
+      setObjective('patch', 'ok', 'Repaired');
     } else {
       toast(`Repair failed: ${r.stderr || r.stdout}. Check the Logs tab for details.`, 'err', 6000);
       setObjective('patch', 'error', 'Repair failed');
@@ -1120,12 +1088,315 @@ $('#doctorJsonBtn').addEventListener('click', async () => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Models view
-// ──────���──────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
 const modelsList = $('#modelsList') as HTMLDivElement;
+const modelsSearchInput = $('#modelsSearchInput') as HTMLInputElement | null;
+const modelsPageSizeSelect = $('#modelsPageSizeSelect') as HTMLSelectElement | null;
+const modelsPaginationInfo = $('#modelsPaginationInfo') as HTMLSpanElement | null;
+const modelsPaginationNav = $('#modelsPaginationNav') as HTMLDivElement | null;
+const modelsPrevPageBtn = $('#modelsPrevPageBtn') as HTMLButtonElement | null;
+const modelsNextPageBtn = $('#modelsNextPageBtn') as HTMLButtonElement | null;
+const modelsPageNumbers = $('#modelsPageNumbers') as HTMLDivElement | null;
 
+// State for pagination & filtering
+let allLoadedModels: CustomModel[] = [];
+let modelsCurrentPage = 1;
+let modelsPageSize = 10;
+let modelsSearchQuery = '';
+let modelsCategoryFilter: 'all' | 'active' | 'disabled' = 'all';
+let selectedModelNames = new Set<string>();
 // Reusable template for models list — avoids creating a new <template> each load
 const modelsTpl = document.createElement('template');
+/** Shared filter: search query + category tab. Used by renderModelsView and Select All. */
+function getFilteredModels(): typeof allLoadedModels {
+  const query = modelsSearchQuery.trim().toLowerCase();
+  return allLoadedModels.filter((m) => {
+    // Category filter
+    const isActive = m.enabled !== false;
+    if (modelsCategoryFilter === 'active' && !isActive) return false;
+    if (modelsCategoryFilter === 'disabled' && isActive) return false;
+
+    if (!query) return true;
+    const name = (m.name ?? '').toLowerCase();
+    const displayName = (m.displayName ?? '').toLowerCase();
+    const provider = (m.provider ?? '').toLowerCase();
+    const externalName = (m.externalModelName ?? '').toLowerCase();
+    const apiUrl = (m.apiUrl ?? '').toLowerCase();
+    return (
+      name.includes(query) ||
+      displayName.includes(query) ||
+      provider.includes(query) ||
+      externalName.includes(query) ||
+      apiUrl.includes(query)
+    );
+  });
+}
+
+function updateBulkActionButtonsState(): void {
+  const btnTest = document.getElementById('modelsBulkTestBtn') as HTMLButtonElement;
+  const btnEnable = document.getElementById('modelsBulkEnableBtn') as HTMLButtonElement;
+  const btnDisable = document.getElementById('modelsBulkDisableBtn') as HTMLButtonElement;
+  const btnDelete = document.getElementById('modelsBulkDeleteBtn') as HTMLButtonElement;
+  const cbSelectAll = document.getElementById('modelsSelectAllCb') as HTMLInputElement;
+  const filtered = getFilteredModels();
+    // Dynamic Category Tab Badges (BUG-2.1 fix)
+  const allCount = allLoadedModels.length;
+  const activeCount = allLoadedModels.filter(m => m.enabled !== false).length;
+  const disabledCount = allLoadedModels.filter(m => m.enabled === false).length;
+  const tabAll = document.querySelector('.models-cat-tab[data-cat="all"]');
+  const tabActive = document.querySelector('.models-cat-tab[data-cat="active"]');
+  const tabDisabled = document.querySelector('.models-cat-tab[data-cat="disabled"]');
+  if (tabAll) tabAll.textContent = `All (${allCount})`;
+  if (tabActive) tabActive.textContent = `Active (${activeCount})`;
+  if (tabDisabled) tabDisabled.textContent = `Disabled (${disabledCount})`;
+
+  const totalItems = filtered.length;
+  let page = modelsCurrentPage;
+  const totalPages = Math.max(1, Math.ceil(totalItems / modelsPageSize));
+  if (page > totalPages) page = totalPages;
+  if (page < 1) page = 1;
+  const startIdx = (page - 1) * modelsPageSize;
+  const endIdx = Math.min(startIdx + modelsPageSize, totalItems);
+  const pageItems = filtered.slice(startIdx, endIdx);
+
+  const hasSelection = selectedModelNames.size > 0;
+  if (btnTest) btnTest.disabled = !hasSelection;
+  if (btnEnable) btnEnable.disabled = !hasSelection;
+  if (btnDisable) btnDisable.disabled = !hasSelection;
+  if (btnDelete) btnDelete.disabled = !hasSelection;
+
+  if (cbSelectAll && pageItems) {
+    if (pageItems.length === 0) {
+      cbSelectAll.checked = false;
+      cbSelectAll.indeterminate = false;
+    } else {
+      const selectedOnPage = pageItems.filter(m => selectedModelNames.has(m.name)).length;
+      if (selectedOnPage === pageItems.length) {
+        cbSelectAll.checked = true;
+        cbSelectAll.indeterminate = false;
+      } else if (selectedOnPage > 0) {
+        cbSelectAll.checked = false;
+        cbSelectAll.indeterminate = true;
+      } else {
+        cbSelectAll.checked = false;
+        cbSelectAll.indeterminate = false;
+      }
+    }
+  }
+}
+
+function renderModelsView(): void {
+  const query = modelsSearchQuery.trim().toLowerCase();
+  const filtered = getFilteredModels();
+
+  const totalItems = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / modelsPageSize));
+
+  if (modelsCurrentPage > totalPages) modelsCurrentPage = totalPages;
+  if (modelsCurrentPage < 1) modelsCurrentPage = 1;
+
+  const startIdx = (modelsCurrentPage - 1) * modelsPageSize;
+  const endIdx = Math.min(startIdx + modelsPageSize, totalItems);
+  const pageItems = filtered.slice(startIdx, endIdx);
+
+    // Update Category Tab Count Badges
+  const allCount = allLoadedModels.length;
+  const activeCount = allLoadedModels.filter((m) => m.enabled !== false).length;
+  const disabledCount = allLoadedModels.filter((m) => m.enabled === false).length;
+
+  document.querySelectorAll('.models-cat-tab').forEach((btn) => {
+    const el = btn as HTMLButtonElement;
+    const cat = el.dataset.cat;
+    if (cat === 'all') el.textContent = `All (${allCount})`;
+    else if (cat === 'active') el.textContent = `Active (${activeCount})`;
+    else if (cat === 'disabled') el.textContent = `Disabled (${disabledCount})`;
+  });
+
+  // Update pagination info text
+  if (modelsPaginationInfo) {
+    if (allLoadedModels.length === 0) {
+      modelsPaginationInfo.textContent = 'Showing 0 models';
+    } else if (totalItems === 0) {
+      modelsPaginationInfo.textContent = `0 models found (filtered from ${allLoadedModels.length})`;
+    } else {
+      const filterSuffix = query ? ` (filtered from ${allLoadedModels.length})` : '';
+      modelsPaginationInfo.textContent = `Showing ${startIdx + 1}–${endIdx} of ${totalItems} models${filterSuffix}`;
+    }
+  }
+
+  // Render list items or empty state
+  if (allLoadedModels.length === 0) {
+    modelsList.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">
+          <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/></svg>
+        </div>
+        <p style="margin-bottom: 12px;">No models configured yet. <strong>Add model</strong> to connect a custom OpenAI- or Anthropic-compatible provider.</p>
+        <button class="btn btn-primary btn-sm" id="emptyAddModelBtn" type="button">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Add model
+        </button>
+      </div>`;
+  } else if (totalItems === 0) {
+    modelsList.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">
+          <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        </div>
+        <p style="margin-bottom: 8px;">No models matching "<strong>${escapeHtml(query)}</strong>"</p>
+        <button class="btn btn-ghost btn-sm" id="clearModelsSearchBtn" type="button">Clear search filter</button>
+      </div>`;
+  } else {
+    const html = pageItems
+      .map((m) => {
+        const initials = (m.displayName ?? m.name).slice(0, 2).toUpperCase();
+        const isEnabled = m.enabled !== false;
+        const statusDotClass = isEnabled ? 'ok' : 'off';
+        const providerLower = (m.provider || '').toLowerCase();
+        const nameLower = (m.name || '').toLowerCase();
+        let avatarBg = 'linear-gradient(135deg, #3b82f6, #1d4ed8)';
+        if (providerLower.includes('openai') || nameLower.includes('gpt')) {
+          avatarBg = 'linear-gradient(135deg, #10a37f, #059669)';
+        } else if (providerLower.includes('anthropic') || nameLower.includes('claude')) {
+          avatarBg = 'linear-gradient(135deg, #d97706, #b45309)';
+        } else if (providerLower.includes('google') || nameLower.includes('gemini')) {
+          avatarBg = 'linear-gradient(135deg, #8b5cf6, #6366f1)';
+        } else if (nameLower.includes('deepseek')) {
+          avatarBg = 'linear-gradient(135deg, #0284c7, #1d4ed8)';
+        } else if (nameLower.includes('qwen') || providerLower.includes('aliyun') || providerLower.includes('dashscope')) {
+          avatarBg = 'linear-gradient(135deg, #6366f1, #4f46e5)';
+        } else if (providerLower.includes('ollama')) {
+          avatarBg = 'linear-gradient(135deg, #64748b, #334155)';
+        }
+
+        return `
+          <div class="model-card ${isEnabled ? '' : 'model-disabled'}" style="padding-left: 0;">
+            <div style="padding: 0 12px; display: flex; align-items: center;">
+              <input type="checkbox" class="model-select-cb" data-name="${escapeHtml(m.name)}" ${selectedModelNames.has(m.name) ? 'checked' : ''} style="cursor: pointer; width: 14px; height: 14px; margin: 0;">
+            </div>
+            <div class="model-avatar" style="margin-left: 0; background: ${avatarBg};">${escapeHtml(initials)}</div>
+            <div class="model-body">
+              <div class="model-name">
+                <span class="status-dot ${statusDotClass}" id="status-dot-${escapeHtml(m.name)}" title="${isEnabled ? 'Active' : 'Disabled'}"></span>
+                ${escapeHtml(m.displayName ?? m.name)}
+              </div>
+              <div class="model-meta">
+                <code>${escapeHtml(m.name)}</code> · ${escapeHtml(m.provider)} · ${escapeHtml(m.externalModelName)}
+              </div>
+              <div class="model-meta" style="margin-top:4px">
+                <code style="font-size:10px">${escapeHtml(m.apiUrl)}</code> · key: ${escapeHtml(maskKey(m.apiKey))}${m.encrypted ? ' · <span style="color:var(--ok)">encrypted</span>' : ''}
+              </div>
+            </div>
+            <div class="model-actions">
+              <button class="btn btn-ghost btn-sm model-action-test" data-action="test" data-name="${escapeHtml(m.name)}" title="Test connection to ${escapeHtml(m.name)}">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                Test
+              </button>
+              <button class="btn btn-ghost btn-sm model-action-edit" data-action="edit" data-name="${escapeHtml(m.name)}" data-provider="${escapeHtml(m.provider)}" data-url="${escapeHtml(m.apiUrl)}" title="Edit provider for ${escapeHtml(m.name)}">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                Edit
+              </button>
+              <button class="btn btn-ghost btn-sm model-action-toggle ${isEnabled ? 'is-active' : 'is-disabled'}" data-action="toggle" data-name="${escapeHtml(m.name)}" title="${isEnabled ? 'Disable model' : 'Enable model'}">
+                <span class="status-dot-sm ${isEnabled ? 'ok' : 'off'}"></span>
+                ${isEnabled ? 'Active' : 'Disabled'}
+              </button>
+              <button class="btn btn-danger btn-sm model-action-delete" data-action="remove" data-name="${escapeHtml(m.name)}" data-url="${escapeHtml(m.apiUrl)}" title="Delete model ${escapeHtml(m.name)}">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+                Delete
+              </button>
+            </div>
+          </div>`;
+      })
+      .join('');
+    modelsTpl.innerHTML = html;
+    modelsList.replaceChildren(modelsTpl.content);
+  }
+
+  // Update Bulk Actions UI state
+  updateBulkActionButtonsState();
+
+  // Update Pagination Controls
+  if (modelsPaginationNav) {
+    if (totalPages <= 1) {
+      modelsPaginationNav.style.display = 'none';
+    } else {
+      modelsPaginationNav.style.display = 'flex';
+
+      if (modelsPrevPageBtn) modelsPrevPageBtn.disabled = modelsCurrentPage <= 1;
+      if (modelsNextPageBtn) modelsNextPageBtn.disabled = modelsCurrentPage >= totalPages;
+
+      if (modelsPageNumbers) {
+        let pagesHtml = '';
+        const delta = 1;
+        const range: number[] = [];
+        const rangeWithDots: (number | string)[] = [];
+
+        for (let i = 1; i <= totalPages; i++) {
+          if (i === 1 || i === totalPages || (i >= modelsCurrentPage - delta && i <= modelsCurrentPage + delta)) {
+            range.push(i);
+          }
+        }
+
+        let l: number | undefined;
+        for (const i of range) {
+          if (l !== undefined) {
+            if (i - l === 2) {
+              rangeWithDots.push(l + 1);
+            } else if (i - l !== 1) {
+              rangeWithDots.push('…');
+            }
+          }
+          rangeWithDots.push(i);
+          l = i;
+        }
+
+        for (const pageItem of rangeWithDots) {
+          if (typeof pageItem === 'number') {
+            const isActive = pageItem === modelsCurrentPage ? 'active' : '';
+            pagesHtml += `<button class="models-page-btn ${isActive}" data-page="${pageItem}" type="button">${pageItem}</button>`;
+          } else {
+            pagesHtml += `<span class="models-page-ellipsis" style="padding: 0 4px; color: var(--text-2); font-size: 12px; display: inline-flex; align-items: center;">…</span>`;
+          }
+        }
+        modelsPageNumbers.innerHTML = pagesHtml;
+      }
+    }
+  }
+}
+
+// Search & Pagination controls listeners
+modelsSearchInput?.addEventListener('input', () => {
+  modelsSearchQuery = modelsSearchInput.value;
+  modelsCurrentPage = 1;
+  renderModelsView();
+});
+
+modelsPageSizeSelect?.addEventListener('change', () => {
+  modelsPageSize = parseInt(modelsPageSizeSelect.value, 10) || 10;
+  modelsCurrentPage = 1;
+  renderModelsView();
+});
+
+modelsPrevPageBtn?.addEventListener('click', () => {
+  if (modelsCurrentPage > 1) {
+    modelsCurrentPage--;
+    renderModelsView();
+  }
+});
+
+modelsNextPageBtn?.addEventListener('click', () => {
+  modelsCurrentPage++;
+  renderModelsView();
+});
+
+modelsPageNumbers?.addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest<HTMLElement>('.models-page-btn');
+  if (btn && btn.dataset.page) {
+    modelsCurrentPage = parseInt(btn.dataset.page, 10) || 1;
+    renderModelsView();
+  }
+});
 
 async function loadModels(): Promise<void> {
   setStatus('Loading models…', 'busy');
@@ -1133,50 +1404,9 @@ async function loadModels(): Promise<void> {
   try {
     const result = await window.ag.run(['models', 'list', '--json']);
     const data = JSON.parse(result.stdout) as ModelsFile;
-    if (data.models.length === 0) {
-      modelsList.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-icon">
-            <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/></svg>
-          </div>
-          <p style="margin-bottom: 12px;">No models configured yet. <strong>Add model</strong> to connect a custom OpenAI- or Anthropic-compatible provider.</p>
-          <button class="btn btn-primary btn-sm" id="emptyAddModelBtn" type="button">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Add model
-          </button>
-        </div>`;
-    } else {
-      // Use template element for parse-once, insert-once
-      const html = data.models
-        .map((m) => {
-          const initials = (m.displayName ?? m.name).slice(0, 2).toUpperCase();
-          return `
-            <div class="model-card">
-              <div class="model-avatar">${escapeHtml(initials)}</div>
-              <div class="model-body">
-                <div class="model-name">
-                  <span class="status-dot" id="status-dot-${escapeHtml(m.name)}"></span>
-                  ${escapeHtml(m.displayName ?? m.name)}
-                </div>
-                <div class="model-meta">
-                  <code>${escapeHtml(m.name)}</code> · ${escapeHtml(m.provider)} · ${escapeHtml(m.externalModelName)}
-                </div>
-                <div class="model-meta" style="margin-top:4px">
-                  <code style="font-size:10px">${escapeHtml(m.apiUrl)}</code> · key: ${escapeHtml(maskKey(m.apiKey))}${m.encrypted ? ' · <span style="color:var(--ok)">encrypted</span>' : ''}
-                </div>
-              </div>
-              <div class="model-actions">
-                <button class="btn btn-ghost btn-sm" data-action="test" data-name="${escapeHtml(m.name)}">Test model</button>
-                <button class="btn btn-ghost btn-sm" data-action="reveal" data-url="${escapeHtml(m.apiUrl)}">Open endpoint</button>
-                <button class="btn btn-danger btn-sm" data-action="remove" data-name="${escapeHtml(m.name)}">Delete model</button>
-              </div>
-            </div>`;
-        })
-        .join('');
-      modelsTpl.innerHTML = html;
-      modelsList.replaceChildren(modelsTpl.content);
-    }
-    setStatus(`${data.models.length} model(s) loaded`);
+    allLoadedModels = data.models || [];
+    renderModelsView();
+    setStatus(`${allLoadedModels.length} model(s) loaded`);
   } catch (e) {
     modelsList.innerHTML = `<div class="empty-state"><p>Could not load models: ${escapeHtml((e as Error).message)}</p></div>`;
     setStatus('Error', 'err');
@@ -1185,11 +1415,34 @@ async function loadModels(): Promise<void> {
   }
 }
 
+// Category Tabs listeners
+document.querySelectorAll('.models-cat-tab').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    const target = e.currentTarget as HTMLButtonElement;
+    const cat = target.dataset.cat as 'all' | 'active' | 'disabled';
+    if (!cat) return;
+    
+    document.querySelectorAll('.models-cat-tab').forEach(b => b.classList.remove('active'));
+    target.classList.add('active');
+    
+    modelsCategoryFilter = cat;
+    modelsCurrentPage = 1;
+    renderModelsView();
+  });
+});
+
 // Event delegation for model-card actions (one listener, not N)
 modelsList.addEventListener('click', (e) => {
   const target = e.target as HTMLElement;
   if (target.closest('#emptyAddModelBtn')) {
     openProviderManagerModal();
+    return;
+  }
+  if (target.closest('#clearModelsSearchBtn')) {
+    if (modelsSearchInput) modelsSearchInput.value = '';
+    modelsSearchQuery = '';
+    modelsCurrentPage = 1;
+    renderModelsView();
     return;
   }
   const btn = target.closest<HTMLElement>('[data-action]');
@@ -1201,18 +1454,95 @@ async function handleModelAction(btn: HTMLElement): Promise<void> {
   const action = btn.dataset.action;
   const name = btn.dataset.name ?? '';
   const url = btn.dataset.url ?? '';
+  const provider = btn.dataset.provider ?? '';
+
+  // Always ensure providersCache is populated from disk
+  if (!providersCache || providersCache.length === 0) {
+    try {
+      providersCache = (await window.ag.providers.get()) as ProviderEntry[];
+    } catch {
+      providersCache = [];
+    }
+  }
+
   if (action === 'test') {
     setStatus(`Testing ${name}…`, 'busy');
+    const dot = document.getElementById(`status-dot-${name}`);
+    btn.setAttribute('disabled', 'true');
+    const origHtml = btn.innerHTML;
+    btn.innerHTML = `<span class="spinner"></span> Testing…`;
+
     try {
-      const r = await window.ag.run(['models', 'test', name]);
-      toast(r.stdout.includes('✓') || r.code === 0 ? `${name} is reachable` : `${name} failed — check the endpoint and API key`, r.code === 0 ? 'ok' : 'err');
-      setStatus('Ready');
+      const match = await getProviderForModelBulk(name);
+      let success = false;
+      let msg = '';
+      if (match) {
+        const cleanName = name.replace(/^models\//, '');
+        const res = (await window.ag.providers.test({ apiUrl: match.apiUrl, apiKey: match.apiKey, id: match.id, modelId: cleanName })) as { success: boolean; latencyMs?: number; error?: string };
+        success = res.success;
+        msg = success ? `✓ ${name} reachable (${res.latencyMs ?? 0}ms)` : `${name} failed: ${res.error || 'Unreachable'}`;
+      } else {
+        const r = await window.ag.run(['models', 'test', name]);
+        success = r.stdout.includes('✓') || r.code === 0;
+        msg = success ? `✓ ${name} reachable` : `${name} failed`;
+      }
+      if (!success) throw new Error(msg);
+      toast(msg, 'ok');
+      if (dot) dot.className = 'status-dot ok';
     } catch (e) {
-      toast(`Test failed: ${(e as Error).message}`, 'err');
-      setStatus('Error', 'err');
+      toast(`Tested ${name}: Failed - ${(e as Error).message}`, 'err');
+      if (dot) dot.className = 'status-dot off';
+    } finally {
+      btn.removeAttribute('disabled');
+      btn.innerHTML = origHtml;
+      setStatus('Ready');
     }
-  } else if (action === 'reveal') {
-    await window.ag.openExternal(url);
+  } else if (action === 'toggle') {
+    const isCurrentlyEnabled = !btn.classList.contains('is-disabled');
+    const newEnabled = !isCurrentlyEnabled;
+    
+    // Toggle active UI state immediately for responsiveness
+    btn.classList.toggle('is-disabled', !newEnabled);
+    btn.classList.toggle('is-active', newEnabled);
+    btn.title = newEnabled ? 'Disable model' : 'Enable model';
+    btn.innerHTML = `
+      <span class="status-dot-sm ${newEnabled ? 'ok' : 'off'}"></span>
+      ${newEnabled ? 'Active' : 'Disabled'}
+    `;
+
+    // Always find parent provider and save state
+    const parentProvider = await getProviderForModelBulk(name);
+    
+    if (parentProvider) {
+      const targetId = resolveModelId(parentProvider, name);
+      if (!parentProvider.models) parentProvider.models = [];
+      let pModel = parentProvider.models.find(m => m.id === targetId || m.displayName === targetId || m.id === name || m.displayName === name);
+      if (pModel) {
+        pModel.enabled = newEnabled;
+      } else {
+        parentProvider.models.push({ id: targetId, displayName: targetId, enabled: newEnabled });
+      }
+      await window.ag.providers.save(parentProvider);
+    } else {
+      toast('Built-in models cannot be manually disabled yet.', 'warn');
+      btn.classList.toggle('is-disabled', isCurrentlyEnabled);
+      btn.classList.toggle('is-active', !isCurrentlyEnabled);
+      btn.title = isCurrentlyEnabled ? 'Disable model' : 'Enable model';
+      btn.innerHTML = `
+        <span class="status-dot-sm ${isCurrentlyEnabled ? 'ok' : 'off'}"></span>
+        ${isCurrentlyEnabled ? 'Active' : 'Disabled'}
+      `;
+      return;
+    }
+
+    const dot = document.getElementById(`status-dot-${name}`);
+    if (dot) {
+      dot.className = `status-dot ${newEnabled ? 'ok' : 'off'}`;
+    }
+
+    toast(newEnabled ? `Enabled ${name}` : `Disabled ${name}`, 'ok');
+    void loadModels();
+    void renderProviderList();
   } else if (action === 'remove') {
     const ok = await confirmModal(
       'Delete this model?',
@@ -1221,10 +1551,21 @@ async function handleModelAction(btn: HTMLElement): Promise<void> {
     );
     if (!ok) return;
     setStatus('Removing model…', 'busy');
+
+    // Remove model entry from parent provider if present
+    const parentProvider = await getProviderForModelBulk(name);
+
+    if (parentProvider && parentProvider.models) {
+      const targetId = resolveModelId(parentProvider, name);
+      parentProvider.models = parentProvider.models.filter((m) => m.id !== targetId && m.displayName !== targetId && m.id !== name && m.displayName !== name);
+      await window.ag.providers.save(parentProvider);
+    }
+
     const r = await window.ag.run(['models', 'remove', name, '--yes']);
-    if (r.code === 0) {
+    if (r.code === 0 || parentProvider) {
       toast(`Removed ${name}`, 'ok');
-      void loadModels();
+      await loadModels();
+      await renderProviderList();
     } else {
       toast(`Delete failed: ${r.stderr || r.stdout}. Check the Logs tab for details.`, 'err');
     }
@@ -1232,7 +1573,7 @@ async function handleModelAction(btn: HTMLElement): Promise<void> {
   }
 }
 
-$('#modelsTestBtn').addEventListener('click', async () => {
+$('#modelsTestBtn')?.addEventListener('click', async () => {
   setStatus('Testing all models…', 'busy');
   try {
     const r = await window.ag.run(['models', 'test']);
@@ -1248,7 +1589,392 @@ $('#modelsTestBtn').addEventListener('click', async () => {
   }
 });
 
+// ── Test & Auto-Disable ──────────────────────────────────────────────────────
+async function testAndAutoDisable(silent = false): Promise<void> {
+  // Lazy-load providers from disk if cache is empty
+  if (providersCache.length === 0) {
+    try { providersCache = (await window.ag.providers.get()) as ProviderEntry[]; } catch { providersCache = []; }
+  }
+  if (providersCache.length === 0) {
+    if (!silent) toast('No custom providers configured', 'warn');
+    return;
+  }
 
+  if (!silent) setStatus('Testing models & auto-disabling failures…', 'busy');
+  let okModelCount = 0;
+  let disabledModelCount = 0;
+
+  for (const p of providersCache) {
+    if (!p.enabled) continue;
+
+    // First test base provider endpoint connectivity
+    let baseRes = { success: false };
+    try {
+      baseRes = await window.ag.providers.test({ apiUrl: p.apiUrl, apiKey: p.apiKey, id: p.id });
+    } catch {
+      baseRes = { success: false };
+    }
+
+    if (!baseRes.success) {
+      // Entire provider is down — disable provider and all its models
+      p.enabled = false;
+      if (p.models) {
+        disabledModelCount += p.models.filter((m) => m.enabled !== false).length;
+        p.models.forEach((m) => (m.enabled = false));
+      }
+      await window.ag.providers.save(p);
+      continue;
+    }
+
+    // Provider is reachable! Test active models under this provider
+    if (p.models && p.models.length > 0) {
+      let providerSaveNeeded = false;
+      for (const m of p.models) {
+        if (m.enabled === false) continue;
+
+        try {
+          const mRes = await window.ag.providers.test({
+            apiUrl: p.apiUrl,
+            apiKey: p.apiKey,
+            id: p.id,
+            modelId: m.id,
+          });
+
+          if (mRes.success) {
+            okModelCount++;
+          } else {
+            disabledModelCount++;
+            m.enabled = false;
+            providerSaveNeeded = true;
+          }
+        } catch {
+          disabledModelCount++;
+          m.enabled = false;
+          providerSaveNeeded = true;
+        }
+      }
+
+      if (providerSaveNeeded) {
+        // If all models under provider were disabled, disable provider as well
+        if (p.models.every((m) => m.enabled === false)) {
+          p.enabled = false;
+        }
+        await window.ag.providers.save(p);
+      }
+    } else {
+      okModelCount++;
+    }
+  }
+
+  await loadModels();
+  await renderProviderList();
+
+  if (disabledModelCount === 0) {
+    toast(`All ${okModelCount} active model(s) healthy`, 'ok', 5000);
+  } else {
+    toast(`${okModelCount} model(s) OK, ${disabledModelCount} failing → auto-disabled`, 'warn', 7000);
+  }
+  if (!silent) setStatus('Ready');
+}
+
+$('#modelsTestHideBtn')?.addEventListener('click', () => void testAndAutoDisable(false));
+
+// ── Auto-Sentinel Toggle ─────────────────────────────────────────────────────
+const SENTINEL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+let sentinelTimerId: ReturnType<typeof setInterval> | null = null;
+const autoSentinelToggle = $('#autoSentinelToggle') as HTMLInputElement | null;
+const autoSentinelLabel = $('#autoSentinelLabel') as HTMLSpanElement | null;
+
+autoSentinelToggle?.addEventListener('change', () => {
+  if (autoSentinelToggle.checked) {
+    // Run immediately on activation, then repeat
+    void testAndAutoDisable(true);
+    sentinelTimerId = setInterval(() => void testAndAutoDisable(true), SENTINEL_INTERVAL_MS);
+    if (autoSentinelLabel) autoSentinelLabel.textContent = 'Sentinel ON';
+    toast('Auto-Sentinel enabled — checks every 5 min', 'ok');
+  } else {
+    if (sentinelTimerId !== null) {
+      clearInterval(sentinelTimerId);
+      sentinelTimerId = null;
+    }
+    if (autoSentinelLabel) autoSentinelLabel.textContent = 'Auto-Sentinel';
+    toast('Auto-Sentinel disabled', 'ok');
+  }
+});
+
+
+// Impeccable Hover Glow effect for model cards
+document.getElementById('modelsList')?.addEventListener('mousemove', (e) => {
+  const card = (e.target as HTMLElement).closest('.model-card') as HTMLElement;
+  if (!card) return;
+  const rect = card.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  card.style.setProperty('--mouse-x', `${x}px`);
+  card.style.setProperty('--mouse-y', `${y}px`);
+});
+
+// Bulk Actions on Models Page
+
+// Handle individual checkbox clicks
+$('#modelsList')?.addEventListener('change', (e) => {
+  const target = e.target as HTMLInputElement;
+  if (target.classList.contains('model-select-cb')) {
+    const name = target.dataset.name;
+    if (name) {
+      if (target.checked) selectedModelNames.add(name);
+      else selectedModelNames.delete(name);
+      updateBulkActionButtonsState();
+    }
+  }
+});
+
+// Handle Select All click
+// Select All — uses shared getFilteredModels() so category filter is respected (BUG-2 fix)
+$('#modelsSelectAllCb')?.addEventListener('change', (e) => {
+  const checked = (e.target as HTMLInputElement).checked;
+  const filtered = getFilteredModels();
+  const totalItems = filtered.length;
+  let page = modelsCurrentPage;
+  const totalPages = Math.max(1, Math.ceil(totalItems / modelsPageSize));
+  if (page > totalPages) page = totalPages;
+  if (page < 1) page = 1;
+  const startIdx = (page - 1) * modelsPageSize;
+  const endIdx = Math.min(startIdx + modelsPageSize, totalItems);
+  const pageItems = filtered.slice(startIdx, endIdx);
+
+  pageItems.forEach(m => {
+    if (checked) selectedModelNames.add(m.name);
+    else selectedModelNames.delete(m.name);
+  });
+  renderModelsView();
+});
+
+window.ag.providers.onChanged(() => {
+  // Synchronize models list whenever providers change
+  void loadModels();
+  void renderProviderList();
+});
+
+// Helper for finding provider
+
+function resolveModelId(provider: ProviderEntry, modelName: string): string {
+  const prefix = `${provider.id}-`;
+  if (modelName.startsWith(prefix)) return modelName.slice(prefix.length);
+  return modelName.replace(/^models\//, '');
+}
+
+async function getProviderForModelBulk(modelName: string) {
+  if (!providersCache || providersCache.length === 0) {
+    try {
+      providersCache = (await window.ag.providers.get()) as ProviderEntry[];
+    } catch {
+      providersCache = [];
+    }
+  }
+  const cleanModelName = modelName.replace(/^models\//, '');
+  const targetModel = allLoadedModels.find(m => m.name === modelName);
+  return providersCache.find((p) => {
+    if (p.provider && p.provider.toLowerCase() === 'openai' && targetModel && targetModel.apiUrl && p.apiUrl && p.apiUrl.toLowerCase() !== targetModel.apiUrl.toLowerCase()) {
+      return false;
+    }
+    if (p.models?.some((m) => m.id === cleanModelName || m.displayName === cleanModelName || m.id === modelName || m.displayName === modelName)) return true;
+    if (targetModel) {
+      if (p.apiUrl && targetModel.apiUrl && p.apiUrl.toLowerCase() === targetModel.apiUrl.toLowerCase()) return true;
+      if (p.provider && targetModel.provider && p.provider.toLowerCase() !== 'openai' && targetModel.provider.toLowerCase() !== 'openai' && p.provider.toLowerCase() === targetModel.provider.toLowerCase()) return true;
+      if (!p.apiUrl && !targetModel.apiUrl && p.provider && targetModel.provider && p.provider.toLowerCase() === targetModel.provider.toLowerCase()) return true;
+    }
+    return p.name.toLowerCase() === modelName.toLowerCase();
+  });
+}
+
+$('#modelsBulkTestBtn')?.addEventListener('click', async () => {
+  if (selectedModelNames.size === 0) return;
+  setStatus(`Testing ${selectedModelNames.size} selected models…`, 'busy');
+  let successCount = 0;
+  let failCount = 0;
+  
+  for (const name of Array.from(selectedModelNames)) {
+    const dot = document.getElementById(`status-dot-${name}`);
+    if (dot) dot.className = 'status-dot'; // reset
+    try {
+      let success = false;
+      const match = await getProviderForModelBulk(name);
+      if (match) {
+        const res = (await window.ag.providers.test({ apiUrl: match.apiUrl, apiKey: match.apiKey, id: match.id })) as { success: boolean; };
+        success = res.success;
+      } else {
+        const r = await window.ag.run(['models', 'test', name]);
+        success = r.stdout.includes('✓') || r.code === 0;
+      }
+      
+      if (success) successCount++;
+      else failCount++;
+      
+      if (dot) dot.className = `status-dot ${success ? 'ok' : 'err'}`;
+    } catch (e) {
+      failCount++;
+      if (dot) dot.className = 'status-dot err';
+    }
+  }
+  
+  if (failCount === 0) {
+    toast(`✓ Successfully tested ${successCount} models`, 'ok');
+  } else {
+    toast(`Tested ${successCount + failCount} models: ${successCount} succeeded, ${failCount} failed`, 'warn');
+  }
+  setStatus('Ready');
+});
+
+$('#modelsBulkEnableBtn')?.addEventListener('click', async () => {
+  if (selectedModelNames.size === 0) return;
+  setStatus(`Enabling ${selectedModelNames.size} selected models…`, 'busy');
+  try {
+    for (const name of Array.from(selectedModelNames)) {
+      const match = await getProviderForModelBulk(name);
+      if (match) {
+        const cleanName = name.replace(/^models\//, '');
+        if (!match.models) match.models = [];
+        const pModel = match.models.find((m) => m.id === cleanName || m.displayName === cleanName || m.id === name || m.displayName === name);
+        if (pModel) pModel.enabled = true;
+        else match.models.push({ id: cleanName, displayName: cleanName, enabled: true });
+        await window.ag.providers.save(match);
+      }
+    }
+    const enabledCount = selectedModelNames.size;
+    selectedModelNames.clear();
+    toast(`Enabled ${enabledCount} models`, 'ok');
+    void loadModels();
+    void renderProviderList();
+  } catch (err) {
+    toast(`Bulk enable error: ${(err as Error).message}`, 'err');
+  } finally {
+    setStatus('Ready');
+  }
+});
+
+$('#modelsBulkDisableBtn')?.addEventListener('click', async () => {
+  if (selectedModelNames.size === 0) return;
+  setStatus(`Disabling ${selectedModelNames.size} selected models…`, 'busy');
+  try {
+    for (const name of Array.from(selectedModelNames)) {
+      const match = await getProviderForModelBulk(name);
+      if (match) {
+        const cleanName = name.replace(/^models\//, '');
+        if (!match.models) match.models = [];
+        const pModel = match.models.find((m) => m.id === cleanName || m.displayName === cleanName || m.id === name || m.displayName === name);
+        if (pModel) pModel.enabled = false;
+        else match.models.push({ id: cleanName, displayName: cleanName, enabled: false });
+        await window.ag.providers.save(match);
+      }
+    }
+    const disabledCount = selectedModelNames.size;
+    selectedModelNames.clear();
+    toast(`Disabled ${disabledCount} models`, 'ok');
+    void loadModels();
+    void renderProviderList();
+  } catch (err) {
+    toast(`Bulk disable error: ${(err as Error).message}`, 'err');
+  } finally {
+    setStatus('Ready');
+  }
+});
+
+$('#modelsBulkDeleteBtn')?.addEventListener('click', async () => {
+  if (selectedModelNames.size === 0) return;
+  const count = selectedModelNames.size;
+  const ok = await confirmModal(
+    `Delete ${count} selected models?`,
+    `Are you sure you want to delete <strong>${count} selected model(s)</strong>? This action cannot be undone.`,
+    { confirmLabel: 'Delete selected', danger: true }
+  );
+  if (!ok) return;
+
+  setStatus(`Deleting ${count} selected models…`, 'busy');
+  try {
+    for (const name of Array.from(selectedModelNames)) {
+      const match = await getProviderForModelBulk(name);
+      if (match && match.models) {
+        match.models = match.models.filter((m) => m.id !== name && m.displayName !== name);
+        await window.ag.providers.save(match);
+      }
+      await window.ag.run(['models', 'remove', name, '--yes']);
+    }
+    selectedModelNames.clear();
+    toast(`Deleted ${count} models`, 'ok');
+    void loadModels();
+    void renderProviderList();
+  } catch (err) {
+    toast(`Bulk delete error: ${(err as Error).message}`, 'err');
+  } finally {
+    setStatus('Ready');
+  }
+});
+
+$('#exportProvidersBtn')?.addEventListener('click', async () => {
+  try {
+    const providers = await window.ag.providers.get();
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(providers, null, 2));
+    const dlAnchorElem = document.createElement('a');
+    dlAnchorElem.setAttribute("href", dataStr);
+    dlAnchorElem.setAttribute("download", `antigravity_providers_export_${new Date().toISOString().slice(0, 10)}.json`);
+    dlAnchorElem.click();
+    toast('Providers exported', 'ok');
+  } catch (err) {
+    toast(`Export failed: ${(err as Error).message}`, 'err');
+  }
+});
+
+$('#importProvidersBtn')?.addEventListener('click', () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.onchange = async (e) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const providers = JSON.parse(text);
+      if (!Array.isArray(providers)) throw new Error('Invalid JSON format: expected an array');
+      
+      setStatus('Importing providers...', 'busy');
+      for (const p of providers) {
+        const res = await window.ag.providers.save(p);
+        if (!res.success) throw new Error(`Failed to save provider: ${res.error}`);
+      }
+      toast(`Successfully imported ${providers.length} providers`, 'ok');
+      void loadModels();
+      void renderProviderList();
+    } catch (err) {
+      toast(`Import failed: ${(err as Error).message}`, 'err');
+    } finally {
+      setStatus('Ready');
+    }
+  };
+  input.click();
+});
+
+$('#restoreBackupBtn')?.addEventListener('click', async () => {
+  const ok = await confirmModal(
+    'Restore Backup',
+    'Are you sure you want to restore custom_models.json from the latest .bak file? This will overwrite your current configuration.',
+    { confirmLabel: 'Restore', danger: true }
+  );
+  if (!ok) return;
+
+  setStatus('Restoring backup...', 'busy');
+  try {
+    const r = await window.ag.run(['models', 'import']);
+    if (r.code !== 0) throw new Error(r.stderr || r.stdout || 'Restore failed');
+    toast('Backup restored successfully', 'ok');
+    void loadModels();
+    void renderProviderList();
+  } catch (err) {
+    toast(`Restore failed: ${(err as Error).message}`, 'err');
+  } finally {
+    setStatus('Ready');
+  }
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MITM view
@@ -2182,8 +2908,13 @@ logsFollowBtn.addEventListener('click', () => {
   if (logsStreaming) void stopLogStream();
   else void startLogStream();
 });
-logsClearBtn.addEventListener('click', () => {
+logsClearBtn.addEventListener('click', async () => {
   logsOutput.textContent = '';
+  try {
+    await window.ag.run(['logs', '--clear', '--source', currentLogSource]);
+  } catch (err) {
+    console.error('Failed to clear logs on backend', err);
+  }
   toast('Logs cleared', 'info', 1500);
 });
 logsCopyBtn.addEventListener('click', async () => {
@@ -2219,54 +2950,42 @@ logsTabs.forEach((tab) => {
 // Antigravity Status view
 // ─────────────────────────────────────────────────────────────────────────────
 
-const infoTable = $('#infoTable') as HTMLDivElement;
-const agHeroDot = $('#agHeroDot') as HTMLSpanElement;
-const agHeroLabel = $('#agHeroLabel') as HTMLSpanElement;
-const agHeroTitle = $('#agHeroTitle') as HTMLHeadingElement;
-const agHeroMeta = $('#agHeroMeta') as HTMLParagraphElement;
-const agVersion = $('#agVersion') as HTMLDivElement;
-const agPid = $('#agPid') as HTMLDivElement;
-const agCustomModels = $('#agCustomModels') as HTMLDivElement;
-const agUptime = $('#agUptime') as HTMLDivElement;
-const agPaths = $('#agPaths') as HTMLDivElement;
+const agVersionValue = $('#agVersionValue') as HTMLDivElement;
+const agRunningValue = $('#agRunningValue') as HTMLDivElement;
+const agProxyValue = $('#agProxyValue') as HTMLDivElement;
+const agLsValue = $('#agLsValue') as HTMLDivElement;
+
+const agSourceBadge = $('#agSourceBadge') as HTMLSpanElement;
+const agInstallPath = $('#agInstallPath') as HTMLDivElement;
+const agAppAsar = $('#agAppAsar') as HTMLDivElement;
+const agVersionRow = $('#agVersionRow') as HTMLDivElement;
+const agChannelRow = $('#agChannelRow') as HTMLDivElement;
+
+const agPidsBadge = $('#agPidsBadge') as HTMLSpanElement;
+const agAgPids = $('#agAgPids') as HTMLDivElement;
+const agLsPids = $('#agLsPids') as HTMLDivElement;
+
 const agRefreshBtn = $('#agRefreshBtn') as HTMLButtonElement;
-const agOpenBtn = $('#agOpenBtn') as HTMLButtonElement;
+const agLaunchBtn = $('#agLaunchBtn') as HTMLButtonElement;
+const agKillBtn = $('#agKillBtn') as HTMLButtonElement;
 const agRestartBtn = $('#agRestartBtn') as HTMLButtonElement;
 const agLaunchLogsBtn = $('#agLaunchLogsBtn') as HTMLButtonElement;
-const agRevealBtn = $('#agRevealBtn') as HTMLButtonElement;
-const agCopyPathsBtn = $('#agCopyPathsBtn') as HTMLButtonElement;
 
 let agStartedAt: number | null = null;
 let agUptimeTimer: number | null = null;
 
 function setAgHero(status: 'ok' | 'warn' | 'err' | 'busy', label: string, meta: string): void {
-  agHeroDot.className = `ag-hero-dot ${status}`;
-  agHeroLabel.textContent = label;
-  agHeroMeta.textContent = meta;
-}
-
-function formatUptime(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ${s % 60}s`;
-  const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m`;
+  if (agRunningValue) {
+    agRunningValue.textContent = label;
+  }
 }
 
 function startUptimeTicker(): void {
-  // PERF: every previous interval must be cleared before assigning a new one.
-  // The original code only cleared when re-entering startUptimeTicker, so a
-  // fast launch → refresh → launch sequence leaked N zombie timers that kept
-  // writing into a hidden view's DOM node.
-  if (agUptimeTimer !== null) {
-    window.clearInterval(agUptimeTimer);
-    agUptimeTimer = null;
-  }
-  agStartedAt = Date.now();
-agUptimeTimer = window.setInterval(() => {
-    if (agStartedAt) agUptime.textContent = formatUptime(Date.now() - agStartedAt);
-  }, 1000);
+  // UI changed, no longer showing uptime in real-time
+}
+
+function stopUptimeTicker(): void {
+  // UI changed, no longer showing uptime in real-time
 }
 
 // Reusable template for paths — avoids creating a new <template> each render
@@ -2308,15 +3027,17 @@ $('#agPaths')?.addEventListener('click', async (e) => {
   }
 });
 
-agCopyPathsBtn.addEventListener('click', async () => {
-  const values = Array.from(agPaths.querySelectorAll<HTMLElement>('.path-row-value'))
+$('#agCopyPathsBtn')?.addEventListener('click', async () => {
+  const container = $('#agPaths');
+  if (!container) return;
+  const values = Array.from(container.querySelectorAll<HTMLElement>('.path-row-value'))
     .map((el) => el.textContent ?? '').join('\n');
   await navigator.clipboard.writeText(values);
   toast('All paths copied', 'ok', 2000);
 });
 
 agRefreshBtn.addEventListener('click', () => void loadAntigravityStatus());
-agOpenBtn.addEventListener('click', async () => {
+agLaunchBtn.addEventListener('click', async () => {
   setAgHero('busy', 'Opening…', 'Launching Antigravity');
   try {
     const result = await window.ag.antigravityLaunch();
@@ -2330,6 +3051,20 @@ agOpenBtn.addEventListener('click', async () => {
     toast(`Launch failed: ${(e as Error).message}`, 'err');
   }
 });
+agKillBtn.addEventListener('click', async () => {
+  setAgHero('busy', 'Closing…', 'Killing Antigravity process');
+  try {
+    const result = await window.ag.antigravityKill();
+    if (!result.ok) throw new Error(result.error ?? 'Kill failed');
+    setAgHero('warn', 'Stopped', `Killed ${result.data?.killed ?? 0} processes`);
+    // stopUptimeTicker();
+    toast('Antigravity closed', 'ok', 2000);
+  } catch (e) {
+    setAgHero('err', 'Failed', (e as Error).message);
+    toast(`Close failed: ${(e as Error).message}`, 'err');
+  }
+});
+
 agRestartBtn.addEventListener('click', async () => {
   setAgHero('busy', 'Restarting…', 'Killing and relaunching');
   try {
@@ -2344,19 +3079,7 @@ agRestartBtn.addEventListener('click', async () => {
     toast(`Restart failed: ${(e as Error).message}`, 'err');
   }
 });
-agRevealBtn.addEventListener('click', async () => {
-  try {
-    const r = await window.ag.antigravityStatus();
-    const installDir = r.ok ? (r.data as Record<string, unknown>)?.installDir as string | undefined : undefined;
-    if (installDir) {
-      await window.ag.reveal(installDir);
-    } else {
-      toast('Install directory not found', 'warn');
-    }
-  } catch (e) {
-    toast(`Reveal failed: ${(e as Error).message}`, 'err');
-  }
-});
+// remove unused buttons
 
 async function loadAntigravityStatus(): Promise<void> {
   return guardLoad('agStatus', async () => {
@@ -2400,45 +3123,61 @@ async function loadAntigravityStatus(): Promise<void> {
     } else {
       setAgHero('warn', 'Installed · Stopped', version ?? 'Not running');
     }
-    agHeroTitle.textContent = (status?.displayName as string | undefined) ?? 'Antigravity';
 
     // Stat cards
-    agVersion.textContent = version ?? '—';
-    agPid.textContent = pid != null ? String(pid) : '—';
-    agCustomModels.textContent = String(modelsCount);
-    if (!running && agUptime) agUptime.textContent = '—';
+    if (agVersionValue) agVersionValue.textContent = version ?? '—';
+    if (agRunningValue) {
+      if (!installed) {
+        agRunningValue.textContent = 'Not installed';
+      } else if (running) {
+        agRunningValue.textContent = 'Running';
+      } else {
+        agRunningValue.textContent = 'Stopped';
+      }
+    }
+    
+    // Fill Installation Panel
+    if (agInstallPath) agInstallPath.textContent = installDir || '—';
+    if (agAppAsar) agAppAsar.textContent = (status?.appAsarPath as string | undefined) ?? '—';
+    if (agVersionRow) agVersionRow.textContent = version ?? '—';
+    if (agChannelRow) agChannelRow.textContent = (status?.channel as string | undefined) ?? '—';
+    
+    // Fill Running processes Panel
+    let agPidCount = 0;
+    if (agAgPids) {
+      const pids = status?.agPids as number[] | undefined;
+      agPidCount += pids?.length ?? (pid ? 1 : 0);
+      agAgPids.textContent = pids && pids.length > 0 ? pids.join(', ') : (pid ? String(pid) : '—');
+    }
+    if (agLsPids) {
+      const lsPids = status?.lsPids as number[] | undefined;
+      agPidCount += lsPids?.length ?? 0;
+      agLsPids.textContent = lsPids && lsPids.length > 0 ? lsPids.join(', ') : '—';
+    }
+    if (agPidsBadge) {
+      agPidsBadge.textContent = `${agPidCount} PIDs`;
+    }
+    if (agSourceBadge) {
+       agSourceBadge.textContent = installed ? 'Installed' : 'Missing';
+    }
 
-    // Paths
-    const paths: Array<[string, string]> = [
-      ['Install dir', installDir],
-      ['Binary', (status?.binaryPath as string | undefined) ?? ''],
-      ['app.asar', (status?.appAsarPath as string | undefined) ?? ''],
-      ['custom_models.json', (status?.customModelsPath as string | undefined) ?? ''],
-      ['LS log', (status?.lsLogPath as string | undefined) ?? ''],
-      ['CLI', info.cliPath],
-    ];
-    renderPaths(paths);
-
-    // Runtime details table
-    const rows: Array<[string, string]> = [
-      ['Platform', `${info.platform}/${info.arch}`],
-      ['Electron', info.electron],
-      ['Node', info.node],
-      ['Chromium', info.chrome],
-      ['Username', (status?.username as string | undefined) ?? '—'],
-      ['Home', (status?.homedir as string | undefined) ?? '—'],
-      ['CPU', (status?.cpu as string | undefined) ?? '—'],
-      ['Memory', (status?.memory as string | undefined) ?? '—'],
-    ];
-    const html = rows
-      .map(([k, v]) => `<div class="info-cell k">${escapeHtml(k)}</div><div class="info-cell v">${escapeHtml(v)}</div>`)
-      .join('');
-    infoTableTpl.innerHTML = html;
-    infoTable.replaceChildren(infoTableTpl.content);
+    if (agLsValue) {
+       const lsPids = status?.lsPids as number[] | undefined;
+       agLsValue.textContent = (lsPids && lsPids.length > 0) ? 'Running' : 'Stopped';
+    }
+    
+    try {
+        const proxyResp = await window.ag.proxyStatus();
+        if (agProxyValue) {
+            agProxyValue.textContent = proxyResp?.data?.running ? 'Running' : 'Stopped';
+        }
+    } catch {
+        if (agProxyValue) agProxyValue.textContent = 'Unknown';
+    }
+    
     setStatus('Ready');
   } catch (e) {
     setAgHero('err', 'Error', (e as Error).message);
-    infoTable.innerHTML = `<div class="empty-state"><p>Could not load Antigravity info: ${escapeHtml((e as Error).message)}</p></div>`;
     setStatus('Error', 'err');
   }
   });
@@ -2714,34 +3453,6 @@ paletteInput.addEventListener('keydown', (e) => {
     closePalette();
   }
 });
-paletteBackdrop.addEventListener('click', (e) => {
-  if (e.target === paletteBackdrop) closePalette();
-});
-
-// Global shortcut: Ctrl+Shift+P / Cmd+Shift+P
-document.addEventListener('keydown', (e: KeyboardEvent) => {
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'P' || e.key === 'p')) {
-    e.preventDefault();
-    openPalette();
-  }
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Main → renderer events
-// ─────────────────────────────────────────────────────────────────────────────
-
-window.ag.onRunDoctor(() => void runDoctor());
-window.ag.onNavigate((view) => navigate(view));
-window.ag.onCommandPalette(() => openPalette());
-// Real-time proxy error fan-out: render the matching native quota card
-// inside the existing #modalBackdrop so the user sees the failure the
-// instant the upstream emits it (no Doctor run required).
-startProxyErrorBridge();
-window.ag.onThemeChanged((theme) => {
-  document.documentElement.dataset.theme = theme;
-  themeToggle.textContent = theme === 'dark' ? 'Switch to light' : 'Switch to dark';
-  updateStatusBarTheme(theme);
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Status bar wiring
@@ -2776,7 +3487,6 @@ if (statusTheme) {
 (async function boot(): Promise<void> {
   setStatus('Initializing…', 'busy');
   try {
-    // Parallelize: theme config + system info are independent IPC calls
     const [, info] = await Promise.all([
       applySavedTheme(),
       memo('info', 60_000, () => window.ag.info()),
@@ -2788,13 +3498,11 @@ if (statusTheme) {
   } catch {
     setStatus('Ready');
   }
-  // Defer the initial diagnostic to idle time so the UI paints first.
-  // The user sees the dashboard shell immediately, then results fill in.
   whenIdle(() => void runDoctor(), 250);
 })();
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Antigravity view
+// Provider Manager & Custom Models Modal
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface AntigravityVersionInfo {
@@ -2802,6 +3510,7 @@ interface AntigravityVersionInfo {
   channel?: string;
   source: 'asar' | 'product.json' | 'app-update.yml' | 'exe' | 'pak' | 'unknown';
 }
+
 interface AntigravityStatus {
   installed: boolean;
   installDir: string | null;
@@ -2866,12 +3575,86 @@ const pmFormError = $('#pmFormError') as HTMLDivElement;
 const pmModelsList = $('#pmModelsList') as HTMLDivElement;
 const pmFormFetchModelsBtn = $('#pmFormFetchModels') as HTMLButtonElement;
 const pmModalClose2 = $('#pmModalClose2') as HTMLButtonElement;
+const pmFormTest = $('#pmFormTest') as HTMLButtonElement;
 
 let providersCache: ProviderEntry[] = [];
 let editingProviderId: string | null = null;
+let currentFetchedModels: Array<{ id: string; displayName?: string; enabled: boolean }> = [];
+let pmModelsSearchQuery = '';
 
-// Smart Banner Manager instance
-const smartBanner = new SmartBannerManager('globalSmartBanner');
+const pmKeyToggle = $('#pmKeyToggle') as HTMLButtonElement | null;
+const pmModelsSearch = $('#pmModelsSearch') as HTMLInputElement | null;
+const pmModelsSelectAll = $('#pmModelsSelectAll') as HTMLButtonElement | null;
+const pmModelsDeselectAll = $('#pmModelsDeselectAll') as HTMLButtonElement | null;
+const pmFormCustomModelInput = $('#pmFormCustomModelInput') as HTMLInputElement | null;
+const pmFormAddCustomModelBtn = $('#pmFormAddCustomModelBtn') as HTMLButtonElement | null;
+const pmModelsCountBadge = $('#pmModelsCountBadge') as HTMLSpanElement | null;
+const pmCapFilters = $('#pmCapFilters') as HTMLDivElement | null;
+let activeCapFilter: 'all' | 'reasoning' | 'vision' | 'code' = 'all';
+
+function detectModelCapabilities(modelId: string): string[] {
+  const caps: string[] = [];
+  const id = modelId.toLowerCase();
+  if (/r1|o1|o3|reasoner|thinking|qwq/.test(id)) caps.push('reasoning');
+  if (/vision|4o|claude-3|gemini-1\.5|flash|pixtral/.test(id)) caps.push('vision');
+  if (/coder|code|starcoder|qwen2\.5-coder/.test(id)) caps.push('code');
+  return caps;
+}
+
+function updatePmModelsCounter(): void {
+  if (!pmModelsCountBadge) return;
+  const total = currentFetchedModels.length;
+  const selected = currentFetchedModels.filter((m) => m.enabled !== false).length;
+  pmModelsCountBadge.textContent = `${selected} / ${total} selected`;
+  if (selected === 0) {
+    pmModelsCountBadge.className = 'badge badge-warn';
+  } else if (selected === total && total > 0) {
+    pmModelsCountBadge.className = 'badge badge-ok';
+  } else {
+    pmModelsCountBadge.className = 'badge badge-primary';
+  }
+}
+
+function renderPmModelsCatalog(): void {
+  if (!pmModelsList) return;
+  updatePmModelsCounter();
+  const q = pmModelsSearchQuery.trim().toLowerCase();
+  const filtered = currentFetchedModels.filter((m) => {
+    const caps = detectModelCapabilities(m.id);
+    if (activeCapFilter !== 'all' && !caps.includes(activeCapFilter)) {
+      return false;
+    }
+    if (!q) return true;
+    return m.id.toLowerCase().includes(q) || (m.displayName || '').toLowerCase().includes(q);
+  });
+
+  if (currentFetchedModels.length === 0) {
+    pmModelsList.innerHTML = '<div class="pm-models-hint">No models loaded. Click "Fetch models" or add custom ID below.</div>';
+    return;
+  }
+
+  if (filtered.length === 0) {
+    pmModelsList.innerHTML = `<div class="pm-models-hint">No models matching active filter or search query.</div>`;
+    return;
+  }
+
+  let html = '<div class="agy-model-chips">';
+  for (const m of filtered) {
+    const checked = m.enabled !== false ? 'checked' : '';
+    const caps = detectModelCapabilities(m.id);
+    const badgesHtml = caps
+      .map((c) => `<span class="pm-cap-badge ${c}">${c}</span>`)
+      .join('');
+
+    html += `<label class="agy-chip" title="${escapeHtml(m.id)}">
+      <input type="checkbox" data-model-id="${escapeHtml(m.id)}" ${checked} />
+      <span>${escapeHtml(m.displayName || m.id)}</span>
+      ${badgesHtml}
+    </label>`;
+  }
+  html += '</div>';
+  pmModelsList.innerHTML = html;
+}
 
 function triggerSmartFailover(failingProviderId?: string): void {
   const fallback = providersCache.find((p) => p.enabled && p.id !== failingProviderId && (p.status === 'healthy' || !p.status));
@@ -2882,24 +3665,13 @@ function triggerSmartFailover(failingProviderId?: string): void {
   }
 }
 
-function handleProviderError(errorMsg: string, status?: number, p?: ProviderEntry): void {
-  const decoded = decodeCustomProviderError(errorMsg, status, p?.name);
-  smartBanner.show({
-    category: decoded.category,
-    title: decoded.title,
-    hint: decoded.hint,
-    resetSeconds: decoded.resetSeconds,
-    providerName: decoded.providerName,
-    onFallback: () => triggerSmartFailover(p?.id),
-    onEditKey: () => {
-      if (p) openProviderForm(p.id);
-      else openProviderManagerModal();
-    },
-    onStartStub: () => {
-      window.location.hash = '#mitm';
-      navigate('mitm');
-    }
-  });
+function handleProviderError(errorMsg: string, status?: number, _p?: ProviderEntry): void {
+  const label = status === 401 ? 'Auth error — check API key'
+    : status === 429 ? 'Rate-limited — try again later'
+    : status === 402 ? 'Quota exceeded'
+    : status ? `Provider error (HTTP ${status})`
+    : errorMsg || 'Provider unreachable';
+  toast(label, 'err', 6000);
 }
 
 function showPmView(view: 'list' | 'form'): void {
@@ -3027,7 +3799,6 @@ async function renderProviderList(): Promise<void> {
             p.status = r.healthStatus ?? 'healthy';
             p.latencyMs = r.latencyMs;
             toast(`Healthy (${r.latencyMs ?? 0}ms)`, 'ok');
-            smartBanner.dismiss();
           } else {
             p.status = r.healthStatus ?? 'offline';
             p.latencyMs = r.latencyMs;
@@ -3060,7 +3831,7 @@ async function renderProviderList(): Promise<void> {
           await renderProviderList();
         } else {
           toast(`Save failed: ${r.error}`, 'err');
-          p.enabled = !p.enabled; // revert
+          p.enabled = !p.enabled;
         }
       });
     });
@@ -3112,195 +3883,52 @@ function resetProviderForm(): void {
 }
 
 function openProviderForm(existingId?: string): void {
+  pmModelsSearchQuery = '';
+  if (pmModelsSearch) pmModelsSearch.value = '';
   resetProviderForm();
   if (existingId) {
     const p = providersCache.find((x) => x.id === existingId);
-    if (!p) return;
-    editingProviderId = existingId;
-    pmFormTitle.textContent = 'Edit provider';
-    pmFormName.value = p.name;
-    pmFormType.value = p.provider;
-    pmFormUrl.value = p.apiUrl;
-    pmFormKey.value = p.apiKey;
-    pmFormInsecure.checked = !!p.allowUnauthorized;
-    if (p.models && p.models.length > 0) {
-      let html = '<div class="agy-model-chips">';
-      for (const m of p.models) {
-        const checked = m.enabled ? 'checked' : '';
-        html += `<label class="agy-chip">
-          <input type="checkbox" data-model-id="${escapeHtml(m.id)}" ${checked} />
-          <span>${escapeHtml(m.displayName || m.id)}</span>
-        </label>`;
-      }
-      html += '</div>';
-      pmModelsList.innerHTML = html;
-    } else {
-      pmModelsList.innerHTML = '<div class="pm-models-hint">No models loaded. Click "Fetch models" to load the list.</div>';
+    if (p) {
+      editingProviderId = p.id;
+      pmFormTitle.textContent = 'Edit Provider';
+      pmFormName.value = p.name;
+      pmFormType.value = p.provider;
+      pmFormUrl.value = p.apiUrl;
+      pmFormKey.value = p.apiKey;
+      pmFormInsecure.checked = p.allowUnauthorized ?? false;
+      currentFetchedModels = (p.models || []).map((m) => ({
+        id: m.id,
+        displayName: m.displayName || m.id,
+        enabled: m.enabled !== false,
+      }));
+      renderPmModelsCatalog();
     }
   } else {
-    pmFormTitle.textContent = 'Add provider';
-    pmModelsList.innerHTML = '<div class="pm-models-hint">Fill in the API URL and click "Fetch models" to load available models.</div>';
+    pmFormTitle.textContent = 'Add Provider';
+    currentFetchedModels = [];
+    renderPmModelsCatalog();
   }
   showPmView('form');
-  setTimeout(() => pmFormName.focus(), 50);
 }
-
-function getSelectedProviderModels(): ProviderModel[] {
-  const checkboxes = pmModelsList.querySelectorAll<HTMLInputElement>('input[type="checkbox"][data-model-id]');
-  const models: ProviderModel[] = [];
-  checkboxes.forEach((cb) => {
-    models.push({ id: cb.dataset.modelId!, displayName: cb.dataset.modelId!, enabled: cb.checked });
-  });
-  return models;
-}
-
-// Fetch models button handler
-pmFormFetchModelsBtn?.addEventListener('click', async () => {
-  const apiUrl = pmFormUrl.value.trim();
-  const apiKey = pmFormKey.value.trim();
-  if (!apiUrl) {
-    pmFormError.textContent = 'API URL is required to fetch models';
-    pmFormError.hidden = false;
-    return;
-  }
-  pmFormError.hidden = true;
-  const origBtnHtml = pmFormFetchModelsBtn.innerHTML;
-  pmFormFetchModelsBtn.setAttribute('disabled', 'true');
-  pmFormFetchModelsBtn.textContent = 'Fetching…';
-  pmModelsList.innerHTML = '<div class="pm-models-hint">Fetching available models…</div>';
-
-  try {
-    const res = await window.ag.providers.fetchModels({ apiUrl, apiKey });
-    if (res.success && res.models && res.models.length > 0) {
-      let html = '<div class="agy-model-chips">';
-      for (const m of res.models) {
-        html += `<label class="agy-chip">
-          <input type="checkbox" data-model-id="${escapeHtml(m.id)}" checked />
-          <span>${escapeHtml(m.displayName || m.id)}</span>
-        </label>`;
-      }
-      html += '</div>';
-      pmModelsList.innerHTML = html;
-      toast(`Fetched ${res.models.length} model(s)`, 'ok');
-    } else {
-      const errMsg = res.error || 'No models returned from endpoint';
-      pmFormError.textContent = `Fetch failed: ${errMsg}`;
-      pmFormError.hidden = false;
-      pmModelsList.innerHTML = `<div style="color: var(--err); font-size: 12px; padding: 4px 0;">Could not load models: ${escapeHtml(errMsg)}</div>`;
-      toast(`Fetch failed: ${errMsg}`, 'err');
-    }
-  } catch (err) {
-    const errMsg = (err as Error).message;
-    pmFormError.textContent = `Fetch error: ${errMsg}`;
-    pmFormError.hidden = false;
-    pmModelsList.innerHTML = `<div style="color: var(--err); font-size: 12px; padding: 4px 0;">Error: ${escapeHtml(errMsg)}</div>`;
-  } finally {
-    pmFormFetchModelsBtn.removeAttribute('disabled');
-    pmFormFetchModelsBtn.innerHTML = origBtnHtml;
-  }
-});
-
-// Clear error state when input values change
-[pmFormName, pmFormUrl, pmFormKey, pmFormType].forEach((el) => {
-  el?.addEventListener('input', () => {
-    pmFormError.hidden = true;
-  });
-});
-
-pmAddBtn.addEventListener('click', () => openProviderForm());
-pmFormBack.addEventListener('click', async () => {
-  showPmView('list');
-  await renderProviderList();
-});
-pmFormBack2?.addEventListener('click', async () => {
-  showPmView('list');
-  await renderProviderList();
-});
-
-// Register Provider Manager Overlay with ModalManager for modal backdrop, Escape key, and focus trap support
-modals.registerOverlay({
-  id: 'providerManagerModal',
-  backdrop: pmBackdrop,
-  onOpen: () => {
-    showPmView('list');
-    void renderProviderList();
-  },
-  onClose: () => {
-    resetProviderForm();
-  }
-});
 
 function openProviderManagerModal(): void {
-  modals.openOverlay('providerManagerModal');
+  pmBackdrop.hidden = false;
+  showPmView('list');
+  void renderProviderList();
 }
 
-function closeProviderManagerModal(): void {
-  modals.closeOverlay('providerManagerModal');
-}
+pmClose.addEventListener('click', () => { pmBackdrop.hidden = true; });
+if (pmModalClose2) pmModalClose2.addEventListener('click', () => { pmBackdrop.hidden = true; });
+pmAddBtn.addEventListener('click', () => openProviderForm());
+pmFormBack.addEventListener('click', () => showPmView('list'));
+if (pmFormBack2) pmFormBack2.addEventListener('click', () => showPmView('list'));
 
-pmClose.addEventListener('click', closeProviderManagerModal);
-pmModalClose2?.addEventListener('click', closeProviderManagerModal);
-
-// Quick Presets listeners for Provider Manager
-$('#presetOllama')?.addEventListener('click', () => {
-  pmFormName.value = 'Ollama (Local)';
-  pmFormType.value = 'custom';
-  pmFormUrl.value = 'http://localhost:11434/v1';
-  pmFormKey.value = 'ollama';
-  pmFormError.hidden = true;
-});
-$('#presetLMStudio')?.addEventListener('click', () => {
-  pmFormName.value = 'LM Studio (Local)';
-  pmFormType.value = 'openai';
-  pmFormUrl.value = 'http://localhost:1234/v1';
-  pmFormKey.value = 'lm-studio';
-  pmFormError.hidden = true;
-});
-$('#presetOpenRouter')?.addEventListener('click', () => {
-  pmFormName.value = 'OpenRouter AI';
-  pmFormType.value = 'openai';
-  pmFormUrl.value = 'https://openrouter.ai/api/v1';
-  pmFormKey.value = '';
-  pmFormError.hidden = true;
-});
-$('#presetLocalAI')?.addEventListener('click', () => {
-  pmFormName.value = 'LocalAI';
-  pmFormType.value = 'custom';
-  pmFormUrl.value = 'http://localhost:8000/v1';
-  pmFormKey.value = '';
-  pmFormError.hidden = true;
-});
-
-// Test connection button handler
-const pmFormTestBtn = $('#pmFormTest') as HTMLButtonElement;
-pmFormTestBtn?.addEventListener('click', async () => {
-  const apiUrl = pmFormUrl.value.trim();
-  const apiKey = pmFormKey.value.trim();
-  if (!apiUrl) {
-    pmFormError.textContent = 'API URL is required to test connection';
-    pmFormError.hidden = false;
-    return;
-  }
-  pmFormError.hidden = true;
-  const origText = pmFormTestBtn.textContent;
-  pmFormTestBtn.setAttribute('disabled', 'true');
-  pmFormTestBtn.textContent = 'Testing…';
-
-  try {
-    const res = await window.ag.providers.test({ apiUrl, apiKey, id: editingProviderId ?? undefined });
-    if (res.success) {
-      toast(`Connection successful (${res.status ?? 200})`, 'ok');
-    } else {
-      pmFormError.textContent = `Connection failed: ${res.error ?? 'Unreachable'}`;
-      pmFormError.hidden = false;
-      toast(`Connection failed: ${res.error ?? 'Unreachable'}`, 'err');
-    }
-  } catch (err) {
-    pmFormError.textContent = `Test error: ${(err as Error).message}`;
-    pmFormError.hidden = false;
-  } finally {
-    pmFormTestBtn.removeAttribute('disabled');
-    pmFormTestBtn.textContent = origText;
+pmFormType.addEventListener('change', () => {
+  const t = pmFormType.value;
+  if (!pmFormUrl.value || pmFormUrl.value.includes('api.openai.com') || pmFormUrl.value.includes('api.anthropic.com')) {
+    if (t === 'openai') pmFormUrl.value = 'https://api.openai.com/v1';
+    else if (t === 'anthropic') pmFormUrl.value = 'https://api.anthropic.com/v1';
+    else if (t === 'ollama') pmFormUrl.value = 'http://localhost:11434';
   }
 });
 
@@ -3309,44 +3937,171 @@ pmFormSave.addEventListener('click', async () => {
   const provider = pmFormType.value;
   const apiUrl = pmFormUrl.value.trim();
   const apiKey = pmFormKey.value.trim();
+  const allowUnauthorized = pmFormInsecure.checked;
 
-  if (!name || !provider || !apiUrl) {
-    pmFormError.textContent = 'Name, type and URL are required';
+  if (!name) {
+    pmFormError.textContent = 'Provider name is required.';
+    pmFormError.hidden = false;
+    return;
+  }
+  if (!apiUrl) {
+    pmFormError.textContent = 'API URL is required.';
     pmFormError.hidden = false;
     return;
   }
 
-  pmFormSave.setAttribute('disabled', 'true');
+  const selectedModels = currentFetchedModels
+    .filter((m) => m.enabled !== false)
+    .map((m) => ({ id: m.id, displayName: m.displayName || m.id, enabled: true }));
+
+  const entry: ProviderEntry = {
+    id: editingProviderId || `provider-${Date.now()}`,
+    name,
+    provider,
+    apiUrl,
+    apiKey: apiKey || 'none',
+    allowUnauthorized,
+    enabled: true,
+    models: selectedModels,
+  };
+
+  pmFormSave.disabled = true;
   pmFormSave.textContent = 'Saving…';
-
   try {
-    const id = editingProviderId ?? `provider-${Date.now()}`;
-    const existing = providersCache.find((x) => x.id === id);
-    const providerEntry: ProviderEntry = {
-      id,
-      name,
-      provider,
-      apiUrl,
-      apiKey,
-      enabled: existing?.enabled ?? true,
-      allowUnauthorized: pmFormInsecure.checked,
-      models: editingProviderId ? getSelectedProviderModels() : (existing?.models ?? [])
-    };
-
-    const r = (await window.ag.providers.save(providerEntry)) as { success: boolean; error?: string };
-    if (!r.success) throw new Error(r.error || 'Save failed');
-
-    toast(editingProviderId ? 'Provider updated' : 'Provider added', 'ok');
-    showPmView('list');
-    await renderProviderList();
+    const r = (await window.ag.providers.save(entry)) as { success: boolean; error?: string };
+    if (r.success) {
+      toast('Provider saved', 'ok');
+      showPmView('list');
+      await renderProviderList();
+      await loadModels();
+    } else {
+      pmFormError.textContent = r.error || 'Failed to save provider.';
+      pmFormError.hidden = false;
+    }
   } catch (err) {
     pmFormError.textContent = (err as Error).message;
     pmFormError.hidden = false;
   } finally {
-    pmFormSave.removeAttribute('disabled');
+    pmFormSave.disabled = false;
     pmFormSave.textContent = 'Save provider';
   }
 });
+
+if (pmFormTest) {
+  pmFormTest.addEventListener('click', async () => {
+    const apiUrl = pmFormUrl.value.trim();
+    const apiKey = pmFormKey.value.trim();
+    const allowUnauthorized = pmFormInsecure.checked;
+    if (!apiUrl) {
+      toast('Enter an API URL first', 'warn');
+      return;
+    }
+    pmFormTest.disabled = true;
+    pmFormTest.textContent = 'Testing…';
+    try {
+      const r = (await window.ag.providers.test({ apiUrl, apiKey: apiKey || 'none', allowUnauthorized } as any)) as {
+        success: boolean;
+        latencyMs?: number;
+        error?: string;
+      };
+      if (r.success) {
+        toast(`Connection successful (${r.latencyMs ?? 0}ms)`, 'ok');
+      } else {
+        toast(`Test failed: ${r.error}`, 'err', 5000);
+      }
+    } catch (err) {
+      toast(`Test failed: ${(err as Error).message}`, 'err');
+    } finally {
+      pmFormTest.disabled = false;
+      pmFormTest.textContent = 'Test connection';
+    }
+  });
+}
+
+if (pmFormFetchModelsBtn) {
+  pmFormFetchModelsBtn.addEventListener('click', async () => {
+    const provider = pmFormType.value;
+    const apiUrl = pmFormUrl.value.trim();
+    const apiKey = pmFormKey.value.trim();
+    if (!apiUrl) {
+      toast('Enter API URL first', 'warn');
+      return;
+    }
+    pmFormFetchModelsBtn.disabled = true;
+    pmFormFetchModelsBtn.textContent = 'Fetching…';
+    try {
+      const r = (await window.ag.providers.fetchModels({ provider, apiUrl, apiKey: apiKey || 'none' } as any)) as {
+        success: boolean;
+        models?: Array<{ id: string; displayName?: string }>;
+        error?: string;
+      };
+      if (r.success && r.models) {
+        currentFetchedModels = r.models.map((m) => ({
+          id: m.id,
+          displayName: m.displayName || m.id,
+          enabled: true,
+        }));
+        renderPmModelsCatalog();
+        toast(`Fetched ${r.models.length} models`, 'ok');
+      } else {
+        toast(`Fetch models failed: ${r.error}`, 'err');
+      }
+    } catch (err) {
+      toast(`Fetch failed: ${(err as Error).message}`, 'err');
+    } finally {
+      pmFormFetchModelsBtn.disabled = false;
+      pmFormFetchModelsBtn.textContent = 'Fetch models';
+    }
+  });
+}
+
+if (pmCapFilters) {
+  pmCapFilters.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLElement>('.pm-cap-filter');
+    if (!btn || !btn.dataset.cap) return;
+    activeCapFilter = btn.dataset.cap as 'all' | 'reasoning' | 'vision' | 'code';
+    pmCapFilters.querySelectorAll('.pm-cap-filter').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderPmModelsCatalog();
+  });
+}
+
+if (pmModelsSelectAll) {
+  pmModelsSelectAll.addEventListener('click', () => {
+    currentFetchedModels.forEach((m) => { m.enabled = true; });
+    renderPmModelsCatalog();
+  });
+}
+
+if (pmModelsDeselectAll) {
+  pmModelsDeselectAll.addEventListener('click', () => {
+    currentFetchedModels.forEach((m) => { m.enabled = false; });
+    renderPmModelsCatalog();
+  });
+}
+
+function addCustomModelToCatalog(): void {
+  if (!pmFormCustomModelInput) return;
+  const customId = pmFormCustomModelInput.value.trim();
+  if (!customId) return;
+  const exists = currentFetchedModels.some((m) => m.id.toLowerCase() === customId.toLowerCase());
+  if (!exists) {
+    currentFetchedModels.push({ id: customId, displayName: customId, enabled: true });
+    toast(`Added custom model ${customId}`, 'ok');
+  }
+  pmFormCustomModelInput.value = '';
+  renderPmModelsCatalog();
+}
+
+if (pmFormAddCustomModelBtn) pmFormAddCustomModelBtn.addEventListener('click', addCustomModelToCatalog);
+if (pmFormCustomModelInput) {
+  pmFormCustomModelInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addCustomModelToCatalog();
+    }
+  });
+}
 
 // Bind all Add Model buttons across views
 $('#dashboardAddModelBtn')?.addEventListener('click', openProviderManagerModal);
@@ -3357,4 +4112,5 @@ $('#emptyAddModelBtn')?.addEventListener('click', openProviderManagerModal);
 // Real-time synchronization listener: re-render provider list whenever custom_models.json changes
 window.ag?.providers?.onChanged(() => {
   void renderProviderList();
+  void loadModels();
 });

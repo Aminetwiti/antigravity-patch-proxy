@@ -459,7 +459,7 @@ function translateToolCallToNative(name, args) {
 function formatTranslatedResponse(translatedInfo, responseData) {
     const { translatedName, cmd } = translatedInfo;
     // S-3: Redact secrets before logging — SSH passwords, Bearer tokens, API keys.
-    const safeCmd = cmd
+    const safeCmd = (cmd ?? '')
         .replace(/(-pw\s+|--password[= ])\S+/gi, '$1[REDACTED]')
         .replace(/(Authorization:\s*(?:Bearer|Basic)\s+)\S+/gi, '$1[REDACTED]')
         .replace(/(apikey|api_key|api-key)[=: ]+\S+/gi, '$1=[REDACTED]');

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * patch_2_3.js — Surgical patcher for Antigravity v2.3.x app.asar.
+ * patch_2_5.js — Surgical patcher for Antigravity v2.5.x app.asar.
  *
  * ════════════════════════════════════════════════════════════════════════════
  * VERSION DIFFERENCE (the WHY this script exists)
@@ -22,7 +22,7 @@
  *   • Fix: re-inject 3 modules (cryptoStore, customModelStore, schemaValidator)
  *     via `patch_2_2_1.js`.
  *
- * Antigravity 2.3.x (since 2026-07, e.g. 2.3.1)  ────────────────────────────
+ * Antigravity 2.5.x (since 2026-07, e.g. 2.5.1)  ────────────────────────────
  *   • Google went MUCH further. They removed:
  *       1. The entire `dist/proxy/*` tree (22 modules)
  *       2. `dist/cryptoStore.js`, `dist/customModelStore.js`,
@@ -42,7 +42,7 @@
  *     still appears in `language_server.exe` (1 occurrence) → binary patch
  *     still works the same way.
  *
- * What the patch needs to do for 2.3.x  ──────────────────────────────────────
+ * What the patch needs to do for 2.5.x  ──────────────────────────────────────
  *   1. Re-inject the 25 missing JS modules (22 in `dist/proxy/*` + cryptoStore,
  *      customModelStore, schemaValidator).
  *   2. Re-create `proxy-runner.js` at the asar root.
@@ -67,7 +67,7 @@
  * ════════════════════════════════════════════════════════════════════════════
  *
  * Usage:
- *   node patch_2_3.js <asar-in> <build-dir> <asar-out>
+ *   node patch_2_5.js <asar-in> <build-dir> <asar-out>
  *
  *   <asar-in>   Path to the existing app.asar (typically the deployed one
  *               under %LOCALAPPDATA%\Programs\Antigravity\resources\)
@@ -127,13 +127,13 @@ const {
   assertUnpackedDeployed,
 } = require('./lib/patch-2-3-mitm');
 
-// ─── The 25 modules that v2.3.x dropped and we need to re-inject ───────────
+// ─── The 25 modules that v2.5.x dropped and we need to re-inject ───────────
 const MISSING_JS_MODULES = [
   // Standalone modules
   'cryptoStore',
   'customModelStore',
   'schemaValidator',
-  // New repo modules not present in v2.3.x original asar
+  // New repo modules not present in v2.5.x original asar
   'presets',
   'presets/reasoningEffort',
   'configExchange',
@@ -198,7 +198,7 @@ const MISSING_JS_MODULES = [
   'proxy/translators/utils',
 ];
 
-// ─── The 5 files that v2.3.x stripped and need to be OVERWRITTEN ───────────
+// ─── The 5 files that v2.5.x stripped and need to be OVERWRITTEN ───────────
 // These come from the repo dist/ which retains v2.2.x proxy integration hooks.
 const OVERWRITE_FILES = [
   'dist/main.js',
@@ -232,7 +232,7 @@ const DUPLICATE_IPC_HANDLERS = [
   'storage:fetch-models',     // registered at L188 and L418 in repo ipcHandlers.js
 ];
 
-// ─── The 1 root-level file that v2.3.x removed ─────────────────────────────
+// ─── The 1 root-level file that v2.5.x removed ─────────────────────────────
 const NEW_ROOT_FILES = [
   'proxy-runner.js',
 ];
@@ -304,7 +304,7 @@ function copySiblings(srcBase, dstBase) {
 async function main() {
   const [, , asarIn, buildDir, asarOut] = process.argv;
   if (!asarIn || !buildDir || !asarOut) {
-    die('usage: node patch_2_3.js <asar-in> <build-dir> <asar-out>');
+    die('usage: node patch_2_5.js <asar-in> <build-dir> <asar-out>');
   }
   if (!fs.existsSync(asarIn)) die(`asar-in not found: ${asarIn}`);
 
@@ -377,7 +377,7 @@ async function main() {
     }
     ensureDir(path.dirname(dst));
     let content = fs.readFileSync(src, 'utf8');
-    // v2.3.x patch: dedupe duplicate IPC handler registrations in ipcHandlers.js.
+    // v2.5.x patch: dedupe duplicate IPC handler registrations in ipcHandlers.js.
     //
     // Two safeguards are needed because tsc output varies across builds:
     //   1. Match EITHER single OR double quotes around the channel name.
@@ -445,7 +445,7 @@ async function main() {
           for (let k = 0; k < blocks.length - 1; k++) {
             const b = blocks[k];
             out += content.slice(cursor, b.start);
-            out += `/* v2.3.x patch: duplicate '${channel}' registration stripped */\n`;
+            out += `/* v2.5.x patch: duplicate '${channel}' registration stripped */\n`;
             cursor = b.end;
             stripped++;
           }
@@ -457,15 +457,15 @@ async function main() {
         }
       }
     }
-    // v2.3.x patch: inject require('../proxy-runner') at the top of dist/main.js
-    // because 2.3.x removed the proxy-runner hook that 2.2.x relied on.
+    // v2.5.x patch: inject require('../proxy-runner') at the top of dist/main.js
+    // because 2.5.x removed the proxy-runner hook that 2.2.x relied on.
     // proxy-runner.js is a standalone Electron-app entry that:
     //   1. Waits for app.whenReady()
     //   2. Loads dist/proxy
     //   3. Calls startProxy()
     //   4. Writes port to AGY_BROWSER_ACTIVE_PORT_FILE
     // Without this hook, the patched languageServer.js's startProxy() inside
-    // startLanguageServer() is unreliable on 2.3.x (the IDE wizard flow may
+    // startLanguageServer() is unreliable on 2.5.x (the IDE wizard flow may
     // bypass startAndMonitorLanguageServer entirely).
     if (rel === 'dist/main.js' && !content.includes("require('../proxy-runner')") && !content.includes('require("../proxy-runner")')) {
       // Find a safe insertion point: just after the strict mode + tsHelpers
@@ -475,45 +475,45 @@ async function main() {
       for (let i = 0; i < lines.length; i++) {
         if (lines[i].includes('use strict')) { insertAt = i + 1; break; }
       }
-      lines.splice(insertAt, 0, "// v2.3.x patch: start the proxy runner as a side-effect import.", "require('../proxy-runner');");
+      lines.splice(insertAt, 0, "// v2.5.x patch: start the proxy runner as a side-effect import.", "require('../proxy-runner');");
       content = lines.join('\n');
       console.log('            + injected require(\'../proxy-runner\') at line ' + (insertAt + 1));
     }
-    // v2.3.x patch: wrap main_1.default.initialize() in try/catch.
+    // v2.5.x patch: wrap main_1.default.initialize() in try/catch.
     if (rel === 'dist/main.js') {
       const before = content;
       content = content.replace(
         /main_1\.default\.initialize\(\);/,
-        'try { main_1.default.initialize(); } catch (e) { /* v2.3.x patch: electron-log already initialised by proxy-runner.js */ main_1.default.warn("[v2.3.x patch] electron-log initialize failed (non-fatal):", e); }',
+        'try { main_1.default.initialize(); } catch (e) { /* v2.5.x patch: electron-log already initialised by proxy-runner.js */ main_1.default.warn("[v2.5.x patch] electron-log initialize failed (non-fatal):", e); }',
       );
       if (content !== before) {
         console.log('            + wrapped main_1.default.initialize() in try/catch');
       }
     }
-    // v2.3.x patch: skip the IDE install wizard.
+    // v2.5.x patch: skip the IDE install wizard.
     if (rel === 'dist/main.js') {
       const before = content;
       content = content.replace(
         /if \(!HEADLESS\) \{\s*await \(0, ideInstall_1\.maybeShowIdeInstallWizard\)\(storageManager\);\s*\}/,
-        '/* v2.3.x patch: IDE wizard skipped (bypass on patched builds) */\n    if (false && !HEADLESS) {\n        await (0, ideInstall_1.maybeShowIdeInstallWizard)(storageManager);\n    }',
+        '/* v2.5.x patch: IDE wizard skipped (bypass on patched builds) */\n    if (false && !HEADLESS) {\n        await (0, ideInstall_1.maybeShowIdeInstallWizard)(storageManager);\n    }',
       );
       if (content !== before) {
         console.log('            + skipped maybeShowIdeInstallWizard');
       }
     }
-    // v2.3.x patch: wrap registerIpcHandlers in try/catch with logging
+    // v2.5.x patch: wrap registerIpcHandlers in try/catch with logging
     // to identify the cause of the IDE window not opening.
     if (rel === 'dist/main.js') {
       const before = content;
       content = content.replace(
         /\(0, ipcHandlers_1\.registerIpcHandlers\)\(storageManager\);/,
-        'console.log("[v2.3.x patch] before-registerIpcHandlers"); try { (0, ipcHandlers_1.registerIpcHandlers)(storageManager); console.log("[v2.3.x patch] after-registerIpcHandlers"); } catch (e) { console.error("[v2.3.x patch] registerIpcHandlers FAILED:", e && e.message); throw e; }',
+        'console.log("[v2.5.x patch] before-registerIpcHandlers"); try { (0, ipcHandlers_1.registerIpcHandlers)(storageManager); console.log("[v2.5.x patch] after-registerIpcHandlers"); } catch (e) { console.error("[v2.5.x patch] registerIpcHandlers FAILED:", e && e.message); throw e; }',
       );
       if (content !== before) {
         console.log('            + wrapped registerIpcHandlers with debug logging');
       }
     }
-    // v2.3.x patch: disable GPU acceleration to prevent black screen on Windows.
+    // v2.5.x patch: disable GPU acceleration to prevent black screen on Windows.
     // Electron's GPU compositing frequently produces a fully black window on
     // certain Windows/GPU driver combinations.  Calling disableHardwareAcceleration()
     // before the app is ready forces software rendering and eliminates the issue.
@@ -522,7 +522,7 @@ async function main() {
       content = content.replace(
         /const gotTheLock = electron_1\.app\.requestSingleInstanceLock\(\);/,
         [
-          '// v2.3.x patch: disable GPU acceleration to prevent black screen on Windows',
+          '// v2.5.x patch: disable GPU acceleration to prevent black screen on Windows',
           'electron_1.app.disableHardwareAcceleration();',
           "electron_1.app.commandLine.appendSwitch('disable-gpu');",
           "electron_1.app.commandLine.appendSwitch('disable-gpu-compositing');",
@@ -533,7 +533,7 @@ async function main() {
         console.log('            + disabled GPU acceleration (black screen fix)');
       }
     }
-    // v2.3.x patch: deduplicate 'storage:fetch-models' IPC handler.
+    // v2.5.x patch: deduplicate 'storage:fetch-models' IPC handler.
     // The patched dist/ipcHandlers.js registers this handler TWICE
     // (once via registerModelHandlers + once via registerStorageHandlers).
     // Electron throws "Attempted to register a second handler for
@@ -547,7 +547,7 @@ async function main() {
         (match) => {
           dupCount++;
           if (dupCount === 1) return match;
-          return '/* v2.3.x patch: removed duplicate storage:fetch-models registration */';
+          return '/* v2.5.x patch: removed duplicate storage:fetch-models registration */';
         },
       );
       if (content !== before) {
@@ -562,7 +562,7 @@ async function main() {
       content = removeSandboxedPreloadLocalImports(content);
       content = addIdeBridgeToPreload(content);
       content = addUpdaterStateBridgeToPreload(content);
-      console.log('            + embedded sandbox-safe preload helpers and 2.3.1 bridges');
+      console.log('            + embedded sandbox-safe preload helpers and 2.5.1 bridges');
     }
     fs.writeFileSync(dst, content);
     const size = fs.statSync(dst).size;
@@ -584,7 +584,7 @@ async function main() {
     }
     ensureDir(path.dirname(dst));
     let content = fs.readFileSync(src, 'utf8');
-    // v2.3.x patch: strip log.initialize({ preload: true }) from proxy-runner.js.
+    // v2.5.x patch: strip log.initialize({ preload: true }) from proxy-runner.js.
     // The main process (dist/main.js) also calls log.initialize() in its
     // whenReady callback. electron-log throws on the second call, which
     // breaks whenReady and prevents the IDE window from opening. We just
@@ -654,7 +654,7 @@ async function main() {
   console.log(`            in:  ${inSize} B`);
   console.log(`            out: ${outSize} B (+${delta} B)`);
   console.log(`            patched: ${filesAdded + owCount + nrCount} files (~${grandTotal} B of source)`);
-  // v2.3.x patch is larger than v2.2.x because it replaces 5 large files
+  // v2.5.x patch is larger than v2.2.x because it replaces 5 large files
   // (preload.js alone is ~75 KB). Expect ~500 KB growth.
   //
   // Note: @electron/asar's createPackage() does NOT apply LZ4 compression,
@@ -662,13 +662,13 @@ async function main() {
   // typically ~10x larger than the original (the content is identical, just
   // uncompressed). Electron loads both formats transparently.
   //
-  // v2.3.x original (compressed): ~2.1 MB
-  // v2.3.x patched (uncompressed): ~21 MB
+  // v2.5.x original (compressed): ~2.1 MB
+  // v2.5.x patched (uncompressed): ~21 MB
   // The "growth" here is purely the missing LZ4 layer, not new content.
   if (delta > 50 * 1024 * 1024) {
     console.log(`[patch_2_3] NOTE: output grew by ${(delta / 1024 / 1024).toFixed(1)} MB.`);
     console.log('            Most of this growth is the missing LZ4 compression layer,');
-    console.log('            not new content. v2.3.x patch adds ~400 KB of JS source.');
+    console.log('            not new content. v2.5.x patch adds ~400 KB of JS source.');
   }
 }
 

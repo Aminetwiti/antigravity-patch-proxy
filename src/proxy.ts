@@ -58,7 +58,9 @@ import * as registry from './proxy/registry';
 import { injectCustomModelsIntoResponse } from './proxy/protoInjector';
 
 // Custom model loading (extracted from proxy.ts)
-import { loadCustomModels } from './proxy/modelLoader';
+import { loadCustomModels, getCustomModelsPath } from './proxy/modelLoader';
+import { invalidateModelStoreCache } from './services/modelStore';
+import { invalidateHealthCache } from './proxy/modelHealthChecker';
 import { recordProviderUsage } from './customModelStore';
 import { classifyError, ErrorDiagnostic, type ErrorType } from './proxy/errorClassifier';
 import { shouldRetryStatus } from './proxy/retryStrategy';
@@ -107,6 +109,7 @@ import {
 // ID generation (extracted from proxy.ts)
 import { generateModelPlaceholderId, toSlug } from './proxy/idGenerator';
 export { generateModelPlaceholderId, toSlug };
+import { expandModelsWithEffort } from './proxy/effortExpander';
 
 // DNS resolution bypasses the poisoned hosts file (extracted from proxy.ts)
 import { resolveGoogleIp } from './proxy/dnsResolver';
@@ -1745,7 +1748,7 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
         );
 
         if (candidateNames.length > 0) {
-          const customModels = loadCustomModels();
+          const customModels = expandModelsWithEffort(loadCustomModels());
           const matchedCustomModel = customModels.find((m) => {
             const enumName = generateModelPlaceholderId(m);
             return candidateNames.some(
@@ -1784,7 +1787,7 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
 
     if (req.method === 'POST' && (isGenerate || isStandardStream)) {
       const matchedModelName = isGenerate ? generateMatch![1] : streamMatch![1];
-      const customModels = loadCustomModels();
+      const customModels = expandModelsWithEffort(loadCustomModels());
       const matchedCustomModel = customModels.find((m) => {
         const enumName = generateModelPlaceholderId(m);
         return (
@@ -1815,6 +1818,60 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
     // 5. Fallback: transparent proxy to Google
     await proxyToGoogle(req, res, fullBody);
   });
+}
+
+// ─── File Watcher for custom_models.json ──────────────────────────────────
+
+let customModelsWatcher: fs.FSWatcher | null = null;
+let customModelsWatcherDebounce: NodeJS.Timeout | null = null;
+
+export function setupCustomModelsWatcher(): void {
+  try {
+    const customModelsPath = getCustomModelsPath();
+    const customModelsDir = path.dirname(customModelsPath);
+    if (!fs.existsSync(customModelsDir)) {
+      fs.mkdirSync(customModelsDir, { recursive: true });
+    }
+
+    if (customModelsWatcher) {
+      customModelsWatcher.close();
+      customModelsWatcher = null;
+    }
+
+    customModelsWatcher = fs.watch(customModelsDir, (_eventType, filename) => {
+      if (filename && filename.includes('custom_models.json')) {
+        if (customModelsWatcherDebounce) clearTimeout(customModelsWatcherDebounce);
+        customModelsWatcherDebounce = setTimeout(() => {
+          log.info('[Proxy] custom_models.json changed on disk. Invalidating model caches...');
+          invalidateModelStoreCache();
+          invalidateHealthCache();
+          try {
+            const models = loadCustomModels();
+            if (models.length > 0) {
+              checkAllModelsHealth(models).catch(() => {});
+            }
+          } catch (err) {
+            log.warn('[Proxy] Failed to reload/health-check models after file change:', err);
+          }
+        }, 200);
+      }
+    });
+  } catch (err) {
+    log.warn('[Proxy] Failed to setup custom_models.json watcher:', err);
+  }
+}
+
+export function stopCustomModelsWatcher(): void {
+  if (customModelsWatcherDebounce) {
+    clearTimeout(customModelsWatcherDebounce);
+    customModelsWatcherDebounce = null;
+  }
+  if (customModelsWatcher) {
+    try {
+      customModelsWatcher.close();
+    } catch {}
+    customModelsWatcher = null;
+  }
 }
 
 // ─── Server Start/Stop ────────────────────────────────────────────────────
@@ -1873,6 +1930,7 @@ export function startProxy(): Promise<number> {
           // so that failures here don't prevent the port from binding.
           try {
             startCleanupInterval();
+            setupCustomModelsWatcher();
           } catch (err) {
             log.error('[Proxy] Failed to start cleanup interval:', err);
           }
@@ -1962,6 +2020,7 @@ export function stopProxy(): Promise<void> {
   return new Promise((resolve) => {
     // P1-9: Stop cleanup interval to prevent orphaned timers
     stopCleanupInterval();
+    stopCustomModelsWatcher();
 
     const finish = (): void => {
       // Phase 6.3: flush any pending persisted state (force, ignore throttle)
