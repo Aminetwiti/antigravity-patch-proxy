@@ -1011,7 +1011,7 @@ function setObjective(key: ObjectiveKey, state: 'pending' | 'ok' | 'warn' | 'err
   const statusDiv = el.querySelector('.objective-status');
   if (statusDiv) {
     statusDiv.textContent = detail || (state === 'pending' ? 'Pending' : state === 'ok' ? 'OK' : state === 'warn' ? 'Warning' : 'Error');
-    if (detail) statusDiv.title = detail;
+    if (detail) statusDiv.setAttribute('title', detail);
   }
 }
 
