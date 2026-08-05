@@ -998,18 +998,20 @@ async function runStartStub(): Promise<void> {
   }
 }
 
-// Reusable template for objective icons — avoids innerHTML on every doctor run
-const objectiveIconTpl = document.createElement('template');
-
 function setObjective(key: ObjectiveKey, state: 'pending' | 'ok' | 'warn' | 'error', detail?: string): void {
   const el = document.getElementById(`obj-${key}`);
   if (!el) return;
-  el.className = `status-icon ${state}`;
-  if (detail) el.title = detail;
-  el.replaceChildren(objectiveIconTpl.content.cloneNode(true));
-  const iconSpan = el.querySelector('span');
-  if (iconSpan) {
-    iconSpan.className = `status-icon ${state}`;
+  
+  const iconDiv = el.querySelector('.objective-icon');
+  if (iconDiv) {
+    iconDiv.className = `objective-icon ${state}`;
+    iconDiv.innerHTML = iconForObjective(state);
+  }
+  
+  const statusDiv = el.querySelector('.objective-status');
+  if (statusDiv) {
+    statusDiv.textContent = detail || (state === 'pending' ? 'Pending' : state === 'ok' ? 'OK' : state === 'warn' ? 'Warning' : 'Error');
+    if (detail) statusDiv.title = detail;
   }
 }
 
