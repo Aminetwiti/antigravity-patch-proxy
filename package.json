@@ -13,7 +13,7 @@
     "build": "tsc",
     "watch": "tsc --watch",
     "lint": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "npm run build && vitest run",
     "test:watch": "vitest",
     "doctor": "node ag-doctor/bin/ag-doctor.js doctor",
     "doctor:check": "node ag-doctor/bin/ag-doctor.js check",
@@ -40,7 +40,9 @@
   },
   "devDependencies": {
     "@electron/asar": "^3.4.1",
+    "@types/node": "^20.10.0",
     "patch-package": "^8.0.1",
+    "typescript": "^5.3.0",
     "vitest": "^4.1.10"
   }
 }

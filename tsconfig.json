@@ -19,7 +19,6 @@
                             "forceConsistentCasingInFileNames":  true,
                             "resolveJsonModule":  true,
                             "skipLibCheck":  true,
-                            "moduleResolution":  "node",
                             "ignoreDeprecations":  "5.0",
                             "allowJs":  false,
                             "checkJs":  false,
