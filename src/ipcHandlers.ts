@@ -6,17 +6,36 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as http from 'http';
 import * as https from 'https';
+import { setProxyErrorEmitter, type ProxyErrorPayload } from './proxy';
 import { extensionAuthorities } from './customScheme';
 import { updateTrayAgentCount } from './tray';
 import { StorageManager } from './storage';
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const cryptoStore = require('./cryptoStore');
+import * as cryptoStore from './cryptoStore';
+import * as customModelStore from './customModelStore';
+// Avoid TS2440 name clash with customModelStore's own CustomModelFileEntry.
+import type { CustomModelFileEntry as CustomModelFileEntryFromTypes } from './proxy/types';
+import { WELL_KNOWN_PRESETS } from './presets';
+import * as configExchange from './configExchange';
+
+
+
 
 /**
  * Registers all IPC handlers for the main process.
  */
 export function registerIpcHandlers(storageManager: StorageManager): void {
+  // Fan-out proxy errors from proxy.ts to every BrowserWindow via the
+  // 'proxy:error' IPC channel. The renderer subscribes through preload.ts
+  // (window.ag.onProxyError) and renders the matching native quota card.
+  setProxyErrorEmitter((payload: ProxyErrorPayload) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('proxy:error', payload);
+      }
+    }
+  });
+
   // Dialog
   ipcMain.handle('dialog:open-workspace', async () => {
     const result = await dialog.showOpenDialog({
@@ -40,6 +59,13 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
     }
     autoUpdater.quitAndInstall();
   });
+
+  // IDE bridge (2.3.1+) — exposed via window.ide.isInstalled() in the preload.
+  // The renderer asks the main process whether the IDE is installed; since this
+  // IS the IDE process, we always answer true. Without this handler the renderer
+  // hits "No handler registered for 'ide:is-installed'" and stays on a black
+  // screen because the mount path throws before React can render.
+  ipcMain.handle('ide:is-installed', () => true);
 
   // Notifications
   ipcMain.handle(
@@ -102,62 +128,218 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
     await storageManager.updateItems(changes);
   });
   ipcMain.handle('storage:get-custom-models', async () => {
-    const geminiDir = path.join(app.getPath('home'), '.gemini', 'antigravity');
-    const filePath = path.join(geminiDir, 'custom_models.json');
-    try {
-      const content = await fs.readFile(filePath, 'utf-8');
-      const parsed = JSON.parse(content) as { models?: CustomModelFileEntry[] };
-      const models = parsed.models || [];
+    // Unmasked version for preload.ts injection
+    return await customModelStore.loadCustomModels();
+  });
 
-      // Return models with masked API keys to the UI
-      return models.map((m) => {
-        let maskedKey: string = m.apiKey;
-        if (m.apiKey && m.apiKey !== 'none') {
-          const decrypted = cryptoStore.decryptString(m.apiKey) as string;
-          if (decrypted.length <= 8) {
-            maskedKey = '********';
-          } else {
-            maskedKey = decrypted.substring(0, 4) + '...' + decrypted.substring(decrypted.length - 4);
-          }
+  ipcMain.handle('storage:get-providers', async () => {
+    const providers = await customModelStore.loadProviders();
+    return providers.map(p => ({
+      ...p,
+      apiKey: customModelStore.maskApiKey(p.apiKey)
+    }));
+  });
+
+  ipcMain.handle('storage:get-well-known-presets', async () => {
+    return WELL_KNOWN_PRESETS;
+  });
+
+  ipcMain.handle('storage:test-provider-health', async (_event, params: customModelStore.TestModelParams) => {
+    return customModelStore.testProviderHealth(params);
+  });
+
+  ipcMain.handle('storage:export-providers-base64', async () => {
+    try {
+      const providers = await customModelStore.loadProviders();
+      const base64 = configExchange.exportProvidersToBase64(providers);
+      return { success: true, base64, count: providers.length };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle('storage:import-providers-base64', async (_event, base64Str: string, strategy: configExchange.MergeStrategy = 'merge') => {
+    try {
+      const incoming = configExchange.parseProvidersFromBase64(base64Str);
+      const existing = await customModelStore.loadProviders();
+      const res = configExchange.mergeProviderConfigs(existing, incoming, strategy);
+      await customModelStore.saveProviders(res.providers);
+      return res;
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  });
+
+
+
+
+  ipcMain.handle('storage:save-provider', async (_event, newProvider: customModelStore.ProviderFileEntry) => {
+    try {
+      const providers = await customModelStore.loadProviders();
+      const existingIdx = providers.findIndex((p) => p.id === newProvider.id);
+
+      // Decide the effective API key value to persist.
+      // - 'none' or empty means the user explicitly cleared the key.
+      // - Anything matching a masked shape means the field is untouched; preserve existing.
+      // - Otherwise treat as a new plaintext value and encrypt.
+      const rawKey = newProvider.apiKey;
+      const isExplicitClear = !rawKey || rawKey === 'none' || rawKey === '';
+      const isMasked = !isExplicitClear && customModelStore.isMaskedApiKey(rawKey);
+
+      if (isExplicitClear) {
+        newProvider.apiKey = 'none';
+        newProvider.encrypted = false;
+      } else if (isMasked && existingIdx !== -1) {
+        newProvider.apiKey = providers[existingIdx].apiKey;
+        newProvider.encrypted = providers[existingIdx].encrypted;
+      } else {
+        const enc = customModelStore.encryptApiKeyIfNeeded(rawKey);
+        newProvider.apiKey = enc.apiKey;
+        newProvider.encrypted = enc.encrypted;
+      }
+
+      // Validate URL
+      try {
+        const u = new URL(newProvider.apiUrl);
+        if (!/^https?:$/.test(u.protocol)) {
+          return { success: false, error: 'API URL must use http or https' };
         }
-        return {
-          ...m,
-          apiKey: maskedKey,
-        };
+      } catch {
+        return { success: false, error: 'Invalid API URL' };
+      }
+
+      if (existingIdx !== -1) {
+        providers[existingIdx] = newProvider;
+      } else {
+        providers.push(newProvider);
+      }
+
+      await customModelStore.saveProviders(providers);
+      return { success: true };
+    } catch (err) {
+      console.error('[IPC] Failed to save provider:', err);
+      return { success: false, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle('storage:delete-provider', async (_event, providerId: string) => {
+    try {
+      const providers = await customModelStore.loadProviders();
+      const filtered = providers.filter((p) => p.id !== providerId);
+      await customModelStore.saveProviders(filtered);
+      return { success: true };
+    } catch (err) {
+      console.error('[IPC] Failed to delete provider:', err);
+      return { success: false, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle('storage:export-providers', async () => {
+    try {
+      const providers = await customModelStore.loadProviders();
+      const saveResult = await (dialog as unknown as {
+        showSaveDialog: (opts: { title: string; defaultPath: string; filters: Array<{ name: string; extensions: string[] }>; }) => Promise<{ canceled: boolean; filePath?: string }>;
+      }).showSaveDialog({
+        title: 'Export Provider Configuration',
+        defaultPath: 'antigravity_providers.json',
+        filters: [{ name: 'JSON Files', extensions: ['json'] }],
       });
-    } catch {
-      return [];
+      if (saveResult.canceled || !saveResult.filePath) {
+        return { success: false, error: 'Cancelled' };
+      }
+      await fs.writeFile(saveResult.filePath, JSON.stringify({ providers }, null, 2), 'utf-8');
+      return { success: true, count: providers.length };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  });
+
+  // Symmetric counterpart to storage:export-providers. The renderer calls this
+  // channel (not the -base64 variant) when the user picks "Import" from the UI,
+  // so the main process must open a file dialog, parse the JSON, and merge it
+  // into the existing provider store.
+  ipcMain.handle('storage:import-providers', async () => {
+    try {
+      const openResult = await (dialog as unknown as {
+        showOpenDialog: (opts: { title: string; properties: string[]; filters: Array<{ name: string; extensions: string[] }>; }) => Promise<{ canceled: boolean; filePaths: string[] }>;
+      }).showOpenDialog({
+        title: 'Import Provider Configuration',
+        properties: ['openFile'],
+        filters: [{ name: 'JSON Files', extensions: ['json'] }],
+      });
+      if (openResult.canceled || openResult.filePaths.length === 0) {
+        return { success: false, error: 'Cancelled' };
+      }
+      const raw = await fs.readFile(openResult.filePaths[0], 'utf-8');
+      const parsed = JSON.parse(raw) as { providers?: customModelStore.ProviderFileEntry[] };
+      const incoming = parsed.providers ?? [];
+      const existing = await customModelStore.loadProviders();
+      const res = configExchange.mergeProviderConfigs(existing, incoming, 'merge');
+      await customModelStore.saveProviders(res.providers);
+      return { success: true, count: incoming.length };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  });
+
+
+  ipcMain.handle('storage:get-doctor-diagnostics', async () => {
+    try {
+      const providers = await customModelStore.loadProviders();
+      const customModels = await customModelStore.loadCustomModels();
+      let activePort = 50999;
+      try {
+        const home = process.env.HOME || process.env.USERPROFILE || require('os').homedir();
+        const portFile = path.join(home, '.gemini', 'antigravity', '.proxy_port');
+        const content = await fs.readFile(portFile, 'utf-8');
+        activePort = parseInt(content.trim(), 10) || 50999;
+      } catch {
+        /* default port */
+      }
+      const activeProviders = providers.filter((p) => p.enabled);
+      const totalTokens = providers.reduce(
+        (acc, p) => acc + (p.usage?.promptTokens || 0) + (p.usage?.completionTokens || 0),
+        0,
+      );
+      const totalRequests = providers.reduce((acc, p) => acc + (p.usage?.totalRequests || 0), 0);
+
+      return {
+        success: true,
+        proxyPort: activePort,
+        providersCount: providers.length,
+        activeProvidersCount: activeProviders.length,
+        customModelsCount: customModels.length,
+        totalTokens,
+        totalRequests,
+        providers: providers.map((p) => ({
+          id: p.id,
+          name: p.name,
+          provider: p.provider,
+          enabled: p.enabled,
+          modelCount: p.models.length,
+          enabledModelCount: p.models.filter((m) => m.enabled).length,
+          usage: p.usage,
+        })),
+      };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
     }
   });
 
   ipcMain.handle('storage:save-custom-model', async (_event, newModel: CustomModelFileEntry & { apiKey?: string }) => {
-    const geminiDir = path.join(app.getPath('home'), '.gemini', 'antigravity');
-    const filePath = path.join(geminiDir, 'custom_models.json');
     try {
-      let models: CustomModelFileEntry[] = [];
-      try {
-        const content = await fs.readFile(filePath, 'utf-8');
-        const parsed = JSON.parse(content) as { models?: CustomModelFileEntry[] };
-        models = parsed.models || [];
-      } catch {
-        // Ignore if file doesn't exist
-      }
-
-      // Check if model already exists, if so update it, otherwise push
+      const models = await customModelStore.loadCustomModels();
       const existingIdx = models.findIndex((m) => m.name === newModel.name);
 
-      // Edit collision protection: If new key is masked and old record exists, preserve old encrypted key
       const isMasked =
         newModel.apiKey &&
         (newModel.apiKey.includes('...') || newModel.apiKey.startsWith('***') || newModel.apiKey === '********');
       if (isMasked && existingIdx !== -1) {
         newModel.apiKey = models[existingIdx].apiKey;
         newModel.encrypted = models[existingIdx].encrypted;
-      } else {
-        if (newModel.apiKey && newModel.apiKey !== 'none') {
-          newModel.apiKey = cryptoStore.encryptString(newModel.apiKey);
-          newModel.encrypted = true;
-        }
+      } else if (newModel.apiKey && newModel.apiKey !== 'none') {
+        newModel.apiKey = cryptoStore.encryptString(newModel.apiKey);
+        newModel.encrypted = true;
       }
 
       if (existingIdx !== -1) {
@@ -166,8 +348,7 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
         models.push(newModel);
       }
 
-      await fs.mkdir(path.dirname(filePath), { recursive: true });
-      await fs.writeFile(filePath, JSON.stringify({ models }, null, 2), 'utf-8');
+      await customModelStore.saveCustomModels(models);
       return { success: true };
     } catch (err) {
       console.error('[IPC] Failed to save custom model:', err);
@@ -176,22 +357,8 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
   });
 
   ipcMain.handle('storage:delete-custom-model', async (_event, modelName: string) => {
-    const geminiDir = path.join(app.getPath('home'), '.gemini', 'antigravity');
-    const filePath = path.join(geminiDir, 'custom_models.json');
     try {
-      let models: CustomModelFileEntry[] = [];
-      try {
-        const content = await fs.readFile(filePath, 'utf-8');
-        const parsed = JSON.parse(content) as { models?: CustomModelFileEntry[] };
-        models = parsed.models || [];
-      } catch {
-        // Ignore if file doesn't exist
-      }
-
-      models = models.filter((m) => m.name !== modelName);
-
-      await fs.mkdir(path.dirname(filePath), { recursive: true });
-      await fs.writeFile(filePath, JSON.stringify({ models }, null, 2), 'utf-8');
+      await customModelStore.deleteCustomModel(modelName);
       return { success: true };
     } catch (err) {
       console.error('[IPC] Failed to delete custom model:', err);
@@ -208,10 +375,17 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
 
     return new Promise<ConnectionTestResult>((resolve) => {
       try {
-        let urlStr = model.apiUrl;
+        let urlStr = model.apiUrl || '';
+        if (!urlStr) {
+          resolve({ success: false, error: 'No API URL provided' });
+          return;
+        }
+
+        const providerLower = (model.provider || '').toLowerCase();
         // Normalize URL for chat API endpoints
-        if (model.provider === 'openai' || model.provider === 'custom' || model.provider === 'ollama') {
-          if (!urlStr.toLowerCase().includes('/chat/completions') && !urlStr.toLowerCase().includes('/completions')) {
+        if (providerLower === 'openai' || providerLower === 'custom' || providerLower === 'ollama') {
+          const urlLower = urlStr.toLowerCase();
+          if (!urlLower.includes('/chat/completions') && !urlLower.includes('/completions')) {
             if (urlStr.endsWith('/v1')) {
               urlStr += '/chat/completions';
             } else if (!urlStr.endsWith('/')) {
@@ -269,27 +443,44 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
           }
         }
 
-        const req = client.request(options, (res: { statusCode?: number; resume: () => void }) => {
-          // Any response (even 401/403) means the endpoint is reachable
-          if (res.statusCode! >= 200 && res.statusCode! < 500) {
-            resolve({
-              success: true,
-              status: res.statusCode,
-              message: `Endpoint reachable (HTTP ${res.statusCode})`,
-            });
-          } else {
-            resolve({
-              success: false,
-              status: res.statusCode,
-              error: `Server returned HTTP ${res.statusCode}`,
-            });
+        const startTime = Date.now();
+        const getLatency = () => Math.round(Date.now() - startTime);
+
+        const req = client.request(options);
+
+        req.on('response', (res: http.IncomingMessage) => {
+          // Distinguish auth failures (401/403) from network reachable.
+          if (res.statusCode === 401 || res.statusCode === 403) {
+            res.resume();
+            resolve({ success: false, status: res.statusCode, error: `Authentication failed (HTTP ${res.statusCode})`, latencyMs: getLatency() });
+            return;
           }
-          res.resume(); // consume response to free memory
+          if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 500) {
+            res.resume();
+            resolve({ success: false, status: res.statusCode, error: `HTTP ${res.statusCode}`, latencyMs: getLatency() });
+            return;
+          }
+          let body = '';
+          let bytes = 0;
+          const MAX_BODY = 256 * 1024;
+          res.on('data', (chunk: Buffer | string) => {
+            bytes += chunk.length;
+            if (bytes > MAX_BODY) {
+              req.destroy();
+              resolve({ success: false, error: 'Response too large', latencyMs: getLatency() });
+              return;
+            }
+            body += chunk.toString();
+          });
+          res.on('end', () => {
+            const ok = res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 400;
+            resolve({ success: ok, status: res.statusCode, message: `HTTP ${res.statusCode}`, latencyMs: getLatency() });
+          });
         });
 
         req.setTimeout(10000, () => {
           req.destroy();
-          resolve({ success: false, error: 'Connection timed out after 10 seconds' });
+          resolve({ success: false, error: 'Request timed out', latencyMs: getLatency() });
         });
 
         req.on('error', (err: NodeJS.ErrnoException) => {
@@ -301,7 +492,7 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
           } else if (message.includes('CERT') || message.includes('certificate') || message.includes('SSL')) {
             message = 'SSL/TLS error — try enabling "allowUnauthorized" for self-signed certs';
           }
-          resolve({ success: false, error: message });
+          resolve({ success: false, error: message, latencyMs: getLatency() });
         });
 
         req.end();
@@ -310,6 +501,10 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
       }
     });
   });
+
+  function isMaskedKey(key: string): boolean {
+    return key.includes('...') || key.startsWith('***') || key === '********';
+  };
 
   // ─── Fetch Models from /v1/models endpoint ──────────────────────────────────────
   // P3-18: Query a provider's /v1/models endpoint to discover available models
@@ -325,7 +520,12 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
         // e.g. https://api.openai.com/v1/chat/completions → /v1/models
         // e.g. https://api.anthropic.com/v1/messages → /v1/models
         // e.g. http://localhost:11434/v1/chat/completions → /v1/models
-        let baseUrl = params.apiUrl;
+        let baseUrl = (typeof params?.apiUrl === 'string' && params.apiUrl) ? params.apiUrl : (typeof (params as any)?.baseUrl === 'string' ? (params as any).baseUrl : '');
+
+        if (!baseUrl || typeof baseUrl !== 'string') {
+          resolve({ success: false, error: 'No API URL provided' });
+          return;
+        }
 
         // Strip the chat/completions or /messages path to get the base
         const urlLower = baseUrl.toLowerCase();
@@ -344,8 +544,8 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
         // Trim trailing slashes
         baseUrl = baseUrl.replace(/\/+$/, '');
 
-        // For Google-style URLs that already end with /models, return as-is
-        if (isGooglePath && baseUrl.endsWith('/models')) {
+        // For URLs that already end with /models, return as-is
+        if (baseUrl.endsWith('/models')) {
           // keep as-is
         } else if (baseUrl.endsWith('/v1')) {
           baseUrl += '/models';
@@ -368,18 +568,22 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
           },
         };
 
+        const providerLower = (params.provider || '').toLowerCase();
+
         // Add auth header
-        if (params.apiKey && params.apiKey !== 'none') {
-          let key = params.apiKey;
+        const apiKey = (params as { apiKey?: string }).apiKey;
+        if (apiKey && apiKey !== 'none' && !isMaskedKey(apiKey)) {
+          let key = apiKey;
           try {
-            key = cryptoStore.decryptString(params.apiKey);
+            key = cryptoStore.decryptString(apiKey);
           } catch {
             /* key might not be encrypted */
           }
 
-          if (params.provider === 'anthropic') {
+          if (providerLower === 'anthropic') {
             (options.headers as Record<string, string>)['x-api-key'] = key;
-          } else if (params.provider === 'google') {
+            (options.headers as Record<string, string>)['anthropic-version'] = '2025-04-01';
+          } else if (providerLower === 'google') {
             (options.headers as Record<string, string>)['x-goog-api-key'] = key;
           } else {
             (options.headers as Record<string, string>)['Authorization'] = `Bearer ${key}`;
@@ -388,12 +592,24 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
 
         const req = client.request(options, (res: http.IncomingMessage) => {
           let body = '';
+          let bytes = 0;
+          const MAX_BODY = 4 * 1024 * 1024;
 
-          res.on('data', (chunk: string) => {
-            body += chunk;
+          res.on('data', (chunk: string | Buffer) => {
+            bytes += chunk.length;
+            if (bytes > MAX_BODY) {
+              req.destroy();
+              resolve({ success: false, error: 'Response too large' });
+              return;
+            }
+            body += chunk.toString();
           });
 
           res.on('end', () => {
+            if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+              resolve({ success: false, error: `HTTP ${res.statusCode}: ${body.slice(0, 200)}` });
+              return;
+            }
             try {
               const parsed = JSON.parse(body) as Record<string, unknown>;
 
@@ -543,6 +759,7 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
   });
 
   // Auto-updater manual check
+  ipcMain.handle('updater:get-state', () => ({ type: 'idle' }));
   ipcMain.handle('updater:check-for-updates', () => {
     checkForUpdates(true);
   });
@@ -682,6 +899,7 @@ interface ConnectionTestResult {
   status?: number;
   message?: string;
   error?: string;
+  latencyMs?: number;
 }
 
 // ─── Fetch Models Types ────────────────────────────────────────────────────────────

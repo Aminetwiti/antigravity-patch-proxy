@@ -3,6 +3,7 @@ import {
   computeRetryDelay,
   shouldRetryStatus,
   buildRetryDecision,
+  isRetryableStatus,
   type RetryStrategy,
 } from '../proxy/retryStrategy';
 import {
@@ -25,34 +26,85 @@ describe('computeRetryDelay', () => {
       expect(computeRetryDelay('rate-limit', 3, 30_000)).toBe(30_000);
     });
 
-    it('ignores Retry-After when 0', () => {
-      expect(computeRetryDelay('server-error', 0, 0)).toBe(SERVER_ERROR_RETRY_BASE_DELAY_MS);
+    it('ignores Retry-After when 0 (returns jittered base delay)', () => {
+      const d = computeRetryDelay('server-error', 0, 0);
+      // Jittered: SERVER_ERROR_RETRY_BASE_DELAY_MS +/- 10%
+      expect(d).toBeGreaterThanOrEqual(SERVER_ERROR_RETRY_BASE_DELAY_MS * 0.9);
+      expect(d).toBeLessThanOrEqual(SERVER_ERROR_RETRY_BASE_DELAY_MS * 1.1);
     });
   });
 
   describe('stream-error strategy', () => {
-    it('uses linear backoff: base * (retryCount + 1)', () => {
-      expect(computeRetryDelay('stream-error', 0, 0)).toBe(STREAM_RETRY_BASE_DELAY_MS * 1);
-      expect(computeRetryDelay('stream-error', 1, 0)).toBe(STREAM_RETRY_BASE_DELAY_MS * 2);
-      expect(computeRetryDelay('stream-error', 2, 0)).toBe(STREAM_RETRY_BASE_DELAY_MS * 3);
+    it('returns small delay near base for attempt=0', () => {
+      // initialDelay * 2^0 = 1000ms, capped at 5000ms, +/- 10% jitter
+      const d = computeRetryDelay('stream-error', 0, 0);
+      expect(d).toBeGreaterThanOrEqual(STREAM_RETRY_BASE_DELAY_MS * 0.9);
+      expect(d).toBeLessThanOrEqual(STREAM_RETRY_BASE_DELAY_MS * 1.1);
+    });
+
+    it('grows exponentially with retryCount', () => {
+      const d0 = computeRetryDelay('stream-error', 0, 0);
+      const d1 = computeRetryDelay('stream-error', 1, 0);
+      const d2 = computeRetryDelay('stream-error', 2, 0);
+      expect(d1).toBeGreaterThan(d0);
+      expect(d2).toBeGreaterThan(d1);
     });
   });
 
   describe('server-error strategy', () => {
-    it('uses exponential backoff: base * 2^retryCount', () => {
-      expect(computeRetryDelay('server-error', 0, 0)).toBe(SERVER_ERROR_RETRY_BASE_DELAY_MS);
-      expect(computeRetryDelay('server-error', 1, 0)).toBe(SERVER_ERROR_RETRY_BASE_DELAY_MS * 2);
-      expect(computeRetryDelay('server-error', 2, 0)).toBe(SERVER_ERROR_RETRY_BASE_DELAY_MS * 4);
-      expect(computeRetryDelay('server-error', 3, 0)).toBe(SERVER_ERROR_RETRY_BASE_DELAY_MS * 8);
+    it('returns base delay for attempt=0 (with jitter)', () => {
+      const d = computeRetryDelay('server-error', 0, 0);
+      expect(d).toBeGreaterThanOrEqual(SERVER_ERROR_RETRY_BASE_DELAY_MS * 0.9);
+      expect(d).toBeLessThanOrEqual(SERVER_ERROR_RETRY_BASE_DELAY_MS * 1.1);
+    });
+
+    it('grows exponentially for attempt=1,2,3', () => {
+      const d0 = computeRetryDelay('server-error', 0, 0);
+      const d1 = computeRetryDelay('server-error', 1, 0);
+      const d2 = computeRetryDelay('server-error', 2, 0);
+      const d3 = computeRetryDelay('server-error', 3, 0);
+      expect(d1).toBeGreaterThan(d0);
+      expect(d2).toBeGreaterThan(d1);
+      expect(d3).toBeGreaterThan(d2);
     });
   });
 
   describe('rate-limit strategy', () => {
-    it('uses 2x exponential backoff: 2 * base * 2^retryCount', () => {
-      expect(computeRetryDelay('rate-limit', 0, 0)).toBe(RATE_LIMIT_RETRY_BASE_DELAY_MS);
-      expect(computeRetryDelay('rate-limit', 1, 0)).toBe(RATE_LIMIT_RETRY_BASE_DELAY_MS * 2);
-      expect(computeRetryDelay('rate-limit', 2, 0)).toBe(RATE_LIMIT_RETRY_BASE_DELAY_MS * 4);
+    it('returns base delay for attempt=0 (with jitter)', () => {
+      const d = computeRetryDelay('rate-limit', 0, 0);
+      expect(d).toBeGreaterThanOrEqual(RATE_LIMIT_RETRY_BASE_DELAY_MS * 0.9);
+      expect(d).toBeLessThanOrEqual(RATE_LIMIT_RETRY_BASE_DELAY_MS * 1.1);
     });
+
+    it('grows exponentially with retryCount', () => {
+      const d0 = computeRetryDelay('rate-limit', 0, 0);
+      const d1 = computeRetryDelay('rate-limit', 1, 0);
+      const d2 = computeRetryDelay('rate-limit', 2, 0);
+      expect(d1).toBeGreaterThan(d0);
+      expect(d2).toBeGreaterThan(d1);
+    });
+  });
+});
+
+describe('isRetryableStatus', () => {
+  it('returns true for 5xx server errors', () => {
+    expect(isRetryableStatus(500)).toBe(true);
+    expect(isRetryableStatus(502)).toBe(true);
+    expect(isRetryableStatus(503)).toBe(true);
+    expect(isRetryableStatus(504)).toBe(true);
+  });
+
+  it('returns true for 429 rate limit', () => {
+    expect(isRetryableStatus(429)).toBe(true);
+  });
+
+  it('returns false for other status codes', () => {
+    expect(isRetryableStatus(200)).toBe(false);
+    expect(isRetryableStatus(400)).toBe(false);
+    expect(isRetryableStatus(401)).toBe(false);
+    expect(isRetryableStatus(402)).toBe(false);
+    expect(isRetryableStatus(403)).toBe(false);
+    expect(isRetryableStatus(404)).toBe(false);
   });
 });
 

@@ -19,6 +19,7 @@ import { runModelsFetch } from './commands/models/fetch';
 import { runPatchStatus } from './commands/patch/status';
 import { runPatchApply } from './commands/patch/apply';
 import { runPatchRestore } from './commands/patch/restore';
+import { runPatchSelect } from './commands/patch/select';
 import { runLogs } from './commands/logs';
 import { runUpdate } from './commands/update';
 import { runInfo } from './commands/info';
@@ -61,7 +62,10 @@ Commands:
   patch status           Show binary patch state
   patch apply            Apply the binary patch (snapshots first)
   patch restore          Restore language_server from backup (snapshots first)
-  logs [-f] [-n N]       Show language_server logs (tail/follow)
+  patch select <range|auto>
+                         Force a patch range or return to auto-detect
+  logs [-f] [-n N] [--source S] [--level L] [--clear] [--clear-all] [--stats]
+                         Show/follow/filter/clear logs (levels: error|warn|info|all)
   mitm {status|install|uninstall|proxy-on|proxy-off|export-ca}
                          Manage MITM CA cert and system proxy
   proxy {status|start|stop|stub}
@@ -224,6 +228,7 @@ export async function main(argv: string[]): Promise<number> {
         if (sub === 'status') return runPatchStatus(ctx);
         if (sub === 'apply') return await runPatchApply(ctx);
         if (sub === 'restore') return await runPatchRestore(ctx);
+        if (sub === 'select') return await runPatchSelect(ctx, rest[0]);
         console.error(`Unknown patch subcommand: ${sub}`);
         console.error(USAGE);
         return 2;
@@ -232,6 +237,10 @@ export async function main(argv: string[]): Promise<number> {
           follow: Boolean(parsed.options.follow || parsed.options.f),
           lines: Number(parsed.options.lines || parsed.options.n) || 50,
           source: String(parsed.options.source || 'language_server'),
+          clear: Boolean(parsed.options.clear),
+          clearAll: Boolean(parsed.options['clear-all']),
+          level: String(parsed.options.level || 'all'),
+          stats: Boolean(parsed.options.stats),
         });
       case 'mitm':
         return await runMitm(ctx, sub);

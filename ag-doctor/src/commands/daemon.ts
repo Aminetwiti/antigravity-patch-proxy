@@ -96,11 +96,23 @@ function clearPid(): void {
   if (fs.existsSync(f)) fs.unlinkSync(f);
 }
 
-function appendLog(line: string): void {
+type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
+
+function appendLog(line: string, level: LogLevel = 'INFO'): void {
   const f = getLogFile();
   fs.mkdirSync(path.dirname(f), { recursive: true });
+  
+  try {
+    const stats = fs.statSync(f);
+    if (stats.size > 10 * 1024 * 1024) { // 10MB
+      fs.renameSync(f, f + '.1');
+    }
+  } catch {
+    // ignore
+  }
+
   const ts = new Date().toISOString();
-  fs.appendFileSync(f, `[${ts}] ${line}\n`, 'utf-8');
+  fs.appendFileSync(f, `[${ts}] [${level}] ${line}\n`, 'utf-8');
 }
 
 // ─── Diagnostic runner ────────────────────────────────────────────────────
@@ -195,7 +207,7 @@ async function daemonLoop(opts: DaemonOptions): Promise<number> {
       // Find applicable rules
       const rules = findApplicableRules(results, cfg);
       if (rules.length > 0) {
-        appendLog(`[${ts}] ${rules.length} recovery rule(s) triggered: ${rules.map((r) => r.id).join(', ')}`);
+        appendLog(`[${ts}] ${rules.length} recovery rule(s) triggered: ${rules.map((r) => r.id).join(', ')}`, 'WARN');
         if (!opts.quiet) {
           for (const rule of rules) {
             console.log(`  ${c.yellow('⚡')} Triggering recovery: ${rule.title} (${rule.id})`);
@@ -206,14 +218,14 @@ async function daemonLoop(opts: DaemonOptions): Promise<number> {
         for (const outcome of outcomes) {
           const icon = outcome.ok ? c.green('✓') : c.red('✗');
           const msg = outcome.ok ? outcome.message : `${outcome.message}${outcome.details ? ` — ${outcome.details}` : ''}`;
-          appendLog(`[${ts}]   ${outcome.ruleId}: ${outcome.ok ? 'OK' : 'FAIL'} (${outcome.durationMs}ms) — ${msg}`);
+          appendLog(`[${ts}]   ${outcome.ruleId}: ${outcome.ok ? 'OK' : 'FAIL'} (${outcome.durationMs}ms) — ${msg}`, outcome.ok ? 'INFO' : 'ERROR');
           if (!opts.quiet) {
             console.log(`    ${icon} ${outcome.ruleId}: ${msg} (${outcome.durationMs}ms)`);
           }
         }
       }
     } catch (e) {
-      appendLog(`[ERROR] iteration=${iteration}: ${(e as Error).message}`);
+      appendLog(`[ERROR] iteration=${iteration}: ${(e as Error).message}`, 'ERROR');
       if (!opts.quiet) error(`Daemon error: ${(e as Error).message}`);
     }
 

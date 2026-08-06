@@ -11,6 +11,21 @@ export interface RunResult {
 
 const api = {
   run: (args: string[]): Promise<RunResult> => ipcRenderer.invoke('ag:run', args),
+
+  // Provider Management APIs
+  providers: {
+    get: (): Promise<unknown[]> => ipcRenderer.invoke('ag:providers:get'),
+    save: (p: unknown): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('ag:providers:save', p),
+    delete: (id: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('ag:providers:delete', id),
+    fetchModels: (params: { apiUrl: string; apiKey: string }): Promise<{ success: boolean; models?: Array<{ id: string; displayName?: string; enabled?: boolean }>; error?: string }> => ipcRenderer.invoke('ag:providers:fetch-models', params),
+    test: (params: { apiUrl: string; apiKey: string; id?: string; modelId?: string }): Promise<{ success: boolean; status?: number; latencyMs?: number; healthStatus?: 'healthy' | 'degraded' | 'offline'; error?: string }> =>
+      ipcRenderer.invoke('ag:providers:test', params),
+    onChanged: (handler: () => void): (() => void) => {
+      const listener = () => handler();
+      ipcRenderer.on('ag:providers:changed', listener);
+      return () => ipcRenderer.removeListener('ag:providers:changed', listener);
+    },
+  },
   info: (): Promise<{
     platform: string;
     arch: string;
@@ -22,19 +37,33 @@ const api = {
   }> => ipcRenderer.invoke('ag:info'),
   config: (): Promise<Record<string, unknown>> => ipcRenderer.invoke('ag:config'),
   setTheme: (theme: 'dark' | 'light'): Promise<boolean> => ipcRenderer.invoke('ag:config:set-theme', theme),
+  setNotifyEnabled: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('ag:config:set-notify', enabled),
+  restoreBackup: (): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('ag:config:restore-backup'),
+  getProxyErrorHistory: (): Promise<Array<{
+    traceId: string;
+    provider: string;
+    status?: number;
+    errorType: string;
+    rawError: string;
+    title: string;
+    message: string;
+    suggestions: string[];
+    actionUrl?: string;
+    at: number;
+  }>> => ipcRenderer.invoke('ag:proxy-error-history'),
   notify: (title: string, body: string): Promise<void> => ipcRenderer.invoke('ag:notify', title, body),
   trayStatus: (status: 'ok' | 'warn' | 'err'): Promise<void> => ipcRenderer.invoke('ag:tray-status', status),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('ag:open-external', url),
   reveal: (p: string): Promise<void> => ipcRenderer.invoke('ag:reveal', p),
 
   // MITM Proxy Server Management
-  proxyStart: (): Promise<{ ok: boolean; message: string; pid?: number }> => 
+  proxyStart: (): Promise<{ ok: boolean; message: string; pid?: number }> =>
     ipcRenderer.invoke('ag:proxy:start'),
-  proxyStop: (): Promise<{ ok: boolean; message: string }> => 
+  proxyStop: (): Promise<{ ok: boolean; message: string }> =>
     ipcRenderer.invoke('ag:proxy:stop'),
-  proxyStatus: (): Promise<{ ok: boolean; data?: { running: boolean; port: number; pid?: number; error?: string }; error?: string }> => 
+  proxyStatus: (): Promise<{ ok: boolean; data?: { running: boolean; port: number; pid?: number; error?: string }; error?: string }> =>
     ipcRenderer.invoke('ag:proxy:status'),
-  proxyRestart: (): Promise<{ ok: boolean; message: string }> => 
+  proxyRestart: (): Promise<{ ok: boolean; message: string }> =>
     ipcRenderer.invoke('ag:proxy:restart'),
 
 
@@ -137,6 +166,62 @@ const api = {
     const listener = (_: unknown, err: string) => handler(err);
     ipcRenderer.on(channel, listener);
     return () => ipcRenderer.removeListener(channel, listener);
+  },
+
+  // MITM traffic fan-out — emitted once per intercepted request when the
+  // proxy (mitm_443.js) writes a `mitm:traffic` JSON line on stdout.
+  // payload.id is unique per call; payload.ts is Date.now() at the proxy.
+  onMitmTraffic: (handler: (payload: {
+    id: string;
+    ts: number;
+    method: string;
+    path: string;
+    targetModel: string;
+    translatedProvider: string;
+    statusCode: number;
+    latencyMs: number;
+  }) => void): (() => void) => {
+    const listener = (_: unknown, payload: {
+      id: string;
+      ts: number;
+      method: string;
+      path: string;
+      targetModel: string;
+      translatedProvider: string;
+      statusCode: number;
+      latencyMs: number;
+    }) => handler(payload);
+    ipcRenderer.on('mitm:traffic', listener);
+    return () => ipcRenderer.removeListener('mitm:traffic', listener);
+  },
+
+  // Real-time proxy error fan-out from the main process. The renderer
+  // receives a ProxyErrorPayload (see src/proxy.ts) and renders the matching
+  // native quota/error card via NativeQuotaCardRenderer.
+  onProxyError: (handler: (payload: {
+    traceId: string;
+    provider: string;
+    status?: number;
+    errorType: string;
+    rawError: string;
+    title: string;
+    message: string;
+    suggestions: string[];
+    actionUrl?: string;
+  }) => void): (() => void) => {
+    const listener = (_: unknown, payload: {
+      traceId: string;
+      provider: string;
+      status?: number;
+      errorType: string;
+      rawError: string;
+      title: string;
+      message: string;
+      suggestions: string[];
+      actionUrl?: string;
+    }) => handler(payload);
+    ipcRenderer.on('proxy:error', listener);
+    return () => ipcRenderer.removeListener('proxy:error', listener);
   },
 };
 

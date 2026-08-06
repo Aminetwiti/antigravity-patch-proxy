@@ -1,26 +1,33 @@
-// Minimal HTTP stub on 127.0.0.1:50999.
+// Minimal HTTP stub on 127.0.0.1:50999 — emergency fallback when the real
+// proxy crashes (see docs/troubleshooting/mitm-443.md). Returns valid empty JSON so
+// the Go language server stops logging ECONNREFUSED, and exposes /health
+// with an X-Proxy-Stub: 1 marker so ag-doctor can detect the fallback.
 //
-// Purpose: makes the local-proxy port reachable so ag-doctor's "Local proxy"
-// check passes and the patched language_server.exe stops flooding
-// "connect ECONNREFUSED 127.0.0.1:50999" errors.
-//
-// This is NOT the real proxy (dist/proxy.js) — it does NOT inject custom
-// models. It returns empty/minimal responses so the LS can initialise.
-// For full custom-model support, run repack.ps1 to fix the bundled proxy.
-const http = require('http');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+// Usage:  node proxy-stub.js [port]
+// Env:    AG_PROXY_STUB_PORT (default 50999)
+//         AG_PROXY_STUB_HOST (default 127.0.0.1)
+//         AG_PROXY_STUB_LOG  (default os.tmpdir()/ag-proxy-stub.log)
 
-// Portable paths — derived from environment / OS conventions, never hardcoded.
-const LOG = process.env.AG_PROXY_STUB_LOG || path.join(os.tmpdir(), 'ag-proxy-stub.log');
-const PORT = parseInt(process.env.AG_PROXY_STUB_PORT || '50999', 10);
+'use strict';
+
+const http  = require('http');
+const fs    = require('fs');
+const os    = require('os');
+const path  = require('path');
+const dns   = require('dns');
+
+// Force IPv4 to avoid [::1] vs 127.0.0.1 mismatch on dual-stack hosts.
+dns.setDefaultResultOrder('ipv4first');
+
+const LOG  = process.env.AG_PROXY_STUB_LOG  || path.join(os.tmpdir(), 'ag-proxy-stub.log');
+const PORT = parseInt(process.argv[2] || process.env.AG_PROXY_STUB_PORT || '50999', 10);
 const HOST = process.env.AG_PROXY_STUB_HOST || '127.0.0.1';
 
 function log(line) {
   const ts = new Date().toISOString();
-  try { fs.appendFileSync(LOG, '[' + ts + '] ' + line + '\n'); } catch (_) {}
-  try { process.stdout.write('[' + ts + '] ' + line + '\n'); } catch (_) {}
+  const msg = '[' + ts + '] ' + line + '\n';
+  try { fs.appendFileSync(LOG, msg); } catch (_) {}
+  try { process.stdout.write(msg); } catch (_) {}
 }
 
 try { fs.writeFileSync(LOG, ''); } catch (_) {}
@@ -29,23 +36,33 @@ log('proxy-stub starting on ' + HOST + ':' + PORT + ' (log=' + LOG + ')');
 const server = http.createServer((req, res) => {
   log(req.method + ' ' + req.url + ' from ' + (req.socket.remoteAddress || '?'));
 
-  // Health probe (ag-doctor checkProxy + manual)
   if (req.url === '/health' || req.url.startsWith('/health?')) {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', stub: true, port: PORT }));
+    const body = JSON.stringify({
+      status: 'ok', stub: true, port: PORT,
+      uptime: process.uptime(), pid: process.pid,
+    });
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(body),
+      'X-Proxy-Stub': '1',
+      'Cache-Control': 'no-store',
+    });
+    res.end(body);
     return;
   }
 
-  // Collect body but don't block — return a minimal response immediately.
-  // The patched LS hits /v1internal/xxxxxxx/v1internal:* with POST/GET.
   let bodyLen = 0;
   req.on('data', (c) => { bodyLen += c.length; });
   req.on('end', () => {
     log('  -> body bytes=' + bodyLen + ', returning empty 200');
-    // Empty 200 with JSON content-type. The Go LS treats most of these as
-    // "no data" and moves on (it logs a warning but does not crash).
-    res.writeHead(200, { 'Content-Type': 'application/json', 'X-Proxy-Stub': '1' });
-    res.end('{}');
+    const body = '{}';
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(body),
+      'X-Proxy-Stub': '1',
+      'Cache-Control': 'no-store',
+    });
+    res.end(body);
   });
   req.on('error', (e) => log('req error: ' + e.message));
 });
@@ -53,7 +70,8 @@ const server = http.createServer((req, res) => {
 server.on('error', (err) => {
   log('server error: ' + err.code + ' ' + err.message);
   if (err.code === 'EADDRINUSE') {
-    log('Port ' + PORT + ' already in use — another process is bound. Exiting.');
+    log('Port ' + PORT + ' already in use — another instance is running');
+    process.exit(2);
   }
   process.exit(1);
 });
@@ -62,6 +80,12 @@ server.listen(PORT, HOST, () => {
   log('listening on http://' + HOST + ':' + PORT + ' (pid=' + process.pid + ')');
 });
 
+function shutdown(signal) {
+  log(signal + ', closing');
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 3000).unref();
+}
+process.on('SIGINT',  () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('uncaughtException', (e) => log('uncaught: ' + (e.stack || e)));
-process.on('SIGINT', () => { log('SIGINT, closing'); server.close(); process.exit(0); });
-process.on('SIGTERM', () => { log('SIGTERM, closing'); server.close(); process.exit(0); });
+process.on('unhandledRejection', (reason) => log('unhandled: ' + reason));

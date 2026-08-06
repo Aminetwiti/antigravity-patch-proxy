@@ -1,6 +1,6 @@
 {
   "name": "ag-doctor",
-  "version": "1.0.0",
+  "version": "3.0.2",
   "description": "Diagnostic, repair and management CLI for the Antigravity custom-model patch",
   "license": "Apache-2.0",
   "bin": {
@@ -24,10 +24,9 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@electron/asar": "^4.2.0"
+    "@electron/asar": "^3.4.1"
   },
   "devDependencies": {
-    "@rolldown/binding-win32-x64-msvc": "^1.1.5",
     "@types/node": "^20.11.0",
     "typescript": "^5.4.0",
     "vitest": "^1.6.0"

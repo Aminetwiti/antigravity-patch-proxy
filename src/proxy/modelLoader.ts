@@ -10,7 +10,39 @@ import log from 'electron-log';
 import * as cryptoStore from '../cryptoStore';
 import { validateCustomModel } from '../schemaValidator';
 import { ALL_PROVIDERS, type ProviderName } from '../constants';
+import { generateModelPlaceholderId } from './idGenerator';
 import type { CustomModel } from './types';
+
+/** Shape of a raw entry in the `providers` array of custom_models.json. */
+interface RawProviderEntry {
+  id?: string;
+  provider?: string;
+  apiKey?: string;
+  apiUrl?: string;
+  allowUnauthorized?: boolean;
+  encrypted?: boolean;
+  enabled?: boolean;
+  useRawBaseUrl?: boolean;
+  extraHeaders?: Record<string, string>;
+  extraBody?: Record<string, unknown>;
+  models?: RawModelEntry[];
+}
+
+/** Shape of a raw entry in the `models` array inside a provider. */
+interface RawModelEntry {
+  id?: string;
+  displayName?: string;
+  enabled?: boolean;
+  extraHeaders?: Record<string, string>;
+  extraBody?: Record<string, unknown>;
+}
+
+
+/** Shape of the top-level custom_models.json object. */
+interface CustomModelsFile {
+  models?: CustomModel[];
+  providers?: RawProviderEntry[];
+}
 
 /**
  * Returns the absolute path to the custom_models.json file.
@@ -115,6 +147,62 @@ function validateModels(decrypted: CustomModel[]): CustomModel[] {
   return validModels;
 }
 
+function parseProvidersSchema(providers: RawProviderEntry[]): CustomModel[] {
+  const flatModels: CustomModel[] = [];
+  for (const p of providers) {
+    if (p.enabled === false) continue;
+    const models = Array.isArray(p.models) ? p.models : [];
+    for (const m of models) {
+      if (m.enabled === false) continue;
+      const mergedHeaders = { ...p.extraHeaders, ...(m as { extraHeaders?: Record<string, string> }).extraHeaders };
+      const mergedBody = { ...p.extraBody, ...(m as { extraBody?: Record<string, unknown> }).extraBody };
+
+      const partialModel: CustomModel = {
+        name: m.id ?? '',
+        displayName: m.displayName ?? m.id ?? '',
+        description: (m as { description?: string }).description ?? '',
+        provider: (p.provider ?? 'openai') as ProviderName,
+        apiKey: p.apiKey ?? 'none',
+        apiUrl: p.apiUrl ?? '',
+        externalModelName: m.id ?? '',
+        allowUnauthorized: p.allowUnauthorized,
+        encrypted: p.encrypted,
+        useRawBaseUrl: p.useRawBaseUrl,
+        extraHeaders: Object.keys(mergedHeaders).length > 0 ? mergedHeaders : undefined,
+        extraBody: Object.keys(mergedBody).length > 0 ? mergedBody : undefined,
+      };
+      const placeholderId = generateModelPlaceholderId(partialModel);
+
+      flatModels.push({
+        ...partialModel,
+        name: `models/${placeholderId}`,
+      });
+    }
+  }
+  const decrypted = cryptoStore.decryptModels(flatModels as unknown as Record<string, unknown>[]) as unknown as CustomModel[];
+  return validateModels(decrypted);
+}
+
+/**
+ * Parses and decrypts the legacy `models` JSON schema format.
+ */
+function parseModelsSchema(models: CustomModel[], filePath: string): CustomModel[] {
+  const needsMigration = models.some(
+    (m) =>
+      !m.encrypted &&
+      m.apiKey &&
+      m.apiKey !== 'none' &&
+      !m.apiKey.startsWith('enc:') &&
+      !m.apiKey.startsWith('fallback:'),
+  );
+  if (needsMigration) {
+    return migrateToEncrypted(filePath, models);
+  }
+
+  const decrypted = cryptoStore.decryptModels(models as unknown as Record<string, unknown>[]) as unknown as CustomModel[];
+  return validateModels(decrypted);
+}
+
 /**
  * Loads custom models from disk, handling first-run defaults,
  * encryption migration, and validation.
@@ -128,32 +216,20 @@ export function loadCustomModels(): CustomModel[] {
 
   try {
     let content = fs.readFileSync(filePath, 'utf-8');
-    // Strip UTF-8 BOM if present (Windows Notepad / PowerShell add it by default on save,
-    // which breaks JSON.parse and silently loads 0 custom models).
+    // Strip UTF-8 BOM if present
     if (content.charCodeAt(0) === 0xFEFF) {
       content = content.slice(1);
     }
-    const parsed = JSON.parse(content) as { models?: CustomModel[] };
-    const models = parsed.models || [];
+    const parsed = JSON.parse(content) as CustomModelsFile;
 
-    // Auto-migration check
-    const needsMigration = models.some(
-      (m) =>
-        !m.encrypted &&
-        m.apiKey &&
-        m.apiKey !== 'none' &&
-        !m.apiKey.startsWith('enc:') &&
-        !m.apiKey.startsWith('fallback:'),
-    );
-    if (needsMigration) {
-      return migrateToEncrypted(filePath, models);
+    if (parsed.providers && Array.isArray(parsed.providers)) {
+      return parseProvidersSchema(parsed.providers);
     }
 
-    const decrypted = cryptoStore.decryptModels(models as unknown as Record<string, unknown>[]) as unknown as CustomModel[];
-    return validateModels(decrypted);
+    const models = parsed.models || [];
+    return parseModelsSchema(models, filePath);
   } catch (e) {
     log.error('[Proxy] Failed to parse custom_models.json', e);
-    // Auto-recovery: backup corrupted file and recreate defaults
     try {
       if (fs.existsSync(filePath)) {
         cryptoStore.backupFile(filePath);

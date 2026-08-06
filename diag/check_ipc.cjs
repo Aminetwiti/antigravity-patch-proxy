@@ -1,0 +1,11 @@
+const asar = require('@electron/asar');
+const content = asar.extractFile('C:/Users/amine/AppData/Local/Programs/Antigravity/resources/app.asar', 'dist/ipcHandlers.js');
+const text = Buffer.from(content).toString('utf8');
+console.log('Has ide:is-installed handler:', text.includes('ide:is-installed'));
+console.log('Has updater:get-state handler:', text.includes('updater:get-state'));
+const handleRe = /ipcMain\.handle\(\s*['"]([^'"]+)['"]/g;
+let m;
+const channels = new Set();
+while ((m = handleRe.exec(text)) !== null) channels.add(m[1]);
+console.log('--- ipcMain.handle channels (' + channels.size + ' unique) ---');
+Array.from(channels).sort().forEach(c => console.log('  ' + c));

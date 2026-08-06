@@ -95,21 +95,41 @@ export function getTranslator(provider: string): TranslatorModule | null {
   return translators.get('openai') || null;
 }
 
-export function translateRequest(provider: string, geminiBody: unknown, modelName: string): unknown {
+export function translateRequest(
+  provider: string,
+  geminiBody: unknown,
+  modelName: string,
+  extraBody?: Record<string, unknown>,
+): unknown {
   const t = getTranslator(provider);
+  let payload: unknown = geminiBody;
 
-  if (provider === 'google') return geminiBody;
-  if (OPENAI_COMPAT.has(provider)) return t?.mapGeminiToOpenAI ? t.mapGeminiToOpenAI(geminiBody, modelName) : geminiBody;
-  if (ANTHROPIC_COMPAT.has(provider)) return t?.mapGeminiToAnthropic ? t.mapGeminiToAnthropic(geminiBody, modelName) : geminiBody;
-
-  // Generic: try mapGeminiTo<Provider> convention
-  const fnName = `mapGeminiTo${provider.charAt(0).toUpperCase() + provider.slice(1)}`;
-  if (t && typeof t[fnName] === 'function') {
-    return (t[fnName] as (...args: unknown[]) => unknown)(geminiBody, modelName);
+  if (provider === 'google') {
+    payload = geminiBody;
+  } else if (OPENAI_COMPAT.has(provider)) {
+    payload = t?.mapGeminiToOpenAI ? t.mapGeminiToOpenAI(geminiBody, modelName) : geminiBody;
+  } else if (ANTHROPIC_COMPAT.has(provider)) {
+    payload = t?.mapGeminiToAnthropic ? t.mapGeminiToAnthropic(geminiBody, modelName) : geminiBody;
+  } else {
+    // Generic: try mapGeminiTo<Provider> convention
+    const fnName = `mapGeminiTo${provider.charAt(0).toUpperCase() + provider.slice(1)}`;
+    if (t && typeof t[fnName] === 'function') {
+      payload = (t[fnName] as (...args: unknown[]) => unknown)(geminiBody, modelName);
+    } else {
+      log.warn(`[TranslatorRegistry] No request translator for provider "${provider}", passing through`);
+      payload = geminiBody;
+    }
   }
 
-  log.warn(`[TranslatorRegistry] No request translator for provider "${provider}", passing through`);
-  return geminiBody;
+  // Merge extraBody parameters if payload is a plain object
+  if (extraBody && typeof payload === 'object' && payload !== null && !Array.isArray(payload)) {
+    payload = {
+      ...(payload as Record<string, unknown>),
+      ...extraBody,
+    };
+  }
+
+  return payload;
 }
 
 export function translateResponse(provider: string, providerRes: unknown, modelName: string): unknown {
@@ -143,9 +163,15 @@ export function translateStreamChunk(provider: string, chunk: unknown, modelName
   return null;
 }
 
-export function getProviderHeaders(provider: string, apiKey: string): ProviderHeaders {
+export function getProviderHeaders(
+  provider: string,
+  apiKey: string,
+  extraHeaders?: Record<string, string>,
+): ProviderHeaders {
   const headers: ProviderHeaders = { 'Content-Type': 'application/json' };
-  if (!apiKey || apiKey === 'none') return headers;
+  if (!apiKey || apiKey === 'none') {
+    return extraHeaders ? { ...headers, ...extraHeaders } : headers;
+  }
 
   if (provider === 'anthropic' || ANTHROPIC_COMPAT.has(provider)) {
     headers['x-api-key'] = apiKey;
@@ -159,8 +185,14 @@ export function getProviderHeaders(provider: string, apiKey: string): ProviderHe
   } else if (provider !== 'ollama') {
     headers['Authorization'] = `Bearer ${apiKey}`;
   }
+
+  if (extraHeaders) {
+    Object.assign(headers, extraHeaders);
+  }
+
   return headers;
 }
+
 
 export function supportsStreaming(provider: string): boolean {
   return OPENAI_COMPAT.has(provider) || ANTHROPIC_COMPAT.has(provider) || provider === 'google';

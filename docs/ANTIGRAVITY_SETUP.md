@@ -1,8 +1,9 @@
-# Antigravity v2.0.1 — Guide complet : Custom Models + MITM 443
+# Antigravity v2.2.x — Guide complet : Custom Models + MITM 443
 
-**Projet** : `C:\Users\amine\Downloads\antigravity-add-model-main\antigravity-add-model-main`  
-**Objectif** : ajouter et utiliser des modèles LLM custom (OpenAI/Anthropic/custom) dans l'application desktop **Antigravity v2.0.1** sous Windows 11 + WSL2.  
-**Date** : 2026-07-07
+**Projet** : `C:\Users\amine\Downloads\antigravity-add-model-main\antigravity-add-model-main`
+**Objectif** : ajouter et utiliser des modèles LLM custom (OpenAI/Anthropic/custom) dans l'application desktop **Antigravity** sous Windows 11 + WSL2.
+**Stratégie** : **patch chirurgical** (`scripts/patch_2_2_1.js`) + MITM 443 — fonctionne avec **toutes** les versions v2.2.x publiées via auto-update.
+**Date** : 2026-07-13
 
 ---
 
@@ -25,38 +26,43 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         Antigravity Desktop v2.0.1                          │
+│                       Antigravity Desktop (v2.2.x)                          │
 │  ┌──────────────┐   HTTPS    cloudcode-pa.googleapis.com:443                 │
 │  │ UI renderer  │──────────▶  (hosts Windows → 127.0.0.1:443)               │
 │  └──────────────┘                                                           │
-│  ┌──────────────┐   HTTPS    127.0.0.1:<port>                               │
-│  │ Language S.  │──────────▶  (spawn args pointent sur localhost:50999)     │
+│  ┌──────────────┐   HTTPS    127.0.0.1:50999                                │
+│  │ Language S.  │──────────▶  (binary patch redirige vers le proxy local)   │
 │  └──────────────┘                                                           │
 └─────────────────────────────────────────────────────────────────────────────┘
                                        │
-                    ┌──────────────────┼──────────────────┐
-                    │                                     │
-                    ▼                                     ▼
-         ┌─────────────────────┐              ┌─────────────────────┐
-         │ MITM HTTPS :443     │              │ Proxy local :50999  │
-         │ cert *.googleapis   │──────────────│ dist/proxy.js patché│
-         └─────────────────────┘   HTTP       └─────────────────────┘
-                                                           │
-                                                           ▼ HTTPS
-                                                ┌─────────────────────┐
-                                                │ Resolver public DNS │
-                                                │ 8.8.8.8 / 1.1.1.1   │
-                                                └─────────────────────┘
-                                                           │
-                                                           ▼
-                                                Google APIs réelles
+                     ┌─────────────────┼─────────────────┐
+                     │                                     │
+                     ▼                                     ▼
+          ┌─────────────────────┐              ┌─────────────────────┐
+          │ MITM HTTPS :443     │              │ Proxy local :50999  │
+          │ cert *.googleapis   │──────────────│ dist/proxy.js patché│
+          └─────────────────────┘   HTTP       └─────────────────────┘
+                                                            │
+                                                            ▼ HTTPS
+                                                 ┌─────────────────────┐
+                                                 │ Resolver public DNS │
+                                                 │ 8.8.8.8 / 1.1.1.1   │
+                                                 └─────────────────────┘
+                                                            │
+                                                            ▼
+                                                 Google APIs réelles
 ```
 
 **Pourquoi tout ça ?**
 - Antigravity est pensé pour appeler **Gemini** (Google).
 - Le patch `antigravity-add-model` intercepte les appels API et les redirige vers d'autres providers.
 - Pour intercepter le trafic, le `hosts` Windows redirige les domaines Google vers `127.0.0.1`.
-- Mais Antigravity v2.0.1 communique en **HTTPS**, donc il faut un MITM TLS sur le port 443 avec un certificat trusté.
+- Mais Antigravity communique en **HTTPS**, donc il faut un MITM TLS sur le port 443 avec un certificat trusté.
+
+**Stratégie patch — clé v2.2.x :**
+- Le projet utilise un **patch chirurgical** (`scripts/patch_2_2_1.js`) qui injecte **uniquement** les 3 modules manquants — `cryptoStore.js`, `customModelStore.js`, `schemaValidator.js` — dans l'archive `app.asar` extraite. **Aucun autre fichier** n'est touché (en particulier `dist/main.js` et `dist/preload.js` ne sont **jamais** réécrits).
+- **L'auto-update est conservé.** Après chaque mise à jour d'Antigravity, il suffit de relancer `repatch.bat` pour réappliquer le patch. Aucune manipulation de désinstallation n'est nécessaire.
+- Le `repack_safe.sh` complet (stratégie v2.0.1) est **interdit** : il écrasait `dist/main.js` et `dist/preload.js` et cassait le runtime.
 
 ---
 
@@ -66,7 +72,7 @@
 |---|---|
 | Windows | 10/11 avec WSL2 activé |
 | Node.js | Installé sur Windows **et** dans WSL (`C:\Program Files\nodejs\node.exe` et `/home/amine/.nvm/...`) |
-| Antigravity | v2.0.1 installé dans `C:\Users\amine\AppData\Local\Programs\Antigravity\` |
+| Antigravity | v2.2.x (toute version publiée via auto-update) installé dans `C:\Users\amine\AppData\Local\Programs\antigravity\` |
 | PowerShell | Pour exécuter le script admin |
 | Droits admin | Nécessaires pour lier le port 443 et importer un certificat racine |
 
@@ -80,21 +86,15 @@
 
 Copier le dossier `antigravity-add-model-main` dans `C:\Users\amine\Downloads\`.
 
-### Étape 2 — Vérifier Antigravity v2.0.1
+### Étape 2 — Vérifier Antigravity v2.2.x
 
 ```powershell
 # Vérifier la version installée
-Get-Content "C:\Users\amine\AppData\Local\Programs\Antigravity\resources\app.asar" | Select-String '"version":'
-# Doit afficher "version": "2.0.1"
+Get-Content "C:\Users\amine\AppData\Local\Programs\antigravity\resources\app.asar" | Select-String '"version":'
+# Doit afficher "version": "2.2.x"
 ```
 
-Si Antigravity a été auto-mis à jour en v2.2.1, il faut le **désinstaller** et réinstaller la v2.0.1 depuis les installers dans `Downloads\` :
-
-```powershell
-ls "C:\Users\amine\Downloads\Antigravity*.exe"
-```
-
-Le candidat le plus probable est `Antigravity (2).exe` (~166 MB).
+Toutes les versions **2.2.x** sont supportées. Si une mise à jour sort, il suffit de relancer `repatch.bat` (voir §7).
 
 ### Étape 3 — Générer les certificats
 
@@ -119,21 +119,24 @@ openssl x509 -req -in server-csr.pem -CA ca-cert.pem -CAkey ca-key.pem -CAcreate
 
 Les fichiers `ca.conf` et `server.conf` sont déjà dans `certs/`.
 
-### Étape 4 — Compiler et patcher app.asar
+### Étape 4 — Patch chirurgical de app.asar
+
+Dans WSL, depuis la racine du projet :
 
 ```bash
 cd /mnt/c/Users/amine/Downloads/antigravity-add-model-main/antigravity-add-model-main
 npm install
 npm run build
-./repack_safe.sh
+node scripts/patch_2_2_1.js
 ```
 
-`repack_safe.sh` va :
-- tuer Antigravity
-- extraire l'asar actuel
-- copier `dist/proxy.js` compilé
-- repacker l'asar
-- créer un backup `app.asar.pre-dnsfix.bak`
+`patch_2_2_1.js` va :
+- extraire l'asar actuel dans `app.asar.unpacked/`
+- injecter **uniquement** `cryptoStore.js`, `customModelStore.js`, `schemaValidator.js` dans le bundle dist
+- recréer `app.asar`
+- créer un backup `app.asar.bak`
+
+> ⚠️ **N'écrasez pas `dist/main.js` ni `dist/preload.js`.** Le patch ne touche jamais ces fichiers. Si vous utilisez un outil tiers qui remplace `dist/`, lancez d'abord `npm run build` puis réappliquez le patch chirurgical.
 
 ### Étape 5 — Configurer le hosts Windows
 
@@ -152,7 +155,7 @@ Vérifier que `C:\Windows\System32\drivers\etc\hosts` contient :
 
 ### Étape 6 — Créer le raccourci bureau
 
-Le fichier `Desktop\Start Antigravity MITM.bat` doit exister :
+Le fichier `Start Antigravity MITM.bat` doit exister à la racine du projet (et être épinglé au bureau) :
 
 ```bat
 @echo off
@@ -169,9 +172,8 @@ powershell -Command "Start-Process PowerShell -Verb RunAs -ArgumentList '-Execut
 
 ```
 [Proxy] Server listening on http://127.0.0.1:50999
-[Proxy] Loaded custom models count: 2
-[Proxy] Custom model "MiniMax M3 (Kimchi)" => ...
-[Proxy] Custom model "kimi-k2.7" => ...
+[Proxy] Loaded custom models count: <N>
+[Proxy] Custom model "<votre-model>" => ...
 ```
 
 ---
@@ -183,7 +185,7 @@ powershell -Command "Start-Process PowerShell -Verb RunAs -ArgumentList '-Execut
 **Symptôme** :
 
 ```
-SyntaxError: Unexpected token '﻿', "﻿{... is not valid JSON
+SyntaxError: Unexpected token '', "{... is not valid JSON
 [Proxy] Loaded custom models count: 0
 ```
 
@@ -325,16 +327,22 @@ text = text.replace(/https:(\/\/)cloudcode-pa\.googleapis\.com/g, `${proxyProto}
 
 | Fichier | Rôle |
 |---|---|
-| `src/proxy.ts` | Coeur du proxy. Contient le DNS bypass, l'interception `fetchAvailableModels`, le forwarding Google, la gestion des modèles custom. |
-| `dist/proxy.js` | Version compilée. C'est ce fichier qui est injecté dans `app.asar`. |
+| `src/proxy.ts` | Cœur du proxy. Contient le DNS bypass, l'interception `fetchAvailableModels`, le forwarding Google, la gestion des modèles custom. |
+| `dist/proxy.js` | Version compilée. C'est ce fichier qui est injecté dans `app.asar` via le patch chirurgical. |
+| `src/cryptoStore.ts` | Module ajouté par le patch — gère l'encryptage `safeStorage` des clés API. |
+| `src/customModelStore.ts` | Module ajouté par le patch — charge/valide `custom_models.json`. |
+| `src/schemaValidator.ts` | Module ajouté par le patch — valide la structure des modèles. |
+| `scripts/patch_2_2_1.js` | **Patcheur chirurgical** — injecte les 3 modules ci-dessus dans `app.asar`. |
+| `scripts/mitm/mitm_443.js` | Forwarder HTTPS 443 → HTTP 50999. |
+| `scripts/mitm/start_mitm_443.ps1` | Script PowerShell admin : importe la CA et lance `mitm_443.js`. |
+| `scripts/deploy/deploy.ps1` | Déploiement complet (Windows). |
+| `scripts/repack/repack.ps1` | Recompile + repack complet (utilisé en secours). |
+| `scripts/repack/repack_safe.sh` | Variante WSL safe (utilisée en secours). |
 | `certs/ca-cert.pem` | Certificat racine auto-signé. Doit être trusté dans Windows. |
 | `certs/server-cert.pem` | Certificat serveur pour `*.googleapis.com`. |
 | `certs/server-key.pem` | Clé privée du serveur MITM. |
 | `certs/ca.conf` | Config OpenSSL pour la CA. |
 | `certs/server.conf` | Config OpenSSL pour le cert serveur. |
-| `mitm_443.js` | Forwarder HTTPS 443 → HTTP 50999. |
-| `start_mitm_443.ps1` | Script PowerShell admin : importe la CA et lance `mitm_443.js`. |
-| `repack_safe.sh` | Script WSL : recompile et repack `app.asar` en toute sécurité. |
 | `ANTIGRAVITY_SETUP.md` | Ce guide. |
 
 ---
@@ -357,26 +365,44 @@ text = text.replace(/https:(\/\/)cloudcode-pa\.googleapis\.com/g, `${proxyProto}
 
 ## Recompiler / repatcher après modification du code
 
+### Après modification du code TypeScript
+
 Dans WSL :
 
 ```bash
 cd /mnt/c/Users/amine/Downloads/antigravity-add-model-main/antigravity-add-model-main
 npm run build
-./repack_safe.sh
+node scripts/patch_2_2_1.js
 ```
 
 Puis relancer Antigravity (le MITM peut rester ouvert).
+
+### Après chaque mise à jour d'Antigravity (auto-update v2.2.x → v2.2.y)
+
+Tant que la version reste **2.2.x**, il suffit de relancer le patch chirurgical :
+
+```powershell
+cd C:\Users\amine\Downloads\antigravity-add-model-main\antigravity-add-model-main
+.\repatch.bat
+```
+
+`repatch.bat` :
+1. Tue Antigravity
+2. Compile (`npm run build`)
+3. Lance `scripts/deploy/deploy.ps1` qui extrait l'asar, copie le nouveau `dist/`, et repack
+
+Si la mise à jour passe en **v2.3.x ou plus**, il faudra attendre une nouvelle version de `patch_2_2_1.js` adaptée, ou adapter le patcher à la nouvelle version.
 
 ---
 
 ## Rollback
 
-Revenir à l'asar d'origine (avant le patch DNS) :
+Revenir à l'asar d'origine (avant le patch chirurgical) :
 
 ```powershell
 Stop-Process -Name Antigravity, language_server -Force
-copy "C:\Users\amine\AppData\Local\Programs\Antigravity\resources\app.asar.pre-dnsfix.bak" `
-     "C:\Users\amine\AppData\Local\Programs\Antigravity\resources\app.asar"
+copy "C:\Users\amine\AppData\Local\Programs\antigravity\resources\app.asar.bak" `
+     "C:\Users\amine\AppData\Local\Programs\antigravity\resources\app.asar"
 ```
 
 ---
@@ -387,16 +413,17 @@ copy "C:\Users\amine\AppData\Local\Programs\Antigravity\resources\app.asar.pre-d
 |---|---|---|
 | `ECONNREFUSED 127.0.0.1:443` | MITM non démarré | Relancer `Start Antigravity MITM.bat` |
 | `certificate signed by unknown authority` | CA non trustée | Relancer `start_mitm_443.ps1` |
-| `Parse Error: Content-Length / Transfer-Encoding` | Vieux `dist/proxy.js` | `npm run build && ./repack_safe.sh` |
+| `Parse Error: Content-Length / Transfer-Encoding` | Vieux `dist/proxy.js` | `npm run build && node scripts/patch_2_2_1.js` |
 | `Loaded custom models count: 0` | `custom_models.json` invalide / BOM | Strip BOM, vérifier JSON |
-| Modèles custom absents de l'UI | Auto-update a remis v2.2.1 | Désinstaller v2.2.1, réinstaller v2.0.1, repatcher |
+| Modèles custom absents après mise à jour Antigravity | Patch pas réappliqué | Lancer `repatch.bat` |
 | MITM ne démarre pas sur 443 | Pas admin / port déjà utilisé | Vérifier UAC / tuer l'ancien MITM |
+| `connectex: No connection could be made` sur 50999 | Proxy local n'a pas démarré | Inspecter `main.log` (chercher `[Proxy]` lines); redémarrer Antigravity |
 
 ---
 
 ## Limitations
 
 - Nécessite un démarrage manuel du MITM à chaque session Windows.
-- Le certificat CA expire le **06/07/2027**.
-- Antigravity reste bloqué en v2.0.1 (l'auto-update est désactivé par le patch).
+- Le certificat CA expire **10 ans** après génération (`-days 3650`).
+- L'auto-update d'Antigravity est **conservé** : tant que la version reste 2.2.x, un simple `repatch.bat` suffit. Pour les versions 2.3.x+ il faudra une mise à jour du patcher.
 - Si Google change radicalement son API ou ses IPs anycast, le setup pourrait nécessiter un ajustement.

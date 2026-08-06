@@ -1,0 +1,199 @@
+[
+  {
+    "method": "Runtime.executionContextCreated",
+    "params": {
+      "context": {
+        "id": 4,
+        "origin": "https://127.0.0.1:59070",
+        "name": "Electron Isolated Context",
+        "uniqueId": "-6485874433252519326.-9058210161590753243",
+        "auxData": {
+          "isDefault": false,
+          "type": "isolated",
+          "frameId": "1D9495AA9C04BA58CFEEA9BBF438C788"
+        }
+      }
+    }
+  },
+  {
+    "method": "Runtime.executionContextCreated",
+    "params": {
+      "context": {
+        "id": 3,
+        "origin": "https://127.0.0.1:59070",
+        "name": "",
+        "uniqueId": "-3803059832701433309.-2035143193731767467",
+        "auxData": {
+          "isDefault": true,
+          "type": "default",
+          "frameId": "1D9495AA9C04BA58CFEEA9BBF438C788"
+        }
+      }
+    }
+  },
+  {
+    "method": "Runtime.consoleAPICalled",
+    "params": {
+      "type": "error",
+      "args": [
+        {
+          "type": "string",
+          "value": "Unable to load preload script: C:\\Users\\amine\\AppData\\Local\\Programs\\Antigravity\\resources\\app.asar\\dist\\preload.js"
+        }
+      ],
+      "executionContextId": 4,
+      "timestamp": 1784733807215.455,
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "executeSandboxedPreloadScripts",
+            "scriptId": "14",
+            "url": "node:electron/js2c/sandbox_bundle",
+            "lineNumber": 1,
+            "columnNumber": 144666
+          }
+        ]
+      }
+    }
+  },
+  {
+    "method": "Runtime.consoleAPICalled",
+    "params": {
+      "type": "error",
+      "args": [
+        {
+          "type": "object",
+          "subtype": "error",
+          "className": "Error",
+          "description": "Error: module not found: ./proxy/idGenerator\n    at preloadRequire (node:electron/js2c/sandbox_bundle:2:145068)\n    at <anonymous>:10:23\n    at runPreloadScript (node:electron/js2c/sandbox_bundle:2:145337)\n    at executeSandboxedPreloadScripts (node:electron/js2c/sandbox_bundle:2:144610)\n    at node:electron/js2c/sandbox_bundle:2:157745\n    at node:electron/js2c/sandbox_bundle:2:157947\n    at ___electron_webpack_init__ (node:electron/js2c/sandbox_bundle:2:157951)\n    at node:electron/js2c/sandbox_bundle:2:158074",
+          "objectId": "1607430115737119866.4.1"
+        }
+      ],
+      "executionContextId": 4,
+      "timestamp": 1784733807215.525,
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "executeSandboxedPreloadScripts",
+            "scriptId": "14",
+            "url": "node:electron/js2c/sandbox_bundle",
+            "lineNumber": 1,
+            "columnNumber": 144719
+          }
+        ]
+      }
+    }
+  },
+  {
+    "method": "Runtime.consoleAPICalled",
+    "params": {
+      "type": "log",
+      "args": [
+        {
+          "type": "string",
+          "value": "[AppState] connecting..."
+        }
+      ],
+      "executionContextId": 3,
+      "timestamp": 1784733812576.106,
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "console.log",
+            "scriptId": "11",
+            "url": "https://127.0.0.1:59070/main.js",
+            "lineNumber": 11215,
+            "columnNumber": 234
+          }
+        ]
+      }
+    }
+  },
+  {
+    "method": "Runtime.consoleAPICalled",
+    "params": {
+      "type": "log",
+      "args": [
+        {
+          "type": "string",
+          "value": "[TrajectorySummaries] connecting..."
+        }
+      ],
+      "executionContextId": 3,
+      "timestamp": 1784733812582.945,
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "console.log",
+            "scriptId": "11",
+            "url": "https://127.0.0.1:59070/main.js",
+            "lineNumber": 11215,
+            "columnNumber": 234
+          }
+        ]
+      }
+    }
+  },
+  {
+    "method": "Runtime.exceptionThrown",
+    "params": {
+      "timestamp": 1784733812711.425,
+      "exceptionDetails": {
+        "exceptionId": 2,
+        "text": "Uncaught (in promise)",
+        "lineNumber": 9925,
+        "columnNumber": 287,
+        "scriptId": "11",
+        "url": "https://127.0.0.1:59070/main.js",
+        "exception": {
+          "type": "object",
+          "subtype": "error",
+          "className": "Error",
+          "description": "Error: No native storage bridge found during initialization\n    at onb.init (https://127.0.0.1:59070/main.js:9926:288)\n    at znb (https://127.0.0.1:59070/main.js:9938:33)\n    at tqb (https://127.0.0.1:59070/main.js:10355:504)\n    at Qsb (https://127.0.0.1:59070/main.js:11416:38)\n    at https://127.0.0.1:59070/main.js:11430:172\n    at https://127.0.0.1:59070/main.js:11433:298",
+          "objectId": "1607430115737119866.3.1"
+        },
+        "executionContextId": 3
+      }
+    }
+  },
+  {
+    "method": "Runtime.consoleAPICalled",
+    "params": {
+      "type": "log",
+      "args": [
+        {
+          "type": "string",
+          "value": "[cdp-renderer-dump] console probe"
+        },
+        {
+          "type": "string",
+          "value": "https://127.0.0.1:59070/"
+        },
+        {
+          "type": "string",
+          "value": "complete"
+        }
+      ],
+      "executionContextId": 3,
+      "timestamp": 1784734509612.04,
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "console.log",
+            "scriptId": "11",
+            "url": "https://127.0.0.1:59070/main.js",
+            "lineNumber": 11215,
+            "columnNumber": 234
+          },
+          {
+            "functionName": "",
+            "scriptId": "35",
+            "url": "",
+            "lineNumber": 0,
+            "columnNumber": 8
+          }
+        ]
+      }
+    }
+  }
+]

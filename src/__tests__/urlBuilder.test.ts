@@ -4,8 +4,10 @@ import {
   resolveCustomModelUrl,
   resolveMaxRetries,
   resolveRequestTimeout,
+  getBaseModelId,
 } from '../proxy/urlBuilder';
 import type { CustomModel } from '../proxy/types';
+
 
 const baseModel: CustomModel = {
   name: 'gpt-4o',
@@ -189,8 +191,8 @@ describe('resolveCustomModelUrl', () => {
 });
 
 describe('resolveMaxRetries', () => {
-  it('defaults to 3 when undefined', () => {
-    expect(resolveMaxRetries(baseModel)).toBe(3);
+  it('defaults to 1 when undefined (retry-storm prevention)', () => {
+    expect(resolveMaxRetries(baseModel)).toBe(1);
   });
 
   it('uses provided value', () => {
@@ -215,19 +217,49 @@ describe('resolveMaxRetries', () => {
 });
 
 describe('resolveRequestTimeout', () => {
-  it('defaults to 120_000 ms when undefined', () => {
-    expect(resolveRequestTimeout(baseModel)).toBe(120_000);
+  it('defaults to 30_000 ms when undefined (proxy saturation guard)', () => {
+    expect(resolveRequestTimeout(baseModel)).toBe(30_000);
   });
 
   it('uses provided timeout', () => {
-    expect(resolveRequestTimeout({ ...baseModel, timeout: 30_000 })).toBe(30_000);
+    expect(resolveRequestTimeout({ ...baseModel, timeout: 60_000 })).toBe(60_000);
   });
 
   it('falls back to default when timeout is 0 (falsy)', () => {
-    expect(resolveRequestTimeout({ ...baseModel, timeout: 0 })).toBe(120_000);
+    expect(resolveRequestTimeout({ ...baseModel, timeout: 0 })).toBe(30_000);
   });
 
   it('handles large timeout values', () => {
     expect(resolveRequestTimeout({ ...baseModel, timeout: 600_000 })).toBe(600_000);
   });
 });
+
+describe('getBaseModelId', () => {
+  it('strips anchor variants starting with #', () => {
+    expect(getBaseModelId('claude-3-5-sonnet#thinking')).toBe('claude-3-5-sonnet');
+    expect(getBaseModelId('gpt-4o#flex')).toBe('gpt-4o');
+    expect(getBaseModelId('gemini-2.0-flash#search')).toBe('gemini-2.0-flash');
+  });
+
+  it('returns clean model IDs unchanged', () => {
+    expect(getBaseModelId('gpt-4o')).toBe('gpt-4o');
+    expect(getBaseModelId('claude-3-5-sonnet-20241022')).toBe('claude-3-5-sonnet-20241022');
+  });
+
+  it('handles empty string or missing input gracefully', () => {
+    expect(getBaseModelId('')).toBe('');
+  });
+});
+
+describe('useRawBaseUrl option', () => {
+  it('returns exact apiUrl as-is when useRawBaseUrl is true', () => {
+    const noopUrlBuilder = (url: string) => url;
+    const url = resolveCustomModelUrl(
+      { ...baseModel, provider: 'openai', apiUrl: 'http://localhost:1234/custom/v1/chat', useRawBaseUrl: true },
+      false,
+      noopUrlBuilder,
+    );
+    expect(url).toBe('http://localhost:1234/custom/v1/chat');
+  });
+});
+

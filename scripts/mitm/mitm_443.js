@@ -36,8 +36,34 @@ const target = new URL(PROXY_TARGET);
 /**
  * Forward a decrypted HTTP request to the local Antigravity proxy.
  * Used by the HTTPS server after TLS termination.
+ *
+ * Emits one JSON line per request on stdout so the ag-doctor UI can paint
+ * the Traffic Inspector in real time. Channel: `mitm:traffic`. Schema:
+ *   { kind: 'mitm:traffic', id, ts, method, path, targetModel,
+ *     translatedProvider, statusCode, latencyMs, source: 'mitm' }
+ * Stdout is line-buffered when piped (default for child_process.spawn),
+ * so each JSON.parse call on the consumer side gets exactly one event.
  */
 function forwardToProxy(clientReq, clientRes) {
+  const start = Date.now();
+  // Best-effort target-model + provider extraction. The Antigravity
+  // request path looks like /v1beta/models/<model>:generateContent or
+  // /v1/chat/completions etc. We extract a stable identifier so the
+  // dashboard can group calls by model without parsing the body.
+  const urlObj = new URL(clientReq.url || '/', 'http://internal');
+  const pathParts = urlObj.pathname.split('/').filter(Boolean);
+  const targetModel =
+    pathParts[0] === 'v1beta' && pathParts[1] === 'models' && pathParts[2]
+      ? pathParts[2].split(':')[0]
+      : urlObj.pathname;
+  // Provider routing: the Antigravity CLI re-routes via header `x-ag-target-provider`
+  // when it knows the upstream. Otherwise we mark it 'unknown' so the UI can
+  // still group and count, and the dashboard can refine later.
+  const translatedProvider =
+    (clientReq.headers['x-ag-target-provider'] as string | undefined) ??
+    (clientReq.headers['x-ag-provider'] as string | undefined) ??
+    'unknown';
+
   const fwdOptions = {
     hostname: target.hostname,
     port: target.port,
@@ -51,12 +77,31 @@ function forwardToProxy(clientReq, clientRes) {
   fwdOptions.headers['x-forwarded-proto'] = 'https';
 
   const proxyReq = http.request(fwdOptions, (proxyRes) => {
-    clientRes.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
+    const statusCode = proxyRes.statusCode || 200;
+    clientRes.writeHead(statusCode, proxyRes.headers);
     proxyRes.pipe(clientRes);
+    // Emit AFTER headers are flushed so latency reflects full round-trip
+    // from the client's perspective. Status + latency captured atomically.
+    emitTraffic({
+      method: clientReq.method || 'GET',
+      path: urlObj.pathname,
+      targetModel,
+      translatedProvider,
+      statusCode,
+      latencyMs: Date.now() - start,
+    });
   });
 
   proxyReq.on('error', (err) => {
     console.error('[MITM-443] Forward error:', err.message);
+    emitTraffic({
+      method: clientReq.method || 'GET',
+      path: urlObj.pathname,
+      targetModel,
+      translatedProvider,
+      statusCode: 502,
+      latencyMs: Date.now() - start,
+    });
     if (!clientRes.headersSent) {
       clientRes.writeHead(502, { 'Content-Type': 'application/json' });
       clientRes.end(JSON.stringify({ error: 'MITM forward failed: ' + err.message }));
@@ -64,6 +109,25 @@ function forwardToProxy(clientReq, clientRes) {
   });
 
   clientReq.pipe(proxyReq);
+}
+
+/**
+ * Write one structured JSON line to stdout. Errors are swallowed — the
+ * traffic log is best-effort, never blocking the actual forwarding path.
+ */
+function emitTraffic(entry) {
+  try {
+    const line = JSON.stringify({
+      kind: 'mitm:traffic',
+      id: `tr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      ts: Date.now(),
+      ...entry,
+    });
+    process.stdout.write(line + '\n');
+  } catch (err) {
+    // Stdout closed / JSON.stringify failed — ignore. Forwarding already
+    // happened by the time we got here.
+  }
 }
 
 /**

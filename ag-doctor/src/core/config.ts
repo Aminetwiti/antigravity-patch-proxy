@@ -11,7 +11,11 @@
  *   "doctorInterval": 5000,
  *   "ui": { "theme": "dark", "accent": "#22d3ee" },
  *   "history": { "maxRuns": 50 },
- *   "snapshot": { "enabled": true, "maxSnapshots": 10 }
+ *   "snapshot": { "enabled": true, "maxSnapshots": 10 },
+ *   "patch": {
+ *     "versionOverride": "2.3.0+",        // force a specific version range
+ *     "overrideReason": "auto-detect failed"  // optional, audit trail
+ *   }
  * }
  */
 import fs from 'fs';
@@ -20,6 +24,17 @@ import { getAntigravityDataDir } from './paths';
 import { getProfilePath } from './profile';
 
 export const CONFIG_FILE = 'config.json';
+
+/** Known patch version-range ids. Keep in sync with PATCH_REGISTRY in
+ *  core/version-specific-patch.ts. The values here are the `versionRange`
+ *  strings exposed to the UI; the underlying PatchDefinition lookup is done
+ *  via findPatchForVersion() with min/max semver matching. */
+export const KNOWN_PATCH_RANGES = [
+  '2.0.1 - 2.1.x',
+  '2.2.0 - 2.2.x',
+  '2.3.0+',
+] as const;
+export type KnownPatchRange = (typeof KNOWN_PATCH_RANGES)[number];
 
 export interface AgDoctorConfig {
   mitmPort: number;
@@ -35,6 +50,14 @@ export interface AgDoctorConfig {
   snapshot: {
     enabled: boolean;
     maxSnapshots: number;
+  };
+  patch: {
+    /** When set, force this patch range instead of auto-detecting. */
+    versionOverride: KnownPatchRange | null;
+    /** Optional human note explaining why the override was set. */
+    overrideReason: string | null;
+    /** ISO timestamp of when the override was set. */
+    overrideSetAt: string | null;
   };
 }
 
@@ -53,7 +76,17 @@ export const DEFAULT_CONFIG: AgDoctorConfig = {
     enabled: true,
     maxSnapshots: 10,
   },
+  patch: {
+    versionOverride: null,
+    overrideReason: null,
+    overrideSetAt: null,
+  },
 };
+
+/** Type guard for a string that is one of the known patch ranges. */
+export function isKnownPatchRange(s: unknown): s is KnownPatchRange {
+  return typeof s === 'string' && (KNOWN_PATCH_RANGES as readonly string[]).includes(s);
+}
 
 export function getConfigPath(): string {
   return getProfilePath('config');
@@ -68,6 +101,10 @@ function mergeWithDefaults(partial: Partial<AgDoctorConfig> | null | undefined):
     ui: { ...DEFAULT_CONFIG.ui, ...(partial.ui ?? {}) },
     history: { ...DEFAULT_CONFIG.history, ...(partial.history ?? {}) },
     snapshot: { ...DEFAULT_CONFIG.snapshot, ...(partial.snapshot ?? {}) },
+    patch: {
+      ...DEFAULT_CONFIG.patch,
+      ...(partial.patch ?? {}),
+    },
   };
   return merged;
 }
@@ -139,4 +176,43 @@ export function getConfigValue(path: string): unknown {
     cursor = (cursor as Record<string, unknown>)[seg];
   }
   return cursor;
+}
+
+/**
+ * Set (or clear) a manual patch version override. When set, the patch
+ * commands will use this range regardless of what `detectAntigravityVersion`
+ * reports. Pass `null` (or empty string) to clear the override and fall back
+ * to auto-detection.
+ */
+export function setPatchVersionOverride(
+  range: KnownPatchRange | null | '',
+  reason?: string,
+): AgDoctorConfig {
+  const cfg = loadConfig();
+  const next: KnownPatchRange | null =
+    range == null || range === '' ? null : isKnownPatchRange(range) ? range : null;
+  if (range != null && range !== '' && !isKnownPatchRange(range)) {
+    throw new Error(
+      `Unknown patch range "${range}". Known: ${KNOWN_PATCH_RANGES.join(', ')}`,
+    );
+  }
+  cfg.patch.versionOverride = next;
+  cfg.patch.overrideReason = next ? (reason ?? cfg.patch.overrideReason ?? null) : null;
+  cfg.patch.overrideSetAt = next ? new Date().toISOString() : null;
+  saveConfig(cfg);
+  return cfg;
+}
+
+/** Read the current patch version override (or null if not set). */
+export function getPatchVersionOverride(): {
+  range: KnownPatchRange | null;
+  reason: string | null;
+  setAt: string | null;
+} {
+  const cfg = loadConfig();
+  return {
+    range: cfg.patch?.versionOverride ?? null,
+    reason: cfg.patch?.overrideReason ?? null,
+    setAt: cfg.patch?.overrideSetAt ?? null,
+  };
 }

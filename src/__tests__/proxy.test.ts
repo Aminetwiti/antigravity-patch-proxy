@@ -1,34 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import * as path from 'path';
-import { generateModelPlaceholderId, toSlug, parseRetryAfter } from '../proxy';
 
-// We need to mock the external dependencies that proxy.ts imports at module level
 vi.mock('electron', () => ({
-  app: {
-    getPath: vi.fn((name: string) => {
-      if (name === 'home') return '/mock/home';
-      return '/mock/' + name;
-    }),
-  },
-  safeStorage: {
-    isEncryptionAvailable: vi.fn(() => false),
-    encryptString: vi.fn((s: string) => Buffer.from(s)),
-    decryptString: vi.fn((b: Buffer) => b.toString()),
-  },
+  app: { getPath: () => '/mock/home' },
 }));
 
-// Mock cryptoStore using the same path proxy.ts uses (./cryptoStore)
-// Vitest matches mocks by the resolved module path, not the specifier string
-vi.mock('./cryptoStore', () => ({
-  isEncryptionAvailable: vi.fn(() => false),
-  encryptString: vi.fn((s: string) => s),
-  decryptString: vi.fn((s: string) => s),
-  encryptModels: vi.fn((models: unknown[]) => models),
-  decryptModels: vi.fn((models: unknown[]) => models),
-  backupFile: vi.fn(),
-}));
-
-vi.mock('electron-log', () => ({
+vi.mock('electron-log/main', () => ({
   default: {
     info: vi.fn(),
     warn: vi.fn(),
@@ -37,90 +13,110 @@ vi.mock('electron-log', () => ({
   },
 }));
 
-// ─── Tests ────────────────────────────────────────────────────────────────
+import { generateModelPlaceholderId, toSlug, parseRetryAfter } from '../proxy';
 
 describe('generateModelPlaceholderId', () => {
   it('generates deterministic IDs for the same input', () => {
-    const id1 = generateModelPlaceholderId({ name: 'gpt-4o', displayName: 'GPT-4o' });
-    const id2 = generateModelPlaceholderId({ name: 'gpt-4o', displayName: 'GPT-4o' });
+    const id1 = generateModelPlaceholderId({ name: 'gpt-4o', displayName: 'GPT-4o', apiUrl: 'https://api.openai.com/v1' });
+    const id2 = generateModelPlaceholderId({ name: 'gpt-4o', displayName: 'GPT-4o', apiUrl: 'https://api.openai.com/v1' });
     expect(id1).toBe(id2);
   });
 
   it('produces IDs in the MODEL_PLACEHOLDER_M format', () => {
-    const id = generateModelPlaceholderId({ name: 'gpt-4o' });
+    const id = generateModelPlaceholderId({ name: 'gpt-4o', apiUrl: 'https://api.openai.com/v1' });
     expect(id).toMatch(/^MODEL_PLACEHOLDER_M\d+$/);
   });
 
   it('produces different IDs for different models', () => {
-    const id1 = generateModelPlaceholderId({ name: 'gpt-4o' });
-    const id2 = generateModelPlaceholderId({ name: 'claude-3-5-sonnet' });
+    const id1 = generateModelPlaceholderId({ name: 'gpt-4o', apiUrl: 'https://api.openai.com/v1' });
+    const id2 = generateModelPlaceholderId({ name: 'claude-3-5-sonnet', apiUrl: 'https://api.anthropic.com/v1' });
     expect(id1).not.toBe(id2);
   });
 
   it('uses displayName over name', () => {
-    const id1 = generateModelPlaceholderId({ name: 'models/gpt-4o', displayName: 'My GPT-4o' });
-    const id2 = generateModelPlaceholderId({ name: 'models/gpt-4o', displayName: 'Different Name' });
+    const id1 = generateModelPlaceholderId({ name: 'models/gpt-4o', displayName: 'My GPT-4o', apiUrl: 'https://api.openai.com/v1' });
+    const id2 = generateModelPlaceholderId({ name: 'models/gpt-4o', displayName: 'Different Name', apiUrl: 'https://api.openai.com/v1' });
     expect(id1).not.toBe(id2);
   });
 
   it('falls back to name when displayName is missing', () => {
-    const id = generateModelPlaceholderId({ name: 'gpt-4o' });
+    const id = generateModelPlaceholderId({ name: 'gpt-4o', apiUrl: 'https://api.openai.com/v1' });
     expect(id).toBeTruthy();
   });
 
   it('falls back to "custom-model" when both name and displayName missing', () => {
-    const id = generateModelPlaceholderId({});
+    const id = generateModelPlaceholderId({ apiUrl: 'https://api.openai.com/v1' });
     expect(id).toBeTruthy();
   });
 
   it('placeholder number is within range [400, 599]', () => {
-    const id = generateModelPlaceholderId({ name: 'gpt-4o' });
+    const id = generateModelPlaceholderId({ name: 'gpt-4o', apiUrl: 'https://api.openai.com/v1' });
     const num = parseInt(id.replace('MODEL_PLACEHOLDER_M', ''), 10);
     expect(num).toBeGreaterThanOrEqual(400);
     expect(num).toBeLessThanOrEqual(599);
   });
 
   it('lowercases the input before hashing', () => {
-    const id1 = generateModelPlaceholderId({ name: 'GPT-4O' });
-    const id2 = generateModelPlaceholderId({ name: 'gpt-4o' });
+    const id1 = generateModelPlaceholderId({ name: 'GPT-4O', apiUrl: 'https://api.openai.com/v1' });
+    const id2 = generateModelPlaceholderId({ name: 'gpt-4o', apiUrl: 'https://api.openai.com/v1' });
     expect(id1).toBe(id2);
+  });
+
+  it('produces DISTINCT ids for same name but different apiUrls (dropdown collision fix)', () => {
+    const id1 = generateModelPlaceholderId({ name: 'gpt-4o', apiUrl: 'https://api.openai.com/v1' });
+    const id2 = generateModelPlaceholderId({ name: 'gpt-4o', apiUrl: 'https://api.openai.com/v2' });
+    expect(id1).not.toBe(id2);
   });
 });
 
 describe('toSlug', () => {
+  const apiUrl = 'http://api.test';
+  const provider = 'openai';
+
   it('prefixes with "custom-"', () => {
-    const slug = toSlug({ name: 'gpt-4o' });
+    const slug = toSlug({ name: 'gpt-4o', apiUrl, provider });
     expect(slug).toMatch(/^custom-/);
   });
 
-  it('removes "models/" prefix from externalModelName', () => {
-    const slug = toSlug({ externalModelName: 'models/gpt-4o' });
-    expect(slug).toBe('custom-gpt-4o');
+  it('includes the sanitized apiUrl before the model name', () => {
+    const slug = toSlug({ name: 'gpt-4o', apiUrl, provider });
+    expect(slug).toBe('custom-openai-http-api-test-gpt-4o');
+  });
+
+  it('keeps "models/" prefix from externalModelName', () => {
+    const slug = toSlug({ externalModelName: 'models/gpt-4o', apiUrl, provider });
+    expect(slug).toBe('custom-openai-http-api-test-models-gpt-4o');
   });
 
   it('replaces non-alphanumeric chars with hyphens', () => {
-    const slug = toSlug({ name: 'GPT 4o (Latest)' });
-    expect(slug).toBe('custom-gpt-4o-latest');
+    const slug = toSlug({ name: 'GPT 4o (Latest)', apiUrl, provider });
+    expect(slug).toBe('custom-openai-http-api-test-gpt-4o-latest');
   });
 
   it('removes leading and trailing hyphens', () => {
-    const slug = toSlug({ name: '--test--' });
-    expect(slug).toBe('custom-test');
+    const slug = toSlug({ name: '--test--', apiUrl, provider });
+    expect(slug).toBe('custom-openai-http-api-test-test');
   });
 
   it('lowercases the result', () => {
-    const slug = toSlug({ name: 'GPT-4O' });
-    expect(slug).toBe('custom-gpt-4o');
+    const slug = toSlug({ name: 'GPT-4O', apiUrl, provider });
+    expect(slug).toBe('custom-openai-http-api-test-gpt-4o');
   });
 
   it('uses externalModelName over name', () => {
-    const slug = toSlug({ name: 'gpt-4o', externalModelName: 'openai/gpt-4o' });
-    expect(slug).toBe('custom-openai-gpt-4o');
+    const slug = toSlug({ name: 'gpt-4o', externalModelName: 'openai/gpt-4o', apiUrl, provider });
+    expect(slug).toBe('custom-openai-http-api-test-openai-gpt-4o');
   });
 
   it('handles OpenRouter model format (provider/model)', () => {
-    const slug = toSlug({ externalModelName: 'openai/gpt-4o' });
-    expect(slug).toBe('custom-openai-gpt-4o');
+    const slug = toSlug({ externalModelName: 'openai/gpt-4o', apiUrl, provider });
+    expect(slug).toBe('custom-openai-http-api-test-openai-gpt-4o');
+  });
+
+  it('generates distinct slugs for same name with different apiUrls', () => {
+    const slug1 = toSlug({ name: 'gpt-4o', apiUrl: 'http://a.com', provider });
+    const slug2 = toSlug({ name: 'gpt-4o', apiUrl: 'http://b.com', provider });
+    expect(slug1).not.toBe(slug2);
   });
 });
 

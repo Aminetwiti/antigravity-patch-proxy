@@ -253,7 +253,12 @@ export function mapGeminiToAnthropic(geminiBody: GeminiRequestBody, modelName: s
               else if ((p as any).fileData) { const fd = (p as any).fileData; if (fd.mimeType?.startsWith('image/')) { partsContent.push({ type: 'image', source: { type: 'url', media_type: fd.mimeType, data: fd.fileUri } }); } else { try { const url = new URL(fd.fileUri); if (url.protocol === 'file:') { const fs = require('fs'); partsContent.push({ type: 'text', text: `[File:\n${fs.readFileSync(url.pathname.replace(/^\//, '').replace(/\//g, path.sep), 'utf-8')}\n]` }); } else { partsContent.push({ type: 'text', text: `[File: ${fd.fileUri} (${fd.mimeType})]` }); } } catch { partsContent.push({ type: 'text', text: `[File: ${fd.fileUri} (${fd.mimeType})]` }); } } }
               else if ((p as any).inlineData) { const id = (p as any).inlineData; if (id.mimeType?.startsWith('image/')) { partsContent.push({ type: 'image', source: { type: 'base64', media_type: id.mimeType, data: id.data } }); } else { partsContent.push({ type: 'text', text: `[${id.mimeType}: ${id.data}]` }); } }
             }
-            content = partsContent;
+            // Preserve legacy behavior: a single plain-text part stays a string.
+            if (partsContent.length === 1 && partsContent[0].type === 'text') {
+              content = partsContent[0].text;
+            } else {
+              content = partsContent;
+            }
           }
           if (roleStr === 'system') {
             system = (system || '') + '\n' + (Array.isArray(content) ? content.map((c) => (c.type === 'text' ? c.text || '' : '')).join('\n') : content);

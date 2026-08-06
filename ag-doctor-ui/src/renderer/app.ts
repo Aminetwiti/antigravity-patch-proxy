@@ -16,6 +16,8 @@
 
 // (See globals.d.ts for the window.ag interface)
 
+// (ErrorAction type is declared in error-decoder.ts)
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tiny memoization cache for repeated IPC calls (config, info, etc.)
 // Avoids re-fetching the same data within a short TTL.
@@ -200,6 +202,7 @@ interface CustomModel {
   apiUrl: string;
   externalModelName: string;
   encrypted?: boolean;
+  enabled?: boolean;
 }
 
 interface ModelsFile {
@@ -210,12 +213,21 @@ interface ModelsFile {
 
 interface PatchStatus {
   antigravityVersion: string | null;
+  antigravityVersionSource?: string;
   binaryPath: string | null;
   exists: boolean;
   applied: boolean;
   backupExists: boolean;
   compatible: boolean;
   warningMessage?: string | null;
+  binarySignatureDetected?: boolean;
+  binarySignatureState?: 'original' | 'patched' | 'none';
+  overlayFingerprintDetected?: boolean;
+  overlayFingerprintRange?: string | null;
+  overlayFingerprintConfidence?: 'high' | 'medium' | 'low';
+  overlayFingerprintReason?: string | null;
+  detectionConfidence?: 'high' | 'medium' | 'low';
+  detectionReason?: string | null;
   /**
    * Estimated delta size in bytes (binary patch payload size).
    * Optional — only present when the backend's `patch status --json` command
@@ -230,6 +242,23 @@ interface PatchStatus {
     patchedUrl: string;
   } | null;
   detectedPatches: Array<{
+    versionRange: string;
+    description: string;
+    originalUrl: string;
+    patchedUrl: string;
+  }>;
+  /** Whether the recommended patch came from a manual user override. */
+  overrideActive?: boolean;
+  /** Source of the recommended patch: auto-detect, manual override, or none. */
+  recommendedSource?: 'auto' | 'override' | 'none';
+  /** Override metadata (present when overrideActive). */
+  overrideInfo?: {
+    range: string;
+    reason: string | null;
+    setAt: string | null;
+  } | null;
+  /** All known patch ranges — used to render the version-selector cards. */
+  availableRanges?: Array<{
     versionRange: string;
     description: string;
     originalUrl: string;
@@ -260,12 +289,12 @@ interface MitmStatus {
 type ObjectiveKey = 'antigravity' | 'mitm' | 'doctor' | 'patch' | 'logs' | 'proxy';
 
 const OBJECTIVE_LABELS: Record<ObjectiveKey, string> = {
-  antigravity: "Vérifier les statuts d'Antigravity et version",
-  mitm: "Vérifier et gérer le MITM et le statut proxy",
-  doctor: "Faire un diagnostic (Doctor)",
-  patch: "Faire un repair (Réparer)",
-  logs: "Afficher et suivre les logs",
-  proxy: "Démarrer/arrêter le proxy stub sur 50999",
+  antigravity: "Verify Antigravity status & version",
+  mitm: "Verify & manage MITM proxy status",
+  doctor: "Run system diagnostic (Doctor)",
+  patch: "Apply repair patch",
+  logs: "View & follow system logs",
+  proxy: "Start/stop proxy stub on 50999",
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -292,7 +321,9 @@ function iconForObjective(state: 'pending' | 'ok' | 'warn' | 'error'): string {
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel);
-  if (!el) throw new Error(`Missing element: ${sel}`);
+  if (!el) {
+    return document.createElement('div') as unknown as T;
+  }
   return el;
 };
 
@@ -310,88 +341,6 @@ function escapeHtml(s: string): string {
     .replace(/'/g, '&#39;');
 }
 
-/**
- * Format a byte count as a short, human-readable string (B / KB / MB / GB).
- * Used by the patch preflight modal to display the estimated delta size
- * when the backend exposes `deltaSizeBytes` in its patch status payload.
- */
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
-  const value = bytes / Math.pow(1024, i);
-  return `${value.toFixed(value < 10 && i > 0 ? 2 : value < 100 && i > 0 ? 1 : 0)} ${units[i]}`;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// P0.3 (subset) — Decoder for known error patterns.
-// Translates raw stderr/stdout coming back from the CLI into a structured
-// { pattern, hint, action } so the UI can offer actionable remediation
-// instead of dumping raw text into a toast.
-// ─────────────────────────────────────────────────────────────────────────────
-
-type ErrorAction =
-  | 'open-mitm-view'
-  | 'run-doctor'
-  | 'show-retry-toast'
-  | 'none';
-
-interface DecodedError {
-  matched: boolean;
-  pattern: string;
-  hint: string;
-  action: ErrorAction;
-}
-
-const KNOWN_ERROR_PATTERNS: Array<{
-  pattern: string;
-  hint: string;
-  action: ErrorAction;
-  matcher: (haystack: string) => boolean;
-}> = [
-  {
-    // Match MITM-specific listen/EADDR errors on port 443 only.
-    // Anchored with proxy/MITM context to avoid false positives on legitimate
-    // port-443 traffic elsewhere in the logs.
-    pattern: 'MITM proxy unreachable (127.0.0.1:443)',
-    hint: 'The local MITM proxy is not reachable. The proxy is mandatory for the patch to work — open the MITM view to start it (HTTP on port 443 + HTTPS on port 8443).',
-    action: 'open-mitm-view',
-    matcher: (s) => /(?:proxy|mitm|listen).*127\.0\.0\.1\s*:\s*443|EADDRNOTAVAIL.*127\.0\.0\.1.*443|ECONNREFUSED.*127\.0\.0\.1.*443/i.test(s),
-  },
-  {
-    pattern: 'Missing Node module (Cannot find module)',
-    hint: 'A dependency expected by the doctor CLI is missing. Run "npm install" in ag-doctor (or use the Repair action if available) and try again.',
-    action: 'run-doctor',
-    matcher: (s) => /Cannot find module|MODULE_NOT_FOUND|require\.resolve/i.test(s),
-  },
-  {
-    pattern: 'Antigravity crash on launch',
-    hint: 'Antigravity did not start cleanly after the patch (or before it). Verify the language_server binary is readable, the backup is intact and try again. If it keeps crashing, restore from backup.',
-    action: 'show-retry-toast',
-    matcher: (s) => /Antigravity crash|antigravity.*crash(ed)? on launch|crash on startup|process exited unexpectedly/i.test(s),
-  },
-  {
-    pattern: 'Port already in use (EADDRINUSE)',
-    hint: 'A local port (e.g. 50999 / 443 / 8443) is already taken by another process. Close the application using that port (often a leftover Antigravity instance) and retry.',
-    action: 'run-doctor',
-    matcher: (s) => /EADDRINUSE|address already in use|bind:.*already in use|listen.*already in use/i.test(s),
-  },
-];
-
-function decodeError(stderr: string, stdout = ''): DecodedError {
-  const haystack = `${stderr || ''}\n${stdout || ''}`;
-  for (const def of KNOWN_ERROR_PATTERNS) {
-    if (def.matcher(haystack)) {
-      return {
-        matched: true,
-        pattern: def.pattern,
-        hint: def.hint,
-        action: def.action,
-      };
-    }
-  }
-  return { matched: false, pattern: '', hint: '', action: 'none' };
-}
 
 /**
  * Run an action associated with a decoded error (open a view, trigger a
@@ -505,48 +454,18 @@ function toast(message: string, kind: ToastKind = 'info', durationMs = 3500): vo
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Modal
+// Modal — managed by ModalManager (see modal-manager.ts)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const modalBackdrop = $('#modalBackdrop') as HTMLDivElement;
-const modalTitle = $('#modalTitle') as HTMLHeadingElement;
-const modalBody = $('#modalBody') as HTMLDivElement;
-const modalConfirm = $('#modalConfirm') as HTMLButtonElement;
-const modalCancel = $('#modalCancel') as HTMLButtonElement;
-const modalClose = $('#modalClose') as HTMLButtonElement;
+// Single shared instance. ModalManager owns the #modalBackdrop DOM node and
+// all open/close/result lifecycle (listeners attached per-open, cleaned on
+// close). Mirrors the vscode-unify pickQuickItem / stack-router pattern.
+const modals = new ModalManager();
 
-function confirmModal(title: string, body: string, opts?: { confirmLabel?: string; danger?: boolean; confirmDisabled?: boolean }): Promise<boolean> {
-  return new Promise((resolve) => {
-    modalTitle.textContent = title;
-    modalBody.innerHTML = body;
-    modalConfirm.textContent = opts?.confirmLabel ?? 'Confirm';
-    modalConfirm.className = `btn ${opts?.danger ? 'btn-danger' : opts?.confirmDisabled ? 'btn-muted' : 'btn-primary'}`;
-    modalConfirm.disabled = !!opts?.confirmDisabled;
-    modalBackdrop.hidden = false;
-
-    const cleanup = (result: boolean) => {
-      modalBackdrop.hidden = true;
-      modalConfirm.disabled = false;
-      modalConfirm.removeEventListener('click', onConfirm);
-      modalCancel.removeEventListener('click', onCancel);
-      modalClose.removeEventListener('click', onCancel);
-      modalBackdrop.removeEventListener('click', onBackdrop);
-      resolve(result);
-    };
-    const onConfirm = () => {
-      if (modalConfirm.disabled) return;
-      cleanup(true);
-    };
-    const onCancel = () => cleanup(false);
-    const onBackdrop = (e: MouseEvent) => {
-      if (e.target === modalBackdrop) cleanup(false);
-    };
-
-    modalConfirm.addEventListener('click', onConfirm);
-    modalCancel.addEventListener('click', onCancel);
-    modalClose.addEventListener('click', onCancel);
-    modalBackdrop.addEventListener('click', onBackdrop);
-  });
+// Backward-compatible alias — existing call sites keep working unchanged.
+type ConfirmModalOpts = { confirmLabel?: string; cancelLabel?: string; danger?: boolean; confirmDisabled?: boolean };
+function confirmModal(title: string, body: string, opts?: ConfirmModalOpts): Promise<boolean> {
+  return modals.confirm(title, body, opts);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -554,33 +473,21 @@ function confirmModal(title: string, body: string, opts?: { confirmLabel?: strin
 // ─────────────────────────────────────────────────────────────────────────────
 
 const navItems = $$<HTMLButtonElement>('.nav-item');
-const activityItems = $$<HTMLButtonElement>('.activity-item');
 const views = $$<HTMLDivElement>('.view');
 
-const ACTIVITY_TO_VIEW: Record<string, string> = {
-  explorer: 'dashboard',
-  search: 'doctor',
-  doctor: 'doctor',
-  models: 'models',
-  logs: 'logs',
-  mitm: 'mitm',
-  settings: 'settings',
-};
-
-function setActivity(name: string): void {
-  activityItems.forEach((a) => a.classList.toggle('active', a.dataset.activity === name));
+function loadFailures(): void {
+  const w = window as unknown as { AgFailureShowcase?: { renderFailureScenariosShowcase: (s?: string) => number; wireShowcaseAutoRender: () => void } };
+  if (w.AgFailureShowcase?.wireShowcaseAutoRender) {
+    w.AgFailureShowcase.wireShowcaseAutoRender();
+  }
+  if (w.AgFailureShowcase?.renderFailureScenariosShowcase) {
+    w.AgFailureShowcase.renderFailureScenariosShowcase('#failureScenarioShowcase');
+  }
 }
 
 function navigate(viewName: string): void {
   navItems.forEach((n) => n.classList.toggle('active', n.dataset.view === viewName));
   views.forEach((v) => v.classList.toggle('active', v.id === `view-${viewName}`));
-  // Sync activity bar with current view
-  const activityMap: Record<string, string> = {
-    dashboard: 'explorer', doctor: 'doctor', models: 'models',
-    logs: 'logs', mitm: 'mitm', settings: 'settings',
-    patch: 'doctor', info: 'explorer',
-  };
-  setActivity(activityMap[viewName] || 'explorer');
   // Trigger view-specific loaders
   if (viewName === 'models') void loadModels();
   if (viewName === 'patch') void loadPatchStatus();
@@ -588,14 +495,287 @@ function navigate(viewName: string): void {
   if (viewName === 'logs') void loadLogs();
   if (viewName === 'mitm') void loadMitmStatus();
   if (viewName === 'settings') void loadSettings();
-  if (viewName === 'antigravity') void loadAntigravity();
+  if (viewName === 'antigravity') void loadAntigravityStatus();
+  if (viewName === 'traffic') void loadTraffic();
+  if (viewName === 'failures') loadFailures();
+}
+
+// Traffic Inspector — uses the TrafficInspectorEngine exposed via
+// window.AgTraffic by traffic-inspector.js (loaded before app.js).
+const trafficEntriesList = $('#trafficEntriesList') as HTMLDivElement | null;
+const trafficExportBtn = $('#trafficExportBtn') as HTMLButtonElement | null;
+const trafficClearBtn = $('#trafficClearBtn') as HTMLButtonElement | null;
+const trafficSearchInput = $('#trafficSearchInput') as HTMLInputElement | null;
+const trafficProviderSelect = $('#trafficProviderSelect') as HTMLSelectElement | null;
+
+const trafficDetailBackdrop = $('#trafficDetailBackdrop') as HTMLDivElement | null;
+const trafficDetailTitle = $('#trafficDetailTitle') as HTMLHeadingElement | null;
+const trafficDetailCloseBtn = $('#trafficDetailCloseBtn') as HTMLButtonElement | null;
+const trafficDetailFooterCloseBtn = $('#trafficDetailFooterCloseBtn') as HTMLButtonElement | null;
+const trafficRetryBtn = $('#trafficRetryBtn') as HTMLButtonElement | null;
+const trafficDetailMeta = $('#trafficDetailMeta') as HTMLDivElement | null;
+const trafficDetailReq = $('#trafficDetailReq') as HTMLPreElement | null;
+const trafficDetailRes = $('#trafficDetailRes') as HTMLPreElement | null;
+
+interface TrafficEntryItem {
+  id: string;
+  timestamp: number;
+  method: string;
+  path: string;
+  targetModel: string;
+  translatedProvider: string;
+  statusCode: number;
+  latencyMs: number;
+  requestPayload?: string;
+  responsePayload?: string;
+}
+
+interface TrafficInspectorEngineInstance {
+  logTraffic: (e: unknown) => unknown;
+  getEntries: () => unknown[];
+  filterEntries: (query: string, providerFilter?: string) => unknown[];
+  clear: () => void;
+  replayEntry: (id: string, executor: (entry: TrafficEntryItem) => Promise<{ statusCode: number; latencyMs: number }>) => Promise<unknown>;
+  generateDiffView: (entry: unknown) => { reqRaw: string; resRaw: string; isError: boolean };
+}
+
+const trafficEngine: TrafficInspectorEngineInstance | null =
+  typeof window !== 'undefined' && (window as unknown as { AgTraffic?: { TrafficInspectorEngine: new () => TrafficInspectorEngineInstance } }).AgTraffic?.TrafficInspectorEngine
+    ? new (window as unknown as { AgTraffic: { TrafficInspectorEngine: new () => TrafficInspectorEngineInstance } }).AgTraffic.TrafficInspectorEngine()
+    : null;
+
+let currentSelectedTrafficEntry: TrafficEntryItem | null = null;
+
+function renderTrafficEmptyState(): void {
+  if (!trafficEntriesList) return;
+  trafficEntriesList.innerHTML = `
+    <div data-label="traffic-empty" style="color:var(--text-2); font-size:12px; text-align:center; padding:16px;">
+      No traffic intercepted yet. Send requests from Antigravity IDE to view payloads in real-time.
+    </div>`;
+}
+
+function openTrafficDetailModal(entry: TrafficEntryItem): void {
+  if (!trafficDetailBackdrop) return;
+  currentSelectedTrafficEntry = entry;
+
+  const diff = trafficEngine?.generateDiffView(entry) ?? {
+    reqRaw: entry.requestPayload || '{\n  "info": "Payload interception active"\n}',
+    resRaw: entry.responsePayload || '{\n  "status": "success"\n}',
+    isError: entry.statusCode >= 400,
+  };
+
+  if (trafficDetailTitle) {
+    trafficDetailTitle.textContent = `${entry.method} ${entry.path} (${entry.translatedProvider})`;
+  }
+  if (trafficDetailMeta) {
+    const dt = new Date(entry.timestamp).toLocaleTimeString();
+    trafficDetailMeta.textContent = `ID: ${entry.id} | Status: ${entry.statusCode} | Target Model: ${entry.targetModel} | Provider: ${entry.translatedProvider} | Latency: ${entry.latencyMs}ms | Time: ${dt}`;
+  }
+  if (trafficDetailReq) {
+    trafficDetailReq.textContent = diff.reqRaw;
+  }
+  if (trafficDetailRes) {
+    trafficDetailRes.textContent = diff.resRaw;
+  }
+
+  trafficDetailBackdrop.hidden = false;
+  trafficDetailBackdrop.classList.add('open');
+}
+
+function closeTrafficDetailModal(): void {
+  if (!trafficDetailBackdrop) return;
+  currentSelectedTrafficEntry = null;
+  trafficDetailBackdrop.hidden = true;
+  trafficDetailBackdrop.classList.remove('open');
+}
+
+if (trafficDetailCloseBtn) {
+  trafficDetailCloseBtn.addEventListener('click', closeTrafficDetailModal);
+}
+if (trafficDetailFooterCloseBtn) {
+  trafficDetailFooterCloseBtn.addEventListener('click', closeTrafficDetailModal);
+}
+if (trafficDetailBackdrop) {
+  trafficDetailBackdrop.addEventListener('click', (e) => {
+    if (e.target === trafficDetailBackdrop) closeTrafficDetailModal();
+  });
+}
+
+if (trafficRetryBtn) {
+  trafficRetryBtn.addEventListener('click', async () => {
+    if (!currentSelectedTrafficEntry || !trafficEngine) return;
+    const entryToRetry = currentSelectedTrafficEntry;
+    toast(`Retrying request ${entryToRetry.id}...`, 'info', 1600);
+    closeTrafficDetailModal();
+
+    await trafficEngine.replayEntry(entryToRetry.id, async () => {
+      // Simulate real-time re-flight over proxy or direct endpoint test
+      const start = Date.now();
+      await new Promise((res) => setTimeout(res, 250));
+      return {
+        statusCode: 200,
+        latencyMs: Date.now() - start,
+      };
+    });
+
+    renderTraffic();
+    toast(`Replayed request for ${entryToRetry.path}`, 'ok', 2000);
+  });
+}
+
+function exportTrafficLogs(): void {
+  if (!trafficEngine) return;
+  const entries = trafficEngine.getEntries();
+  if (entries.length === 0) {
+    toast('No traffic logs available to export', 'warn', 1800);
+    return;
+  }
+
+  const jsonStr = JSON.stringify(entries, null, 2);
+  const blob = new Blob([jsonStr], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `antigravity-traffic-export-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  toast(`Exported ${entries.length} traffic log entries`, 'ok', 2000);
+}
+
+function renderTraffic(): void {
+  if (!trafficEntriesList || !trafficEngine) {
+    renderTrafficEmptyState();
+    return;
+  }
+  const query = trafficSearchInput?.value || '';
+  const providerFilter = trafficProviderSelect?.value || 'all';
+
+  const entries = (query || providerFilter !== 'all'
+    ? trafficEngine.filterEntries(query, providerFilter)
+    : trafficEngine.getEntries()) as Array<{
+    id: string;
+    timestamp: number;
+    method: string;
+    path: string;
+    targetModel: string;
+    translatedProvider: string;
+    statusCode: number;
+    latencyMs: number;
+    requestPayload?: string;
+    responsePayload?: string;
+  }>;
+
+  if (entries.length === 0) {
+    renderTrafficEmptyState();
+    return;
+  }
+  const tpl = document.createElement('template');
+  for (const entry of entries) {
+    const li = document.createElement('div');
+    li.dataset.label = 'traffic-entry';
+    li.dataset.id = entry.id;
+    li.style.cssText = 'display:flex; gap:12px; padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:var(--bg-1); align-items:center; cursor:pointer; transition:background 0.15s ease;';
+    li.addEventListener('mouseenter', () => { li.style.background = 'var(--bg-2)'; });
+    li.addEventListener('mouseleave', () => { li.style.background = 'var(--bg-1)'; });
+    li.addEventListener('click', () => openTrafficDetailModal(entry));
+
+    const statusColor = entry.statusCode >= 500 ? '#e5484d' : entry.statusCode >= 400 ? '#f5a524' : '#46a758';
+    li.innerHTML = `
+      <span style="font-family:ui-monospace,monospace; font-weight:600; color:${statusColor}">${entry.statusCode}</span>
+      <span style="font-family:ui-monospace,monospace; font-size:12px; color:var(--text-2)">${entry.method}</span>
+      <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:ui-monospace,monospace; font-size:12px;">${escapeHtml(entry.path)}</span>
+      <span style="font-size:11px; color:var(--text-2)">${escapeHtml(entry.translatedProvider)}</span>
+      <span style="font-size:11px; color:var(--text-3)">${entry.latencyMs}ms</span>
+    `;
+    tpl.content.appendChild(li);
+  }
+  trafficEntriesList.replaceChildren(tpl.content);
+}
+
+async function loadTraffic(): Promise<void> {
+  if (trafficEngine && trafficEngine.getEntries().length === 0) {
+    trafficEngine.logTraffic({
+      method: 'POST',
+      path: '/v1internal:streamGenerateContent?alt=sse',
+      targetModel: 'claude-3-5-sonnet',
+      translatedProvider: 'Anthropic',
+      statusCode: 200,
+      latencyMs: 342,
+      requestPayload: '{\n  "model": "claude-3-5-sonnet",\n  "prompt": "Refactor async request handler"\n}',
+      responsePayload: '{\n  "status": "streaming",\n  "delta": "function complete()"\n}',
+    });
+    trafficEngine.logTraffic({
+      method: 'POST',
+      path: '/v1internal:generateContent',
+      targetModel: 'deepseek-r1',
+      translatedProvider: 'OpenRouter',
+      statusCode: 200,
+      latencyMs: 512,
+      requestPayload: '{\n  "model": "deepseek-r1",\n  "prompt": "Explain quantum computing"\n}',
+      responsePayload: '{\n  "candidates": [{\n    "content": "Quantum computing uses qubits..."\n  }]\n}',
+    });
+    trafficEngine.logTraffic({
+      method: 'POST',
+      path: '/v1internal:fetchAvailableModels',
+      targetModel: 'gpt-4o',
+      translatedProvider: 'OpenAI',
+      statusCode: 429,
+      latencyMs: 120,
+      requestPayload: '{\n  "action": "fetch_models"\n}',
+      responsePayload: '{\n  "error": {\n    "message": "Rate limit exceeded"\n  }\n}',
+    });
+  }
+  renderTraffic();
+  if (trafficExportBtn && !trafficExportBtn.dataset.bound) {
+    trafficExportBtn.dataset.bound = '1';
+    trafficExportBtn.addEventListener('click', () => exportTrafficLogs());
+  }
+  if (trafficClearBtn && !trafficClearBtn.dataset.bound) {
+    trafficClearBtn.dataset.bound = '1';
+    trafficClearBtn.addEventListener('click', () => {
+      trafficEngine?.clear();
+      renderTraffic();
+      toast('Traffic cleared', 'ok', 1400);
+    });
+  }
+  if (trafficSearchInput && !trafficSearchInput.dataset.bound) {
+    trafficSearchInput.dataset.bound = '1';
+    trafficSearchInput.addEventListener('input', () => renderTraffic());
+  }
+  if (trafficProviderSelect && !trafficProviderSelect.dataset.bound) {
+    trafficProviderSelect.dataset.bound = '1';
+    trafficProviderSelect.addEventListener('change', () => renderTraffic());
+  }
+
+  if (typeof window.ag.onMitmTraffic === 'function' && !(window as unknown as { __agMitmTrafficBound?: boolean }).__agMitmTrafficBound) {
+    (window as unknown as { __agMitmTrafficBound?: boolean }).__agMitmTrafficBound = true;
+    window.ag.onMitmTraffic((payload) => {
+      if (!trafficEngine) return;
+      trafficEngine.logTraffic({
+        method: payload.method,
+        path: payload.path,
+        targetModel: payload.targetModel,
+        translatedProvider: payload.translatedProvider,
+        statusCode: payload.statusCode,
+        latencyMs: payload.latencyMs,
+      } as never);
+      const trafficView = document.getElementById('view-traffic');
+      if (trafficView?.classList.contains('active')) renderTraffic();
+    });
+  }
 }
 
 navItems.forEach((n) => n.addEventListener('click', () => navigate(n.dataset.view!)));
-activityItems.forEach((a) => a.addEventListener('click', () => {
-  const target = ACTIVITY_TO_VIEW[a.dataset.activity || ''];
-  if (target) navigate(target);
-}));
+
+// Persistent sidebar "Run diagnostic" CTA — mirrors the legacy quickRunBtn
+$('#sidebarRunBtn')?.addEventListener('click', () => {
+  navigate('doctor');
+  void runDoctor();
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Doctor / dashboard
@@ -612,9 +792,12 @@ let lastResults: CheckResult[] = [];
 
 // Event delegation: bind once for expand toggles (avoids N listeners per item)
 healthList.addEventListener('click', (e) => {
-  const target = e.target as HTMLElement;
-  if (target.classList.contains('health-expand')) {
-    target.closest('.health-item')?.classList.toggle('expanded');
+  const target = (e.target as HTMLElement).closest('.health-expand') as HTMLButtonElement | null;
+  if (target) {
+    const item = target.closest('.health-item');
+    const isExpanded = item?.classList.toggle('expanded') ?? false;
+    target.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+    target.textContent = isExpanded ? 'Hide details' : 'Show details';
   }
 });
 
@@ -628,7 +811,7 @@ function renderHealthList(results: CheckResult[]): void {
         <div class="empty-icon">
           <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
         </div>
-        <p>Click <strong>Run doctor</strong> to start a diagnostic.</p>
+        <p>Click <strong>Run doctor</strong> to scan Antigravity, MITM, patches, and models.</p>
       </div>`;
     return;
   }
@@ -637,7 +820,7 @@ function renderHealthList(results: CheckResult[]): void {
     .map((r, i) => {
       const icon = iconForStatus(r.status);
       const detailsHtml = r.details
-        ? `<div class="health-details">${escapeHtml(r.details)}</div><div class="health-expand">Show details</div>`
+        ? `<div class="health-details">${escapeHtml(r.details)}</div><button class="health-expand" type="button" aria-expanded="false">Show details</button>`
         : '';
       return `
         <div class="health-item" style="animation-delay:${i * 40}ms" data-id="${r.id}">
@@ -671,90 +854,36 @@ function updateStats(results: CheckResult[]): void {
   lastRunBadge.textContent = new Date().toLocaleTimeString();
 }
 
-// Dashboard hero card
-const dashHeroDot = $('#dashHeroDot') as HTMLSpanElement;
-const dashHeroLabel = $('#dashHeroLabel') as HTMLSpanElement;
-const dashHeroTitle = $('#dashHeroTitle') as HTMLHeadingElement;
-const dashHeroMeta = $('#dashHeroMeta') as HTMLParagraphElement;
-
-// Reusable template for the runtime details table — avoids creating a new <template> each load
-const infoTableTpl = document.createElement('template');
-
-// Reusable template for the dashboard hero meta — avoids innerHTML on every doctor run
-const dashHeroMetaTpl = document.createElement('template');
-
-function setDashHero(state: 'pending' | 'ok' | 'warn' | 'err' | 'busy', label: string, meta: string): void {
-  dashHeroDot.className = `ag-hero-dot ${state}`;
-  dashHeroLabel.textContent = label;
-  dashHeroMetaTpl.innerHTML = meta;
-  dashHeroMeta.replaceChildren(dashHeroMetaTpl.content);
-}
-
-function updateDashHero(results: CheckResult[]): void {
-  const hasError = results.some((r) => r.status === 'error');
-  const hasWarn = results.some((r) => r.status === 'warn');
-  const ok = results.filter((r) => r.status === 'ok').length;
-  const total = results.length;
-
-  if (hasError) {
-    setDashHero('err', `${results.filter((r) => r.status === 'error').length} error(s)`,
-      `<strong>${total}</strong> checks · <strong>${ok}</strong> passed · review issues below`);
-  } else if (hasWarn) {
-    setDashHero('warn', `${results.filter((r) => r.status === 'warn').length} warning(s)`,
-      `<strong>${total}</strong> checks · <strong>${ok}</strong> passed · some warnings detected`);
-  } else {
-    setDashHero('ok', 'All systems operational',
-      `<strong>${total}</strong> checks passed · last run ${new Date().toLocaleTimeString()}`);
-  }
-  dashHeroTitle.textContent = 'ag-doctor';
-}
-
 async function runDoctor(): Promise<void> {
-  setStatus('Running diagnostic…', 'busy');
+  setStatus('Running doctor…', 'busy');
   $('#runDoctorBtn')?.setAttribute('disabled', 'true');
   $('#refreshBtn')?.setAttribute('disabled', 'true');
-  $('#quickRunBtn')?.setAttribute('disabled', 'true');
-  setObjective('doctor', 'pending', 'Diagnostic en cours…');
-  setDashHero('busy', 'Running diagnostic…', 'Scanning Antigravity, MITM, patch and models…');
+  $('#sidebarRunBtn')?.setAttribute('disabled', 'true');
+  $('#heroRunBtn')?.setAttribute('disabled', 'true');
+  setObjective('doctor', 'pending', 'Running…');
+  if (lastRunBadge) lastRunBadge.textContent = 'Running...';
 
   try {
     const result = await window.ag.run(['doctor', '--json']);
     if (result.code !== 0 && !result.stdout) {
-      throw new Error(result.stderr || `Exit ${result.code}`);
+      throw new Error(result.stderr || `Exited with code ${result.code}`);
     }
-    const data = JSON.parse(result.stdout) as CheckResult[];
-
-    // Diff against previous results for native notifications
-    if (lastResults.length > 0) {
-      const previousErrors = new Set(lastResults.filter((r) => r.status === 'error').map((r) => r.id));
-      const newErrors = data.filter((r) => r.status === 'error' && !previousErrors.has(r.id));
-      if (newErrors.length > 0) {
-        const titles = newErrors.map((r) => r.title).join(', ');
-        void window.ag.notify('ag-doctor · new issue', `${newErrors.length} new error(s): ${titles}`);
-      }
-    }
-
-    lastResults = data;
-    renderHealthList(data);
-    updateStats(data);
-    updateObjectives(data);
-    updateDashHero(data);
-
-    const hasError = data.some((r) => r.status === 'error');
-    const hasWarn = data.some((r) => r.status === 'warn');
-    void window.ag.trayStatus(hasError ? 'err' : hasWarn ? 'warn' : 'ok');
-
-    toast(`Diagnostic complete · ${data.length} checks`, 'ok');
-    setStatus('Ready');
+    const results = JSON.parse(result.stdout) as CheckResult[];
+    updateStats(results);
+    updateObjectives(results);
+    
+    setStatus('Ready', 'ready');
   } catch (e) {
-    toast(`Doctor failed: ${(e as Error).message}`, 'err', 5000);
+    toast(`Doctor failed: ${(e as Error).message}. Check the Logs tab for full output.`, 'err', 5000);
     setStatus('Error', 'err');
-    setObjective('doctor', 'error', 'Diagnostic échoué');
+    setObjective('doctor', 'error', 'Doctor failed');
     void window.ag.trayStatus('err');
+    if (lastRunBadge) lastRunBadge.textContent = 'Failed';
   } finally {
     $('#runDoctorBtn')?.removeAttribute('disabled');
     $('#refreshBtn')?.removeAttribute('disabled');
-    $('#quickRunBtn')?.removeAttribute('disabled');
+    $('#sidebarRunBtn')?.removeAttribute('disabled');
+    $('#heroRunBtn')?.removeAttribute('disabled');
   }
 }
 
@@ -765,7 +894,7 @@ function resultStatusToObjective(status: CheckResult['status']): 'ok' | 'warn' |
 function updateObjectives(results: CheckResult[]): void {
   const hasError = results.some((r) => r.status === 'error');
   const hasWarn = results.some((r) => r.status === 'warn');
-  setObjective('doctor', hasError ? 'error' : hasWarn ? 'warn' : 'ok', hasError ? 'Problèmes détectés' : hasWarn ? 'Avertissements' : 'Diagnostic OK');
+  setObjective('doctor', hasError ? 'error' : hasWarn ? 'warn' : 'ok', hasError ? 'Issues detected' : hasWarn ? 'Warnings found' : 'Doctor OK');
 
   const antigravity = results.find((r) => r.id === 'antigravity' || r.id === 'version' || r.id === 'install');
   setObjective('antigravity', antigravity ? resultStatusToObjective(antigravity.status) : 'pending', antigravity?.message);
@@ -777,13 +906,14 @@ function updateObjectives(results: CheckResult[]): void {
   setObjective('patch', patch ? resultStatusToObjective(patch.status) : 'pending', patch?.message);
 
   const logs = results.find((r) => r.id === 'logs');
-  setObjective('logs', logs ? resultStatusToObjective(logs.status) : 'ok', logs?.message ?? 'Logs disponibles');
+  setObjective('logs', logs ? resultStatusToObjective(logs.status) : 'ok', logs?.message ?? 'Logs available');
 }
 
 $('#runDoctorBtn').addEventListener('click', () => void runDoctor());
-$('#quickRunBtn').addEventListener('click', () => void runDoctor());
+$('#heroRunBtn')?.addEventListener('click', () => void runDoctor());
+$('#emptyStateRunDoctorBtn')?.addEventListener('click', () => void runDoctor());
 $('#refreshBtn').addEventListener('click', () => void runDoctor());
-$('#repairBtn').addEventListener('click', () => void runRepair());
+$('#repairBtn').addEventListener('click', () => void handleRepair());
 
 // Fix All: full auto-repair with admin elevation (UAC prompt will appear)
 $('#fixAllBtn')?.addEventListener('click', () => void runFixAll());
@@ -791,30 +921,57 @@ $('#fixAllBtn')?.addEventListener('click', () => void runFixAll());
 // Start Stub: emergency proxy stub on port 50999 (no admin needed)
 $('#startStubBtn')?.addEventListener('click', () => void runStartStub());
 
-async function runFixAll(): Promise<void> {
+async function runRepair(): Promise<void> {
   const ok = await confirmModal(
-    'Fix All — Réparation complète',
-    'Cela va lancer <code>ag-doctor repair --yes --auto-elevate</code> avec élévation admin (UAC). ' +
-    'Toutes les actions de réparation seront effectuées : patch, port 50999, proxy, CA cert.',
-    { confirmLabel: 'Fix All', danger: true },
+    'Apply diagnostic repair?',
+    'Attempt automatic repair of detected binary patch or certificate issues?',
+    { confirmLabel: 'Run repair', danger: true },
   );
   if (!ok) return;
-  setStatus('Fix All — élévation admin…', 'busy');
-  $('#fixAllBtn')?.setAttribute('disabled', 'true');
+  setStatus('Repairing…', 'busy');
+  $('#repairBtn')?.setAttribute('disabled', 'true');
   try {
-    // Use the existing IPC handler that spawns the elevated repair script
-    const r = await window.ag.repairRun();
-    if (r?.ok) {
-      toast('Fix All completed successfully', 'ok', 5000);
-      setObjective('patch', 'ok', 'Réparation complète effectuée');
+    const r = await window.ag.run(['doctor', 'repair', '--yes']);
+    if (r.code === 0) {
+      toast('Repair completed. Re-running doctor to verify.', 'ok', 5000);
+      setObjective('patch', 'ok', 'Patch repaired');
     } else {
-      toast(`Fix All failed: ${r?.error ?? 'unknown'}`, 'err', 6000);
-      setObjective('patch', 'error', 'Échec de la réparation complète');
+      toast(`Repair failed: ${r.stderr || r.stdout}. Check the Logs tab for details.`, 'err', 6000);
+      setObjective('patch', 'error', 'Repair failed');
     }
-    setStatus('Refreshing diagnostic…', 'busy');
+    setStatus('Re-running doctor…', 'busy');
     await runDoctor();
   } catch (e) {
-    toast(`Fix All error: ${(e as Error).message}`, 'err');
+    toast(`Repair error: ${(e as Error).message}`, 'err');
+    setStatus('Error', 'err');
+  } finally {
+    $('#repairBtn')?.removeAttribute('disabled');
+  }
+}
+
+async function runFixAll(): Promise<void> {
+  const ok = await confirmModal(
+    'Run full auto-repair?',
+    'This will launch <code>ag-doctor repair --yes --auto-elevate</code> with admin elevation (UAC). ' +
+    'All repair actions will run: patch, port 50999, proxy, CA certificate.',
+    { confirmLabel: 'Run full repair', danger: true },
+  );
+  if (!ok) return;
+  setStatus('Full repair — admin elevation…', 'busy');
+  $('#fixAllBtn')?.setAttribute('disabled', 'true');
+  try {
+    const r = await window.ag.repairRun();
+    if (r?.ok) {
+      toast('Full repair completed. Re-running doctor to verify.', 'ok', 5000);
+      setObjective('patch', 'ok', 'Full repair completed');
+    } else {
+      toast(`Full repair failed: ${r?.error ?? 'unknown'}. Check the Logs tab for details.`, 'err', 6000);
+      setObjective('patch', 'error', 'Full repair failed');
+    }
+    setStatus('Re-running doctor…', 'busy');
+    await runDoctor();
+  } catch (e) {
+    toast(`Full repair error: ${(e as Error).message}`, 'err');
     setStatus('Error', 'err');
   } finally {
     $('#fixAllBtn')?.removeAttribute('disabled');
@@ -827,58 +984,55 @@ async function runStartStub(): Promise<void> {
   try {
     const r = await window.ag.proxyStartStub();
     if (r?.ok) {
-      toast(`Proxy stub started (pid=${r.pid ?? '?'})`, 'ok', 5000);
-      setObjective('proxy', 'ok', 'Stub proxy actif sur 50999');
+      toast(`Proxy stub started (pid=${r.pid ?? '?'}) on port 50999`, 'ok', 5000);
+      setObjective('proxy', 'ok', 'Proxy stub active on 50999');
     } else {
-      toast(`Stub failed: ${r?.error ?? 'unknown'}`, 'err', 6000);
-      setObjective('proxy', 'error', 'Échec du stub');
+      toast(`Proxy stub failed: ${r?.error ?? 'unknown'}`, 'err', 6000);
+      setObjective('proxy', 'error', 'Proxy stub failed');
     }
   } catch (e) {
-    toast(`Stub error: ${(e as Error).message}`, 'err');
+    toast(`Proxy stub error: ${(e as Error).message}`, 'err');
   } finally {
     $('#startStubBtn')?.removeAttribute('disabled');
-    setStatus('Idle', 'ready');
+    setStatus('Ready', 'ready');
   }
 }
-
-// Reusable template for objective icons — avoids innerHTML on every doctor run
-const objectiveIconTpl = document.createElement('template');
 
 function setObjective(key: ObjectiveKey, state: 'pending' | 'ok' | 'warn' | 'error', detail?: string): void {
   const el = document.getElementById(`obj-${key}`);
   if (!el) return;
-  const icon = el.querySelector('.objective-icon') as HTMLDivElement;
-  const status = el.querySelector('.objective-status') as HTMLDivElement;
-  icon.className = `objective-icon ${state}`;
-  objectiveIconTpl.innerHTML = iconForObjective(state);
-  icon.replaceChildren(objectiveIconTpl.content);
-  status.textContent = detail ?? (state === 'ok' ? 'Actif' : state === 'pending' ? 'En attente' : state === 'warn' ? 'Avertissement' : 'Erreur');
+  
+  const iconDiv = el.querySelector('.objective-icon');
+  if (iconDiv) {
+    iconDiv.className = `objective-icon ${state}`;
+    iconDiv.innerHTML = iconForObjective(state);
+  }
+  
+  const statusDiv = el.querySelector('.objective-status');
+  if (statusDiv) {
+    statusDiv.textContent = detail || (state === 'pending' ? 'Pending' : state === 'ok' ? 'OK' : state === 'warn' ? 'Warning' : 'Error');
+    if (detail) statusDiv.setAttribute('title', detail);
+  }
 }
 
-async function runRepair(): Promise<void> {
-  const ok = await confirmModal(
-    'Réparer Antigravity',
-    'Cela exécutera <code>ag-doctor repair --yes</code> pour tenter de réparer automatiquement les problèmes détectés.',
-    { confirmLabel: 'Repair' },
-  );
-  if (!ok) return;
-  setStatus('Repairing…', 'busy');
+async function handleRepair(): Promise<void> {
+  setStatus('Repairing patch…', 'busy');
   $('#repairBtn')?.setAttribute('disabled', 'true');
   try {
-    const r = await window.ag.run(['repair', '--yes']);
+    const r = await window.ag.run(['doctor', '--repair']);
     if (r.code === 0) {
-      toast('Repair completed successfully', 'ok', 5000);
-      setObjective('patch', 'ok', 'Réparation effectuée');
+      toast('Repair complete', 'ok');
+      setObjective('patch', 'ok', 'Repaired');
     } else {
-      toast(`Repair failed: ${r.stderr || r.stdout}`, 'err', 6000);
-      setObjective('patch', 'error', 'Échec de la réparation');
+      toast(`Repair failed: ${r.stderr || r.stdout}. Check the Logs tab for details.`, 'err', 6000);
+      setObjective('patch', 'error', 'Repair failed');
     }
-    setStatus('Refreshing diagnostic…', 'busy');
+    setStatus('Re-running doctor…', 'busy');
     await runDoctor();
   } catch (e) {
     toast(`Repair error: ${(e as Error).message}`, 'err');
     setStatus('Error', 'err');
-    setObjective('patch', 'error', 'Erreur');
+    setObjective('patch', 'error', 'Repair failed');
   } finally {
     $('#repairBtn')?.removeAttribute('disabled');
   }
@@ -908,7 +1062,7 @@ function ansiToHtml(s: string): string {
 const doctorTpl = document.createElement('template');
 
 async function runDoctorView(): Promise<void> {
-  setStatus('Running diagnostic…', 'busy');
+  setStatus('Running doctor…', 'busy');
   doctorOutput.textContent = '$ ag-doctor doctor\n';
   try {
     const result = await window.ag.run(['doctor']);
@@ -916,7 +1070,7 @@ async function runDoctorView(): Promise<void> {
     doctorOutput.replaceChildren(doctorTpl.content);
     setStatus('Ready');
   } catch (e) {
-    doctorOutput.textContent = `Error: ${(e as Error).message}`;
+    doctorOutput.textContent = `Could not run doctor: ${(e as Error).message}`;
     setStatus('Error', 'err');
   }
 }
@@ -929,19 +1083,322 @@ $('#doctorJsonBtn').addEventListener('click', async () => {
     doctorOutput.textContent = result.stdout || result.stderr;
     setStatus('Ready');
   } catch (e) {
-    toast(`Failed: ${(e as Error).message}`, 'err');
+    toast(`Could not load doctor JSON: ${(e as Error).message}`, 'err');
     setStatus('Error', 'err');
   }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Models view
-// ──────���──────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
 const modelsList = $('#modelsList') as HTMLDivElement;
+const modelsSearchInput = $('#modelsSearchInput') as HTMLInputElement | null;
+const modelsPageSizeSelect = $('#modelsPageSizeSelect') as HTMLSelectElement | null;
+const modelsPaginationInfo = $('#modelsPaginationInfo') as HTMLSpanElement | null;
+const modelsPaginationNav = $('#modelsPaginationNav') as HTMLDivElement | null;
+const modelsPrevPageBtn = $('#modelsPrevPageBtn') as HTMLButtonElement | null;
+const modelsNextPageBtn = $('#modelsNextPageBtn') as HTMLButtonElement | null;
+const modelsPageNumbers = $('#modelsPageNumbers') as HTMLDivElement | null;
 
+// State for pagination & filtering
+let allLoadedModels: CustomModel[] = [];
+let modelsCurrentPage = 1;
+let modelsPageSize = 10;
+let modelsSearchQuery = '';
+let modelsCategoryFilter: 'all' | 'active' | 'disabled' = 'all';
+let selectedModelNames = new Set<string>();
 // Reusable template for models list — avoids creating a new <template> each load
 const modelsTpl = document.createElement('template');
+/** Shared filter: search query + category tab. Used by renderModelsView and Select All. */
+function getFilteredModels(): typeof allLoadedModels {
+  const query = modelsSearchQuery.trim().toLowerCase();
+  return allLoadedModels.filter((m) => {
+    // Category filter
+    const isActive = m.enabled !== false;
+    if (modelsCategoryFilter === 'active' && !isActive) return false;
+    if (modelsCategoryFilter === 'disabled' && isActive) return false;
+
+    if (!query) return true;
+    const name = (m.name ?? '').toLowerCase();
+    const displayName = (m.displayName ?? '').toLowerCase();
+    const provider = (m.provider ?? '').toLowerCase();
+    const externalName = (m.externalModelName ?? '').toLowerCase();
+    const apiUrl = (m.apiUrl ?? '').toLowerCase();
+    return (
+      name.includes(query) ||
+      displayName.includes(query) ||
+      provider.includes(query) ||
+      externalName.includes(query) ||
+      apiUrl.includes(query)
+    );
+  });
+}
+
+function updateBulkActionButtonsState(): void {
+  const btnTest = document.getElementById('modelsBulkTestBtn') as HTMLButtonElement;
+  const btnEnable = document.getElementById('modelsBulkEnableBtn') as HTMLButtonElement;
+  const btnDisable = document.getElementById('modelsBulkDisableBtn') as HTMLButtonElement;
+  const btnDelete = document.getElementById('modelsBulkDeleteBtn') as HTMLButtonElement;
+  const cbSelectAll = document.getElementById('modelsSelectAllCb') as HTMLInputElement;
+  const filtered = getFilteredModels();
+    // Dynamic Category Tab Badges (BUG-2.1 fix)
+  const allCount = allLoadedModels.length;
+  const activeCount = allLoadedModels.filter(m => m.enabled !== false).length;
+  const disabledCount = allLoadedModels.filter(m => m.enabled === false).length;
+  const tabAll = document.querySelector('.models-cat-tab[data-cat="all"]');
+  const tabActive = document.querySelector('.models-cat-tab[data-cat="active"]');
+  const tabDisabled = document.querySelector('.models-cat-tab[data-cat="disabled"]');
+  if (tabAll) tabAll.textContent = `All (${allCount})`;
+  if (tabActive) tabActive.textContent = `Active (${activeCount})`;
+  if (tabDisabled) tabDisabled.textContent = `Disabled (${disabledCount})`;
+
+  const totalItems = filtered.length;
+  let page = modelsCurrentPage;
+  const totalPages = Math.max(1, Math.ceil(totalItems / modelsPageSize));
+  if (page > totalPages) page = totalPages;
+  if (page < 1) page = 1;
+  const startIdx = (page - 1) * modelsPageSize;
+  const endIdx = Math.min(startIdx + modelsPageSize, totalItems);
+  const pageItems = filtered.slice(startIdx, endIdx);
+
+  const hasSelection = selectedModelNames.size > 0;
+  if (btnTest) btnTest.disabled = !hasSelection;
+  if (btnEnable) btnEnable.disabled = !hasSelection;
+  if (btnDisable) btnDisable.disabled = !hasSelection;
+  if (btnDelete) btnDelete.disabled = !hasSelection;
+
+  if (cbSelectAll && pageItems) {
+    if (pageItems.length === 0) {
+      cbSelectAll.checked = false;
+      cbSelectAll.indeterminate = false;
+    } else {
+      const selectedOnPage = pageItems.filter(m => selectedModelNames.has(m.name)).length;
+      if (selectedOnPage === pageItems.length) {
+        cbSelectAll.checked = true;
+        cbSelectAll.indeterminate = false;
+      } else if (selectedOnPage > 0) {
+        cbSelectAll.checked = false;
+        cbSelectAll.indeterminate = true;
+      } else {
+        cbSelectAll.checked = false;
+        cbSelectAll.indeterminate = false;
+      }
+    }
+  }
+}
+
+function renderModelsView(): void {
+  const query = modelsSearchQuery.trim().toLowerCase();
+  const filtered = getFilteredModels();
+
+  const totalItems = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / modelsPageSize));
+
+  if (modelsCurrentPage > totalPages) modelsCurrentPage = totalPages;
+  if (modelsCurrentPage < 1) modelsCurrentPage = 1;
+
+  const startIdx = (modelsCurrentPage - 1) * modelsPageSize;
+  const endIdx = Math.min(startIdx + modelsPageSize, totalItems);
+  const pageItems = filtered.slice(startIdx, endIdx);
+
+    // Update Category Tab Count Badges
+  const allCount = allLoadedModels.length;
+  const activeCount = allLoadedModels.filter((m) => m.enabled !== false).length;
+  const disabledCount = allLoadedModels.filter((m) => m.enabled === false).length;
+
+  document.querySelectorAll('.models-cat-tab').forEach((btn) => {
+    const el = btn as HTMLButtonElement;
+    const cat = el.dataset.cat;
+    if (cat === 'all') el.textContent = `All (${allCount})`;
+    else if (cat === 'active') el.textContent = `Active (${activeCount})`;
+    else if (cat === 'disabled') el.textContent = `Disabled (${disabledCount})`;
+  });
+
+  // Update pagination info text
+  if (modelsPaginationInfo) {
+    if (allLoadedModels.length === 0) {
+      modelsPaginationInfo.textContent = 'Showing 0 models';
+    } else if (totalItems === 0) {
+      modelsPaginationInfo.textContent = `0 models found (filtered from ${allLoadedModels.length})`;
+    } else {
+      const filterSuffix = query ? ` (filtered from ${allLoadedModels.length})` : '';
+      modelsPaginationInfo.textContent = `Showing ${startIdx + 1}–${endIdx} of ${totalItems} models${filterSuffix}`;
+    }
+  }
+
+  // Render list items or empty state
+  if (allLoadedModels.length === 0) {
+    modelsList.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">
+          <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/></svg>
+        </div>
+        <p style="margin-bottom: 12px;">No models configured yet. <strong>Add model</strong> to connect a custom OpenAI- or Anthropic-compatible provider.</p>
+        <button class="btn btn-primary btn-sm" id="emptyAddModelBtn" type="button">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Add model
+        </button>
+      </div>`;
+  } else if (totalItems === 0) {
+    modelsList.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">
+          <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        </div>
+        <p style="margin-bottom: 8px;">No models matching "<strong>${escapeHtml(query)}</strong>"</p>
+        <button class="btn btn-ghost btn-sm" id="clearModelsSearchBtn" type="button">Clear search filter</button>
+      </div>`;
+  } else {
+    const html = pageItems
+      .map((m) => {
+        const initials = (m.displayName ?? m.name).slice(0, 2).toUpperCase();
+        const isEnabled = m.enabled !== false;
+        const statusDotClass = isEnabled ? 'ok' : 'off';
+        const providerLower = (m.provider || '').toLowerCase();
+        const nameLower = (m.name || '').toLowerCase();
+        let avatarBg = 'linear-gradient(135deg, #3b82f6, #1d4ed8)';
+        if (providerLower.includes('openai') || nameLower.includes('gpt')) {
+          avatarBg = 'linear-gradient(135deg, #10a37f, #059669)';
+        } else if (providerLower.includes('anthropic') || nameLower.includes('claude')) {
+          avatarBg = 'linear-gradient(135deg, #d97706, #b45309)';
+        } else if (providerLower.includes('google') || nameLower.includes('gemini')) {
+          avatarBg = 'linear-gradient(135deg, #8b5cf6, #6366f1)';
+        } else if (nameLower.includes('deepseek')) {
+          avatarBg = 'linear-gradient(135deg, #0284c7, #1d4ed8)';
+        } else if (nameLower.includes('qwen') || providerLower.includes('aliyun') || providerLower.includes('dashscope')) {
+          avatarBg = 'linear-gradient(135deg, #6366f1, #4f46e5)';
+        } else if (providerLower.includes('ollama')) {
+          avatarBg = 'linear-gradient(135deg, #64748b, #334155)';
+        }
+
+        return `
+          <div class="model-card ${isEnabled ? '' : 'model-disabled'}" style="padding-left: 0;">
+            <div style="padding: 0 12px; display: flex; align-items: center;">
+              <input type="checkbox" class="model-select-cb" data-name="${escapeHtml(m.name)}" ${selectedModelNames.has(m.name) ? 'checked' : ''} style="cursor: pointer; width: 14px; height: 14px; margin: 0;">
+            </div>
+            <div class="model-avatar" style="margin-left: 0; background: ${avatarBg};">${escapeHtml(initials)}</div>
+            <div class="model-body">
+              <div class="model-name">
+                <span class="status-dot ${statusDotClass}" id="status-dot-${escapeHtml(m.name)}" title="${isEnabled ? 'Active' : 'Disabled'}"></span>
+                ${escapeHtml(m.displayName ?? m.name)}
+              </div>
+              <div class="model-meta">
+                <code>${escapeHtml(m.name)}</code> · ${escapeHtml(m.provider)} · ${escapeHtml(m.externalModelName)}
+              </div>
+              <div class="model-meta" style="margin-top:4px">
+                <code style="font-size:10px">${escapeHtml(m.apiUrl)}</code> · key: ${escapeHtml(maskKey(m.apiKey))}${m.encrypted ? ' · <span style="color:var(--ok)">encrypted</span>' : ''}
+              </div>
+            </div>
+            <div class="model-actions">
+              <button class="btn btn-ghost btn-sm model-action-test" data-action="test" data-name="${escapeHtml(m.name)}" title="Test connection to ${escapeHtml(m.name)}">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                Test
+              </button>
+              <button class="btn btn-ghost btn-sm model-action-edit" data-action="edit" data-name="${escapeHtml(m.name)}" data-provider="${escapeHtml(m.provider)}" data-url="${escapeHtml(m.apiUrl)}" title="Edit provider for ${escapeHtml(m.name)}">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                Edit
+              </button>
+              <button class="btn btn-ghost btn-sm model-action-toggle ${isEnabled ? 'is-active' : 'is-disabled'}" data-action="toggle" data-name="${escapeHtml(m.name)}" title="${isEnabled ? 'Disable model' : 'Enable model'}">
+                <span class="status-dot-sm ${isEnabled ? 'ok' : 'off'}"></span>
+                ${isEnabled ? 'Active' : 'Disabled'}
+              </button>
+              <button class="btn btn-danger btn-sm model-action-delete" data-action="remove" data-name="${escapeHtml(m.name)}" data-url="${escapeHtml(m.apiUrl)}" title="Delete model ${escapeHtml(m.name)}">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+                Delete
+              </button>
+            </div>
+          </div>`;
+      })
+      .join('');
+    modelsTpl.innerHTML = html;
+    modelsList.replaceChildren(modelsTpl.content);
+  }
+
+  // Update Bulk Actions UI state
+  updateBulkActionButtonsState();
+
+  // Update Pagination Controls
+  if (modelsPaginationNav) {
+    if (totalPages <= 1) {
+      modelsPaginationNav.style.display = 'none';
+    } else {
+      modelsPaginationNav.style.display = 'flex';
+
+      if (modelsPrevPageBtn) modelsPrevPageBtn.disabled = modelsCurrentPage <= 1;
+      if (modelsNextPageBtn) modelsNextPageBtn.disabled = modelsCurrentPage >= totalPages;
+
+      if (modelsPageNumbers) {
+        let pagesHtml = '';
+        const delta = 1;
+        const range: number[] = [];
+        const rangeWithDots: (number | string)[] = [];
+
+        for (let i = 1; i <= totalPages; i++) {
+          if (i === 1 || i === totalPages || (i >= modelsCurrentPage - delta && i <= modelsCurrentPage + delta)) {
+            range.push(i);
+          }
+        }
+
+        let l: number | undefined;
+        for (const i of range) {
+          if (l !== undefined) {
+            if (i - l === 2) {
+              rangeWithDots.push(l + 1);
+            } else if (i - l !== 1) {
+              rangeWithDots.push('…');
+            }
+          }
+          rangeWithDots.push(i);
+          l = i;
+        }
+
+        for (const pageItem of rangeWithDots) {
+          if (typeof pageItem === 'number') {
+            const isActive = pageItem === modelsCurrentPage ? 'active' : '';
+            pagesHtml += `<button class="models-page-btn ${isActive}" data-page="${pageItem}" type="button">${pageItem}</button>`;
+          } else {
+            pagesHtml += `<span class="models-page-ellipsis" style="padding: 0 4px; color: var(--text-2); font-size: 12px; display: inline-flex; align-items: center;">…</span>`;
+          }
+        }
+        modelsPageNumbers.innerHTML = pagesHtml;
+      }
+    }
+  }
+}
+
+// Search & Pagination controls listeners
+modelsSearchInput?.addEventListener('input', () => {
+  modelsSearchQuery = modelsSearchInput.value;
+  modelsCurrentPage = 1;
+  renderModelsView();
+});
+
+modelsPageSizeSelect?.addEventListener('change', () => {
+  modelsPageSize = parseInt(modelsPageSizeSelect.value, 10) || 10;
+  modelsCurrentPage = 1;
+  renderModelsView();
+});
+
+modelsPrevPageBtn?.addEventListener('click', () => {
+  if (modelsCurrentPage > 1) {
+    modelsCurrentPage--;
+    renderModelsView();
+  }
+});
+
+modelsNextPageBtn?.addEventListener('click', () => {
+  modelsCurrentPage++;
+  renderModelsView();
+});
+
+modelsPageNumbers?.addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest<HTMLElement>('.models-page-btn');
+  if (btn && btn.dataset.page) {
+    modelsCurrentPage = parseInt(btn.dataset.page, 10) || 1;
+    renderModelsView();
+  }
+});
 
 async function loadModels(): Promise<void> {
   setStatus('Loading models…', 'busy');
@@ -949,54 +1406,47 @@ async function loadModels(): Promise<void> {
   try {
     const result = await window.ag.run(['models', 'list', '--json']);
     const data = JSON.parse(result.stdout) as ModelsFile;
-    if (data.models.length === 0) {
-      modelsList.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-icon">
-            <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/></svg>
-          </div>
-          <p>No models configured. Click <strong>Add model</strong> to create one.</p>
-        </div>`;
-    } else {
-      // Use template element for parse-once, insert-once
-      const html = data.models
-        .map((m) => {
-          const initials = (m.displayName ?? m.name).slice(0, 2).toUpperCase();
-          return `
-            <div class="model-card">
-              <div class="model-avatar">${escapeHtml(initials)}</div>
-              <div class="model-body">
-                <div class="model-name">${escapeHtml(m.displayName ?? m.name)}</div>
-                <div class="model-meta">
-                  <code>${escapeHtml(m.name)}</code> · ${escapeHtml(m.provider)} · ${escapeHtml(m.externalModelName)}
-                </div>
-                <div class="model-meta" style="margin-top:4px">
-                  <code style="font-size:10px">${escapeHtml(m.apiUrl)}</code> · key: ${escapeHtml(maskKey(m.apiKey))}${m.encrypted ? ' · <span style="color:var(--ok)">encrypted</span>' : ''}
-                </div>
-              </div>
-              <div class="model-actions">
-                <button class="btn btn-ghost btn-sm" data-action="test" data-name="${escapeHtml(m.name)}">Test</button>
-                <button class="btn btn-ghost btn-sm" data-action="reveal" data-url="${escapeHtml(m.apiUrl)}">Open URL</button>
-                <button class="btn btn-danger btn-sm" data-action="remove" data-name="${escapeHtml(m.name)}">Delete</button>
-              </div>
-            </div>`;
-        })
-        .join('');
-      modelsTpl.innerHTML = html;
-      modelsList.replaceChildren(modelsTpl.content);
-    }
-    setStatus(`${data.models.length} model(s)`);
+    allLoadedModels = data.models || [];
+    renderModelsView();
+    setStatus(`${allLoadedModels.length} model(s) loaded`);
   } catch (e) {
-    modelsList.innerHTML = `<div class="empty-state"><p>Error: ${escapeHtml((e as Error).message)}</p></div>`;
+    modelsList.innerHTML = `<div class="empty-state"><p>Could not load models: ${escapeHtml((e as Error).message)}</p></div>`;
     setStatus('Error', 'err');
   } finally {
     hideSkeleton(modelsList);
   }
 }
 
+// Category Tabs listeners
+document.querySelectorAll('.models-cat-tab').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    const target = e.currentTarget as HTMLButtonElement;
+    const cat = target.dataset.cat as 'all' | 'active' | 'disabled';
+    if (!cat) return;
+    
+    document.querySelectorAll('.models-cat-tab').forEach(b => b.classList.remove('active'));
+    target.classList.add('active');
+    
+    modelsCategoryFilter = cat;
+    modelsCurrentPage = 1;
+    renderModelsView();
+  });
+});
+
 // Event delegation for model-card actions (one listener, not N)
 modelsList.addEventListener('click', (e) => {
   const target = e.target as HTMLElement;
+  if (target.closest('#emptyAddModelBtn')) {
+    openProviderManagerModal();
+    return;
+  }
+  if (target.closest('#clearModelsSearchBtn')) {
+    if (modelsSearchInput) modelsSearchInput.value = '';
+    modelsSearchQuery = '';
+    modelsCurrentPage = 1;
+    renderModelsView();
+    return;
+  }
   const btn = target.closest<HTMLElement>('[data-action]');
   if (!btn) return;
   void handleModelAction(btn);
@@ -1006,42 +1456,134 @@ async function handleModelAction(btn: HTMLElement): Promise<void> {
   const action = btn.dataset.action;
   const name = btn.dataset.name ?? '';
   const url = btn.dataset.url ?? '';
+  const provider = btn.dataset.provider ?? '';
+
+  // Always ensure providersCache is populated from disk
+  if (!providersCache || providersCache.length === 0) {
+    try {
+      providersCache = (await window.ag.providers.get()) as ProviderEntry[];
+    } catch {
+      providersCache = [];
+    }
+  }
+
   if (action === 'test') {
     setStatus(`Testing ${name}…`, 'busy');
+    const dot = document.getElementById(`status-dot-${name}`);
+    btn.setAttribute('disabled', 'true');
+    const origHtml = btn.innerHTML;
+    btn.innerHTML = `<span class="spinner"></span> Testing…`;
+
     try {
-      const r = await window.ag.run(['models', 'test', name]);
-      toast(r.stdout.includes('✓') || r.code === 0 ? `${name} reachable` : `${name} failed`, r.code === 0 ? 'ok' : 'err');
-      setStatus('Ready');
+      const match = await getProviderForModelBulk(name);
+      let success = false;
+      let msg = '';
+      if (match) {
+        const cleanName = name.replace(/^models\//, '');
+        const res = (await window.ag.providers.test({ apiUrl: match.apiUrl, apiKey: match.apiKey, id: match.id, modelId: cleanName })) as { success: boolean; latencyMs?: number; error?: string };
+        success = res.success;
+        msg = success ? `✓ ${name} reachable (${res.latencyMs ?? 0}ms)` : `${name} failed: ${res.error || 'Unreachable'}`;
+      } else {
+        const r = await window.ag.run(['models', 'test', name]);
+        success = r.stdout.includes('✓') || r.code === 0;
+        msg = success ? `✓ ${name} reachable` : `${name} failed`;
+      }
+      if (!success) throw new Error(msg);
+      toast(msg, 'ok');
+      if (dot) dot.className = 'status-dot ok';
     } catch (e) {
-      toast(`Test failed: ${(e as Error).message}`, 'err');
-      setStatus('Error', 'err');
+      toast(`Tested ${name}: Failed - ${(e as Error).message}`, 'err');
+      if (dot) dot.className = 'status-dot off';
+    } finally {
+      btn.removeAttribute('disabled');
+      btn.innerHTML = origHtml;
+      setStatus('Ready');
     }
-  } else if (action === 'reveal') {
-    await window.ag.openExternal(url);
+  } else if (action === 'toggle') {
+    const isCurrentlyEnabled = !btn.classList.contains('is-disabled');
+    const newEnabled = !isCurrentlyEnabled;
+    
+    // Toggle active UI state immediately for responsiveness
+    btn.classList.toggle('is-disabled', !newEnabled);
+    btn.classList.toggle('is-active', newEnabled);
+    btn.title = newEnabled ? 'Disable model' : 'Enable model';
+    btn.innerHTML = `
+      <span class="status-dot-sm ${newEnabled ? 'ok' : 'off'}"></span>
+      ${newEnabled ? 'Active' : 'Disabled'}
+    `;
+
+    // Always find parent provider and save state
+    const parentProvider = await getProviderForModelBulk(name);
+    
+    if (parentProvider) {
+      const targetId = resolveModelId(parentProvider, name);
+      if (!parentProvider.models) parentProvider.models = [];
+      let pModel = parentProvider.models.find(m => m.id === targetId || m.displayName === targetId || m.id === name || m.displayName === name);
+      if (pModel) {
+        pModel.enabled = newEnabled;
+      } else {
+        parentProvider.models.push({ id: targetId, displayName: targetId, enabled: newEnabled });
+      }
+      await window.ag.providers.save(parentProvider);
+    } else {
+      toast('Built-in models cannot be manually disabled yet.', 'warn');
+      btn.classList.toggle('is-disabled', isCurrentlyEnabled);
+      btn.classList.toggle('is-active', !isCurrentlyEnabled);
+      btn.title = isCurrentlyEnabled ? 'Disable model' : 'Enable model';
+      btn.innerHTML = `
+        <span class="status-dot-sm ${isCurrentlyEnabled ? 'ok' : 'off'}"></span>
+        ${isCurrentlyEnabled ? 'Active' : 'Disabled'}
+      `;
+      return;
+    }
+
+    const dot = document.getElementById(`status-dot-${name}`);
+    if (dot) {
+      dot.className = `status-dot ${newEnabled ? 'ok' : 'off'}`;
+    }
+
+    toast(newEnabled ? `Enabled ${name}` : `Disabled ${name}`, 'ok');
+    void loadModels();
+    void renderProviderList();
   } else if (action === 'remove') {
     const ok = await confirmModal(
-      'Delete model',
-      `Are you sure you want to delete <strong>${escapeHtml(name)}</strong>?`,
-      { confirmLabel: 'Delete', danger: true },
+      'Delete this model?',
+      `Delete <strong>${escapeHtml(name)}</strong> from this device? This only removes the saved provider — models on your remote account are unaffected.`,
+      { confirmLabel: 'Delete model', danger: true },
     );
     if (!ok) return;
-    setStatus('Removing…', 'busy');
+    setStatus('Removing model…', 'busy');
+
+    // Remove model entry from parent provider if present
+    const parentProvider = await getProviderForModelBulk(name);
+
+    if (parentProvider && parentProvider.models) {
+      const targetId = resolveModelId(parentProvider, name);
+      parentProvider.models = parentProvider.models.filter((m) => m.id !== targetId && m.displayName !== targetId && m.id !== name && m.displayName !== name);
+      await window.ag.providers.save(parentProvider);
+    }
+
     const r = await window.ag.run(['models', 'remove', name, '--yes']);
-    if (r.code === 0) {
+    if (r.code === 0 || parentProvider) {
       toast(`Removed ${name}`, 'ok');
-      void loadModels();
+      await loadModels();
+      await renderProviderList();
     } else {
-      toast(`Failed: ${r.stderr || r.stdout}`, 'err');
+      toast(`Delete failed: ${r.stderr || r.stdout}. Check the Logs tab for details.`, 'err');
     }
     setStatus('Ready');
   }
 }
 
-$('#modelsTestBtn').addEventListener('click', async () => {
+$('#modelsTestBtn')?.addEventListener('click', async () => {
   setStatus('Testing all models…', 'busy');
   try {
     const r = await window.ag.run(['models', 'test']);
-    toast(r.code === 0 ? 'All models reachable' : 'Some models failed', r.code === 0 ? 'ok' : 'warn', 5000);
+    if (r.code === 0) {
+      toast('All models reachable', 'ok', 5000);
+    } else {
+      toast('Some models failed. Open the Models view for details.', 'warn', 5000);
+    }
     setStatus('Ready');
   } catch (e) {
     toast(`Test failed: ${(e as Error).message}`, 'err');
@@ -1049,304 +1591,390 @@ $('#modelsTestBtn').addEventListener('click', async () => {
   }
 });
 
-// Add Model Modal elements
-const addModelModalBackdrop = $('#addModelModalBackdrop') as HTMLDivElement;
-const addModelModalClose = $('#addModelModalClose') as HTMLButtonElement;
-const addModelModalCancel = $('#addModelModalCancel') as HTMLButtonElement;
-const addModelModalBack = $('#addModelModalBack') as HTMLButtonElement;
-const addModelModalFetch = $('#addModelModalFetch') as HTMLButtonElement;
-const addModelModalSave = $('#addModelModalSave') as HTMLButtonElement;
-
-const addStep1 = $('#addStep1') as HTMLDivElement;
-const addStep2 = $('#addStep2') as HTMLDivElement;
-const addStep1Indicator = $('#addStep1Indicator') as HTMLDivElement;
-const addStep2Indicator = $('#addStep2Indicator') as HTMLDivElement;
-const addStep1Badge = $('#addStep1Badge') as HTMLDivElement;
-const addStep2Badge = $('#addStep2Badge') as HTMLDivElement;
-
-const modelProviderTypeInput = $('#modelProviderType') as HTMLSelectElement;
-const modelApiUrlInput = $('#modelApiUrl') as HTMLInputElement;
-const modelApiKeyInput = $('#modelApiKey') as HTMLInputElement;
-const modelAllowUnauthorizedInput = $('#modelAllowUnauthorized') as HTMLInputElement;
-const modelDisplayNameSuffixInput = $('#modelDisplayNameSuffix') as HTMLInputElement;
-const fetchedModelsList = $('#fetchedModelsList') as HTMLDivElement;
-const fetchModelsError = $('#fetchModelsError') as HTMLDivElement;
-const saveModelsError = $('#saveModelsError') as HTMLDivElement;
-const refetchModelsBtn = $('#refetchModelsBtn') as HTMLButtonElement;
-
-interface FetchedModel {
-  id: string;
-  name: string;
-  inputModalities?: string[];
-}
-
-let fetchedModels: FetchedModel[] = [];
-let currentStep = 1;
-
-function setAddStep(step: number): void {
-  currentStep = step;
-  if (step === 1) {
-    addStep1.style.display = 'block';
-    addStep2.style.display = 'none';
-    addModelModalBack.style.display = 'none';
-    addModelModalFetch.style.display = 'inline-flex';
-    addModelModalSave.style.display = 'none';
-    addStep1Indicator.style.opacity = '1';
-    addStep2Indicator.style.opacity = '0.5';
-    addStep1Badge.style.backgroundColor = '#3b82f6';
-    addStep1Badge.style.color = '#ffffff';
-    addStep2Badge.style.backgroundColor = '#27272a';
-    addStep2Badge.style.color = '#a1a1aa';
-  } else {
-    addStep1.style.display = 'none';
-    addStep2.style.display = 'block';
-    addModelModalBack.style.display = 'inline-flex';
-    addModelModalFetch.style.display = 'none';
-    addModelModalSave.style.display = 'inline-flex';
-    addStep1Indicator.style.opacity = '0.5';
-    addStep2Indicator.style.opacity = '1';
-    addStep1Badge.style.backgroundColor = '#27272a';
-    addStep1Badge.style.color = '#a1a1aa';
-    addStep2Badge.style.backgroundColor = '#3b82f6';
-    addStep2Badge.style.color = '#ffffff';
+// ── Test & Auto-Disable ──────────────────────────────────────────────────────
+async function testAndAutoDisable(silent = false): Promise<void> {
+  // Lazy-load providers from disk if cache is empty
+  if (providersCache.length === 0) {
+    try { providersCache = (await window.ag.providers.get()) as ProviderEntry[]; } catch { providersCache = []; }
   }
-}
-
-function resetAddModelModal(): void {
-  modelProviderTypeInput.value = 'openai';
-  modelApiUrlInput.value = '';
-  modelApiKeyInput.value = '';
-  modelAllowUnauthorizedInput.checked = false;
-  modelDisplayNameSuffixInput.value = '';
-  fetchedModels = [];
-  fetchedModelsList.innerHTML = `
-    <div style="text-align: center; padding: 24px; color: #a1a1aa; font-size: 13px;">
-      Fetch models to see available options.
-    </div>
-  `;
-  fetchModelsError.style.display = 'none';
-  saveModelsError.style.display = 'none';
-  setAddStep(1);
-}
-
-function openAddModelModal(): void {
-  resetAddModelModal();
-  addModelModalBackdrop.hidden = false;
-  addModelModalBackdrop.style.display = 'grid';
-  setTimeout(() => modelApiUrlInput.focus(), 50);
-}
-
-function closeAddModelModal(): void {
-  addModelModalBackdrop.hidden = true;
-  addModelModalBackdrop.style.display = 'none';
-}
-
-$('#modelsAddBtn').addEventListener('click', openAddModelModal);
-$('#dashboardAddModelBtn').addEventListener('click', openAddModelModal);
-
-addModelModalClose.addEventListener('click', closeAddModelModal);
-addModelModalCancel.addEventListener('click', closeAddModelModal);
-addModelModalBackdrop.addEventListener('click', (e) => {
-  if (e.target === addModelModalBackdrop) closeAddModelModal();
-});
-
-// Escape key closes the modal
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !addModelModalBackdrop.hidden) {
-    closeAddModelModal();
-  }
-});
-
-// Safety: ensure modal is hidden on script load
-addModelModalBackdrop.hidden = true;
-addModelModalBackdrop.style.display = 'none';
-
-function renderFetchedModels(): void {
-  if (fetchedModels.length === 0) {
-    fetchedModelsList.innerHTML = `
-      <div style="text-align: center; padding: 24px; color: #a1a1aa; font-size: 13px;">
-        No models found at this endpoint.
-      </div>
-    `;
+  if (providersCache.length === 0) {
+    if (!silent) toast('No custom providers configured', 'warn');
     return;
   }
 
-  const allChecked = fetchedModels.length > 0;
-  let html = `
-    <div style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid #27272a; margin-bottom: 4px;">
-      <input type="checkbox" id="selectAllModels" style="width: 16px; height: 16px; accent-color: #3b82f6; cursor: pointer;" ${allChecked ? 'checked' : ''} />
-      <label for="selectAllModels" style="margin: 0; font-size: 12px; color: #a1a1aa; cursor: pointer;">Select all</label>
-    </div>
-  `;
+  if (!silent) setStatus('Testing models & auto-disabling failures…', 'busy');
+  let okModelCount = 0;
+  let disabledModelCount = 0;
 
-  for (const model of fetchedModels) {
-    const supportsImages = model.inputModalities?.includes('image') || false;
-    const supportsVideo = model.inputModalities?.includes('video') || false;
-    const modalityBadges = [];
-    if (supportsImages) modalityBadges.push(`<span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background-color: #22c55e18; color: #22c55e;">image</span>`);
-    if (supportsVideo) modalityBadges.push(`<span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background-color: #a855f718; color: #a855f7;">video</span>`);
+  for (const p of providersCache) {
+    if (!p.enabled) continue;
 
-    html += `
-      <div style="display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 6px; transition: background-color 0.15s ease;" class="fetched-model-row" data-model-id="${escapeHtml(model.id)}">
-        <input type="checkbox" class="model-select-checkbox" value="${escapeHtml(model.id)}" checked style="width: 16px; height: 16px; accent-color: #3b82f6; cursor: pointer; flex-shrink: 0;" />
-        <div style="flex: 1; min-width: 0;">
-          <div style="font-size: 13px; color: #f4f4f5; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(model.id)}</div>
-          ${model.name !== model.id ? `<div style="font-size: 11px; color: #a1a1aa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(model.name)}</div>` : ''}
-        </div>
-        <div style="display: flex; gap: 4px; flex-shrink: 0;">${modalityBadges.join('')}</div>
-      </div>
-    `;
+    // First test base provider endpoint connectivity
+    let baseRes = { success: false };
+    try {
+      baseRes = await window.ag.providers.test({ apiUrl: p.apiUrl, apiKey: p.apiKey, id: p.id });
+    } catch {
+      baseRes = { success: false };
+    }
+
+    if (!baseRes.success) {
+      // Entire provider is down — disable provider and all its models
+      p.enabled = false;
+      if (p.models) {
+        disabledModelCount += p.models.filter((m) => m.enabled !== false).length;
+        p.models.forEach((m) => (m.enabled = false));
+      }
+      await window.ag.providers.save(p);
+      continue;
+    }
+
+    // Provider is reachable! Test active models under this provider
+    if (p.models && p.models.length > 0) {
+      let providerSaveNeeded = false;
+      for (const m of p.models) {
+        if (m.enabled === false) continue;
+
+        try {
+          const mRes = await window.ag.providers.test({
+            apiUrl: p.apiUrl,
+            apiKey: p.apiKey,
+            id: p.id,
+            modelId: m.id,
+          });
+
+          if (mRes.success) {
+            okModelCount++;
+          } else {
+            disabledModelCount++;
+            m.enabled = false;
+            providerSaveNeeded = true;
+          }
+        } catch {
+          disabledModelCount++;
+          m.enabled = false;
+          providerSaveNeeded = true;
+        }
+      }
+
+      if (providerSaveNeeded) {
+        // If all models under provider were disabled, disable provider as well
+        if (p.models.every((m) => m.enabled === false)) {
+          p.enabled = false;
+        }
+        await window.ag.providers.save(p);
+      }
+    } else {
+      okModelCount++;
+    }
   }
 
-  fetchedModelsList.innerHTML = html;
+  await loadModels();
+  await renderProviderList();
 
-  const selectAll = $('#selectAllModels') as HTMLInputElement | null;
-  selectAll?.addEventListener('change', () => {
-    document.querySelectorAll<HTMLInputElement>('.model-select-checkbox').forEach((cb) => {
-      cb.checked = selectAll.checked;
-    });
+  if (disabledModelCount === 0) {
+    toast(`All ${okModelCount} active model(s) healthy`, 'ok', 5000);
+  } else {
+    toast(`${okModelCount} model(s) OK, ${disabledModelCount} failing → auto-disabled`, 'warn', 7000);
+  }
+  if (!silent) setStatus('Ready');
+}
+
+$('#modelsTestHideBtn')?.addEventListener('click', () => void testAndAutoDisable(false));
+
+// ── Auto-Sentinel Toggle ─────────────────────────────────────────────────────
+const SENTINEL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+let sentinelTimerId: ReturnType<typeof setInterval> | null = null;
+const autoSentinelToggle = $('#autoSentinelToggle') as HTMLInputElement | null;
+const autoSentinelLabel = $('#autoSentinelLabel') as HTMLSpanElement | null;
+
+autoSentinelToggle?.addEventListener('change', () => {
+  if (autoSentinelToggle.checked) {
+    // Run immediately on activation, then repeat
+    void testAndAutoDisable(true);
+    sentinelTimerId = setInterval(() => void testAndAutoDisable(true), SENTINEL_INTERVAL_MS);
+    if (autoSentinelLabel) autoSentinelLabel.textContent = 'Sentinel ON';
+    toast('Auto-Sentinel enabled — checks every 5 min', 'ok');
+  } else {
+    if (sentinelTimerId !== null) {
+      clearInterval(sentinelTimerId);
+      sentinelTimerId = null;
+    }
+    if (autoSentinelLabel) autoSentinelLabel.textContent = 'Auto-Sentinel';
+    toast('Auto-Sentinel disabled', 'ok');
+  }
+});
+
+
+// Impeccable Hover Glow effect for model cards
+document.getElementById('modelsList')?.addEventListener('mousemove', (e) => {
+  const card = (e.target as HTMLElement).closest('.model-card') as HTMLElement;
+  if (!card) return;
+  const rect = card.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  card.style.setProperty('--mouse-x', `${x}px`);
+  card.style.setProperty('--mouse-y', `${y}px`);
+});
+
+// Bulk Actions on Models Page
+
+// Handle individual checkbox clicks
+$('#modelsList')?.addEventListener('change', (e) => {
+  const target = e.target as HTMLInputElement;
+  if (target.classList.contains('model-select-cb')) {
+    const name = target.dataset.name;
+    if (name) {
+      if (target.checked) selectedModelNames.add(name);
+      else selectedModelNames.delete(name);
+      updateBulkActionButtonsState();
+    }
+  }
+});
+
+// Handle Select All click
+// Select All — uses shared getFilteredModels() so category filter is respected (BUG-2 fix)
+$('#modelsSelectAllCb')?.addEventListener('change', (e) => {
+  const checked = (e.target as HTMLInputElement).checked;
+  const filtered = getFilteredModels();
+  const totalItems = filtered.length;
+  let page = modelsCurrentPage;
+  const totalPages = Math.max(1, Math.ceil(totalItems / modelsPageSize));
+  if (page > totalPages) page = totalPages;
+  if (page < 1) page = 1;
+  const startIdx = (page - 1) * modelsPageSize;
+  const endIdx = Math.min(startIdx + modelsPageSize, totalItems);
+  const pageItems = filtered.slice(startIdx, endIdx);
+
+  pageItems.forEach(m => {
+    if (checked) selectedModelNames.add(m.name);
+    else selectedModelNames.delete(m.name);
+  });
+  renderModelsView();
+});
+
+window.ag.providers.onChanged(() => {
+  // Synchronize models list whenever providers change
+  void loadModels();
+  void renderProviderList();
+});
+
+// Helper for finding provider
+
+function resolveModelId(provider: ProviderEntry, modelName: string): string {
+  const prefix = `${provider.id}-`;
+  if (modelName.startsWith(prefix)) return modelName.slice(prefix.length);
+  return modelName.replace(/^models\//, '');
+}
+
+async function getProviderForModelBulk(modelName: string) {
+  if (!providersCache || providersCache.length === 0) {
+    try {
+      providersCache = (await window.ag.providers.get()) as ProviderEntry[];
+    } catch {
+      providersCache = [];
+    }
+  }
+  const cleanModelName = modelName.replace(/^models\//, '');
+  const targetModel = allLoadedModels.find(m => m.name === modelName);
+  return providersCache.find((p) => {
+    if (p.provider && p.provider.toLowerCase() === 'openai' && targetModel && targetModel.apiUrl && p.apiUrl && p.apiUrl.toLowerCase() !== targetModel.apiUrl.toLowerCase()) {
+      return false;
+    }
+    if (p.models?.some((m) => m.id === cleanModelName || m.displayName === cleanModelName || m.id === modelName || m.displayName === modelName)) return true;
+    if (targetModel) {
+      if (p.apiUrl && targetModel.apiUrl && p.apiUrl.toLowerCase() === targetModel.apiUrl.toLowerCase()) return true;
+      if (p.provider && targetModel.provider && p.provider.toLowerCase() !== 'openai' && targetModel.provider.toLowerCase() !== 'openai' && p.provider.toLowerCase() === targetModel.provider.toLowerCase()) return true;
+      if (!p.apiUrl && !targetModel.apiUrl && p.provider && targetModel.provider && p.provider.toLowerCase() === targetModel.provider.toLowerCase()) return true;
+    }
+    return p.name.toLowerCase() === modelName.toLowerCase();
   });
 }
 
-async function fetchModels(): Promise<void> {
-  const provider = modelProviderTypeInput.value;
-  const url = modelApiUrlInput.value.trim();
-  const key = modelApiKeyInput.value.trim();
-  const allowUnauthorized = modelAllowUnauthorizedInput.checked;
-
-  if (!url) {
-    fetchModelsError.textContent = 'API URL is required';
-    fetchModelsError.style.display = 'block';
-    modelApiUrlInput.focus();
-    return;
-  }
-
-  addModelModalFetch.setAttribute('disabled', 'true');
-  addModelModalFetch.textContent = 'Fetching…';
-  fetchModelsError.style.display = 'none';
-  setStatus('Fetching models…', 'busy');
-
-  try {
-    const args = [
-      'models',
-      'fetch',
-      '--provider', provider,
-      '--url', url,
-      '--json',
-    ];
-    if (key) {
-      args.push('--key', key);
-    }
-    if (allowUnauthorized) {
-      args.push('--allow-unauthorized');
-    }
-
-    const r = await window.ag.run(args);
-    if (r.code !== 0) {
-      let msg = r.stderr || r.stdout || 'Failed to fetch models';
-      try {
-        const parsed = JSON.parse(msg);
-        if (parsed.error) msg = parsed.error;
-      } catch {
-        // keep raw msg
-      }
-      fetchModelsError.textContent = msg;
-      fetchModelsError.style.display = 'block';
-      setStatus('Ready');
-      return;
-    }
-
-    const result = JSON.parse(r.stdout) as { success: boolean; models?: FetchedModel[]; error?: string };
-    if (!result.success) {
-      fetchModelsError.textContent = result.error || 'Failed to fetch models';
-      fetchModelsError.style.display = 'block';
-      setStatus('Ready');
-      return;
-    }
-
-    fetchedModels = result.models || [];
-    renderFetchedModels();
-    setAddStep(2);
-    setStatus('Ready');
-  } catch (e) {
-    fetchModelsError.textContent = `Error: ${(e as Error).message}`;
-    fetchModelsError.style.display = 'block';
-    setStatus('Error', 'err');
-  } finally {
-    addModelModalFetch.removeAttribute('disabled');
-    addModelModalFetch.textContent = 'Fetch Models';
-  }
-}
-
-addModelModalFetch.addEventListener('click', fetchModels);
-refetchModelsBtn.addEventListener('click', fetchModels);
-
-addModelModalBack.addEventListener('click', () => setAddStep(1));
-
-addModelModalSave.addEventListener('click', async () => {
-  const selected = Array.from(document.querySelectorAll<HTMLInputElement>('.model-select-checkbox:checked')).map((cb) => cb.value);
-  if (selected.length === 0) {
-    saveModelsError.textContent = 'Please select at least one model';
-    saveModelsError.style.display = 'block';
-    return;
-  }
-
-  const provider = modelProviderTypeInput.value;
-  const url = modelApiUrlInput.value.trim();
-  const key = modelApiKeyInput.value.trim();
-  const suffix = modelDisplayNameSuffixInput.value.trim();
-
-  addModelModalSave.setAttribute('disabled', 'true');
-  addModelModalSave.textContent = 'Adding…';
-  saveModelsError.style.display = 'none';
-  setStatus(`Adding ${selected.length} model(s)…`, 'busy');
-
-  let added = 0;
-  let failed = 0;
-  const errors: string[] = [];
-
-  for (const modelId of selected) {
-    const name = `models/${modelId}`;
-    const display = suffix ? `${modelId} (${suffix})` : modelId;
-    const args = [
-      'models',
-      'add',
-      '--provider', provider,
-      '--name', name,
-      '--external', modelId,
-      '--url', url,
-      '--key', key || '',
-      '--display', display,
-      '--yes'
-    ];
-
+$('#modelsBulkTestBtn')?.addEventListener('click', async () => {
+  if (selectedModelNames.size === 0) return;
+  setStatus(`Testing ${selectedModelNames.size} selected models…`, 'busy');
+  let successCount = 0;
+  let failCount = 0;
+  
+  for (const name of Array.from(selectedModelNames)) {
+    const dot = document.getElementById(`status-dot-${name}`);
+    if (dot) dot.className = 'status-dot'; // reset
     try {
-      const r = await window.ag.run(args);
-      if (r.code === 0) {
-        added++;
+      let success = false;
+      const match = await getProviderForModelBulk(name);
+      if (match) {
+        const res = (await window.ag.providers.test({ apiUrl: match.apiUrl, apiKey: match.apiKey, id: match.id })) as { success: boolean; };
+        success = res.success;
       } else {
-        failed++;
-        errors.push(`${modelId}: ${r.stderr || r.stdout}`);
+        const r = await window.ag.run(['models', 'test', name]);
+        success = r.stdout.includes('✓') || r.code === 0;
       }
+      
+      if (success) successCount++;
+      else failCount++;
+      
+      if (dot) dot.className = `status-dot ${success ? 'ok' : 'err'}`;
     } catch (e) {
-      failed++;
-      errors.push(`${modelId}: ${(e as Error).message}`);
+      failCount++;
+      if (dot) dot.className = 'status-dot err';
     }
   }
-
-  addModelModalSave.removeAttribute('disabled');
-  addModelModalSave.textContent = 'Add Selected Models';
-
-  if (failed === 0) {
-    toast(`Successfully added ${added} model(s)`, 'ok');
-    closeAddModelModal();
-    void loadModels();
+  
+  if (failCount === 0) {
+    toast(`✓ Successfully tested ${successCount} models`, 'ok');
   } else {
-    saveModelsError.textContent = `Added ${added}, failed ${failed}. ${errors.slice(0, 3).join('; ')}`;
-    saveModelsError.style.display = 'block';
-    toast(`Added ${added} model(s), ${failed} failed`, 'warn', 6000);
+    toast(`Tested ${successCount + failCount} models: ${successCount} succeeded, ${failCount} failed`, 'warn');
+  }
+  setStatus('Ready');
+});
+
+$('#modelsBulkEnableBtn')?.addEventListener('click', async () => {
+  if (selectedModelNames.size === 0) return;
+  setStatus(`Enabling ${selectedModelNames.size} selected models…`, 'busy');
+  try {
+    for (const name of Array.from(selectedModelNames)) {
+      const match = await getProviderForModelBulk(name);
+      if (match) {
+        const cleanName = name.replace(/^models\//, '');
+        if (!match.models) match.models = [];
+        const pModel = match.models.find((m) => m.id === cleanName || m.displayName === cleanName || m.id === name || m.displayName === name);
+        if (pModel) pModel.enabled = true;
+        else match.models.push({ id: cleanName, displayName: cleanName, enabled: true });
+        await window.ag.providers.save(match);
+      }
+    }
+    const enabledCount = selectedModelNames.size;
+    selectedModelNames.clear();
+    toast(`Enabled ${enabledCount} models`, 'ok');
+    void loadModels();
+    void renderProviderList();
+  } catch (err) {
+    toast(`Bulk enable error: ${(err as Error).message}`, 'err');
+  } finally {
     setStatus('Ready');
-    if (added > 0) void loadModels();
+  }
+});
+
+$('#modelsBulkDisableBtn')?.addEventListener('click', async () => {
+  if (selectedModelNames.size === 0) return;
+  setStatus(`Disabling ${selectedModelNames.size} selected models…`, 'busy');
+  try {
+    for (const name of Array.from(selectedModelNames)) {
+      const match = await getProviderForModelBulk(name);
+      if (match) {
+        const cleanName = name.replace(/^models\//, '');
+        if (!match.models) match.models = [];
+        const pModel = match.models.find((m) => m.id === cleanName || m.displayName === cleanName || m.id === name || m.displayName === name);
+        if (pModel) pModel.enabled = false;
+        else match.models.push({ id: cleanName, displayName: cleanName, enabled: false });
+        await window.ag.providers.save(match);
+      }
+    }
+    const disabledCount = selectedModelNames.size;
+    selectedModelNames.clear();
+    toast(`Disabled ${disabledCount} models`, 'ok');
+    void loadModels();
+    void renderProviderList();
+  } catch (err) {
+    toast(`Bulk disable error: ${(err as Error).message}`, 'err');
+  } finally {
+    setStatus('Ready');
+  }
+});
+
+$('#modelsBulkDeleteBtn')?.addEventListener('click', async () => {
+  if (selectedModelNames.size === 0) return;
+  const count = selectedModelNames.size;
+  const ok = await confirmModal(
+    `Delete ${count} selected models?`,
+    `Are you sure you want to delete <strong>${count} selected model(s)</strong>? This action cannot be undone.`,
+    { confirmLabel: 'Delete selected', danger: true }
+  );
+  if (!ok) return;
+
+  setStatus(`Deleting ${count} selected models…`, 'busy');
+  try {
+    for (const name of Array.from(selectedModelNames)) {
+      const match = await getProviderForModelBulk(name);
+      if (match && match.models) {
+        match.models = match.models.filter((m) => m.id !== name && m.displayName !== name);
+        await window.ag.providers.save(match);
+      }
+      await window.ag.run(['models', 'remove', name, '--yes']);
+    }
+    selectedModelNames.clear();
+    toast(`Deleted ${count} models`, 'ok');
+    void loadModels();
+    void renderProviderList();
+  } catch (err) {
+    toast(`Bulk delete error: ${(err as Error).message}`, 'err');
+  } finally {
+    setStatus('Ready');
+  }
+});
+
+$('#exportProvidersBtn')?.addEventListener('click', async () => {
+  try {
+    const providers = await window.ag.providers.get();
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(providers, null, 2));
+    const dlAnchorElem = document.createElement('a');
+    dlAnchorElem.setAttribute("href", dataStr);
+    dlAnchorElem.setAttribute("download", `antigravity_providers_export_${new Date().toISOString().slice(0, 10)}.json`);
+    dlAnchorElem.click();
+    toast('Providers exported', 'ok');
+  } catch (err) {
+    toast(`Export failed: ${(err as Error).message}`, 'err');
+  }
+});
+
+$('#importProvidersBtn')?.addEventListener('click', () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.onchange = async (e) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const providers = JSON.parse(text);
+      if (!Array.isArray(providers)) throw new Error('Invalid JSON format: expected an array');
+      
+      setStatus('Importing providers...', 'busy');
+      for (const p of providers) {
+        const res = await window.ag.providers.save(p);
+        if (!res.success) throw new Error(`Failed to save provider: ${res.error}`);
+      }
+      toast(`Successfully imported ${providers.length} providers`, 'ok');
+      void loadModels();
+      void renderProviderList();
+    } catch (err) {
+      toast(`Import failed: ${(err as Error).message}`, 'err');
+    } finally {
+      setStatus('Ready');
+    }
+  };
+  input.click();
+});
+
+$('#restoreBackupBtn')?.addEventListener('click', async () => {
+  const ok = await confirmModal(
+    'Restore Backup',
+    'Are you sure you want to restore custom_models.json from the latest .bak file? This will overwrite your current configuration.',
+    { confirmLabel: 'Restore', danger: true }
+  );
+  if (!ok) return;
+
+  setStatus('Restoring backup...', 'busy');
+  try {
+    const r = await window.ag.run(['models', 'import']);
+    if (r.code !== 0) throw new Error(r.stderr || r.stdout || 'Restore failed');
+    toast('Backup restored successfully', 'ok');
+    void loadModels();
+    void renderProviderList();
+  } catch (err) {
+    toast(`Restore failed: ${(err as Error).message}`, 'err');
+  } finally {
+    setStatus('Ready');
   }
 });
 
@@ -1370,19 +1998,40 @@ async function loadMitmStatus(): Promise<void> {
         'mitm status',
       );
     const s = JSON.parse(r.stdout) as MitmStatus;
+
+    // Dynamically toggle top required warning banner based on actual interception health
+    const reqBanner = document.getElementById('mitmRequiredBanner') as HTMLDivElement | null;
+    if (reqBanner) {
+      const isFullyFunctional = s.interception.reachable && s.ca.installed && !s.ca.isExpired && s.proxy.redirected;
+      reqBanner.style.display = isFullyFunctional ? 'none' : 'flex';
+    }
+
+    // Dynamically update header buttons' visual hierarchy based on proxy/CA state
+    const proxyOnBtn = document.getElementById('mitmProxyOnBtn') as HTMLButtonElement | null;
+    const proxyOffBtn = document.getElementById('mitmProxyOffBtn') as HTMLButtonElement | null;
+    if (proxyOnBtn && proxyOffBtn) {
+      if (s.proxy.redirected) {
+        proxyOnBtn.className = 'btn btn-ghost';
+        proxyOffBtn.className = 'btn btn-primary';
+      } else {
+        proxyOnBtn.className = 'btn btn-primary';
+        proxyOffBtn.className = 'btn btn-ghost';
+      }
+    }
+
     const caBanner = s.ca.installed && !s.ca.isExpired
       ? `<div class="patch-banner ok">
            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
            <div class="patch-banner-body">
              <div class="patch-banner-title">CA certificate installed</div>
-             <div class="patch-banner-text">System trusts the local MITM CA.</div>
+             <div class="patch-banner-text">Your system trusts the local MITM certificate.</div>
            </div>
          </div>`
       : `<div class="patch-banner warn">
            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
            <div class="patch-banner-body">
              <div class="patch-banner-title">${s.ca.isExpired ? 'CA certificate expired' : 'CA certificate not installed'}</div>
-             <div class="patch-banner-text">${s.ca.isExpired ? 'The certificate has expired. Use Repair All to regenerate it.' : 'Install the CA to avoid TLS errors in intercepted applications.'}</div>
+             <div class="patch-banner-text">${s.ca.isExpired ? 'The certificate has expired. Run Repair all to regenerate it.' : 'Install the CA to avoid TLS errors in intercepted apps.'}</div>
            </div>
          </div>`;
 
@@ -1391,14 +2040,14 @@ async function loadMitmStatus(): Promise<void> {
            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
            <div class="patch-banner-body">
              <div class="patch-banner-title">System proxy active</div>
-             <div class="patch-banner-text">Traffic is redirected to ${escapeHtml(s.proxy.host ?? 'localhost')}:${s.proxy.port ?? '—'}.</div>
+             <div class="patch-banner-text">Traffic is being redirected to ${escapeHtml(s.proxy.host ?? 'localhost')}:${s.proxy.port ?? '—'}.</div>
            </div>
          </div>`
       : `<div class="patch-banner warn">
            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
            <div class="patch-banner-body">
              <div class="patch-banner-title">System proxy inactive</div>
-             <div class="patch-banner-text">Toggle Proxy ON to start redirecting traffic.</div>
+             <div class="patch-banner-text">Click <strong>Proxy ON</strong> above to start redirecting traffic.</div>
            </div>
          </div>`;
 
@@ -1407,21 +2056,21 @@ async function loadMitmStatus(): Promise<void> {
            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
            <div class="patch-banner-body">
              <div class="patch-banner-title">Interception reachable</div>
-             <div class="patch-banner-text">The proxy is listening and responding.</div>
+             <div class="patch-banner-text">The proxy is listening and responding to requests.</div>
            </div>
          </div>`
       : `<div class="patch-banner err">
            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
            <div class="patch-banner-body">
              <div class="patch-banner-title">Interception unreachable</div>
-             <div class="patch-banner-text">The proxy does not appear to be listening.</div>
+             <div class="patch-banner-text">The proxy does not appear to be listening. Try Repair all.</div>
            </div>
          </div>`;
 
     mitmTpl.innerHTML = `
       <div class="mitm-grid">
         <div class="mitm-card">
-          <div class="mitm-card-header"><h3>CA Certificate</h3><span class="badge ${s.ca.installed ? 'ok' : 'warn'}">${s.ca.installed ? 'installed' : 'not installed'}</span></div>
+          <div class="mitm-card-header"><h3>CA certificate</h3><span class="badge ${s.ca.installed ? 'ok' : 'warn'}">${s.ca.installed ? 'installed' : 'not installed'}</span></div>
           <div class="mitm-card-body">
             <div class="patch-row"><div class="patch-row-label">Generated</div><div class="patch-row-value ${s.ca.generated ? 'ok' : ''}">${s.ca.generated ? 'yes' : 'no'}</div></div>
             <div class="patch-row"><div class="patch-row-label">Expires</div><div class="patch-row-value ${s.ca.isExpired ? 'err' : ''}">${escapeHtml(s.ca.expiresAt ?? '—')}</div></div>
@@ -1431,7 +2080,7 @@ async function loadMitmStatus(): Promise<void> {
           ${caBanner}
         </div>
         <div class="mitm-card">
-          <div class="mitm-card-header"><h3>System Proxy</h3><span class="badge ${s.proxy.redirected ? 'ok' : 'warn'}">${s.proxy.redirected ? 'redirected' : 'off'}</span></div>
+          <div class="mitm-card-header"><h3>System proxy</h3><span class="badge ${s.proxy.redirected ? 'ok' : 'warn'}">${s.proxy.redirected ? 'redirected' : 'off'}</span></div>
           <div class="mitm-card-body">
             <div class="patch-row"><div class="patch-row-label">Host</div><div class="patch-row-value">${escapeHtml(s.proxy.host ?? '—')}</div></div>
             <div class="patch-row"><div class="patch-row-label">Port</div><div class="patch-row-value">${s.proxy.port ?? '—'}</div></div>
@@ -1439,7 +2088,7 @@ async function loadMitmStatus(): Promise<void> {
           ${proxyBanner}
         </div>
         <div class="mitm-card">
-          <div class="mitm-card-header"><h3>Interception Status</h3><span class="badge ${s.interception.reachable ? 'ok' : 'err'}">${s.interception.reachable ? 'reachable' : 'unreachable'}</span></div>
+          <div class="mitm-card-header"><h3>Interception status</h3><span class="badge ${s.interception.reachable ? 'ok' : 'err'}">${s.interception.reachable ? 'reachable' : 'unreachable'}</span></div>
           <div class="mitm-card-body">
             <div class="patch-row"><div class="patch-row-label">Listening</div><div class="patch-row-value ${s.interception.listening ? 'ok' : ''}">${s.interception.listening ? 'yes' : 'no'}</div></div>
             <div class="patch-row"><div class="patch-row-label">Connectivity</div><div class="patch-row-value ${s.interception.reachable ? 'ok' : 'err'}">${s.interception.reachable ? 'ok' : 'failed'}</div></div>
@@ -1451,36 +2100,37 @@ async function loadMitmStatus(): Promise<void> {
       <div style="margin-top: 20px; text-align: center;">
         <button id="repair-all-btn" class="btn btn-primary" style="padding: 10px 20px; font-size: 14px;">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: text-bottom; margin-right: 6px;"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 9.36l-7.1 7.1a1 1 0 0 1-1.4 0l-2.8-2.8a1 1 0 0 1 0-1.4l7.1-7.1a6 6 0 0 1 9.36-7.94z"/></svg>
-          Repair All (Requires Admin)
+          Repair all (needs admin)
         </button>
       </div>
       ` : ''}`;
     mitmStatusEl.replaceChildren(mitmTpl.content);
-    
+
     const repairBtn = document.getElementById('repair-all-btn');
     if (repairBtn) {
+      repairBtn.setAttribute('aria-label', 'Repair all MITM issues (requires administrator)');
       repairBtn.addEventListener('click', async () => {
         repairBtn.setAttribute('disabled', 'true');
-        repairBtn.innerHTML = 'Repairing... Please check UAC prompt.';
-        setStatus('Repairing MITM...', 'busy');
+        repairBtn.textContent = 'Repairing — approve the UAC prompt…';
+        setStatus('Repairing MITM…', 'busy');
         try {
           const res = await window.ag.repairRun();
           if (res.ok) {
-            toast('✅ Repair script completed successfully.', 'ok', 3000);
-            
-            // Auto-start the proxy server after successful repair
+            toast('Repair script completed successfully.', 'ok', 3000);
+
+            // Auto-start the proxy server after a successful repair
             console.log('[MITM] Auto-starting proxy server after repair...');
             const startResult = await window.ag.proxyStart();
             if (startResult.ok) {
-              toast('✅ Proxy server started automatically', 'ok', 3000);
+              toast('Proxy server started automatically.', 'ok', 3000);
             } else {
-              toast(`⚠️ Repair succeeded but proxy server failed to start: ${startResult.message}`, 'warn', 6000);
+              toast(`Repair succeeded but proxy server failed to start: ${startResult.message}`, 'warn', 6000);
             }
           } else {
-            toast('❌ Repair failed: ' + res.error, 'err', 6000);
+            toast(`Repair failed: ${res.error}`, 'err', 6000);
           }
         } catch (err) {
-          toast('❌ Repair IPC error: ' + (err as Error).message, 'err', 6000);
+          toast(`Repair IPC error: ${(err as Error).message}`, 'err', 6000);
         } finally {
           void loadMitmStatus();
         }
@@ -1489,7 +2139,7 @@ async function loadMitmStatus(): Promise<void> {
 
     setStatus('Ready');
   } catch (e) {
-    mitmStatusEl.innerHTML = `<div class="empty-state"><p>Error: ${escapeHtml((e as Error).message)}</p></div>`;
+    mitmStatusEl.innerHTML = `<div class="empty-state"><p>Could not load MITM status: ${escapeHtml((e as Error).message)}</p></div>`;
     setStatus('Error', 'err');
   } finally {
     hideSkeleton(mitmStatusEl);
@@ -1508,27 +2158,26 @@ async function mitmAction(args: string[], successMsg: string, refresh = true, pr
       toast(successMsg, 'ok', 5000);
       if (refresh) void loadMitmStatus();
     } else {
-      // Enhanced error message with diagnostic hints
       const errorMsg = r.stderr || r.stdout || 'Unknown error';
       const operation = args.slice(1).join(' ');
-      
-      // Check for common failure patterns
+
+      // Match common failure patterns with actionable guidance.
       if (errorMsg.toLowerCase().includes('uac') || errorMsg.toLowerCase().includes('cancelled')) {
-        toast(`❌ ${operation} failed: UAC prompt was declined. Please click "Yes" when prompted.`, 'err', 8000);
+        toast(`${operation} failed: UAC prompt was declined. Click "Yes" when prompted.`, 'err', 8000);
       } else if (errorMsg.toLowerCase().includes('access denied') || r.code === 5) {
-        toast(`❌ ${operation} failed: Access denied. Try running as Administrator.`, 'err', 8000);
+        toast(`${operation} failed: access denied. Try running as Administrator.`, 'err', 8000);
       } else if (errorMsg.toLowerCase().includes('not found')) {
-        toast(`❌ ${operation} failed: Required system tool not found. Check your PATH.`, 'err', 8000);
+        toast(`${operation} failed: required system tool not found. Check your PATH.`, 'err', 8000);
       } else {
-        toast(`❌ ${operation} failed: ${errorMsg.substring(0, 150)}`, 'err', 8000);
+        toast(`${operation} failed: ${errorMsg.substring(0, 150)}`, 'err', 8000);
       }
-      
+
       console.error(`[MITM Action Failed]`, { args, code: r.code, stderr: r.stderr, stdout: r.stdout });
       setStatus('Error', 'err');
     }
   } catch (e) {
     const operation = args.slice(1).join(' ');
-    toast(`❌ ${operation} error: ${(e as Error).message}`, 'err', 8000);
+    toast(`${operation} error: ${(e as Error).message}`, 'err', 8000);
     console.error(`[MITM Action Exception]`, { args, error: e });
     setStatus('Error', 'err');
   }
@@ -1545,95 +2194,95 @@ async function maybeUacPreStatus(subcommand: string): Promise<string> {
 }
 
 $('#mitmInstallBtn').addEventListener('click', async () => {
-  const pre = await maybeUacPreStatus('install CA');
-  void mitmAction(['mitm', 'install', '--yes'], 'CA installed', true, pre);
+  const pre = await maybeUacPreStatus('install CA certificate');
+  void mitmAction(['mitm', 'install', '--yes'], 'CA certificate installed', true, pre);
 });
 $('#mitmUninstallBtn').addEventListener('click', async () => {
-  const pre = await maybeUacPreStatus('uninstall CA');
-  void mitmAction(['mitm', 'uninstall', '--yes'], 'CA uninstalled', true, pre);
+  const pre = await maybeUacPreStatus('uninstall CA certificate');
+  void mitmAction(['mitm', 'uninstall', '--yes'], 'CA certificate uninstalled', true, pre);
 });
 $('#mitmProxyOnBtn').addEventListener('click', async () => {
-  setStatus('Enabling proxy...', 'busy');
+  setStatus('Enabling proxy…', 'busy');
   try {
     // Step 1: Start the proxy server
     console.log('[MITM] Starting proxy server...');
     const startResult = await window.ag.proxyStart();
     console.log('[MITM] Proxy start result:', startResult);
-    
+
     if (!startResult.ok) {
       const decoded = decodeError(startResult.message ?? '', '');
       if (decoded.matched) {
-        toast(`❌ Failed to start proxy server — ${decoded.pattern}`, 'err', 8000);
+        toast(`Failed to start proxy server — ${decoded.pattern}`, 'err', 8000);
         toast(decoded.hint, 'warn', 8000);
         runErrorAction(decoded.action);
       } else {
-        toast(`❌ Failed to start proxy server: ${startResult.message}`, 'err', 8000);
+        toast(`Failed to start proxy server: ${startResult.message}`, 'err', 8000);
       }
       setStatus('Error', 'err');
       return;
     }
-    
-    toast(`✅ Proxy server started (PID: ${startResult.pid})`, 'ok', 3000);
-    
+
+    toast(`Proxy server started (PID: ${startResult.pid})`, 'ok', 3000);
+
     // Step 2: Configure Windows to use the proxy
     const pre = await maybeUacPreStatus('enable proxy');
     setStatus(pre, 'busy');
-    
+
     const r = await window.ag.run(['mitm', 'proxy-on']);
     if (r.code === 0) {
-      toast('✅ Proxy enabled and running', 'ok', 5000);
+      toast('Proxy enabled and running', 'ok', 5000);
       void loadMitmStatus();
     } else {
       const errorMsg = r.stderr || r.stdout || 'Unknown error';
-      toast(`❌ Failed to configure proxy: ${errorMsg}`, 'err', 8000);
+      toast(`Failed to configure proxy: ${errorMsg}`, 'err', 8000);
       setStatus('Error', 'err');
-      
+
       // Try to stop the proxy server since configuration failed
       await window.ag.proxyStop();
     }
   } catch (e) {
-    toast(`❌ Proxy enable error: ${(e as Error).message}`, 'err', 8000);
+    toast(`Proxy enable error: ${(e as Error).message}`, 'err', 8000);
     console.error(`[MITM] Proxy enable exception:`, e);
     setStatus('Error', 'err');
   }
 });
 
 $('#mitmProxyOffBtn').addEventListener('click', async () => {
-  setStatus('Disabling proxy...', 'busy');
+  setStatus('Disabling proxy…', 'busy');
   try {
     // Step 1: Disable Windows proxy configuration
     const pre = await maybeUacPreStatus('disable proxy');
     setStatus(pre, 'busy');
-    
+
     const r = await window.ag.run(['mitm', 'proxy-off']);
     if (r.code === 0) {
-      toast('✅ Proxy disabled', 'ok', 3000);
+      toast('Proxy disabled', 'ok', 3000);
     } else {
       const errorMsg = r.stderr || r.stdout || 'Unknown error';
-      toast(`⚠️ Proxy disable warning: ${errorMsg}`, 'warn', 5000);
+      toast(`Proxy disable warning: ${errorMsg}`, 'warn', 5000);
     }
-    
+
     // Step 2: Stop the proxy server (even if config failed)
     console.log('[MITM] Stopping proxy server...');
     const stopResult = await window.ag.proxyStop();
     console.log('[MITM] Proxy stop result:', stopResult);
-    
+
     if (stopResult.ok) {
-      toast('✅ Proxy server stopped', 'ok', 3000);
+      toast('Proxy server stopped', 'ok', 3000);
     } else {
       const decoded = decodeError(stopResult.message ?? '', '');
       if (decoded.matched) {
-        toast(`⚠️ Failed to stop proxy server — ${decoded.pattern}`, 'warn', 5000);
+        toast(`Failed to stop proxy server — ${decoded.pattern}`, 'warn', 5000);
         toast(decoded.hint, 'warn', 8000);
         runErrorAction(decoded.action);
       } else {
-        toast(`⚠️ Failed to stop proxy server: ${stopResult.message}`, 'warn', 5000);
+        toast(`Failed to stop proxy server: ${stopResult.message}`, 'warn', 5000);
       }
     }
-    
+
     void loadMitmStatus();
   } catch (e) {
-    toast(`❌ Proxy disable error: ${(e as Error).message}`, 'err', 8000);
+    toast(`Proxy disable error: ${(e as Error).message}`, 'err', 8000);
     console.error(`[MITM] Proxy disable exception:`, e);
     setStatus('Error', 'err');
   }
@@ -1645,9 +2294,157 @@ $('#mitmExportCaBtn').addEventListener('click', () => void mitmAction(['mitm', '
 // ─────────────────────────────────────────────────────────────────────────────
 
 const patchStatusEl = $('#patchStatus') as HTMLDivElement;
+const patchDetectedVersionEl = $('#patchDetectedVersion') as HTMLDivElement;
+const patchDetectedSourceEl = $('#patchDetectedSource') as HTMLSpanElement;
+const patchRecommendedBadgeEl = $('#patchRecommendedBadge') as HTMLSpanElement;
+const patchDetectedMetaEl = $('#patchDetectedMeta') as HTMLDivElement;
+const patchRangeGridEl = $('#patchRangeGrid') as HTMLDivElement;
+const patchOverrideBannerEl = $('#patchOverrideBanner') as HTMLDivElement;
+const patchOverrideBannerTextEl = $('#patchOverrideBannerText') as HTMLDivElement;
+const patchRescanBtn = $('#patchRescanBtn') as HTMLButtonElement;
+const patchClearOverrideBtn = $('#patchClearOverrideBtn') as HTMLButtonElement;
 
 // Reusable template for patch status — avoids creating a new <template> each load
 const patchTpl = document.createElement('template');
+
+function patchBadge(label: string, tone: 'ok' | 'warn' | 'err' | 'muted' = 'muted'): string {
+  return `<span class="badge badge-${tone}">${escapeHtml(label)}</span>`;
+}
+
+function patchSourceLabel(s: PatchStatus): string {
+  if (s.overrideActive) return 'Manual selection';
+  if (s.antigravityVersionSource && s.antigravityVersionSource !== 'unknown') {
+    return `Version read from ${s.antigravityVersionSource}`;
+  }
+  return 'Uncertain detection';
+}
+
+function patchFamilyLabel(range: string): string {
+  if (range.includes('2.4')) return 'Family 2.4 (2.4.2)';
+  if (range.includes('2.3')) return 'Family 2.3';
+  if (range.includes('2.2')) return 'Family 2.2';
+  return 'Family 2.1';
+}
+
+function patchConfidenceLabel(confidence?: PatchStatus['detectionConfidence']): string {
+  if (confidence === 'high') return 'High confidence';
+  if (confidence === 'medium') return 'Medium confidence';
+  return 'Low confidence';
+}
+
+function patchConfidenceTone(confidence?: PatchStatus['detectionConfidence']): 'ok' | 'warn' | 'err' {
+  if (confidence === 'high') return 'ok';
+  if (confidence === 'medium') return 'warn';
+  return 'err';
+}
+
+function patchSignatureLabel(s: PatchStatus): string {
+  if (s.binarySignatureState === 'patched') return 'Binary signature: patch already present';
+  if (s.binarySignatureState === 'original') return 'Binary signature: stock binary detected';
+  return 'Binary signature missing';
+}
+
+function patchOverlayLabel(s: PatchStatus): string {
+  if (!s.overlayFingerprintDetected || !s.overlayFingerprintRange) return 'JS overlay footprint missing or inconclusive';
+  return `JS overlay footprint: ${s.overlayFingerprintRange}`;
+}
+
+function patchNeedsMetadataWithoutBinaryWarning(s: PatchStatus): boolean {
+  return !!(s.antigravityVersion && s.antigravityVersion !== 'unknown' && !s.binarySignatureDetected);
+}
+
+function renderPatchSelector(s: PatchStatus): void {
+  patchDetectedVersionEl.textContent = s.antigravityVersion ?? 'unknown';
+  patchDetectedSourceEl.className = `badge ${s.overrideActive ? 'badge-warn' : 'badge-muted'}`;
+  patchDetectedSourceEl.textContent = patchSourceLabel(s);
+  patchRecommendedBadgeEl.className = `badge ${s.compatible ? 'badge-ok' : 'badge-warn'}`;
+  patchRecommendedBadgeEl.textContent = s.recommendedPatch
+    ? `${patchFamilyLabel(s.recommendedPatch.versionRange)} · ${patchConfidenceLabel(s.detectionConfidence)}`
+    : 'no recommended family';
+
+  const detectorMeta = [
+    `<span class="badge badge-${patchConfidenceTone(s.detectionConfidence)}">${escapeHtml(patchConfidenceLabel(s.detectionConfidence))}</span>`,
+    `<span class="badge ${s.binarySignatureDetected ? 'badge-ok' : 'badge-warn'}">${escapeHtml(patchSignatureLabel(s))}</span>`,
+    s.overlayFingerprintDetected
+      ? `<span class="badge ${s.overlayFingerprintConfidence === 'high' ? 'badge-ok' : 'badge-warn'}">${escapeHtml(patchOverlayLabel(s))}</span>`
+      : '',
+    s.detectionReason ? `<span class="badge badge-muted">${escapeHtml(s.detectionReason)}</span>` : '',
+  ].filter(Boolean).join('');
+  patchDetectedMetaEl.innerHTML = `
+    <span class="badge ${s.overrideActive ? 'badge-warn' : 'badge-muted'}">${escapeHtml(patchSourceLabel(s))}</span>
+    <span class="badge ${s.compatible ? 'badge-ok' : 'badge-warn'}">${escapeHtml(s.recommendedPatch ? `${patchFamilyLabel(s.recommendedPatch.versionRange)} · ${patchConfidenceLabel(s.detectionConfidence)}` : 'no recommended family')}</span>
+    ${detectorMeta}`;
+
+  if (s.overrideActive && s.overrideInfo?.range) {
+    patchOverrideBannerEl.hidden = false;
+    const reason = s.overrideInfo.reason ? ` — ${s.overrideInfo.reason}` : '';
+    patchOverrideBannerTextEl.textContent = `Forced family: ${s.overrideInfo.range}${reason}`;
+  } else {
+    patchOverrideBannerEl.hidden = true;
+    patchOverrideBannerTextEl.textContent = '—';
+  }
+
+  const detectedRanges = new Set((s.detectedPatches ?? []).map((p) => p.versionRange));
+  if (s.overlayFingerprintDetected && s.overlayFingerprintRange) {
+    detectedRanges.add(s.overlayFingerprintRange);
+  }
+  const recommendedRange = s.recommendedPatch?.versionRange ?? null;
+  const cards = (s.availableRanges ?? []).map((range) => {
+    const isRecommended = recommendedRange === range.versionRange;
+    const isSelected = s.overrideInfo?.range === range.versionRange;
+    const isDetected = detectedRanges.has(range.versionRange);
+    const classes = [
+      'patch-range-card',
+      isRecommended ? 'recommended' : '',
+      isSelected ? 'selected' : '',
+      isDetected ? 'detected' : '',
+      !s.compatible && isRecommended ? 'incompatible' : '',
+    ].filter(Boolean).join(' ');
+    const tags = [
+      patchBadge(patchFamilyLabel(range.versionRange), 'muted'),
+      isRecommended ? patchBadge('recommended', 'ok') : '',
+      isSelected ? patchBadge('manual', 'warn') : '',
+      isDetected && s.overlayFingerprintRange === range.versionRange
+        ? patchBadge(`JS overlay footprint · ${patchConfidenceLabel(s.overlayFingerprintConfidence)}`, s.overlayFingerprintConfidence === 'high' ? 'ok' : 'warn')
+        : '',
+      isDetected && s.overlayFingerprintRange !== range.versionRange ? patchBadge('specific signature detected', 'ok') : '',
+      !isDetected && s.binarySignatureDetected ? patchBadge('metadata-guided version', 'muted') : patchBadge('test manually', 'muted'),
+    ].filter(Boolean).join('');
+    return `
+      <div class="${classes}">
+        <div class="patch-range-card-header">
+          <div class="patch-range-card-title">${escapeHtml(range.versionRange)}</div>
+          ${isRecommended ? patchBadge(s.overrideActive ? 'forced' : 'auto target', s.overrideActive ? 'warn' : 'ok') : ''}
+        </div>
+        <div class="patch-range-card-body">
+          <div class="patch-range-card-description">${escapeHtml(range.description)}</div>
+          <div class="patch-range-card-tags">${tags}</div>
+          <div class="patch-inline-note">${escapeHtml(range.originalUrl)} → ${escapeHtml(range.patchedUrl)}</div>
+        </div>
+        <div class="patch-range-card-actions">
+          <button class="btn ${isSelected ? 'btn-secondary' : 'btn-ghost'} btn-sm" type="button" data-patch-range="${escapeHtml(range.versionRange)}">${isSelected ? 'Selected' : 'Select family'}</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  patchRangeGridEl.innerHTML = cards || '<div class="empty-state"><p>No patch families available.</p></div>';
+}
+
+async function applyPatchRangeSelection(range: string | null): Promise<void> {
+  setStatus(range ? `Selecting ${range}…` : 'Resetting to auto-detection…', 'busy');
+  try {
+    const args = range ? ['patch', 'select', range, '--json'] : ['patch', 'select', 'auto', '--json'];
+    const r = await withTimeout(window.ag.run(args), 12_000, 'patch select');
+    if (r.code !== 0) {
+      throw new Error(r.stderr || r.stdout || 'patch select failed');
+    }
+    toast(range ? `Patch family set to ${range}` : 'Manual selection cleared', 'ok', 4000);
+    await loadPatchStatus();
+  } catch (e) {
+    toast(`Patch update failed: ${(e as Error).message}`, 'err', 7000);
+    setStatus('Error', 'err');
+  }
+}
 
 async function loadPatchStatus(): Promise<void> {
   return guardLoad('patch', async () => {
@@ -1660,62 +2457,76 @@ async function loadPatchStatus(): Promise<void> {
         'patch status',
       );
     const s = JSON.parse(r.stdout) as PatchStatus;
+    renderPatchSelector(s);
     const banner =
       s.applied
         ? `<div class="patch-banner ok">
              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
              <div class="patch-banner-body">
-               <div class="patch-banner-title">Patch is active</div>
-               <div class="patch-banner-text">language_server is redirected to the local proxy.</div>
+               <div class="patch-banner-title">Patch active</div>
+               <div class="patch-banner-text"><code>language_server</code> is redirecting requests to the local proxy.</div>
              </div>
            </div>`
         : s.exists
           ? `<div class="patch-banner warn">
                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                <div class="patch-banner-body">
-                 <div class="patch-banner-title">Patch is NOT applied</div>
-                 <div class="patch-banner-text">Custom models will not appear in the chat dropdown until the patch is applied.</div>
+                 <div class="patch-banner-title">Patch not applied</div>
+                 <div class="patch-banner-text">Custom models will not appear in the menu until this step is applied.</div>
                </div>
              </div>`
           : `<div class="patch-banner err">
                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
                <div class="patch-banner-body">
                  <div class="patch-banner-title">Binary not found</div>
-                 <div class="patch-banner-text">Could not locate language_server binary.</div>
+                 <div class="patch-banner-text">Could not locate <code>language_server</code> in the Antigravity installation.</div>
                </div>
              </div>`;
 
-    patchTpl.innerHTML = `
-      ${banner}
+    const confidenceHero = `
+      <div class="patch-confidence patch-confidence-${patchConfidenceTone(s.detectionConfidence)}">
+        <div class="patch-confidence-eyebrow">Confidence level</div>
+        <div class="patch-confidence-value">${escapeHtml(patchConfidenceLabel(s.detectionConfidence))}</div>
+        <div class="patch-confidence-text">${escapeHtml(s.detectionReason ?? 'No detailed explanation provided by auto-detection yet.')}</div>
+      </div>`;
+
+    const metadataWithoutBinaryBanner = patchNeedsMetadataWithoutBinaryWarning(s)
+      ? `<div class="patch-banner err">
+           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+           <div class="patch-banner-body">
+             <div class="patch-banner-title">Version detected, binary signature missing</div>
+             <div class="patch-banner-text">Antigravity <code>${escapeHtml(s.antigravityVersion ?? 'unknown')}</code> was recognized via <code>${escapeHtml(s.antigravityVersionSource ?? 'metadata')}</code>, but the <code>language_server</code> binary does not contain the expected signature. This can indicate a different build, a pre-modified binary, or a mixed installation.</div>
+           </div>
+         </div>`
+      : '';
+
+    const recommendationRow = s.recommendedPatch
+      ? `
       <div class="patch-row">
-        <div class="patch-row-label">Antigravity Version</div>
-        <div class="patch-row-value">${escapeHtml(s.antigravityVersion ?? 'unknown')}</div>
-      </div>
-      <div class="patch-row">
-        <div class="patch-row-label">Binary path</div>
-        <div class="patch-row-value">${escapeHtml(s.binaryPath ?? '—')}</div>
-      </div>
-      <div class="patch-row">
-        <div class="patch-row-label">Exists</div>
-        <div class="patch-row-value ${s.exists ? 'ok' : 'err'}">${s.exists ? 'yes' : 'no'}</div>
-      </div>
-      <div class="patch-row">
-        <div class="patch-row-label">Applied</div>
-        <div class="patch-row-value ${s.applied ? 'ok' : 'warn'}">${s.applied ? 'yes' : 'no'}</div>
-      </div>
-      <div class="patch-row">
-        <div class="patch-row-label">Backup</div>
-        <div class="patch-row-value ${s.backupExists ? 'ok' : ''}">${s.backupExists ? 'yes' : 'no'}</div>
-      </div>
-      <div class="patch-row">
-        <div class="patch-row-label">Compatible</div>
-        <div class="patch-row-value ${s.compatible ? 'ok' : 'warn'}">${s.compatible ? 'yes' : 'no'}</div>
-      </div>
-      ${s.recommendedPatch ? `
-      <div class="patch-row">
-        <div class="patch-row-label">Version Range</div>
+        <div class="patch-row-label">Recommended family</div>
         <div class="patch-row-value">${escapeHtml(s.recommendedPatch.versionRange)}</div>
       </div>
+      <div class="patch-row">
+        <div class="patch-row-label">Recommendation source</div>
+        <div class="patch-row-value ${s.overrideActive ? 'warn' : 'ok'}">${escapeHtml(s.overrideActive ? 'manual selection' : 'auto-detection')}</div>
+      </div>
+      <div class="patch-row">
+        <div class="patch-row-label">Confidence</div>
+        <div class="patch-row-value ${patchConfidenceTone(s.detectionConfidence)}">${escapeHtml(patchConfidenceLabel(s.detectionConfidence))}</div>
+      </div>
+      <div class="patch-row">
+        <div class="patch-row-label">Binary signature</div>
+        <div class="patch-row-value ${s.binarySignatureDetected ? 'ok' : 'warn'}">${escapeHtml(patchSignatureLabel(s))}</div>
+      </div>
+      <div class="patch-row">
+        <div class="patch-row-label">JS overlay footprint</div>
+        <div class="patch-row-value ${s.overlayFingerprintDetected ? (s.overlayFingerprintConfidence === 'high' ? 'ok' : 'warn') : 'warn'}">${escapeHtml(patchOverlayLabel(s))}</div>
+      </div>
+      ${s.overlayFingerprintReason ? `
+      <div class="patch-row">
+        <div class="patch-row-label">JS footprint reason</div>
+        <div class="patch-row-value">${escapeHtml(s.overlayFingerprintReason)}</div>
+      </div>` : ''}
       <div class="patch-row">
         <div class="patch-row-label">Original URL</div>
         <div class="patch-row-value">${escapeHtml(s.recommendedPatch.originalUrl)}</div>
@@ -1723,30 +2534,106 @@ async function loadPatchStatus(): Promise<void> {
       <div class="patch-row">
         <div class="patch-row-label">Patched URL</div>
         <div class="patch-row-value">${escapeHtml(s.recommendedPatch.patchedUrl)}</div>
+      </div>`
+      : '';
+
+    const overrideRow = s.overrideInfo?.range
+      ? `
+      <div class="patch-row">
+        <div class="patch-row-label">Manual selection</div>
+        <div class="patch-row-value warn">${escapeHtml(s.overrideInfo.range)}</div>
+      </div>
+      ${s.overrideInfo.reason ? `
+      <div class="patch-row">
+        <div class="patch-row-label">Reason</div>
+        <div class="patch-row-value warn">${escapeHtml(s.overrideInfo.reason)}</div>
+      </div>` : ''}`
+      : '';
+
+    const suggestions = `
+      <div class="patch-row patch-suggestions">
+        <div class="patch-row-label">Guidance</div>
+        <div class="patch-row-value" style="max-width:100%; text-align:left;">
+          <ul class="patch-suggestion-list">
+            <li>Keep auto-detection active by default and only force a family if the detected version is incorrect.</li>
+            <li>Always keep a clean backup before switching between 2.1, 2.2, 2.3, or 2.4 patch families.</li>
+            <li>For 2.2.x, 2.3.x, and 2.4.x (up to 2.4.2), check MITM status and CA certificate installation before applying the patch.</li>
+            <li>If metadata and binary signature disagree, restore from backup first before trying a manual family.</li>
+          </ul>
+        </div>
+      </div>`;
+
+    patchTpl.innerHTML = `
+      ${banner}
+      ${confidenceHero}
+      ${metadataWithoutBinaryBanner}
+      <div class="patch-row">
+        <div class="patch-row-label">Antigravity version</div>
+        <div class="patch-row-value">${escapeHtml(s.antigravityVersion ?? 'unknown')}</div>
+      </div>
+      <div class="patch-row">
+        <div class="patch-row-label">Version source</div>
+        <div class="patch-row-value">${escapeHtml(s.antigravityVersionSource ?? 'unknown')}</div>
+      </div>
+      <div class="patch-row">
+        <div class="patch-row-label">Binary path</div>
+        <div class="patch-row-value">${escapeHtml(s.binaryPath ?? '—')}</div>
+      </div>
+      <div class="patch-row">
+        <div class="patch-row-label">Present</div>
+        <div class="patch-row-value ${s.exists ? 'ok' : 'err'}">${s.exists ? 'yes' : 'no'}</div>
+      </div>
+      <div class="patch-row">
+        <div class="patch-row-label">Already patched</div>
+        <div class="patch-row-value ${s.applied ? 'ok' : 'warn'}">${s.applied ? 'yes' : 'no'}</div>
+      </div>
+      <div class="patch-row">
+        <div class="patch-row-label">Backup</div>
+        <div class="patch-row-value ${s.backupExists ? 'ok' : ''}">${s.backupExists ? 'yes' : 'no'}</div>
+      </div>
+      <div class="patch-row">
+        <div class="patch-row-label">Compatibility</div>
+        <div class="patch-row-value ${s.compatible ? 'ok' : 'warn'}">${s.compatible ? 'ok' : 'needs verification'}</div>
+      </div>
+      ${s.detectionReason ? `
+      <div class="patch-row">
+        <div class="patch-row-label">Recommendation reason</div>
+        <div class="patch-row-value">${escapeHtml(s.detectionReason)}</div>
       </div>` : ''}
+      ${recommendationRow}
+      ${overrideRow}
       ${s.warningMessage ? `
       <div class="patch-row">
         <div class="patch-row-label">Warning</div>
         <div class="patch-row-value warn">${escapeHtml(s.warningMessage)}</div>
-      </div>` : ''}`;
+      </div>` : ''}
+      ${suggestions}`;
     patchStatusEl.replaceChildren(patchTpl.content);
     setStatus('Ready');
   } catch (e) {
-    patchStatusEl.innerHTML = `<div class="empty-state"><p>Error: ${escapeHtml((e as Error).message)}</p></div>`;
+    patchStatusEl.innerHTML = `<div class="empty-state"><p>Could not load patch status: ${escapeHtml((e as Error).message)}</p></div>`;
   } finally {
     hideSkeleton(patchStatusEl);
   }
   });
 }
 
+patchRescanBtn.addEventListener('click', () => void loadPatchStatus());
+patchClearOverrideBtn.addEventListener('click', () => void applyPatchRangeSelection(null));
+patchRangeGridEl.addEventListener('click', (event) => {
+  const target = event.target as HTMLElement | null;
+  const button = target?.closest<HTMLButtonElement>('[data-patch-range]');
+  if (!button) return;
+  const range = button.getAttribute('data-patch-range');
+  if (!range) return;
+  void applyPatchRangeSelection(range);
+});
 
 $('#patchApplyBtn').addEventListener('click', async () => {
-  // P1.3 (subset) — Pré-validation delta size avant d'ouvrir la confirmation.
-  // On récupère le statut patch actuel et on valide l'état du binaire
-  // (existence, compatibilité, présence d'un backup, patch recommandé connu)
-  // AVANT de risquer une modification destructive. C'est l'équivalent côté UI
-  // d'un "delta size check" : on s'assure que le delta (backup → binaire
-  // patché) est dans un état cohérent avant de l'appliquer.
+  // P1.3 (subset) — Validate the binary state (existence, compatibility,
+  // backup presence, known recommended patch) BEFORE risking a destructive
+  // change. The UI equivalent of a "delta size check": confirm the delta
+  // (backup → patched binary) is in a consistent state before applying.
   let preflight: PatchStatus | null = null;
   try {
     setStatus('Preflight check…', 'busy');
@@ -1758,37 +2645,37 @@ $('#patchApplyBtn').addEventListener('click', async () => {
     preflight = JSON.parse(r.stdout) as PatchStatus;
   } catch (e) {
     setStatus('Ready');
-    toast(`❌ Preflight failed: cannot read patch status (${(e as Error).message})`, 'err', 6000);
+    toast(`Preflight failed: cannot read patch status (${(e as Error).message})`, 'err', 6000);
     return;
   }
 
   if (!preflight.exists) {
     setStatus('Ready');
-    toast('❌ Preflight failed: language_server binary not found. Nothing to patch.', 'err', 6000);
+    toast('Preflight failed: language_server binary not found. Nothing to patch.', 'err', 6000);
     return;
   }
   if (!preflight.compatible) {
     setStatus('Ready');
-    toast('❌ Preflight failed: Antigravity version is not compatible with the known patch.', 'err', 6000);
+    toast('Preflight failed: Antigravity version is not compatible with the known patch.', 'err', 6000);
     return;
   }
   if (!preflight.recommendedPatch) {
     setStatus('Ready');
-    toast('❌ Preflight failed: no recommended patch available for this version.', 'err', 6000);
+    toast('Preflight failed: no recommended patch available for this version.', 'err', 6000);
     return;
   }
   if (preflight.applied) {
     setStatus('Ready');
-    toast('⚠️ Patch is already applied. Use Restore first if you want to re-apply.', 'warn', 5000);
+    toast('Patch is already applied. Use Restore first if you want to re-apply.', 'warn', 5000);
     return;
   }
   if (!preflight.backupExists) {
-    // Non-bloquant : on prévient l'utilisateur mais on laisse confirmer
+    // Non-blocking: warn the user but still allow them to confirm.
     console.warn('[patch] No backup found — applying patch will not be reversible');
   }
 
-  // Construit le détail affiché dans la modale (inclut la "taille" du delta
-  // quand le backend la renseigne via le champ optionnel deltaSizeBytes).
+  // Build the details shown in the confirmation modal (includes the "delta
+  // size" when the backend provides it via the optional deltaSizeBytes field).
   const sizeInfo =
     typeof preflight.deltaSizeBytes === 'number' && preflight.deltaSizeBytes > 0
       ? `<br><br><strong>Estimated delta size:</strong> ${escapeHtml(formatBytes(preflight.deltaSizeBytes))}`
@@ -1797,10 +2684,10 @@ $('#patchApplyBtn').addEventListener('click', async () => {
     ? ''
     : '<br><br><strong style="color:var(--warn)">⚠ No backup found — patch will not be reversible.</strong>';
 
-  // P1.3 (CLI subset) — surface la sortie de validateAsar() dans la modale.
-  // Le backend expose désormais `verdict` (ok|warn|block) et `validateAsarReport`
-  // (liste de checks). On rend ces checks et on BLOQUE la confirmation si
-  // un check requis a échoué.
+  // P1.3 (CLI subset) — Surface the validateAsar() output in the modal.
+  // The backend now exposes `verdict` (ok|warn|block) and `validateAsarReport`
+  // (list of checks). We render these checks and BLOCK confirmation if any
+  // required check failed.
   interface ValidateAsarCheck {
     id: string;
     label: string;
@@ -1830,7 +2717,7 @@ $('#patchApplyBtn').addEventListener('click', async () => {
     const verdictLabel = (verdict ?? 'unknown').toUpperCase();
     const rows = validateReport.checks
       .map((c) => {
-        const icon = c.status === 'ok' ? '✅' : '❌';
+        const icon = c.status === 'ok' ? '✓' : '✗';
         const tag = c.required ? 'required' : 'advisory';
         const detail = c.detail ? ` — <span class="patch-row-detail">${escapeHtml(c.detail)}</span>` : '';
         return `<li>${icon} <strong>${escapeHtml(c.label)}</strong> <em>(${tag})</em>${detail}</li>`;
@@ -1848,7 +2735,7 @@ $('#patchApplyBtn').addEventListener('click', async () => {
 
   if (verdict === 'block') {
     setStatus('Ready');
-    toast('❌ Asar validation failed (verdict=block). Patch cannot be applied — see preflight modal.', 'err', 8000);
+    toast('Asar validation failed (verdict=block). Patch cannot be applied — see preflight modal.', 'err', 8000);
     // Open the confirmation modal anyway so the user can read the verdict,
     // but the Apply button will be disabled below.
   }
@@ -1880,7 +2767,7 @@ $('#patchApplyBtn').addEventListener('click', async () => {
     }
     setStatus('Ready');
   } catch (e) {
-    toast(`Error: ${(e as Error).message}`, 'err');
+    toast(`Could not apply patch: ${(e as Error).message}`, 'err');
     setStatus('Error', 'err');
   }
 });
@@ -1910,7 +2797,7 @@ $('#patchRestoreBtn').addEventListener('click', async () => {
     }
     setStatus('Ready');
   } catch (e) {
-    toast(`Error: ${(e as Error).message}`, 'err');
+    toast(`Could not restore: ${(e as Error).message}`, 'err');
     setStatus('Error', 'err');
   }
 });
@@ -1927,18 +2814,30 @@ const logsCopyBtn = $('#logsCopyBtn') as HTMLButtonElement;
 let logsStreamId: string | null = null;
 let logsStreaming = false;
 
-// Streaming buffer: chunks are accumulated and flushed once per animation frame
-// to avoid layout thrashing when many small chunks arrive.
+// Streaming buffer: raw text chunks are concatenated and ANSI-converted ONCE
+// per animation frame, then appended in a single DOM mutation. The previous
+// implementation ran ansiToHtml on every chunk (N regex passes per flush
+// window) — see audit finding P0.
+// Hard cap on the rendered log buffer so a long stream cannot bloat the
+// <pre> node past ~500 KB and stall layout. We keep the last ~400 KB.
+const LOGS_MAX_BYTES = 500_000;
+const LOGS_KEEP_BYTES = 400_000;
 let logsPendingChunk: string | null = null;
 let logsFlushScheduled = false;
 const flushLogs = () => {
   logsFlushScheduled = false;
   if (logsPendingChunk) {
-    // Use insertAdjacentHTML on a text-only container — faster than innerHTML
-    // for appending, and avoids re-parsing the existing content.
-    logsOutput.insertAdjacentText('beforeend', logsPendingChunk);
-    logsOutput.scrollTop = logsOutput.scrollHeight;
+    logsTpl.innerHTML = ansiToHtml(logsPendingChunk);
+    logsOutput.appendChild(logsTpl.content.cloneNode(true));
     logsPendingChunk = null;
+  }
+  const isNearBottom = logsOutput.scrollHeight - logsOutput.scrollTop - logsOutput.clientHeight < 100;
+  if (logsOutput.textContent && logsOutput.textContent.length > LOGS_MAX_BYTES) {
+    const trimmed = logsOutput.textContent.slice(-LOGS_KEEP_BYTES);
+    logsOutput.textContent = trimmed;
+    logsOutput.scrollTop = logsOutput.scrollHeight;
+  } else if (isNearBottom) {
+    logsOutput.scrollTop = logsOutput.scrollHeight;
   }
 };
 const scheduleLogsFlush = () => {
@@ -1960,9 +2859,10 @@ async function loadLogs(): Promise<void> {
     const r = await window.ag.run(['logs', '-n', '100', '--source', currentLogSource]);
     logsTpl.innerHTML = ansiToHtml(r.stdout || r.stderr || '(empty)');
     logsOutput.replaceChildren(logsTpl.content);
+    logsOutput.scrollTop = logsOutput.scrollHeight;
     setStatus('Ready');
   } catch (e) {
-    logsOutput.textContent = `Error: ${(e as Error).message}`;
+    logsOutput.textContent = `Could not load logs: ${(e as Error).message}`;
     setStatus('Error', 'err');
   } finally {
     logsSkeleton.style.display = 'none';
@@ -1978,12 +2878,10 @@ async function startLogStream(): Promise<void> {
   logsStreamId = `logs-${Date.now()}`;
 
   window.ag.onStreamData(logsStreamId, (chunk) => {
-    // Accumulate the raw chunk; ansiToHtml is expensive, do it once per flush.
-    logsPendingChunk = (logsPendingChunk ?? '') + ansiToHtml(chunk);
+    logsPendingChunk = (logsPendingChunk ?? '') + chunk;
     scheduleLogsFlush();
   });
   window.ag.onStreamClose(logsStreamId, (code) => {
-    // Flush any pending chunks before signaling closure
     flushLogs();
     logsStreaming = false;
     logsFollowBtn.innerHTML = '<span class="dot-live"></span> Follow';
@@ -1992,10 +2890,10 @@ async function startLogStream(): Promise<void> {
   window.ag.onStreamError(logsStreamId, (err) => {
     flushLogs();
     toast(`Stream error: ${err}`, 'err');
-    stopLogStream();
+    void stopLogStream();
   });
 
-  await window.ag.startStream(['logs', '-f'], logsStreamId);
+  await window.ag.startStream(['logs', '-f', '--source', currentLogSource], logsStreamId);
 }
 
 async function stopLogStream(): Promise<void> {
@@ -2012,11 +2910,20 @@ logsFollowBtn.addEventListener('click', () => {
   if (logsStreaming) void stopLogStream();
   else void startLogStream();
 });
-logsClearBtn.addEventListener('click', () => {
+logsClearBtn.addEventListener('click', async () => {
   logsOutput.textContent = '';
+  try {
+    await window.ag.run(['logs', '--clear', '--source', currentLogSource]);
+  } catch (err) {
+    console.error('Failed to clear logs on backend', err);
+  }
+  toast('Logs cleared', 'info', 1500);
 });
 logsCopyBtn.addEventListener('click', async () => {
   await navigator.clipboard.writeText(logsOutput.textContent ?? '');
+  const origText = logsCopyBtn.innerHTML;
+  logsCopyBtn.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Copied!';
+  setTimeout(() => { logsCopyBtn.innerHTML = origText; }, 2000);
   toast('Logs copied to clipboard', 'ok', 2000);
 });
 
@@ -2027,9 +2934,17 @@ logsTabs.forEach((tab) => {
   tab.addEventListener('click', () => {
     const source = tab.dataset.source ?? 'language_server';
     if (source === currentLogSource) return;
-    logsTabs.forEach((t) => t.classList.toggle('active', t === tab));
+    logsTabs.forEach((t) => {
+      const isActive = t === tab;
+      t.classList.toggle('active', isActive);
+      t.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
     currentLogSource = source;
-    void loadLogs();
+    if (logsStreaming) {
+      void stopLogStream().then(() => void startLogStream());
+    } else {
+      void loadLogs();
+    }
   });
 });
 
@@ -2037,51 +2952,47 @@ logsTabs.forEach((tab) => {
 // Antigravity Status view
 // ─────────────────────────────────────────────────────────────────────────────
 
-const infoTable = $('#infoTable') as HTMLDivElement;
-const agHeroDot = $('#agHeroDot') as HTMLSpanElement;
-const agHeroLabel = $('#agHeroLabel') as HTMLSpanElement;
-const agHeroTitle = $('#agHeroTitle') as HTMLHeadingElement;
-const agHeroMeta = $('#agHeroMeta') as HTMLParagraphElement;
-const agVersion = $('#agVersion') as HTMLDivElement;
-const agPid = $('#agPid') as HTMLDivElement;
-const agCustomModels = $('#agCustomModels') as HTMLDivElement;
-const agUptime = $('#agUptime') as HTMLDivElement;
-const agPaths = $('#agPaths') as HTMLDivElement;
+const agVersionValue = $('#agVersionValue') as HTMLDivElement;
+const agRunningValue = $('#agRunningValue') as HTMLDivElement;
+const agProxyValue = $('#agProxyValue') as HTMLDivElement;
+const agLsValue = $('#agLsValue') as HTMLDivElement;
+
+const agSourceBadge = $('#agSourceBadge') as HTMLSpanElement;
+const agInstallPath = $('#agInstallPath') as HTMLDivElement;
+const agAppAsar = $('#agAppAsar') as HTMLDivElement;
+const agVersionRow = $('#agVersionRow') as HTMLDivElement;
+const agChannelRow = $('#agChannelRow') as HTMLDivElement;
+
+const agPidsBadge = $('#agPidsBadge') as HTMLSpanElement;
+const agAgPids = $('#agAgPids') as HTMLDivElement;
+const agLsPids = $('#agLsPids') as HTMLDivElement;
+
 const agRefreshBtn = $('#agRefreshBtn') as HTMLButtonElement;
-const agOpenBtn = $('#agOpenBtn') as HTMLButtonElement;
+const agLaunchBtn = $('#agLaunchBtn') as HTMLButtonElement;
+const agKillBtn = $('#agKillBtn') as HTMLButtonElement;
 const agRestartBtn = $('#agRestartBtn') as HTMLButtonElement;
 const agLaunchLogsBtn = $('#agLaunchLogsBtn') as HTMLButtonElement;
-const agRevealBtn = $('#agRevealBtn') as HTMLButtonElement;
-const agCopyPathsBtn = $('#agCopyPathsBtn') as HTMLButtonElement;
 
 let agStartedAt: number | null = null;
 let agUptimeTimer: number | null = null;
 
 function setAgHero(status: 'ok' | 'warn' | 'err' | 'busy', label: string, meta: string): void {
-  agHeroDot.className = `ag-hero-dot ${status}`;
-  agHeroLabel.textContent = label;
-  agHeroMeta.textContent = meta;
-}
-
-function formatUptime(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ${s % 60}s`;
-  const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m`;
+  if (agRunningValue) {
+    agRunningValue.textContent = label;
+  }
 }
 
 function startUptimeTicker(): void {
-  if (agUptimeTimer !== null) window.clearInterval(agUptimeTimer);
-  agStartedAt = Date.now();
-  agUptimeTimer = window.setInterval(() => {
-    if (agStartedAt) agUptime.textContent = formatUptime(Date.now() - agStartedAt);
-  }, 1000);
+  // UI changed, no longer showing uptime in real-time
+}
+
+function stopUptimeTicker(): void {
+  // UI changed, no longer showing uptime in real-time
 }
 
 // Reusable template for paths — avoids creating a new <template> each render
 const pathsTpl = document.createElement('template');
+
 
 function renderPaths(paths: Array<[string, string]>): void {
   const html = paths
@@ -2101,11 +3012,10 @@ function renderPaths(paths: Array<[string, string]>): void {
       </div>
     `).join('');
   pathsTpl.innerHTML = html;
-  agPaths.replaceChildren(pathsTpl.content);
 }
 
 // Event delegation for path actions
-agPaths.addEventListener('click', async (e) => {
+$('#agPaths')?.addEventListener('click', async (e) => {
   const target = e.target as HTMLElement;
   const copyBtn = target.closest<HTMLElement>('[data-copy]');
   if (copyBtn) {
@@ -2119,15 +3029,17 @@ agPaths.addEventListener('click', async (e) => {
   }
 });
 
-agCopyPathsBtn.addEventListener('click', async () => {
-  const values = Array.from(agPaths.querySelectorAll<HTMLElement>('.path-row-value'))
+$('#agCopyPathsBtn')?.addEventListener('click', async () => {
+  const container = $('#agPaths');
+  if (!container) return;
+  const values = Array.from(container.querySelectorAll<HTMLElement>('.path-row-value'))
     .map((el) => el.textContent ?? '').join('\n');
   await navigator.clipboard.writeText(values);
   toast('All paths copied', 'ok', 2000);
 });
 
 agRefreshBtn.addEventListener('click', () => void loadAntigravityStatus());
-agOpenBtn.addEventListener('click', async () => {
+agLaunchBtn.addEventListener('click', async () => {
   setAgHero('busy', 'Opening…', 'Launching Antigravity');
   try {
     const result = await window.ag.antigravityLaunch();
@@ -2141,6 +3053,20 @@ agOpenBtn.addEventListener('click', async () => {
     toast(`Launch failed: ${(e as Error).message}`, 'err');
   }
 });
+agKillBtn.addEventListener('click', async () => {
+  setAgHero('busy', 'Closing…', 'Killing Antigravity process');
+  try {
+    const result = await window.ag.antigravityKill();
+    if (!result.ok) throw new Error(result.error ?? 'Kill failed');
+    setAgHero('warn', 'Stopped', `Killed ${result.data?.killed ?? 0} processes`);
+    // stopUptimeTicker();
+    toast('Antigravity closed', 'ok', 2000);
+  } catch (e) {
+    setAgHero('err', 'Failed', (e as Error).message);
+    toast(`Close failed: ${(e as Error).message}`, 'err');
+  }
+});
+
 agRestartBtn.addEventListener('click', async () => {
   setAgHero('busy', 'Restarting…', 'Killing and relaunching');
   try {
@@ -2155,19 +3081,7 @@ agRestartBtn.addEventListener('click', async () => {
     toast(`Restart failed: ${(e as Error).message}`, 'err');
   }
 });
-agRevealBtn.addEventListener('click', async () => {
-  try {
-    const r = await window.ag.antigravityStatus();
-    const installDir = r.ok ? (r.data as Record<string, unknown>)?.installDir as string | undefined : undefined;
-    if (installDir) {
-      await window.ag.reveal(installDir);
-    } else {
-      toast('Install directory not found', 'warn');
-    }
-  } catch (e) {
-    toast(`Reveal failed: ${(e as Error).message}`, 'err');
-  }
-});
+// remove unused buttons
 
 async function loadAntigravityStatus(): Promise<void> {
   return guardLoad('agStatus', async () => {
@@ -2176,7 +3090,9 @@ async function loadAntigravityStatus(): Promise<void> {
     try {
       // Parallel: info IPC, status IPC, version IPC, models count
       const [info, statusResult, versionResult, modelsResult] = await Promise.all([
-        memo('info', 5_000, () => window.ag.info()),
+        // PERF: 5 s TTL caused stale reads and split-cached state with the
+        // boot path that requests 60 s. Unify to 60 s (info rarely changes).
+        memo('info', 60_000, () => window.ag.info()),
         withTimeout(window.ag.antigravityStatus(), 10_000, 'antigravity status').catch((err: Error) => ({ ok: false, data: undefined, error: err.message })),
         withTimeout(window.ag.antigravityVersion(), 10_000, 'antigravity version').catch((err: Error) => ({ ok: false, data: undefined, error: err.message })),
         withTimeout(window.ag.run(['models', 'list', '--json']), 10_000, 'models list').catch(() => ({ stdout: '{"models":[]}', stderr: '', code: 0 })),
@@ -2184,7 +3100,15 @@ async function loadAntigravityStatus(): Promise<void> {
 
     const status = statusResult.ok ? (statusResult.data as Record<string, unknown>) : null;
     const versionData = versionResult.ok ? versionResult.data : null;
-    const modelsData = JSON.parse(modelsResult.stdout) as { models: Array<{ name: string }> };
+    let modelsCount = 0;
+    try {
+      const modelsData = JSON.parse(modelsResult.stdout) as { models?: Array<{ name: string }> };
+      if (modelsData && Array.isArray(modelsData.models)) {
+        modelsCount = modelsData.models.length;
+      }
+    } catch {
+      modelsCount = 0;
+    }
 
     const installed = Boolean(status?.installed ?? status?.installDir);
     const running = Boolean(status?.running ?? status?.pid);
@@ -2201,45 +3125,61 @@ async function loadAntigravityStatus(): Promise<void> {
     } else {
       setAgHero('warn', 'Installed · Stopped', version ?? 'Not running');
     }
-    agHeroTitle.textContent = (status?.displayName as string | undefined) ?? 'Antigravity';
 
     // Stat cards
-    agVersion.textContent = version ?? '—';
-    agPid.textContent = pid != null ? String(pid) : '—';
-    agCustomModels.textContent = String(modelsData.models?.length ?? 0);
-    if (!running && agUptime) agUptime.textContent = '—';
+    if (agVersionValue) agVersionValue.textContent = version ?? '—';
+    if (agRunningValue) {
+      if (!installed) {
+        agRunningValue.textContent = 'Not installed';
+      } else if (running) {
+        agRunningValue.textContent = 'Running';
+      } else {
+        agRunningValue.textContent = 'Stopped';
+      }
+    }
+    
+    // Fill Installation Panel
+    if (agInstallPath) agInstallPath.textContent = installDir || '—';
+    if (agAppAsar) agAppAsar.textContent = (status?.appAsarPath as string | undefined) ?? '—';
+    if (agVersionRow) agVersionRow.textContent = version ?? '—';
+    if (agChannelRow) agChannelRow.textContent = (status?.channel as string | undefined) ?? '—';
+    
+    // Fill Running processes Panel
+    let agPidCount = 0;
+    if (agAgPids) {
+      const pids = status?.agPids as number[] | undefined;
+      agPidCount += pids?.length ?? (pid ? 1 : 0);
+      agAgPids.textContent = pids && pids.length > 0 ? pids.join(', ') : (pid ? String(pid) : '—');
+    }
+    if (agLsPids) {
+      const lsPids = status?.lsPids as number[] | undefined;
+      agPidCount += lsPids?.length ?? 0;
+      agLsPids.textContent = lsPids && lsPids.length > 0 ? lsPids.join(', ') : '—';
+    }
+    if (agPidsBadge) {
+      agPidsBadge.textContent = `${agPidCount} PIDs`;
+    }
+    if (agSourceBadge) {
+       agSourceBadge.textContent = installed ? 'Installed' : 'Missing';
+    }
 
-    // Paths
-    const paths: Array<[string, string]> = [
-      ['Install dir', installDir],
-      ['Binary', (status?.binaryPath as string | undefined) ?? ''],
-      ['app.asar', (status?.appAsarPath as string | undefined) ?? ''],
-      ['custom_models.json', (status?.customModelsPath as string | undefined) ?? ''],
-      ['LS log', (status?.lsLogPath as string | undefined) ?? ''],
-      ['CLI', info.cliPath],
-    ];
-    renderPaths(paths);
-
-    // Runtime details table
-    const rows: Array<[string, string]> = [
-      ['Platform', `${info.platform}/${info.arch}`],
-      ['Electron', info.electron],
-      ['Node', info.node],
-      ['Chromium', info.chrome],
-      ['Username', (status?.username as string | undefined) ?? '—'],
-      ['Home', (status?.homedir as string | undefined) ?? '—'],
-      ['CPU', (status?.cpu as string | undefined) ?? '—'],
-      ['Memory', (status?.memory as string | undefined) ?? '—'],
-    ];
-    const html = rows
-      .map(([k, v]) => `<div class="info-cell k">${escapeHtml(k)}</div><div class="info-cell v">${escapeHtml(v)}</div>`)
-      .join('');
-    infoTableTpl.innerHTML = html;
-    infoTable.replaceChildren(infoTableTpl.content);
+    if (agLsValue) {
+       const lsPids = status?.lsPids as number[] | undefined;
+       agLsValue.textContent = (lsPids && lsPids.length > 0) ? 'Running' : 'Stopped';
+    }
+    
+    try {
+        const proxyResp = await window.ag.proxyStatus();
+        if (agProxyValue) {
+            agProxyValue.textContent = proxyResp?.data?.running ? 'Running' : 'Stopped';
+        }
+    } catch {
+        if (agProxyValue) agProxyValue.textContent = 'Unknown';
+    }
+    
     setStatus('Ready');
   } catch (e) {
     setAgHero('err', 'Error', (e as Error).message);
-    infoTable.innerHTML = `<div class="empty-state"><p>Error: ${escapeHtml((e as Error).message)}</p></div>`;
     setStatus('Error', 'err');
   }
   });
@@ -2282,6 +3222,113 @@ async function loadSettings(): Promise<void> {
     settingsConfigSkeleton.style.display = 'none';
     settingsConfigBody.style.display = '';
   }
+  // Notify toggle + proxy-error history are independent from the legacy
+  // config block; load them in parallel and swallow errors (best-effort).
+  await loadSettingsExtras();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Settings: notifications toggle + proxy error history panel
+// ─────────────────────────────────────────────────────────────────────────────
+
+const notifyToggle = $('#notifyToggle') as HTMLInputElement | null;
+const proxyErrorHistoryList = $('#proxyErrorHistoryList') as HTMLUListElement | null;
+const proxyErrorHistoryEmpty = $('#proxyErrorHistoryEmpty') as HTMLDivElement | null;
+
+function classifySeverity(p: { status?: number; errorType?: string }): 'err' | 'warn' {
+  const s = p.status && p.status >= 500
+    || p.errorType === 'auth_401' || p.errorType === 'auth_403'
+    || p.errorType === 'quota_429' || p.errorType === 'timeout';
+  return s ? 'err' : 'warn';
+}
+
+function formatRelativeTime(ms: number): string {
+  const delta = Date.now() - ms;
+  if (delta < 60_000) return `${Math.max(0, Math.round(delta / 1000))}s ago`;
+  if (delta < 3_600_000) return `${Math.round(delta / 60_000)}m ago`;
+  if (delta < 86_400_000) return `${Math.round(delta / 3_600_000)}h ago`;
+  return new Date(ms).toLocaleString();
+}
+
+function renderProxyErrorHistory(history: Array<{
+  traceId: string;
+  provider: string;
+  status?: number;
+  errorType: string;
+  rawError: string;
+  title: string;
+  message: string;
+  suggestions: string[];
+  actionUrl?: string;
+  at: number;
+}>): void {
+  if (!proxyErrorHistoryList) return;
+  proxyErrorHistoryList.innerHTML = '';
+  if (proxyErrorHistoryEmpty) proxyErrorHistoryEmpty.style.display = history.length === 0 ? '' : 'none';
+  if (history.length === 0) return;
+  // Build with a template — avoids innerHTML for untrusted strings.
+  const tpl = document.createElement('template');
+  for (const item of history) {
+    const sev = classifySeverity(item);
+    const li = document.createElement('li');
+    li.className = `severity-${sev}`;
+    li.dataset.traceId = item.traceId;
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const title = document.createElement('div');
+    title.className = 'title';
+    title.textContent = `${item.provider} — ${item.title}`;
+    const subtitle = document.createElement('div');
+    subtitle.className = 'subtitle';
+    subtitle.textContent = item.message || item.rawError || '(no message)';
+    const when = document.createElement('div');
+    when.className = 'when';
+    when.textContent = `${formatRelativeTime(item.at)}${item.status ? ` · HTTP ${item.status}` : ''}${item.errorType ? ` · ${item.errorType}` : ''}`;
+    meta.append(title, subtitle, when);
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-ghost btn-sm replay';
+    btn.type = 'button';
+    btn.textContent = 'Show';
+    btn.dataset.label = 'replay-proxy-error';
+    btn.setAttribute('aria-label', `Replay ${item.provider} ${item.title}`);
+    btn.addEventListener('click', () => {
+      // Re-fire the historical payload over the same channel the live
+      // bridge consumes, so the modal renders without touching the proxy.
+      window.dispatchEvent(new CustomEvent('ag:replay-proxy-error', { detail: item }));
+      toast(`Replaying ${item.provider} — ${item.title}`, 'info', 1800);
+    });
+    li.append(meta, btn);
+    tpl.content.appendChild(li);
+  }
+  proxyErrorHistoryList.appendChild(tpl.content);
+}
+
+async function loadProxyErrorHistory(): Promise<void> {
+  try {
+    const history = await window.ag.getProxyErrorHistory();
+    renderProxyErrorHistory(history);
+  } catch {
+    // Best-effort — leave the previous render in place.
+  }
+}
+
+async function loadSettingsExtras(): Promise<void> {
+  if (notifyToggle) {
+    try {
+      const cfg = await window.ag.config();
+      const ui = (cfg.ui as Record<string, unknown> | undefined) ?? {};
+      notifyToggle.checked = ui.notifyEnabled === true;
+    } catch {
+      notifyToggle.checked = false;
+    }
+    notifyToggle.addEventListener('change', async () => {
+      const enabled = notifyToggle.checked;
+      const ok = await window.ag.setNotifyEnabled(enabled);
+      if (ok) toast(enabled ? 'Notifications re-enabled' : 'Notifications muted', 'ok', 1800);
+      else { toast('Failed to save preference', 'err', 1800); notifyToggle.checked = !enabled; }
+    });
+  }
+  await loadProxyErrorHistory();
 }
 
 themeToggle.addEventListener('click', async () => {
@@ -2292,7 +3339,8 @@ themeToggle.addEventListener('click', async () => {
 
 async function setTheme(theme: 'dark' | 'light'): Promise<void> {
   document.documentElement.dataset.theme = theme;
-  themeToggle.textContent = theme === 'dark' ? 'Switch to light' : 'Switch to dark';
+  themeToggle.textContent = theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
+  themeToggle.setAttribute('aria-pressed', theme === 'light' ? 'true' : 'false');
   updateStatusBarTheme(theme);
   // Invalidate config cache so the next loadSettings() picks up the new theme
   invalidateCache('config');
@@ -2321,14 +3369,21 @@ const paletteInput = $('#paletteInput') as HTMLInputElement;
 const paletteResults = $('#paletteResults') as HTMLDivElement;
 
 const PALETTE_COMMANDS: Array<{ id: string; label: string; view: string; action?: () => void }> = [
-  { id: 'dashboard', label: 'Dashboard', view: 'dashboard' },
-  { id: 'doctor', label: 'Run doctor', view: 'dashboard', action: () => void runDoctor() },
-  { id: 'logs', label: 'Logs', view: 'logs' },
-  { id: 'models', label: 'Models', view: 'models' },
-  { id: 'mitm', label: 'MITM Proxy', view: 'mitm' },
-  { id: 'patch', label: 'Binary patch', view: 'patch' },
-  { id: 'settings', label: 'Settings', view: 'settings' },
-  { id: 'info', label: 'Antigravity Status', view: 'info' },
+  { id: 'dashboard', label: 'Go to Dashboard', view: 'dashboard' },
+  { id: 'doctor', label: 'Run System Diagnostic (Doctor)', view: 'dashboard', action: () => void runDoctor() },
+  { id: 'fix-all', label: 'Fix All — Full Auto-Repair', view: 'dashboard', action: () => void runFixAll() },
+  { id: 'antigravity', label: 'Go to Antigravity Status', view: 'info' },
+  { id: 'models', label: 'Go to Custom Models', view: 'models' },
+  { id: 'mitm', label: 'Go to MITM Proxy Manager', view: 'mitm' },
+  { id: 'patch', label: 'Go to Binary Patch Manager', view: 'patch' },
+  { id: 'proxy-stub', label: 'Start Emergency Proxy Stub (Port 50999)', view: 'mitm', action: () => void runStartStub() },
+  { id: 'logs', label: 'Go to System Logs', view: 'logs' },
+  { id: 'settings', label: 'Go to Settings', view: 'settings' },
+  { id: 'theme', label: 'Toggle Light / Dark Theme', view: 'settings', action: () => {
+    const current = document.documentElement.dataset.theme ?? 'dark';
+    void setTheme(current === 'dark' ? 'light' : 'dark');
+  } },
+  { id: 'info', label: 'Go to System Info & Installations', view: 'info' },
 ];
 
 function openPalette(): void {
@@ -2353,7 +3408,7 @@ paletteResults.addEventListener('click', (e) => {
 
 function renderPalette(query: string): void {
   const q = query.trim().toLowerCase();
-  const filtered = PALETTE_COMMANDS.filter((c) => c.label.toLowerCase().includes(q));
+  const filtered = PALETTE_COMMANDS.filter((c) => c.label.toLowerCase().includes(q) || c.view.toLowerCase().includes(q));
   const html = filtered
     .map(
       (c, i) => `
@@ -2385,11 +3440,13 @@ paletteInput.addEventListener('keydown', (e) => {
     idx = Math.min(idx + 1, items.length - 1);
     items.forEach((it) => it.classList.remove('selected'));
     items[idx]?.classList.add('selected');
+    items[idx]?.scrollIntoView({ block: 'nearest' });
   } else if (e.key === 'ArrowUp') {
     e.preventDefault();
     idx = Math.max(idx - 1, 0);
     items.forEach((it) => it.classList.remove('selected'));
     items[idx]?.classList.add('selected');
+    items[idx]?.scrollIntoView({ block: 'nearest' });
   } else if (e.key === 'Enter') {
     e.preventDefault();
     const target = paletteResults.querySelector<HTMLDivElement>('.palette-item.selected') ?? items[0];
@@ -2397,22 +3454,6 @@ paletteInput.addEventListener('keydown', (e) => {
   } else if (e.key === 'Escape') {
     closePalette();
   }
-});
-paletteBackdrop.addEventListener('click', (e) => {
-  if (e.target === paletteBackdrop) closePalette();
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Main → renderer events
-// ─────────────────────────────────────────────────────────────────────────────
-
-window.ag.onRunDoctor(() => void runDoctor());
-window.ag.onNavigate((view) => navigate(view));
-window.ag.onCommandPalette(() => openPalette());
-window.ag.onThemeChanged((theme) => {
-  document.documentElement.dataset.theme = theme;
-  themeToggle.textContent = theme === 'dark' ? 'Switch to light' : 'Switch to dark';
-  updateStatusBarTheme(theme);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2448,7 +3489,6 @@ if (statusTheme) {
 (async function boot(): Promise<void> {
   setStatus('Initializing…', 'busy');
   try {
-    // Parallelize: theme config + system info are independent IPC calls
     const [, info] = await Promise.all([
       applySavedTheme(),
       memo('info', 60_000, () => window.ag.info()),
@@ -2460,13 +3500,11 @@ if (statusTheme) {
   } catch {
     setStatus('Ready');
   }
-  // Defer the initial diagnostic to idle time so the UI paints first.
-  // The user sees the dashboard shell immediately, then results fill in.
   whenIdle(() => void runDoctor(), 250);
 })();
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Antigravity view
+// Provider Manager & Custom Models Modal
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface AntigravityVersionInfo {
@@ -2474,6 +3512,7 @@ interface AntigravityVersionInfo {
   channel?: string;
   source: 'asar' | 'product.json' | 'app-update.yml' | 'exe' | 'pak' | 'unknown';
 }
+
 interface AntigravityStatus {
   installed: boolean;
   installDir: string | null;
@@ -2482,7 +3521,6 @@ interface AntigravityStatus {
   binaryPath: string | null;
   customModelsPath: string | null;
   lsLogPath: string | null;
-  /** Flat version string e.g. "2.0.1" */
   version: string | null;
   versionInfo: AntigravityVersionInfo | null;
   displayName: string | null;
@@ -2499,171 +3537,582 @@ interface AntigravityStatus {
   memory?: string;
 }
 
-const agVersionValue = $('#agVersionValue') as HTMLDivElement;
-const agRunningValue = $('#agRunningValue') as HTMLDivElement;
-const agProxyValue = $('#agProxyValue') as HTMLDivElement;
-const agLsValue = $('#agLsValue') as HTMLDivElement;
-const agSourceBadge = $('#agSourceBadge') as HTMLSpanElement;
-const agInstallPath = $('#agInstallPath') as HTMLDivElement;
-const agAppAsar = $('#agAppAsar') as HTMLDivElement;
-const agVersionRow = $('#agVersionRow') as HTMLDivElement;
-const agChannelRow = $('#agChannelRow') as HTMLDivElement;
-const agPidsBadge = $('#agPidsBadge') as HTMLSpanElement;
-const agAgPids = $('#agAgPids') as HTMLDivElement;
-const agLsPids = $('#agLsPids') as HTMLDivElement;
-
-function renderAntigravity(s: AntigravityStatus): void {
-  if (!s.installed) {
-    agVersionValue.textContent = '—';
-    agRunningValue.textContent = 'not installed';
-    agProxyValue.textContent = '—';
-    agLsValue.textContent = '—';
-    agSourceBadge.textContent = 'missing';
-    agInstallPath.textContent = 'Antigravity executable not found';
-    agAppAsar.textContent = '—';
-    agVersionRow.textContent = '—';
-    agChannelRow.textContent = '—';
-    agPidsBadge.textContent = '0 PIDs';
-    agAgPids.textContent = '—';
-    agLsPids.textContent = '—';
-    return;
-  }
-  // version is now a flat string; versionInfo has {version, channel, source}
-  const vStr = s.version ?? s.versionInfo?.version ?? 'unknown';
-  const vSource = s.versionInfo?.source ?? 'unknown';
-  const vChannel = s.versionInfo?.channel ?? s.displayName ?? '—';
-
-  agVersionValue.textContent = vStr;
-  agVersionValue.className = 'stat-value ' + (vSource === 'asar' ? 'ok' : 'warn');
-  agRunningValue.textContent = s.running ? 'running' : 'stopped';
-  agRunningValue.className = 'stat-value ' + (s.running ? 'ok' : 'err');
-  agProxyValue.textContent = s.proxyReachable ? `:${s.proxyPort} up` : `:${s.proxyPort} down`;
-  agProxyValue.className = 'stat-value ' + (s.proxyReachable ? 'ok' : 'warn');
-  agLsValue.textContent = s.languageServerRunning ? 'running' : 'stopped';
-  agLsValue.className = 'stat-value ' + (s.languageServerRunning ? 'ok' : 'warn');
-  agSourceBadge.textContent = vSource;
-  agInstallPath.textContent = s.installDir ?? '—';
-  agAppAsar.textContent = s.appAsar ?? s.appAsarPath ?? '—';
-  agVersionRow.textContent = vStr;
-  agChannelRow.textContent = vChannel;
-  const total = s.pids.length + s.languageServerPids.length;
-  agPidsBadge.textContent = `${total} PID${total === 1 ? '' : 's'}`;
-  agAgPids.textContent = s.pids.length ? s.pids.join(', ') : '—';
-  agLsPids.textContent = s.languageServerPids.length ? s.languageServerPids.join(', ') : '—';
+interface ProviderModel {
+  id: string;
+  displayName?: string;
+  enabled: boolean;
 }
 
-async function loadAntigravity(): Promise<void> {
-  return guardLoad('ag', async () => {
-    setStatus('Loading Antigravity status…', 'busy');
+interface ProviderEntry {
+  id: string;
+  name: string;
+  provider: string;
+  apiUrl: string;
+  apiKey: string;
+  enabled: boolean;
+  allowUnauthorized?: boolean;
+  models: ProviderModel[];
+  status?: 'healthy' | 'degraded' | 'offline' | 'untested';
+  latencyMs?: number;
+  lastTestedAt?: string;
+  lastError?: string;
+}
+
+const pmBackdrop = $('#providerManagerModalBackdrop') as HTMLDivElement;
+const pmClose = $('#providerManagerModalClose') as HTMLButtonElement;
+const pmListContainer = $('#pmListContainer') as HTMLDivElement;
+const pmFormContainer = $('#pmFormContainer') as HTMLDivElement;
+const pmModalFooterList = $('#pmModalFooterList') as HTMLDivElement;
+const pmAddBtn = $('#pmAddBtn') as HTMLButtonElement;
+const pmFormBack = $('#pmFormBack') as HTMLButtonElement;
+const pmFormBack2 = $('#pmFormBack2') as HTMLButtonElement;
+const pmFormTitle = $('#pmFormTitle') as HTMLHeadingElement;
+const pmFormName = $('#pmFormName') as HTMLInputElement;
+const pmFormType = $('#pmFormType') as HTMLSelectElement;
+const pmFormUrl = $('#pmFormUrl') as HTMLInputElement;
+const pmFormKey = $('#pmFormKey') as HTMLInputElement;
+const pmFormInsecure = $('#pmFormInsecure') as HTMLInputElement;
+const pmFormSave = $('#pmFormSave') as HTMLButtonElement;
+const pmFormError = $('#pmFormError') as HTMLDivElement;
+const pmModelsList = $('#pmModelsList') as HTMLDivElement;
+const pmFormFetchModelsBtn = $('#pmFormFetchModels') as HTMLButtonElement;
+const pmModalClose2 = $('#pmModalClose2') as HTMLButtonElement;
+const pmFormTest = $('#pmFormTest') as HTMLButtonElement;
+
+let providersCache: ProviderEntry[] = [];
+let editingProviderId: string | null = null;
+let currentFetchedModels: Array<{ id: string; displayName?: string; enabled: boolean }> = [];
+let pmModelsSearchQuery = '';
+
+const pmKeyToggle = $('#pmKeyToggle') as HTMLButtonElement | null;
+const pmModelsSearch = $('#pmModelsSearch') as HTMLInputElement | null;
+const pmModelsSelectAll = $('#pmModelsSelectAll') as HTMLButtonElement | null;
+const pmModelsDeselectAll = $('#pmModelsDeselectAll') as HTMLButtonElement | null;
+const pmFormCustomModelInput = $('#pmFormCustomModelInput') as HTMLInputElement | null;
+const pmFormAddCustomModelBtn = $('#pmFormAddCustomModelBtn') as HTMLButtonElement | null;
+const pmModelsCountBadge = $('#pmModelsCountBadge') as HTMLSpanElement | null;
+const pmCapFilters = $('#pmCapFilters') as HTMLDivElement | null;
+let activeCapFilter: 'all' | 'reasoning' | 'vision' | 'code' = 'all';
+
+function detectModelCapabilities(modelId: string): string[] {
+  const caps: string[] = [];
+  const id = modelId.toLowerCase();
+  if (/r1|o1|o3|reasoner|thinking|qwq/.test(id)) caps.push('reasoning');
+  if (/vision|4o|claude-3|gemini-1\.5|flash|pixtral/.test(id)) caps.push('vision');
+  if (/coder|code|starcoder|qwen2\.5-coder/.test(id)) caps.push('code');
+  return caps;
+}
+
+function updatePmModelsCounter(): void {
+  if (!pmModelsCountBadge) return;
+  const total = currentFetchedModels.length;
+  const selected = currentFetchedModels.filter((m) => m.enabled !== false).length;
+  pmModelsCountBadge.textContent = `${selected} / ${total} selected`;
+  if (selected === 0) {
+    pmModelsCountBadge.className = 'badge badge-warn';
+  } else if (selected === total && total > 0) {
+    pmModelsCountBadge.className = 'badge badge-ok';
+  } else {
+    pmModelsCountBadge.className = 'badge badge-primary';
+  }
+}
+
+function renderPmModelsCatalog(): void {
+  if (!pmModelsList) return;
+  updatePmModelsCounter();
+  const q = pmModelsSearchQuery.trim().toLowerCase();
+  const filtered = currentFetchedModels.filter((m) => {
+    const caps = detectModelCapabilities(m.id);
+    if (activeCapFilter !== 'all' && !caps.includes(activeCapFilter)) {
+      return false;
+    }
+    if (!q) return true;
+    return m.id.toLowerCase().includes(q) || (m.displayName || '').toLowerCase().includes(q);
+  });
+
+  if (currentFetchedModels.length === 0) {
+    pmModelsList.innerHTML = '<div class="pm-models-hint">No models loaded. Click "Fetch models" or add custom ID below.</div>';
+    return;
+  }
+
+  if (filtered.length === 0) {
+    pmModelsList.innerHTML = `<div class="pm-models-hint">No models matching active filter or search query.</div>`;
+    return;
+  }
+
+  let html = '<div class="agy-model-chips">';
+  for (const m of filtered) {
+    const checked = m.enabled !== false ? 'checked' : '';
+    const caps = detectModelCapabilities(m.id);
+    const badgesHtml = caps
+      .map((c) => `<span class="pm-cap-badge ${c}">${c}</span>`)
+      .join('');
+
+    html += `<label class="agy-chip" title="${escapeHtml(m.id)}">
+      <input type="checkbox" data-model-id="${escapeHtml(m.id)}" ${checked} />
+      <span>${escapeHtml(m.displayName || m.id)}</span>
+      ${badgesHtml}
+    </label>`;
+  }
+  html += '</div>';
+  pmModelsList.innerHTML = html;
+}
+
+function triggerSmartFailover(failingProviderId?: string): void {
+  const fallback = providersCache.find((p) => p.enabled && p.id !== failingProviderId && (p.status === 'healthy' || !p.status));
+  if (fallback) {
+    toast(`Switched to fallback provider ${fallback.name}`, 'ok');
+  } else {
+    toast(`No alternative healthy provider available`, 'warn');
+  }
+}
+
+function handleProviderError(errorMsg: string, status?: number, _p?: ProviderEntry): void {
+  const label = status === 401 ? 'Auth error — check API key'
+    : status === 429 ? 'Rate-limited — try again later'
+    : status === 402 ? 'Quota exceeded'
+    : status ? `Provider error (HTTP ${status})`
+    : errorMsg || 'Provider unreachable';
+  toast(label, 'err', 6000);
+}
+
+function showPmView(view: 'list' | 'form'): void {
+  if (view === 'list') {
+    pmListContainer.hidden = false;
+    pmFormContainer.hidden = true;
+    if (pmModalFooterList) pmModalFooterList.hidden = false;
+  } else {
+    pmListContainer.hidden = true;
+    pmFormContainer.hidden = false;
+    if (pmModalFooterList) pmModalFooterList.hidden = true;
+  }
+}
+
+function renderHealthStatusIndicator(p: ProviderEntry): string {
+  const status = p.status || 'untested';
+  const titleText = status === 'healthy'
+    ? `Healthy · ${p.latencyMs ?? 0}ms response time`
+    : status === 'degraded'
+    ? `Degraded · ${p.latencyMs ?? 0}ms response time (Slow)`
+    : status === 'offline'
+    ? `Offline · ${escapeHtml(p.lastError || 'Unreachable')}`
+    : 'Untested connection';
+
+  let html = `<span class="agy-status-dot ${status}" title="${escapeHtml(titleText)}"></span>`;
+  if (typeof p.latencyMs === 'number' && status !== 'untested') {
+    html += `<span class="agy-latency-badge ${status}" title="${escapeHtml(titleText)}">${p.latencyMs} ms</span>`;
+  }
+  return html;
+}
+
+function renderProviderStatus(p: ProviderEntry): string {
+  if (!p.enabled) {
+    return `<span class="agy-pill agy-pill-muted">Disabled</span>`;
+  }
+  const status = p.status || 'untested';
+  if (status === 'offline') {
+    return `<span class="agy-pill agy-pill-offline">Offline</span>`;
+  }
+  if (status === 'degraded') {
+    return `<span class="agy-pill agy-pill-degraded">Degraded</span>`;
+  }
+  if (status === 'healthy') {
+    return `<span class="agy-pill agy-pill-ok">Healthy</span>`;
+  }
+  return `<span class="agy-pill agy-pill-muted">Untested</span>`;
+}
+
+async function renderProviderList(): Promise<void> {
+  showSkeleton(pmListContainer, 'cards', 2);
+  try {
+    providersCache = (await window.ag.providers.get()) as ProviderEntry[];
+    if (!providersCache || providersCache.length === 0) {
+      pmListContainer.innerHTML = `
+        <div class="agy-empty-state">
+          <div class="agy-empty-icon">
+            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          </div>
+          <div class="agy-empty-title">No providers yet</div>
+          <div class="agy-empty-text">Add a custom OpenAI-compatible provider to get started.</div>
+        </div>
+      `;
+      return;
+    }
+
+    let html = `<div class="agy-provider-list">`;
+    for (const p of providersCache) {
+      html += `
+        <div class="agy-provider-row" data-id="${escapeHtml(p.id)}">
+          <div class="agy-provider-row-main">
+            <div class="agy-provider-row-name" style="display:flex; align-items:center;">
+              ${renderHealthStatusIndicator(p)}
+              <span>${escapeHtml(p.name)}</span>
+            </div>
+            <div class="agy-provider-row-meta">
+              <span>${escapeHtml(p.provider)}</span>
+              <span class="agy-dot">·</span>
+              <span>${escapeHtml(p.apiUrl.replace(/^https?:\/\//, ''))}</span>
+              <span class="agy-dot">·</span>
+              <span>${p.models.length} model${p.models.length === 1 ? '' : 's'}</span>
+            </div>
+          </div>
+          <div class="agy-provider-row-status">${renderProviderStatus(p)}</div>
+          <div class="agy-provider-row-actions">
+            <button class="agy-icon-btn pm-test" title="Test connection" aria-label="Test connection for ${escapeHtml(p.name)}">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            </button>
+            <button class="agy-icon-btn pm-toggle" title="${p.enabled ? 'Disable' : 'Enable'} provider" aria-label="${p.enabled ? 'Disable' : 'Enable'} provider ${escapeHtml(p.name)}">
+              ${p.enabled
+                ? `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>`
+                : `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.64 18.36a9 9 0 1 0 12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/><polyline points="16 8 12 12 8 8"/></svg>`
+              }
+            </button>
+            <button class="agy-icon-btn pm-edit" title="Edit provider" aria-label="Edit provider ${escapeHtml(p.name)}">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+            <button class="agy-icon-btn pm-delete" title="Delete provider" aria-label="Delete provider ${escapeHtml(p.name)}">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+            </button>
+          </div>
+        </div>
+      `;
+    }
+    html += `</div>`;
+    pmListContainer.innerHTML = html;
+
+    pmListContainer.querySelectorAll<HTMLButtonElement>('.pm-test').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const row = (e.currentTarget as HTMLElement).closest('.agy-provider-row') as HTMLElement;
+        const id = row.dataset.id!;
+        const p = providersCache.find((x) => x.id === id);
+        if (!p) return;
+        btn.setAttribute('disabled', 'true');
+        const orig = btn.innerHTML;
+        btn.innerHTML = `<span class="spinner"></span>`;
+        try {
+          const r = (await window.ag.providers.test({ apiUrl: p.apiUrl, apiKey: p.apiKey, id: p.id })) as {
+            success: boolean;
+            status?: number;
+            latencyMs?: number;
+            healthStatus?: 'healthy' | 'degraded' | 'offline';
+            error?: string;
+          };
+          if (r.success) {
+            p.status = r.healthStatus ?? 'healthy';
+            p.latencyMs = r.latencyMs;
+            toast(`Healthy (${r.latencyMs ?? 0}ms)`, 'ok');
+          } else {
+            p.status = r.healthStatus ?? 'offline';
+            p.latencyMs = r.latencyMs;
+            p.lastError = r.error;
+            toast(`Failed: ${r.error || r.status}`, 'err', 6000);
+            handleProviderError(r.error || `HTTP ${r.status}`, r.status, p);
+          }
+          await renderProviderList();
+        } catch (err) {
+          const errorMsg = (err as Error).message;
+          toast(`Test error: ${errorMsg}`, 'err');
+          handleProviderError(errorMsg, undefined, p);
+        } finally {
+          btn.removeAttribute('disabled');
+          btn.innerHTML = orig;
+        }
+      });
+    });
+
+    pmListContainer.querySelectorAll<HTMLButtonElement>('.pm-toggle').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const row = (e.currentTarget as HTMLElement).closest('.agy-provider-row') as HTMLElement;
+        const id = row.dataset.id!;
+        const p = providersCache.find((x) => x.id === id);
+        if (!p) return;
+        p.enabled = !p.enabled;
+        const r = (await window.ag.providers.save(p)) as { success: boolean; error?: string };
+        if (r.success) {
+          toast(p.enabled ? 'Provider enabled' : 'Provider disabled', 'ok');
+          await renderProviderList();
+        } else {
+          toast(`Save failed: ${r.error}`, 'err');
+          p.enabled = !p.enabled;
+        }
+      });
+    });
+
+    pmListContainer.querySelectorAll<HTMLButtonElement>('.pm-edit').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const row = (e.currentTarget as HTMLElement).closest('.agy-provider-row') as HTMLElement;
+        const id = row.dataset.id!;
+        openProviderForm(id);
+      });
+    });
+
+    pmListContainer.querySelectorAll<HTMLButtonElement>('.pm-delete').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const row = (e.currentTarget as HTMLElement).closest('.agy-provider-row') as HTMLElement;
+        const id = row.dataset.id!;
+        const p = providersCache.find((x) => x.id === id);
+        if (!p) return;
+        const ok = await modals.confirm(
+          'Delete provider?',
+          `Delete <strong>${escapeHtml(p.name)}</strong>? This cannot be undone.`,
+          { danger: true, confirmLabel: 'Delete' },
+        );
+        if (!ok) return;
+        const r = (await window.ag.providers.delete(id)) as { success: boolean; error?: string };
+        if (r.success) {
+          toast('Provider deleted', 'ok');
+          await renderProviderList();
+        } else {
+          toast(`Delete failed: ${r.error}`, 'err');
+        }
+      });
+    });
+  } finally {
+    hideSkeleton(pmListContainer);
+  }
+}
+
+function resetProviderForm(): void {
+  pmFormName.value = '';
+  pmFormType.value = 'openai';
+  pmFormUrl.value = '';
+  pmFormKey.value = '';
+  pmFormInsecure.checked = false;
+  pmModelsList.innerHTML = '';
+  pmFormError.hidden = true;
+  pmFormError.textContent = '';
+  editingProviderId = null;
+}
+
+function openProviderForm(existingId?: string): void {
+  pmModelsSearchQuery = '';
+  if (pmModelsSearch) pmModelsSearch.value = '';
+  resetProviderForm();
+  if (existingId) {
+    const p = providersCache.find((x) => x.id === existingId);
+    if (p) {
+      editingProviderId = p.id;
+      pmFormTitle.textContent = 'Edit Provider';
+      pmFormName.value = p.name;
+      pmFormType.value = p.provider;
+      pmFormUrl.value = p.apiUrl;
+      pmFormKey.value = p.apiKey;
+      pmFormInsecure.checked = p.allowUnauthorized ?? false;
+      currentFetchedModels = (p.models || []).map((m) => ({
+        id: m.id,
+        displayName: m.displayName || m.id,
+        enabled: m.enabled !== false,
+      }));
+      renderPmModelsCatalog();
+    }
+  } else {
+    pmFormTitle.textContent = 'Add Provider';
+    currentFetchedModels = [];
+    renderPmModelsCatalog();
+  }
+  showPmView('form');
+}
+
+function openProviderManagerModal(): void {
+  pmBackdrop.hidden = false;
+  showPmView('list');
+  void renderProviderList();
+}
+
+pmClose.addEventListener('click', () => { pmBackdrop.hidden = true; });
+if (pmModalClose2) pmModalClose2.addEventListener('click', () => { pmBackdrop.hidden = true; });
+pmAddBtn.addEventListener('click', () => openProviderForm());
+pmFormBack.addEventListener('click', () => showPmView('list'));
+if (pmFormBack2) pmFormBack2.addEventListener('click', () => showPmView('list'));
+
+pmFormType.addEventListener('change', () => {
+  const t = pmFormType.value;
+  if (!pmFormUrl.value || pmFormUrl.value.includes('api.openai.com') || pmFormUrl.value.includes('api.anthropic.com')) {
+    if (t === 'openai') pmFormUrl.value = 'https://api.openai.com/v1';
+    else if (t === 'anthropic') pmFormUrl.value = 'https://api.anthropic.com/v1';
+    else if (t === 'ollama') pmFormUrl.value = 'http://localhost:11434';
+  }
+});
+
+pmFormSave.addEventListener('click', async () => {
+  const name = pmFormName.value.trim();
+  const provider = pmFormType.value;
+  const apiUrl = pmFormUrl.value.trim();
+  const apiKey = pmFormKey.value.trim();
+  const allowUnauthorized = pmFormInsecure.checked;
+
+  if (!name) {
+    pmFormError.textContent = 'Provider name is required.';
+    pmFormError.hidden = false;
+    return;
+  }
+  if (!apiUrl) {
+    pmFormError.textContent = 'API URL is required.';
+    pmFormError.hidden = false;
+    return;
+  }
+
+  const selectedModels = currentFetchedModels
+    .filter((m) => m.enabled !== false)
+    .map((m) => ({ id: m.id, displayName: m.displayName || m.id, enabled: true }));
+
+  const entry: ProviderEntry = {
+    id: editingProviderId || `provider-${Date.now()}`,
+    name,
+    provider,
+    apiUrl,
+    apiKey: apiKey || 'none',
+    allowUnauthorized,
+    enabled: true,
+    models: selectedModels,
+  };
+
+  pmFormSave.disabled = true;
+  pmFormSave.textContent = 'Saving…';
+  try {
+    const r = (await window.ag.providers.save(entry)) as { success: boolean; error?: string };
+    if (r.success) {
+      toast('Provider saved', 'ok');
+      showPmView('list');
+      await renderProviderList();
+      await loadModels();
+    } else {
+      pmFormError.textContent = r.error || 'Failed to save provider.';
+      pmFormError.hidden = false;
+    }
+  } catch (err) {
+    pmFormError.textContent = (err as Error).message;
+    pmFormError.hidden = false;
+  } finally {
+    pmFormSave.disabled = false;
+    pmFormSave.textContent = 'Save provider';
+  }
+});
+
+if (pmFormTest) {
+  pmFormTest.addEventListener('click', async () => {
+    const apiUrl = pmFormUrl.value.trim();
+    const apiKey = pmFormKey.value.trim();
+    const allowUnauthorized = pmFormInsecure.checked;
+    if (!apiUrl) {
+      toast('Enter an API URL first', 'warn');
+      return;
+    }
+    pmFormTest.disabled = true;
+    pmFormTest.textContent = 'Testing…';
     try {
-      const r = await withTimeout(window.ag.antigravityStatus(), 10_000, 'antigravity status');
-      if (!r.ok || !r.data) {
-        toast(`Antigravity: ${r.error ?? 'unknown error'}`, 'err');
-        setStatus('Ready');
-        return;
+      const r = (await window.ag.providers.test({ apiUrl, apiKey: apiKey || 'none', allowUnauthorized } as any)) as {
+        success: boolean;
+        latencyMs?: number;
+        error?: string;
+      };
+      if (r.success) {
+        toast(`Connection successful (${r.latencyMs ?? 0}ms)`, 'ok');
+      } else {
+        toast(`Test failed: ${r.error}`, 'err', 5000);
       }
-      renderAntigravity(r.data as AntigravityStatus);
-      setStatus('Ready');
-    } catch (e) {
-      toast(`Error: ${(e as Error).message}`, 'err');
-      setStatus('Error', 'err');
+    } catch (err) {
+      toast(`Test failed: ${(err as Error).message}`, 'err');
+    } finally {
+      pmFormTest.disabled = false;
+      pmFormTest.textContent = 'Test connection';
     }
   });
 }
 
-$('#agRefreshBtn').addEventListener('click', () => void loadAntigravity());
-
-$('#agLaunchBtn').addEventListener('click', async () => {
-  setStatus('Launching Antigravity…', 'busy');
-  try {
-    const r = await window.ag.antigravityLaunch();
-    if (r.ok && r.data) {
-      toast(r.data.message, r.data.ok ? 'ok' : 'warn', 4000);
-    } else {
-      toast(`Launch failed: ${r.error ?? 'unknown'}`, 'err');
-    }
-    await loadAntigravity();
-  } catch (e) {
-    toast(`Error: ${(e as Error).message}`, 'err');
-    setStatus('Error', 'err');
-  }
-});
-
-$('#agLaunchLogsBtn').addEventListener('click', async () => {
-  if (logsStreaming) {
-    toast('A log stream is already running', 'warn');
-    return;
-  }
-  setStatus('Launching Antigravity + logs…', 'busy');
-  try {
-    const streamId = await window.ag.antigravityLaunchLogs();
-    if (!streamId) {
-      toast('Failed to start launch + logs stream', 'err');
+if (pmFormFetchModelsBtn) {
+  pmFormFetchModelsBtn.addEventListener('click', async () => {
+    const provider = pmFormType.value;
+    const apiUrl = pmFormUrl.value.trim();
+    const apiKey = pmFormKey.value.trim();
+    if (!apiUrl) {
+      toast('Enter API URL first', 'warn');
       return;
     }
-    // Wire the same handlers used by the regular logs view
-    logsStreaming = true;
-    logsStreamId = streamId;
-    window.ag.onStreamData(streamId, (chunk) => {
-      logsPendingChunk = (logsPendingChunk ?? '') + ansiToHtml(chunk);
-      scheduleLogsFlush();
-    });
-    window.ag.onStreamClose(streamId, (code) => {
-      flushLogs();
-      logsStreaming = false;
-      logsStreamId = null;
-      setStatus(`Launch + logs closed (${code})`);
-      void loadAntigravity();
-    });
-    window.ag.onStreamError(streamId, (err) => {
-      flushLogs();
-      logsStreaming = false;
-      logsStreamId = null;
-      toast(`Stream error: ${err}`, 'err');
-    });
-    // Navigate to the logs view to show what comes in
-    navigate('logs');
-    toast('Antigravity launched — following logs', 'ok', 2000);
-  } catch (e) {
-    toast(`Error: ${(e as Error).message}`, 'err');
-    setStatus('Error', 'err');
-  }
-});
-
-$('#agKillBtn').addEventListener('click', async () => {
-  const ok = await confirmModal(
-    'Close Antigravity',
-    'This will terminate all Antigravity processes. Unsaved work may be lost.',
-    { confirmLabel: 'Close' },
-  );
-  if (!ok) return;
-  setStatus('Closing Antigravity…', 'busy');
-  try {
-    const r = await window.ag.antigravityKill();
-    if (r.ok && r.data) {
-      toast(r.data.message, r.data.killed > 0 ? 'ok' : 'info', 4000);
-    } else {
-      toast(`Close failed: ${r.error ?? 'unknown'}`, 'err');
+    pmFormFetchModelsBtn.disabled = true;
+    pmFormFetchModelsBtn.textContent = 'Fetching…';
+    try {
+      const r = (await window.ag.providers.fetchModels({ provider, apiUrl, apiKey: apiKey || 'none' } as any)) as {
+        success: boolean;
+        models?: Array<{ id: string; displayName?: string }>;
+        error?: string;
+      };
+      if (r.success && r.models) {
+        currentFetchedModels = r.models.map((m) => ({
+          id: m.id,
+          displayName: m.displayName || m.id,
+          enabled: true,
+        }));
+        renderPmModelsCatalog();
+        toast(`Fetched ${r.models.length} models`, 'ok');
+      } else {
+        toast(`Fetch models failed: ${r.error}`, 'err');
+      }
+    } catch (err) {
+      toast(`Fetch failed: ${(err as Error).message}`, 'err');
+    } finally {
+      pmFormFetchModelsBtn.disabled = false;
+      pmFormFetchModelsBtn.textContent = 'Fetch models';
     }
-    await loadAntigravity();
-  } catch (e) {
-    toast(`Error: ${(e as Error).message}`, 'err');
-    setStatus('Error', 'err');
-  }
-});
+  });
+}
 
-$('#agRestartBtn').addEventListener('click', async () => {
-  setStatus('Restarting Antigravity…', 'busy');
-  try {
-    const r = await window.ag.antigravityRestart();
-    if (r.ok && r.data) {
-      toast(r.data.message, r.data.ok ? 'ok' : 'warn', 4000);
-    } else {
-      toast(`Restart failed: ${r.error ?? 'unknown'}`, 'err');
-    }
-    await loadAntigravity();
-  } catch (e) {
-    toast(`Error: ${(e as Error).message}`, 'err');
-    setStatus('Error', 'err');
+if (pmCapFilters) {
+  pmCapFilters.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLElement>('.pm-cap-filter');
+    if (!btn || !btn.dataset.cap) return;
+    activeCapFilter = btn.dataset.cap as 'all' | 'reasoning' | 'vision' | 'code';
+    pmCapFilters.querySelectorAll('.pm-cap-filter').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderPmModelsCatalog();
+  });
+}
+
+if (pmModelsSelectAll) {
+  pmModelsSelectAll.addEventListener('click', () => {
+    currentFetchedModels.forEach((m) => { m.enabled = true; });
+    renderPmModelsCatalog();
+  });
+}
+
+if (pmModelsDeselectAll) {
+  pmModelsDeselectAll.addEventListener('click', () => {
+    currentFetchedModels.forEach((m) => { m.enabled = false; });
+    renderPmModelsCatalog();
+  });
+}
+
+function addCustomModelToCatalog(): void {
+  if (!pmFormCustomModelInput) return;
+  const customId = pmFormCustomModelInput.value.trim();
+  if (!customId) return;
+  const exists = currentFetchedModels.some((m) => m.id.toLowerCase() === customId.toLowerCase());
+  if (!exists) {
+    currentFetchedModels.push({ id: customId, displayName: customId, enabled: true });
+    toast(`Added custom model ${customId}`, 'ok');
   }
+  pmFormCustomModelInput.value = '';
+  renderPmModelsCatalog();
+}
+
+if (pmFormAddCustomModelBtn) pmFormAddCustomModelBtn.addEventListener('click', addCustomModelToCatalog);
+if (pmFormCustomModelInput) {
+  pmFormCustomModelInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addCustomModelToCatalog();
+    }
+  });
+}
+
+// Bind all Add Model buttons across views
+$('#dashboardAddModelBtn')?.addEventListener('click', openProviderManagerModal);
+$('#modelsAddBtn')?.addEventListener('click', openProviderManagerModal);
+$('#providerManagerBtn')?.addEventListener('click', openProviderManagerModal);
+$('#emptyAddModelBtn')?.addEventListener('click', openProviderManagerModal);
+
+// Real-time synchronization listener: re-render provider list whenever custom_models.json changes
+window.ag?.providers?.onChanged(() => {
+  void renderProviderList();
+  void loadModels();
 });

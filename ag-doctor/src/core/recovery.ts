@@ -14,12 +14,23 @@
  *   ~/.gemini/antigravity/recovery.json
  *
  * Built-in rules:
- *   - proxy-down        â†’ restart local proxy
- *   - patch-missing     â†’ re-apply binary patch
- *   - ca-not-installed  â†’ install CA cert (admin required)
- *   - models-corrupted  â†’ restore from latest snapshot
- *   - disk-full         â†’ cleanup old snapshots/history
- *   - connectivity-fail â†’ retry with exponential backoff
+ *   - proxy-down         → restart local proxy
+ *   - patch-missing      → re-apply binary patch
+ *   - ca-not-installed   → install CA cert (admin required)
+ *   - models-corrupted   → restore from latest snapshot
+ *   - disk-full          → cleanup old snapshots/history
+ *   - connectivity-fail  → retry true outages (timeout/DNS/refused) with exp. backoff
+ *   - connectivity-warn  → nudge user to check config (4xx/5xx with reachable host)
+ *
+ * Note on connectivity:
+ *   The `connectivity` check classifies each probe into 3 buckets (ok /
+ *   reachable-but-bad / down). The check status maps to severity:
+ *     - all ok                       → `ok`
+ *     - any reachable-but-bad w/key  → `warn`  (config issue, NOT a network issue)
+ *     - any down                      → `error` (true outage, recovery makes sense)
+ *   We therefore have TWO rules: `connectivity-fail` watches `error` (real
+ *   outage, retryable) and `connectivity-warn` watches `warn` (config issue,
+ *   the only sane action is to inform the user — auto-retry is pointless).
  */
 import fs from 'fs';
 import path from 'path';
@@ -110,11 +121,28 @@ const DEFAULT_CONFIG: RecoveryConfig = {
       id: 'connectivity-fail',
       checkId: 'connectivity',
       status: 'error',
-      title: 'Retry provider connectivity',
-      description: 'Retry failed provider endpoints with exponential backoff',
+      title: 'Retry provider connectivity (true outages only)',
+      description:
+        'Retry provider endpoints that are truly unreachable (timeout, DNS, refused) ' +
+        'with exponential backoff. Does NOT retry hosts that respond with 4xx/5xx — ' +
+        'those are configuration issues, not network problems.',
       cooldownMs: 30_000,
       requiresConfirm: false,
       timeoutMs: 60_000,
+      enabled: true,
+    },
+    {
+      id: 'connectivity-warn',
+      checkId: 'connectivity',
+      status: 'warn',
+      title: 'Surface provider configuration issues',
+      description:
+        'When at least one host is reachable but returns a non-2xx status, surface ' +
+        'the offending URL(s) and HTTP code(s). Auto-retry is intentionally NOT ' +
+        'performed — the cause is a wrong URL/key/model name, which retrying cannot fix.',
+      cooldownMs: 5 * 60_000,
+      requiresConfirm: false,
+      timeoutMs: 5_000,
       enabled: true,
     },
   ],
@@ -325,14 +353,43 @@ async function cleanupDisk(rule: RecoveryRule): Promise<RecoveryActionResult> {
   }
 }
 
+/** Operator-facing advice for each probe error category. */
+const ERROR_ADVICE: Record<string, string> = {
+  dns: 'DNS failure — check network connectivity, /etc/resolv.conf, or DNS-over-HTTPS settings',
+  refused: 'Connection refused — likely the local proxy (port 50999) is down. Restart Antigravity.',
+  timeout: 'Timeout — host is slow or blocked by a firewall. Check upstream status page.',
+  tls: 'TLS error — MITM CA cert missing/untrusted, or upstream uses an invalid certificate.',
+  reset: 'Connection reset — usually transient. If persistent, check upstream rate limits.',
+  other: 'Unclassified error — see details below.',
+};
+
+/** Render category → advice lines for the recovery action's `details`. */
+function buildCategoryAdvice(byCategory: Map<string, string[]>): string {
+  if (byCategory.size === 0) return '';
+  const lines: string[] = ['Failure breakdown by category:'];
+  for (const [cat, sources] of byCategory) {
+    const sample = sources.slice(0, 3).join(', ') + (sources.length > 3 ? ` (+${sources.length - 3} more)` : '');
+    lines.push(`  [${cat}] ${sources.length} host(s): ${sample}`);
+    lines.push(`         → ${ERROR_ADVICE[cat] ?? ERROR_ADVICE.other}`);
+  }
+  return lines.join('\n');
+}
+
 /**
  * Recovery action: retry connectivity.
  *
  * Improved: instead of counting any non-ok probe as "failed", we classify each
  * probe outcome. Only true unreachable errors (timeout, DNS, TCP refused) are
  * retried with exponential backoff. Path/auth errors (4xx/5xx with reachable=true)
- * are surfaced but skipped â€” retrying them achieves nothing, since the cause is
+ * are surfaced but skipped — retrying them achieves nothing, since the cause is
  * configuration, not network. This avoids log spam and false-positive recoveries.
+ *
+ * Also reads each failure's `errorCategory` so the user can distinguish:
+ *   - dns      → check DNS / network connectivity
+ *   - refused  → check whether the local proxy (port 50999) is running
+ *   - timeout  → check firewall / upstream latency
+ *   - tls      → check MITM CA trust / certificate chain
+ *   - reset    → transient; usually self-resolves on next retry
  */
 async function retryConnectivity(rule: RecoveryRule): Promise<RecoveryActionResult> {
   const start = Date.now();
@@ -344,16 +401,39 @@ async function retryConnectivity(rule: RecoveryRule): Promise<RecoveryActionResu
 
     const initial = await checkConnectivity();
     const data = initial.data as
-      | { results?: Array<{ source: string; target: string; result: { ok: boolean; statusCode?: number; error?: string } }> }
+      | {
+          results?: Array<{
+            source: string;
+            target: string;
+            result: {
+              ok: boolean;
+              statusCode?: number;
+              error?: string;
+              errorCategory?: 'dns' | 'refused' | 'timeout' | 'tls' | 'reset' | 'other';
+            };
+          }>;
+        }
       | undefined;
     const results = data?.results ?? [];
 
-    // Classify and count true unreachable vs reachable-but-4xx/5xx
+    // Classify and count true unreachable vs reachable-but-4xx/5xx.
+    // For unreachable endpoints, group by errorCategory so we can produce
+    // actionable advice (DNS vs proxy-down vs TLS vs timeout).
     let trulyDown = 0;
     let reachableButBad = 0;
-    for (const { result } of results) {
-      if (!result.ok) trulyDown++;
-      else if (typeof result.statusCode === 'number' && result.statusCode >= 400) reachableButBad++;
+    const downByCategory = new Map<string, string[]>();
+    for (const { result, source } of results) {
+      if (!result.ok) {
+        trulyDown++;
+        const cat = result.errorCategory ?? 'other';
+        const list = downByCategory.get(cat) ?? [];
+        list.push(source);
+        downByCategory.set(cat, list);
+        continue;
+      }
+      if (typeof result.statusCode === 'number' && result.statusCode >= 400) {
+        reachableButBad++;
+      }
     }
 
     if (trulyDown === 0) {
@@ -410,8 +490,11 @@ async function retryConnectivity(rule: RecoveryRule): Promise<RecoveryActionResu
 
     return {
       ok: false,
-      message: `${trulyDown} endpoint(s) still unreachable after retries (${reachableButBad} returning 4xx/5xx â€” config issue)`,
-      details: JSON.stringify(lastResult, null, 2),
+      message: `${trulyDown} endpoint(s) still unreachable after retries (${reachableButBad} returning 4xx/5xx — config issue)`,
+      details:
+        buildCategoryAdvice(downByCategory) +
+        '\n\nProbe details:\n' +
+        JSON.stringify(lastResult, null, 2),
       durationMs: Date.now() - start,
       ruleId: rule.id,
     };
@@ -425,12 +508,64 @@ async function retryConnectivity(rule: RecoveryRule): Promise<RecoveryActionResu
   }
 }
 
+/**
+ * Recovery action: surface provider configuration issues (4xx/5xx with reachable host).
+ *
+ * This does NOT retry — retrying a misconfigured URL/key achieves nothing. It only
+ * collects the offending endpoints + status codes so the daemon log clearly states
+ * "host X returned 401 — check your API key" instead of silently burning cycles.
+ */
+async function surfaceConfigIssues(rule: RecoveryRule): Promise<RecoveryActionResult> {
+  const start = Date.now();
+  try {
+    const { checkConnectivity } = await import('../checks/connectivity');
+    const result = await checkConnectivity();
+    const data = result.data as
+      | { results?: Array<{ source: string; result: { ok: boolean; statusCode?: number; error?: string } }> }
+      | undefined;
+    const offenders = (data?.results ?? [])
+      .filter((r) => r.result.ok && typeof r.result.statusCode === 'number' && r.result.statusCode >= 400)
+      .map((r) => `${r.source} → HTTP ${r.result.statusCode}`);
+
+    if (offenders.length === 0) {
+      return {
+        ok: true,
+        message: 'No configuration issues detected (host is reachable and 2xx)',
+        durationMs: Date.now() - start,
+        ruleId: rule.id,
+      };
+    }
+    return {
+      ok: true, // informational, not a failure
+      message: `${offenders.length} endpoint(s) need configuration review`,
+      details:
+        'Affected hosts (reachable but returning 4xx/5xx):\n  - ' +
+        offenders.join('\n  - ') +
+        '\n\nLikely causes:\n' +
+        '  - 401/403: API key missing, invalid, or not authorised for this model\n' +
+        '  - 404:     Wrong path (should end with /v1/chat/completions or /v1/models)\n' +
+        '  - 429:     Rate limit hit; back off and retry later\n' +
+        '  - 5xx:     Upstream provider issue — check provider status page',
+      durationMs: Date.now() - start,
+      ruleId: rule.id,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      message: `Config-issue surface failed: ${(e as Error).message}`,
+      durationMs: Date.now() - start,
+      ruleId: rule.id,
+    };
+  }
+}
+
 const ACTIONS: Record<string, (rule: RecoveryRule) => Promise<RecoveryActionResult>> = {
   'proxy-down': restartProxy,
   'patch-missing': reapplyPatch,
   'ca-not-installed': installCa,
   'disk-full': cleanupDisk,
   'connectivity-fail': retryConnectivity,
+  'connectivity-warn': surfaceConfigIssues,
 };
 
 /** Execute a recovery action by rule id. */

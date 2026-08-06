@@ -95,6 +95,11 @@ export function createWindow(url: string): BrowserWindowInstance {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      // Sandbox MUST be false: the preload script requires local modules
+      // (./proxy/idGenerator, ./proxy/errorClassifier) which the sandboxed
+      // preload runtime cannot resolve. contextIsolation + nodeIntegration:false
+      // still keep the renderer secure.
+      sandbox: false,
       preload: path.join(__dirname, 'preload.js'),
     },
   });

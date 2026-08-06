@@ -30,6 +30,7 @@ export async function runPatchStatus(ctx: CommandContext): Promise<number> {
     }
     const jsonOutput = {
       antigravityVersion: status.antigravityVersion,
+      antigravityVersionSource: status.antigravityVersionSource ?? 'unknown',
       binaryPath: status.binaryPath,
       exists: status.exists,
       applied: status.applied,
@@ -48,9 +49,26 @@ export async function runPatchStatus(ctx: CommandContext): Promise<number> {
         originalUrl: p.originalUrl,
         patchedUrl: p.patchedUrl,
       })),
+      binarySignatureDetected: status.binarySignatureDetected ?? false,
+      binarySignatureState: status.binarySignatureState ?? 'none',
+      overlayFingerprintDetected: status.overlayFingerprintDetected ?? false,
+      overlayFingerprintRange: status.overlayFingerprintRange ?? null,
+      overlayFingerprintConfidence: status.overlayFingerprintConfidence ?? 'low',
+      overlayFingerprintReason: status.overlayFingerprintReason ?? null,
+      detectionConfidence: status.detectionConfidence ?? 'low',
+      detectionReason: status.detectionReason ?? null,
       deltaSizeBytes: validateReport?.deltaSizeBytes ?? null,
       verdict,
       validateAsarReport: validateReport,
+      overrideActive: status.overrideActive ?? false,
+      recommendedSource: status.recommendedSource ?? 'auto',
+      overrideInfo: status.overrideInfo ?? null,
+      availableRanges: (status.availableRanges ?? []).map(p => ({
+        versionRange: p.versionRange,
+        description: p.description,
+        originalUrl: p.originalUrl,
+        patchedUrl: p.patchedUrl,
+      })),
     };
     console.log(JSON.stringify(jsonOutput, null, 2));
     return status.compatible ? 0 : 1;
@@ -92,6 +110,10 @@ export async function runPatchStatus(ctx: CommandContext): Promise<number> {
     console.log(`  Description: ${status.recommendedPatch.description}`);
     console.log(`  Original URL: ${status.recommendedPatch.originalUrl}`);
     console.log(`  Patched URL:  ${status.recommendedPatch.patchedUrl}`);
+    console.log(`  Source:       ${status.overrideActive ? 'manual override' : 'auto-detect'}`);
+    if (status.overrideInfo?.reason) {
+      console.log(`  Reason:       ${status.overrideInfo.reason}`);
+    }
   } else {
     warn('No recommended patch found for this version');
   }
@@ -106,6 +128,12 @@ export async function runPatchStatus(ctx: CommandContext): Promise<number> {
   } else {
     warn('No known URL patterns detected in binary');
     warn('This may indicate a new Antigravity version that requires patch definition update');
+  }
+  if (status.overlayFingerprintDetected) {
+    info('Detected JS overlay fingerprint:');
+    console.log(`  Family:      ${status.overlayFingerprintRange}`);
+    console.log(`  Confidence:  ${status.overlayFingerprintConfidence}`);
+    console.log(`  Why:         ${status.overlayFingerprintReason}`);
   }
   console.log('');
 

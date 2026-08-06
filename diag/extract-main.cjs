@@ -1,0 +1,10 @@
+const fs = require('fs');
+const asar = require('@electron/asar');
+const path = 'C:/Users/amine/AppData/Local/Programs/Antigravity/resources/app.asar';
+const buf = asar.extractFile(path, 'dist/main.js');
+fs.writeFileSync('diag/extracted-main.js', buf);
+const txt = buf.toString('utf8');
+console.log('BYTES:', txt.length);
+const lines = txt.split('\n');
+console.log('TOTAL LINES:', lines.length);
+lines.slice(0, 90).forEach((l, i) => console.log((i + 1) + ': ' + l));

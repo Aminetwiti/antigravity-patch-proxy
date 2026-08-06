@@ -56,7 +56,7 @@ const KNOWN_KEY_PREFIXES = [
   'ant-',        // Anthropic (newer)
 ];
 
-export function loadCustomModels(filePath?: string): CustomModelsFile {
+export function loadCustomModels(filePath?: string, options?: { includeDisabled?: boolean }): CustomModelsFile {
   const fp = filePath ?? getCustomModelsPath();
   if (!fs.existsSync(fp)) {
     return { models: [] };
@@ -64,10 +64,51 @@ export function loadCustomModels(filePath?: string): CustomModelsFile {
   try {
     const raw = fs.readFileSync(fp, 'utf-8').replace(/^\uFEFF/, '');
     const parsed = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.models)) {
-      return { models: [] };
+    if (!parsed) return { models: [] };
+
+    const models: CustomModel[] = [];
+    // ponytail: track keys we've seen from providers to avoid duplicates
+    // when models[] and providers[] both contain the same model
+    const seen = new Set<string>();
+
+    if (Array.isArray(parsed.providers)) {
+      for (const p of parsed.providers) {
+        if (!p) continue;
+        if (p.enabled === false && !options?.includeDisabled) continue;
+        const pModels = Array.isArray(p.models) ? p.models : [];
+        for (const m of pModels) {
+          if (!m) continue;
+          if (m.enabled === false && !options?.includeDisabled) continue;
+          const name = m.id?.startsWith('models/') ? m.id : `models/${m.id ?? ''}`;
+          const model: CustomModel = {
+            name,
+            displayName: m.displayName || m.id || name,
+            provider: p.provider || 'openai',
+            apiKey: p.apiKey || '',
+            apiUrl: p.apiUrl || '',
+            externalModelName: m.id || '',
+            allowUnauthorized: p.allowUnauthorized,
+            enabled: m.enabled !== false && p.enabled !== false,
+          };
+          models.push(model);
+          seen.add(modelKey(model));
+        }
+      }
     }
-    return { models: parsed.models as CustomModel[] };
+
+    // Legacy models — only add if not already covered by a provider
+    if (Array.isArray(parsed.models)) {
+      for (const m of parsed.models) {
+        if (m.enabled === false && !options?.includeDisabled) continue;
+        const key = modelKey(m);
+        if (!seen.has(key)) {
+          models.push(m);
+          seen.add(key);
+        }
+      }
+    }
+
+    return { models };
   } catch (e) {
     // Corrupt JSON should not crash the CLI — log and return empty.
     console.warn(`[custom-models] failed to parse ${fp}: ${(e as Error).message}`);
@@ -75,13 +116,64 @@ export function loadCustomModels(filePath?: string): CustomModelsFile {
   }
 }
 
-export function saveCustomModels(
-  file: CustomModelsFile,
-  filePath?: string,
-): void {
+export function saveCustomModels(file: CustomModelsFile, filePath?: string): void {
   const fp = filePath ?? getCustomModelsPath();
-  fs.mkdirSync(path.dirname(fp), { recursive: true });
-  fs.writeFileSync(fp, JSON.stringify(file, null, 2), 'utf-8');
+  const dir = path.dirname(fp);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  let existing: any = {};
+  if (fs.existsSync(fp)) {
+    try {
+      existing = JSON.parse(fs.readFileSync(fp, 'utf-8').replace(/^\uFEFF/, ''));
+    } catch {
+      existing = {};
+    }
+  }
+  existing.models = file.models;
+
+  if (Array.isArray(existing.providers)) {
+    const providers = existing.providers as any[];
+    for (const m of file.models) {
+      const cleanId = m.name.replace(/^models\//, '');
+      let providerEntry = providers.find(
+        (p) =>
+          (p.apiUrl && m.apiUrl && p.apiUrl.toLowerCase() === m.apiUrl.toLowerCase()) ||
+          (p.provider && m.provider && p.provider.toLowerCase() !== 'openai' && m.provider.toLowerCase() !== 'openai' && p.provider.toLowerCase() === m.provider.toLowerCase()) ||
+          (!p.apiUrl && !m.apiUrl && p.provider && m.provider && p.provider.toLowerCase() === m.provider.toLowerCase())
+      );
+      if (!providerEntry) {
+        providerEntry = {
+          id: `provider-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          name: m.provider ? `${m.provider.toUpperCase()} CLI Provider` : 'CLI Provider',
+          provider: m.provider || 'custom',
+          apiUrl: m.apiUrl || '',
+          apiKey: m.apiKey || '',
+          allowUnauthorized: m.allowUnauthorized,
+          enabled: true,
+          models: [],
+        };
+        providers.push(providerEntry);
+      }
+      if (!Array.isArray(providerEntry.models)) {
+        providerEntry.models = [];
+      }
+      const existingModel = providerEntry.models.find(
+        (pm: any) => pm.id === cleanId || pm.id === m.name || pm.displayName === m.displayName
+      );
+      if (existingModel) {
+        existingModel.enabled = m.enabled !== false;
+      } else {
+        providerEntry.models.push({
+          id: cleanId,
+          displayName: m.displayName || cleanId,
+          enabled: m.enabled !== false,
+        });
+      }
+    }
+  }
+
+  fs.writeFileSync(fp, JSON.stringify(existing, null, 2), 'utf-8');
 }
 
 /**

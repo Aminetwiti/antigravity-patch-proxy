@@ -74,12 +74,12 @@
     if (c.exists) {
       const it = document.createElement("span");
       it.className = "install-meta-item ok";
-      it.textContent = "✓ present";
+      it.textContent = "present";
       meta.appendChild(it);
     } else {
       const it = document.createElement("span");
       it.className = "install-meta-item warn";
-      it.textContent = "✗ missing";
+      it.textContent = "missing";
       meta.appendChild(it);
     }
     card.appendChild(meta);
@@ -105,7 +105,7 @@
     try {
       const bridge = (window as any).ag;
       if (!bridge || typeof bridge.detectInstallation !== "function") {
-        summary.textContent = "Bridge unavailable: window.ag.detectInstallation() missing.";
+        summary.textContent = "Bridge unavailable: window.ag.detectInstallation() is missing.";
         grid.innerHTML = "";
         return;
       }
@@ -116,7 +116,7 @@
 
       grid.innerHTML = "";
       if (candidates.length === 0) {
-        summary.textContent = "No Antigravity installations detected.";
+        summary.textContent = "No Antigravity installations detected on this device.";
         return;
       }
 
@@ -131,7 +131,7 @@
       summary.textContent =
         candidates.length + " installation(s) detected" +
         (recommended ? `, ${recommended} recommended` : "") +
-        (hasConflict ? " — ⚠ conflict between versions" : ".");
+        (hasConflict ? " — version conflict between ports." : ".");
 
       candidates
         .sort((a, b) => Number(!!b.recommended) - Number(!!a.recommended))
@@ -155,14 +155,36 @@
   // Axe 2 — Real-time Proxy Monitor
   // ─────────────────────────────────────────────────────────────────────────────
 
-  const proxyLatencyEl = () => document.getElementById("proxyLatency");
-  const proxyStatusEl = () => document.getElementById("proxyStatus");
-  const proxyUptimeEl = () => document.getElementById("proxyUptime");
-  const proxySparkLine = () =>
-    document.getElementById("proxySparkLine") as unknown as SVGPolylineElement | null;
-  const proxyBadge = () => document.getElementById("proxyMonitorBadge");
-  const proxyToggleBtn = () =>
-    document.getElementById("proxyMonitorToggleBtn") as HTMLButtonElement | null;
+  let _proxyLatencyEl: HTMLElement | null = null;
+  let _proxyStatusEl: HTMLElement | null = null;
+  let _proxyUptimeEl: HTMLElement | null = null;
+  let _proxySparkLine: SVGPolylineElement | null = null;
+  let _proxyBadge: HTMLElement | null = null;
+  let _proxyToggleBtn: HTMLButtonElement | null = null;
+
+  function getProxyElements() {
+    if (!_proxyLatencyEl) _proxyLatencyEl = document.getElementById("proxyLatency");
+    if (!_proxyStatusEl) _proxyStatusEl = document.getElementById("proxyStatus");
+    if (!_proxyUptimeEl) _proxyUptimeEl = document.getElementById("proxyUptime");
+    if (!_proxySparkLine) _proxySparkLine = document.getElementById("proxySparkLine") as unknown as SVGPolylineElement | null;
+    if (!_proxyBadge) _proxyBadge = document.getElementById("proxyMonitorBadge");
+    if (!_proxyToggleBtn) _proxyToggleBtn = document.getElementById("proxyMonitorToggleBtn") as HTMLButtonElement | null;
+    return {
+      latency: _proxyLatencyEl,
+      status: _proxyStatusEl,
+      uptime: _proxyUptimeEl,
+      sparkLine: _proxySparkLine,
+      badge: _proxyBadge,
+      toggleBtn: _proxyToggleBtn,
+    };
+  }
+
+  const proxyLatencyEl = () => getProxyElements().latency;
+  const proxyStatusEl = () => getProxyElements().status;
+  const proxyUptimeEl = () => getProxyElements().uptime;
+  const proxySparkLine = () => getProxyElements().sparkLine;
+  const proxyBadge = () => getProxyElements().badge;
+  const proxyToggleBtn = () => getProxyElements().toggleBtn;
 
   const SPARK_MAX = 60;
   const sparkBuffer: number[] = [];
@@ -223,8 +245,8 @@
       }
       if (statEl) {
         statEl.textContent = stats.running
-          ? `running${typeof stats.port === "number" ? " :" + stats.port : ""}`
-          : "stopped";
+          ? `Running${typeof stats.port === "number" ? " on port " + stats.port : ""}`
+          : "Stopped";
         statEl.className = "proxy-stat-value" + (stats.running ? " ok" : " err");
       }
       if (upEl) upEl.textContent = formatUptimeSec(stats.uptimeSec);
@@ -236,7 +258,7 @@
       }
       if (typeof stats.latencyMs === "number") pushSpark(stats.latencyMs);
     } catch {
-      /* swallow — keep polling */
+      /* swallow — keep polling so transient errors self-heal */
     }
   }
 
@@ -244,7 +266,7 @@
     if (proxyRunning) return;
     proxyRunning = true;
     const btn = proxyToggleBtn();
-    if (btn) btn.textContent = "Stop";
+    if (btn) btn.textContent = "Stop monitoring";
     const badge = proxyBadge();
     if (badge) {
       badge.hidden = false;
@@ -262,7 +284,7 @@
       proxyTimer = null;
     }
     const btn = proxyToggleBtn();
-    if (btn) btn.textContent = "Start";
+    if (btn) btn.textContent = "Start monitoring";
     const badge = proxyBadge();
     if (badge) {
       badge.hidden = false;
@@ -305,5 +327,67 @@
     document.addEventListener("DOMContentLoaded", boot);
   } else {
     boot();
+  }
+})();
+
+/**
+ * ag-doctor UI � Failure Scenarios Showcase Auto-Wire
+ * Renders the visual showcase of all known provider error cards when the
+ * "Failure Scenarios" view becomes active. Lazy, idempotent.
+ */
+(function () {
+  "use strict";
+  const VIEW_SEL = "#view-failures";
+  const TARGET_SEL = "#failureScenarioShowcase";
+
+  function bootShowcase() {
+    const view = document.querySelector(VIEW_SEL);
+    const target = document.querySelector(TARGET_SEL);
+    if (!view || !target) return;
+
+    const render = () => {
+      // Lazy-load via the global bridge; safe to call multiple times.
+      const w = window as unknown as { AgFailureShowcase?: { renderFailureScenariosShowcase: (s?: string) => number } };
+      if (w.AgFailureShowcase && typeof w.AgFailureShowcase.renderFailureScenariosShowcase === "function") {
+        w.AgFailureShowcase.renderFailureScenariosShowcase(TARGET_SEL);
+      }
+    };
+
+    if (view.classList.contains("active")) render();
+
+    document.body.addEventListener("click", (ev) => {
+      const t = ev.target as HTMLElement | null;
+      if (!t) return;
+      const btn = t.closest('.nav-item[data-view="failures"]');
+      if (btn) setTimeout(render, 30);
+    });
+
+    const refreshBtn = document.getElementById("openFailureShowcaseBtn2");
+    if (refreshBtn) refreshBtn.addEventListener("click", render);
+
+    // Filter chips
+    const chips = Array.from(document.querySelectorAll(".agy-filter-chip"));
+    if (chips.length) {
+      chips.forEach((chip) => {
+        chip.addEventListener("click", () => {
+          chips.forEach((c) => c.classList.remove("active"));
+          chip.classList.add("active");
+          const filter = chip.getAttribute("data-filter") || "all";
+          render();
+          if (target) {
+            Array.from(target.children).forEach((el) => {
+              const id = (el as HTMLElement).getAttribute("data-scenario-id") || "";
+              (el as HTMLElement).style.display = filter === "all" || id === filter ? "" : "none";
+            });
+          }
+        });
+      });
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bootShowcase);
+  } else {
+    bootShowcase();
   }
 })();

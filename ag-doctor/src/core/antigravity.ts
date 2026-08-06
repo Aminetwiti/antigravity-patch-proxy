@@ -297,41 +297,101 @@ export async function getAntigravityStatus(proxyPort = 50999): Promise<Antigravi
   };
 }
 
-/** Launch Antigravity. Returns the spawned PID or null on failure. */
-export async function launchAntigravity(): Promise<{ ok: boolean; pid?: number; message: string }> {
+async function requestWindowsGuiLaunch(winExe: string, winDir: string): Promise<void> {
+  await execFileAsync('cmd.exe', ['/c', 'start', '', '/d', winDir, winExe], {
+    windowsHide: false,
+  });
+}
+
+/** Result returned by launchAntigravity. */
+export interface AntigravityLaunchResult {
+  ok: boolean;
+  pid?: number;
+  windowVisible?: boolean;
+  launchMethod?: 'windows-cmd-start' | 'wsl-cmd-start' | 'unix-spawn' | 'already-running';
+  elapsedMs?: number;
+  message: string;
+}
+
+/** Helper to check whether an Antigravity GUI window is visible on screen. */
+export async function checkAntigravityWindowVisible(targetPid?: number): Promise<boolean> {
+  if (process.platform !== 'win32' && !isWsl()) {
+    return true;
+  }
+  try {
+    const cmd = isWsl()
+      ? '/mnt/c/Windows/System32/tasklist.exe /v /fi "imagename eq Antigravity.exe" /fo csv'
+      : 'tasklist /v /fi "imagename eq Antigravity.exe" /fo csv';
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+    const { stdout } = await execAsync(cmd, { timeout: 3000 });
+    const lines = stdout.split(/\r?\n/).filter((line) => line.trim().length > 0);
+    for (const line of lines) {
+      if (line.toLowerCase().includes('antigravity.exe')) {
+        const parts = line.split('","').map((p) => p.replace(/^"|"$/g, ''));
+        const pidStr = parts[1];
+        const windowTitle = parts[parts.length - 1];
+        if (targetPid && pidStr && parseInt(pidStr, 10) === targetPid) {
+          if (windowTitle && windowTitle !== 'N/A' && windowTitle.trim() !== '') {
+            return true;
+          }
+        } else if (!targetPid && windowTitle && windowTitle !== 'N/A' && windowTitle.trim() !== '') {
+          return true;
+        }
+      }
+    }
+  } catch {
+    // Ignore tasklist errors
+  }
+  return false;
+}
+
+/** Launch Antigravity and try to surface the real GUI window, not only a background PID. */
+export async function launchAntigravity(): Promise<AntigravityLaunchResult> {
+  const startTime = Date.now();
   const dir = findAntigravityInstallDir();
-  if (!dir) return { ok: false, message: 'Antigravity not found on disk' };
+  if (!dir) {
+    return { ok: false, message: 'Antigravity not found on disk', elapsedMs: Date.now() - startTime };
+  }
 
   const isWindowsExe = process.platform === 'win32' || isWsl() || dir.includes('/mnt/') || dir.includes(':\\\\');
   const exeName = isWindowsExe ? 'Antigravity.exe' : 'Antigravity';
   const exe = path.join(dir, exeName);
   if (!fs.existsSync(exe)) {
-    return { ok: false, message: `Executable not found: ${exe}` };
+    return { ok: false, message: `Executable not found: ${exe}`, elapsedMs: Date.now() - startTime };
   }
 
   const existing = await findAntigravityProcesses();
   if (existing.length > 0) {
-    return { ok: true, pid: existing[0]!.pid, message: 'Already running' };
+    const pid = existing[0]!.pid;
+    const windowVisible = await checkAntigravityWindowVisible(pid);
+    return {
+      ok: true,
+      pid,
+      windowVisible,
+      launchMethod: 'already-running',
+      elapsedMs: Date.now() - startTime,
+      message: `Already running (pid=${pid}${windowVisible ? ', window visible' : ''})`,
+    };
   }
 
-  // Convert a WSL path back to a Windows path for cmd.exe / start
   const wslLaunch = isWsl();
   const winExe = wslLaunch ? exe.replace(/^\/mnt\/([a-z])\//i, '$1:/').replace(/\//g, '\\') : exe;
+  let launchMethod: AntigravityLaunchResult['launchMethod'] = 'unix-spawn';
 
   try {
     if (process.platform === 'win32') {
-      // Windows native: use cmd.exe /c start to open the GUI window reliably
+      launchMethod = 'windows-cmd-start';
       const { exec } = await import('child_process');
       const { promisify } = await import('util');
       const execAsync = promisify(exec);
       execAsync(`cmd.exe /c start "" "${winExe}"`, {
         cwd: dir,
         windowsHide: false,
-      }).catch(() => {
-        // Ignore errors - process is already launched
-      });
+      }).catch(() => {});
     } else if (wslLaunch) {
-      // WSL: spawn Windows binary through cmd.exe detached; GUI appears on the Windows host
+      launchMethod = 'wsl-cmd-start';
       const child = spawn('/mnt/c/Windows/System32/cmd.exe', ['/c', 'start', '', winExe], {
         detached: true,
         stdio: 'ignore',
@@ -339,7 +399,7 @@ export async function launchAntigravity(): Promise<{ ok: boolean; pid?: number; 
       });
       child.unref();
     } else {
-      // Unix: original behavior
+      launchMethod = 'unix-spawn';
       const child = spawn(exe, [], {
         detached: true,
         stdio: 'ignore',
@@ -349,24 +409,55 @@ export async function launchAntigravity(): Promise<{ ok: boolean; pid?: number; 
       child.unref();
     }
 
-    // Poll for the process a few times (Electron apps can be slow to show up)
+    // Poll for process & window visibility (6 attempts, 1s interval)
+    let foundPid: number | undefined;
+    let windowVisible = false;
+
     for (let attempt = 0; attempt < 6; attempt++) {
       await new Promise((r) => setTimeout(r, 1000));
       const procs = await findAntigravityProcesses();
-      const pid = procs[0]?.pid;
-      if (pid) {
-        return { ok: true, pid, message: `Launched (pid=${pid})` };
+      foundPid = procs[0]?.pid;
+      if (foundPid) {
+        windowVisible = await checkAntigravityWindowVisible(foundPid);
+        if (windowVisible || attempt >= 2) {
+          return {
+            ok: true,
+            pid: foundPid,
+            windowVisible,
+            launchMethod,
+            elapsedMs: Date.now() - startTime,
+            message: `Launched (pid=${foundPid}${windowVisible ? ', window visible' : ''})`,
+          };
+        }
       }
+    }
+
+    if (foundPid) {
+      return {
+        ok: true,
+        pid: foundPid,
+        windowVisible,
+        launchMethod,
+        elapsedMs: Date.now() - startTime,
+        message: `Launched (pid=${foundPid})`,
+      };
     }
 
     return {
       ok: false,
+      launchMethod,
+      elapsedMs: Date.now() - startTime,
       message: wslLaunch
         ? 'Process launched but not visible from WSL; launch Antigravity directly from Windows if needed'
         : 'Process started but not detected after 6s',
     };
   } catch (e) {
-    return { ok: false, message: `Failed to launch: ${(e as Error).message}` };
+    return {
+      ok: false,
+      launchMethod,
+      elapsedMs: Date.now() - startTime,
+      message: `Failed to launch: ${(e as Error).message}`,
+    };
   }
 }
 

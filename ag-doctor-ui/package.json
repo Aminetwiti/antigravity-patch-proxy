@@ -1,12 +1,11 @@
 {
   "name": "ag-doctor-ui",
-  "version": "2.0.0",
+  "version": "3.0.2",
   "description": "Premium Electron UI for the ag-doctor CLI",
   "main": "dist/main.js",
   "scripts": {
-    "build": "node scripts/copy-assets.js && tsc -p tsconfig.json",
+    "build": "node scripts/copy-assets.js && tsc -p tsconfig.json && tsc -p tsconfig.renderer.json && node scripts/strip-module-syntax.js",
     "build:cli": "cd ../ag-doctor && npm install && npm run build",
-    "prebuild": "node scripts/copy-assets.js && tsc -p tsconfig.json",
     "prepack": "npm run build && cd ../ag-doctor && npm install && npm run build && npm prune --omit=dev",
     "watch": "tsc -p tsconfig.json --watch",
     "start": "npm run build && electron .",
@@ -26,7 +25,10 @@
     "diagnostic"
   ],
   "author": "Antigravity",
-  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Aminetwiti/antigravity-add-model-main.git"
+  },
   "devDependencies": {
     "@types/node": "^20.10.0",
     "electron": "^28.0.0",
@@ -37,6 +39,11 @@
   "build": {
     "appId": "dev.antigravity.doctor-ui",
     "productName": "ag-doctor",
+    "publish": {
+      "provider": "github",
+      "owner": "Aminetwiti",
+      "repo": "antigravity-add-model-main"
+    },
     "directories": {
       "output": "release"
     },

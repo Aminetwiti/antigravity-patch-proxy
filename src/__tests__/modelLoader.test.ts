@@ -178,4 +178,97 @@ describe('loadCustomModels', () => {
     loadCustomModels();
     expect(cryptoStore.backupFile).not.toHaveBeenCalled();
   });
+
+  // ─── BUG-01 Regression ─────────────────────────────────────────────────────
+  // Ensures that models loaded from the providers schema produce names using the
+  // hash-based generateModelPlaceholderId() function (numeric suffix), NOT the
+  // broken string-concatenation format that caused "unknown model key" errors.
+  it('[BUG-01] providers schema: model name must use numeric hash placeholder', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const providersFile = {
+      providers: [
+        {
+          id: 'my-openai',
+          provider: 'openai',
+          apiKey: 'enc:abc',
+          apiUrl: 'https://api.openai.com/v1/chat/completions',
+          enabled: true,
+          encrypted: true,
+          models: [
+            { id: 'gpt-4o', displayName: 'GPT-4o', enabled: true },
+          ],
+        },
+      ],
+    };
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(providersFile));
+
+    const models = loadCustomModels();
+    expect(models.length).toBeGreaterThanOrEqual(1);
+
+    for (const model of models) {
+      // Must start with 'models/MODEL_PLACEHOLDER_M'
+      expect(model.name).toMatch(/^models\/MODEL_PLACEHOLDER_M/);
+      // The suffix after 'M' must be a pure number (hash-based)
+      const suffix = model.name.replace('models/MODEL_PLACEHOLDER_M', '');
+      expect(suffix).toMatch(/^\d+$/);
+      // Must NOT contain underscores or provider names (old broken format)
+      expect(model.name).not.toContain('openai_');
+      expect(model.name).not.toContain('gpt-4o');
+    }
+  });
+
+  it('[BUG-01] providers schema: disabled providers are skipped (=== false, not falsy)', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const providersFile = {
+      providers: [
+        {
+          id: 'disabled-provider',
+          provider: 'openai',
+          apiKey: 'enc:abc',
+          apiUrl: 'https://api.openai.com/v1/chat/completions',
+          enabled: false,
+          models: [{ id: 'gpt-4o', enabled: true }],
+        },
+        {
+          id: 'enabled-provider',
+          provider: 'anthropic',
+          apiKey: 'enc:abc',
+          apiUrl: 'https://api.anthropic.com/v1/messages',
+          // enabled is undefined — should default to active
+          models: [{ id: 'claude-3-5-sonnet-latest', enabled: true }],
+        },
+      ],
+    };
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(providersFile));
+
+    const models = loadCustomModels();
+    // Only the enabled-provider's model should appear
+    expect(models.length).toBe(1);
+    expect(models[0].provider).toBe('anthropic');
+  });
+
+  it('[BUG-01] providers schema: disabled models are skipped (=== false, not falsy)', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const providersFile = {
+      providers: [
+        {
+          id: 'my-provider',
+          provider: 'openai',
+          apiKey: 'enc:abc',
+          apiUrl: 'https://api.openai.com/v1/chat/completions',
+          enabled: true,
+          models: [
+            { id: 'gpt-4o', enabled: false },
+            { id: 'gpt-4o-mini' },    // undefined enabled → should be active
+          ],
+        },
+      ],
+    };
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(providersFile));
+
+    const models = loadCustomModels();
+    // Only gpt-4o-mini (undefined enabled) should appear, not disabled gpt-4o
+    expect(models.length).toBe(1);
+    expect(models[0].externalModelName).toBe('gpt-4o-mini');
+  });
 });

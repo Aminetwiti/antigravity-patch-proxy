@@ -18,11 +18,11 @@ Le système de patch a été amélioré pour détecter automatiquement la versio
    - Registre de patches pour différentes versions
    - Détection automatique de la version
    - Application du patch version-spécifique
-   
+
 2. **`src/core/binary-patch.ts`** (MODIFIÉ)
    - `getPatchStatus()` utilise maintenant la détection version-aware
    - `applyPatch()` délègue à `applyVersionSpecificPatch()`
-   
+
 3. **`src/commands/patch/status.ts`** (MODIFIÉ)
    - Affiche des informations détaillées sur la compatibilité
    - Montre quelle version est détectée
@@ -122,7 +122,7 @@ $text -match 'https?://[a-z0-9-]+\.googleapis\.com'
 
 ```typescript
 // Les URLs doivent avoir EXACTEMENT la même longueur
-'https://nouvelle-url-trouvee.googleapis.com'.length === 
+'https://nouvelle-url-trouvee.googleapis.com'.length ===
 'http://localhost:50999/v1internal/xxxxxxx'.length
 ```
 
@@ -213,7 +213,7 @@ const result = applyPatch();     // utilise version-aware en arrière-plan
 1. **Identifier l'URL pour 2.2.x:**
    - Analyser le binaire `language_server.exe` de la version 2.2.x
    - Trouver la nouvelle URL googleapis.com
-   
+
 2. **Ajouter le patch 2.2.x au registre**
 
 3. **Tester sur Antigravity 2.2.x**

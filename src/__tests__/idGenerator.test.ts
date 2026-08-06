@@ -30,10 +30,7 @@ describe('generateModelPlaceholderId', () => {
 
   it('produces IDs within the configured range', () => {
     for (let i = 0; i < 50; i++) {
-      const model = {
-        ...baseModel,
-        displayName: `Test Model ${i}`,
-      };
+      const model = { ...baseModel, displayName: `Test Model ${i}` };
       const id = generateModelPlaceholderId(model);
       const numStr = id.replace('MODEL_PLACEHOLDER_M', '');
       const num = parseInt(numStr, 10);
@@ -55,11 +52,7 @@ describe('generateModelPlaceholderId', () => {
   });
 
   it('uses "custom-model" as ultimate fallback', () => {
-    const id = generateModelPlaceholderId({
-      ...baseModel,
-      displayName: '',
-      name: '',
-    });
+    const id = generateModelPlaceholderId({ ...baseModel, displayName: '', name: '' });
     expect(id).toMatch(/^MODEL_PLACEHOLDER_M\d+$/);
   });
 
@@ -87,56 +80,68 @@ describe('generateModelPlaceholderId', () => {
       expect(Number.isInteger(parseInt(numStr, 10))).toBe(true);
     }
   });
+
+  it('produces different IDs for different apiUrls (dropdown collision fix)', () => {
+    const id1 = generateModelPlaceholderId({ ...baseModel, apiUrl: 'https://api.openai.com/v1' });
+    const id2 = generateModelPlaceholderId({ ...baseModel, apiUrl: 'https://api.openai.com/v2' });
+    expect(id1).not.toBe(id2);
+  });
 });
 
 describe('toSlug', () => {
-  it('prepends "custom-" prefix', () => {
-    expect(toSlug(baseModel)).toMatch(/^custom-/);
+  it('prepends "custom-" prefix and includes sanitized apiUrl', () => {
+    expect(toSlug(baseModel)).toBe('custom-openai-https-api-openai-com-v1-gpt-4o');
   });
 
-  it('converts to lowercase', () => {
-    const slug = toSlug({ ...baseModel, externalModelName: 'GPT-4O' });
-    expect(slug).toBe('custom-gpt-4o');
+  it('converts to lowercase and includes apiUrl', () => {
+    const slug = toSlug({ ...baseModel, externalModelName: 'GPT-4O', apiUrl: 'https://API.OPENAI.COM' });
+    expect(slug).toBe('custom-openai-https-api-openai-com-gpt-4o');
   });
 
   it('replaces special characters with hyphens', () => {
-    const slug = toSlug({ ...baseModel, externalModelName: 'gpt 4o turbo' });
-    expect(slug).toBe('custom-gpt-4o-turbo');
+    const slug = toSlug({ ...baseModel, externalModelName: 'gpt 4o turbo', apiUrl: 'https://x.com' });
+    expect(slug).toBe('custom-openai-https-x-com-gpt-4o-turbo');
   });
 
-  it('removes "models/" prefix', () => {
-    const slug = toSlug({ ...baseModel, externalModelName: 'models/gpt-4o' });
-    expect(slug).toBe('custom-gpt-4o');
+  it('keeps "models/" prefix and includes apiUrl', () => {
+    const slug = toSlug({ ...baseModel, externalModelName: 'models/gpt-4o', apiUrl: 'https://api.openai.com' });
+    expect(slug).toBe('custom-openai-https-api-openai-com-models-gpt-4o');
   });
 
   it('strips leading and trailing hyphens', () => {
-    const slug = toSlug({ ...baseModel, externalModelName: '---gpt-4o---' });
-    expect(slug).toBe('custom-gpt-4o');
+    const slug = toSlug({ ...baseModel, externalModelName: '---gpt-4o---', apiUrl: 'https://x.com' });
+    expect(slug).toBe('custom-openai-https-x-com-gpt-4o');
   });
 
   it('handles underscores', () => {
-    const slug = toSlug({ ...baseModel, externalModelName: 'gpt_4o' });
-    expect(slug).toBe('custom-gpt-4o');
+    const slug = toSlug({ ...baseModel, externalModelName: 'gpt_4o', apiUrl: 'https://x.com' });
+    expect(slug).toBe('custom-openai-https-x-com-gpt-4o');
   });
 
   it('handles dots', () => {
-    const slug = toSlug({ ...baseModel, externalModelName: 'gpt-4.0' });
-    expect(slug).toBe('custom-gpt-4-0');
+    const slug = toSlug({ ...baseModel, externalModelName: 'gpt-4.0', apiUrl: 'https://x.com' });
+    expect(slug).toBe('custom-openai-https-x-com-gpt-4-0');
   });
 
   it('falls back to name when externalModelName is missing', () => {
-    const slug = toSlug({ ...baseModel, externalModelName: '', name: 'fallback-model' });
-    expect(slug).toBe('custom-fallback-model');
+    const slug = toSlug({ ...baseModel, externalModelName: '', name: 'fallback-model', apiUrl: 'https://x.com' });
+    expect(slug).toBe('custom-openai-https-x-com-fallback-model');
   });
 
   it('produces URL-safe output', () => {
-    const slug = toSlug({ ...baseModel, externalModelName: 'GPT-4o (turbo) [preview]!' });
+    const slug = toSlug({ ...baseModel, externalModelName: 'GPT-4o (turbo) [preview]!', apiUrl: 'https://x.com' });
     expect(slug).toMatch(/^[a-z0-9-]+$/);
   });
 
   it('handles empty strings', () => {
-    const slug = toSlug({ ...baseModel, externalModelName: '', name: '' });
-    expect(slug).toBe('custom-');
+    const slug = toSlug({ ...baseModel, externalModelName: '', name: '', apiUrl: '' });
+    expect(slug).toBe('custom-openai');
+  });
+
+  it('produces distinct slugs for models with same name but different apiUrls', () => {
+    const slug1 = toSlug({ ...baseModel, name: 'model', apiUrl: 'https://a.com' });
+    const slug2 = toSlug({ ...baseModel, name: 'model', apiUrl: 'https://b.com' });
+    expect(slug1).not.toBe(slug2);
   });
 });
 

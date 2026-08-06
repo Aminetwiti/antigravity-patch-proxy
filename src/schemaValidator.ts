@@ -12,10 +12,20 @@
  */
 
 import { ALL_PROVIDERS, type ProviderName } from './constants';
+import { normalizeModelId } from './wellKnown/modelIdUtils';
 
 interface ValidationResult {
   valid: boolean;
   error?: string;
+}
+
+/**
+ * Normalizes a model name through the modelIdUtils pipeline.
+ * Exposed for callers that want to read the canonical form alongside
+ * the user's original input.
+ */
+export function normalizeModelName(name: string): string {
+  return normalizeModelId(name);
 }
 
 /**
@@ -96,15 +106,26 @@ export function validateCustomModel(model: unknown): ValidationResult {
   }
 
   const name = m.name as string;
-  // Validate model name format: should start with "models/" or be a valid path
-  if (!name.startsWith('models/') && !name.includes('/')) {
-    return { valid: false, error: 'Model name must start with "models/"' };
+  // Normalize the model name (e.g. "GPT-4o", "gpt 4o", "models/gpt-4o" -> "gpt-4o").
+  // The normalized form is used as the canonical key downstream.
+  const normalizedName = normalizeModelId(name);
+  if (!normalizedName) {
+    return { valid: false, error: 'Model name normalizes to an empty slug' };
   }
+  // The name must still carry enough information to be a valid model identifier.
+  if (!name.startsWith('models/') && !name.includes('/') && normalizedName.length < 2) {
+    return { valid: false, error: 'Model name must start with "models/" or be a valid path' };
+  }
+  // Persist the canonical slug back on the input shape for downstream callers.
+  (m as Record<string, unknown>).normalizedName = normalizedName;
 
   const provider = m.provider as string;
   // Validate provider is one of the supported types
   if (!ALL_PROVIDERS.includes(provider as ProviderName)) {
-    return { valid: false, error: `Unsupported provider: ${provider}. Must be one of: ${ALL_PROVIDERS.join(', ')}` };
+    return {
+      valid: false,
+      error: `Unsupported provider: ${provider}. Must be one of: ${ALL_PROVIDERS.join(', ')}`,
+    };
   }
 
   const apiUrl = m.apiUrl as string;

@@ -35,6 +35,7 @@ export type Provider = (typeof PROVIDERS)[number];
  * Returns `null` if the provider is unknown.
  */
 export function resolveProvider(input: string): { provider: Provider; wasAlias: boolean } | null {
+  if (!input || typeof input !== 'string') return null;
   const normalized = input.toLowerCase();
   const aliased = PROVIDER_ALIASES[normalized];
   const candidate = aliased ?? normalized;
@@ -46,6 +47,7 @@ export function resolveProvider(input: string): { provider: Provider; wasAlias: 
  * Suggest a provider or alias name based on a simple prefix match.
  */
 export function suggestProvider(input: string): string | undefined {
+  if (!input || typeof input !== 'string') return undefined;
   const normalized = input.toLowerCase();
   const allNames = [...PROVIDERS, ...Object.keys(PROVIDER_ALIASES)];
   return allNames.find(

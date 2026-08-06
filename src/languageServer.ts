@@ -199,8 +199,12 @@ export function startLanguageServer(port: number, csrf: string, headless?: boole
   return new Promise(async (resolve, reject) => {
     log.info('[LS] Cleaning up any zombie processes before startup...');
     await killZombieLanguageServers();
-    
-    const logStream = fs.createWriteStream(getLsLogPath(), { flags: 'w' });
+    const logPath = getLsLogPath();
+    try {
+      fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    } catch { /* ignore if exists */ }
+    const logStream = fs.createWriteStream(logPath, { flags: 'w' });
+    logStream.on('error', (err) => log.error('[LS] Log stream error:', err));
 
     let proxyPort: number | undefined;
     try {

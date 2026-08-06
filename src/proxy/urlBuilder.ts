@@ -14,9 +14,19 @@ export function resolveProvider(model: CustomModel): string {
 }
 
 /**
+ * Strips model anchors/variants (e.g., `claude-3-5-sonnet#thinking` -> `claude-3-5-sonnet`).
+ */
+export function getBaseModelId(modelId: string): string {
+  if (!modelId) return '';
+  const hashIdx = modelId.indexOf('#');
+  return hashIdx !== -1 ? modelId.substring(0, hashIdx) : modelId;
+}
+
+/**
  * Resolves the effective URL for a custom model request, applying provider-specific
  * URL construction rules.
  *
+ * - If `model.useRawBaseUrl` is true: uses `model.apiUrl` as-is without modification.
  * - `google` / `ollama`: delegated to a provider-specific translator via the registry.
  * - `openai` / `custom` / `openrouter`: appends `/chat/completions` if missing.
  *
@@ -36,12 +46,17 @@ export function resolveCustomModelUrl(
     translator: unknown,
   ) => string,
 ): string {
+  if (model.useRawBaseUrl) {
+    return model.apiUrl;
+  }
+
   const provider = resolveProvider(model);
   let finalUrlStr = model.apiUrl;
+  const cleanModelName = getBaseModelId(model.externalModelName);
 
   if (provider === 'google' || provider === 'ollama') {
     const providerTranslator = (model as unknown as { _translator?: unknown })._translator;
-    finalUrlStr = getProviderUrl(finalUrlStr, model.externalModelName, isStream, providerTranslator);
+    finalUrlStr = getProviderUrl(finalUrlStr, cleanModelName, isStream, providerTranslator);
   } else if (provider === 'openai' || model.provider === 'custom' || model.provider === 'openrouter') {
     const urlLower = finalUrlStr.toLowerCase();
     if (!urlLower.includes('/chat/completions') && !urlLower.includes('/completions')) {
@@ -58,17 +73,19 @@ export function resolveCustomModelUrl(
   return finalUrlStr;
 }
 
+
 /**
  * Resolves the effective max retries for a custom model request.
- * Clamped to [0, 5].
+ * Clamped to [0, 5]. Default lowered from 3 to 1 (see DEFAULT_MAX_RETRIES).
  */
 export function resolveMaxRetries(model: CustomModel): number {
-  return Math.min(Math.max(model.maxRetries ?? 3, 0), 5);
+  return Math.min(Math.max(model.maxRetries ?? 1, 0), 5);
 }
 
 /**
  * Resolves the effective request timeout in milliseconds.
+ * Default lowered from 120_000 to 30_000 (see DEFAULT_MODEL_REQUEST_TIMEOUT_MS).
  */
 export function resolveRequestTimeout(model: CustomModel): number {
-  return model.timeout || 120_000;
+  return model.timeout || 30_000;
 }
