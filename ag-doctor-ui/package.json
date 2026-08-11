@@ -75,7 +75,9 @@
       "target": [
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "artifactName": "ag-doctor-${version}-portable.${ext}"
@@ -86,5 +88,9 @@
     "linux": {
       "target": "AppImage"
     }
+  },
+  "dependencies": {
+    "@types/qrcode": "^1.5.6",
+    "qrcode": "^1.5.4"
   }
 }

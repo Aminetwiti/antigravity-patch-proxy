@@ -89,6 +89,10 @@ interface AgAPI {
     actionUrl?: string;
   }) => void): () => void;
 
+  // Network Utils
+  getLocalIp: () => Promise<string>;
+  generateQr: (text: string) => Promise<string>;
+
   // Antigravity lifecycle
   antigravityStatus(): Promise<{ ok: boolean; data?: unknown; error?: string }>;
   antigravityVersion(): Promise<{ ok: boolean; data?: { version: string }; error?: string }>;

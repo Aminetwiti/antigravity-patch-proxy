@@ -66,6 +66,9 @@ const api = {
   proxyRestart: (): Promise<{ ok: boolean; message: string }> =>
     ipcRenderer.invoke('ag:proxy:restart'),
 
+  // Network Utils
+  getLocalIp: (): Promise<string> => ipcRenderer.invoke('ag:network:getLocalIp'),
+  generateQr: (text: string): Promise<string> => ipcRenderer.invoke('ag:network:generateQr', text),
 
   // Antigravity lifecycle (version, status, launch, kill, restart)
   antigravityStatus: (): Promise<{ ok: boolean; data?: unknown; error?: string }> =>

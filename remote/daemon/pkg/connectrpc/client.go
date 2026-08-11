@@ -2,13 +2,18 @@ package connectrpc
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 )
 
+// Client parle le protocole gRPC-Web validé (voir remote/PROTOCOL.md) :
+//   POST /exa.language_server_pb.LanguageServerService/<Method>
+//   Content-Type: application/grpc-web+proto
+//   x-codeium-csrf-token: <token>   (et non X-CSRF-Token)
+//   Framing: 1 octet flags + 4 octets BE longueur + payload protobuf
 type Client struct {
 	Port      int
 	CSRFToken string
@@ -25,21 +30,29 @@ func NewClient(port int, csrfToken string) *Client {
 	}
 }
 
-func (c *Client) Post(path string, body map[string]interface{}) ([]byte, error) {
-	jsonPayload, err := json.Marshal(body)
+// Frame encadre un message protobuf pour gRPC-Web.
+func Frame(payload []byte) []byte {
+	buf := make([]byte, 5+len(payload))
+	buf[0] = 0 // flags: pas de compression
+	binary.BigEndian.PutUint32(buf[1:5], uint32(len(payload)))
+	copy(buf[5:], payload)
+	return buf
+}
+
+// Call exécute une méthode RPC et retourne les messages protobuf bruts.
+func (c *Client) Call(method string, payload []byte) ([]byte, error) {
+	url := fmt.Sprintf("http://%s:%d/exa.language_server_pb.LanguageServerService/%s", c.Host, c.Port, method)
+	body := Frame(payload)
+
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-
-	url := fmt.Sprintf("http://%s:%d%s", c.Host, c.Port, path)
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Content-Type", "application/connect+json")
-	req.Header.Set("X-CSRF-Token", c.CSRFToken)
+	req.Header.Set("Content-Type", "application/grpc-web+proto")
+	req.Header.Set("Accept", "application/grpc-web+proto,application/grpc-web-text")
+	req.Header.Set("x-codeium-csrf-token", c.CSRFToken)
 	req.Header.Set("Connect-Protocol-Version", "1")
+	req.Header.Set("X-Grpc-Web", "1")
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
@@ -47,41 +60,107 @@ func (c *Client) Post(path string, body map[string]interface{}) ([]byte, error) 
 	}
 	defer resp.Body.Close()
 
-	return io.ReadAll(resp.Body)
-}
-
-func (c *Client) CreateCascade(workspacePath string) (map[string]interface{}, error) {
-	respBytes, err := c.Post("/antigravity.v1.CascadeService/CreateCascade", map[string]interface{}{
-		"workspacePath": workspacePath,
-	})
+	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
-	var res map[string]interface{}
-	err = json.Unmarshal(respBytes, &res)
-	return res, err
+	if resp.StatusCode != http.StatusOK {
+		return raw, fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(string(raw), 200))
+	}
+
+	// Découper les frames gRPC-Web : flags(1) + longueur BE(4) + message
+	var frames [][]byte
+	offset := 0
+	for offset+5 <= len(raw) {
+		length := int(binary.BigEndian.Uint32(raw[offset+1 : offset+5]))
+		offset += 5
+		if offset+length > len(raw) {
+			break // trailer tronqué
+		}
+		frames = append(frames, raw[offset:offset+length])
+		offset += length
+	}
+	if len(frames) == 0 {
+		return nil, fmt.Errorf("aucune frame gRPC-Web dans la réponse (%d octets)", len(raw))
+	}
+	return frames[0], nil
 }
 
-func (c *Client) GetAllCascades() (map[string]interface{}, error) {
-	respBytes, err := c.Post("/antigravity.v1.CascadeService/GetAllCascades", map[string]interface{}{})
+// CallStream exécute une méthode RPC en streaming gRPC-Web et invoque onFrame pour chaque frame protobuf reçue.
+func (c *Client) CallStream(method string, payload []byte, timeout time.Duration, onFrame func([]byte) error) error {
+	url := fmt.Sprintf("http://%s:%d/exa.language_server_pb.LanguageServerService/%s", c.Host, c.Port, method)
+	body := Frame(payload)
+
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return err
 	}
-	var res map[string]interface{}
-	err = json.Unmarshal(respBytes, &res)
-	return res, err
+	req.Header.Set("Content-Type", "application/grpc-web+proto")
+	req.Header.Set("Accept", "application/grpc-web+proto,application/grpc-web-text")
+	req.Header.Set("x-codeium-csrf-token", c.CSRFToken)
+	req.Header.Set("Connect-Protocol-Version", "1")
+	req.Header.Set("X-Grpc-Web", "1")
+
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(string(raw), 200))
+	}
+
+	buf := make([]byte, 32768)
+	var accumulated []byte
+
+	for {
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			accumulated = append(accumulated, buf[:n]...)
+			frames, rest := splitFrames(accumulated)
+			accumulated = rest
+			for _, frameData := range frames {
+				if err := onFrame(frameData); err != nil {
+					return err
+				}
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			return readErr
+		}
+	}
+	return nil
 }
 
-func (c *Client) SubmitToolApproval(cascadeID, callID, decision string) (map[string]interface{}, error) {
-	respBytes, err := c.Post("/antigravity.v1.CascadeService/SubmitToolApproval", map[string]interface{}{
-		"cascadeId": cascadeID,
-		"callId":    callID,
-		"decision":  decision,
-	})
-	if err != nil {
-		return nil, err
+// splitFrames extrait les frames gRPC-Web complètes d'un buffer.
+// Retourne les frames de données (les trailers flag 0x80 sont ignorés) et
+// le reste fragmentaire non consommé (frame partielle en attente de données).
+func splitFrames(buf []byte) ([][]byte, []byte) {
+	var frames [][]byte
+	for len(buf) >= 5 {
+		flags := buf[0]
+		length := int(binary.BigEndian.Uint32(buf[1:5]))
+		if len(buf) < 5+length {
+			break
+		}
+		if flags&0x80 == 0 {
+			frames = append(frames, buf[5:5+length])
+		}
+		buf = buf[5+length:]
 	}
-	var res map[string]interface{}
-	err = json.Unmarshal(respBytes, &res)
-	return res, err
+	return frames, buf
 }
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
+}
+

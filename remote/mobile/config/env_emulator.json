@@ -1,0 +1,7 @@
+{
+  "ENVIRONMENT": "emulator",
+  "DAEMON_HOST": "10.0.2.2",
+  "DAEMON_PORT": 8080,
+  "USE_SSL": false,
+  "ENABLE_LOGGING": true
+}

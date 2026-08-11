@@ -39,9 +39,10 @@ export function findLanguageServer(): ProcEntry | null {
       if (!out) return null;
       const parsed = JSON.parse(out);
       const list: any[] = Array.isArray(parsed) ? parsed : [parsed];
-      // Prefer an IDE-bound instance over the standalone hub.
+      // L'instance qui expose le service RPC est le hub standalone
+      // (--subclient_type hub). Les instances IDE répondent 404.
       const pick =
-        list.find((p) => /--subclient_type ide/.test(p.CommandLine || '')) || list[0];
+        list.find((p) => /--subclient_type hub/.test(p.CommandLine || '')) || list[0];
       return { pid: pick.ProcessId, name: pick.Name || '', commandLine: pick.CommandLine || '' };
     }
     const out = execSync(`ps aux | grep -i language_server | grep -v grep`, {
@@ -58,7 +59,7 @@ export function findLanguageServer(): ProcEntry | null {
 }
 
 function argValue(commandLine: string, name: string): string {
-  const re = new RegExp(`--${name}=([^\\s]+)`);
+  const re = new RegExp(`--${name}(?:=|\\s+)([^\\s"]+)`);
   const m = commandLine.match(re);
   return m ? m[1] : '';
 }
@@ -83,6 +84,47 @@ export function checkPort(port: number, host = '127.0.0.1', timeoutMs = 200): Pr
   });
 }
 
+/** Envoie un Heartbeat gRPC-Web (frame vide) — seul critère fiable. */
+async function probeService(port: number, csrfToken: string): Promise<boolean> {
+  const url = `http://127.0.0.1:${port}/exa.language_server_pb.LanguageServerService/Heartbeat`;
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/grpc-web+proto',
+        Accept: 'application/grpc-web+proto,application/grpc-web-text',
+        'x-codeium-csrf-token': csrfToken,
+        'Connect-Protocol-Version': '1',
+        'X-Grpc-Web': '1',
+      },
+      body: Buffer.alloc(5), // frame gRPC-Web vide
+      signal: AbortSignal.timeout(3000),
+    });
+    return resp.status === 200;
+  } catch {
+    return false;
+  }
+}
+
+/** Ports d'écoute du PID (netstat) — pour les hubs sans extension_server_port. */
+function listeningPortsForPID(pid: number): number[] {
+  try {
+    const out = execSync('netstat -ano', { encoding: 'utf-8', maxBuffer: 4 * 1024 * 1024 });
+    const ports: number[] = [];
+    for (const line of out.split('\n')) {
+      const f = line.trim().split(/\s+/);
+      if (f.length < 5 || f[4] !== String(pid) || !f[3].includes('LISTEN')) continue;
+      const addr = f[1];
+      const idx = addr.lastIndexOf(':');
+      const port = parseInt(addr.slice(idx + 1), 10);
+      if (!Number.isNaN(port) && port > 0) ports.push(port);
+    }
+    return ports;
+  } catch {
+    return [];
+  }
+}
+
 export async function discoverLocalHarness(): Promise<LocalHarnessInfo | null> {
   // Allow manual overrides (e.g. when the process scan fails or IDE restarted).
   const envPort = process.env.AG_REMOTE_PORT;
@@ -101,16 +143,21 @@ export async function discoverLocalHarness(): Promise<LocalHarnessInfo | null> {
   const extensionCsrfToken =
     argValue(proc?.commandLine || '', 'extension_server_csrf_token') || envCsrf || csrfToken;
 
-  let connectRpcPort = basePort || 0;
-  if (basePort) {
-    for (let offset = 1; offset <= 20; offset++) {
-      if (await checkPort(basePort + offset)) {
-        connectRpcPort = basePort + offset;
-        break;
-      }
-    }
-    if (connectRpcPort === basePort && !(await checkPort(basePort))) {
-      connectRpcPort = 0;
+  // Prober chaque port candidat avec un vrai Heartbeat gRPC-Web
+  // (seul critère fiable : le port doit exposer LanguageServerService).
+  // - Avec extension_server_port : tester base+1..base+20
+  // - Sans (hub standalone, port OS-assigné) : utiliser netstat sur le PID
+  let candidates = basePort
+    ? Array.from({ length: 20 }, (_, i) => basePort + i + 1)
+    : proc
+      ? listeningPortsForPID(proc.pid)
+      : [];
+  const token = extensionCsrfToken || csrfToken;
+  let connectRpcPort = 0;
+  for (const port of candidates) {
+    if (await probeService(port, token)) {
+      connectRpcPort = port;
+      break;
     }
   }
 

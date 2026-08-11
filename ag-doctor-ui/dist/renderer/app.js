@@ -3686,4 +3686,41 @@ window.ag?.providers?.onChanged(() => {
     void renderProviderList();
     void loadModels();
 });
+// ─────────────────────────────────────────────────────────────────────────────
+// Remote Server (QR Code)
+// ─────────────────────────────────────────────────────────────────────────────
+const startRemoteBtn = $('#startRemoteBtn');
+const remoteQrContainer = $('#remoteQrContainer');
+const remoteQrImage = $('#remoteQrImage');
+const remoteQrPlaceholder = $('#remoteQrPlaceholder');
+const remoteStatusText = $('#remoteStatusText');
+if (startRemoteBtn) {
+    startRemoteBtn.addEventListener('click', async () => {
+        try {
+            startRemoteBtn.setAttribute('disabled', 'true');
+            if (remoteStatusText)
+                remoteStatusText.textContent = 'Starting server...';
+            const ip = await window.ag.getLocalIp();
+            const port = 8089; // Fixed for now, daemon will listen here
+            const text = `ws://${ip}:${port}/ws`;
+            const dataUrl = await window.ag.generateQr(text);
+            if (remoteQrImage)
+                remoteQrImage.src = dataUrl;
+            if (remoteQrPlaceholder)
+                remoteQrPlaceholder.style.display = 'none';
+            if (remoteQrContainer)
+                remoteQrContainer.style.display = 'block';
+            if (remoteStatusText) {
+                remoteStatusText.innerHTML = `Server listening on <b>${ip}:${port}</b><br/><br/><i>Go Daemon must be running!</i>`;
+            }
+        }
+        catch (e) {
+            if (remoteStatusText)
+                remoteStatusText.textContent = `Error: ${e.message}`;
+        }
+        finally {
+            startRemoteBtn.removeAttribute('disabled');
+        }
+    });
+}
 //# sourceMappingURL=app.js.map

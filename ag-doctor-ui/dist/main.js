@@ -619,6 +619,29 @@ try {
 }
 catch { /* ignore watcher errors */ }
 // Secure External Link IPC Handler
+electron_1.ipcMain.handle('ag:network:getLocalIp', async () => {
+    const os = require('os');
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+        for (const iface of interfaces[name]) {
+            // Skip over internal (i.e. 127.0.0.1) and non-ipv4 addresses
+            if (iface.family === 'IPv4' && !iface.internal) {
+                return iface.address;
+            }
+        }
+    }
+    return '127.0.0.1';
+});
+electron_1.ipcMain.handle('ag:network:generateQr', async (_event, text) => {
+    const qrcode = require('qrcode');
+    try {
+        const dataUrl = await qrcode.toDataURL(text, { width: 256, margin: 2, color: { dark: '#000000FF', light: '#FFFFFFFF' } });
+        return dataUrl;
+    }
+    catch (e) {
+        throw new Error('Failed to generate QR code: ' + e.message);
+    }
+});
 electron_1.ipcMain.handle('ag:open-external', async (_event, url) => {
     try {
         if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {

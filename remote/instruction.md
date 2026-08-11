@@ -239,7 +239,7 @@ Les endpoints **probables** (à vérifier sur votre version) :
 | 0 | Processus `localharness` découvert (PID + Port + CSRF Token) | ✅ | Validé |
 | 1 | `curl CreateCascade` → reçoit un `cascadeId` | ✅ | Validé (via `test-1`) |
 | 2 | `curl SendCascadeMessage` → reçoit un stream de `TEXT_DELTA` | ✅ | Validé (via `test-2`) |
-| 3 | `curl SubmitToolApproval` → l'agent reprend après validation | ⬜ | En attente |
+| 3 | `curl SubmitToolApproval` → l'agent reprend après validation | ✅ | Validé (via `test-9`) |
 | 4 | Cartographie des endpoints RPC de votre version | ✅ | Validé |
 
 > [!IMPORTANT]

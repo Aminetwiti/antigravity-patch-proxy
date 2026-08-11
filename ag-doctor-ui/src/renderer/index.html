@@ -114,6 +114,10 @@
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
               <span>Antigravity</span>
             </button></li>
+            <li><button class="nav-item" data-view="remote" type="button" title="Remote Server">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+              <span>Remote App</span>
+            </button></li>
           </ul>
         </li>
       </ul>
@@ -130,6 +134,33 @@
 
     <!-- Content -->
     <section class="content">
+      <!-- Remote -->
+      <div class="view" id="view-remote">
+        <div class="view-header">
+          <div>
+            <h1>Remote Server</h1>
+            <p class="subtitle">Scan the QR code with the Antigravity mobile app to pair your device.</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-primary" id="startRemoteBtn" type="button">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Start Remote Server
+            </button>
+          </div>
+        </div>
+        
+        <div class="settings-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding: 40px;">
+            <h3 style="margin-bottom: 20px;">Pairing QR Code</h3>
+            <div id="remoteQrContainer" style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); display: none;">
+                <img id="remoteQrImage" width="256" height="256" />
+            </div>
+            <div id="remoteQrPlaceholder" style="width: 256px; height: 256px; background: var(--bg-1); border: 2px dashed var(--border); border-radius: 12px; display: flex; align-items: center; justify-content: center; color: var(--text-2);">
+                Server not running
+            </div>
+            <p id="remoteStatusText" style="margin-top: 20px; font-family: monospace; color: var(--text-2);">Click 'Start' to host the remote proxy</p>
+        </div>
+      </div>
+
       <!-- Dashboard -->
       <div class="view active" id="view-dashboard">
         <div class="view-header">

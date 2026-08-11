@@ -34,6 +34,9 @@ const api = {
     proxyStop: () => electron_1.ipcRenderer.invoke('ag:proxy:stop'),
     proxyStatus: () => electron_1.ipcRenderer.invoke('ag:proxy:status'),
     proxyRestart: () => electron_1.ipcRenderer.invoke('ag:proxy:restart'),
+    // Network Utils
+    getLocalIp: () => electron_1.ipcRenderer.invoke('ag:network:getLocalIp'),
+    generateQr: (text) => electron_1.ipcRenderer.invoke('ag:network:generateQr', text),
     // Antigravity lifecycle (version, status, launch, kill, restart)
     antigravityStatus: () => electron_1.ipcRenderer.invoke('ag:antigravity:status'),
     antigravityVersion: () => electron_1.ipcRenderer.invoke('ag:antigravity:version'),

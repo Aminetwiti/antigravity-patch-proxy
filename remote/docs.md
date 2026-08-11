@@ -599,5 +599,6 @@ Voici l'**Audit de Faisabilité et de Risques Technologiques** pour la création
 
 ### Conseil de stratégie :
 
-Ne commencez **pas** par coder l'application Android !
-Commencez par écrire un simple **script en ligne de commande (CLI)** sur votre PC qui se connecte au `localharness`, crée une cascade et envoie un prompt. Une fois que ce script PC fonctionne à 100%, vous pourrez construire le Daemon et l'APK Android par-dessus en toute sérénité.
+Nous avons **validé avec succès** toutes les étapes de la Phase 1 (script CLI) et implémenté la Phase 1.5 (intégration de l'interface graphique de connexion avec scan de QR Code dans l'outil `ag-doctor-ui`). Le protocole n'a plus de secrets !
+
+Prochaine étape : La construction du **Daemon Bridge en Go** sur le port `8089` pour servir de relais robuste.

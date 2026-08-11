@@ -145,26 +145,33 @@ Chaque marche doit fonctionner à 100% avant de passer à la suivante.
 | **2** | CLI - Gestion des Workspaces | Ajouter un workspace et changer de projet actif | ✅ Validé (`test-7-workspace.ts`) |
 | **3** | CLI - Gestion des Modèles | Lister les modèles LLM disponibles, changer le modèle actif | ✅ Validé (`test-6-model.ts`) |
 | **4** | CLI - Gestion des Sessions | Lister toutes les sessions (Cascades) actives | ✅ Validé (`test-4-list.ts`) |
-| **5** | CLI - Interaction Session | Ouvrir une session existante, envoyer un prompt, récupérer les données | ✅ Validé (`test-5-history.ts`) |
-| **6** | CLI - Mode Autonome / Cleanup | Supprimer une session, gérer `ask_user` dynamiquement | ⏳ À faire |
+| **5** | CLI - Interaction Session | Ouvrir une session existante, envoyer un prompt, récupérer les données | ✅ Validé (`test-5-history.ts` et `test-marche.ts`) |
+| **6** | CLI - Actions Avancées | Appels d'outils, Focus (SmartFocusConversation), GetSidecars | ✅ Validé (`test-8` à `test-17`) |
+
+### Phase 1.5 — Intégration UI (Doctor UI)
+
+| Marche | Objectif | Critère de Succès | Statut |
+|:---|:---|:---|:---|
+| **7** | Onglet Remote App | Ajouter une vue "Remote Server" dans l'UI d'Antigravity Doctor | ✅ Validé |
+| **8** | Génération de QR Code | Le Main process génère un QR code avec l'adresse IP locale et le port (`8089`) | ✅ Validé |
 
 ### Phase 2 — Daemon Bridge (Go)
 
 | Marche | Objectif | Critère de Succès |
 |:---|:---|:---|
-| **5** | Le CLI devient un Daemon | Le Daemon écoute sur un port WebSocket et relaye les sessions |
-| **6** | Reconnexion automatique | Si le token CSRF change (redémarrage IDE), le Daemon se ré-authentifie seul |
-| **7** | Tunneling réseau | Le Daemon est accessible via Cloudflare Tunnel ou Tailscale |
+| **9** | Le CLI devient un Daemon | Le Daemon Go écoute sur le port `:8089` WebSocket et relaye vers ConnectRPC |
+| **10** | Reconnexion automatique | Si le token CSRF change, le Daemon se ré-authentifie seul |
+| **11** | Tunneling réseau | Le Daemon est accessible via Cloudflare Tunnel ou Tailscale |
 
 ### Phase 3 — APK Android Natif
 
 | Marche | Objectif | Critère de Succès |
 |:---|:---|:---|
-| **8** | Connexion au Daemon | L'APK se connecte via WebSocket et affiche la liste des sessions |
-| **9** | Envoi de prompt + streaming | L'APK envoie un message et affiche la réponse en temps réel |
-| **10** | Approbation tactile | L'APK affiche un bouton Approuver/Refuser quand l'agent bloque |
-| **11** | Workspace browser | L'APK affiche l'arborescence du projet et les diffs de code |
-| **12** | Notifications FCM | L'APK réveille l'écran quand un agent attend une validation |
+| **12** | Connexion au Daemon | L'APK scanne le QR code, se connecte via WebSocket et affiche les sessions |
+| **13** | Envoi de prompt + streaming | L'APK envoie un message et affiche la réponse en temps réel |
+| **14** | Approbation tactile | L'APK affiche un bouton Approuver/Refuser quand l'agent bloque |
+| **15** | Workspace browser | L'APK affiche l'arborescence du projet et les diffs de code |
+| **16** | Notifications FCM | L'APK réveille l'écran quand un agent attend une validation |
 
 ---
 

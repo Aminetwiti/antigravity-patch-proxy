@@ -1,0 +1,10 @@
+# github.com/antigravity/remote-daemon/pkg/connectrpc [github.com/antigravity/remote-daemon/pkg/connectrpc.test]
+pkg\connectrpc\protobuf_test.go:4:2: "bytes" imported and not used
+FAIL	github.com/antigravity/remote-daemon/pkg/connectrpc [build failed]
+=== RUN   TestExtractArg
+--- PASS: TestExtractArg (0.00s)
+=== RUN   TestExtractJson
+--- PASS: TestExtractJson (0.00s)
+PASS
+ok  	github.com/antigravity/remote-daemon/pkg/discovery	(cached)
+FAIL

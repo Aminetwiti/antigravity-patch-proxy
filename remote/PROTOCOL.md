@@ -26,9 +26,19 @@ Le "cerveau" d'Antigravity est **`language_server`** (et non `localharness`) :
 | 35280 | 55256 | 55256, 55257, 55262, 55263 | IDE |
 | 34320 | 55342 | 55342 | IDE (workspace raouf_taxi) |
 | 36464 | 53336 | 53336 | IDE |
-| 37136 | (hub) | 60656, 60657 | Hub standalone |
+| 37136 | (hub) | 60656, 60657 | **Hub standalone ← cible RPC** |
 
-**Règle de découverte :** scanner `base..base+1` (HTTP + HTTPS local), les deux répondent.
+**Règle de découverte validée (2026-08-11) :**
+
+1. Lister les processus `language_server*` (PowerShell CIM).
+2. **Préférer l'instance hub** (`--subclient_type hub`) — les instances IDE répondent **404** au service RPC.
+3. Ports candidats : `extension_server_port+1..+20` ; si absent (hub), utiliser `netstat -ano` sur le PID.
+4. **Probe Heartbeat** (seul critère fiable) :
+   ```powershell
+   POST http://127.0.0.1:<port>/exa.language_server_pb.LanguageServerService/Heartbeat
+   → 200 = bon port (les autres ports ouverts répondent 404)
+   ```
+5. Le hub n'a pas de `--extension_server_port` : port OS-assigné (60656/60657 ici), récupéré par netstat.
 
 ## 4. Protocole HTTP réel (gRPC-Web, PAS Connect JSON)
 
