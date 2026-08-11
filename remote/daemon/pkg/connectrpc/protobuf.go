@@ -43,11 +43,19 @@ func (w *writer) bytesField(fieldNum int, data []byte) {
 
 // StartCascadeRequest : field 4 source=1, 5 trajectory_type=1,
 // 8 workspace_uris (string), 14 requested_model (varint).
-func BuildStartCascade(workspaceURI string, requestedModel uint64) []byte {
+// BuildStartCascade génère un message StartCascadeRequest brut.
+func BuildStartCascade(workspaceURI, projectID string, requestedModel uint64) []byte {
 	w := &writer{}
 	w.varintField(4, 1)
 	w.varintField(5, 1)
-	w.stringField(8, workspaceURI)
+	if projectID != "" {
+		envW := &writer{}
+		envW.stringField(1, projectID)
+		envW.bytesField(4, []byte{}) // defaultProjectEnvironment
+		w.bytesField(17, envW.b)
+	} else {
+		w.stringField(8, workspaceURI)
+	}
 	w.varintField(14, requestedModel)
 	return w.b
 }

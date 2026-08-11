@@ -82,7 +82,7 @@ func (l *loadRPCClient) Heartbeat() ([]byte, error) {
 	l.heartbeats.Add(1)
 	return connectrpc.Frame(pbTextFrame("ok")), nil
 }
-func (l *loadRPCClient) CreateCascade(uri string, model uint64) ([]byte, error) {
+func (l *loadRPCClient) CreateCascade(uri string, projectID string, model uint64) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("casc-1")), nil
 }
 func (l *loadRPCClient) GetAllCascades() ([]byte, error) {
@@ -214,7 +214,7 @@ func BenchmarkGatewayHeartbeat(b *testing.B) {
 type failingStreamClient struct{}
 
 func (f *failingStreamClient) Heartbeat() ([]byte, error) { return connectrpc.Frame(pbTextFrame("ok")), nil }
-func (f *failingStreamClient) CreateCascade(uri string, model uint64) ([]byte, error) {
+func (f *failingStreamClient) CreateCascade(uri, projectID string, model uint64) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("casc")), nil
 }
 func (f *failingStreamClient) GetAllCascades() ([]byte, error) { return connectrpc.Frame(pbTextFrame("s")), nil }

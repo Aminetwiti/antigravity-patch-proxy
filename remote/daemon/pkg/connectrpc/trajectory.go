@@ -13,6 +13,7 @@ type TrajectorySummary struct {
 	CascadeID string    `json:"cascadeId"`
 	Title     string    `json:"title"`
 	Workspace string    `json:"workspace"`
+	ProjectID string    `json:"projectId"`
 	Status    string    `json:"status"`
 	UpdatedAt time.Time `json:"updatedAt,omitempty"`
 	Size      int       `json:"size"`
@@ -83,6 +84,14 @@ func trajectoryFromBlob(blob []byte) TrajectorySummary {
 				if f.WireType == 2 && len(f.Bytes) == 36 {
 					t.CascadeID = string(f.Bytes)
 				}
+			case 2:
+				if f.WireType == 2 {
+					for _, mf := range DecodeFields(f.Bytes) {
+						if mf.Num == 18 && mf.WireType == 2 {
+							t.ProjectID = string(mf.Bytes)
+						}
+					}
+				}
 			case 3: // timestamp
 				t.UpdatedAt = timestampFromMessage(f.Bytes)
 			case 22:
@@ -94,6 +103,13 @@ func trajectoryFromBlob(blob []byte) TrajectorySummary {
 				}
 				if t.Workspace == "" {
 					t.Workspace = workspaceRe.FindString(string(f.Bytes))
+				}
+				if t.ProjectID == "" && f.Num == 2 {
+					for _, mf := range DecodeFields(f.Bytes) {
+						if mf.Num == 11 && mf.WireType == 2 && len(mf.Bytes) == 36 {
+							t.ProjectID = string(mf.Bytes)
+						}
+					}
 				}
 			}
 		}

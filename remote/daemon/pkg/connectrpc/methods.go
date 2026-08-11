@@ -6,8 +6,8 @@ import (
 )
 
 // CreateCascade crée une session via StartCascade.
-func (c *Client) CreateCascade(workspaceURI string, requestedModel uint64) ([]byte, error) {
-	return c.Call("StartCascade", BuildStartCascade(workspaceURI, requestedModel))
+func (c *Client) CreateCascade(workspaceURI, projectID string, requestedModel uint64) ([]byte, error) {
+	return c.Call("StartCascade", BuildStartCascade(workspaceURI, projectID, requestedModel))
 }
 
 // GetAllCascades liste toutes les sessions via GetAllCascadeTrajectories.

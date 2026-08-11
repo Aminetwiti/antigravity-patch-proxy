@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'core/network/websocket_client.dart';
+import 'core/notifications/approval_notifier.dart';
 import 'core/protocol/daemon_api.dart';
 import 'core/protocol/messages.dart';
 import 'core/protocol/session_parser.dart';
@@ -65,6 +66,8 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
   void initState() {
     super.initState();
     _wsClient.statusNotifier.addListener(_onStatusChanged);
+    // Notifications locales (APPROVAL_REQUIRED) — aucune dépendance Firebase.
+    ApprovalNotifier.instance.init();
   }
 
   void _onStatusChanged() {
@@ -142,6 +145,17 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
               command: approval.detail,
               description: 'Tool execution requires your confirmation',
             );
+            // Étape 3 : notification locale si l'utilisateur n'est PAS actif
+            // sur le PC hôte (hostActive=true → l'approbation est déjà à
+            // l'écran de l'ordinateur, inutile de sonner le téléphone).
+            final hostActive = msg['data']?['hostActive'] == true;
+            if (!hostActive) {
+              ApprovalNotifier.instance.notifyApprovalRequired(
+                callId: approval.callId,
+                toolName: approval.tool,
+                command: approval.detail,
+              );
+            }
           }
         });
       } else if (type == 'stream_end') {
@@ -243,6 +257,14 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
               command: approval.detail,
               description: 'Tool execution requires your confirmation',
             );
+            final hostActive = msg['data']?['hostActive'] == true;
+            if (!hostActive) {
+              ApprovalNotifier.instance.notifyApprovalRequired(
+                callId: approval.callId,
+                toolName: approval.tool,
+                command: approval.detail,
+              );
+            }
           }
         });
       },
@@ -278,6 +300,8 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       _pendingApproval = null;
     });
     if (approval == null) return;
+    // L'utilisateur a répondu : on retire la notification de la barre.
+    ApprovalNotifier.instance.cancelApproval(approval.callId);
     _api?.submitApproval(
       cascadeId: _activeSessionId,
       callId: approval.callId,

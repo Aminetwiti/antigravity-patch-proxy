@@ -11,6 +11,14 @@ import (
 	"time"
 )
 
+// Regexes d'extraction d'URL (package-level pour testabilité sans binaire réel).
+var (
+	cloudflareURLRe = regexp.MustCompile(`https://[a-zA-Z0-9-]+\.trycloudflare\.com`)
+	// https?://[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.pinggy\.link — couvre aussi
+	// "a.pinggy.link" (sous-domaine à label unique) et le préfixe ssh://.
+	pinggyURLRe     = regexp.MustCompile(`(?:https?|ssh)://[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.pinggy\.link`)
+)
+
 type Manager struct {
 	Provider     string `json:"provider"`
 	ProviderPref string `json:"-"`
@@ -103,7 +111,7 @@ func (m *Manager) startCloudflare(binPath string, localPort int) (string, error)
 	}
 
 	urlChan := make(chan string, 1)
-	re := regexp.MustCompile(`https://[a-zA-Z0-9-]+\.trycloudflare\.com`)
+	re := cloudflareURLRe
 
 	go func() {
 		scanner := bufio.NewScanner(stderr)
@@ -151,7 +159,7 @@ func (m *Manager) startPinggy(binPath string, localPort int) (string, error) {
 	}
 
 	urlChan := make(chan string, 1)
-	re := regexp.MustCompile(`https?://[a-zA-Z0-9-]+\.[a-zA-Z0-9-]*pinggy\.link`)
+	re := pinggyURLRe
 
 	scanFunc := func(scanner *bufio.Scanner) {
 		for scanner.Scan() {

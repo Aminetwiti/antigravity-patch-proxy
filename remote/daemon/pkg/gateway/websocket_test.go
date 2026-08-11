@@ -56,17 +56,21 @@ func pbTextFrame(s string) []byte {
 // fakeRPCClient est un stub du backend LanguageServer (gRPC-Web).
 type fakeRPCClient struct {
 	streamDeltas []string // frames émises par SendMessageStream
+	cascadesRaw  []byte   // réponse GetAllCascades (nil → défaut)
 }
 
 func (f *fakeRPCClient) Heartbeat() ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("ok")), nil
 }
 
-func (f *fakeRPCClient) CreateCascade(uri string, model uint64) ([]byte, error) {
+func (f *fakeRPCClient) CreateCascade(uri string, projectID string, model uint64) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("casc-1")), nil
 }
 
 func (f *fakeRPCClient) GetAllCascades() ([]byte, error) {
+	if f.cascadesRaw != nil {
+		return f.cascadesRaw, nil
+	}
 	return connectrpc.Frame(pbTextFrame("sess")), nil
 }
 
@@ -231,9 +235,85 @@ func TestWebSocketAuth(t *testing.T) {
 	conn.Close()
 }
 
-// TestWebSocketStreamBroadcastMultiClient — la synchronisation multi-surface :
-// un stream déclenché par un client doit être diffusé à TOUS les clients
-// connectés (équivalent Claude Code "work from 2 surfaces at once").
+// TestWebSocketReadLimit — un message > 1 Mo doit être rejeté sans crash :
+// le serveur ferme la connexion, le client reçoit une erreur de lecture.
+func TestWebSocketReadLimit(t *testing.T) {
+	srv := newTestServer(&fakeRPCClient{})
+	defer srv.Close()
+
+	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	big := strings.Repeat("A", maxWSMessageSize+1024)
+	if err := client.conn.WriteMessage(websocket.TextMessage, []byte(big)); err != nil {
+		t.Fatalf("envoi du gros message échoué: %v", err)
+	}
+
+	// La prochaine lecture doit échouer (connexion fermée par le serveur).
+	_, _, err := client.conn.ReadMessage()
+	if err == nil {
+		t.Fatal("Attendu une erreur de lecture après dépassement du read limit")
+	}
+}
+
+// TestWebSocketCheckOrigin — un navigateur web avec un Origin arbitraire
+// doit être rejeté (CSWSH), tandis qu'un client natif sans Origin passe.
+func TestWebSocketCheckOrigin(t *testing.T) {
+	srv := newTestServer(&fakeRPCClient{})
+	defer srv.Close()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
+
+	// Origin malveillant → refusé
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Origin": []string{"https://evil.example.com"}})
+	if err == nil {
+		resp.Body.Close()
+		t.Fatal("Attendu un rejet pour Origin malveillant")
+	}
+
+	// Origin localhost → accepté
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Origin": []string{"http://localhost:3000"}})
+	if err != nil {
+		t.Fatalf("Origin localhost refusé à tort: %v", err)
+	}
+	conn.Close()
+}
+
+// trajectoryFrame construit une réponse GetAllCascadeTrajectories contenant
+// UNE trajectoire structurée (champ 1 : cascade_id UUID de 36 octets + status).
+func trajectoryFrame(uuid string) []byte {
+	inner := append([]byte{0x0a, 0x24}, []byte(uuid)...) // field 1: cascade_id
+	inner = append(inner, 0xb0, 0x01, 0x04)              // field 22: varint 4 (READY)
+	outer := append([]byte{0x0a, byte(len(inner))}, inner...)
+	return connectrpc.Frame(outer)
+}
+
+// TestWebSocketGetContextReal — get_context compte les artefacts réels depuis
+// la réponse GetAllCascadeTrajectories (plus de mock en dur).
+func TestWebSocketGetContextReal(t *testing.T) {
+	srv := newTestServer(&fakeRPCClient{cascadesRaw: trajectoryFrame("123e4567-e89b-12d3-a456-426614174000")})
+	defer srv.Close()
+
+	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	client.send(t, map[string]string{"type": "get_context", "requestId": "ctx1"})
+	resp := client.recv(t)
+	if resp["error"] != nil {
+		t.Fatalf("get_context a renvoyé une erreur: %v", resp["error"])
+	}
+	data, ok := resp["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("data manquant ou invalide: %v", resp)
+	}
+	// 1 trajectoire réelle → artifactsCount = 1 (plus de mock en dur 2).
+	if artifacts, ok := data["artifactsCount"].(float64); !ok || artifacts != 1 {
+		t.Fatalf("artifactsCount attendu 1, reçu %v", data["artifactsCount"])
+	}
+	// Les anciens mocks en dur (1/3/2) ne doivent plus apparaître.
+	if data["subagentsCount"].(float64) == 1 && data["filesChangedCount"].(float64) == 3 {
+		t.Fatalf("statistiques mock en dur encore présentes: %v", data)
+	}
+}
 func TestWebSocketStreamBroadcastMultiClient(t *testing.T) {
 	srv := newTestServer(&fakeRPCClient{streamDeltas: []string{"hello", " world"}})
 	defer srv.Close()
