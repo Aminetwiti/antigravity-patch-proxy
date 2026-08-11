@@ -59,14 +59,19 @@ type Server struct {
 	// approvalPending : cascadeId → une approbation est en attente (posée par
 	// MarkApprovalPending quand un événement approval_required est émis).
 	approvalPending map[string]bool
+	// sessionApprovals : cascadeId+approvalType → l'utilisateur a choisi
+	// « toujours autoriser pour cette session » (B3). Les demandes suivantes
+	// du même type sont auto-approuvées sans repasser par le téléphone.
+	sessionApprovals map[string]bool
 }
 
 func NewServer(client RPCClient, authToken string) *Server {
 	return &Server{
-		RPCClient:       client,
-		AuthToken:       authToken,
-		clients:         make(map[*websocket.Conn]bool),
-		approvalPending: make(map[string]bool),
+		RPCClient:        client,
+		AuthToken:        authToken,
+		clients:          make(map[*websocket.Conn]bool),
+		approvalPending:  make(map[string]bool),
+		sessionApprovals: make(map[string]bool),
 	}
 }
 
@@ -117,6 +122,7 @@ type IncomingMessage struct {
 	StepIndex     int64  `json:"stepIndex,omitempty"`
 	ApprovalType  string `json:"approvalType,omitempty"`
 	Decision      string `json:"decision,omitempty"`
+	Scope         string `json:"scope,omitempty"`
 	Prompt        string `json:"prompt,omitempty"`
 	FilePath      string `json:"filePath,omitempty"`
 	Command       string `json:"command,omitempty"`
@@ -137,6 +143,26 @@ func (s *Server) hasPendingApproval(cascadeID string) bool {
 func (s *Server) MarkApprovalPending(cascadeID string) {
 	s.mu.Lock()
 	s.approvalPending[cascadeID] = true
+	s.mu.Unlock()
+}
+
+// sessionApprovalKey : clé de cache « toujours autoriser pour cette session ».
+func sessionApprovalKey(cascadeID, approvalType string) string {
+	return cascadeID + "|" + strings.ToLower(approvalType)
+}
+
+// hasSessionApproval rapporte si l'utilisateur a déjà auto-approuvé ce type
+// d'approbation pour cette cascade (B3).
+func (s *Server) hasSessionApproval(cascadeID, approvalType string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sessionApprovals[sessionApprovalKey(cascadeID, approvalType)]
+}
+
+// markSessionApproval enregistre l'auto-approbation pour le reste de la session.
+func (s *Server) markSessionApproval(cascadeID, approvalType string) {
+	s.mu.Lock()
+	s.sessionApprovals[sessionApprovalKey(cascadeID, approvalType)] = true
 	s.mu.Unlock()
 }
 
@@ -331,7 +357,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 		s.broadcast(OutgoingMessage{Type: "stream_start", RequestID: msg.RequestID, Data: map[string]string{"cascadeId": msg.CascadeID}})
-		
+
 		// 1. Force l'IDE à afficher la conversation avant de lancer le prompt
 		if _, errSet := s.RPCClient.SetBrowserOpenConversation(msg.CascadeID); errSet != nil {
 			log.Printf("[WS] Erreur SetBrowserOpenConversation: %v", errSet)
@@ -345,7 +371,19 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			// est considérée « en attente » — le stream_end le reflètera.
 			for _, ev := range events {
 				if ev.Kind == connectrpc.EventKindApprovalRequired {
-					s.MarkApprovalPending(msg.CascadeID)
+					// B3 : auto-approbation si l'utilisateur a choisi
+					// « toujours autoriser ce type pour la session ».
+					if s.hasSessionApproval(msg.CascadeID, ev.Tool) {
+						oneofField, oneofPayload := approvalOneof(ev.Tool, true, ev.Detail, "")
+						if _, errSubmit := s.RPCClient.SubmitToolApproval(
+							msg.CascadeID, ev.TrajectoryID, ev.StepIndex,
+							oneofField, oneofPayload,
+						); errSubmit != nil {
+							log.Printf("[WS] Auto-approbation session %s/%s: %v", msg.CascadeID, ev.Tool, errSubmit)
+						}
+					} else {
+						s.MarkApprovalPending(msg.CascadeID)
+					}
 				}
 			}
 			data := map[string]interface{}{
@@ -365,9 +403,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			})
 			return nil
 		})
-		// Étape 4 : fin structurée — le mobile peut notifier « tâche terminée »,
-		// « erreur » ou « bloquée sur approbation » sans parser les frames.
-		
+
 		// 3. Force l'IDE à ouvrir cette nouvelle session
 		if _, errSet := s.RPCClient.SetBrowserOpenConversation(msg.CascadeID); errSet != nil {
 			log.Printf("[WS] Erreur SetBrowserOpenConversation: %v", errSet)
@@ -397,20 +433,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 		// Bloc A : le oneof est choisi selon le type d'approbation détecté.
 		// run_command = 5, file_permission = 19, permission = 21, approval = 23.
-		oneofField := connectrpc.InteractionApproval // fallback générique
-		var oneofPayload []byte
-		switch strings.ToLower(msg.ApprovalType) {
-		case "run_command":
-			oneofField = connectrpc.InteractionRunCommand
-			oneofPayload = connectrpc.BuildRunCommandInteraction(confirm, msg.Command, "")
-		case "file_permission":
-			oneofField = connectrpc.InteractionFilePermission
-			oneofPayload = connectrpc.BuildFilePermissionInteraction(confirm, 2, msg.FilePath)
-		case "permission":
-			oneofField = connectrpc.InteractionPermission
-			oneofPayload = connectrpc.BuildPermissionInteraction(confirm, 2)
-		default:
-			oneofPayload = connectrpc.BuildApprovalInteraction(confirm)
+		oneofField, oneofPayload := approvalOneof(msg.ApprovalType, confirm, msg.Command, msg.FilePath)
+		// B3 : « pour toute la session » → le daemon ne redemandera plus pour
+		// ce type d'approbation sur cette cascade.
+		if msg.Scope == "session" && confirm {
+			s.markSessionApproval(msg.CascadeID, msg.ApprovalType)
 		}
 		if msg.TrajectoryID != "" && msg.StepIndex >= 0 {
 			raw, err = s.RPCClient.SubmitToolApproval(msg.CascadeID, msg.TrajectoryID, uint32(msg.StepIndex), oneofField, oneofPayload)
@@ -560,4 +587,20 @@ func buildFileTree(root, relativePath string, depth int) ([]map[string]interface
 		}
 	}
 	return result, nil
+}
+
+// approvalOneof : mÃªme logique que le switch de submit_approval, factorisÃ©e
+// pour Ãªtre rÃ©utilisable par l'auto-approbation de session (B3).
+// run_command = 5, file_permission = 19, permission = 21, approval = 23.
+func approvalOneof(approvalType string, confirm bool, command, filePath string) (int, []byte) {
+	switch strings.ToLower(approvalType) {
+	case "run_command":
+		return connectrpc.InteractionRunCommand, connectrpc.BuildRunCommandInteraction(confirm, command, "")
+	case "file_permission":
+		return connectrpc.InteractionFilePermission, connectrpc.BuildFilePermissionInteraction(confirm, 2, filePath)
+	case "permission":
+		return connectrpc.InteractionPermission, connectrpc.BuildPermissionInteraction(confirm, 2)
+	default:
+		return connectrpc.InteractionApproval, connectrpc.BuildApprovalInteraction(confirm)
+	}
 }

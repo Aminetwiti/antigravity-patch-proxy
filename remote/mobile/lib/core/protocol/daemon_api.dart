@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart'
     show ValueListenable, VoidCallback;
 
 import '../network/outbox.dart';
+import 'messages.dart';
 
 /// High-level typed client over the Daemon Bridge WebSocket (protocol v1).
 ///
@@ -131,8 +132,11 @@ class DaemonApi {
   Future<Map<String, dynamic>> listFiles(String workspacePath) =>
       call('list_files', {'workspacePath': workspacePath});
 
-  Future<Map<String, dynamic>> readFile(String filePath) =>
-      call('read_file', {'filePath': filePath});
+  Future<Map<String, dynamic>> readFile(String filePath, {String? workspacePath}) =>
+      call('read_file', {
+        'filePath': filePath,
+        if (workspacePath != null) 'workspacePath': workspacePath,
+      });
 
   Future<Map<String, dynamic>> getContext() => call('get_context');
 
@@ -144,6 +148,7 @@ class DaemonApi {
     int stepIndex = -1,
     String approvalType = 'approval',
     String command = '',
+    ApprovalScope scope = ApprovalScope.once,
   }) =>
       call('submit_approval', {
         'cascadeId': cascadeId,
@@ -152,6 +157,7 @@ class DaemonApi {
         'stepIndex': stepIndex,
         'approvalType': approvalType,
         'command': command,
+        'scope': scope == ApprovalScope.session ? 'session' : 'once',
         'decision': allow ? 'allow' : 'deny',
       });
 

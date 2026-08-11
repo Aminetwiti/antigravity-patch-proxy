@@ -27,7 +27,7 @@ class ChatStreamScreen extends StatefulWidget {
   State<ChatStreamScreen> createState() => _ChatStreamScreenState();
 }
 
-class _ChatStreamScreenState extends State<ChatStreamScreen> {
+class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBindingObserver {
   final List<ChatMessage> _messages = [];
   ToolApprovalRequest? _pendingApproval;
   
@@ -42,10 +42,25 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> {
   Map<String, dynamic>? _lastLocalStreamEnd;
   final Map<String, String> _externalThoughts = {};
 
+  Timer? _throttleTimer;
+  bool _needsStateUpdate = false;
+  static const _throttleDuration = Duration(milliseconds: 100);
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _watchBroadcastStreams();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      _streamSub?.pause();
+    } else if (state == AppLifecycleState.resumed) {
+      _streamSub?.resume();
+      // Optionally request history resync here.
+    }
   }
 
   @override
@@ -63,6 +78,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _throttleTimer?.cancel();
     _streamSub?.cancel();
     _stillWorkingTimer?.cancel();
     super.dispose();
@@ -135,41 +152,42 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> {
         final textDelta = StreamDeltaParser.textOf(msg);
         final thoughtDelta = StreamDeltaParser.thinkingOf(msg);
         final approval = StreamDeltaParser.approvalOf(msg);
-        setState(() {
-          final idx = _messages.indexWhere((m) => m.id == 'ext-$requestId');
-          if (idx >= 0) {
-            final current = _messages[idx];
-            _externalThoughts[requestId] =
-                (_externalThoughts[requestId] ?? '') + thoughtDelta;
-            _messages[idx] = current.copyWith(
-              text: current.text + textDelta,
-              thought: _externalThoughts[requestId]!.isNotEmpty
-                  ? 'Thought · ${_externalThoughts[requestId]!.trim()}'
-                  : current.thought,
-            );
-          }
-          if (approval != null) {
-            _pendingApproval = ToolApprovalRequest(
+        
+        final idx = _messages.indexWhere((m) => m.id == 'ext-$requestId');
+        if (idx >= 0) {
+          final current = _messages[idx];
+          _externalThoughts[requestId] =
+              (_externalThoughts[requestId] ?? '') + thoughtDelta;
+          _messages[idx] = current.copyWith(
+            text: current.text + textDelta,
+            thought: _externalThoughts[requestId]!.isNotEmpty
+                ? 'Thought · ${_externalThoughts[requestId]!.trim()}'
+                : current.thought,
+          );
+        }
+        if (approval != null) {
+          _pendingApproval = ToolApprovalRequest(
+            callId: approval.callId,
+            toolName: approval.tool,
+            command: approval.command,
+            description: 'Tool execution requires your confirmation',
+            cascadeId: approval.cascadeId,
+            trajectoryId: approval.trajectoryId,
+            stepIndex: approval.stepIndex,
+            approvalType: approval.approvalType,
+          );
+          _pendingApprovalCallIds.add(approval.callId);
+          final hostActive = msg['data']?['hostActive'] == true;
+          if (!hostActive) {
+            ApprovalNotifier.instance.notifyApprovalRequired(
               callId: approval.callId,
               toolName: approval.tool,
               command: approval.command,
-              description: 'Tool execution requires your confirmation',
-              cascadeId: approval.cascadeId,
-              trajectoryId: approval.trajectoryId,
-              stepIndex: approval.stepIndex,
-              approvalType: approval.approvalType,
             );
-            _pendingApprovalCallIds.add(approval.callId);
-            final hostActive = msg['data']?['hostActive'] == true;
-            if (!hostActive) {
-              ApprovalNotifier.instance.notifyApprovalRequired(
-                callId: approval.callId,
-                toolName: approval.tool,
-                command: approval.command,
-              );
-            }
           }
-        });
+        }
+        
+        _scheduleThrottledUpdate();
       } else if (type == 'stream_end') {
         _onStreamEnded();
         _handleStreamEnded(msg);
@@ -221,42 +239,43 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> {
         final thoughtDelta = StreamDeltaParser.thinkingOf(msg);
         final approval = StreamDeltaParser.approvalOf(msg);
         if (!mounted) return;
-        setState(() {
-          if (textDelta.isNotEmpty || thoughtDelta.isNotEmpty) {
-            final idx = _messages.indexWhere((m) => m.id == assistantId);
-            if (idx >= 0) {
-              final current = _messages[idx];
-              thoughtBuffer.write(thoughtDelta);
-              _messages[idx] = current.copyWith(
-                text: current.text + textDelta,
-                thought: thoughtBuffer.isNotEmpty
-                    ? 'Thought · ${thoughtBuffer.toString().trim()}'
-                    : current.thought,
-              );
-            }
+        
+        if (textDelta.isNotEmpty || thoughtDelta.isNotEmpty) {
+          final idx = _messages.indexWhere((m) => m.id == assistantId);
+          if (idx >= 0) {
+            final current = _messages[idx];
+            thoughtBuffer.write(thoughtDelta);
+            _messages[idx] = current.copyWith(
+              text: current.text + textDelta,
+              thought: thoughtBuffer.isNotEmpty
+                  ? 'Thought · ${thoughtBuffer.toString().trim()}'
+                  : current.thought,
+            );
           }
-          if (approval != null) {
-            _pendingApproval = ToolApprovalRequest(
+        }
+        if (approval != null) {
+          _pendingApproval = ToolApprovalRequest(
+            callId: approval.callId,
+            toolName: approval.tool,
+            command: approval.command,
+            description: 'Tool execution requires your confirmation',
+            cascadeId: approval.cascadeId,
+            trajectoryId: approval.trajectoryId,
+            stepIndex: approval.stepIndex,
+            approvalType: approval.approvalType,
+          );
+          _pendingApprovalCallIds.add(approval.callId);
+          final hostActive = msg['data']?['hostActive'] == true;
+          if (!hostActive) {
+            ApprovalNotifier.instance.notifyApprovalRequired(
               callId: approval.callId,
               toolName: approval.tool,
               command: approval.command,
-              description: 'Tool execution requires your confirmation',
-              cascadeId: approval.cascadeId,
-              trajectoryId: approval.trajectoryId,
-              stepIndex: approval.stepIndex,
-              approvalType: approval.approvalType,
             );
-            _pendingApprovalCallIds.add(approval.callId);
-            final hostActive = msg['data']?['hostActive'] == true;
-            if (!hostActive) {
-              ApprovalNotifier.instance.notifyApprovalRequired(
-                callId: approval.callId,
-                toolName: approval.tool,
-                command: approval.command,
-              );
-            }
           }
-        });
+        }
+        
+        _scheduleThrottledUpdate();
       },
       onDone: () {
         if (!mounted) return;
@@ -292,7 +311,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> {
     );
   }
 
-  void _handleToolDecision(ToolDecision decision) {
+  void _handleToolDecision(ToolDecision decision,
+      {ApprovalScope scope = ApprovalScope.once}) {
     final approval = _pendingApproval;
     setState(() {
       _pendingApproval = null;
@@ -310,7 +330,24 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> {
       stepIndex: approval.stepIndex,
       approvalType: approval.approvalType,
       command: approval.command,
+      scope: scope,
     ).catchError((_) => <String, dynamic>{});
+  }
+
+  void _scheduleThrottledUpdate() {
+    if (_throttleTimer?.isActive ?? false) {
+      _needsStateUpdate = true;
+      return;
+    }
+    
+    setState(() {}); // Immediate update
+    
+    _throttleTimer = Timer(_throttleDuration, () {
+      if (_needsStateUpdate && mounted) {
+        setState(() {});
+        _needsStateUpdate = false;
+      }
+    });
   }
 
   Widget _buildReminderBanners() {

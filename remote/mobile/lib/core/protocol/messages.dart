@@ -79,6 +79,10 @@ class ChatMessage {
 
 enum ToolDecision { allow, deny }
 
+/// Portée d'une décision d'approbation : ponctuelle (par défaut) ou
+/// « pour toute la session » (auto-approuvé côté daemon ensuite).
+enum ApprovalScope { once, session }
+
 class ToolApprovalRequest {
   final String callId;
   final String toolName;
@@ -90,6 +94,10 @@ class ToolApprovalRequest {
   final String approvalType;
   final String? filePath;
 
+  /// "Ne plus redemander pour cette session" — le daemon auto-approuve les
+  /// approbations du même type pour cette cascade.
+  final ApprovalScope scope;
+
   const ToolApprovalRequest({
     required this.callId,
     required this.toolName,
@@ -100,6 +108,7 @@ class ToolApprovalRequest {
     this.stepIndex = -1,
     this.approvalType = 'approval',
     this.filePath,
+    this.scope = ApprovalScope.once,
   });
 
   factory ToolApprovalRequest.fromJson(Map<String, dynamic> json) {
@@ -114,6 +123,9 @@ class ToolApprovalRequest {
       stepIndex: (json['stepIndex'] as num?)?.toInt() ?? -1,
       approvalType: json['approvalType'] ?? 'approval',
       filePath: json['filePath'],
+      scope: json['scope'] == 'session'
+          ? ApprovalScope.session
+          : ApprovalScope.once,
     );
   }
 }

@@ -98,7 +98,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               keyboardType: TextInputType.number,
                               style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
                               decoration: const InputDecoration(
-                                hintText: '8080',
+                                hintText: '8090',
                               ),
                             ),
                           ],

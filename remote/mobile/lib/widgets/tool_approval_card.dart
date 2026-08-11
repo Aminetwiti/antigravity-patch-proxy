@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import '../core/protocol/messages.dart';
 import '../theme/app_colors.dart';
 
-class ToolApprovalCard extends StatelessWidget {
+class ToolApprovalCard extends StatefulWidget {
   final ToolApprovalRequest request;
-  final Function(ToolDecision decision) onDecision;
+  final Function(ToolDecision decision, {ApprovalScope scope}) onDecision;
 
   const ToolApprovalCard({
     super.key,
@@ -13,7 +13,29 @@ class ToolApprovalCard extends StatelessWidget {
   });
 
   @override
+  State<ToolApprovalCard> createState() => _ToolApprovalCardState();
+}
+
+class _ToolApprovalCardState extends State<ToolApprovalCard> {
+  bool _alwaysAllow = false;
+  bool _isSubmitting = false;
+
+  void _handleDecision(ToolDecision decision) async {
+    if (_isSubmitting) return;
+    setState(() => _isSubmitting = true);
+    try {
+      await widget.onDecision(
+        decision,
+        scope: _alwaysAllow ? ApprovalScope.session : ApprovalScope.once,
+      );
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final request = widget.request;
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 10),
       padding: const EdgeInsets.all(14),
@@ -78,14 +100,38 @@ class ToolApprovalCard extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 6),
+
+          // "Always allow for this session"
+          Row(
+            children: [
+              const Icon(Icons.autorenew, size: 14, color: AppColors.warning),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Toujours autoriser ${request.toolName} pour cette session',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              Switch(
+                value: _alwaysAllow,
+                onChanged: (v) => setState(() => _alwaysAllow = v),
+                activeColor: AppColors.warning,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
 
           // Actions Buttons (Approuver / Refuser)
           Row(
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: () => onDecision(ToolDecision.deny),
+                  onPressed: _isSubmitting ? null : () => _handleDecision(ToolDecision.deny),
                   icon: const Icon(Icons.close, size: 16, color: AppColors.danger),
                   label: const Text(
                     'Refuser',
@@ -103,11 +149,17 @@ class ToolApprovalCard extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: () => onDecision(ToolDecision.allow),
-                  icon: const Icon(Icons.check, size: 16, color: Colors.white),
-                  label: const Text(
-                    'Approuver',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  onPressed: _isSubmitting ? null : () => _handleDecision(ToolDecision.allow),
+                  icon: _isSubmitting
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Icon(Icons.check, size: 16, color: Colors.white),
+                  label: Text(
+                    _isSubmitting ? 'En cours...' : 'Approuver',
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                   ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.positive,

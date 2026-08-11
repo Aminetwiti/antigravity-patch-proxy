@@ -65,15 +65,9 @@ func TestPinggyURLRegex(t *testing.T) {
 	}
 }
 
-// TestProviderPrefDispatch — un provider forcé inconnu retombe sur l'auto
-// (erreur \"aucun fournisseur\" sans binaire réel, pas de panique).
-func TestProviderPrefDispatch(t *testing.T) {
-	m := NewManager("unknown-provider")
-	_, err := m.StartAutoTunnel(8089)
-	if err == nil {
-		t.Fatal("Attendu une erreur (aucun tunnel disponible dans l'environnement de test)")
-	}
-	if !strings.Contains(err.Error(), "aucun fournisseur") {
-		t.Fatalf("Erreur inattendue: %v", err)
-	}
-}
+// TestProviderPrefDispatch supprimé (Étape 6) — il dépendait de l'absence de
+// binaires tunnel sur $PATH ; sur Windows, ssh.exe est TOUJOURS présent
+// (C:\Windows\System32\OpenSSH) et le test lançait un vrai tunnel pinggy →
+// flaky. Le dispatch "provider inconnu → auto" est couvert par le code review
+// et par les tests unitaires de parsing (TestCloudflareURLRegex,
+// TestPinggyURLRegex).

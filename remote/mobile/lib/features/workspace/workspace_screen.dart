@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../theme/app_colors.dart';
 import '../../core/protocol/daemon_api.dart';
 
@@ -50,7 +51,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       _isLoadingCode = true;
     });
     try {
-      final res = await widget.api!.readFile(path);
+      final res = await widget.api!.readFile(path, workspacePath: widget.workspacePath);
       if (mounted) {
         setState(() {
           _codeContent = res['content'] as String? ?? '';
@@ -155,8 +156,20 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                         ),
                       ),
                       IconButton(
-                        icon: Icon(Icons.download_outlined, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                        onPressed: () {},
+                        icon: Icon(Icons.copy_all_outlined, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        tooltip: 'Copier le contenu',
+                        onPressed: _selectedFilePath.isEmpty || _isLoadingCode
+                            ? null
+                            : () async {
+                                await Clipboard.setData(ClipboardData(text: _codeContent));
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Contenu copié : ${_selectedFilePath.split('/').last}'),
+                                    duration: const Duration(seconds: 1),
+                                  ),
+                                );
+                              },
                       ),
                     ],
                   ),

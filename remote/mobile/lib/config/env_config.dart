@@ -13,7 +13,7 @@ class EnvConfig {
 
   static const int daemonPort = int.fromEnvironment(
     'DAEMON_PORT',
-    defaultValue: 8080,
+    defaultValue: 8090,
   );
 
   static const bool useSsl = bool.fromEnvironment(
