@@ -24,6 +24,9 @@ class AppTheme {
       brightness: Brightness.dark,
       scaffoldBackgroundColor: colorScheme.surface,
       colorScheme: colorScheme,
+      splashColor: Colors.transparent,
+      highlightColor: Colors.transparent,
+      splashFactory: NoSplash.splashFactory,
       appBarTheme: AppBarTheme(
         backgroundColor: colorScheme.surfaceContainer,
         elevation: 0,

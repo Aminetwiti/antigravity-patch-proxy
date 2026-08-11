@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../theme/app_colors.dart';
 
 class ChatInputBar extends StatefulWidget {
   final Function(String message) onSend;
@@ -68,7 +67,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                       onTap: () {},
                       borderRadius: BorderRadius.circular(8),
                       child: Padding(
-                        padding: const EdgeInsets.all(4),
+                        padding: const EdgeInsets.all(12),
                         child: Icon(Icons.add, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
                       ),
                     ),
@@ -78,19 +77,22 @@ class _ChatInputBarState extends State<ChatInputBar> {
                     InkWell(
                       onTap: () {},
                       borderRadius: BorderRadius.circular(6),
-                      child: Row(
-                        children: [
-                          Text(
-                            _selectedModel,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Theme.of(context).colorScheme.onSurface,
-                              fontWeight: FontWeight.w500,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                        child: Row(
+                          children: [
+                            Text(
+                              _selectedModel,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Theme.of(context).colorScheme.onSurface,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 4),
-                          Icon(Icons.keyboard_arrow_down, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                        ],
+                            const SizedBox(width: 4),
+                            Icon(Icons.keyboard_arrow_down, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                          ],
+                        ),
                       ),
                     ),
 
@@ -98,8 +100,6 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
                     // Voice Mic Icon
                     IconButton(
-                      constraints: const BoxConstraints(),
-                      padding: const EdgeInsets.all(6),
                       icon: Icon(Icons.mic_none, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
                       onPressed: () {},
                     ),
@@ -109,13 +109,16 @@ class _ChatInputBarState extends State<ChatInputBar> {
                     InkWell(
                       onTap: _handleSend,
                       borderRadius: BorderRadius.circular(16),
-                      child: Container(
+                      child: Padding(
                         padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.surfaceContainer,
-                          shape: BoxShape.circle,
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.surfaceContainer,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(Icons.arrow_forward, size: 16, color: Theme.of(context).colorScheme.onSurface),
                         ),
-                        child: Icon(Icons.arrow_forward, size: 16, color: Theme.of(context).colorScheme.onSurface),
                       ),
                     ),
                   ],
@@ -125,26 +128,48 @@ class _ChatInputBarState extends State<ChatInputBar> {
           ),
           
           // Footer (Local / Main Agent)
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           Row(
             children: [
-              const SizedBox(width: 12),
-              Icon(Icons.monitor_outlined, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
-              const SizedBox(width: 6),
-              Text(
-                'Local',
-                style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              InkWell(
+                onTap: () {},
+                borderRadius: BorderRadius.circular(4),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.monitor_outlined, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Local',
+                        style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      ),
+                      const SizedBox(width: 2),
+                      Icon(Icons.keyboard_arrow_down, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ],
+                  ),
+                ),
               ),
-              const SizedBox(width: 2),
-              Icon(Icons.keyboard_arrow_down, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
               const Spacer(),
-              Text(
-                'Main Agent',
-                style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              InkWell(
+                onTap: () {},
+                borderRadius: BorderRadius.circular(4),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Main Agent',
+                        style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      ),
+                      const SizedBox(width: 2),
+                      Icon(Icons.keyboard_arrow_down, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ],
+                  ),
+                ),
               ),
-              const SizedBox(width: 2),
-              Icon(Icons.keyboard_arrow_down, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
-              const SizedBox(width: 12),
             ],
           ),
         ],

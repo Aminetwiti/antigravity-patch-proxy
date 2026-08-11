@@ -118,6 +118,28 @@ func toOutgoing(raw []byte) interface{} {
 	return map[string]interface{}{"fields": items, "rawBytes": len(raw)}
 }
 
+// sessionsOut convertit la réponse GetAllCascadeTrajectories en une liste de
+// sessions structurées (cascadeId, titre, workspace, statut, updatedAt).
+// Le parsing protobuf vit côté Go (connectrpc.ParseTrajectories) — le mobile
+// reçoit du JSON propre au lieu d'un dump de champs binaires.
+func sessionsOut(raw []byte) interface{} {
+	summaries := connectrpc.ParseTrajectories(raw)
+	if len(summaries) == 0 {
+		return map[string]interface{}{"rawBytes": len(raw)}
+	}
+	items := make([]map[string]interface{}, 0, len(summaries))
+	for _, s := range summaries {
+		items = append(items, map[string]interface{}{
+			"cascadeId": s.CascadeID,
+			"title":     s.Title,
+			"workspace": s.Workspace,
+			"status":    s.Status,
+			"updatedAt": s.UpdatedAt,
+		})
+	}
+	return map[string]interface{}{"sessions": items}
+}
+
 func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Vérification de l'authentification si AuthToken est défini
 	if s.AuthToken != "" {
@@ -190,6 +212,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 
 	case "list_sessions":
 		raw, err = s.RPCClient.GetAllCascades()
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: sessionsOut(raw)})
+			return
+		}
 
 	case "send_prompt":
 		if msg.CascadeID == "" || msg.Prompt == "" {

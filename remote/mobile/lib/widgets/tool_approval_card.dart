@@ -18,7 +18,7 @@ class ToolApprovalCard extends StatelessWidget {
       margin: const EdgeInsets.symmetric(vertical: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.surfaceRaised,
+        color: Theme.of(context).colorScheme.surfaceContainer,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: AppColors.warning, width: 1.5),
       ),
@@ -56,25 +56,25 @@ class ToolApprovalCard extends StatelessWidget {
           const SizedBox(height: 10),
 
           // Command Box
-          const Text(
+          Text(
             'Command to execute:',
-            style: TextStyle(fontSize: 12, color: AppColors.inkSecondary),
+            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 4),
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: AppColors.surfaceInput,
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: AppColors.borderSubtle),
+              border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
             ),
             child: Text(
               request.command,
-              style: const TextStyle(
+              style: TextStyle(
                 fontFamily: 'monospace',
                 fontSize: 12.5,
-                color: AppColors.inkPrimary,
+                color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
           ),

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../theme/app_colors.dart';
 
 class RightSidebarDrawer extends StatelessWidget {
   final int subagentsCount;
@@ -103,42 +102,12 @@ class _ContextItemRow extends StatelessWidget {
     required this.onTap,
   });
 
-  Widget _buildDetailRow(BuildContext context, IconData icon, String label, String value, {bool isPositive = false}) {
-    return Row(
-      children: [
-        Icon(icon, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-        const SizedBox(width: 12),
-        SizedBox(
-          width: 80,
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ),
-        Expanded(
-          child: Text(
-            value,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: isPositive ? AppColors.positive : Theme.of(context).colorScheme.onSurface,
-            ),
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-      ],
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         child: Row(
           children: [
             Text(

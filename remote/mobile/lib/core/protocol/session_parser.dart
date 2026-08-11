@@ -3,23 +3,34 @@ import 'dart:typed_data';
 
 import 'messages.dart';
 
-/// Parses the daemon's raw protobuf field dump for `list_sessions` into
-/// [CascadeSession] items.
+/// Parses the daemon's `list_sessions` response into [CascadeSession] items.
 ///
-/// The gateway (`remote/daemon/pkg/gateway/websocket.go`) currently returns
-/// the response as `{"fields":[{"field":1,"wireType":2,"bytes":N,"text":"..."}]}`
-/// — top-level repeated field 1 = one trajectory per entry. The trajectory
-/// protobuf is not yet decoded server-side, so we heuristically scan each
-/// blob for a UUID (the cascade_id) and any readable title text.
+/// The gateway (remote/daemon/pkg/gateway/websocket.go) now returns structured
+/// sessions: `{"sessions":[{cascadeId,title,workspace,status,updatedAt}]}`
+/// (parsed server-side by connectrpc.ParseTrajectories).
 ///
-/// ponytail: heuristic — upgrade path is a structured `list_sessions_v2`
-/// in the Go gateway that decodes trajectories into SessionInfo objects.
+/// Fallback: legacy daemons that still send the raw protobuf field dump
+/// (`{"fields":[...]}`) are parsed heuristically (UUID + readable title).
 class SessionParser {
+  static List<CascadeSession> parseListSessions(Map<String, dynamic> data) {
+    final sessions = data['sessions'];
+    if (sessions is List) {
+      final out = <CascadeSession>[];
+      for (final s in sessions) {
+        if (s is Map<String, dynamic>) out.add(CascadeSession.fromJson(s));
+      }
+      if (out.isNotEmpty) return out;
+    }
+    return _parseLegacyFieldDump(data);
+  }
+
+  // ── Fallback : ancien daemon (dump de champs protobuf bruts) ──────────────
+
   static final RegExp _uuidRe = RegExp(
     r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}',
   );
 
-  static List<CascadeSession> parseListSessions(Map<String, dynamic> data) {
+  static List<CascadeSession> _parseLegacyFieldDump(Map<String, dynamic> data) {
     final fields = data['fields'];
     if (fields is! List) return const [];
 
@@ -32,7 +43,7 @@ class SessionParser {
       final text = f['text'] is String ? f['text'] as String : '';
       final combined = '$text ${_asAscii(blob)}';
       final id = _uuidRe.firstMatch(combined)?.group(0) ?? '';
-      final title = _titleOf(f, text, blob);
+      final title = _legacyTitleOf(f, text, blob);
       if (id.isEmpty) continue;
 
       sessions.add(CascadeSession(
@@ -63,7 +74,11 @@ class SessionParser {
     return latin1.decode(blob, allowInvalid: true);
   }
 
-  static String _titleOf(Map<String, dynamic> field, String text, Uint8List blob) {
+  static String _legacyTitleOf(
+    Map<String, dynamic> field,
+    String text,
+    Uint8List blob,
+  ) {
     final cleaned = text
         .trim()
         .replaceFirst(RegExp(r'^\{[\s\S]*\}\s*'), '');

@@ -284,10 +284,19 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                     width: double.infinity,
                     child: ElevatedButton.icon(
                       onPressed: _isConnecting ? null : _connect,
-                      icon: _isConnecting
-                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                          : const Icon(Icons.link, size: 16),
-                      label: Text(_isConnecting ? 'Connexion…' : 'Appairer & Connecter'),
+                      icon: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        child: _isConnecting
+                            ? const SizedBox(key: ValueKey('loading'), width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.link, key: ValueKey('link'), size: 16),
+                      ),
+                      label: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        child: Text(
+                          _isConnecting ? 'Connexion…' : 'Appairer & Connecter',
+                          key: ValueKey<bool>(_isConnecting),
+                        ),
+                      ),
                     ),
                   ),
                 ],

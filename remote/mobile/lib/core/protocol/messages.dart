@@ -17,11 +17,22 @@ class CascadeSession {
   factory CascadeSession.fromJson(Map<String, dynamic> json) {
     return CascadeSession(
       id: json['cascadeId'] ?? json['id'] ?? '',
-      workspacePath: json['workspacePath'] ?? '',
+      workspacePath: json['workspacePath'] ?? json['workspace'] ?? '',
       title: json['title'] ?? 'Cascade Session',
       status: json['status'] ?? 'CASCADE_STATUS_READY',
-      time: json['time'] ?? 'Just now',
+      time: json['time'] ?? _relativeTime(json['updatedAt']),
     );
+  }
+
+  static String _relativeTime(Object? iso) {
+    if (iso is! String) return 'Just now';
+    final parsed = DateTime.tryParse(iso);
+    if (parsed == null) return 'Just now';
+    final diff = DateTime.now().difference(parsed.toLocal());
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m';
+    if (diff.inHours < 24) return '${diff.inHours}h';
+    return '${diff.inDays}d';
   }
 
   Map<String, dynamic> toJson() => {

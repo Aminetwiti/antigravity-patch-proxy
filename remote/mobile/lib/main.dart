@@ -148,6 +148,8 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         setState(() {
           _sessions = sessions;
           _activeSessionId = sessions.first.id;
+          // Titre réel depuis la trajectoire (Étape 2) au lieu du placeholder.
+          _activeSessionTitle = sessions.first.title;
         });
       }
     } catch (_) {
@@ -347,7 +349,9 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                 }
               },
               borderRadius: BorderRadius.circular(12),
-              child: Container(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: isConnected
@@ -362,7 +366,9 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Container(
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeInOut,
                       width: 6,
                       height: 6,
                       decoration: BoxDecoration(
@@ -371,12 +377,16 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                       ),
                     ),
                     const SizedBox(width: 5),
-                    Text(
-                      isConnected ? 'Connected' : 'Offline',
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        color: isConnected ? AppColors.positive : Theme.of(context).colorScheme.error,
-                        fontWeight: FontWeight.w600,
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 300),
+                      child: Text(
+                        isConnected ? 'Connected' : 'Offline',
+                        key: ValueKey<bool>(isConnected),
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          color: isConnected ? AppColors.positive : Theme.of(context).colorScheme.error,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ],

@@ -1,150 +1,120 @@
-# Antigravity Remote Control OS
+# Antigravity Remote Control OS 🚀
 
-> Contrôle total d'Antigravity 2.0 depuis un smartphone — en dialoguant **directement avec le moteur Go** (`language_server`) via son protocole natif, et non en simulant des clics sur l'interface (CDP).
-
----
-
-## Pourquoi ce projet existe
-
-Les agents Antigravity exécutent des tâches longues mais **se bloquent régulièrement** pour demander une validation humaine (`ask_user`). Le développeur est enchaîné à son écran.
-
-Les 5 solutions communautaires existantes passent toutes par le **CDP (scraping DOM)** → fragiles, lentes, cassées à chaque mise à jour.
-
-**Nous** parlons directement au `language_server` (le cerveau Go) via **gRPC-Web** → stable, rapide, contrôle total. Voir [objectif.md](objectif.md) pour la vision complète.
+> Contrôle total de vos agents Antigravity depuis votre smartphone — en dialoguant **directement avec le moteur Go** (`language_server`) via son protocole natif.
 
 ---
 
-## Architecture
+## 🎯 Pourquoi ce projet existe
 
+Les agents Antigravity exécutent des tâches longues mais se bloquent souvent pour demander une validation humaine (`ask_user`), vous obligeant à rester devant l'écran de votre PC. 
+
+**La Solution :** Une application mobile couplée à un Daemon (serveur relais) sur votre PC, vous permettant d'approuver des actions, de lancer des prompts et de surveiller l'agent depuis n'importe où, avec une latence quasi-nulle grâce à un tunnel SSH.
+
+Contrairement aux autres solutions qui s'appuient sur le "scraping" d'interface (CDP) très instable, **Antigravity Remote** se branche directement sur le cœur d'Antigravity via gRPC-Web (Protobuf). C'est stable, robuste et instantané.
+
+---
+
+## 🏗 Architecture globale
+
+Le système se compose de 3 piliers principaux qui communiquent entre eux :
+
+```mermaid
+graph TD
+    A[Application Mobile Flutter] -->|WebSocket JSON| B(Tunnel Pinggy/Cloudflare)
+    B -->|WebSocket JSON| C[Daemon Bridge Go]
+    C -->|Découverte Automatique| D[LocalHarness]
+    C -->|gRPC-Web Protobuf| E[Language Server Hub]
+    
+    subgraph PC Local (Doctor UI)
+    C
+    D
+    E
+    end
 ```
-Smartphone (APK Android)                PC (Daemon Go)                Antigravity
-        │                                    │                           │
-   WebSocket JSON                      gRPC-Web + Protobuf         language_server
-        │                                    │                     (--subclient_type hub)
-        ▼                                    ▼                           ▼
-   Écrans Kotlin/Compose              Découverte auto                CascadeService
-   (dashboard, chat,                  (PID + port + CSRF)           (sessions, prompts,
-    approbations)                     + proxy RPC                   approbations, workspace)
-```
-
-## Stack Technologique
-
-| Couche | Technologie |
-|:---|:---|
-| **PC — Daemon** | Go 1.22, stdlib `net/http`, `gorilla/websocket` |
-| **RPC moteur** | gRPC-Web + Protobuf (varint manuel, aucune lib) |
-| **Mobile** | Kotlin, Jetpack Compose (Material 3), OkHttp, Room, FCM |
-| **Réseau distant** | Cloudflare Tunnel / Tailscale (Zero Trust) |
-
-➡️ Détails et justifications : [TECH.md](TECH.md)
 
 ---
 
-## Statut du projet
+## 🛠 Technologies utilisées (Stack)
 
-| Phase | Composant | Statut |
+| Couche | Technologie | Justification |
 |:---|:---|:---|
-| **1** | CLI de validation du protocole (`remote/cli/`) | ✅ Terminée |
-| **2** | Daemon Bridge Go (`remote/daemon/`) | 🔄 En cours — streaming E2E |
-| **3** | APK Android (`remote/mobile/`) | 📋 Planifiée |
-
-> [!NOTE]
-> **Dernière validation (2026-08-11) :** le Daemon découvre automatiquement le hub, et le gateway WebSocket crée des sessions (`create_cascade` → `cascadeId`) et liste les 55 trajectoires du hub. Le streaming multi-frames des prompts est en cours.
-
----
-
-## Démarrage rapide
-
-### Prérequis
-- Antigravity IDE **ouvert** (le hub `language_server` tourne)
-- Windows (PowerShell), Go 1.22+, Node.js 20+
-
-### 1. Valider la découverte (CLI)
-```powershell
-cd remote/cli
-npm install
-npm run scan          # affiche PID + port + CSRF du hub
-```
-
-### 2. Lancer le Daemon (pont WebSocket)
-```powershell
-cd remote/daemon
-go build -o daemon.exe .
-.\daemon.exe          # écoute sur ws://localhost:8089/ws
-```
-
-### 3. Tester le gateway WebSocket
-```powershell
-powershell -File ..\scratch\test_ws_full.ps1
-# attendu : heartbeat OK + liste des sessions + cascadeId à la création
-```
+| **Daemon (Relais PC)** | **Go 1.22** | Performance, empreinte mémoire faible, idéal pour les serveurs et le réseau. |
+| **Tunnel Public** | **Pinggy SSH** / Cloudflare | Expose le port local (8080) sur Internet en 1 seconde sans configuration lourde. |
+| **Communication PC ↔ IDE** | **gRPC-Web + Protobuf** | Rétro-ingénierie du vrai protocole d'Antigravity (manuel, sans bibliothèque pour rester léger). |
+| **Communication Mobile ↔ PC**| **WebSockets (JSON)** | Flux bidirectionnel asynchrone parfait pour le streaming de texte (LLM). |
+| **Interface PC (Manager)** | **Electron (Doctor UI)** | S'intègre naturellement à l'écosystème existant de l'utilisateur pour gérer le Daemon et scanner le QR Code. |
+| **Application Mobile** | **Flutter (Dart)** | Multi-plateforme (iOS/Android), UI riche, gestion réactive de l'état avec BLoC/Riverpod. |
 
 ---
 
-## Documentation
+## 🚀 Phases du projet (Statut d'implémentation)
 
-| Document | Contenu |
-|:---|:---|
-| [objectif.md](objectif.md) | Vision produit, problème, solution |
-| [prd.md](prd.md) | Product Requirements Document (V1 étendue) |
-| [TECH.md](TECH.md) | **Stack technique, choix et justifications** |
-| [PLANS.md](PLANS.md) | **Plans d'implémentation par sous-projet** |
-| [PROTOCOL.md](PROTOCOL.md) | Protocole gRPC-Web validé (référence infra) |
-| [localharness.md](localharness.md) | Analyse du binaire `language_server` |
-| [docs.md](docs.md) | État de l'art communautaire (CDP vs RPC) |
+### ✅ Phase 1 : Rétro-ingénierie et Client CLI (Terminée)
+- Analyse du binaire `language_server` (LocalHarness).
+- Extraction du jeton d'authentification CSRF (hérité de Codeium).
+- Mapping manuel des structures Protobuf (ID: `exa.language_server_pb.LanguageServerService`).
+- **Validation :** Scripts TypeScript capables de lister les sessions et d'envoyer des prompts directement.
+
+### ✅ Phase 2 : Le Daemon Bridge Go (Terminée)
+- **Découverte automatique :** Le Daemon trouve tout seul le processus Antigravity et récupère le jeton.
+- **Watchdog CSRF :** Si l'IDE redémarre, le Daemon détecte le nouveau port et met à jour ses identifiants.
+- **Passerelle WebSocket :** Traduction instantanée des requêtes JSON (Mobile) vers Protobuf (Antigravity).
+- **Auto-Tunneling :** Lancement asynchrone de `ssh` (Pinggy) avec parsing des logs (`stdout`/`stderr`) pour extraire l'URL publique automatiquement.
+
+### ✅ Phase 3 : Intégration Doctor UI & Mobile (Terminée / En cours de design UI)
+- **Doctor UI :** Refonte de l'interface Electron pour piloter le Daemon (Start/Stop).
+- **Génération QR Code :** Une fois le tunnel Pinggy établi, Doctor UI génère un QR Code contenant l'URL publique et le Token de sécurité.
+- **Flutter App :** L'application mobile scanne le QR Code et se connecte au WebSockets.
 
 ---
 
-## Arborescence
+## 📖 Démarrage Rapide (Comment utiliser)
+
+### 1. Côté PC (Doctor UI)
+1. Ouvrez **Doctor UI** (l'interface Electron).
+2. Allez dans l'onglet **Remote**.
+3. Définissez le port (ex: `8080`), choisissez le tunnel (`pinggy`) et définissez un Token de sécurité (ex: `516d5qyy`).
+4. Cliquez sur **Start Remote Server**.
+5. Le Daemon Go se lance, le tunnel s'ouvre, et un **QR Code** apparaît à l'écran.
+
+### 2. Côté Smartphone (Flutter)
+1. Lancez l'application **Antigravity Remote**.
+2. Scannez le QR Code affiché sur votre écran PC.
+3. L'application est connectée ! Vous pouvez maintenant voir les sessions actives et répondre aux requêtes `ask_user`.
+
+---
+
+## 📁 Arborescence détaillée du projet
 
 ```
 remote/
-├── README.md            # Ce fichier
-├── TECH.md              # Stack technique
-├── PLANS.md             # Plans par sous-projet
-├── PROTOCOL.md          # Protocole gRPC-Web validé
-├── objectif.md          # Vision
-├── prd.md               # PRD
-├── instruction.md       # Marches de validation (Phase 1)
-├── docs.md              # Recherche communautaire
-├── localharness.md      # Analyse du binaire
+├── README.md            # Ce fichier de documentation
+├── TECH.md              # Détails techniques historiques
+├── prd.md               # Product Requirements Document
+├── docs.md              # Recherches et notes communautaires
 │
-├── proto/               # Contrat Protobuf Daemon ↔ Mobile (v2)
-│   └── remote_service.proto
-│
-├── cli/                 # Phase 1 : validation du protocole (TypeScript)
-│   └── src/             # discovery, grpcweb, protobuf, client, index
-│
-├── daemon/              # Phase 2 : Daemon Bridge (Go)
-│   ├── main.go
+├── daemon/              # Code source du Serveur Relais (Go)
+│   ├── main.go          # Point d'entrée
+│   ├── daemon.exe       # Binaire compilé (Windows)
 │   └── pkg/
-│       ├── discovery/   # Découverte hub + probe Heartbeat
-│       ├── connectrpc/  # Client gRPC-Web + protobuf manuel
-│       └── gateway/     # WebSocket JSON (protocole mobile)
+│       ├── connectrpc/  # Encodeur/Décodeur Protobuf manuel
+│       ├── discovery/   # Scanner de processus (PID/CSRF) & Watchdog
+│       ├── gateway/     # Serveur WebSocket JSON
+│       └── tunnel/      # Gestionnaire Cloudflare/Pinggy SSH
 │
-├── mobile/              # Phase 3 : APK Android (Kotlin/Compose)
-│   └── app/             # Gradle initialisé, package com.antigravity.remote
+├── tools/
+│   └── antigravity-client/ # (Phase 1) Scripts TS de test du protocole
 │
-└── scratch/             # Scripts de test (probes, WS E2E)
+└── ag-doctor-ui/        # Application PC (Electron) - Pilotage du Daemon
+    ├── src/main.ts      # Gestion du cycle de vie du processus daemon.exe
+    └── src/renderer/    # Interface UI avec le QR Code auto-généré
 ```
 
 ---
 
-## Découvertes clés (rétro-ingénierie)
+## 🔐 Sécurité
 
-1. Le service RPC s'appelle `exa.language_server_pb.LanguageServerService` — **pas** `antigravity.v1.CascadeService`.
-2. Le port actif est celui du **hub standalone** (`--subclient_type hub`), pas les instances IDE.
-3. Header d'auth : **`x-codeium-csrf-token`** (héritage Codeium).
-4. Framing gRPC-Web : `1 octet flags + 4 octets BE + payload protobuf`.
-5. Les méthodes validées : `Heartbeat`, `GetStatus`, `StartCascade`, `GetAllCascadeTrajectories`, `SendUserCascadeMessage`.
-
----
-
-## Prochaines étapes
-
-1. **B6** — Streaming multi-frames `SendUserCascadeMessage` (deltas temps réel via WS)
-2. **B7** — `SubmitToolApproval` (approbation d'outils à distance)
-3. **B8** — Watchdog CSRF (reconnexion auto si l'IDE redémarre)
-4. **C1** — Première connexion APK Android au Daemon
-
-➡️ Détail : [PLANS.md](PLANS.md)
+- Le Daemon est protégé par un **Token d'authentification** fort, partagé via le QR Code.
+- Toutes les communications passent par des tunnels sécurisés (WSS / HTTPS).
+- Le Daemon n'a pas besoin des privilèges Administrateur (scan LocalHarness basé sur WMI en espace utilisateur).
+- L'URL Pinggy SSH change à chaque démarrage (si on utilise la version gratuite), évitant toute attaque ciblée de long terme.

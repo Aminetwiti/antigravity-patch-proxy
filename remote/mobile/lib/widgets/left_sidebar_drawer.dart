@@ -250,7 +250,7 @@ class _ProjectFolderGroup extends StatelessWidget {
         ...sessions.map((s) {
           final itemId = s is CascadeSession ? s.id : (s as _SessionItemData).id;
           final itemTitle = s is CascadeSession ? s.title : (s as _SessionItemData).title;
-          final itemTime = s is CascadeSession ? '' : (s as _SessionItemData).time;
+          final itemTime = s is CascadeSession ? s.time : (s as _SessionItemData).time;
           final isSelected = itemId == activeSessionId;
           return Padding(
             padding: const EdgeInsets.only(left: 12, top: 2, bottom: 2),

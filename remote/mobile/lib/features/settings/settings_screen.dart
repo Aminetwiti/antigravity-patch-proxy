@@ -75,7 +75,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
-                      children: const [
+                      children: [
                         Text(
                           'Amine Developer',
                           style: TextStyle(
