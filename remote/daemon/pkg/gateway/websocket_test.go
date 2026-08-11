@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/antigravity/remote-daemon/pkg/connectrpc"
 	"github.com/gorilla/websocket"
@@ -57,6 +58,9 @@ func pbTextFrame(s string) []byte {
 type fakeRPCClient struct {
 	streamDeltas []string // frames émises par SendMessageStream
 	cascadesRaw  []byte   // réponse GetAllCascades (nil → défaut)
+	// lastApproval : dernier SubmitToolApproval reçu (vérifié par les tests
+	// d'approbation : décision utilisateur ou auto-refus d'expiration).
+	lastApproval interface{}
 }
 
 func (f *fakeRPCClient) Heartbeat() ([]byte, error) {
@@ -88,6 +92,11 @@ func (f *fakeRPCClient) SendMessageStream(cascadeID, text string, onFrame func([
 }
 
 func (f *fakeRPCClient) SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error) {
+	f.lastApproval = &submitApprovalCall{
+		cascadeID: cascadeID,
+		stepIndex: stepIndex,
+		confirm:   connectrpc.DecodeFields(oneofPayload)[0].Varint == 1,
+	}
 	return connectrpc.Frame(pbTextFrame("ok")), nil
 }
 
@@ -413,4 +422,121 @@ func TestWebSocketStreamBroadcastMultiClient(t *testing.T) {
 			t.Fatalf("Attendu stream_end sans erreur, reçu %v", end)
 		}
 	}
+}
+
+// TestWebSocketApprovalExpiry — Phase 6 : une approbation sans réponse dans
+// le délai (approvalTimeout) est auto-refusée côté daemon (deny = sécurité :
+// téléphone perdu) puis broadcast approval_expired pour nettoyer les cartes.
+func TestWebSocketApprovalExpiry(t *testing.T) {
+	t.Run("timeout => auto-deny + approval_expired", func(t *testing.T) {
+		backend := &fakeRPCClient{streamDeltas: []string{`{"run_command":"npx jest","step_index":1,"trajectory_id":"123e4567-e89b-12d3-a456-426614174000"}`}}
+		server := NewServer(backend, "")
+		server.SetApprovalTimeout(80 * time.Millisecond)
+		mux := http.NewServeMux()
+		mux.HandleFunc("/ws", server.HandleWebSocket)
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+		defer client.conn.Close()
+
+		client.send(t, map[string]string{
+			"type": "send_prompt", "requestId": "r9",
+			"cascadeId": "casc-1", "prompt": "travaille",
+		})
+
+		// Consomme stream_start + stream_delta + stream_end(outcome=approval)
+		for {
+			msg := client.recv(t)
+			if msg["type"] == "stream_end" {
+				break
+			}
+		}
+
+		// Le timer expire → auto-refus + broadcast approval_expired.
+		var expired map[string]interface{}
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			msg := client.recv(t)
+			if msg["type"] == "approval_expired" {
+				expired = msg
+				break
+			}
+		}
+		if expired == nil {
+			t.Fatal("approval_expired jamais reçu après expiration")
+		}
+		data, _ := expired["data"].(map[string]interface{})
+		if data == nil || data["cascadeId"] != "casc-1" {
+			t.Fatalf("approval_expired data invalide: %v", expired)
+		}
+
+		// Auto-refus : SubmitToolApproval avec confirm=false (deny).
+		got, ok := backend.lastApproval.(*submitApprovalCall)
+		if !ok {
+			t.Fatalf("Aucun SubmitToolApproval d'auto-refus enregistré")
+		}
+		if got.confirm {
+			t.Fatalf("Auto-refus attendu avec confirm=false, reçu confirm=%v", got.confirm)
+		}
+		if got.cascadeID != "casc-1" || got.stepIndex != 1 {
+			t.Fatalf("Auto-refus cible erronée: %+v", got)
+		}
+	})
+
+	t.Run("submit before timeout => no expiry", func(t *testing.T) {
+		backend := &fakeRPCClient{streamDeltas: []string{`{"run_command":"npx jest","step_index":1,"trajectory_id":"123e4567-e89b-12d3-a456-426614174000"}`}}
+		server := NewServer(backend, "")
+		server.SetApprovalTimeout(150 * time.Millisecond)
+		mux := http.NewServeMux()
+		mux.HandleFunc("/ws", server.HandleWebSocket)
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+		defer client.conn.Close()
+
+		client.send(t, map[string]string{
+			"type": "send_prompt", "requestId": "r9",
+			"cascadeId": "casc-1", "prompt": "travaille",
+		})
+		for {
+			msg := client.recv(t)
+			if msg["type"] == "stream_end" {
+				break
+			}
+		}
+
+		// L'utilisateur répond avant le timeout → pas d'expiration.
+		client.send(t, map[string]string{
+			"type": "submit_approval", "requestId": "r10",
+			"cascadeId": "casc-1",
+			"trajectoryID": "123e4567-e89b-12d3-a456-426614174000",
+			"stepIndex": "1",
+			"approvalType": "run_command",
+			"decision": "allow",
+			"command": "npx jest",
+		})
+		// réponse unary
+		for {
+			msg := client.recv(t)
+			if msg["type"] == "response" {
+				break
+			}
+		}
+
+		// Attendre au-delà du timeout : aucun approval_expired ne doit arriver.
+		time.Sleep(200 * time.Millisecond)
+		client.conn.SetReadDeadline(time.Now().Add(150 * time.Millisecond))
+		_, _, err := client.conn.ReadMessage()
+		if err == nil {
+			t.Fatal("Message inattendu reçu après submit (approval_expired ?)")
+		}
+	})
+}
+
+type submitApprovalCall struct {
+	cascadeID  string
+	stepIndex  uint32
+	confirm    bool
 }

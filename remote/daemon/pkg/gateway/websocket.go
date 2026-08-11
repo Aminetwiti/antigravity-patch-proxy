@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -48,6 +49,18 @@ func checkOrigin(r *http.Request) bool {
 	return h == "localhost" || h == "127.0.0.1" || h == "::1"
 }
 
+// pendingApproval : une approbation émise mais pas encore répondue, avec les
+// infos nécessaires à l'auto-refus (trajectoryId + stepIndex + payload) et le
+// timer d'expiration (approvalTimeout, défaut 5 min).
+type pendingApproval struct {
+	trajectoryID string
+	stepIndex    uint32
+	approvalType string
+	command      string
+	filePath     string
+	timer        *time.Timer
+}
+
 type Server struct {
 	RPCClient RPCClient
 	AuthToken string
@@ -56,9 +69,13 @@ type Server struct {
 	// writeMu sérialise les écritures : gorilla/websocket n'autorise qu'un
 	// seul writer concurrent par connexion, or le broadcast écrit sur toutes.
 	writeMu sync.Mutex
-	// approvalPending : cascadeId → une approbation est en attente (posée par
-	// MarkApprovalPending quand un événement approval_required est émis).
-	approvalPending map[string]bool
+	// approvals : cascadeId → approbation en attente (posée par
+	// MarkApprovalPending quand un événement approval_required est émis,
+	// retirée à la décision utilisateur ou à l'expiration).
+	approvals map[string]*pendingApproval
+	// approvalTimeout : délai avant auto-refus d'une approbation sans réponse
+	// (sécurité : téléphone perdu). 0 = désactivé. Défaut 5 minutes.
+	approvalTimeout time.Duration
 	// sessionApprovals : cascadeId+approvalType → l'utilisateur a choisi
 	// « toujours autoriser pour cette session » (B3). Les demandes suivantes
 	// du même type sont auto-approuvées sans repasser par le téléphone.
@@ -70,9 +87,18 @@ func NewServer(client RPCClient, authToken string) *Server {
 		RPCClient:        client,
 		AuthToken:        authToken,
 		clients:          make(map[*websocket.Conn]bool),
-		approvalPending:  make(map[string]bool),
+		approvals:        make(map[string]*pendingApproval),
+		approvalTimeout:  5 * time.Minute,
 		sessionApprovals: make(map[string]bool),
 	}
+}
+
+// SetApprovalTimeout configure le délai avant auto-refus d'une approbation
+// (0 = désactivé). Appelable avant l'acceptation de connexions.
+func (s *Server) SetApprovalTimeout(d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.approvalTimeout = d
 }
 
 // maxWSMessageSize borne la taille des messages WebSocket entrants (1 Mo)
@@ -118,7 +144,7 @@ type IncomingMessage struct {
 	WorkspacePath string `json:"workspacePath,omitempty"`
 	CascadeID     string `json:"cascadeId,omitempty"`
 	CallID        string `json:"callId,omitempty"`
-	TrajectoryID  string `json:"trajectoryId,omitempty"`
+	TrajectoryID  string `json:"trajectoryID,omitempty"`
 	StepIndex     int64  `json:"stepIndex,omitempty"`
 	ApprovalType  string `json:"approvalType,omitempty"`
 	Decision      string `json:"decision,omitempty"`
@@ -128,22 +154,110 @@ type IncomingMessage struct {
 	Command       string `json:"command,omitempty"`
 }
 
-// hasPendingApproval rapporte si une approbation a été émise pour cette
-// cascade depuis le début du stream courant (marquée par la couche RPC via
-// MarkApprovalPending). Sans marquage, la valeur de repli est false → le
-// stream est classé "done" (comportement hérité, tests inchangés).
+// hasPendingApproval rapporte si une approbation est en attente pour cette
+// cascade (posée par MarkApprovalPending, retirée à la décision ou à
+// l'expiration). Sans marquage, la valeur de repli est false → le stream est
+// classé "done" (comportement hérité, tests inchangés).
 func (s *Server) hasPendingApproval(cascadeID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.approvalPending[cascadeID]
+	_, ok := s.approvals[cascadeID]
+	return ok
 }
 
-// MarkApprovalPending est appelé par la couche RPC quand un événement
-// approval_required est émis pour une cascade (interface publique du paquet).
-func (s *Server) MarkApprovalPending(cascadeID string) {
+// MarkApprovalPending enregistre une approbation en attente pour une cascade
+// (appelé quand un événement approval_required est émis) et arme le timer
+// d'auto-refus si approvalTimeout > 0.
+func (s *Server) MarkApprovalPending(cascadeID string, ev connectrpc.StreamEvent) {
 	s.mu.Lock()
-	s.approvalPending[cascadeID] = true
+	defer s.mu.Unlock()
+	if prev, ok := s.approvals[cascadeID]; ok && prev.timer != nil {
+		prev.timer.Stop() // une nouvelle approbation remplace l'ancienne
+	}
+	p := &pendingApproval{
+		trajectoryID: ev.TrajectoryID,
+		stepIndex:    ev.StepIndex,
+		approvalType: ev.Tool,
+		command:      extractCommand(ev.Detail),
+		filePath:     "",
+	}
+	s.approvals[cascadeID] = p
+	if s.approvalTimeout > 0 {
+		p.timer = time.AfterFunc(s.approvalTimeout, func() { s.expireApproval(cascadeID) })
+	}
+}
+
+// clearApproval retire une approbation en attente (décision utilisateur) et
+// stoppe son timer d'expiration.
+func (s *Server) clearApproval(cascadeID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if p, ok := s.approvals[cascadeID]; ok {
+		if p.timer != nil {
+			p.timer.Stop()
+		}
+		delete(s.approvals, cascadeID)
+	}
+}
+
+// expireApproval est le callback du timer : l'approbation n'a pas reçu de
+// réponse à temps → auto-refus (sécurité : téléphone perdu) puis broadcast
+// approval_expired pour que toutes les surfaces nettoient la carte.
+func (s *Server) expireApproval(cascadeID string) {
+	s.mu.Lock()
+	p, ok := s.approvals[cascadeID]
+	if !ok {
+		s.mu.Unlock()
+		return // déjà traitée (submit) — timer obsolète
+	}
+	delete(s.approvals, cascadeID)
 	s.mu.Unlock()
+
+	log.Printf("[WS] Approbation expirée pour %s — auto-refus", cascadeID)
+	if p.trajectoryID != "" {
+		oneofField, oneofPayload := buildApprovalPayload(p.approvalType, false, p.command, p.filePath)
+		if _, err := s.RPCClient.SubmitToolApproval(cascadeID, p.trajectoryID, p.stepIndex, oneofField, oneofPayload); err != nil {
+			log.Printf("[WS] Auto-refus échoué pour %s: %v", cascadeID, err)
+		}
+	}
+	s.broadcast(OutgoingMessage{
+		Type: "approval_expired",
+		Data: map[string]interface{}{"cascadeId": cascadeID},
+	})
+}
+
+// commandLineRe extrait la commande proposée du détail d'approbation
+// run_command (même format que l'extraction mobile, voir stream_parser.dart).
+var commandLineRe = regexp.MustCompile(`"(?:command_line|commandline)"\s*:\s*"((?:[^"\\]|\\.)*)"`)
+
+func extractCommand(detail string) string {
+	if m := commandLineRe.FindStringSubmatch(detail); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// buildApprovalPayload construit le oneof + payload HandleCascadeUserInteraction
+// pour une décision. run_command = 5, file_permission = 19, permission = 21,
+// approval = 23 (fallback générique). Partagé entre submit_approval et
+// l'auto-refus d'expiration.
+func buildApprovalPayload(approvalType string, confirm bool, command, filePath string) (int, []byte) {
+	oneofField := connectrpc.InteractionApproval // fallback générique
+	var oneofPayload []byte
+	switch strings.ToLower(approvalType) {
+	case "run_command":
+		oneofField = connectrpc.InteractionRunCommand
+		oneofPayload = connectrpc.BuildRunCommandInteraction(confirm, command, "")
+	case "file_permission":
+		oneofField = connectrpc.InteractionFilePermission
+		oneofPayload = connectrpc.BuildFilePermissionInteraction(confirm, 2, filePath)
+	case "permission":
+		oneofField = connectrpc.InteractionPermission
+		oneofPayload = connectrpc.BuildPermissionInteraction(confirm, 2)
+	default:
+		oneofPayload = connectrpc.BuildApprovalInteraction(confirm)
+	}
+	return oneofField, oneofPayload
 }
 
 // sessionApprovalKey : clé de cache « toujours autoriser pour cette session ».
@@ -367,14 +481,15 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		err = s.RPCClient.SendMessageStream(msg.CascadeID, msg.Prompt, func(frame []byte) error {
 			frameIndex++
 			events := connectrpc.ParseFrameEvents(frame, msg.CascadeID)
-			// Étape 4 : si la frame porte une demande d'approbation, la cascade
-			// est considérée « en attente » — le stream_end le reflètera.
+			// Étape 4/6 : si la frame porte une demande d'approbation, la cascade
+			// est considérée « en attente » — le stream_end le reflètera, et le
+			// timer d'auto-refus est armé (approvalTimeout).
 			for _, ev := range events {
 				if ev.Kind == connectrpc.EventKindApprovalRequired {
 					// B3 : auto-approbation si l'utilisateur a choisi
 					// « toujours autoriser ce type pour la session ».
 					if s.hasSessionApproval(msg.CascadeID, ev.Tool) {
-						oneofField, oneofPayload := approvalOneof(ev.Tool, true, ev.Detail, "")
+						oneofField, oneofPayload := buildApprovalPayload(ev.Tool, true, extractCommand(ev.Detail), "")
 						if _, errSubmit := s.RPCClient.SubmitToolApproval(
 							msg.CascadeID, ev.TrajectoryID, ev.StepIndex,
 							oneofField, oneofPayload,
@@ -382,7 +497,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 							log.Printf("[WS] Auto-approbation session %s/%s: %v", msg.CascadeID, ev.Tool, errSubmit)
 						}
 					} else {
-						s.MarkApprovalPending(msg.CascadeID)
+						s.MarkApprovalPending(msg.CascadeID, ev)
 					}
 				}
 			}
@@ -390,11 +505,6 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				"frameIndex": frameIndex,
 				"events":     events,
 				"raw":        toOutgoing(frame),
-			}
-			// Étape 3 : si l'utilisateur est actif sur le PC hôte, l'approbation
-			// est déjà visible à l'écran → pas de notification sur le téléphone.
-			if hostActiveSince(10 * time.Second) {
-				data["hostActive"] = true
 			}
 			s.broadcast(OutgoingMessage{
 				Type:      "stream_delta",
@@ -427,23 +537,26 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		return
 
 	case "submit_approval":
+		if msg.TrajectoryID == "" || msg.StepIndex < 0 {
+			err = fmt.Errorf("trajectoryId + stepIndex requis (protocole HandleCascadeUserInteraction)")
+			break
+		}
 		confirm := true
 		if strings.EqualFold(msg.Decision, "deny") {
 			confirm = false
 		}
-		// Bloc A : le oneof est choisi selon le type d'approbation détecté.
-		// run_command = 5, file_permission = 19, permission = 21, approval = 23.
-		oneofField, oneofPayload := approvalOneof(msg.ApprovalType, confirm, msg.Command, msg.FilePath)
+		// Étape 6 : la décision utilisateur annule le timer d'expiration AVANT
+		// l'envoi (pas de course entre submit et auto-refus).
+		s.clearApproval(msg.CascadeID)
+
 		// B3 : « pour toute la session » → le daemon ne redemandera plus pour
 		// ce type d'approbation sur cette cascade.
 		if msg.Scope == "session" && confirm {
 			s.markSessionApproval(msg.CascadeID, msg.ApprovalType)
 		}
-		if msg.TrajectoryID != "" && msg.StepIndex >= 0 {
-			raw, err = s.RPCClient.SubmitToolApproval(msg.CascadeID, msg.TrajectoryID, uint32(msg.StepIndex), oneofField, oneofPayload)
-		} else {
-			err = fmt.Errorf("trajectoryId + stepIndex requis (protocole HandleCascadeUserInteraction)")
-		}
+
+		oneofField, oneofPayload := buildApprovalPayload(msg.ApprovalType, confirm, msg.Command, msg.FilePath)
+		raw, err = s.RPCClient.SubmitToolApproval(msg.CascadeID, msg.TrajectoryID, uint32(msg.StepIndex), oneofField, oneofPayload)
 
 	case "list_files":
 		if msg.WorkspacePath == "" {
@@ -503,6 +616,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
 		return
 	}
+	// Réponse unary au client DEMANDEUR uniquement : un broadcast polluerait
+	// les autres surfaces (elles n'ont pas ce requestId) et casserait la
+	// corrélation des tests.
 	s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
 }
 
@@ -587,20 +703,4 @@ func buildFileTree(root, relativePath string, depth int) ([]map[string]interface
 		}
 	}
 	return result, nil
-}
-
-// approvalOneof : mÃªme logique que le switch de submit_approval, factorisÃ©e
-// pour Ãªtre rÃ©utilisable par l'auto-approbation de session (B3).
-// run_command = 5, file_permission = 19, permission = 21, approval = 23.
-func approvalOneof(approvalType string, confirm bool, command, filePath string) (int, []byte) {
-	switch strings.ToLower(approvalType) {
-	case "run_command":
-		return connectrpc.InteractionRunCommand, connectrpc.BuildRunCommandInteraction(confirm, command, "")
-	case "file_permission":
-		return connectrpc.InteractionFilePermission, connectrpc.BuildFilePermissionInteraction(confirm, 2, filePath)
-	case "permission":
-		return connectrpc.InteractionPermission, connectrpc.BuildPermissionInteraction(confirm, 2)
-	default:
-		return connectrpc.InteractionApproval, connectrpc.BuildApprovalInteraction(confirm)
-	}
 }

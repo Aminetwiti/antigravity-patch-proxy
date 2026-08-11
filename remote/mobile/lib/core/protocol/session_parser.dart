@@ -18,11 +18,10 @@ class SessionParser {
       var out = <CascadeSession>[];
       for (final s in sessions) {
         if (s is Map<String, dynamic>) {
-          final projectId = s['projectId'] as String?;
-          // Filtrer uniquement les sessions orphelines explicites (projectId
-          // "N/A" posé par le daemon) — une session sans projectId (gateway
-          // legacy) ou vide doit rester visible, sinon l'écran est vide.
-          if (projectId != 'N/A') {
+          final id = s['cascadeId'] ?? s['id'];
+          // Filtrer les entrées sans clé primaire : une session sans id est
+          // inutilisable (impossible de la reprendre / l'annuler).
+          if (id is String && id.isNotEmpty) {
             out.add(CascadeSession.fromJson(s));
           }
         }

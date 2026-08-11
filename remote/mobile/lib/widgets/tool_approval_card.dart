@@ -1,15 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../core/protocol/messages.dart';
 import '../theme/app_colors.dart';
 
 class ToolApprovalCard extends StatefulWidget {
   final ToolApprovalRequest request;
   final Function(ToolDecision decision, {ApprovalScope scope}) onDecision;
+  // true après approval_expired du daemon : la demande a été auto-refusée
+  // (timeout) — la carte passe en lecture seule.
+  final bool isExpired;
 
   const ToolApprovalCard({
     super.key,
     required this.request,
     required this.onDecision,
+    this.isExpired = false,
   });
 
   @override
@@ -20,8 +25,22 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
   bool _alwaysAllow = false;
   bool _isSubmitting = false;
 
+  @override
+  void didUpdateWidget(ToolApprovalCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.request.callId != widget.request.callId) {
+      // Sécurité Critique (Scénario 6) : Réinitialiser l'état local si Flutter
+      // recycle ce composant pour une NOUVELLE demande d'approbation.
+      // Sans ça, une demande destructive pourrait hériter du `_alwaysAllow` = true
+      // d'une précédente demande innocente !
+      _isSubmitting = false;
+      _alwaysAllow = false;
+    }
+  }
+
   void _handleDecision(ToolDecision decision) async {
     if (_isSubmitting) return;
+    HapticFeedback.lightImpact();
     setState(() => _isSubmitting = true);
     try {
       await widget.onDecision(
@@ -36,13 +55,25 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
   @override
   Widget build(BuildContext context) {
     final request = widget.request;
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutExpo,
       margin: const EdgeInsets.symmetric(vertical: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surfaceContainer,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.warning, width: 1.5),
+        border: Border.all(
+          color: widget.isExpired
+              ? AppColors.danger.withValues(alpha: 0.7)
+              : _isSubmitting
+                  ? AppColors.positive.withValues(alpha: 0.5)
+                  : AppColors.warning,
+          width: 1.5,
+        ),
+        boxShadow: _isSubmitting
+            ? [BoxShadow(color: AppColors.positive.withValues(alpha: 0.2), blurRadius: 10, spreadRadius: 1)]
+            : [],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -118,7 +149,10 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
               ),
               Switch(
                 value: _alwaysAllow,
-                onChanged: (v) => setState(() => _alwaysAllow = v),
+                onChanged: (v) {
+                  HapticFeedback.lightImpact();
+                  setState(() => _alwaysAllow = v);
+                },
                 activeColor: AppColors.warning,
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
@@ -126,12 +160,41 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
           ),
           const SizedBox(height: 6),
 
+          // État expiré : le daemon a auto-refusé (timeout) — bandeau rouge.
+          if (widget.isExpired) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.danger.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: AppColors.danger.withValues(alpha: 0.4)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.timer_off_outlined, size: 14, color: AppColors.danger),
+                  SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Approbation expirée — auto-refusée par le daemon (5 min)',
+                      style: TextStyle(fontSize: 11.5, color: AppColors.danger, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+
           // Actions Buttons (Approuver / Refuser)
           Row(
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: _isSubmitting ? null : () => _handleDecision(ToolDecision.deny),
+                  onPressed:
+                      _isSubmitting || widget.isExpired
+                          ? null
+                          : () => _handleDecision(ToolDecision.deny),
                   icon: const Icon(Icons.close, size: 16, color: AppColors.danger),
                   label: const Text(
                     'Refuser',
@@ -149,7 +212,9 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
               const SizedBox(width: 12),
               Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: _isSubmitting ? null : () => _handleDecision(ToolDecision.allow),
+                  onPressed: _isSubmitting || widget.isExpired
+                      ? null
+                      : () => _handleDecision(ToolDecision.allow),
                   icon: _isSubmitting
                       ? const SizedBox(
                           width: 16,

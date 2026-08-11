@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class ChatInputBar extends StatefulWidget {
   final Function(String message) onSend;
+  final bool isConnected;
 
   const ChatInputBar({
     super.key,
     required this.onSend,
+    this.isConnected = true,
   });
 
   @override
@@ -16,9 +19,16 @@ class _ChatInputBarState extends State<ChatInputBar> {
   final TextEditingController _controller = TextEditingController();
   final String _selectedModel = 'Gemini 3.1 Pro High';
 
+  bool _isSendPressed = false;
+
   void _handleSend() {
+    if (!widget.isConnected) {
+      HapticFeedback.selectionClick();
+      return;
+    }
     final text = _controller.text.trim();
     if (text.isNotEmpty) {
+      HapticFeedback.lightImpact();
       widget.onSend(text);
       _controller.clear();
     }
@@ -43,15 +53,25 @@ class _ChatInputBarState extends State<ChatInputBar> {
                 // Input TextField
                 TextField(
                   controller: _controller,
+                  enabled: widget.isConnected,
                   maxLines: 6,
                   minLines: 1,
-                  style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurface),
-                  decoration: const InputDecoration(
-                    hintText: 'Ask anything, @ to mention, / for actions',
-                    hintStyle: TextStyle(color: Colors.grey, fontSize: 14),
+                  style: TextStyle(
+                    fontSize: 14, 
+                    color: widget.isConnected 
+                        ? Theme.of(context).colorScheme.onSurface
+                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: widget.isConnected ? 'Ask anything, @ to mention, / for actions' : 'Hors ligne. Reconnexion en cours...',
+                    hintStyle: TextStyle(
+                      color: widget.isConnected ? Colors.grey : Theme.of(context).colorScheme.error, 
+                      fontSize: 14,
+                    ),
                     border: InputBorder.none,
                     enabledBorder: InputBorder.none,
                     focusedBorder: InputBorder.none,
+                    disabledBorder: InputBorder.none,
                     contentPadding: EdgeInsets.zero,
                     fillColor: Colors.transparent,
                     filled: false,
@@ -106,18 +126,35 @@ class _ChatInputBarState extends State<ChatInputBar> {
                     const SizedBox(width: 4),
 
                     // Send Arrow Button
-                    InkWell(
-                      onTap: _handleSend,
-                      borderRadius: BorderRadius.circular(16),
-                      child: Padding(
-                        padding: const EdgeInsets.all(6),
-                        child: Container(
+                    GestureDetector(
+                      onTapDown: (_) => setState(() => _isSendPressed = true),
+                      onTapUp: (_) {
+                        setState(() => _isSendPressed = false);
+                        _handleSend();
+                      },
+                      onTapCancel: () => setState(() => _isSendPressed = false),
+                      child: AnimatedScale(
+                        scale: _isSendPressed ? 0.85 : 1.0,
+                        duration: const Duration(milliseconds: 100),
+                        curve: Curves.easeOutQuart,
+                        child: Padding(
                           padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.surfaceContainer,
-                            shape: BoxShape.circle,
+                          child: Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: widget.isConnected 
+                                  ? Theme.of(context).colorScheme.surfaceContainer
+                                  : Theme.of(context).colorScheme.surfaceContainerHighest,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.arrow_forward, 
+                              size: 16, 
+                              color: widget.isConnected 
+                                  ? Theme.of(context).colorScheme.onSurface
+                                  : Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                            ),
                           ),
-                          child: Icon(Icons.arrow_forward, size: 16, color: Theme.of(context).colorScheme.onSurface),
                         ),
                       ),
                     ),

@@ -50,7 +50,7 @@ class StreamDeltaParser {
           detail: e['detail'] ?? '',
           cascadeId: e['cascadeId'] ?? '',
           trajectoryId: e['trajectoryId'] ?? '',
-          stepIndex: (e['stepIndex'] as num?)?.toInt() ?? -1,
+          stepIndex: e['stepIndex'] is num ? (e['stepIndex'] as num).toInt() : -1,
           approvalType: tool == 'run_command' ? 'run_command' : 'approval',
         );
       }

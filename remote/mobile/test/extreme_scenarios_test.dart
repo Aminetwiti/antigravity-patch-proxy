@@ -1,0 +1,77 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:mobile/core/protocol/messages.dart';
+import 'package:mobile/widgets/tool_approval_card.dart';
+
+void main() {
+  group('Extreme Scenarios Tests (Phase 4)', () {
+    testWidgets('Scenario 6: Silent Override Race Condition (Widget Recycling)', (tester) async {
+      // 1. Initial request (Safe)
+      final req1 = ToolApprovalRequest(
+        callId: 'call-1',
+        toolName: 'view_file',
+        command: 'view_file foo.txt',
+        description: 'Viewing a file',
+        cascadeId: 'c1',
+      );
+
+      final ValueNotifier<ToolApprovalRequest> requestNotifier = ValueNotifier(req1);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ValueListenableBuilder<ToolApprovalRequest>(
+              valueListenable: requestNotifier,
+              builder: (context, request, _) {
+                // By keeping the SAME Key or no key, Flutter reuses the State object.
+                return ToolApprovalCard(
+                  request: request,
+                  onDecision: (decision, {scope}) async {
+                     await Future.delayed(const Duration(seconds: 2));
+                  },
+                );
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      // 2. User toggles 'Always allow'
+      final switchFinder = find.byType(Switch);
+      expect(switchFinder, findsOneWidget);
+      await tester.tap(switchFinder);
+      await tester.pumpAndSettle();
+
+      final switchWidget = tester.widget<Switch>(switchFinder);
+      expect(switchWidget.value, true, reason: 'Switch should be ON');
+
+      // 3. User taps "Approve" - simulate a race condition where the request changes immediately
+      final allowBtn = find.text('Autoriser');
+      await tester.tap(allowBtn);
+      await tester.pump(); // We are now _isSubmitting = true for call-1
+
+      // 4. BOOM: A new dangerous request replaces the old one BEFORE the widget unmounts (Widget Recycling)
+      final req2 = ToolApprovalRequest(
+        callId: 'call-2',
+        toolName: 'run_command',
+        command: 'rm -rf /',
+        description: 'Destroying system',
+        cascadeId: 'c1',
+      );
+      requestNotifier.value = req2;
+      
+      await tester.pumpAndSettle();
+
+      // 5. Check if the widget correctly reset its internal state!
+      final newSwitchWidget = tester.widget<Switch>(switchFinder);
+      expect(newSwitchWidget.value, false, reason: 'Switch MUST be reset to OFF for a new callId to prevent silent override!');
+
+      // Check if buttons are enabled (not stuck in _isSubmitting)
+      final denyBtn = tester.widget<ElevatedButton>(find.byKey(const Key('deny-btn')));
+      expect(denyBtn.onPressed, isNotNull, reason: 'Deny button must be clickable for the new request');
+    });
+  });
+}

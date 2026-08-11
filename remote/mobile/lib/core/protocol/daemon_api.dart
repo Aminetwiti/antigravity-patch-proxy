@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart'
     show ValueListenable, VoidCallback;
+import 'package:meta/meta.dart';
 
 import '../network/outbox.dart';
 import 'messages.dart';
@@ -30,10 +31,25 @@ class DaemonApi {
       StreamController<Map<String, dynamic>>.broadcast();
   final Duration _timeout;
 
+  /// Batching des broadcasts (A3) : quand le daemon relaie une rafale de
+  /// frames (stream_start + N deltas + stream_end), on les regroupe en UNE
+  /// émission toutes les 100 ms au lieu de N setState — l'UI reste fluide
+  /// (le rendu des bulles est déjà throttlé côté écran, celui-ci protège
+  /// les autres auditeurs globaux comme la liste des sessions).
+  /// ponytail: délai fixe de 100 ms (pas de fenêtre glissante adaptative),
+  /// plafond acceptable — chemin d'upgrade si le daemon émet par salves > 10/s.
+  Timer? _batchTimer;
+  final List<Map<String, dynamic>> _batch = [];
+
   int _nextRequestId = 0;
 
-  /// Broadcast of every decoded daemon message (UI listeners, logging).
+  /// Broadcast de chaque message daemon décodé (UI listeners, logging).
   Stream<Map<String, dynamic>> get events => _events.stream;
+
+  /// Retourne les messages broadcast en attente d'émission par le batch 100 ms
+  /// (utile aux tests pour forcer le flush).
+  @visibleForTesting
+  int get pendingBatchCount => _batch.length;
 
   DaemonApi({
     required Stream<dynamic> incoming,
@@ -48,6 +64,57 @@ class DaemonApi {
   }
 
   String _newRequestId() => 'r${++_nextRequestId}';
+
+  /// Envoie un message et attend la réponse, mais signale un échec réseau
+  /// plutôt que de planter : renvoie false quand le socket est coupé (le
+  /// message est mis en outbox pour être rejoué à la reconnexion).
+  /// Utilisé par l'UI pour afficher « Message mis en file » vs « Envoyé ».
+  Future<bool> sendWithResult(
+    String type, [
+    Map<String, dynamic> params = const {},
+  ]) async {
+    final id = _newRequestId();
+    final completer = Completer<Map<String, dynamic>>();
+    _pending[id] = completer;
+    final message = {'type': type, 'requestId': id, ...params};
+    final outbox = _outbox;
+    if (outbox != null) {
+      outbox.enqueue(message);
+    }
+    _send(message);
+    try {
+      await completer.future.timeout(
+        _timeout,
+        onTimeout: () {
+          _pending.remove(id);
+          throw TimeoutException('Daemon did not respond to $type ($id)');
+        },
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Émet un message broadcast vers tous les abonnés, en le groupant dans la
+  /// fenêtre de 100 ms. Si un seul message arrive, il est émis immédiatement
+  /// (pas de latence ajoutée au cas nominal).
+  void _emitBatched(Map<String, dynamic> msg) {
+    if (_batch.isEmpty && (_batchTimer == null || !_batchTimer!.isActive)) {
+      // Cas nominal : émission immédiate, sans latence.
+      _events.add(msg);
+      return;
+    }
+    _batch.add(msg);
+    _batchTimer ??= Timer(const Duration(milliseconds: 100), () {
+      final pending = List<Map<String, dynamic>>.from(_batch);
+      _batch.clear();
+      _batchTimer = null;
+      for (final m in pending) {
+        _events.add(m);
+      }
+    });
+  }
 
   // Étape 5 : si un outbox est fourni, les messages envoyés hors-ligne sont
   // mis en file ; à la reconnexion (reconnectVersion change), on les rejoue.
@@ -86,6 +153,13 @@ class DaemonApi {
 
   void dispose() {
     _reconnectVersion?.removeListener(_reconnectListener!);
+    _batchTimer?.cancel();
+    if (_batch.isNotEmpty) {
+      for (final m in List<Map<String, dynamic>>.from(_batch)) {
+        _events.add(m);
+      }
+      _batch.clear();
+    }
     _events.close();
     for (final c in _pending.values) {
       c.completeError(StateError('DaemonApi disposed'));
@@ -203,7 +277,7 @@ class DaemonApi {
         // Stream déclenché par une AUTRE surface (PC ou autre téléphone) :
         // le broadcast daemon le relaie ici sans requestId local. On le
         // réémet sur _events (marqué) pour que l'UI suive la session.
-        _events.add({...msg, 'broadcast': true});
+        _emitBatched({...msg, 'broadcast': true});
         return;
       }
       if (type == 'stream_end') {
@@ -216,15 +290,22 @@ class DaemonApi {
       } else {
         controller.add(msg);
       }
-      _events.add(msg);
+      _emitBatched(msg);
       return;
     }
 
-    _events.add(msg);
-
+    _emitBatched(msg);
     final completer = _pending.remove(requestId);
-    if (completer == null) return;
-    _outbox?.remove(requestId); // drain : la réponse est arrivée
+    // Drain même si le completer a expiré (timeout) : la réponse est arrivée,
+    // rejouer ce message à la reconnexion créerait un doublon.
+    _outbox?.remove(requestId);
+    if (completer == null) {
+      // Événement poussé par le serveur sans requête locale (approval_expired,
+      // …) : re-marqué broadcast pour que les écouteurs de session le voient.
+      _emitBatched({...msg, 'broadcast': true});
+      return;
+    }
+    _emitBatched(msg);
     if (type == 'error' || error != null) {
       completer.completeError(Exception(error ?? 'Unknown daemon error'));
     } else {

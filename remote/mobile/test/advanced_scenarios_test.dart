@@ -56,5 +56,48 @@ void main() {
       expect(find.text('Approuver'), findsOneWidget);
       expect(tapCount, 1, reason: 'Debounce failed, tapped multiple times');
     });
+
+    testWidgets('ToolApprovalCard isExpired disables actions (Phase 6)', (WidgetTester tester) async {
+      int calls = 0;
+      final request = ToolApprovalRequest(
+        callId: 'expired_call',
+        toolName: 'run_command',
+        command: 'rm -rf /tmp/x',
+        description: 'test',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ToolApprovalCard(
+              request: request,
+              isExpired: true,
+              onDecision: (decision, {ApprovalScope scope = ApprovalScope.once}) async {
+                calls++;
+              },
+            ),
+          ),
+        ),
+      );
+
+      // Le bandeau d'auto-refus est visible.
+      expect(find.textContaining('Approbation expirée'), findsOneWidget);
+
+      // Les deux boutons sont désactivés → aucun appel de décision possible.
+      // (byType ne matche pas les sous-classes privées _…WithIcon ; bySubtype si.)
+      final denyButton = tester.widget<OutlinedButton>(
+        find.bySubtype<OutlinedButton>(),
+      );
+      final allowButton = tester.widget<ElevatedButton>(
+        find.bySubtype<ElevatedButton>(),
+      );
+      expect(denyButton.onPressed, isNull);
+      expect(allowButton.onPressed, isNull);
+
+      await tester.tap(find.text('Refuser'), warnIfMissed: false);
+      await tester.tap(find.text('Approuver'), warnIfMissed: false);
+      await tester.pump();
+      expect(calls, 0, reason: 'Expired card must not submit decisions');
+    });
   });
 }

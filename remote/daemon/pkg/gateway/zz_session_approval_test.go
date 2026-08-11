@@ -24,14 +24,15 @@ func (f *fakeApprovalRPC) SubmitToolApproval(cascadeID, trajectoryID string, ste
 }
 
 // approvalEventFrame construit une frame protobuf dont ParseFrameEvents
-// extrait un événement EventKindApprovalRequired : le parseur détecte les
-// blocs contenant « run_command » et corrèle stepIndex/trajectoryId.
+// extrait un événement EventKindApprovalRequired. Le blob contient le texte
+// « run_command » (détection du parseur) ET un UUID de 36 octets (corrélation
+// trajectoryId pour l'auto-approbation SubmitToolApproval).
 func approvalEventFrame(tool string) []byte {
-	payload := "{\"tool\":\"" + tool + "\",\"stepIndex\":0,\"trajectoryId\":\"traj-1\"}"
-	buf := make([]byte, 2+len(payload))
-	buf[0] = 0x12 // champ #2 length-delimited
-	buf[1] = byte(len(payload))
-	copy(buf[2:], payload)
+	blob := tool + " 123e4567-e89b-12d3-a456-426614174000"
+	buf := make([]byte, 2+len(blob))
+	buf[0] = 0x0a // champ #1 length-delimited (test event_parser)
+	buf[1] = byte(len(blob))
+	copy(buf[2:], blob)
 	return connectrpc.Frame(buf)
 }
 
@@ -40,6 +41,8 @@ func approvalEventFrame(tool string) []byte {
 // d'approbation du même type est auto-approuvée sans passer par le client.
 func TestSessionApprovalAutoApproves(t *testing.T) {
 	fake := &fakeApprovalRPC{}
+	// Même format que TestWebSocketStreamEndOutcome : le fake enveloppe la
+	// frame dans pbTextFrame, et ParseFrameEvents y détecte run_command + UUID.
 	fake.streamDeltas = []string{`{"run_command":"npx jest","step_index":1,"trajectory_id":"123e4567-e89b-12d3-a456-426614174000"}`}
 	srv := newTestServer(fake)
 	defer srv.Close()
@@ -48,17 +51,20 @@ func TestSessionApprovalAutoApproves(t *testing.T) {
 	defer client.conn.Close()
 
 	// 1. L'utilisateur choisit « toujours autoriser run_command pour la session ».
-	//    stepIndex doit être un nombre JSON (int64 en Go) — un string tuerait
-	//    le décodage et fermerait la connexion.
-	if err := client.conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"submit_approval","requestId":"a1","cascadeId":"casc-1","callId":"call-1","trajectoryId":"traj-1","stepIndex":0,"approvalType":"run_command","decision":"allow","scope":"session"}`)); err != nil {
+	if err := client.conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"submit_approval","requestId":"a1","cascadeId":"casc-1","callId":"call-1","trajectoryId":"123e4567-e89b-12d3-a456-426614174000","stepIndex":0,"approvalType":"run_command","decision":"allow","scope":"session"}`)); err != nil {
 		t.Fatalf("envoi submit_approval: %v", err)
 	}
 	// Traiter le message : drainer la réponse éventuelle.
+	client.conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 	drain(t, client.conn)
 
 	// 2. Un nouveau prompt émet une demande d'approbation run_command :
 	//    elle doit être auto-approuvée (submitted == 1) et le stream doit
 	//    se terminer en « done » (aucune approbation laissée en attente).
+	// Laisser le daemon traiter submit_approval (marquage session) avant le
+	// second prompt : la dispatch WebSocket est asynchrone côté serveur.
+	time.Sleep(200 * time.Millisecond)
+
 	if err := client.conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"send_prompt","requestId":"r2","cascadeId":"casc-1","prompt":"fais qqch"}`)); err != nil {
 		t.Fatalf("envoi send_prompt: %v", err)
 	}
@@ -141,6 +147,7 @@ func drain(t *testing.T, conn *websocket.Conn) {
 			break
 		}
 	}
-	// La deadline expirée reste posée : la réinitialiser pour les lectures suivantes.
+	// Ne pas laisser la deadline active : les lectures suivantes du test
+	// (stream_end du prompt) bloqueraient sinon pendant 2 s puis timeout.
 	conn.SetReadDeadline(time.Time{})
 }

@@ -161,9 +161,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                         onPressed: _selectedFilePath.isEmpty || _isLoadingCode
                             ? null
                             : () async {
+                                final messenger = ScaffoldMessenger.of(context);
                                 await Clipboard.setData(ClipboardData(text: _codeContent));
                                 if (!mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(
+                                messenger.showSnackBar(
                                   SnackBar(
                                     content: Text('Contenu copié : ${_selectedFilePath.split('/').last}'),
                                     duration: const Duration(seconds: 1),

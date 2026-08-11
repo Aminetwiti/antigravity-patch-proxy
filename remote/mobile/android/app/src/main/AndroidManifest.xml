@@ -1,10 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Connexion réseau au daemon (WebSocket) -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- Notifications d'approbation (Android 13+ : permission runtime) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
         android:label="Antigravity Remote"
         android:name="${applicationName}"
-        android:icon="@mipmap/launcher_icon">
+        android:icon="@mipmap/launcher_icon"
+        android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"

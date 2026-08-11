@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'core/network/outbox.dart';
 import 'core/network/websocket_client.dart';
 import 'core/notifications/approval_notifier.dart';
@@ -56,17 +57,31 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
 
   List<CascadeSession> _sessions = const [];
 
+  ConnectionStatus _prevStatus = ConnectionStatus.disconnected;
+
   @override
   void initState() {
     super.initState();
+    _prevStatus = _wsClient.statusNotifier.value;
     _wsClient.statusNotifier.addListener(_onStatusChanged);
     ApprovalNotifier.instance.init();
   }
 
   void _onStatusChanged() {
     if (!mounted) return;
+    
+    final currentStatus = _wsClient.statusNotifier.value;
+    if (_prevStatus != currentStatus) {
+      if (currentStatus == ConnectionStatus.disconnected || currentStatus == ConnectionStatus.error) {
+        HapticFeedback.heavyImpact();
+      } else if (currentStatus == ConnectionStatus.connected) {
+        HapticFeedback.lightImpact();
+      }
+      _prevStatus = currentStatus;
+    }
+
     setState(() {});
-    if (_wsClient.statusNotifier.value == ConnectionStatus.connected) {
+    if (currentStatus == ConnectionStatus.connected) {
       _api ??= DaemonApi(
         incoming: _wsClient.stream,
         send: _wsClient.send,
@@ -296,6 +311,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         api: _api,
         activeSessionId: _activeSessionId,
         activeProjectName: _activeProjectName,
+        isConnected: isConnected,
       ),
     );
   }

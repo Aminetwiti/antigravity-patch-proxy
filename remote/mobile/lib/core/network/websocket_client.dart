@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:meta/meta.dart';
 import '../../config/env_config.dart';
 
 enum ConnectionStatus { disconnected, connecting, connected, error }
@@ -17,6 +18,7 @@ class DaemonWebSocketClient {
       ValueNotifier(ConnectionStatus.disconnected);
 
   Timer? _reconnectTimer;
+  Timer? _retryCountdownTimer;
   String _targetUrl = EnvConfig.wsUrl;
   String? _authToken;
   bool _manualDisconnect = false;
@@ -30,6 +32,14 @@ class DaemonWebSocketClient {
     final seconds = min(30, 2 * (1 << capped));
     return Duration(seconds: seconds);
   }
+
+  /// Numéro de la tentative de reconnexion + temps restant avant la prochaine
+  /// tentative — regroupés dans UN notifier pour que l'UI (banner) écoute
+  /// une seule source et se mette à jour en un setState.
+  final ValueNotifier<RetryInfo> retryInfo = ValueNotifier(const RetryInfo());
+
+  /// Alias pratique pour l'UI : l'état de connexion actuel.
+  ConnectionStatus get status => statusNotifier.value;
 
   /// Étape 5 : incrémenté à chaque reconnexion réussie. Les consommateurs
   /// (DaemonApi → replay outbox, UI → re-sync) écoutent ce notifier pour
@@ -68,6 +78,8 @@ class DaemonWebSocketClient {
 
       statusNotifier.value = ConnectionStatus.connected;
       _reconnectAttempts = 0;
+      _stopRetryCountdown();
+      retryInfo.value = const RetryInfo();
       reconnectVersion.value++; // Étape 5 : signaler la (re)connexion
       if (kDebugMode) {
         print('[DaemonWS] Connected to $_targetUrl');
@@ -113,19 +125,32 @@ class DaemonWebSocketClient {
     _socket?.close();
     _socket = null;
     _reconnectAttempts++;
+    retryInfo.value = retryInfo.value.copyWith(attempt: _reconnectAttempts);
     _scheduleReconnect();
   }
 
   void _scheduleReconnect() {
     _reconnectTimer?.cancel();
+    _stopRetryCountdown();
     if (_manualDisconnect) return;
     final delay = backoffDelay(_reconnectAttempts);
     // Jitter ±1 s : évite la rafale synchrone quand plusieurs appareils
     // retombent en même temps (le host redémarre).
     final jitter = Random().nextInt(2000) - 1000;
+    final effective = delay + Duration(milliseconds: jitter);
+    retryInfo.value =
+        retryInfo.value.copyWith(nextRetryIn: effective);
+    // Compte à rebours visible : 1 tick / seconde vers la prochaine tentative.
+    _retryCountdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      final left = retryInfo.value.nextRetryIn - const Duration(seconds: 1);
+      retryInfo.value =
+          retryInfo.value.copyWith(nextRetryIn: left.isNegative ? Duration.zero : left);
+    });
     _reconnectTimer = Timer(
-      delay + Duration(milliseconds: jitter),
+      effective,
       () {
+        _stopRetryCountdown();
+        retryInfo.value = retryInfo.value.copyWith(nextRetryIn: Duration.zero);
         if (statusNotifier.value == ConnectionStatus.disconnected) {
           connect();
         }
@@ -133,12 +158,34 @@ class DaemonWebSocketClient {
     );
   }
 
+  void _stopRetryCountdown() {
+    _retryCountdownTimer?.cancel();
+    _retryCountdownTimer = null;
+  }
+
   void disconnect() {
     _manualDisconnect = true;
     _reconnectTimer?.cancel();
+    _stopRetryCountdown();
     _socket?.close();
     _socket = null;
     statusNotifier.value = ConnectionStatus.disconnected;
+    retryInfo.value = const RetryInfo();
+  }
+
+  /// Vrai quand la déconnexion vient d'un choix explicite de l'utilisateur
+  /// (bouton « Offline ») et non d'une perte réseau : l'UI ne doit pas
+  /// notifier « Connexion perdue » dans ce cas.
+  bool get isManualDisconnect => _manualDisconnect;
+
+  /// Annule l'attente du backoff et tente immédiatement une connexion
+  /// (bouton « Réessayer » du banner).
+  void retryNow() {
+    _manualDisconnect = false;
+    _reconnectTimer?.cancel();
+    _stopRetryCountdown();
+    retryInfo.value = const RetryInfo();
+    connect();
   }
 
   void dispose() {
@@ -146,5 +193,22 @@ class DaemonWebSocketClient {
     _messageController?.close();
     _messageController = null;
     reconnectVersion.dispose();
+    retryInfo.dispose();
+  }
+}
+
+/// État de reconnexion exposé à l'UI : numéro de tentative en cours et temps
+/// restant avant la prochaine relance (décrémenté chaque seconde).
+class RetryInfo {
+  final int attempt;
+  final Duration nextRetryIn;
+
+  const RetryInfo({this.attempt = 0, this.nextRetryIn = Duration.zero});
+
+  RetryInfo copyWith({int? attempt, Duration? nextRetryIn}) {
+    return RetryInfo(
+      attempt: attempt ?? this.attempt,
+      nextRetryIn: nextRetryIn ?? this.nextRetryIn,
+    );
   }
 }

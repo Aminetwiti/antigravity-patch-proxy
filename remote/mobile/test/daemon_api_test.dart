@@ -192,6 +192,36 @@ void main() {
       api.dispose();
     });
 
+    test('surfaces server-pushed approval_expired as broadcast (Phase 6)', () async {
+      final outgoing = <Map<String, dynamic>>[];
+      final controller = StreamController<dynamic>();
+      final api = DaemonApi(
+        incoming: controller.stream,
+        send: (data) => outgoing.add(data as Map<String, dynamic>),
+      );
+
+      final broadcastEvents = <Map<String, dynamic>>[];
+      final sub = api.events.listen(broadcastEvents.add);
+
+      // Le daemon pousse approval_expired sans requestId (pas de requête
+      // locale) : l'API doit le réémettre marqué broadcast pour que l'UI
+      // nettoie la carte d'approbation expirée.
+      controller.add(jsonEncode({
+        'type': 'approval_expired',
+        'data': {'cascadeId': 'c1'},
+      }));
+
+      await Future<void>.delayed(Duration.zero);
+      expect(broadcastEvents, hasLength(1));
+      expect(broadcastEvents.first['type'], 'approval_expired');
+      expect(broadcastEvents.first['broadcast'], isTrue);
+      expect(broadcastEvents.first['data']?['cascadeId'], 'c1');
+
+      await sub.cancel();
+      await controller.close();
+      api.dispose();
+    });
+
     test('outbox: sendPrompt offline is replayed on reconnect (Étape 5)', () async {
       final outgoing = <Map<String, dynamic>>[];
       final controller = StreamController<dynamic>();

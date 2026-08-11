@@ -3,11 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../core/network/websocket_client.dart';
 import '../../core/notifications/approval_notifier.dart';
 import '../../core/protocol/daemon_api.dart';
 import '../../core/protocol/messages.dart';
 import '../../core/protocol/stream_parser.dart';
 import '../../widgets/chat_input_bar.dart';
+import '../../widgets/connection_banner.dart';
 import '../../widgets/markdown_bubble.dart';
 import '../../widgets/tool_approval_card.dart';
 
@@ -15,12 +17,19 @@ class ChatStreamScreen extends StatefulWidget {
   final DaemonApi? api;
   final String activeSessionId;
   final String activeProjectName;
+  final bool isConnected;
+
+  /// Client WebSocket partagé (null en tests/aperçu) — fournit l'état de
+  /// connexion en temps réel (statut, tentative, compte à rebours) au banner.
+  final DaemonWebSocketClient? wsClient;
 
   const ChatStreamScreen({
     super.key,
     required this.api,
     required this.activeSessionId,
     required this.activeProjectName,
+    this.isConnected = true,
+    this.wsClient,
   });
 
   @override
@@ -30,12 +39,16 @@ class ChatStreamScreen extends StatefulWidget {
 class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBindingObserver {
   final List<ChatMessage> _messages = [];
   ToolApprovalRequest? _pendingApproval;
+  // true quand le daemon a broadcasté approval_expired pour la carte courante :
+  // on affiche l'état « expiré » et on désactive les boutons.
+  bool _approvalExpired = false;
   
   StreamSubscription<Map<String, dynamic>>? _streamSub;
   int _messageCounter = 0;
 
   static const _stillWorkingDelay = Duration(seconds: 15);
   final Set<String> _pendingApprovalCallIds = {};
+  final Set<String> _processedCallIds = {};
   Timer? _stillWorkingTimer;
   int _activeStreamCount = 0;
   bool _showStillWorking = false;
@@ -46,11 +59,56 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
   bool _needsStateUpdate = false;
   static const _throttleDuration = Duration(milliseconds: 100);
 
+  // ── État de connexion live (alimenté par wsClient) ─────────────────────
+  ConnectionStatus _status = ConnectionStatus.disconnected;
+  int _attempt = 0;
+  Duration _nextRetryIn = Duration.zero;
+  bool _isManualDisconnect = false;
+  bool _notifiedLost = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _watchBroadcastStreams();
+    _setupConnectionListeners();
+  }
+
+  void _setupConnectionListeners() {
+    final client = widget.wsClient;
+    if (client == null) return;
+
+    setState(() {
+      _status = client.status.value;
+    });
+
+    client.status.addListener(() {
+      if (!mounted) return;
+      final newStatus = client.status.value;
+      
+      if (_status == ConnectionStatus.connected && 
+          newStatus != ConnectionStatus.connected) {
+        if (!_notifiedLost) {
+          _notifiedLost = true;
+          // Notification optionnelle :
+          // ApprovalNotifier.instance.notifyConnectionLost();
+        }
+      } else if (newStatus == ConnectionStatus.connected) {
+        _notifiedLost = false;
+      }
+
+      setState(() {
+        _status = newStatus;
+      });
+    });
+
+    client.retryInfo.addListener(() {
+      if (!mounted) return;
+      setState(() {
+        _attempt = client.retryInfo.value.attempt;
+        _nextRetryIn = client.retryInfo.value.nextRetryIn;
+      });
+    });
   }
 
   @override
@@ -166,24 +224,30 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
           );
         }
         if (approval != null) {
-          _pendingApproval = ToolApprovalRequest(
-            callId: approval.callId,
-            toolName: approval.tool,
-            command: approval.command,
-            description: 'Tool execution requires your confirmation',
-            cascadeId: approval.cascadeId,
-            trajectoryId: approval.trajectoryId,
-            stepIndex: approval.stepIndex,
-            approvalType: approval.approvalType,
-          );
-          _pendingApprovalCallIds.add(approval.callId);
-          final hostActive = msg['data']?['hostActive'] == true;
-          if (!hostActive) {
-            ApprovalNotifier.instance.notifyApprovalRequired(
+          if (!_processedCallIds.contains(approval.callId)) {
+            if (_pendingApproval == null) {
+              HapticFeedback.mediumImpact();
+            }
+            _approvalExpired = false;
+            _pendingApproval = ToolApprovalRequest(
               callId: approval.callId,
               toolName: approval.tool,
               command: approval.command,
+              description: 'Tool execution requires your confirmation',
+              cascadeId: approval.cascadeId,
+              trajectoryId: approval.trajectoryId,
+              stepIndex: approval.stepIndex,
+              approvalType: approval.approvalType,
             );
+            _pendingApprovalCallIds.add(approval.callId);
+            final hostActive = msg['data']?['hostActive'] == true;
+            if (!hostActive) {
+              ApprovalNotifier.instance.notifyApprovalRequired(
+                callId: approval.callId,
+                toolName: approval.tool,
+                command: approval.command,
+              );
+            }
           }
         }
         
@@ -198,6 +262,18 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
           }
           _externalThoughts.remove(requestId);
         });
+      } else if (type == 'approval_expired') {
+        // Phase 6 : le daemon a auto-refusé l'approbation (timeout) — on
+        // retire la carte et on annule la notification locale.
+        final expired = _pendingApproval;
+        setState(() {
+          _pendingApproval = null;
+          _approvalExpired = true;
+        });
+        if (expired != null) {
+          ApprovalNotifier.instance.cancelApproval(expired.callId);
+          _pendingApprovalCallIds.remove(expired.callId);
+        }
       }
     });
   }
@@ -254,24 +330,27 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
           }
         }
         if (approval != null) {
-          _pendingApproval = ToolApprovalRequest(
-            callId: approval.callId,
-            toolName: approval.tool,
-            command: approval.command,
-            description: 'Tool execution requires your confirmation',
-            cascadeId: approval.cascadeId,
-            trajectoryId: approval.trajectoryId,
-            stepIndex: approval.stepIndex,
-            approvalType: approval.approvalType,
-          );
-          _pendingApprovalCallIds.add(approval.callId);
-          final hostActive = msg['data']?['hostActive'] == true;
-          if (!hostActive) {
-            ApprovalNotifier.instance.notifyApprovalRequired(
+          if (!_processedCallIds.contains(approval.callId)) {
+            _approvalExpired = false;
+            _pendingApproval = ToolApprovalRequest(
               callId: approval.callId,
               toolName: approval.tool,
               command: approval.command,
+              description: 'Tool execution requires your confirmation',
+              cascadeId: approval.cascadeId,
+              trajectoryId: approval.trajectoryId,
+              stepIndex: approval.stepIndex,
+              approvalType: approval.approvalType,
             );
+            _pendingApprovalCallIds.add(approval.callId);
+            final hostActive = msg['data']?['hostActive'] == true;
+            if (!hostActive) {
+              ApprovalNotifier.instance.notifyApprovalRequired(
+                callId: approval.callId,
+                toolName: approval.tool,
+                command: approval.command,
+              );
+            }
           }
         }
         
@@ -311,13 +390,22 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
     );
   }
 
-  void _handleToolDecision(ToolDecision decision,
-      {ApprovalScope scope = ApprovalScope.once}) {
-    final approval = _pendingApproval;
+  void _handleToolDecision(ToolDecision decision, {ApprovalScope scope = ApprovalScope.once}) {
+    final pending = _pendingApproval;
+    if (pending == null) return;
+    
+    // Scénarios Extrêmes (1 & 7) : On marque cet appel comme traité pour ne plus jamais
+    // ré-afficher cette carte si le serveur rejoue le message après une perte de connexion.
+    _processedCallIds.add(pending.callId);
+
     setState(() {
       _pendingApproval = null;
     });
-    if (approval == null) return;
+    if (_approvalExpired) {
+      // La carte affichait déjà l'état expiré : on nettoie juste l'état.
+      _approvalExpired = false;
+      return;
+    }
     ApprovalNotifier.instance.cancelApproval(approval.callId);
     _pendingApprovalCallIds.remove(approval.callId);
     widget.api?.submitApproval(
@@ -377,57 +465,110 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
 
   @override
   Widget build(BuildContext context) {
+    Widget connectivityBanner = AnimatedSize(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutQuart,
+      child: ConnectionBanner(
+        status: _status,
+        attempt: _attempt,
+        nextRetryIn: _nextRetryIn,
+        isManualDisconnect: _isManualDisconnect,
+        onRetry: _wsClient?.retryNow,
+      ),
+    );
+
     if (_messages.isEmpty && _pendingApproval == null) {
-      return Center(
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.folder_outlined, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                    const SizedBox(width: 8),
-                    Text(
-                      widget.activeProjectName,
-                      style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                    ),
-                    const SizedBox(width: 4),
-                    Icon(Icons.keyboard_arrow_down, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  ],
+      return Column(
+        children: [
+          Expanded(
+            child: Center(
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.folder_outlined, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                          const SizedBox(width: 8),
+                          Text(
+                            widget.activeProjectName,
+                            style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(Icons.keyboard_arrow_down, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      ChatInputBar(
+                        onSend: _handleSendMessage,
+                        isConnected: widget.isConnected,
+                      ),
+                      const SizedBox(height: 64),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 16),
-                ChatInputBar(
-                  onSend: _handleSendMessage,
-                ),
-                const SizedBox(height: 64),
-              ],
+              ),
             ),
           ),
-        ),
+          connectivityBanner,
+        ],
       );
     }
 
     return Column(
       children: [
+        connectivityBanner,
         Expanded(
           child: ListView(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             children: [
               _buildReminderBanners(),
-              ..._messages.map((msg) => _MessageBubble(message: msg)),
+              ..._messages.map((msg) => TweenAnimationBuilder<double>(
+                key: ValueKey(msg.id),
+                duration: const Duration(milliseconds: 400),
+                curve: Curves.easeOutQuart,
+                tween: Tween(begin: 0.0, end: 1.0),
+                builder: (context, value, child) {
+                  return Opacity(
+                    opacity: value,
+                    child: Transform.translate(
+                      offset: Offset(0, 10 * (1 - value)),
+                      child: child,
+                    ),
+                  );
+                },
+                child: _MessageBubble(message: msg),
+              )),
               if (_pendingApproval != null)
-                ToolApprovalCard(
-                  request: _pendingApproval!,
-                  onDecision: _handleToolDecision,
+                TweenAnimationBuilder<double>(
+                  key: const ValueKey('pending-approval'),
+                  duration: const Duration(milliseconds: 400),
+                  curve: Curves.easeOutQuart,
+                  tween: Tween(begin: 0.0, end: 1.0),
+                  builder: (context, value, child) {
+                    return Opacity(
+                      opacity: value,
+                      child: Transform.translate(
+                        offset: Offset(0, 10 * (1 - value)),
+                        child: child,
+                      ),
+                    );
+                  },
+                  child: ToolApprovalCard(
+                    request: _pendingApproval!,
+                    onDecision: _handleToolDecision,
+                    isExpired: _approvalExpired,
+                  ),
                 ),
             ],
           ),
         ),
         ChatInputBar(
           onSend: _handleSendMessage,
+          isConnected: widget.isConnected,
         ),
       ],
     );
