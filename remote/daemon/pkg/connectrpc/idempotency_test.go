@@ -25,7 +25,7 @@ func TestBuilders_ConcurrentSafety(t *testing.T) {
 				cascID := fmt.Sprintf("casc-%d-%d", g, i)
 				msg := fmt.Sprintf("message %d goroutine %d — accents éèà", i, g)
 
-				b1 := BuildStartCascade("file:///C:/x", 190)
+				b1 := BuildStartCascade("file:///C:/proj", "", 190)
 				b2 := BuildSendMessage(cascID, msg)
 				b3 := BuildSubmitToolApproval(cascID, "call-1", 1)
 				_ = Frame(b1)

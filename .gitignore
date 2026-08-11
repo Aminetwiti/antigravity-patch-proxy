@@ -41,6 +41,7 @@ _archive/
 *.zip
 ag-doctor-ui/dist/
 ag-doctor-ui/release/
+tool/
 
 # Temporary text outputs from scripts
 scripts/freebuff/extraction-output.txt

@@ -8,7 +8,7 @@ func TestBuildStartCascadeAndDecode(t *testing.T) {
 	workspaceURI := "file:///C:/test_project"
 	requestedModel := uint64(190)
 
-	buf := BuildStartCascade(workspaceURI, requestedModel)
+	buf := BuildStartCascade(workspaceURI, "", requestedModel)
 	if len(buf) == 0 {
 		t.Fatalf("BuildStartCascade ne devrait pas renvoyer un buffer vide")
 	}

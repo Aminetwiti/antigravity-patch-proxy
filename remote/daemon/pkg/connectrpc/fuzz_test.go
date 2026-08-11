@@ -157,14 +157,14 @@ func TestSplitFrames_StreamAssociativity(t *testing.T) {
 }
 
 // TestDecodeFields_EncodeDecode : propriété d'inversion —
-// DecodeFields(BuildStartCascade(...)) redonne les champs d'origine.
+// DecodeFields(BuildStartCascade(s, "", uint64(n))) redonne les champs d'origine.
 func TestDecodeFields_EncodeDecode(t *testing.T) {
 	cases := []struct {
 		name string
 		buf  []byte
 		nums []int
 	}{
-		{"StartCascade", BuildStartCascade("file:///C:/x", 190), []int{4, 5, 8, 14}},
+		{"StartCascade", BuildStartCascade("file:///C:/x", "", 190), []int{4, 5, 8, 14}},
 		{"SendMessage", BuildSendMessage("casc-1", "bonjour"), []int{1, 2}},
 	}
 	for _, c := range cases {
