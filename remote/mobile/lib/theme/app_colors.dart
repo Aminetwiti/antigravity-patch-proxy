@@ -14,8 +14,8 @@ abstract class AppColors {
 
   // ── Ink / Text
   static const Color inkPrimary = Color(0xFFF4F4F5);   // #f4f4f5 (High contrast text)
-  static const Color inkSecondary = Color(0xFFA1A1AA); // #a1a1aa (Subtitles, details)
-  static const Color inkMuted = Color(0xFF71717A);     // #71717a (Placeholders, disabled)
+  static const Color inkSecondary = Color(0xFFD4D4D8); // #d4d4d8 (Zinc 300 - Subtitles, details)
+  static const Color inkMuted = Color(0xFFA1A1AA);     // #a1a1aa (Zinc 400 - Placeholders, disabled)
 
   // ── Accents & Actions
   static const Color accentBlue = Color(0xFF3B82F6);     // #3b82f6 (Primary action)

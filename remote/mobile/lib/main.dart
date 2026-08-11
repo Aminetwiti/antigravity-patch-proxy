@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'core/network/websocket_client.dart';
 import 'core/protocol/daemon_api.dart';
 import 'core/protocol/messages.dart';
@@ -13,6 +14,7 @@ import 'theme/app_colors.dart';
 import 'theme/app_theme.dart';
 import 'widgets/chat_input_bar.dart';
 import 'widgets/left_sidebar_drawer.dart';
+import 'widgets/markdown_bubble.dart';
 import 'widgets/right_sidebar_drawer.dart';
 import 'widgets/tool_approval_card.dart';
 
@@ -56,6 +58,8 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
   DaemonApi? _api;
   StreamSubscription<Map<String, dynamic>>? _streamSub;
   int _messageCounter = 0;
+  
+  Map<String, dynamic> _contextStats = {};
 
   @override
   void initState() {
@@ -73,7 +77,21 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       );
       _watchBroadcastStreams();
       _refreshSessions();
+      _refreshContext();
     }
+  }
+
+  Future<void> _refreshContext() async {
+    final api = _api;
+    if (api == null) return;
+    try {
+      final stats = await api.getContext();
+      if (mounted) {
+        setState(() {
+          _contextStats = stats;
+        });
+      }
+    } catch (_) {}
   }
 
   // Suit les streams déclenchés par une AUTRE surface (PC ou autre téléphone)
@@ -309,17 +327,33 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           );
         },
         onOpenWorkspace: () {
+          final activeSession = _sessions.firstWhere(
+            (s) => s.id == _activeSessionId,
+            orElse: () => const CascadeSession(id: '', workspacePath: '.', title: '', status: '', time: ''),
+          );
+          var path = activeSession.workspacePath;
+          if (path.startsWith('file:///')) {
+            path = path.substring(8);
+          } else if (path.startsWith('file://')) {
+            path = path.substring(7);
+          }
+          
           Navigator.of(context).push(
-            MaterialPageRoute(builder: (context) => const WorkspaceScreen()),
+            MaterialPageRoute(
+              builder: (context) => WorkspaceScreen(
+                api: _api,
+                workspacePath: path,
+              ),
+            ),
           );
         },
       ),
-      endDrawer: const RightSidebarDrawer(
-        subagentsCount: 0,
-        filesChangedCount: 10,
-        artifactsCount: 1,
-        uploadsCount: 0,
-        backgroundTasksCount: 0,
+      endDrawer: RightSidebarDrawer(
+        subagentsCount: _contextStats['subagentsCount'] as int? ?? 0,
+        filesChangedCount: _contextStats['filesChangedCount'] as int? ?? 0,
+        artifactsCount: _contextStats['artifactsCount'] as int? ?? 0,
+        uploadsCount: _contextStats['uploadsCount'] as int? ?? 0,
+        backgroundTasksCount: _contextStats['backgroundTasksCount'] as int? ?? 0,
       ),
       appBar: AppBar(
         leading: IconButton(
@@ -552,10 +586,10 @@ class _MessageBubbleState extends State<_MessageBubble> {
             const SizedBox(height: 6),
           ],
 
-          // Assistant Response Text
-          Text(
-            widget.message.text,
-            style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurface, height: 1.4),
+          // Assistant Response Text (Markdown-rendered)
+          MarkdownBubble(
+            text: widget.message.text,
+            isStreaming: widget.message.isStreaming,
           ),
 
           const SizedBox(height: 8),
@@ -563,8 +597,23 @@ class _MessageBubbleState extends State<_MessageBubble> {
           // Message Action Icons (Copy, Like, Dislike)
           Row(
             children: [
-              Icon(Icons.copy_outlined, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
-              const SizedBox(width: 12),
+              InkWell(
+                onTap: () {
+                  Clipboard.setData(ClipboardData(text: widget.message.text));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Message copié dans le presse-papiers'),
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
+                },
+                borderRadius: BorderRadius.circular(4),
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(Icons.copy_outlined, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+              ),
+              const SizedBox(width: 8),
               Icon(Icons.thumb_up_outlined, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
               const SizedBox(width: 12),
               Icon(Icons.thumb_down_outlined, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),

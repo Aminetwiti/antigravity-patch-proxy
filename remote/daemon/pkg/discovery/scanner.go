@@ -249,10 +249,24 @@ func extractJsonInt(s, key string) int {
 
 func extractArg(cmdLine, name string) string {
 	// Format réel observé : "--csrf_token <value>" (espace), parfois "--name=<value>".
-	re := regexp.MustCompile(`--` + name + `(?:=|\s+)([^\s"]+)`)
-	m := re.FindStringSubmatch(cmdLine)
-	if len(m) > 1 {
-		return m[1]
+	// Parsing par tokens : simple, et évite les pièges de regex (guillemets,
+	// '=' dans la valeur, flag sans valeur qui avalerait le flag suivant).
+	target := "--" + name
+	for _, tok := range strings.Fields(cmdLine) {
+		if strings.HasPrefix(tok, target+"=") {
+			v := strings.TrimPrefix(tok, target+"=")
+			return strings.Trim(v, `"`)
+		}
+		if tok == target {
+			// La valeur est le token suivant — seulement si ce n'est pas un flag.
+			rest := strings.Fields(cmdLine)
+			for i, t := range rest {
+				if t == target && i+1 < len(rest) && !strings.HasPrefix(rest[i+1], "--") {
+					return strings.Trim(rest[i+1], `"`)
+				}
+			}
+			return ""
+		}
 	}
 	return ""
 }

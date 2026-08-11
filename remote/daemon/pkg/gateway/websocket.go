@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -77,6 +80,7 @@ type IncomingMessage struct {
 	CallID        string `json:"callId,omitempty"`
 	Decision      string `json:"decision,omitempty"`
 	Prompt        string `json:"prompt,omitempty"`
+	FilePath      string `json:"filePath,omitempty"`
 }
 
 type OutgoingMessage struct {
@@ -253,6 +257,44 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 		raw, err = s.RPCClient.SubmitToolApproval(msg.CascadeID, msg.CallID, decision)
 
+	case "list_files":
+		if msg.WorkspacePath == "" {
+			err = fmt.Errorf("workspacePath requis")
+			break
+		}
+		tree, errList := buildFileTree(msg.WorkspacePath, "", 0)
+		if errList != nil {
+			err = errList
+			break
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"files": tree}})
+		return
+
+	case "read_file":
+		if msg.FilePath == "" {
+			err = fmt.Errorf("filePath requis")
+			break
+		}
+		content, errRead := os.ReadFile(msg.FilePath)
+		if errRead != nil {
+			err = errRead
+			break
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"content": string(content)}})
+		return
+
+	case "get_context":
+		// Mock stats
+		stats := map[string]int{
+			"subagentsCount":       1,
+			"filesChangedCount":    3,
+			"artifactsCount":       2,
+			"uploadsCount":         0,
+			"backgroundTasksCount": 0,
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: stats})
+		return
+
 	default:
 		s.writeJSON(conn, OutgoingMessage{Type: "error", RequestID: msg.RequestID, Error: "Unknown action type: " + msg.Type})
 		return
@@ -263,4 +305,42 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		return
 	}
 	s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+}
+
+func buildFileTree(root, relativePath string, depth int) ([]map[string]interface{}, error) {
+	var result []map[string]interface{}
+	fullPath := filepath.Join(root, relativePath)
+	entries, err := os.ReadDir(fullPath)
+	if err != nil {
+		return nil, err
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].IsDir() == entries[j].IsDir() {
+			return entries[i].Name() < entries[j].Name()
+		}
+		return entries[i].IsDir()
+	})
+
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == ".git" || name == "node_modules" || name == "build" || name == "dist" || name == ".dart_tool" {
+			continue
+		}
+
+		item := map[string]interface{}{
+			"name":     name,
+			"path":     filepath.Join(relativePath, name),
+			"fullPath": filepath.Join(fullPath, name),
+			"depth":    depth,
+			"isDir":    entry.IsDir(),
+		}
+		result = append(result, item)
+
+		if entry.IsDir() {
+			children, _ := buildFileTree(root, filepath.Join(relativePath, name), depth+1)
+			result = append(result, children...)
+		}
+	}
+	return result, nil
 }

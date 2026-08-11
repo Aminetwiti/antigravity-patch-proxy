@@ -1,23 +1,70 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_colors.dart';
+import '../../core/protocol/daemon_api.dart';
 
 class WorkspaceScreen extends StatefulWidget {
-  const WorkspaceScreen({super.key});
+  final DaemonApi? api;
+  final String workspacePath;
+
+  const WorkspaceScreen({super.key, this.api, this.workspacePath = '.'});
 
   @override
   State<WorkspaceScreen> createState() => _WorkspaceScreenState();
 }
 
 class _WorkspaceScreenState extends State<WorkspaceScreen> {
-  final String _selectedFilePath = 'lib/main.dart';
-  bool _isLoading = true;
+  String _selectedFilePath = '';
+  bool _isLoadingTree = true;
+  bool _isLoadingCode = false;
+  List<Map<String, dynamic>> _files = [];
+  String _codeContent = '// Sélectionnez un fichier';
 
   @override
   void initState() {
     super.initState();
-    Future.delayed(const Duration(milliseconds: 1500), () {
-      if (mounted) setState(() => _isLoading = false);
+    _loadFiles();
+  }
+
+  Future<void> _loadFiles() async {
+    if (widget.api == null) {
+      if (mounted) setState(() => _isLoadingTree = false);
+      return;
+    }
+    try {
+      final res = await widget.api!.listFiles(widget.workspacePath);
+      if (mounted) {
+        setState(() {
+          _files = List<Map<String, dynamic>>.from(res['files'] ?? []);
+          _isLoadingTree = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoadingTree = false);
+    }
+  }
+
+  Future<void> _loadFile(String path) async {
+    if (widget.api == null) return;
+    setState(() {
+      _selectedFilePath = path;
+      _isLoadingCode = true;
     });
+    try {
+      final res = await widget.api!.readFile(path);
+      if (mounted) {
+        setState(() {
+          _codeContent = res['content'] as String? ?? '';
+          _isLoadingCode = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _codeContent = 'Erreur: $e';
+          _isLoadingCode = false;
+        });
+      }
+    }
   }
 
   @override
@@ -50,23 +97,28 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
               ),
               const Divider(),
               Expanded(
-                child: _isLoading 
+                child: _isLoadingTree 
                   ? _buildSkeletonTree()
-                  : ListView(
+                  : ListView.builder(
                       padding: const EdgeInsets.only(bottom: 12),
-                      children: const [
-                        _TreeFolder(title: 'lib', depth: 0),
-                        _TreeFile(title: 'main.dart', depth: 1),
-                        _TreeFile(title: 'config/env_config.dart', depth: 1),
-                        _TreeFile(title: 'core/framing.dart', depth: 1),
-                        _TreeFile(title: 'core/network/websocket_client.dart', depth: 1),
-                        _TreeFile(title: 'features/settings/settings_screen.dart', depth: 1),
-                        _TreeFile(title: 'theme/app_colors.dart', depth: 1),
-                        _TreeFolder(title: 'config', depth: 0),
-                        _TreeFile(title: 'env_dev.json', depth: 1),
-                        _TreeFile(title: 'env_emulator.json', depth: 1),
-                        _TreeFile(title: 'env_prod.json', depth: 1),
-                      ],
+                      itemCount: _files.length,
+                      itemBuilder: (context, index) {
+                        final file = _files[index];
+                        final isDir = file['isDir'] == true;
+                        final name = file['name'] as String;
+                        final depth = file['depth'] as int;
+                        final fullPath = file['fullPath'] as String;
+
+                        if (isDir) {
+                          return _TreeFolder(title: name, depth: depth);
+                        } else {
+                          return _TreeFile(
+                            title: name,
+                            depth: depth,
+                            onTap: () => _loadFile(fullPath),
+                          );
+                        }
+                      },
                     ),
               ),
             ],
@@ -115,29 +167,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                     width: double.infinity,
                     padding: const EdgeInsets.all(14),
                     color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                    child: _isLoading
+                    child: _isLoadingCode
                         ? _buildSkeletonCode()
                         : SingleChildScrollView(
                             child: Text(
-                              '''// lib/main.dart
-import 'package:flutter/material.dart';
-
-void main() {
-  runApp(const AntigravityRemoteApp());
-}
-
-class AntigravityRemoteApp extends StatelessWidget {
-  const AntigravityRemoteApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Antigravity Mobile',
-      theme: AppTheme.darkTheme,
-      home: const AntigravityMainScreen(),
-    );
-  }
-}''',
+                              _codeContent,
                               style: TextStyle(
                                 fontFamily: 'monospace',
                                 fontSize: 12,
@@ -235,13 +269,14 @@ class _TreeFolder extends StatelessWidget {
 class _TreeFile extends StatelessWidget {
   final String title;
   final int depth;
+  final VoidCallback onTap;
 
-  const _TreeFile({required this.title, required this.depth});
+  const _TreeFile({required this.title, required this.depth, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      onTap: () {},
+      onTap: onTap,
       child: Padding(
         padding: EdgeInsets.only(left: 8.0 + depth * 14, top: 2, bottom: 2),
         child: Row(

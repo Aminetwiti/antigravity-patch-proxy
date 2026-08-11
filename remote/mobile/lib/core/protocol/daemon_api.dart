@@ -69,6 +69,14 @@ class DaemonApi {
   Future<Map<String, dynamic>> createCascade(String workspacePath) =>
       call('create_cascade', {'workspacePath': workspacePath});
 
+  Future<Map<String, dynamic>> listFiles(String workspacePath) =>
+      call('list_files', {'workspacePath': workspacePath});
+
+  Future<Map<String, dynamic>> readFile(String filePath) =>
+      call('read_file', {'filePath': filePath});
+
+  Future<Map<String, dynamic>> getContext() => call('get_context');
+
   Future<Map<String, dynamic>> submitApproval({
     required String cascadeId,
     required String callId,
