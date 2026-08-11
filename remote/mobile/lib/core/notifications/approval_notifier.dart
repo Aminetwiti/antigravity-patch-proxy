@@ -1,7 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
-/// Notifications locales pour les demandes d'approbation (APPROVAL_REQUIRED).
+/// Notifications locales pour les demandes d'approbation (APPROVAL_REQUIRED)
+/// et les fins de tâche (stream_end structuré).
 ///
 /// Objectif : compenser l'absence de FCM (100% local, pas de dépendance
 /// Firebase). Le phone peut être en arrière-plan ou verrouillé : la
@@ -23,6 +24,11 @@ class ApprovalNotifier {
   String? _lastCallId;
   DateTime? _lastShownAt;
 
+  /// Notification « tâche terminée » déjà montrée pour cette cascade — évite
+  /// de re-sonner quand le broadcast stream_end arrive sur plusieurs surfaces.
+  String? _lastTaskDoneCascade;
+  DateTime? _lastTaskDoneAt;
+
   bool _initialized = false;
 
   Future<void> init() async {
@@ -38,21 +44,21 @@ class ApprovalNotifier {
       const settings = InitializationSettings(android: android, iOS: ios);
       await _plugin.initialize(settings);
 
-      // Android 13+ : permission runtime POST_NOTIFICATIONS (déclarée dans le
-      // manifest) — l'utilisateur doit accepter pour recevoir les alertes.
-      await _plugin
-          .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>()
-          ?.requestNotificationsPermission();
-      _initialized = true;
-    } catch (e) {
-      // Environnement sans registrant de plugin (flutter test, headless) :
-      // la plateforme n'est jamais enregistrée → on désactive les
-      // notifications sans planter. Sur Android/iOS réel, le registrant
-      // Dart est toujours présent.
+      // Sur les environnements sans registrant de plugin (flutter test,
+      // headless), resolvePlatformSpecificImplementation renvoie null :
+      // on désactive les notifications sans planter. Sur Android/iOS réel,
+      // le registrant Dart est toujours présent.
       // ponytail: plafond = les tests ne vérifient pas la vraie chaîne de
       // notification ; chemin d'upgrade = fake platform dans widget_test.dart
       // (FlutterLocalNotificationsPlatform.instance = …) si besoin plus tard.
+      final androidImpl = _plugin
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>();
+      if (androidImpl != null) {
+        await androidImpl.requestNotificationsPermission();
+      }
+      _initialized = true;
+    } catch (e) {
       debugPrint('[Notifier] notifications indisponibles: $e');
     }
   }
@@ -101,8 +107,100 @@ class ApprovalNotifier {
     debugPrint('[Notifier] approval notification -> $callId ($toolName)');
   }
 
+  /// Notifie la fin d'une tâche (stream_end) : terminée, erreur ou action
+  /// requise. Dédupliquée par cascade sur 30 s.
+  Future<void> notifyTaskEnded({
+    required String cascadeId,
+    required String outcome, // 'done' | 'error' | 'approval'
+    required String message,
+  }) async {
+    if (!_initialized) return;
+    final now = DateTime.now();
+    if (cascadeId == _lastTaskDoneCascade &&
+        _lastTaskDoneAt != null &&
+        now.difference(_lastTaskDoneAt!) < const Duration(seconds: 30)) {
+      return;
+    }
+    _lastTaskDoneCascade = cascadeId;
+    _lastTaskDoneAt = now;
+
+    final (title, body, channelId) = switch (outcome) {
+      'error' => (
+          '⚠ Tâche interrompue',
+          message.isEmpty ? 'Une erreur est survenue sur le PC hôte' : message,
+          'task_errors',
+        ),
+      'approval' => (
+          '✋ Action requise',
+          message.isEmpty ? 'L\'agent attend votre approbation' : message,
+          'approval_required',
+        ),
+      _ => (
+          '✅ Tâche terminée',
+          message.isEmpty ? 'L\'agent a fini de travailler' : message,
+          'task_done',
+        ),
+    };
+
+    const androidDetails = AndroidNotificationDetails(
+      'task_done',
+      'Tâches distantes',
+      channelDescription: 'Fin des tâches exécutées sur le PC hôte',
+      importance: Importance.defaultImportance,
+      priority: Priority.defaultPriority,
+      visibility: NotificationVisibility.public,
+      playSound: true,
+      enableVibration: true,
+    );
+    const errorDetails = AndroidNotificationDetails(
+      'task_errors',
+      'Erreurs de tâche',
+      channelDescription: 'Erreurs des tâches exécutées sur le PC hôte',
+      importance: Importance.high,
+      priority: Priority.high,
+      playSound: true,
+      enableVibration: true,
+    );
+    const approvalDetails = AndroidNotificationDetails(
+      'approval_required',
+      'Approbations',
+      channelDescription: 'Demandes d\'approbation de commandes distantes',
+      importance: Importance.max,
+      priority: Priority.high,
+      category: AndroidNotificationCategory.call,
+      visibility: NotificationVisibility.public,
+      playSound: true,
+      enableVibration: true,
+    );
+
+    final android = switch (channelId) {
+      'task_errors' => errorDetails,
+      'approval_required' => approvalDetails,
+      _ => androidDetails,
+    };
+    const iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+    );
+    final details = NotificationDetails(android: android, iOS: iosDetails);
+
+    await _plugin.show(
+      cascadeId.hashCode,
+      title,
+      body.length > 120 ? '${body.substring(0, 120)}…' : body,
+      details,
+    );
+    debugPrint('[Notifier] task notification -> $cascadeId ($outcome)');
+  }
+
   /// Annule la notification (l'utilisateur a répondu sur une autre surface).
   Future<void> cancelApproval(String callId) async {
     await _plugin.cancel(callId.hashCode);
+  }
+
+  /// Annule la notification de fin de tâche d'une cascade.
+  Future<void> cancelTask(String cascadeId) async {
+    await _plugin.cancel(cascadeId.hashCode);
   }
 }

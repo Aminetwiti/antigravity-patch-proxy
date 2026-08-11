@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mobile/core/network/outbox.dart';
 import 'package:mobile/core/protocol/daemon_api.dart';
 import 'package:mobile/core/protocol/stream_parser.dart';
 
@@ -106,7 +108,10 @@ void main() {
               'kind': 'approval_required',
               'callId': 'call_1',
               'tool': 'run_command',
-              'detail': 'git status',
+              'detail': '{"command_line":"git status"}',
+              'cascadeId': 'c1',
+              'trajectoryId': 'traj_9',
+              'stepIndex': 4,
             },
           ],
         },
@@ -119,7 +124,11 @@ void main() {
       await done.future;
       expect(approval, isNotNull);
       expect(approval!.tool, 'run_command');
-      expect(approval!.detail, 'git status');
+      expect(approval!.detail, '{"command_line":"git status"}');
+      expect(approval!.trajectoryId, 'traj_9');
+      expect(approval!.stepIndex, 4);
+      expect(approval!.approvalType, 'run_command');
+      expect(approval!.command, 'git status');
       await controller.close();
       api.dispose();
     });
@@ -176,6 +185,60 @@ void main() {
       expect(broadcastEvents.last['type'], 'stream_end');
 
       await sub.cancel();
+      await controller.close();
+      api.dispose();
+    });
+
+    test('outbox: sendPrompt offline is replayed on reconnect (Étape 5)', () async {
+      final outgoing = <Map<String, dynamic>>[];
+      final controller = StreamController<dynamic>();
+      final outbox = OutboxQueue();
+      final api = DaemonApi(
+        incoming: controller.stream,
+        send: (data) => outgoing.add(data as Map<String, dynamic>),
+        outbox: outbox,
+      );
+      final version = ValueNotifier<int>(0);
+
+      var resyncCount = 0;
+      api.attachReconnect(version, () async {
+        resyncCount++;
+        return const {'ok': true};
+      });
+
+      // Hors-ligne : le prompt est mis en file, rien n'est envoyé au daemon
+      // (le send est un no-op tant que le socket est coupé).
+      api.sendPrompt('c1', 'important prompt');
+      expect(outbox.pendingCount, 1);
+      expect(outgoing, isEmpty);
+
+      // Reconnexion : version++ → replay de la queue puis re-sync.
+      version.value = 1;
+      await Future<void>.delayed(Duration.zero);
+      expect(outgoing, hasLength(1));
+      expect(outgoing.first['type'], 'send_prompt');
+      expect(outgoing.first['prompt'], 'important prompt');
+      expect(outgoing.first.containsKey('queuedAt'), isFalse);
+
+      // La réponse arrive → le message est drainé de la queue.
+      final requestId = outgoing.first['requestId'] as String;
+      controller.add(jsonEncode({
+        'type': 'stream_start',
+        'requestId': requestId,
+        'data': {'cascadeId': 'c1'},
+      }));
+      controller.add(jsonEncode({
+        'type': 'stream_end',
+        'requestId': requestId,
+      }));
+      await Future<void>.delayed(Duration.zero);
+      expect(outbox.pendingCount, 0);
+
+      // Nouvelle reconnexion : rien à rejouer, mais re-sync quand même.
+      version.value = 2;
+      await Future<void>.delayed(Duration.zero);
+      expect(resyncCount, 2);
+
       await controller.close();
       api.dispose();
     });

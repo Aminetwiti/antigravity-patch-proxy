@@ -202,4 +202,10 @@ func readVarint(buf []byte, offset int) (uint64, int) {
 	return result, offset
 }
 
-
+// BuildSetBrowserOpenConversation construit un message SetBrowserOpenConversationRequest
+// pour forcer l'IDE Antigravity à ouvrir et afficher une cascade spécifique.
+func BuildSetBrowserOpenConversation(cascadeID string) []byte {
+	w := &writer{}
+	w.stringField(1, cascadeID)
+	return w.b
+}

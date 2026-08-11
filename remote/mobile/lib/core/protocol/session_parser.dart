@@ -15,11 +15,27 @@ class SessionParser {
   static List<CascadeSession> parseListSessions(Map<String, dynamic> data) {
     final sessions = data['sessions'];
     if (sessions is List) {
-      final out = <CascadeSession>[];
+      var out = <CascadeSession>[];
       for (final s in sessions) {
-        if (s is Map<String, dynamic>) out.add(CascadeSession.fromJson(s));
+        if (s is Map<String, dynamic>) {
+          // Filtrer les sessions orphelines (sans projet valide)
+          final projectId = s['projectId'] as String?;
+          if (projectId != null && projectId.isNotEmpty && projectId != 'N/A') {
+            out.add(CascadeSession.fromJson(s));
+          }
+        }
       }
-      if (out.isNotEmpty) return out;
+      if (out.isNotEmpty) {
+        // Tri par date de mise à jour décroissante
+        out.sort((a, b) {
+          final aJson = sessions.firstWhere((s) => s['cascadeId'] == a.id, orElse: () => <String, dynamic>{});
+          final bJson = sessions.firstWhere((s) => s['cascadeId'] == b.id, orElse: () => <String, dynamic>{});
+          final aDate = DateTime.tryParse(aJson['updatedAt'] as String? ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final bDate = DateTime.tryParse(bJson['updatedAt'] as String? ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+          return bDate.compareTo(aDate);
+        });
+        return out;
+      }
     }
     return _parseLegacyFieldDump(data);
   }

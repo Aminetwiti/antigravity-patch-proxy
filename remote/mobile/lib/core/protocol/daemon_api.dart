@@ -1,6 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart'
+    show ValueListenable, VoidCallback;
+
+import '../network/outbox.dart';
+
 /// High-level typed client over the Daemon Bridge WebSocket (protocol v1).
 ///
 /// Wire protocol (source of truth: remote/daemon/pkg/gateway/websocket.go):
@@ -33,14 +38,63 @@ class DaemonApi {
     required Stream<dynamic> incoming,
     required void Function(dynamic) send,
     Duration timeout = const Duration(seconds: 5),
+    OutboxQueue? outbox,
   })  : _incoming = incoming,
         _send = send,
-        _timeout = timeout {
+        _timeout = timeout,
+        _outbox = outbox {
     _incoming.listen(_onMessage);
   }
 
   String _newRequestId() => 'r${++_nextRequestId}';
 
+  // Étape 5 : si un outbox est fourni, les messages envoyés hors-ligne sont
+  // mis en file ; à la reconnexion (reconnectVersion change), on les rejoue.
+  final OutboxQueue? _outbox;
+  OutboxReplayer? _replayer;
+  int _lastReconnectVersion = 0;
+  ValueListenable<int>? _reconnectVersion;
+  VoidCallback? _reconnectListener;
+
+  void attachReconnect(
+    ValueListenable<int> version,
+    Future<Map<String, dynamic>> Function() resync,
+  ) {
+    _reconnectVersion?.removeListener(_reconnectListener!);
+    _reconnectVersion = version;
+    _reconnectListener = () {
+      final v = version.value;
+      if (v == _lastReconnectVersion) return;
+      _lastReconnectVersion = v;
+      final outbox = _outbox;
+      if (outbox != null && outbox.hasPending) {
+        _replayer ??= OutboxReplayer(
+          queue: outbox,
+          send: (msg) {
+            final clean = Map<String, dynamic>.from(msg)
+              ..remove('queuedAt');
+            _send(clean);
+          },
+          resync: resync,
+        );
+        _replayer!.onReconnect();
+      }
+    };
+    version.addListener(_reconnectListener!);
+  }
+
+  void dispose() {
+    _reconnectVersion?.removeListener(_reconnectListener!);
+    _events.close();
+    for (final c in _pending.values) {
+      c.completeError(StateError('DaemonApi disposed'));
+    }
+    _pending.clear();
+    for (final s in _streams.values) {
+      s.close();
+    }
+    _streams.clear();
+  }
   /// Unary call resolved when a `response`/`error` with the same requestId
   /// arrives (30s timeout).
   Future<Map<String, dynamic>> call(
@@ -50,7 +104,12 @@ class DaemonApi {
     final id = _newRequestId();
     final completer = Completer<Map<String, dynamic>>();
     _pending[id] = completer;
-    _send({'type': type, 'requestId': id, ...params});
+    final message = {'type': type, 'requestId': id, ...params};
+    final outbox = _outbox;
+    if (outbox != null) {
+      outbox.enqueue(message); // file jusqu'à réponse ; drainé à la réponse
+    }
+    _send(message);
     return completer.future.timeout(
       _timeout,
       onTimeout: () {
@@ -102,12 +161,17 @@ class DaemonApi {
     final id = _newRequestId();
     final controller = StreamController<Map<String, dynamic>>();
     _streams[id] = controller;
-    _send({
+    final message = {
       'type': 'send_prompt',
       'requestId': id,
       'cascadeId': cascadeId,
       'prompt': prompt,
-    });
+    };
+    final outbox = _outbox;
+    if (outbox != null) {
+      outbox.enqueue(message); // file jusqu'à stream_end ; drainé à la fin
+    }
+    _send(message);
     return controller.stream;
   }
 
@@ -137,6 +201,10 @@ class DaemonApi {
         return;
       }
       if (type == 'stream_end') {
+        // Livre le message stream_end (outcome structuré) au listener local
+        // AVANT de fermer : onDone ne transporte pas de données.
+        _outbox?.remove(requestId);
+        controller.add(msg);
         controller.close();
         _streams.remove(requestId);
       } else {
@@ -150,22 +218,11 @@ class DaemonApi {
 
     final completer = _pending.remove(requestId);
     if (completer == null) return;
+    _outbox?.remove(requestId); // drain : la réponse est arrivée
     if (type == 'error' || error != null) {
       completer.completeError(Exception(error ?? 'Unknown daemon error'));
     } else {
       completer.complete(data);
     }
-  }
-
-  void dispose() {
-    _events.close();
-    for (final c in _pending.values) {
-      c.completeError(StateError('DaemonApi disposed'));
-    }
-    _pending.clear();
-    for (final s in _streams.values) {
-      s.close();
-    }
-    _streams.clear();
   }
 }

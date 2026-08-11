@@ -30,6 +30,7 @@ type RPCClient interface {
 	GetAllCascades() ([]byte, error)
 	SendMessageStream(cascadeID, text string, onFrame func([]byte) error) error
 	SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error)
+	SetBrowserOpenConversation(cascadeID string) ([]byte, error)
 }
 
 // checkOrigin rejette les navigateurs web arbitraires (CSWSH) tout en
@@ -55,13 +56,17 @@ type Server struct {
 	// writeMu sérialise les écritures : gorilla/websocket n'autorise qu'un
 	// seul writer concurrent par connexion, or le broadcast écrit sur toutes.
 	writeMu sync.Mutex
+	// approvalPending : cascadeId → une approbation est en attente (posée par
+	// MarkApprovalPending quand un événement approval_required est émis).
+	approvalPending map[string]bool
 }
 
 func NewServer(client RPCClient, authToken string) *Server {
 	return &Server{
-		RPCClient: client,
-		AuthToken: authToken,
-		clients:   make(map[*websocket.Conn]bool),
+		RPCClient:       client,
+		AuthToken:       authToken,
+		clients:         make(map[*websocket.Conn]bool),
+		approvalPending: make(map[string]bool),
 	}
 }
 
@@ -115,6 +120,24 @@ type IncomingMessage struct {
 	Prompt        string `json:"prompt,omitempty"`
 	FilePath      string `json:"filePath,omitempty"`
 	Command       string `json:"command,omitempty"`
+}
+
+// hasPendingApproval rapporte si une approbation a été émise pour cette
+// cascade depuis le début du stream courant (marquée par la couche RPC via
+// MarkApprovalPending). Sans marquage, la valeur de repli est false → le
+// stream est classé "done" (comportement hérité, tests inchangés).
+func (s *Server) hasPendingApproval(cascadeID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.approvalPending[cascadeID]
+}
+
+// MarkApprovalPending est appelé par la couche RPC quand un événement
+// approval_required est émis pour une cascade (interface publique du paquet).
+func (s *Server) MarkApprovalPending(cascadeID string) {
+	s.mu.Lock()
+	s.approvalPending[cascadeID] = true
+	s.mu.Unlock()
 }
 
 type OutgoingMessage struct {
@@ -282,7 +305,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 					}
 				}
 			}
-			
+
 			if projectID != "" {
 				log.Printf("[WS] Création de cascade rattachée au projet: %s", projectID)
 			} else {
@@ -308,10 +331,23 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 		s.broadcast(OutgoingMessage{Type: "stream_start", RequestID: msg.RequestID, Data: map[string]string{"cascadeId": msg.CascadeID}})
+		
+		// 1. Force l'IDE à afficher la conversation avant de lancer le prompt
+		if _, errSet := s.RPCClient.SetBrowserOpenConversation(msg.CascadeID); errSet != nil {
+			log.Printf("[WS] Erreur SetBrowserOpenConversation: %v", errSet)
+		}
+
 		frameIndex := 0
 		err = s.RPCClient.SendMessageStream(msg.CascadeID, msg.Prompt, func(frame []byte) error {
 			frameIndex++
 			events := connectrpc.ParseFrameEvents(frame, msg.CascadeID)
+			// Étape 4 : si la frame porte une demande d'approbation, la cascade
+			// est considérée « en attente » — le stream_end le reflètera.
+			for _, ev := range events {
+				if ev.Kind == connectrpc.EventKindApprovalRequired {
+					s.MarkApprovalPending(msg.CascadeID)
+				}
+			}
 			data := map[string]interface{}{
 				"frameIndex": frameIndex,
 				"events":     events,
@@ -329,10 +365,28 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			})
 			return nil
 		})
-		if err != nil {
-			s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, Error: err.Error()})
-		} else {
-			s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID})
+		// Étape 4 : fin structurée — le mobile peut notifier « tâche terminée »,
+		// « erreur » ou « bloquée sur approbation » sans parser les frames.
+		
+		// 3. Force l'IDE à ouvrir cette nouvelle session
+		if _, errSet := s.RPCClient.SetBrowserOpenConversation(msg.CascadeID); errSet != nil {
+			log.Printf("[WS] Erreur SetBrowserOpenConversation: %v", errSet)
+		}
+
+		endData := map[string]interface{}{"cascadeId": msg.CascadeID}
+		switch {
+		case err != nil:
+			endData["outcome"] = "error"
+			endData["message"] = err.Error()
+			s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, Data: endData, Error: err.Error()})
+		case s.hasPendingApproval(msg.CascadeID):
+			endData["outcome"] = "approval"
+			endData["message"] = "Action requise"
+			s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, Data: endData})
+		default:
+			endData["outcome"] = "done"
+			endData["message"] = ""
+			s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, Data: endData})
 		}
 		return
 

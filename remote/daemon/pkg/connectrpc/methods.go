@@ -38,3 +38,7 @@ func (c *Client) Heartbeat() ([]byte, error) {
 
 var _ = fmt.Sprintf // garde l'import fmt si les messages d'erreur évoluent
 
+// SetBrowserOpenConversation force l'IDE Antigravity à s'abonner et ouvrir une session spécifique.
+func (c *Client) SetBrowserOpenConversation(cascadeID string) ([]byte, error) {
+	return c.Call("SetBrowserOpenConversation", BuildSetBrowserOpenConversation(cascadeID))
+}

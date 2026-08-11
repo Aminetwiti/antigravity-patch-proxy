@@ -18,6 +18,11 @@ class DaemonWebSocketClient {
   String _targetUrl = EnvConfig.wsUrl;
   String? _authToken;
 
+  /// Étape 5 : incrémenté à chaque reconnexion réussie. Les consommateurs
+  /// (DaemonApi → replay outbox, UI → re-sync) écoutent ce notifier pour
+  /// savoir quand l'état distant doit être rejoué.
+  final ValueNotifier<int> reconnectVersion = ValueNotifier(0);
+
   Stream<dynamic> get stream =>
       _messageController?.stream ?? const Stream.empty();
 
@@ -48,6 +53,7 @@ class DaemonWebSocketClient {
       );
 
       statusNotifier.value = ConnectionStatus.connected;
+      reconnectVersion.value++; // Étape 5 : signaler la (re)connexion
       if (kDebugMode) {
         print('[DaemonWS] Connected to $_targetUrl');
       }
@@ -112,5 +118,6 @@ class DaemonWebSocketClient {
     disconnect();
     _messageController?.close();
     _messageController = null;
+    reconnectVersion.dispose();
   }
 }

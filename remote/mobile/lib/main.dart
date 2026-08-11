@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'core/network/outbox.dart';
 import 'core/network/websocket_client.dart';
 import 'core/notifications/approval_notifier.dart';
 import 'core/protocol/daemon_api.dart';
@@ -70,6 +71,14 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
   int _activeStreamCount = 0;
   bool _showStillWorking = false;
 
+  /// Dernier message stream_end local (outcome structuré du daemon) —
+  /// consommé dans onDone pour déclencher la notification de fin de tâche.
+  Map<String, dynamic>? _lastLocalStreamEnd;
+
+  /// Étape 5 — Offline-first : file de messages non délivrés, rejouée à la
+  /// reconnexion (prompts envoyés pendant une coupure, approbations…).
+  final OutboxQueue _outbox = OutboxQueue();
+
   @override
   void initState() {
     super.initState();
@@ -85,6 +94,14 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       _api ??= DaemonApi(
         incoming: _wsClient.stream,
         send: _wsClient.send,
+        outbox: _outbox,
+      );
+      // Étape 5 : à chaque (re)connexion, rejouer la queue puis re-synchroniser
+      // l'état complet (list_sessions) — les streams relancés du daemon
+      // arrivent ensuite en broadcast et réaffichent le fil.
+      _api!.attachReconnect(
+        _wsClient.reconnectVersion,
+        _resyncSessions,
       );
       _watchBroadcastStreams();
       _refreshSessions();
@@ -147,6 +164,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                   : current.thought,
             );
           }
+          if (approval != null) {
             _pendingApproval = ToolApprovalRequest(
               callId: approval.callId,
               toolName: approval.tool,
@@ -173,6 +191,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         });
       } else if (type == 'stream_end') {
         _onStreamEnded();
+        _handleStreamEnded(msg);
         setState(() {
           final idx = _messages.indexWhere((m) => m.id == 'ext-$requestId');
           if (idx >= 0) {
@@ -204,6 +223,19 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
   }
 
   List<CascadeSession> _sessions = const [];
+
+  /// Étape 5 : re-synchronisation complète après reconnexion (rejouée par
+  /// [OutboxReplayer] à la fin du flush). Renvoie un map vide en cas d'échec.
+  Future<Map<String, dynamic>> _resyncSessions() async {
+    final api = _api;
+    if (api == null) return const {};
+    try {
+      await _refreshSessions();
+      return const {'ok': true};
+    } catch (_) {
+      return const {};
+    }
+  }
 
   @override
   void dispose() {
@@ -243,6 +275,23 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     }
   }
 
+  /// Étape 4 : fin structurée — notifie « tâche terminée », « erreur » ou
+  /// « action requise » quand le daemon a émis stream_end avec outcome.
+  /// Ignorée si l'utilisateur est actif sur le PC hôte (il voit déjà la fin).
+  void _handleStreamEnded(Map<String, dynamic> msg) {
+    final data = msg['data'];
+    if (data is! Map<String, dynamic>) return;
+    if (msg['data']?['hostActive'] == true) return;
+    final outcome = data['outcome'] as String? ?? 'done';
+    final cascadeId = data['cascadeId'] as String? ?? _activeSessionId;
+    final message = data['message'] as String? ?? '';
+    ApprovalNotifier.instance.notifyTaskEnded(
+      cascadeId: cascadeId,
+      outcome: outcome,
+      message: message,
+    );
+  }
+
   void _handleSendMessage(String text) {
     final api = _api;
     setState(() {
@@ -271,8 +320,14 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
 
     var thoughtBuffer = StringBuffer();
     _onStreamStarted(); // Étape 4 : le stream local démarre
+    _lastLocalStreamEnd = null; // Étape 4 : nouvelle tâche = nouveau résultat
     _streamSub = api.sendPrompt(_activeSessionId, text).listen(
       (msg) {
+        if (msg['type'] == 'stream_end') {
+          // Étape 4 : on capture l'outcome structuré AVANT la fermeture du
+          // stream (onDone ne transporte pas de données).
+          _lastLocalStreamEnd = msg;
+        }
         final textDelta = StreamDeltaParser.textOf(msg);
         final thoughtDelta = StreamDeltaParser.thinkingOf(msg);
         final approval = StreamDeltaParser.approvalOf(msg);
@@ -317,6 +372,9 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       onDone: () {
         if (!mounted) return;
         _onStreamEnded();
+        // Étape 4 : le daemon enrichit stream_end d'un outcome structuré
+        // (done/error/approval) — on le remonte en notification locale.
+        _handleStreamEnded(_lastLocalStreamEnd ?? const {});
         setState(() {
           final idx = _messages.indexWhere((m) => m.id == assistantId);
           if (idx >= 0) {
@@ -327,6 +385,11 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       onError: (e) {
         if (!mounted) return;
         _onStreamEnded();
+        ApprovalNotifier.instance.notifyTaskEnded(
+          cascadeId: _activeSessionId,
+          outcome: 'error',
+          message: e.toString(),
+        );
         setState(() {
           final idx = _messages.indexWhere((m) => m.id == assistantId);
           if (idx >= 0) {
