@@ -45,3 +45,4 @@ ag-doctor-ui/release/
 # Temporary text outputs from scripts
 scripts/freebuff/extraction-output.txt
 scripts/freebuff/pkce-output.txt
+remote/tools/*

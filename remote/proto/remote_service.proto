@@ -1,0 +1,91 @@
+syntax = "proto3";
+
+package antigravity.remote.v1;
+
+option go_package = "github.com/antigravity/remote-daemon/pkg/proto/v1;remotepb";
+
+// Core WebSocket request wrapper sent from Mobile App to Daemon
+message MobileRequest {
+  string request_id = 1;
+  oneof payload {
+    CreateCascadeRequest create_cascade = 2;
+    SendPromptRequest send_prompt = 3;
+    SubmitApprovalRequest submit_approval = 4;
+    ListSessionsRequest list_sessions = 5;
+  }
+}
+
+// Core WebSocket response wrapper sent from Daemon to Mobile App
+message DaemonEvent {
+  string request_id = 1;
+  string cascade_id = 2;
+  int64 timestamp_ms = 3;
+  
+  oneof payload {
+    TextDeltaEvent text_delta = 4;
+    ToolCallEvent tool_call = 5;
+    ApprovalRequiredEvent approval_required = 6;
+    FinishedEvent finished = 7;
+    SessionListEvent session_list = 8;
+    ErrorEvent error = 9;
+  }
+}
+
+message CreateCascadeRequest {
+  string workspace_path = 1;
+}
+
+message SendPromptRequest {
+  string cascade_id = 1;
+  string prompt = 2;
+}
+
+message SubmitApprovalRequest {
+  string cascade_id = 1;
+  string call_id = 2;
+  enum Decision {
+    DECISION_UNSPECIFIED = 0;
+    DECISION_ALLOW = 1;
+    DECISION_DENY = 2;
+  }
+  Decision decision = 3;
+}
+
+message ListSessionsRequest {}
+
+message TextDeltaEvent {
+  string delta = 1;
+}
+
+message ToolCallEvent {
+  string call_id = 1;
+  string tool_name = 2;
+  string json_args = 3;
+}
+
+message ApprovalRequiredEvent {
+  string call_id = 1;
+  string tool_name = 2;
+  string command = 3;
+  string description = 4;
+}
+
+message FinishedEvent {
+  string reason = 1;
+}
+
+message SessionInfo {
+  string cascade_id = 1;
+  string workspace_path = 2;
+  string status = 3;
+  int64 created_at_ms = 4;
+}
+
+message SessionListEvent {
+  repeated SessionInfo sessions = 1;
+}
+
+message ErrorEvent {
+  int32 code = 1;
+  string message = 2;
+}
