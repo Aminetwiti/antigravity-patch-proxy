@@ -94,6 +94,9 @@ func (l *loadRPCClient) SendMessageStream(cascadeID, text string, onFrame func([
 func (l *loadRPCClient) SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("ok")), nil
 }
+func (l *loadRPCClient) SetBrowserOpenConversation(cascadeID string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("ok")), nil
+}
 
 // TestWebSocketConcurrentClients — 20 clients en parallèle, 30 messages chacun :
 // aucun message ne doit être perdu ni mélangé (chaque réponse doit porter
@@ -223,6 +226,9 @@ func (f *failingStreamClient) SendMessageStream(cascadeID, text string, onFrame 
 	return fmt.Errorf("stream interrompu par le backend")
 }
 func (f *failingStreamClient) SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("ok")), nil
+}
+func (f *failingStreamClient) SetBrowserOpenConversation(cascadeID string) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("ok")), nil
 }
 

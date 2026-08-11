@@ -82,9 +82,12 @@ class ToolApproval {
   String get command => _extractCommand(detail);
 
   static String _extractCommand(String detail) {
-    final m = RegExp(r'"command_line"\s*:\s*"((?:[^"\\]|\\.)*)"')
+    final m = RegExp(
+          r'"(command_line|commandline)"\s*:\s*"((?:[^"\\]|\\.)*)"',
+          caseSensitive: false,
+        )
         .firstMatch(detail);
-    if (m != null) return m.group(1)!.replaceAll(r'\n', '\n');
+    if (m != null) return m.group(2)!.replaceAll(r'\n', '\n');
     // Fallback: first quoted line that looks like a shell command.
     for (final line in detail.split('\n')) {
       final t = line.trim();

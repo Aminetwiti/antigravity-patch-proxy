@@ -114,7 +114,7 @@ type IncomingMessage struct {
 	CascadeID     string `json:"cascadeId,omitempty"`
 	CallID        string `json:"callId,omitempty"`
 	TrajectoryID  string `json:"trajectoryId,omitempty"`
-	StepIndex     uint32 `json:"stepIndex,omitempty"`
+	StepIndex     int64  `json:"stepIndex,omitempty"`
 	ApprovalType  string `json:"approvalType,omitempty"`
 	Decision      string `json:"decision,omitempty"`
 	Prompt        string `json:"prompt,omitempty"`
@@ -412,7 +412,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		default:
 			oneofPayload = connectrpc.BuildApprovalInteraction(confirm)
 		}
-		raw, err = s.RPCClient.SubmitToolApproval(msg.CascadeID, msg.TrajectoryID, msg.StepIndex, oneofField, oneofPayload)
+		if msg.TrajectoryID != "" && msg.StepIndex >= 0 {
+			raw, err = s.RPCClient.SubmitToolApproval(msg.CascadeID, msg.TrajectoryID, uint32(msg.StepIndex), oneofField, oneofPayload)
+		} else {
+			err = fmt.Errorf("trajectoryId + stepIndex requis (protocole HandleCascadeUserInteraction)")
+		}
 
 	case "list_files":
 		if msg.WorkspacePath == "" {

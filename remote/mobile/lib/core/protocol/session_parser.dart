@@ -18,22 +18,28 @@ class SessionParser {
       var out = <CascadeSession>[];
       for (final s in sessions) {
         if (s is Map<String, dynamic>) {
-          // Filtrer les sessions orphelines (sans projet valide)
           final projectId = s['projectId'] as String?;
-          if (projectId != null && projectId.isNotEmpty && projectId != 'N/A') {
+          // Filtrer uniquement les sessions orphelines explicites (projectId
+          // "N/A" posé par le daemon) — une session sans projectId (gateway
+          // legacy) ou vide doit rester visible, sinon l'écran est vide.
+          if (projectId != 'N/A') {
             out.add(CascadeSession.fromJson(s));
           }
         }
       }
       if (out.isNotEmpty) {
-        // Tri par date de mise à jour décroissante
-        out.sort((a, b) {
-          final aJson = sessions.firstWhere((s) => s['cascadeId'] == a.id, orElse: () => <String, dynamic>{});
-          final bJson = sessions.firstWhere((s) => s['cascadeId'] == b.id, orElse: () => <String, dynamic>{});
-          final aDate = DateTime.tryParse(aJson['updatedAt'] as String? ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
-          final bDate = DateTime.tryParse(bJson['updatedAt'] as String? ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
-          return bDate.compareTo(aDate);
-        });
+        // Tri par date de mise à jour décroissante.
+        final byId = <String, DateTime>{};
+        for (final s in sessions) {
+          if (s is Map && s['cascadeId'] is String) {
+            byId[s['cascadeId'] as String] =
+                DateTime.tryParse(s['updatedAt'] as String? ?? '') ??
+                    DateTime.fromMillisecondsSinceEpoch(0);
+          }
+        }
+        out.sort((a, b) =>
+            (byId[b.id] ?? DateTime.fromMillisecondsSinceEpoch(0))
+                .compareTo(byId[a.id] ?? DateTime.fromMillisecondsSinceEpoch(0)));
         return out;
       }
     }

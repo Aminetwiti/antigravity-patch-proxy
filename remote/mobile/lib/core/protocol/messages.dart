@@ -88,6 +88,7 @@ class ToolApprovalRequest {
   final String trajectoryId;
   final int stepIndex;
   final String approvalType;
+  final String? filePath;
 
   const ToolApprovalRequest({
     required this.callId,
@@ -98,6 +99,7 @@ class ToolApprovalRequest {
     this.trajectoryId = '',
     this.stepIndex = -1,
     this.approvalType = 'approval',
+    this.filePath,
   });
 
   factory ToolApprovalRequest.fromJson(Map<String, dynamic> json) {
@@ -111,6 +113,7 @@ class ToolApprovalRequest {
       trajectoryId: json['trajectoryId'] ?? '',
       stepIndex: (json['stepIndex'] as num?)?.toInt() ?? -1,
       approvalType: json['approvalType'] ?? 'approval',
+      filePath: json['filePath'],
     );
   }
 }

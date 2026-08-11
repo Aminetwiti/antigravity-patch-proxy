@@ -95,7 +95,10 @@ void main() {
       ToolApproval? approval;
       final done = Completer<void>();
       stream.listen(
-        (msg) => approval = StreamDeltaParser.approvalOf(msg),
+        (msg) {
+          final a = StreamDeltaParser.approvalOf(msg);
+          if (a != null) approval = a;
+        },
         onDone: done.complete,
       );
 
@@ -193,9 +196,13 @@ void main() {
       final outgoing = <Map<String, dynamic>>[];
       final controller = StreamController<dynamic>();
       final outbox = OutboxQueue();
+      // Simule le gate réseau du vrai client : hors-ligne, _send est un no-op.
+      var online = false;
       final api = DaemonApi(
         incoming: controller.stream,
-        send: (data) => outgoing.add(data as Map<String, dynamic>),
+        send: (data) {
+          if (online) outgoing.add(data as Map<String, dynamic>);
+        },
         outbox: outbox,
       );
       final version = ValueNotifier<int>(0);
@@ -213,6 +220,7 @@ void main() {
       expect(outgoing, isEmpty);
 
       // Reconnexion : version++ → replay de la queue puis re-sync.
+      online = true;
       version.value = 1;
       await Future<void>.delayed(Duration.zero);
       expect(outgoing, hasLength(1));
@@ -220,7 +228,7 @@ void main() {
       expect(outgoing.first['prompt'], 'important prompt');
       expect(outgoing.first.containsKey('queuedAt'), isFalse);
 
-      // La réponse arrive → le message est drainé de la queue.
+      // La réponse arrive → le message est drainé de la queue (stream_end).
       final requestId = outgoing.first['requestId'] as String;
       controller.add(jsonEncode({
         'type': 'stream_start',
@@ -230,14 +238,16 @@ void main() {
       controller.add(jsonEncode({
         'type': 'stream_end',
         'requestId': requestId,
+        'data': {'cascadeId': 'c1', 'outcome': 'done'},
       }));
       await Future<void>.delayed(Duration.zero);
       expect(outbox.pendingCount, 0);
 
-      // Nouvelle reconnexion : rien à rejouer, mais re-sync quand même.
+      // Nouvelle reconnexion : la queue est vide → le replayer ne tourne pas
+      // (pas de re-sync). Seul le flush de la reconnexion v1 a resyncé.
       version.value = 2;
       await Future<void>.delayed(Duration.zero);
-      expect(resyncCount, 2);
+      expect(resyncCount, 1);
 
       await controller.close();
       api.dispose();

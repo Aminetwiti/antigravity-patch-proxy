@@ -91,6 +91,10 @@ func (f *fakeRPCClient) SubmitToolApproval(cascadeID, trajectoryID string, stepI
 	return connectrpc.Frame(pbTextFrame("ok")), nil
 }
 
+func (f *fakeRPCClient) SetBrowserOpenConversation(cascadeID string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("ok")), nil
+}
+
 // --- Tests WebSocket ---
 
 type wsTestClient struct {
@@ -191,6 +195,58 @@ func TestWebSocketSendPromptStream(t *testing.T) {
 	if end["type"] != "stream_end" || end["error"] != nil {
 		t.Fatalf("Attendu stream_end sans erreur, reçu %v", end)
 	}
+}
+
+// TestWebSocketStreamEndOutcome — le daemon enrichit stream_end d'un
+// outcome structuré : "done" en succès, "approval" quand une frame a porté
+// une demande d'approbation, "error" quand le backend échoue. Le mobile
+// s'en sert pour notifier la fin de tâche (task done / action requise).
+func TestWebSocketStreamEndOutcome(t *testing.T) {
+	t.Run("success => done", func(t *testing.T) {
+		srv := newTestServer(&fakeRPCClient{streamDeltas: []string{"ok"}})
+		defer srv.Close()
+		client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+		defer client.conn.Close()
+		client.send(t, map[string]string{
+			"type": "send_prompt", "requestId": "r9",
+			"cascadeId": "casc-1", "prompt": "travaille",
+		})
+		for {
+			msg := client.recv(t)
+			if msg["type"] != "stream_end" {
+				continue
+			}
+			data, _ := msg["data"].(map[string]interface{})
+			if data == nil || data["outcome"] != "done" {
+				t.Fatalf("Attendu outcome=done, reçu %v", msg)
+			}
+			return
+		}
+	})
+
+	t.Run("approval frame => approval", func(t *testing.T) {
+		// La frame porte run_command → ParseFrameEvents émet
+		// EventKindApprovalRequired → le gateway classe stream_end "approval".
+		srv := newTestServer(&fakeRPCClient{streamDeltas: []string{`{"run_command":"npx jest","step_index":1,"trajectory_id":"123e4567-e89b-12d3-a456-426614174000"}`}})
+		defer srv.Close()
+		client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+		defer client.conn.Close()
+		client.send(t, map[string]string{
+			"type": "send_prompt", "requestId": "r9",
+			"cascadeId": "casc-1", "prompt": "travaille",
+		})
+		for {
+			msg := client.recv(t)
+			if msg["type"] != "stream_end" {
+				continue
+			}
+			data, _ := msg["data"].(map[string]interface{})
+			if data == nil || data["outcome"] != "approval" {
+				t.Fatalf("Attendu outcome=approval (frame run_command), reçu %v", msg)
+			}
+			return
+		}
+	})
 }
 
 // TestWebSocketSendPromptMissingFields — validation des champs requis.

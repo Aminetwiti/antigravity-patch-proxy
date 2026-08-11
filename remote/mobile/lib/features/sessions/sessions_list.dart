@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../core/protocol/messages.dart';
-import '../theme/app_colors.dart';
+import '../../core/protocol/messages.dart';
+import '../../theme/app_colors.dart';
 
 class LeftSidebarDrawer extends StatelessWidget {
   final String activeSessionId;
