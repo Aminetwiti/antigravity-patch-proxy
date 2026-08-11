@@ -69,6 +69,14 @@ const api = {
   // Network Utils
   getLocalIp: (): Promise<string> => ipcRenderer.invoke('ag:network:getLocalIp'),
   generateQr: (text: string): Promise<string> => ipcRenderer.invoke('ag:network:generateQr', text),
+  startDaemon: (options: { port: number; tunnel: string; token: string }): Promise<void> => 
+    ipcRenderer.invoke('ag:network:startDaemon', options),
+  stopDaemon: (): Promise<void> => ipcRenderer.invoke('ag:network:stopDaemon'),
+  onDaemonLog: (callback: (data: string) => void) => {
+    const handler = (_event: any, data: string) => callback(data);
+    ipcRenderer.on('ag:network:daemonLog', handler);
+    return () => ipcRenderer.removeListener('ag:network:daemonLog', handler);
+  },
 
   // Antigravity lifecycle (version, status, launch, kill, restart)
   antigravityStatus: (): Promise<{ ok: boolean; data?: unknown; error?: string }> =>

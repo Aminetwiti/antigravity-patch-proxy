@@ -16,18 +16,55 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
+// RPCClient est l'ensemble des méthodes du backend LanguageServer utilisées
+// par le gateway (interface minimale pour permettre les tests avec un faux).
+type RPCClient interface {
+	Heartbeat() ([]byte, error)
+	CreateCascade(workspaceURI string, requestedModel uint64) ([]byte, error)
+	GetAllCascades() ([]byte, error)
+	SendMessageStream(cascadeID, text string, onFrame func([]byte) error) error
+	SubmitToolApproval(cascadeID, callID string, decision uint64) ([]byte, error)
+}
+
 type Server struct {
-	RPCClient *connectrpc.Client
+	RPCClient RPCClient
 	AuthToken string
 	clients   map[*websocket.Conn]bool
 	mu        sync.Mutex
+	// writeMu sérialise les écritures : gorilla/websocket n'autorise qu'un
+	// seul writer concurrent par connexion, or le broadcast écrit sur toutes.
+	writeMu sync.Mutex
 }
 
-func NewServer(client *connectrpc.Client, authToken string) *Server {
+func NewServer(client RPCClient, authToken string) *Server {
 	return &Server{
 		RPCClient: client,
 		AuthToken: authToken,
 		clients:   make(map[*websocket.Conn]bool),
+	}
+}
+
+// writeJSON envoie un message à une connexion donnée (writer unique sérialisé).
+func (s *Server) writeJSON(conn *websocket.Conn, msg OutgoingMessage) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if err := conn.WriteJSON(msg); err != nil {
+		log.Printf("[WS] Write error: %v", err)
+	}
+}
+
+// broadcast envoie le même message à TOUS les clients connectés : c'est ce qui
+// permet la synchronisation multi-surface (un téléphone voit le stream déclenché
+// par le PC ou par un autre téléphone).
+func (s *Server) broadcast(msg OutgoingMessage) {
+	s.mu.Lock()
+	conns := make([]*websocket.Conn, 0, len(s.clients))
+	for c := range s.clients {
+		conns = append(conns, c)
+	}
+	s.mu.Unlock()
+	for _, c := range conns {
+		s.writeJSON(c, msg)
 	}
 }
 
@@ -72,24 +109,13 @@ func toOutgoing(raw []byte) interface{} {
 			item["bytes"] = len(f.Bytes)
 			// tente une lecture UTF-8 lisible (cascadeId, workspace, texte…)
 			s := strings.TrimSpace(string(f.Bytes))
-			if s != "" && isPrintable(s) && len(s) < 300 {
+			if s != "" && connectrpc.IsPrintable(s) && len(s) < 300 {
 				item["text"] = s
 			}
 		}
 		items = append(items, item)
 	}
 	return map[string]interface{}{"fields": items, "rawBytes": len(raw)}
-}
-
-func isPrintable(s string) bool {
-	for _, r := range s {
-		if r < 0x20 || r > 0x7e {
-			if r != '\n' && r != '\t' && r != '\r' {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -135,7 +161,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		var msg IncomingMessage
 		if err := json.Unmarshal(message, &msg); err != nil {
-			conn.WriteJSON(OutgoingMessage{Type: "error", Error: "Invalid JSON format"})
+			s.writeJSON(conn, OutgoingMessage{Type: "error", Error: "Invalid JSON format"})
 			continue
 		}
 		s.handleAction(conn, msg)
@@ -144,7 +170,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 	uri := msg.WorkspaceURI
-	if uri == "" {
+	if uri == "" && msg.WorkspacePath != "" {
 		uri = toWorkspaceURI(msg.WorkspacePath)
 	}
 
@@ -168,15 +194,15 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 	case "send_prompt":
 		if msg.CascadeID == "" || msg.Prompt == "" {
 			err = fmt.Errorf("cascadeId + prompt requis")
-			conn.WriteJSON(OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
 			return
 		}
-		conn.WriteJSON(OutgoingMessage{Type: "stream_start", RequestID: msg.RequestID, Data: map[string]string{"cascadeId": msg.CascadeID}})
+		s.broadcast(OutgoingMessage{Type: "stream_start", RequestID: msg.RequestID, Data: map[string]string{"cascadeId": msg.CascadeID}})
 		frameIndex := 0
 		err = s.RPCClient.SendMessageStream(msg.CascadeID, msg.Prompt, func(frame []byte) error {
 			frameIndex++
 			events := connectrpc.ParseFrameEvents(frame, msg.CascadeID)
-			conn.WriteJSON(OutgoingMessage{
+			s.broadcast(OutgoingMessage{
 				Type:      "stream_delta",
 				RequestID: msg.RequestID,
 				Data: map[string]interface{}{
@@ -188,9 +214,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return nil
 		})
 		if err != nil {
-			conn.WriteJSON(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, Error: err.Error()})
+			s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, Error: err.Error()})
 		} else {
-			conn.WriteJSON(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID})
+			s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID})
 		}
 		return
 
@@ -202,13 +228,13 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		raw, err = s.RPCClient.SubmitToolApproval(msg.CascadeID, msg.CallID, decision)
 
 	default:
-		conn.WriteJSON(OutgoingMessage{Type: "error", RequestID: msg.RequestID, Error: "Unknown action type: " + msg.Type})
+		s.writeJSON(conn, OutgoingMessage{Type: "error", RequestID: msg.RequestID, Error: "Unknown action type: " + msg.Type})
 		return
 	}
 
 	if err != nil {
-		conn.WriteJSON(OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
 		return
 	}
-	conn.WriteJSON(OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+	s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
 }

@@ -123,7 +123,7 @@ func (f Field) String() string {
 func readVarint(buf []byte, offset int) (uint64, int) {
 	var result uint64
 	var shift uint
-	for {
+	for offset < len(buf) {
 		b := buf[offset]
 		result |= uint64(b&0x7f) << shift
 		offset++

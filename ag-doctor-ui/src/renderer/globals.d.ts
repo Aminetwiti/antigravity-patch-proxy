@@ -92,6 +92,9 @@ interface AgAPI {
   // Network Utils
   getLocalIp: () => Promise<string>;
   generateQr: (text: string) => Promise<string>;
+  startDaemon: (options: { port: number; tunnel: string; token: string }) => Promise<void>;
+  stopDaemon: () => Promise<void>;
+  onDaemonLog: (callback: (data: string) => void) => () => void;
 
   // Antigravity lifecycle
   antigravityStatus(): Promise<{ ok: boolean; data?: unknown; error?: string }>;

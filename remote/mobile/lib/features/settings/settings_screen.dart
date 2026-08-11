@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../config/env_config.dart';
 import '../../theme/app_colors.dart';
+import 'appearance_settings_section.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -255,6 +256,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
           ),
+
+          // ── APPEARANCE
+          const _SectionTitle(title: 'APPEARANCE'),
+          const SizedBox(height: 8),
+          const AppearanceSettingsSection(),
 
           const SizedBox(height: 20),
 

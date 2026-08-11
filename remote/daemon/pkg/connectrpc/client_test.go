@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"testing"
 )
 
@@ -16,6 +18,15 @@ func frame(flags byte, payload []byte) []byte {
 	binary.BigEndian.PutUint32(buf[1:5], uint32(len(payload)))
 	copy(buf[5:], payload)
 	return buf
+}
+
+// testClient pointe un Client vers un serveur httptest (l'URL est Host:Port).
+func testClient(serverURL, token string) *Client {
+	u, _ := url.Parse(serverURL)
+	port, _ := strconv.Atoi(u.Port())
+	c := NewClient(port, token)
+	c.Host = u.Hostname()
+	return c
 }
 
 // --- Tests de splitFrames (logique pure de découpage des frames) ---
@@ -123,8 +134,7 @@ func TestCallStream_Integration(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(0, "tok-123")
-	client.Host = "127.0.0.1"
+	client := testClient(server.URL, "tok-123")
 	client.HTTP = server.Client()
 
 	var got [][]byte
@@ -151,8 +161,7 @@ func TestCallStream_HTTPError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(0, "tok")
-	client.Host = "127.0.0.1"
+	client := testClient(server.URL, "tok")
 	client.HTTP = server.Client()
 
 	err := client.CallStream("Heartbeat", nil, 5e9, func(f []byte) error { return nil })
@@ -167,8 +176,7 @@ func TestCallStream_OnFrameErrorStops(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(0, "tok")
-	client.Host = "127.0.0.1"
+	client := testClient(server.URL, "tok")
 	client.HTTP = server.Client()
 
 	calls := 0

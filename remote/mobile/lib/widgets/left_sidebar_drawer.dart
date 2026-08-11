@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/protocol/messages.dart';
 import '../theme/app_colors.dart';
 
 class LeftSidebarDrawer extends StatelessWidget {
@@ -8,6 +9,7 @@ class LeftSidebarDrawer extends StatelessWidget {
   final VoidCallback? onOpenSettings;
   final VoidCallback? onDiscover;
   final VoidCallback? onOpenWorkspace;
+  final List<CascadeSession>? sessions;
 
   const LeftSidebarDrawer({
     super.key,
@@ -17,6 +19,7 @@ class LeftSidebarDrawer extends StatelessWidget {
     this.onOpenSettings,
     this.onDiscover,
     this.onOpenWorkspace,
+    this.sessions,
   });
 
   @override
@@ -127,7 +130,7 @@ class LeftSidebarDrawer extends StatelessWidget {
                 children: [
                   _ProjectFolderGroup(
                     folderName: 'antigravity-add-model-main',
-                    sessions: const [
+                    sessions: sessions ?? const [
                       _SessionItemData('s1', 'Mobile App Project Plan...', '3m'),
                       _SessionItemData('s2', 'Mobile App Remote Infra...', '10m'),
                       _SessionItemData('s3', 'Poème Sur La Gravité', '50m'),
@@ -235,7 +238,7 @@ class _SessionItemData {
 
 class _ProjectFolderGroup extends StatelessWidget {
   final String folderName;
-  final List<_SessionItemData> sessions;
+  final List<dynamic> sessions;
   final String activeSessionId;
   final Function(String id) onSessionTap;
 
@@ -272,11 +275,14 @@ class _ProjectFolderGroup extends StatelessWidget {
           ),
         ),
         ...sessions.map((s) {
-          final isSelected = s.id == activeSessionId;
+          final itemId = s is CascadeSession ? s.id : (s as _SessionItemData).id;
+          final itemTitle = s is CascadeSession ? s.title : (s as _SessionItemData).title;
+          final itemTime = s is CascadeSession ? '' : (s as _SessionItemData).time;
+          final isSelected = itemId == activeSessionId;
           return Padding(
             padding: const EdgeInsets.only(left: 12, top: 2, bottom: 2),
             child: InkWell(
-              onTap: () => onSessionTap(s.id),
+              onTap: () => onSessionTap(itemId),
               borderRadius: BorderRadius.circular(6),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -288,7 +294,7 @@ class _ProjectFolderGroup extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        s.title,
+                        itemTitle,
                         style: TextStyle(
                           fontSize: 12.5,
                           color: isSelected ? AppColors.inkPrimary : AppColors.inkSecondary,
@@ -297,10 +303,10 @@ class _ProjectFolderGroup extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    if (s.time.isNotEmpty) ...[
+                    if (itemTime.isNotEmpty) ...[
                       const SizedBox(width: 6),
                       Text(
-                        s.time,
+                        itemTime,
                         style: const TextStyle(fontSize: 11, color: AppColors.inkMuted),
                       ),
                     ],

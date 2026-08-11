@@ -22,6 +22,7 @@ class DaemonApi {
   final Map<String, StreamController<Map<String, dynamic>>> _streams = {};
   final StreamController<Map<String, dynamic>> _events =
       StreamController<Map<String, dynamic>>.broadcast();
+  final Duration _timeout;
 
   int _nextRequestId = 0;
 
@@ -31,8 +32,10 @@ class DaemonApi {
   DaemonApi({
     required Stream<dynamic> incoming,
     required void Function(dynamic) send,
+    Duration timeout = const Duration(seconds: 5),
   })  : _incoming = incoming,
-        _send = send {
+        _send = send,
+        _timeout = timeout {
     _incoming.listen(_onMessage);
   }
 
@@ -49,7 +52,7 @@ class DaemonApi {
     _pending[id] = completer;
     _send({'type': type, 'requestId': id, ...params});
     return completer.future.timeout(
-      const Duration(seconds: 30),
+      _timeout,
       onTimeout: () {
         _pending.remove(id);
         throw TimeoutException('Daemon did not respond to $type ($id)');
@@ -106,21 +109,28 @@ class DaemonApi {
     final data = (msg['data'] as Map<String, dynamic>?) ?? const {};
     final error = msg['error'] as String?;
 
-    _events.add(msg);
-
     if (type == 'stream_start' ||
         type == 'stream_delta' ||
         type == 'stream_end') {
       final controller = _streams[requestId];
-      if (controller == null) return;
+      if (controller == null) {
+        // Stream déclenché par une AUTRE surface (PC ou autre téléphone) :
+        // le broadcast daemon le relaie ici sans requestId local. On le
+        // réémet sur _events (marqué) pour que l'UI suive la session.
+        _events.add({...msg, 'broadcast': true});
+        return;
+      }
       if (type == 'stream_end') {
         controller.close();
         _streams.remove(requestId);
       } else {
         controller.add(msg);
       }
+      _events.add(msg);
       return;
     }
+
+    _events.add(msg);
 
     final completer = _pending.remove(requestId);
     if (completer == null) return;

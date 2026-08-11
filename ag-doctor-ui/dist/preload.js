@@ -37,6 +37,13 @@ const api = {
     // Network Utils
     getLocalIp: () => electron_1.ipcRenderer.invoke('ag:network:getLocalIp'),
     generateQr: (text) => electron_1.ipcRenderer.invoke('ag:network:generateQr', text),
+    startDaemon: (options) => electron_1.ipcRenderer.invoke('ag:network:startDaemon', options),
+    stopDaemon: () => electron_1.ipcRenderer.invoke('ag:network:stopDaemon'),
+    onDaemonLog: (callback) => {
+        const handler = (_event, data) => callback(data);
+        electron_1.ipcRenderer.on('ag:network:daemonLog', handler);
+        return () => electron_1.ipcRenderer.removeListener('ag:network:daemonLog', handler);
+    },
     // Antigravity lifecycle (version, status, launch, kill, restart)
     antigravityStatus: () => electron_1.ipcRenderer.invoke('ag:antigravity:status'),
     antigravityVersion: () => electron_1.ipcRenderer.invoke('ag:antigravity:version'),

@@ -4126,25 +4126,81 @@ const remoteQrContainer = $('#remoteQrContainer');
 const remoteQrImage = $('#remoteQrImage') as HTMLImageElement;
 const remoteQrPlaceholder = $('#remoteQrPlaceholder');
 const remoteStatusText = $('#remoteStatusText');
+const remotePort = $('#remotePort') as HTMLInputElement;
+const remoteTunnel = $('#remoteTunnel') as HTMLSelectElement;
+const remoteAuthToken = $('#remoteAuthToken') as HTMLInputElement;
+const remoteConsole = $('#remoteConsole') as HTMLTextAreaElement;
+
+let isDaemonRunning = false;
+
+if (window.ag && window.ag.onDaemonLog) {
+  window.ag.onDaemonLog((data: string) => {
+    if (remoteConsole) {
+      remoteConsole.value += data;
+      remoteConsole.scrollTop = remoteConsole.scrollHeight;
+
+      // Extract tunnel URL (Pinggy or Cloudflare) from logs to generate QR Code dynamically!
+      // Looking for wss://...
+      const match = data.match(/wss:\/\/[^\s]+/);
+      if (match && remoteQrImage) {
+        const tunnelUrl = match[0];
+        window.ag.generateQr(tunnelUrl).then((dataUrl) => {
+          remoteQrImage.src = dataUrl;
+          if (remoteQrPlaceholder) remoteQrPlaceholder.style.display = 'none';
+          if (remoteQrContainer) remoteQrContainer.style.display = 'block';
+          if (remoteStatusText) remoteStatusText.innerHTML = `Tunnel ready: <b>${tunnelUrl}</b>`;
+        });
+      }
+    }
+  });
+}
 
 if (startRemoteBtn) {
   startRemoteBtn.addEventListener('click', async () => {
+    if (isDaemonRunning) {
+      // Arrêter le démon
+      await window.ag.stopDaemon();
+      isDaemonRunning = false;
+      startRemoteBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Start Remote Server';
+      startRemoteBtn.classList.remove('btn-danger');
+      if (remoteStatusText) remoteStatusText.textContent = 'Server stopped.';
+      if (remoteQrContainer) remoteQrContainer.style.display = 'none';
+      if (remoteQrPlaceholder) remoteQrPlaceholder.style.display = 'flex';
+      return;
+    }
+
     try {
       startRemoteBtn.setAttribute('disabled', 'true');
       if (remoteStatusText) remoteStatusText.textContent = 'Starting server...';
+      if (remoteConsole) remoteConsole.value = ''; // clear console
       
-      const ip = await window.ag.getLocalIp();
-      const port = 8089; // Fixed for now, daemon will listen here
-      const text = `ws://${ip}:${port}/ws`;
-      
-      const dataUrl = await window.ag.generateQr(text);
-      if (remoteQrImage) remoteQrImage.src = dataUrl;
-      
-      if (remoteQrPlaceholder) remoteQrPlaceholder.style.display = 'none';
-      if (remoteQrContainer) remoteQrContainer.style.display = 'block';
-      if (remoteStatusText) {
-          remoteStatusText.innerHTML = `Server listening on <b>${ip}:${port}</b><br/><br/><i>Go Daemon must be running!</i>`;
+      const port = parseInt(remotePort?.value || '8080');
+      const tunnel = remoteTunnel?.value || 'none';
+      let token = remoteAuthToken?.value || '';
+
+      if (!token) {
+        token = Math.random().toString(36).substring(2, 10);
+        if (remoteAuthToken) remoteAuthToken.value = token;
       }
+
+      await window.ag.startDaemon({ port, tunnel, token });
+
+      // If tunnel is "none", we generate a local IP QR code immediately
+      if (tunnel === 'none') {
+        const ip = await window.ag.getLocalIp();
+        const wsUrl = `ws://${ip}:${port}/ws?token=${token}`;
+        const dataUrl = await window.ag.generateQr(wsUrl);
+        if (remoteQrImage) remoteQrImage.src = dataUrl;
+        if (remoteQrPlaceholder) remoteQrPlaceholder.style.display = 'none';
+        if (remoteQrContainer) remoteQrContainer.style.display = 'block';
+        if (remoteStatusText) {
+            remoteStatusText.innerHTML = `Server listening on <b>${ip}:${port}</b> (Local Network)`;
+        }
+      }
+
+      isDaemonRunning = true;
+      startRemoteBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg> Stop Remote Server';
+      startRemoteBtn.classList.add('btn-danger');
     } catch (e: any) {
       if (remoteStatusText) remoteStatusText.textContent = `Error: ${e.message}`;
     } finally {

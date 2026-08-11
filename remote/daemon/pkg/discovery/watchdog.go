@@ -8,9 +8,10 @@ import (
 )
 
 type Watchdog struct {
-	Client   *connectrpc.Client
-	Interval time.Duration
-	stopChan chan struct{}
+	Client    *connectrpc.Client
+	Interval  time.Duration
+	stopChan  chan struct{}
+	discover  func() (*LocalHarnessInfo, error)
 }
 
 func NewWatchdog(client *connectrpc.Client, interval time.Duration) *Watchdog {
@@ -18,9 +19,10 @@ func NewWatchdog(client *connectrpc.Client, interval time.Duration) *Watchdog {
 		interval = 10 * time.Second
 	}
 	return &Watchdog{
-		Client:   client,
-		Interval: interval,
-		stopChan: make(chan struct{}),
+		Client:    client,
+		Interval:  interval,
+		stopChan:  make(chan struct{}),
+		discover:  Discover,
 	}
 }
 
@@ -30,7 +32,7 @@ func (w *Watchdog) Start() {
 		for {
 			select {
 			case <-ticker.C:
-				info, err := Discover()
+				info, err := w.discover()
 				if err != nil {
 					log.Printf("[Watchdog] Avertissement découverte hub: %v", err)
 					continue

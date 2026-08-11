@@ -1,6 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'core/network/websocket_client.dart';
+import 'core/protocol/daemon_api.dart';
 import 'core/protocol/messages.dart';
+import 'core/protocol/session_parser.dart';
+import 'core/protocol/stream_parser.dart';
 import 'features/discovery/discovery_screen.dart';
 import 'features/settings/settings_screen.dart';
 import 'features/workspace/workspace_screen.dart';
@@ -44,69 +49,220 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
   final String _activeProjectName = 'antigravity-add-model-main';
   String _activeSessionTitle = 'Poème Sur La Gravité';
 
-  ToolApprovalRequest? _pendingApproval = ToolApprovalRequest(
-    callId: 'call_99182',
-    toolName: 'run_command',
-    command: 'git status && npm run test',
-    description: 'Execution of shell verification command on host PC',
-  );
+  ToolApprovalRequest? _pendingApproval;
 
-  final List<ChatMessage> _messages = [
-    const ChatMessage(
-      id: 'm1',
-      sender: 'user',
-      text: 'Écris un poème de 2 lignes sur la gravité',
-      timestamp: '15:10',
-    ),
-    const ChatMessage(
-      id: 'm2',
-      sender: 'assistant',
-      thought: 'Thought for 1s',
-      text: 'Silencieuse force ramenant tout vers le sol,\nElle dicte aux astres la courbe de leur vol.',
-      timestamp: '15:10',
-    ),
-  ];
+  final List<ChatMessage> _messages = [];
+
+  DaemonApi? _api;
+  StreamSubscription<Map<String, dynamic>>? _streamSub;
+  int _messageCounter = 0;
 
   @override
   void initState() {
     super.initState();
-    _wsClient.statusNotifier.addListener(() {
-      if (mounted) setState(() {});
+    _wsClient.statusNotifier.addListener(_onStatusChanged);
+  }
+
+  void _onStatusChanged() {
+    if (!mounted) return;
+    setState(() {});
+    if (_wsClient.statusNotifier.value == ConnectionStatus.connected) {
+      _api ??= DaemonApi(
+        incoming: _wsClient.stream,
+        send: _wsClient.send,
+      );
+      _watchBroadcastStreams();
+      _refreshSessions();
+    }
+  }
+
+  // Suit les streams déclenchés par une AUTRE surface (PC ou autre téléphone)
+  // et les affiche dans le fil : stream_start → nouveau message assistant
+  // streamé, stream_delta → deltas de texte, stream_end → finalisation.
+  final Map<String, String> _externalThoughts = {};
+  void _watchBroadcastStreams() {
+    _streamSub?.cancel();
+    _streamSub = _api?.events.listen((msg) {
+      final isBroadcast = msg['broadcast'] == true;
+      if (!isBroadcast || !mounted) return;
+      final type = msg['type'] as String?;
+      final requestId = msg['requestId'] as String? ?? '';
+      final sessionId = msg['data']?['cascadeId'] as String?;
+      if (sessionId != null && sessionId != _activeSessionId) return;
+
+      if (type == 'stream_start') {
+        setState(() {
+          _messages.add(ChatMessage(
+            id: 'ext-$requestId',
+            sender: 'assistant',
+            text: '',
+            timestamp: _timestamp(),
+            isStreaming: true,
+          ));
+        });
+      } else if (type == 'stream_delta') {
+        final textDelta = StreamDeltaParser.textOf(msg);
+        final thoughtDelta = StreamDeltaParser.thinkingOf(msg);
+        final approval = StreamDeltaParser.approvalOf(msg);
+        setState(() {
+          final idx = _messages.indexWhere((m) => m.id == 'ext-$requestId');
+          if (idx >= 0) {
+            final current = _messages[idx];
+            _externalThoughts[requestId] =
+                (_externalThoughts[requestId] ?? '') + thoughtDelta;
+            _messages[idx] = current.copyWith(
+              text: current.text + textDelta,
+              thought: _externalThoughts[requestId]!.isNotEmpty
+                  ? 'Thought · ${_externalThoughts[requestId]!.trim()}'
+                  : current.thought,
+            );
+          }
+          if (approval != null) {
+            _pendingApproval = ToolApprovalRequest(
+              callId: approval.callId,
+              toolName: approval.tool,
+              command: approval.detail,
+              description: 'Tool execution requires your confirmation',
+            );
+          }
+        });
+      } else if (type == 'stream_end') {
+        setState(() {
+          final idx = _messages.indexWhere((m) => m.id == 'ext-$requestId');
+          if (idx >= 0) {
+            _messages[idx] = _messages[idx].copyWith(isStreaming: false);
+          }
+          _externalThoughts.remove(requestId);
+        });
+      }
     });
   }
 
+  Future<void> _refreshSessions() async {
+    final api = _api;
+    if (api == null) return;
+    try {
+      final data = await api.listSessions();
+      final sessions = SessionParser.parseListSessions(data);
+      if (sessions.isNotEmpty) {
+        setState(() {
+          _sessions = sessions;
+          _activeSessionId = sessions.first.id;
+        });
+      }
+    } catch (_) {
+      // Offline or daemon not ready — keep local fallback.
+    }
+  }
+
+  List<CascadeSession> _sessions = const [];
+
   @override
   void dispose() {
+    _streamSub?.cancel();
+    _api?.dispose();
     _wsClient.dispose();
     super.dispose();
   }
 
+  String _timestamp() {
+    final now = DateTime.now();
+    return '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+  }
+
   void _handleSendMessage(String text) {
+    final api = _api;
     setState(() {
       _messages.add(ChatMessage(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        id: 'm${++_messageCounter}',
         sender: 'user',
         text: text,
-        timestamp: '${DateTime.now().hour}:${DateTime.now().minute}',
+        timestamp: _timestamp(),
       ));
     });
 
-    _wsClient.send({
-      'action': 'SendUserCascadeMessage',
-      'cascadeId': _activeSessionId,
-      'text': text,
+    if (api == null) return;
+
+    _streamSub?.cancel();
+    final assistantId = 'a${++_messageCounter}';
+    setState(() {
+      _messages.add(ChatMessage(
+        id: assistantId,
+        sender: 'assistant',
+        text: '',
+        timestamp: _timestamp(),
+        isStreaming: true,
+      ));
     });
+
+    var thoughtBuffer = StringBuffer();
+    _streamSub = api.sendPrompt(_activeSessionId, text).listen(
+      (msg) {
+        final textDelta = StreamDeltaParser.textOf(msg);
+        final thoughtDelta = StreamDeltaParser.thinkingOf(msg);
+        final approval = StreamDeltaParser.approvalOf(msg);
+        if (!mounted) return;
+        setState(() {
+          if (textDelta.isNotEmpty || thoughtDelta.isNotEmpty) {
+            final idx = _messages.indexWhere((m) => m.id == assistantId);
+            if (idx >= 0) {
+              final current = _messages[idx];
+              thoughtBuffer.write(thoughtDelta);
+              _messages[idx] = current.copyWith(
+                text: current.text + textDelta,
+                thought: thoughtBuffer.isNotEmpty
+                    ? 'Thought · ${thoughtBuffer.toString().trim()}'
+                    : current.thought,
+              );
+            }
+          }
+          if (approval != null) {
+            _pendingApproval = ToolApprovalRequest(
+              callId: approval.callId,
+              toolName: approval.tool,
+              command: approval.detail,
+              description: 'Tool execution requires your confirmation',
+            );
+          }
+        });
+      },
+      onDone: () {
+        if (!mounted) return;
+        setState(() {
+          final idx = _messages.indexWhere((m) => m.id == assistantId);
+          if (idx >= 0) {
+            _messages[idx] = _messages[idx].copyWith(isStreaming: false);
+          }
+        });
+      },
+      onError: (e) {
+        if (!mounted) return;
+        setState(() {
+          final idx = _messages.indexWhere((m) => m.id == assistantId);
+          if (idx >= 0) {
+            _messages[idx] = _messages[idx].copyWith(
+              text: _messages[idx].text.isEmpty
+                  ? '⚠ Erreur : $e'
+                  : _messages[idx].text,
+              isStreaming: false,
+            );
+          }
+        });
+      },
+    );
   }
 
   void _handleToolDecision(ToolDecision decision) {
+    final approval = _pendingApproval;
     setState(() {
       _pendingApproval = null;
     });
-
-    _wsClient.send({
-      'action': 'SubmitToolApproval',
-      'decision': decision == ToolDecision.allow ? 'ALLOW' : 'DENY',
-    });
+    if (approval == null) return;
+    _api?.submitApproval(
+      cascadeId: _activeSessionId,
+      callId: approval.callId,
+      allow: decision == ToolDecision.allow,
+    ).catchError((_) => <String, dynamic>{});
   }
 
   @override
@@ -118,6 +274,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       key: _scaffoldKey,
       drawer: LeftSidebarDrawer(
         activeSessionId: _activeSessionId,
+        sessions: _sessions,
         onSessionSelected: (id) {
           setState(() {
             _activeSessionId = id;
@@ -137,7 +294,16 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         },
         onDiscover: () {
           Navigator.of(context).push(
-            MaterialPageRoute(builder: (context) => const DiscoveryScreen()),
+            MaterialPageRoute(
+              builder: (context) => DiscoveryScreen(
+                onConnect: (host, port, token) async {
+                  final url = host.startsWith('ws') ? host : 'ws://$host:$port/ws';
+                  _wsClient.disconnect();
+                  await _wsClient.connect(customUrl: url, authToken: token);
+                  return _wsClient.statusNotifier.value == ConnectionStatus.connected;
+                },
+              ),
+            ),
           );
         },
         onOpenWorkspace: () {
@@ -175,6 +341,8 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                 if (isConnected) {
                   _wsClient.disconnect();
                 } else {
+                  // Reconnect using the previously saved URL and token if available
+                  // Note: Since connect() remembers _targetUrl, we just call connect()
                   _wsClient.connect();
                 }
               },
@@ -241,29 +409,60 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          // Messages Timeline
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              children: [
-                ..._messages.map((msg) => _MessageBubble(message: msg)),
-                if (_pendingApproval != null)
-                  ToolApprovalCard(
-                    request: _pendingApproval!,
-                    onDecision: _handleToolDecision,
+      body: _messages.isEmpty && _pendingApproval == null
+          ? Center(
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.folder_outlined, size: 16, color: AppColors.inkMuted),
+                          const SizedBox(width: 8),
+                          Text(
+                            _activeProjectName,
+                            style: const TextStyle(fontSize: 13, color: AppColors.inkMuted),
+                          ),
+                          const SizedBox(width: 4),
+                          const Icon(Icons.keyboard_arrow_down, size: 16, color: AppColors.inkMuted),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      ChatInputBar(
+                        onSend: _handleSendMessage,
+                      ),
+                      const SizedBox(height: 64),
+                    ],
                   ),
+                ),
+              ),
+            )
+          : Column(
+              children: [
+                // Messages Timeline
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    children: [
+                      ..._messages.map((msg) => _MessageBubble(message: msg)),
+                      if (_pendingApproval != null)
+                        ToolApprovalCard(
+                          request: _pendingApproval!,
+                          onDecision: _handleToolDecision,
+                        ),
+                    ],
+                  ),
+                ),
+
+                // Bottom Prompt Input Bar
+                ChatInputBar(
+                  onSend: _handleSendMessage,
+                ),
               ],
             ),
-          ),
-
-          // Bottom Prompt Input Bar
-          ChatInputBar(
-            onSend: _handleSendMessage,
-          ),
-        ],
-      ),
     );
   }
 }

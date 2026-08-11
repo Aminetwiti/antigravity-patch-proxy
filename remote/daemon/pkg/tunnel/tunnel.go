@@ -6,9 +6,9 @@ import (
 	"log"
 	"os/exec"
 	"regexp"
-	"runtime"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Manager struct {
@@ -121,7 +121,7 @@ func (m *Manager) startCloudflare(binPath string, localPort int) (string, error)
 	select {
 	case url := <-urlChan:
 		return url, nil
-	case <-timeAfter(15):
+	case <-time.After(15 * time.Second):
 		cmd.Process.Kill()
 		return "", fmt.Errorf("timeout d'attente de l'URL Cloudflare")
 	}
@@ -141,31 +141,39 @@ func (m *Manager) startPinggy(binPath string, localPort int) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return "", err
+	}
 
 	if err := cmd.Start(); err != nil {
 		return "", err
 	}
 
 	urlChan := make(chan string, 1)
-	re := regexp.MustCompile(`https://[a-zA-Z0-9-]+\.a\.pinggy\.link|https://[a-zA-Z0-9-]+\.free\.pinggy\.link`)
+	re := regexp.MustCompile(`https?://[a-zA-Z0-9-]+\.[a-zA-Z0-9-]*pinggy\.link`)
 
-	go func() {
-		scanner := bufio.NewScanner(stdout)
+	scanFunc := func(scanner *bufio.Scanner) {
 		for scanner.Scan() {
 			line := scanner.Text()
 			if match := re.FindString(line); match != "" {
+				// Assurez-vous d'avoir https
+				match = strings.Replace(match, "http://", "https://", 1)
 				select {
 				case urlChan <- match:
 				default:
 				}
 			}
 		}
-	}()
+	}
+
+	go scanFunc(bufio.NewScanner(stdout))
+	go scanFunc(bufio.NewScanner(stderr))
 
 	select {
 	case url := <-urlChan:
 		return url, nil
-	case <-timeAfter(15):
+	case <-time.After(15 * time.Second):
 		cmd.Process.Kill()
 		return "", fmt.Errorf("timeout d'attente de l'URL Pinggy")
 	}
@@ -190,13 +198,3 @@ func (m *Manager) Stop() {
 	}
 }
 
-func timeAfter(seconds int) <-chan struct{} {
-	ch := make(chan struct{})
-	go func() {
-		if runtime.GOOS == "windows" {
-			exec.Command("powershell", "-Command", fmt.Sprintf("Start-Sleep -Seconds %d", seconds)).Run()
-		}
-		ch <- struct{}{}
-	}()
-	return ch
-}

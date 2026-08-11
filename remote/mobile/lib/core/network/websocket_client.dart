@@ -16,13 +16,17 @@ class DaemonWebSocketClient {
 
   Timer? _reconnectTimer;
   String _targetUrl = EnvConfig.wsUrl;
+  String? _authToken;
 
   Stream<dynamic> get stream =>
       _messageController?.stream ?? const Stream.empty();
 
-  Future<void> connect({String? customUrl}) async {
+  Future<void> connect({String? customUrl, String? authToken}) async {
     if (customUrl != null && customUrl.isNotEmpty) {
       _targetUrl = customUrl;
+    }
+    if (authToken != null) {
+      _authToken = authToken;
     }
 
     if (statusNotifier.value == ConnectionStatus.connected ||
@@ -34,7 +38,11 @@ class DaemonWebSocketClient {
     _messageController ??= StreamController<dynamic>.broadcast();
 
     try {
-      final uri = Uri.parse(_targetUrl);
+      var finalUrl = _targetUrl;
+      if (_authToken != null && _authToken!.isNotEmpty) {
+        finalUrl += '${finalUrl.contains('?') ? '&' : '?'}token=$_authToken';
+      }
+      final uri = Uri.parse(finalUrl);
       _socket = await WebSocket.connect(uri.toString()).timeout(
         const Duration(seconds: 5),
       );

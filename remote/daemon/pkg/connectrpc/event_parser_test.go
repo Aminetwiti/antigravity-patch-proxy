@@ -23,11 +23,11 @@ func TestParseFrameEvents(t *testing.T) {
 }
 
 func TestIsPrintable(t *testing.T) {
-	if !isPrintable("Hello World 123!\n") {
-		t.Errorf("isPrintable devrait être true pour du texte imprimable")
+	if !IsPrintable("Hello World 123!\n") {
+		t.Errorf("IsPrintable devrait être true pour du texte imprimable")
 	}
-	if isPrintable(string([]byte{0x01, 0x02, 0x03})) {
-		t.Errorf("isPrintable devrait être false pour des octets binaires de contrôle")
+	if IsPrintable(string([]byte{0x01, 0x02, 0x03})) {
+		t.Errorf("IsPrintable devrait être false pour des octets binaires de contrôle")
 	}
 }
 

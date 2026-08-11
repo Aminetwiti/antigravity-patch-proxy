@@ -2,6 +2,7 @@ package connectrpc
 
 import (
 	"strings"
+	"unicode"
 )
 
 type EventKind string
@@ -45,7 +46,7 @@ func ParseFrameEvents(raw []byte, cascadeID string) []StreamEvent {
 				Tool:      extractToolName(s),
 				Detail:    s,
 			})
-		} else if isPrintable(s) && len(s) > 1 {
+		} else if IsPrintable(s) && len(s) > 1 {
 			if strings.Contains(s, "<thought>") || strings.Contains(s, "Thinking...") {
 				events = append(events, StreamEvent{
 					Kind:      EventKindThinking,
@@ -75,13 +76,18 @@ func extractToolName(s string) string {
 	return "generic_tool"
 }
 
-func isPrintable(s string) bool {
+// IsPrintable vérifie qu'une chaîne ne contient que des caractères imprimables
+// (ASCII + UTF-8 : accents, CJK, symboles) ou des retours à la ligne.
+// Utilisé pour filtrer les octets binaires des flux protobuf.
+func IsPrintable(s string) bool {
 	for _, r := range s {
-		if r < 0x20 || r > 0x7e {
-			if r != '\n' && r != '\t' && r != '\r' {
-				return false
-			}
+		if unicode.IsPrint(r) {
+			continue
 		}
+		if r == '\n' || r == '\t' || r == '\r' {
+			continue
+		}
+		return false
 	}
 	return true
 }

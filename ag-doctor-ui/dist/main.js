@@ -642,6 +642,43 @@ electron_1.ipcMain.handle('ag:network:generateQr', async (_event, text) => {
         throw new Error('Failed to generate QR code: ' + e.message);
     }
 });
+let daemonProcess = null;
+electron_1.ipcMain.handle('ag:network:startDaemon', async (event, options) => {
+    const { spawn } = require('child_process');
+    const path = require('path');
+    if (daemonProcess) {
+        daemonProcess.kill();
+        daemonProcess = null;
+    }
+    // Resolve path to remote/daemon/daemon.exe (assuming ag-doctor-ui is in repo root's child dir)
+    const daemonExePath = path.join(__dirname, '..', '..', 'remote', 'daemon', 'daemon.exe');
+    const args = ['--port', options.port.toString()];
+    if (options.tunnel && options.tunnel !== 'none') {
+        args.push('--tunnel', options.tunnel);
+    }
+    if (options.token) {
+        args.push('--auth-token', options.token);
+    }
+    event.sender.send('ag:network:daemonLog', `> Lancement de daemon.exe ${args.join(' ')}\n`);
+    daemonProcess = spawn(daemonExePath, args, { cwd: path.dirname(daemonExePath) });
+    daemonProcess.stdout.on('data', (data) => {
+        event.sender.send('ag:network:daemonLog', data.toString());
+    });
+    daemonProcess.stderr.on('data', (data) => {
+        event.sender.send('ag:network:daemonLog', data.toString());
+    });
+    daemonProcess.on('close', (code) => {
+        event.sender.send('ag:network:daemonLog', `[Daemon terminé avec le code ${code}]\n`);
+        daemonProcess = null;
+    });
+});
+electron_1.ipcMain.handle('ag:network:stopDaemon', async (event) => {
+    if (daemonProcess) {
+        daemonProcess.kill();
+        daemonProcess = null;
+        event.sender.send('ag:network:daemonLog', `> Daemon arrêté manuellement.\n`);
+    }
+});
 electron_1.ipcMain.handle('ag:open-external', async (_event, url) => {
     try {
         if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {

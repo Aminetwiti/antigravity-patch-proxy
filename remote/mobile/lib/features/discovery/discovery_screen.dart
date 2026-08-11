@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../config/env_config.dart';
 import '../../theme/app_colors.dart';
+import 'qr_scanner_screen.dart';
 
 class DiscoveryScreen extends StatefulWidget {
   final Future<bool> Function(String host, int port, String csrfToken)? onConnect;
@@ -18,25 +19,36 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
       TextEditingController(text: EnvConfig.daemonPort.toString());
   final TextEditingController _csrfController = TextEditingController();
 
-  bool _isScanning = false;
   bool _isConnecting = false;
   String? _errorMessage;
   String? _successMessage;
 
-  List<String> _discoveredHosts = [];
+  final List<String> _discoveredHosts = [];
 
-  // ponytail: mock scan for demo — replace with real UDP/port scanner against Daemon
+  // Lancement du scanner QR
   Future<void> _startScan() async {
-    setState(() {
-      _isScanning = true;
-      _errorMessage = null;
-    });
-    await Future.delayed(const Duration(seconds: 2));
-    if (!mounted) return;
-    setState(() {
-      _isScanning = false;
-      _discoveredHosts = ['192.168.1.50', '192.168.1.42', '10.0.2.2'];
-    });
+    final scannedCode = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (context) => const QrScannerScreen()),
+    );
+
+    if (scannedCode != null && scannedCode.isNotEmpty) {
+      // Ex: wss://abcd.trycloudflare.com/ws?token=mysecret
+      final uri = Uri.tryParse(scannedCode);
+      if (uri != null) {
+        final host = '${uri.scheme}://${uri.host}${uri.path}';
+        final port = uri.port > 0 ? uri.port : (uri.scheme == 'wss' || uri.scheme == 'https' ? 443 : 80);
+        final token = uri.queryParameters['token'] ?? '';
+
+        setState(() {
+          _hostController.text = host;
+          _portController.text = port.toString();
+          _csrfController.text = token;
+        });
+
+        // Auto-connect
+        _connect();
+      }
+    }
   }
 
   Future<void> _connect() async {
@@ -127,20 +139,15 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
 
           const SizedBox(height: 16),
 
-          // ── Scan Network Button
+          // ── Scan QR Code Button
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
-              onPressed: _isScanning ? null : _startScan,
-              icon: _isScanning
-                  ? const SizedBox(
-                      width: 16, height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accentBlue),
-                    )
-                  : const Icon(Icons.radar, size: 16, color: AppColors.accentBlue),
-              label: Text(
-                _isScanning ? 'Scan en cours…' : 'Scanner le réseau local',
-                style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
+              onPressed: _startScan,
+              icon: const Icon(Icons.qr_code_scanner, size: 16, color: AppColors.accentBlue),
+              label: const Text(
+                'Scanner le QR Code',
+                style: TextStyle(fontSize: 13, color: AppColors.inkPrimary),
               ),
               style: OutlinedButton.styleFrom(
                 side: const BorderSide(color: AppColors.accentBlue),
@@ -209,7 +216,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  const Text('Token CSRF (optionnel)', style: TextStyle(fontSize: 12, color: AppColors.inkSecondary)),
+                  const Text('Token Auth (optionnel)', style: TextStyle(fontSize: 12, color: AppColors.inkSecondary)),
                   const SizedBox(height: 6),
                   TextField(
                     controller: _csrfController,
