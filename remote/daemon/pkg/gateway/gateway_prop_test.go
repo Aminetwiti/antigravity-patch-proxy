@@ -91,7 +91,7 @@ func (l *loadRPCClient) GetAllCascades() ([]byte, error) {
 func (l *loadRPCClient) SendMessageStream(cascadeID, text string, onFrame func([]byte) error) error {
 	return onFrame(connectrpc.Frame(pbTextFrame("ok")))
 }
-func (l *loadRPCClient) SubmitToolApproval(cascadeID, callID string, decision uint64) ([]byte, error) {
+func (l *loadRPCClient) SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("ok")), nil
 }
 
@@ -222,7 +222,7 @@ func (f *failingStreamClient) SendMessageStream(cascadeID, text string, onFrame 
 	_ = onFrame(connectrpc.Frame(pbTextFrame("hello")))
 	return fmt.Errorf("stream interrompu par le backend")
 }
-func (f *failingStreamClient) SubmitToolApproval(cascadeID, callID string, decision uint64) ([]byte, error) {
+func (f *failingStreamClient) SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("ok")), nil
 }
 

@@ -25,9 +25,10 @@ func (c *Client) SendMessageStream(cascadeID, text string, onFrame func([]byte) 
 	return c.CallStream("SendUserCascadeMessage", BuildSendMessage(cascadeID, text), 120*time.Second, onFrame)
 }
 
-// SubmitToolApproval approuve/refuse un appel d'outil.
-func (c *Client) SubmitToolApproval(cascadeID, callID string, decision uint64) ([]byte, error) {
-	return c.Call("SubmitToolApproval", BuildSubmitToolApproval(cascadeID, callID, decision))
+// SubmitToolApproval approuve/refuse une interaction d'outil via le RPC officiel
+// HandleCascadeUserInteraction (trajectory_id + step_index + oneof décision).
+func (c *Client) SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error) {
+	return c.Call("HandleCascadeUserInteraction", BuildHandleCascadeUserInteraction(cascadeID, trajectoryID, stepIndex, oneofField, oneofPayload))
 }
 
 // Heartbeat vérifie que le serveur répond et que l'auth passe.

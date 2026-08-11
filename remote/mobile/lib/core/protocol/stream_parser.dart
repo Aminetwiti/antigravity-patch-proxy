@@ -43,11 +43,15 @@ class StreamDeltaParser {
     if (events is! List) return null;
     for (final e in events) {
       if (e is Map<String, dynamic> && e['kind'] == 'approval_required') {
+        final tool = e['tool'] ?? 'generic_tool';
         return ToolApproval(
           callId: e['callId'] ?? '',
-          tool: e['tool'] ?? 'generic_tool',
+          tool: tool,
           detail: e['detail'] ?? '',
           cascadeId: e['cascadeId'] ?? '',
+          trajectoryId: e['trajectoryId'] ?? '',
+          stepIndex: (e['stepIndex'] as num?)?.toInt() ?? -1,
+          approvalType: tool == 'run_command' ? 'run_command' : 'approval',
         );
       }
     }
@@ -60,11 +64,34 @@ class ToolApproval {
   final String tool;
   final String detail;
   final String cascadeId;
+  final String trajectoryId;
+  final int stepIndex;
+  final String approvalType;
 
   const ToolApproval({
     required this.callId,
     required this.tool,
     required this.detail,
     required this.cascadeId,
+    this.trajectoryId = '',
+    this.stepIndex = -1,
+    this.approvalType = 'approval',
   });
+
+  /// The command line to echo back on approval (run_command oneof field 2).
+  String get command => _extractCommand(detail);
+
+  static String _extractCommand(String detail) {
+    final m = RegExp(r'"command_line"\s*:\s*"((?:[^"\\]|\\.)*)"')
+        .firstMatch(detail);
+    if (m != null) return m.group(1)!.replaceAll(r'\n', '\n');
+    // Fallback: first quoted line that looks like a shell command.
+    for (final line in detail.split('\n')) {
+      final t = line.trim();
+      if (t.isNotEmpty && !t.startsWith('{') && !t.startsWith('}')) {
+        return t;
+      }
+    }
+    return '';
+  }
 }

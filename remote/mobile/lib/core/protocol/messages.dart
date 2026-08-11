@@ -84,12 +84,20 @@ class ToolApprovalRequest {
   final String toolName;
   final String command;
   final String description;
+  final String cascadeId;
+  final String trajectoryId;
+  final int stepIndex;
+  final String approvalType;
 
   const ToolApprovalRequest({
     required this.callId,
     required this.toolName,
     required this.command,
     required this.description,
+    this.cascadeId = '',
+    this.trajectoryId = '',
+    this.stepIndex = -1,
+    this.approvalType = 'approval',
   });
 
   factory ToolApprovalRequest.fromJson(Map<String, dynamic> json) {
@@ -97,7 +105,12 @@ class ToolApprovalRequest {
       callId: json['callId'] ?? '',
       toolName: json['toolName'] ?? 'run_command',
       command: json['command'] ?? '',
-      description: json['description'] ?? 'An agent tool requires user confirmation',
+      description: json['description'] ??
+          'An agent tool requires user confirmation',
+      cascadeId: json['cascadeId'] ?? '',
+      trajectoryId: json['trajectoryId'] ?? '',
+      stepIndex: (json['stepIndex'] as num?)?.toInt() ?? -1,
+      approvalType: json['approvalType'] ?? 'approval',
     );
   }
 }

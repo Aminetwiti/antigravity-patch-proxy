@@ -27,7 +27,7 @@ func TestBuilders_ConcurrentSafety(t *testing.T) {
 
 				b1 := BuildStartCascade("file:///C:/proj", "", 190)
 				b2 := BuildSendMessage(cascID, msg)
-				b3 := BuildSubmitToolApproval(cascID, "call-1", 1)
+				b3 := BuildHandleCascadeUserInteraction(cascID, "traj-1", 2, InteractionRunCommand, BuildRunCommandInteraction(true, "ls", ""))
 				_ = Frame(b1)
 				_ = Frame(b2)
 				_ = Frame(b3)

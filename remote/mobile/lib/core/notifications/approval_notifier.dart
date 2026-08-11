@@ -28,22 +28,33 @@ class ApprovalNotifier {
   Future<void> init() async {
     if (_initialized) return;
 
-    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const ios = DarwinInitializationSettings(
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
-    );
-    const settings = InitializationSettings(android: android, iOS: ios);
-    await _plugin.initialize(settings);
+    try {
+      const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+      const ios = DarwinInitializationSettings(
+        requestAlertPermission: true,
+        requestBadgePermission: true,
+        requestSoundPermission: true,
+      );
+      const settings = InitializationSettings(android: android, iOS: ios);
+      await _plugin.initialize(settings);
 
-    // Android 13+ : permission runtime POST_NOTIFICATIONS (déclarée dans le
-    // manifest) — l'utilisateur doit accepter pour recevoir les alertes.
-    await _plugin
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestNotificationsPermission();
-    _initialized = true;
+      // Android 13+ : permission runtime POST_NOTIFICATIONS (déclarée dans le
+      // manifest) — l'utilisateur doit accepter pour recevoir les alertes.
+      await _plugin
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.requestNotificationsPermission();
+      _initialized = true;
+    } catch (e) {
+      // Environnement sans registrant de plugin (flutter test, headless) :
+      // la plateforme n'est jamais enregistrée → on désactive les
+      // notifications sans planter. Sur Android/iOS réel, le registrant
+      // Dart est toujours présent.
+      // ponytail: plafond = les tests ne vérifient pas la vraie chaîne de
+      // notification ; chemin d'upgrade = fake platform dans widget_test.dart
+      // (FlutterLocalNotificationsPlatform.instance = …) si besoin plus tard.
+      debugPrint('[Notifier] notifications indisponibles: $e');
+    }
   }
 
   /// Notifie une demande d'approbation — dédupliquée par [callId] avec un

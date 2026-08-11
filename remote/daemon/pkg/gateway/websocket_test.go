@@ -87,7 +87,7 @@ func (f *fakeRPCClient) SendMessageStream(cascadeID, text string, onFrame func([
 	return nil
 }
 
-func (f *fakeRPCClient) SubmitToolApproval(cascadeID, callID string, decision uint64) ([]byte, error) {
+func (f *fakeRPCClient) SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("ok")), nil
 }
 

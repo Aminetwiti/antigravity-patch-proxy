@@ -29,7 +29,7 @@ type RPCClient interface {
 	CreateCascade(uri string, projectID string, model uint64) ([]byte, error)
 	GetAllCascades() ([]byte, error)
 	SendMessageStream(cascadeID, text string, onFrame func([]byte) error) error
-	SubmitToolApproval(cascadeID, callID string, decision uint64) ([]byte, error)
+	SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error)
 }
 
 // checkOrigin rejette les navigateurs web arbitraires (CSWSH) tout en
@@ -108,9 +108,13 @@ type IncomingMessage struct {
 	WorkspacePath string `json:"workspacePath,omitempty"`
 	CascadeID     string `json:"cascadeId,omitempty"`
 	CallID        string `json:"callId,omitempty"`
+	TrajectoryID  string `json:"trajectoryId,omitempty"`
+	StepIndex     uint32 `json:"stepIndex,omitempty"`
+	ApprovalType  string `json:"approvalType,omitempty"`
 	Decision      string `json:"decision,omitempty"`
 	Prompt        string `json:"prompt,omitempty"`
 	FilePath      string `json:"filePath,omitempty"`
+	Command       string `json:"command,omitempty"`
 }
 
 type OutgoingMessage struct {
@@ -333,11 +337,28 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		return
 
 	case "submit_approval":
-		decision := uint64(1) // DECISION_ALLOW par défaut
+		confirm := true
 		if strings.EqualFold(msg.Decision, "deny") {
-			decision = 2
+			confirm = false
 		}
-		raw, err = s.RPCClient.SubmitToolApproval(msg.CascadeID, msg.CallID, decision)
+		// Bloc A : le oneof est choisi selon le type d'approbation détecté.
+		// run_command = 5, file_permission = 19, permission = 21, approval = 23.
+		oneofField := connectrpc.InteractionApproval // fallback générique
+		var oneofPayload []byte
+		switch strings.ToLower(msg.ApprovalType) {
+		case "run_command":
+			oneofField = connectrpc.InteractionRunCommand
+			oneofPayload = connectrpc.BuildRunCommandInteraction(confirm, msg.Command, "")
+		case "file_permission":
+			oneofField = connectrpc.InteractionFilePermission
+			oneofPayload = connectrpc.BuildFilePermissionInteraction(confirm, 2, msg.FilePath)
+		case "permission":
+			oneofField = connectrpc.InteractionPermission
+			oneofPayload = connectrpc.BuildPermissionInteraction(confirm, 2)
+		default:
+			oneofPayload = connectrpc.BuildApprovalInteraction(confirm)
+		}
+		raw, err = s.RPCClient.SubmitToolApproval(msg.CascadeID, msg.TrajectoryID, msg.StepIndex, oneofField, oneofPayload)
 
 	case "list_files":
 		if msg.WorkspacePath == "" {

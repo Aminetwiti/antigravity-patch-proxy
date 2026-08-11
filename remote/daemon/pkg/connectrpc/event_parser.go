@@ -15,13 +15,15 @@ const (
 )
 
 type StreamEvent struct {
-	Kind      EventKind `json:"kind"`
-	Delta     string    `json:"delta,omitempty"`
-	Status    string    `json:"status,omitempty"`
-	CascadeID string    `json:"cascadeId,omitempty"`
-	CallID    string    `json:"callId,omitempty"`
-	Tool      string    `json:"tool,omitempty"`
-	Detail    string    `json:"detail,omitempty"`
+	Kind         EventKind `json:"kind"`
+	Delta        string    `json:"delta,omitempty"`
+	Status       string    `json:"status,omitempty"`
+	CascadeID    string    `json:"cascadeId,omitempty"`
+	TrajectoryID string    `json:"trajectoryId,omitempty"`
+	StepIndex    uint32    `json:"stepIndex,omitempty"`
+	CallID       string    `json:"callId,omitempty"`
+	Tool         string    `json:"tool,omitempty"`
+	Detail       string    `json:"detail,omitempty"`
 }
 
 // ParseFrameEvents analyse une frame protobuf gRPC-Web et extrait les événements lisibles.
@@ -40,12 +42,27 @@ func ParseFrameEvents(raw []byte, cascadeID string) []StreamEvent {
 
 		// Détection empirique des blocs d'approbation ou de texte
 		if strings.Contains(s, "run_command") || strings.Contains(s, "write_to_file") {
-			events = append(events, StreamEvent{
+			ev := StreamEvent{
 				Kind:      EventKindApprovalRequired,
 				CascadeID: cascadeID,
 				Tool:      extractToolName(s),
 				Detail:    s,
-			})
+			}
+			// Corrélation (Bloc A) : step_index (varint #2) + trajectory_id (UUID #1)
+			// sont indispensables pour répondre via HandleCascadeUserInteraction.
+			for _, sub := range DecodeFields(f.Bytes) {
+				if sub.WireType == 0 && sub.Num == 2 {
+					ev.StepIndex = uint32(sub.Varint)
+				}
+				if sub.WireType == 2 && sub.Num == 1 && len(sub.Bytes) == 36 {
+					ev.TrajectoryID = string(sub.Bytes)
+				}
+			}
+			if ev.TrajectoryID == "" {
+				// Fallback : le premier UUID du blob d'approbation.
+				ev.TrajectoryID = firstUUID(s)
+			}
+			events = append(events, ev)
 		} else if IsPrintable(s) && len(s) > 1 {
 			if strings.Contains(s, "<thought>") || strings.Contains(s, "Thinking...") {
 				events = append(events, StreamEvent{

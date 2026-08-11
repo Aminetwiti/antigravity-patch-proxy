@@ -81,10 +81,18 @@ class DaemonApi {
     required String cascadeId,
     required String callId,
     required bool allow,
+    String trajectoryId = '',
+    int stepIndex = -1,
+    String approvalType = 'approval',
+    String command = '',
   }) =>
       call('submit_approval', {
         'cascadeId': cascadeId,
         'callId': callId,
+        'trajectoryId': trajectoryId,
+        'stepIndex': stepIndex,
+        'approvalType': approvalType,
+        'command': command,
         'decision': allow ? 'allow' : 'deny',
       });
 

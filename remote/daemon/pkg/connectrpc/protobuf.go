@@ -72,14 +72,70 @@ func BuildSendMessage(cascadeID, text string) []byte {
 	return w.b
 }
 
-// SubmitToolApproval : champs à confirmer par rétro-ingénierie (Phase 1).
-// Placeholder — approuver par callId + décision (1=allow, 2=deny).
-func BuildSubmitToolApproval(cascadeID, callID string, decision uint64) []byte {
+// Champs oneof de CascadeUserInteraction (vérifiés dans cortex_pb.ts).
+const (
+	InteractionRunCommand     = 5  // CascadeRunCommandInteraction
+	InteractionOpenBrowserURL = 6  // CascadeOpenBrowserUrlInteraction
+	InteractionFilePermission = 19 // FilePermissionInteraction
+	InteractionPermission     = 21 // PermissionInteraction
+	InteractionApproval       = 23 // ApprovalInteraction
+)
+
+// BuildRunCommandInteraction : {1: confirm, 2: proposed, 3: submitted}.
+func BuildRunCommandInteraction(confirm bool, proposed, submitted string) []byte {
+	w := &writer{}
+	w.varintField(1, boolToUint64(confirm))
+	w.stringField(2, proposed)
+	if submitted != "" {
+		w.stringField(3, submitted)
+	}
+	return w.b
+}
+
+// BuildPermissionInteraction : {1: allow, 2: scope} (le scope 2 = CONVERSATION).
+func BuildPermissionInteraction(allow bool, scope uint64) []byte {
+	w := &writer{}
+	w.varintField(1, boolToUint64(allow))
+	w.varintField(2, scope)
+	return w.b
+}
+
+// BuildFilePermissionInteraction : {1: allow, 2: scope, 3: absolute_path_uri}.
+func BuildFilePermissionInteraction(allow bool, scope uint64, pathURI string) []byte {
+	w := &writer{}
+	w.varintField(1, boolToUint64(allow))
+	w.varintField(2, scope)
+	w.stringField(3, pathURI)
+	return w.b
+}
+
+// BuildApprovalInteraction : {1: confirm} — fallback générique.
+func BuildApprovalInteraction(confirm bool) []byte {
+	w := &writer{}
+	w.varintField(1, boolToUint64(confirm))
+	return w.b
+}
+
+// BuildHandleCascadeUserInteraction construit le payload de
+// HandleCascadeUserInteractionRequest : {1: cascade_id, 2: interaction}
+// où interaction = {1: trajectory_id, 2: step_index, <oneofField>: oneofPayload}.
+func BuildHandleCascadeUserInteraction(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) []byte {
+	interaction := &writer{}
+	interaction.stringField(1, trajectoryID)
+	interaction.varintField(2, uint64(stepIndex))
+	interaction.bytesField(oneofField, oneofPayload)
+
 	w := &writer{}
 	w.stringField(1, cascadeID)
-	w.stringField(2, callID)
-	w.varintField(3, decision)
+	w.bytesField(2, interaction.b)
 	return w.b
+}
+
+func boolToUint64(b bool) uint64 {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // DecodeFields extrait les champs de premier niveau d'un message protobuf.

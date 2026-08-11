@@ -62,6 +62,14 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
   
   Map<String, dynamic> _contextStats = {};
 
+  // --- Étape 4 : Reminders contextuels ---
+  // « Still working » : bannière après 15 s de stream continu.
+  static const _stillWorkingDelay = Duration(seconds: 15);
+  final Set<String> _pendingApprovalCallIds = {};
+  Timer? _stillWorkingTimer;
+  int _activeStreamCount = 0;
+  bool _showStillWorking = false;
+
   @override
   void initState() {
     super.initState();
@@ -112,6 +120,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       if (sessionId != null && sessionId != _activeSessionId) return;
 
       if (type == 'stream_start') {
+        _onStreamStarted();
         setState(() {
           _messages.add(ChatMessage(
             id: 'ext-$requestId',
@@ -138,13 +147,17 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                   : current.thought,
             );
           }
-          if (approval != null) {
             _pendingApproval = ToolApprovalRequest(
               callId: approval.callId,
               toolName: approval.tool,
-              command: approval.detail,
+              command: approval.command,
               description: 'Tool execution requires your confirmation',
+              cascadeId: approval.cascadeId,
+              trajectoryId: approval.trajectoryId,
+              stepIndex: approval.stepIndex,
+              approvalType: approval.approvalType,
             );
+            _pendingApprovalCallIds.add(approval.callId);
             // Étape 3 : notification locale si l'utilisateur n'est PAS actif
             // sur le PC hôte (hostActive=true → l'approbation est déjà à
             // l'écran de l'ordinateur, inutile de sonner le téléphone).
@@ -153,12 +166,13 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
               ApprovalNotifier.instance.notifyApprovalRequired(
                 callId: approval.callId,
                 toolName: approval.tool,
-                command: approval.detail,
+                command: approval.command,
               );
             }
           }
         });
       } else if (type == 'stream_end') {
+        _onStreamEnded();
         setState(() {
           final idx = _messages.indexWhere((m) => m.id == 'ext-$requestId');
           if (idx >= 0) {
@@ -194,6 +208,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
   @override
   void dispose() {
     _streamSub?.cancel();
+    _stillWorkingTimer?.cancel();
     _api?.dispose();
     _wsClient.dispose();
     super.dispose();
@@ -202,6 +217,30 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
   String _timestamp() {
     final now = DateTime.now();
     return '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+  }
+
+  // --- Étape 4 : suivi de l'activité stream (local + broadcast) ---
+  void _onStreamStarted() {
+    _activeStreamCount++;
+    if (_activeStreamCount == 1) {
+      _stillWorkingTimer?.cancel();
+      _stillWorkingTimer = Timer(_stillWorkingDelay, () {
+        if (mounted && _activeStreamCount > 0) {
+          setState(() => _showStillWorking = true);
+        }
+      });
+    }
+  }
+
+  void _onStreamEnded() {
+    if (_activeStreamCount > 0) _activeStreamCount--;
+    if (_activeStreamCount == 0) {
+      _stillWorkingTimer?.cancel();
+      _stillWorkingTimer = null;
+      if (_showStillWorking && mounted) {
+        setState(() => _showStillWorking = false);
+      }
+    }
   }
 
   void _handleSendMessage(String text) {
@@ -218,6 +257,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     if (api == null) return;
 
     _streamSub?.cancel();
+    _onStreamEnded(); // l'ancien stream (si encore actif) ne compte plus
     final assistantId = 'a${++_messageCounter}';
     setState(() {
       _messages.add(ChatMessage(
@@ -230,6 +270,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     });
 
     var thoughtBuffer = StringBuffer();
+    _onStreamStarted(); // Étape 4 : le stream local démarre
     _streamSub = api.sendPrompt(_activeSessionId, text).listen(
       (msg) {
         final textDelta = StreamDeltaParser.textOf(msg);
@@ -254,15 +295,20 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
             _pendingApproval = ToolApprovalRequest(
               callId: approval.callId,
               toolName: approval.tool,
-              command: approval.detail,
+              command: approval.command,
               description: 'Tool execution requires your confirmation',
+              cascadeId: approval.cascadeId,
+              trajectoryId: approval.trajectoryId,
+              stepIndex: approval.stepIndex,
+              approvalType: approval.approvalType,
             );
+            _pendingApprovalCallIds.add(approval.callId);
             final hostActive = msg['data']?['hostActive'] == true;
             if (!hostActive) {
               ApprovalNotifier.instance.notifyApprovalRequired(
                 callId: approval.callId,
                 toolName: approval.tool,
-                command: approval.detail,
+                command: approval.command,
               );
             }
           }
@@ -270,6 +316,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       },
       onDone: () {
         if (!mounted) return;
+        _onStreamEnded();
         setState(() {
           final idx = _messages.indexWhere((m) => m.id == assistantId);
           if (idx >= 0) {
@@ -279,6 +326,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       },
       onError: (e) {
         if (!mounted) return;
+        _onStreamEnded();
         setState(() {
           final idx = _messages.indexWhere((m) => m.id == assistantId);
           if (idx >= 0) {
@@ -302,11 +350,44 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     if (approval == null) return;
     // L'utilisateur a répondu : on retire la notification de la barre.
     ApprovalNotifier.instance.cancelApproval(approval.callId);
+    _pendingApprovalCallIds.remove(approval.callId);
     _api?.submitApproval(
-      cascadeId: _activeSessionId,
+      cascadeId: approval.cascadeId.isEmpty
+          ? _activeSessionId
+          : approval.cascadeId,
       callId: approval.callId,
       allow: decision == ToolDecision.allow,
+      trajectoryId: approval.trajectoryId,
+      stepIndex: approval.stepIndex,
+      approvalType: approval.approvalType,
+      command: approval.command,
     ).catchError((_) => <String, dynamic>{});
+  }
+
+  /// Étape 4 — Reminders contextuels : bannières au-dessus du fil.
+  Widget _buildReminderBanners() {
+    final children = <Widget>[];
+    if (_showStillWorking) {
+      children.add(_ReminderBanner(
+        icon: Icons.hourglass_top_outlined,
+        message: 'La tâche tourne toujours — suivez la depuis le téléphone',
+      ));
+    }
+    final pendingApprovals = _pendingApprovalCallIds.length;
+    if (pendingApprovals >= 2) {
+      children.add(_ReminderBanner(
+        icon: Icons.pan_tool_alt_outlined,
+        message: 'Approuvez les appels d\'outils depuis le téléphone',
+      ));
+    }
+    if (children.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final banner in children) ...[banner, const SizedBox(height: 8)],
+        const SizedBox(height: 4),
+      ],
+    );
   }
 
   @override
@@ -515,6 +596,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                   child: ListView(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     children: [
+                      _buildReminderBanners(),
                       ..._messages.map((msg) => _MessageBubble(message: msg)),
                       if (_pendingApproval != null)
                         ToolApprovalCard(
@@ -531,6 +613,38 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                 ),
               ],
             ),
+    );
+  }
+}
+
+class _ReminderBanner extends StatelessWidget {
+  final IconData icon;
+  final String message;
+
+  const _ReminderBanner({required this.icon, required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: scheme.primary.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: scheme.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(fontSize: 12.5, color: scheme.onPrimaryContainer),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -66,3 +66,44 @@ func TestVarintEncoding(t *testing.T) {
 		t.Errorf("Attendu octets luss=%d, reçu=%d", len(w.b), n)
 	}
 }
+
+func TestBuildHandleCascadeUserInteraction_RoundTrip(t *testing.T) {
+	cascadeID := "casc-111"
+	trajID := "traj-222"
+	step := uint32(3)
+
+	oneof := BuildRunCommandInteraction(true, "echo hi", "")
+	buf := BuildHandleCascadeUserInteraction(cascadeID, trajID, step, InteractionRunCommand, oneof)
+
+	fields := DecodeFields(buf)
+	if len(fields) != 2 || fields[0].Num != 1 || string(fields[0].Bytes) != cascadeID {
+		t.Fatalf("wrapper invalide: %+v", fields)
+	}
+	if fields[1].Num != 2 {
+		t.Fatalf("interaction attendue dans le champ #2, reçu #%d", fields[1].Num)
+	}
+
+	sub := DecodeFields(fields[1].Bytes)
+	var gotTraj string
+	var gotStep uint32
+	var gotOneof int
+	var gotConfirm bool
+	for _, f := range sub {
+		switch f.Num {
+		case 1:
+			gotTraj = string(f.Bytes)
+		case 2:
+			gotStep = uint32(f.Varint)
+		case InteractionRunCommand:
+			gotOneof = f.Num
+			for _, inner := range DecodeFields(f.Bytes) {
+				if inner.Num == 1 {
+					gotConfirm = inner.Varint == 1
+				}
+			}
+		}
+	}
+	if gotTraj != trajID || gotStep != step || gotOneof != InteractionRunCommand || !gotConfirm {
+		t.Fatalf("round-trip KO: traj=%s step=%d oneof=%d confirm=%v", gotTraj, gotStep, gotOneof, gotConfirm)
+	}
+}
