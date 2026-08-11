@@ -92,10 +92,10 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.surfaceBase,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       appBar: AppBar(
-        title: const Text('Appairage Daemon'),
-        backgroundColor: AppColors.surfaceRaised,
+        title: Text('Discover Daemons', style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurface)),
+        backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -119,15 +119,15 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
-                      children: const [
+                      children: [
                         Text(
                           'Découvrir le Daemon Bridge',
-                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.inkPrimary),
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface),
                         ),
-                        SizedBox(height: 2),
+                        const SizedBox(height: 2),
                         Text(
                           'Scannez votre réseau local ou saisissez manuellement l\'adresse du PC hôte.',
-                          style: TextStyle(fontSize: 12, color: AppColors.inkSecondary),
+                          style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                         ),
                       ],
                     ),
@@ -144,10 +144,10 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
             width: double.infinity,
             child: OutlinedButton.icon(
               onPressed: _startScan,
-              icon: const Icon(Icons.qr_code_scanner, size: 16, color: AppColors.accentBlue),
-              label: const Text(
+              icon: Icon(Icons.qr_code_scanner, size: 16, color: Theme.of(context).colorScheme.primary),
+              label: Text(
                 'Scanner le QR Code',
-                style: TextStyle(fontSize: 13, color: AppColors.inkPrimary),
+                style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
               ),
               style: OutlinedButton.styleFrom(
                 side: const BorderSide(color: AppColors.accentBlue),
@@ -158,15 +158,27 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
 
           if (_discoveredHosts.isNotEmpty) ...[
             const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Text(
+                'RÉSEAU LOCAL (mDNS)',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ),
             Card(
               child: Column(
                 children: _discoveredHosts.map((host) {
                   return ListTile(
                     dense: true,
                     leading: const Icon(Icons.computer, size: 18, color: AppColors.positive),
-                    title: Text(host, style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary)),
-                    subtitle: const Text('Daemon Bridge détecté', style: TextStyle(fontSize: 11, color: AppColors.inkMuted)),
-                    trailing: const Icon(Icons.chevron_right, size: 16, color: AppColors.inkMuted),
+                    title: Text(host, style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface)),
+                    subtitle: Text('Daemon Bridge détecté', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                    trailing: Icon(Icons.chevron_right, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     onTap: () {
                       _hostController.text = host;
                     },
@@ -177,13 +189,13 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
           ],
 
           const SizedBox(height: 20),
-          const Divider(color: AppColors.borderSubtle),
+          const Divider(),
           const SizedBox(height: 16),
 
           // ── Manual Entry Section
-          const Text(
+          Text(
             'CONNEXION MANUELLE',
-            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.inkSecondary, letterSpacing: 0.8),
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurfaceVariant, letterSpacing: 0.8),
           ),
           const SizedBox(height: 8),
 
@@ -193,37 +205,37 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Hôte PC / Domaine', style: TextStyle(fontSize: 12, color: AppColors.inkSecondary)),
+                  Text('Hôte PC / Domaine', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                   const SizedBox(height: 6),
                   TextField(
                     controller: _hostController,
-                    style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
-                    decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.lan_outlined, size: 18, color: AppColors.inkMuted),
+                    style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                    decoration: InputDecoration(
+                      prefixIcon: Icon(Icons.lan_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                       hintText: '192.168.1.50',
                     ),
                   ),
                   const SizedBox(height: 12),
-                  const Text('Port Daemon', style: TextStyle(fontSize: 12, color: AppColors.inkSecondary)),
+                  Text('Port Daemon', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                   const SizedBox(height: 6),
                   TextField(
                     controller: _portController,
                     keyboardType: TextInputType.number,
-                    style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
-                    decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.numbers, size: 18, color: AppColors.inkMuted),
+                    style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                    decoration: InputDecoration(
+                      prefixIcon: Icon(Icons.numbers, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                       hintText: '8080',
                     ),
                   ),
                   const SizedBox(height: 12),
-                  const Text('Token Auth (optionnel)', style: TextStyle(fontSize: 12, color: AppColors.inkSecondary)),
+                  Text('Token Auth (optionnel)', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                   const SizedBox(height: 6),
                   TextField(
                     controller: _csrfController,
                     obscureText: true,
-                    style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
-                    decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.key_outlined, size: 18, color: AppColors.inkMuted),
+                    style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                    decoration: InputDecoration(
+                      prefixIcon: Icon(Icons.key_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -232,15 +244,15 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: AppColors.danger.withValues(alpha: 0.1),
+                        color: Theme.of(context).colorScheme.error.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.error_outline, size: 16, color: AppColors.danger),
+                          Icon(Icons.error_outline, size: 16, color: Theme.of(context).colorScheme.error),
                           const SizedBox(width: 8),
                           Expanded(
-                            child: Text(_errorMessage!, style: const TextStyle(fontSize: 12, color: AppColors.danger)),
+                            child: Text(_errorMessage!, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.error)),
                           ),
                         ],
                       ),

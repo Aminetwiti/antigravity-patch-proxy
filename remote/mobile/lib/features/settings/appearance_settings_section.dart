@@ -16,12 +16,12 @@ class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Appearance',
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w600,
-            color: AppColors.inkPrimary,
+            color: Theme.of(context).colorScheme.onSurface,
           ),
         ),
         const SizedBox(height: 12),
@@ -29,7 +29,7 @@ class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
           decoration: BoxDecoration(
             color: Colors.transparent,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: AppColors.borderStrong),
+            border: Border.all(color: Theme.of(context).colorScheme.outline),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Row(
@@ -37,15 +37,15 @@ class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
+                  children: [
                     Text(
                       'Appearance',
-                      style: TextStyle(fontSize: 13, color: AppColors.inkPrimary, fontWeight: FontWeight.w500),
+                      style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w500),
                     ),
-                    SizedBox(height: 2),
+                    const SizedBox(height: 2),
                     Text(
                       'Select light, dark, or inherit system settings.',
-                      style: TextStyle(fontSize: 12, color: AppColors.inkSecondary),
+                      style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ],
                 ),
@@ -53,9 +53,9 @@ class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
               // Theme Mode Toggle
               Container(
                 decoration: BoxDecoration(
-                  color: AppColors.surfaceRaised,
+                  color: Theme.of(context).colorScheme.surfaceContainer,
                   borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: AppColors.borderSubtle),
+                  border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -84,28 +84,28 @@ class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
           decoration: BoxDecoration(
             color: Colors.transparent,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: AppColors.borderStrong),
+            border: Border.all(color: Theme.of(context).colorScheme.outline),
           ),
           child: Column(
             children: [
               _buildSettingRow(
                 'Preset',
-                _buildDropdownControl('Default Light'),
+                _buildDropdownControl(context, 'Default Light'),
               ),
-              const Divider(color: AppColors.borderSubtle, height: 1, thickness: 1),
+              const Divider(),
               _buildSettingRow(
                 'Background',
-                _buildColorControl(const Color(0xFFEEEEEE), 'EEEEEE'),
+                _buildColorControl(context, const Color(0xFFEEEEEE), 'EEEEEE'),
               ),
-              const Divider(color: AppColors.borderSubtle, height: 1, thickness: 1),
+              const Divider(),
               _buildSettingRow(
                 'Foreground',
-                _buildColorControl(const Color(0xFF101010), '101010'),
+                _buildColorControl(context, const Color(0xFF101010), '101010'),
               ),
-              const Divider(color: AppColors.borderSubtle, height: 1, thickness: 1),
+              const Divider(),
               _buildSettingRow(
                 'Accent',
-                _buildColorControl(const Color(0xFF007ACC), '007ACC'),
+                _buildColorControl(context, const Color(0xFF007ACC), '007ACC'),
               ),
             ],
           ),
@@ -125,28 +125,28 @@ class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
           decoration: BoxDecoration(
             color: Colors.transparent,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: AppColors.borderStrong),
+            border: Border.all(color: Theme.of(context).colorScheme.outline),
           ),
           child: Column(
             children: [
               _buildSettingRow(
                 'Preset',
-                _buildDropdownControl('Default Dark'),
+                _buildDropdownControl(context, 'Default Dark'),
               ),
-              const Divider(color: AppColors.borderSubtle, height: 1, thickness: 1),
+              const Divider(),
               _buildSettingRow(
                 'Background',
-                _buildColorControl(const Color(0xFF101010), '101010'),
+                _buildColorControl(context, const Color(0xFF101010), '101010'),
               ),
-              const Divider(color: AppColors.borderSubtle, height: 1, thickness: 1),
+              const Divider(),
               _buildSettingRow(
                 'Foreground',
-                _buildColorControl(const Color(0xFFCCCCCC), 'CCCCCC'),
+                _buildColorControl(context, const Color(0xFFCCCCCC), 'CCCCCC'),
               ),
-              const Divider(color: AppColors.borderSubtle, height: 1, thickness: 1),
+              const Divider(),
               _buildSettingRow(
                 'Accent',
-                _buildColorControl(const Color(0xFF007ACC), '007ACC'),
+                _buildColorControl(context, const Color(0xFF007ACC), '007ACC'),
               ),
             ],
           ),
@@ -163,13 +163,13 @@ class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected ? AppColors.surfaceInput : Colors.transparent,
+          color: isSelected ? Theme.of(context).colorScheme.surfaceContainerHighest : Colors.transparent,
           borderRadius: BorderRadius.circular(4),
         ),
         child: Icon(
           icon,
           size: 16,
-          color: isSelected ? AppColors.inkPrimary : AppColors.inkSecondary,
+          color: isSelected ? Theme.of(context).colorScheme.onSurface : Theme.of(context).colorScheme.onSurfaceVariant,
         ),
       ),
     );
@@ -183,7 +183,7 @@ class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
         children: [
           Text(
             label,
-            style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
+            style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
           ),
           control,
         ],
@@ -191,35 +191,35 @@ class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
     );
   }
 
-  Widget _buildDropdownControl(String text) {
+  Widget _buildDropdownControl(BuildContext context, String text) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: AppColors.surfaceInput,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: AppColors.borderSubtle),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
             text,
-            style: const TextStyle(fontSize: 12.5, color: AppColors.inkSecondary),
+            style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
           const SizedBox(width: 12),
-          const Icon(Icons.keyboard_arrow_down, size: 14, color: AppColors.inkMuted),
+          Icon(Icons.keyboard_arrow_down, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
         ],
       ),
     );
   }
 
-  Widget _buildColorControl(Color color, String hex) {
+  Widget _buildColorControl(BuildContext context, Color color, String hex) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        color: AppColors.surfaceRaised, // Using a slightly darker/raised color for the input
+        color: Theme.of(context).colorScheme.surfaceContainer, // Using a slightly darker/raised color for the input
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: AppColors.borderSubtle),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -234,13 +234,13 @@ class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
             ),
           ),
           const SizedBox(width: 8),
-          const Text(
+          Text(
             '# ',
-            style: TextStyle(fontSize: 12.5, color: AppColors.inkMuted),
+            style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
           Text(
             hex,
-            style: const TextStyle(fontSize: 12.5, color: AppColors.inkPrimary),
+            style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurface),
           ),
         ],
       ),

@@ -35,7 +35,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: AppColors.surfaceInput,
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(20),
             ),
             child: Column(
@@ -46,10 +46,10 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   controller: _controller,
                   maxLines: 6,
                   minLines: 1,
-                  style: const TextStyle(fontSize: 14, color: AppColors.inkPrimary),
+                  style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurface),
                   decoration: const InputDecoration(
                     hintText: 'Ask anything, @ to mention, / for actions',
-                    hintStyle: TextStyle(color: AppColors.inkMuted, fontSize: 14),
+                    hintStyle: TextStyle(color: Colors.grey, fontSize: 14),
                     border: InputBorder.none,
                     enabledBorder: InputBorder.none,
                     focusedBorder: InputBorder.none,
@@ -69,7 +69,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                       borderRadius: BorderRadius.circular(8),
                       child: Padding(
                         padding: const EdgeInsets.all(4),
-                        child: Icon(Icons.add, size: 20, color: AppColors.inkSecondary),
+                        child: Icon(Icons.add, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -82,14 +82,14 @@ class _ChatInputBarState extends State<ChatInputBar> {
                         children: [
                           Text(
                             _selectedModel,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
-                              color: AppColors.inkPrimary,
+                              color: Theme.of(context).colorScheme.onSurface,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
                           const SizedBox(width: 4),
-                          const Icon(Icons.keyboard_arrow_down, size: 16, color: AppColors.inkMuted),
+                          Icon(Icons.keyboard_arrow_down, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
                         ],
                       ),
                     ),
@@ -100,7 +100,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                     IconButton(
                       constraints: const BoxConstraints(),
                       padding: const EdgeInsets.all(6),
-                      icon: const Icon(Icons.mic_none, size: 20, color: AppColors.inkSecondary),
+                      icon: Icon(Icons.mic_none, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
                       onPressed: () {},
                     ),
                     const SizedBox(width: 4),
@@ -111,11 +111,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
                       borderRadius: BorderRadius.circular(16),
                       child: Container(
                         padding: const EdgeInsets.all(6),
-                        decoration: const BoxDecoration(
-                          color: AppColors.surfaceRaised,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surfaceContainer,
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.arrow_forward, size: 16, color: AppColors.inkPrimary),
+                        child: Icon(Icons.arrow_forward, size: 16, color: Theme.of(context).colorScheme.onSurface),
                       ),
                     ),
                   ],
@@ -129,21 +129,21 @@ class _ChatInputBarState extends State<ChatInputBar> {
           Row(
             children: [
               const SizedBox(width: 12),
-              const Icon(Icons.monitor_outlined, size: 14, color: AppColors.inkMuted),
+              Icon(Icons.monitor_outlined, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
               const SizedBox(width: 6),
-              const Text(
+              Text(
                 'Local',
-                style: TextStyle(fontSize: 11.5, color: AppColors.inkMuted),
+                style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
               const SizedBox(width: 2),
-              const Icon(Icons.keyboard_arrow_down, size: 14, color: AppColors.inkMuted),
+              Icon(Icons.keyboard_arrow_down, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
               const Spacer(),
-              const Text(
+              Text(
                 'Main Agent',
-                style: TextStyle(fontSize: 11.5, color: AppColors.inkMuted),
+                style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
               const SizedBox(width: 2),
-              const Icon(Icons.keyboard_arrow_down, size: 14, color: AppColors.inkMuted),
+              Icon(Icons.keyboard_arrow_down, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
               const SizedBox(width: 12),
             ],
           ),

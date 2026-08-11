@@ -45,10 +45,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.surfaceBase,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       appBar: AppBar(
         title: const Text('Settings & Profile'),
-        backgroundColor: AppColors.surfaceRaised,
+        backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -81,13 +81,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
-                            color: AppColors.inkPrimary,
+                            color: Theme.of(context).colorScheme.onSurface,
                           ),
                         ),
-                        SizedBox(height: 2),
+                        const SizedBox(height: 2),
                         Text(
                           'Remote Host Controller • PC Linked',
-                          style: TextStyle(fontSize: 12, color: AppColors.inkSecondary),
+                          style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                         ),
                       ],
                     ),
@@ -124,15 +124,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Daemon Host IP / Domain',
-                      style: TextStyle(fontSize: 12, color: AppColors.inkSecondary)),
+                  Text('Daemon Host IP / Domain',
+                      style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                   const SizedBox(height: 6),
                   TextField(
                     controller: _hostController,
-                    style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
-                    decoration: const InputDecoration(
+                    style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                    decoration: InputDecoration(
                       hintText: 'e.g. 192.168.1.50 or tunnel.domain.com',
-                      prefixIcon: Icon(Icons.lan_outlined, size: 18, color: AppColors.inkMuted),
+                      prefixIcon: Icon(Icons.lan_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -143,13 +143,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Port',
-                                style: TextStyle(fontSize: 12, color: AppColors.inkSecondary)),
+                            Text('Port',
+                                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                             const SizedBox(height: 6),
                             TextField(
                               controller: _portController,
                               keyboardType: TextInputType.number,
-                              style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
+                              style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
                               decoration: const InputDecoration(
                                 hintText: '8080',
                               ),
@@ -162,8 +162,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('SSL / TLS (WSS)',
-                                style: TextStyle(fontSize: 12, color: AppColors.inkSecondary)),
+                            Text('SSL / TLS (WSS)',
+                                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                             const SizedBox(height: 6),
                             SwitchListTile(
                               value: _useSsl,
@@ -177,15 +177,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 12),
 
-                  const Text('CSRF Security Token',
-                      style: TextStyle(fontSize: 12, color: AppColors.inkSecondary)),
+                  Text('CSRF Security Token',
+                      style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                   const SizedBox(height: 6),
                   TextField(
                     controller: _csrfController,
                     obscureText: true,
-                    style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
-                    decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.key_outlined, size: 18, color: AppColors.inkMuted),
+                    style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                    decoration: InputDecoration(
+                      prefixIcon: Icon(Icons.key_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -219,15 +219,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Modèle par défaut',
-                      style: TextStyle(fontSize: 12, color: AppColors.inkSecondary)),
+                  Text('Modèle par défaut',
+                      style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                   const SizedBox(height: 6),
                   DropdownButtonFormField<String>(
                     value: _selectedDefaultModel,
-                    dropdownColor: AppColors.surfaceRaised,
-                    style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
-                    decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.smart_toy_outlined, size: 18, color: AppColors.inkMuted),
+                    dropdownColor: Theme.of(context).colorScheme.surfaceContainer,
+                    style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                    decoration: InputDecoration(
+                      prefixIcon: Icon(Icons.smart_toy_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                     items: _models
                         .map((m) => DropdownMenuItem(value: m, child: Text(m)))
@@ -239,16 +239,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 12),
 
                   SwitchListTile(
-                    title: const Text(
+                    title: Text(
                       'Notifications Push (Tool Approvals)',
-                      style: TextStyle(fontSize: 13, color: AppColors.inkPrimary),
+                      style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
                     ),
-                    subtitle: const Text(
+                    subtitle: Text(
                       'Recevoir une alerte sonore quand une commande requiert votre accord',
-                      style: TextStyle(fontSize: 11, color: AppColors.inkMuted),
+                      style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                     value: _toolNotifications,
-                    activeColor: AppColors.accentBlue,
+                    activeColor: Theme.of(context).colorScheme.primary,
                     contentPadding: EdgeInsets.zero,
                     onChanged: (val) => setState(() => _toolNotifications = val),
                   ),
@@ -270,19 +270,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           Card(
             child: Column(
-              children: const [
+              children: [
                 ListTile(
                   dense: true,
-                  leading: Icon(Icons.info_outline, size: 18, color: AppColors.inkSecondary),
-                  title: Text('Version de l\'application', style: TextStyle(fontSize: 13, color: AppColors.inkPrimary)),
-                  trailing: Text('v1.0.0 (Build 42)', style: TextStyle(fontSize: 12, color: AppColors.inkMuted)),
+                  leading: Icon(Icons.info_outline, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  title: Text('Version de l\'application', style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface)),
+                  trailing: Text('v1.0.0 (Build 42)', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                 ),
-                Divider(color: AppColors.borderSubtle),
+                const Divider(),
                 ListTile(
                   dense: true,
-                  leading: Icon(Icons.terminal_outlined, size: 18, color: AppColors.inkSecondary),
-                  title: Text('Protocole ConnectRPC / gRPC-Web', style: TextStyle(fontSize: 13, color: AppColors.inkPrimary)),
-                  trailing: Text('Active (v1)', style: TextStyle(fontSize: 12, color: AppColors.positive)),
+                  leading: Icon(Icons.terminal_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  title: Text('Protocole ConnectRPC / gRPC-Web', style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface)),
+                  trailing: const Text('Active (v1)', style: TextStyle(fontSize: 12, color: AppColors.positive)),
                 ),
               ],
             ),
@@ -302,10 +302,10 @@ class _SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       title,
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 11,
         fontWeight: FontWeight.w700,
-        color: AppColors.inkSecondary,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
         letterSpacing: 0.8,
       ),
     );

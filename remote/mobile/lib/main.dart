@@ -321,7 +321,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       ),
       appBar: AppBar(
         leading: IconButton(
-          icon: const Icon(Icons.dock_outlined, size: 20, color: AppColors.inkPrimary),
+          icon: Icon(Icons.dock_outlined, size: 20, color: Theme.of(context).colorScheme.onSurface),
           onPressed: () => _scaffoldKey.currentState?.openDrawer(),
           tooltip: 'Ouvrir le menu gauche',
         ),
@@ -330,7 +330,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
             Expanded(
               child: Text(
                 '$_activeProjectName / $_activeSessionTitle',
-                style: const TextStyle(fontSize: 13, color: AppColors.inkSecondary),
+                style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -352,10 +352,10 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                 decoration: BoxDecoration(
                   color: isConnected
                       ? AppColors.positive.withValues(alpha: 0.15)
-                      : AppColors.danger.withValues(alpha: 0.15),
+                      : Theme.of(context).colorScheme.error.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: isConnected ? AppColors.positive : AppColors.danger,
+                    color: isConnected ? AppColors.positive : Theme.of(context).colorScheme.error,
                     width: 1,
                   ),
                 ),
@@ -366,7 +366,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                       width: 6,
                       height: 6,
                       decoration: BoxDecoration(
-                        color: isConnected ? AppColors.positive : AppColors.danger,
+                        color: isConnected ? AppColors.positive : Theme.of(context).colorScheme.error,
                         shape: BoxShape.circle,
                       ),
                     ),
@@ -375,7 +375,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                       isConnected ? 'Connected' : 'Offline',
                       style: TextStyle(
                         fontSize: 10.5,
-                        color: isConnected ? AppColors.positive : AppColors.danger,
+                        color: isConnected ? AppColors.positive : Theme.of(context).colorScheme.error,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -389,10 +389,10 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           // Open IDE Button Pill
           TextButton.icon(
             onPressed: () {},
-            icon: const Icon(Icons.change_history, size: 14, color: AppColors.accentBlue),
-            label: const Text(
+            icon: Icon(Icons.change_history, size: 14, color: Theme.of(context).colorScheme.primary),
+            label: Text(
               'Open IDE',
-              style: TextStyle(fontSize: 11, color: AppColors.inkPrimary),
+              style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurface),
             ),
             style: TextButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -403,7 +403,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           const SizedBox(width: 4),
           // Right Sidebar Toggle Button
           IconButton(
-            icon: const Icon(Icons.vertical_split_outlined, size: 20, color: AppColors.inkPrimary),
+            icon: Icon(Icons.vertical_split_outlined, size: 20, color: Theme.of(context).colorScheme.onSurface),
             onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
             tooltip: 'Ouvrir le panneau contexte',
           ),
@@ -420,14 +420,14 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.folder_outlined, size: 16, color: AppColors.inkMuted),
+                          Icon(Icons.folder_outlined, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
                           const SizedBox(width: 8),
                           Text(
                             _activeProjectName,
-                            style: const TextStyle(fontSize: 13, color: AppColors.inkMuted),
+                            style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
                           ),
                           const SizedBox(width: 4),
-                          const Icon(Icons.keyboard_arrow_down, size: 16, color: AppColors.inkMuted),
+                          Icon(Icons.keyboard_arrow_down, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
                         ],
                       ),
                       const SizedBox(height: 16),
@@ -490,13 +490,13 @@ class _MessageBubbleState extends State<_MessageBubble> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
-            color: AppColors.surfaceInput,
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.borderSubtle),
+            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
           ),
           child: Text(
             widget.message.text,
-            style: const TextStyle(fontSize: 13.5, color: AppColors.inkPrimary),
+            style: TextStyle(fontSize: 13.5, color: Theme.of(context).colorScheme.onSurface),
           ),
         ),
       );
@@ -523,9 +523,9 @@ class _MessageBubbleState extends State<_MessageBubble> {
                   children: [
                     Text(
                       widget.message.thought!,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        color: AppColors.inkMuted,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -533,7 +533,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
                     Icon(
                       _isThoughtExpanded ? Icons.chevron_right : Icons.expand_more,
                       size: 14,
-                      color: AppColors.inkMuted,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ],
                 ),
@@ -545,19 +545,19 @@ class _MessageBubbleState extends State<_MessageBubble> {
           // Assistant Response Text
           Text(
             widget.message.text,
-            style: const TextStyle(fontSize: 14, color: AppColors.inkPrimary, height: 1.4),
+            style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurface, height: 1.4),
           ),
 
           const SizedBox(height: 8),
 
           // Message Action Icons (Copy, Like, Dislike)
           Row(
-            children: const [
-              Icon(Icons.copy_outlined, size: 14, color: AppColors.inkMuted),
-              SizedBox(width: 12),
-              Icon(Icons.thumb_up_outlined, size: 14, color: AppColors.inkMuted),
-              SizedBox(width: 12),
-              Icon(Icons.thumb_down_outlined, size: 14, color: AppColors.inkMuted),
+            children: [
+              Icon(Icons.copy_outlined, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              const SizedBox(width: 12),
+              Icon(Icons.thumb_up_outlined, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              const SizedBox(width: 12),
+              Icon(Icons.thumb_down_outlined, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ],
           ),
         ],

@@ -19,9 +19,10 @@ type TrajectorySummary struct {
 }
 
 var (
-	uuidRe       = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
-	workspaceRe  = regexp.MustCompile(`file:///[^\x00-\x1f]+`)
-	titleBytesRe = regexp.MustCompile(`[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9 ._'\-]{4,80}`)
+	uuidRe         = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
+	uuidFragmentRe = regexp.MustCompile(`^[0-9a-fA-F-]+$`)
+	workspaceRe    = regexp.MustCompile(`file:///[^\x00-\x1f]+`)
+	titleBytesRe   = regexp.MustCompile(`[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9 ._'\-]{4,80}`)
 )
 
 // ParseTrajectories dé-framme la réponse gRPC-Web de GetAllCascadeTrajectories
@@ -30,19 +31,17 @@ var (
 // Structure observée (rétro-ingénierie, capture réelle) :
 //
 //	GetAllCascadeTrajectoriesResponse {
-//	  1: repeated CascadeTrajectorySummary trajectory_summaries  ← entrées
-//	  ...
+//	  1: repeated CascadeTrajectorySummary summaries
 //	}
 //	CascadeTrajectorySummary {
 //	  1: string cascade_id
-//	  2: string title? / metadata…
-//	  3..10: timestamps (secondes, nanos)
-//	  17: agent status (texte ou message)
-//	  22: varint status
+//	  2: CascadeTrajectoryMetadata metadata   ← titre (sous-champ 1), workspace (sous-champ 9→1)
+//	  3: Timestamp created                     ← secondes (sous-champ 1), nanos (sous-champ 2)
+//	  22: varint status (4 = READY)
 //	}
 //
-// Les entrées sont des chaînes imbriquées "UUID + titre + workspace" ou des
-// messages structurés — les deux formes coexistent dans la réponse réelle.
+// Certaines entrées (sessions de continuation) sont des blobs texte bruts
+// " $<uuid> <contenu>…" — traitées en fallback.
 func ParseTrajectories(raw []byte) []TrajectorySummary {
 	payload := raw
 	// Dé-framming gRPC-Web : flags(1) + longueur BE(4) + payload
@@ -75,20 +74,20 @@ func parseTrajectoryFields(fields []Field) []TrajectorySummary {
 func trajectoryFromBlob(blob []byte) TrajectorySummary {
 	t := TrajectorySummary{Size: len(blob)}
 
-	// Forme 1 : message structuré — les champs contiennent cascade_id,
-	// titre (parfois imbriqué dans un sous-message), workspace, statut.
+	// Forme 1 : message structuré (marqueur = UUID de 36 octets présent)
 	fields := DecodeFields(blob)
-	if len(fields) > 0 && isStructuredTrajectory(fields) {
+	if isStructuredTrajectory(fields) {
 		for _, f := range fields {
 			switch f.Num {
 			case 1:
 				if f.WireType == 2 && len(f.Bytes) == 36 {
 					t.CascadeID = string(f.Bytes)
 				}
+			case 3: // timestamp
+				t.UpdatedAt = timestampFromMessage(f.Bytes)
 			case 22:
 				t.Status = statusName(int(f.Varint))
 			}
-			// Cherche titre/workspace dans tous les sous-champs (niveau 1)
 			if f.WireType == 2 {
 				if t.Title == "" {
 					t.Title = findTitle(f.Bytes)
@@ -116,6 +115,19 @@ func trajectoryFromBlob(blob []byte) TrajectorySummary {
 		t.Title = "Cascade Session"
 	}
 	return t
+}
+
+// timestampFromMessage : message {1: secondes, 2: nanos} → time.Time.
+func timestampFromMessage(b []byte) time.Time {
+	for _, f := range DecodeFields(b) {
+		if f.Num == 1 && f.WireType == 0 {
+			sec := int64(f.Varint)
+			if sec > 0 {
+				return time.Unix(sec, 0)
+			}
+		}
+	}
+	return time.Time{}
 }
 
 // findTitle cherche un titre lisible dans un blob, en descendant d'un niveau
@@ -146,13 +158,17 @@ func isStructuredTrajectory(fields []Field) bool {
 	return false
 }
 
-// isTitleLike : chaîne imprimable courte (<120 octets) sans UUID ni workspace.
+// isTitleLike : chaîne imprimable courte (<200 octets) sans UUID ni workspace.
 func isTitleLike(b []byte) bool {
-	if len(b) == 0 || len(b) > 120 {
+	if len(b) == 0 || len(b) > 200 {
 		return false
 	}
 	s := string(b)
 	if strings.Contains(s, "file:///") || uuidRe.MatchString(s) {
+		return false
+	}
+	// Fragment d'UUID résiduel ("47da31-5b79-4741-…") : tout hex + tirets.
+	if strings.ContainsAny(s, "-") && uuidFragmentRe.MatchString(s) {
 		return false
 	}
 	return len(titleBytesRe.FindString(s)) >= 4
@@ -167,16 +183,23 @@ func firstUUID(s string) string {
 }
 
 func extractTitle(s string) string {
-	// Supprime le préfixe " $<uuid> " puis prend la première ligne lisible.
 	cleaned := strings.TrimSpace(s)
 	cleaned = strings.TrimPrefix(cleaned, "$")
 	if m := uuidRe.FindStringIndex(cleaned); m != nil {
 		cleaned = cleaned[m[1]:]
 	}
-	cleaned = strings.TrimLeft(cleaned, " \t\n")
-	// Coupe au premier octet non imprimable ou à la première ligne
-	firstLine := strings.SplitN(cleaned, "\n", 2)[0]
-	candidates := titleBytesRe.FindAllString(firstLine, -1)
+	// Nettoie les octets de contrôle / ponctuation binaire avant extraction
+	cleaned = strings.TrimLeft(cleaned, " \t\n\r\xb7\x00\x01\x02\x03\x04\x05\"'$+(")
+	if i := strings.IndexByte(cleaned, '\n'); i >= 0 {
+		cleaned = cleaned[:i]
+	}
+	candidates := titleBytesRe.FindAllString(cleaned, -1)
+	for _, c := range candidates {
+		// ignore les fragments d'UUID résiduels (trop courts ou tirets seuls)
+		if len(c) >= 8 && !strings.Contains(c, "-") {
+			return c
+		}
+	}
 	for _, c := range candidates {
 		if len(c) >= 8 {
 			return c

@@ -20,30 +20,37 @@ class RightSidebarDrawer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Drawer(
-      backgroundColor: AppColors.surfaceBase,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       child: SafeArea(
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Right Sidebar Header
+            // Drawer Header
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
               child: Row(
                 children: [
-                  const Icon(Icons.article_outlined, size: 20, color: AppColors.inkSecondary),
+                  Icon(Icons.vertical_split_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   const SizedBox(width: 8),
-                  const Icon(Icons.note_add_outlined, size: 18, color: AppColors.inkMuted),
-                  const Spacer(),
-                  const Icon(Icons.add, size: 18, color: AppColors.inkMuted),
-                  const SizedBox(width: 12),
-                  IconButton(
-                    icon: const Icon(Icons.dock_outlined, size: 20, color: AppColors.inkSecondary),
-                    onPressed: () => Navigator.of(context).pop(),
-                    tooltip: 'Fermer le panneau',
+                  Text(
+                    'CONTEXT',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.2,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
-                ],
+                  const Spacer(),
+                    IconButton(
+                      icon: Icon(Icons.dock_outlined, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      onPressed: () => Navigator.of(context).pop(),
+                      tooltip: 'Fermer le panneau',
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const Divider(color: AppColors.borderSubtle),
+              const Divider(),
 
             // Context Accordion List
             Expanded(
@@ -96,6 +103,36 @@ class _ContextItemRow extends StatelessWidget {
     required this.onTap,
   });
 
+  Widget _buildDetailRow(BuildContext context, IconData icon, String label, String value, {bool isPositive = false}) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 80,
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              color: isPositive ? AppColors.positive : Theme.of(context).colorScheme.onSurface,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return InkWell(
@@ -106,33 +143,33 @@ class _ContextItemRow extends StatelessWidget {
           children: [
             Text(
               title,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w400,
-                color: AppColors.inkPrimary,
+                color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
             const SizedBox(width: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: AppColors.surfaceInput,
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
                 '$badgeCount',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11,
-                  color: AppColors.inkSecondary,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                   fontWeight: FontWeight.w600,
                 ),
               ),
             ),
             const Spacer(),
-            const Icon(
+            Icon(
               Icons.chevron_right,
               size: 16,
-              color: AppColors.inkMuted,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ],
         ),

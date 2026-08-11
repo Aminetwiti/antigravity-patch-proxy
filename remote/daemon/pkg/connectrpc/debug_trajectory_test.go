@@ -84,4 +84,17 @@ func TestDebugStructuredMessage(t *testing.T) {
 	blob := fields[0].Bytes
 	t.Logf("trajectoryFromBlob(%d octets) = %+v", len(blob), trajectoryFromBlob(blob))
 	fmt.Sprint()
+
+	// Version enveloppée (comme la capture réelle) : entrée dans repeated #1.
+	wrapped := &writer{}
+	wrapped.bytesField(1, w.b)
+	fieldsW := DecodeFields(wrapped.b)
+	t.Logf("wrapped fields: %d", len(fieldsW))
+	blobW := fieldsW[0].Bytes
+	t.Logf("blobW = %d octets, isStructured=%v", len(blobW), isStructuredTrajectory(DecodeFields(blobW)))
+	inner := DecodeFields(blobW)
+	for i, f := range inner {
+		t.Logf("  inner[%d] %s", i, f.String())
+	}
+	t.Logf("trajectoryFromBlob(wrapped) = %+v", trajectoryFromBlob(blobW))
 }

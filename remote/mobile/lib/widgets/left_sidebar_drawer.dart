@@ -25,33 +25,36 @@ class LeftSidebarDrawer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Drawer(
-      backgroundColor: AppColors.surfaceBase,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       child: SafeArea(
         child: Column(
           children: [
-            // Top Header Bar with toggle & navigation icons
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.all(16.0),
               child: Row(
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.vertical_split_outlined, size: 20, color: AppColors.inkSecondary),
-                    onPressed: () => Navigator.of(context).pop(),
-                    tooltip: 'Fermer le menu',
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.api_outlined, size: 18, color: Colors.white),
                   ),
-                  const IconButton(
-                    icon: Icon(Icons.arrow_back, size: 18, color: AppColors.inkMuted),
-                    onPressed: null,
-                  ),
-                  const IconButton(
-                    icon: Icon(Icons.arrow_forward, size: 18, color: AppColors.inkMuted),
-                    onPressed: null,
+                  const SizedBox(width: 12),
+                  const Text(
+                    'Antigravity',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5,
+                    ),
                   ),
                 ],
               ),
             ),
-
-            // Main Actions
+            const Divider(),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               child: Column(
@@ -65,65 +68,35 @@ class LeftSidebarDrawer extends StatelessWidget {
                     },
                     isPrimary: true,
                   ),
-                  const SizedBox(height: 6),
-                  _NavButton(
-                    icon: Icons.history,
-                    label: 'Conversation History',
-                    onTap: () {},
-                  ),
-                  const SizedBox(height: 4),
-                  _NavButton(
-                    icon: Icons.schedule,
-                    label: 'Scheduled Tasks',
-                    onTap: () {},
-                  ),
-                  const SizedBox(height: 4),
-                  _NavButton(
-                    icon: Icons.radar,
-                    label: 'Appairer un Daemon',
-                    onTap: () {
-                      Navigator.of(context).pop();
-                      if (onDiscover != null) onDiscover!();
-                    },
-                  ),
-                  const SizedBox(height: 4),
-                  _NavButton(
-                    icon: Icons.folder_open_outlined,
-                    label: 'Explorer le Workspace',
-                    onTap: () {
-                      Navigator.of(context).pop();
-                      if (onOpenWorkspace != null) onOpenWorkspace!();
-                    },
-                  ),
                 ],
               ),
             ),
-
-            const SizedBox(height: 16),
-            const Divider(color: AppColors.borderSubtle),
-
-            // Projects Header
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              child: Row(
-                children: const [
-                  Text(
-                    'Projects',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.inkSecondary,
-                    ),
-                  ),
-                  Spacer(),
-                  Icon(Icons.filter_list, size: 16, color: AppColors.inkMuted),
-                  SizedBox(width: 8),
-                  Icon(Icons.create_new_folder_outlined, size: 16, color: AppColors.inkMuted),
-                ],
-              ),
+            const Divider(),
+            _SidebarAction(
+              icon: Icons.search,
+              label: 'Discover Daemon',
+              onTap: () {
+                Navigator.of(context).pop();
+                if (onDiscover != null) onDiscover!();
+              },
             ),
-
-            // Workspace Tree / Sessions List
+            _SidebarAction(
+              icon: Icons.folder_outlined,
+              label: 'Explorer le Workspace',
+              onTap: () {
+                Navigator.of(context).pop();
+                if (onOpenWorkspace != null) onOpenWorkspace!();
+              },
+            ),
+            _SidebarAction(
+              icon: Icons.settings_outlined,
+              label: 'Settings & Profile',
+              onTap: () {
+                Navigator.of(context).pop();
+                if (onOpenSettings != null) onOpenSettings!();
+              },
+            ),
+            const SizedBox(height: 12),
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -143,39 +116,8 @@ class LeftSidebarDrawer extends StatelessWidget {
                       onSessionSelected(id);
                     },
                   ),
-                  const SizedBox(height: 8),
-                  _ProjectFolderGroup(
-                    folderName: 'www - Copie',
-                    sessions: const [
-                      _SessionItemData('s6', 'Comprehensive Hardco...', ''),
-                      _SessionItemData('s7', 'Identification De L\'Assi...', '30m'),
-                      _SessionItemData('s8', 'Audit Et Rapport Complet', ''),
-                      _SessionItemData('s9', 'Audit UI/UX Mobile Prof...', ''),
-                    ],
-                    activeSessionId: activeSessionId,
-                    onSessionTap: (id) {
-                      Navigator.of(context).pop();
-                      onSessionSelected(id);
-                    },
-                  ),
                 ],
               ),
-            ),
-
-            const Divider(color: AppColors.borderSubtle),
-
-            // Bottom Settings Action
-            ListTile(
-              dense: true,
-              leading: const Icon(Icons.settings_outlined, size: 18, color: AppColors.inkSecondary),
-              title: const Text(
-                'Settings',
-                style: TextStyle(fontSize: 13, color: AppColors.inkPrimary),
-              ),
-              onTap: () {
-                Navigator.of(context).pop();
-                if (onOpenSettings != null) onOpenSettings!();
-              },
             ),
           ],
         ),
@@ -205,20 +147,51 @@ class _NavButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: isPrimary ? AppColors.surfaceInput : Colors.transparent,
+          color: isPrimary ? Theme.of(context).colorScheme.primaryContainer : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
-          border: isPrimary ? Border.all(color: AppColors.borderSubtle) : null,
         ),
         child: Row(
           children: [
-            Icon(icon, size: 18, color: AppColors.inkPrimary),
+            Icon(icon, size: 18, color: Theme.of(context).colorScheme.onSurface),
             const SizedBox(width: 10),
             Text(
               label,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w500,
-                color: AppColors.inkPrimary,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SidebarAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+
+  const _SidebarAction({required this.icon, required this.label, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
+            const SizedBox(width: 12),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w500,
+                color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
           ],
@@ -258,15 +231,15 @@ class _ProjectFolderGroup extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           child: Row(
             children: [
-              const Icon(Icons.folder_open_outlined, size: 16, color: AppColors.inkSecondary),
+              Icon(Icons.folder_open_outlined, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   folderName,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w500,
-                    color: AppColors.inkSecondary,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),

@@ -14,10 +14,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.surfaceBase,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       appBar: AppBar(
         title: const Text('Explorateur de Fichiers'),
-        backgroundColor: AppColors.surfaceRaised,
+        backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
       ),
       body: Row(
         children: [
@@ -25,8 +25,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           Container(
             width: MediaQuery.of(context).size.width * 0.55,
             decoration: BoxDecoration(
-              color: AppColors.surfaceBase,
-              border: Border(right: BorderSide(color: AppColors.borderSubtle)),
+              color: Theme.of(context).colorScheme.surface,
+              border: Border(right: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -34,17 +34,17 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                 Padding(
                   padding: const EdgeInsets.all(12),
                   child: Row(
-                    children: const [
-                      Icon(Icons.folder_open, size: 16, color: AppColors.inkSecondary),
-                      SizedBox(width: 8),
+                    children: [
+                      Icon(Icons.folder_open, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      const SizedBox(width: 8),
                       Text(
                         'antigravity-add-model-main',
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.inkPrimary),
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface),
                       ),
                     ],
                   ),
                 ),
-                const Divider(color: AppColors.borderSubtle),
+                const Divider(),
                 Expanded(
                   child: ListView(
                     padding: const EdgeInsets.only(bottom: 12),
@@ -74,34 +74,34 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
               children: [
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  color: AppColors.surfaceRaised,
+                  color: Theme.of(context).colorScheme.surfaceContainer,
                   child: Row(
                     children: [
-                      const Icon(Icons.description_outlined, size: 16, color: AppColors.inkSecondary),
+                      Icon(Icons.description_outlined, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           _selectedFilePath,
-                          style: const TextStyle(fontSize: 12.5, color: AppColors.inkPrimary),
+                          style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurface),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       IconButton(
                         constraints: const BoxConstraints(),
                         padding: const EdgeInsets.all(4),
-                        icon: const Icon(Icons.download_outlined, size: 16, color: AppColors.inkMuted),
+                        icon: Icon(Icons.download_outlined, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
                         onPressed: () {},
                       ),
                     ],
                   ),
                 ),
-                const Divider(color: AppColors.borderSubtle, height: 1),
+                const Divider(height: 1),
                 Expanded(
                   child: Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(14),
-                    color: AppColors.surfaceInput,
-                    child: const SingleChildScrollView(
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    child: SingleChildScrollView(
                       child: Text(
                         '''// lib/main.dart
 import 'package:flutter/material.dart';
@@ -126,7 +126,7 @@ class AntigravityRemoteApp extends StatelessWidget {
                           fontFamily: 'monospace',
                           fontSize: 12,
                           height: 1.5,
-                          color: AppColors.inkPrimary,
+                          color: Theme.of(context).colorScheme.onSurface,
                         ),
                       ),
                     ),
@@ -155,7 +155,7 @@ class _TreeFolder extends StatelessWidget {
         children: [
           const Icon(Icons.folder_outlined, size: 16, color: AppColors.warning),
           const SizedBox(width: 6),
-          Text(title, style: const TextStyle(fontSize: 12.5, color: AppColors.inkPrimary)),
+          Text(title, style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurface)),
         ],
       ),
     );
@@ -176,12 +176,12 @@ class _TreeFile extends StatelessWidget {
         padding: EdgeInsets.only(left: 8.0 + depth * 14, top: 2, bottom: 2),
         child: Row(
           children: [
-            const Icon(Icons.insert_drive_file_outlined, size: 15, color: AppColors.inkSecondary),
+            Icon(Icons.insert_drive_file_outlined, size: 15, color: Theme.of(context).colorScheme.onSurfaceVariant),
             const SizedBox(width: 6),
             Expanded(
               child: Text(
                 title,
-                style: const TextStyle(fontSize: 12.5, color: AppColors.inkSecondary),
+                style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
