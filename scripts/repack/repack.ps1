@@ -14,7 +14,10 @@ Write-Host "Repacking app.asar package..." -ForegroundColor Yellow
 Write-Host "==============================================" -ForegroundColor Cyan
 
 # Define source and destination paths (portable — uses LOCALAPPDATA)
-$SourceDir = $PSScriptRoot
+# NOTE: this repack targets the CLASSIC 2.x shell (app.asar merge). The
+# VS Code-based "Antigravity IDE" has no app.asar — it is patched via the
+# jetski.cloudCodeUrl settings override (see ag-doctor/src/core/ide-patch.ts).
+$SourceDir = Resolve-Path "$PSScriptRoot\..\.."
 $DestAsar = "$env:LOCALAPPDATA\Programs\antigravity\resources\app.asar"
 
 if (-not (Test-Path $SourceDir)) {
@@ -25,7 +28,12 @@ if (-not (Test-Path $SourceDir)) {
 }
 
 # Repack using @electron/asar (excluding large/unnecessary directories)
-npx -y @electron/asar pack $SourceDir $DestAsar --unpack-dir "{node_modules,scratch,.git}"
+$AsarBin = Join-Path $SourceDir "node_modules\@electron\asar\bin\asar.js"
+if (Test-Path $AsarBin) {
+    node $AsarBin pack $SourceDir $DestAsar --unpack-dir "{node_modules,scratch,.git}"
+} else {
+    npx -y @electron/asar pack $SourceDir $DestAsar --unpack-dir "{node_modules,scratch,.git}"
+}
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "==============================================" -ForegroundColor Cyan

@@ -21,7 +21,7 @@ import { promisify } from 'util';
 import type { CommandContext } from '../types';
 import { c, header, ok, warn, error, info } from '../cli/output';
 import { loadConfig } from '../core/config';
-import { isPortInUse, killAntigravityProcesses } from '../core/process';
+import { isPortInUse, killAntigravityProcesses, resolveProxyRuntime, proxySpawnEnv } from '../core/process';
 import { probe } from '../core/probe';
 import { Spinner } from '../cli/spinner';
 
@@ -99,8 +99,23 @@ async function runStart(ctx: CommandContext, scriptName: string, port: number, n
   const status = await getProxyStatus(port);
 
   if (status.reachable) {
-    if (!ctx.json) info(`Port ${port} already in use (pid=${status.pid ?? '?'})`);
-    return 0;
+    if (status.isStub) {
+      // A leftover stub holds the port (e.g. auto-started by `ag-doctor doctor`).
+      // If we returned here, the real proxy would hit EADDRINUSE and fall back to
+      // another port while the patched language server still dials 50999 —
+      // silently losing model injection. Kill the stub and start the real proxy.
+      if (!ctx.json) warn('Port is held by a proxy stub — replacing it with the real proxy');
+      const killed = await killPid(status.pid);
+      if (!killed) {
+        if (!ctx.json) error('Could not kill the stub holding the port; run `ag-doctor proxy stop` first');
+        return 2;
+      }
+      // Give the port a moment to be released before binding.
+      await new Promise((r) => setTimeout(r, 500));
+    } else {
+      if (!ctx.json) info(`Port ${port} already in use by the real proxy (pid=${status.pid ?? '?'})`);
+      return 0;
+    }
   }
 
   const scriptPath = path.join(__dirname, '..', '..', 'scripts', 'proxy', scriptName);
@@ -117,6 +132,21 @@ async function runStart(ctx: CommandContext, scriptName: string, port: number, n
   return await spawnDetached(scriptPath, [], port, ctx, noStub);
 }
 
+/** Best-effort kill of a single PID (taskkill on Windows, signal elsewhere). */
+async function killPid(pid: number | null): Promise<boolean> {
+  if (!pid) return false;
+  try {
+    if (process.platform === 'win32') {
+      await execFileAsync('taskkill', ['/F', '/PID', String(pid)], { windowsHide: true });
+    } else {
+      process.kill(pid, 'SIGTERM');
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Spawn a detached proxy process and wait for the port to become reachable. */
 async function spawnDetached(scriptPath: string, args: string[], port: number, ctx: CommandContext, noStub: boolean): Promise<number> {
   if (!ctx.json) info(`Spawning detached proxy process: ${scriptPath}`);
@@ -125,11 +155,16 @@ async function spawnDetached(scriptPath: string, args: string[], port: number, c
   if (sp) sp.start();
 
   try {
-    const proc = spawn(process.execPath, [scriptPath, ...args], {
+    const runtime = resolveProxyRuntime();
+    const proc = spawn(runtime.bin, [...runtime.args, scriptPath, ...args], {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
-      env: { ...process.env, AG_PROXY_PORT: String(port), AG_STUB_PORT: String(port) },
+      env: {
+        ...proxySpawnEnv(),
+        AG_PROXY_PORT: String(port),
+        AG_STUB_PORT: String(port),
+      },
     });
     proc.unref();
 

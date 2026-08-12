@@ -222,17 +222,16 @@ async function isPortReachable(port: number, host = '127.0.0.1'): Promise<boolea
 async function findLanguageServerProcesses(): Promise<Array<{ pid: number; command: string }>> {
   try {
     if (process.platform === 'win32') {
-      const { stdout } = await execFileAsync('tasklist', [
-        '/FI',
-        'IMAGENAME eq language_server.exe',
-        '/FO',
-        'CSV',
-        '/NH',
-      ]);
+      // Classic app ships language_server.exe; the VS Code-based IDE ships
+      // language_server_windows_x64.exe inside its bundled extension.
+      const imageNames = ['language_server.exe', 'language_server_windows_x64.exe'];
       const out: Array<{ pid: number; command: string }> = [];
-      for (const line of stdout.split(/\r?\n/)) {
-        const m = line.match(/^"language_server\.exe","(\d+)"/);
-        if (m) out.push({ pid: parseInt(m[1]!, 10), command: 'language_server.exe' });
+      for (const name of imageNames) {
+        const { stdout } = await execFileAsync('tasklist', ['/FI', `IMAGENAME eq ${name}`, '/FO', 'CSV', '/NH']);
+        for (const line of stdout.split(/\r?\n/)) {
+          const m = line.match(/^"([^"]+\.exe)","(\d+)"/);
+          if (m) out.push({ pid: parseInt(m[2]!, 10), command: m[1] });
+        }
       }
       return out;
     }

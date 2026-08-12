@@ -11,11 +11,12 @@
 import type { CommandContext } from '../types';
 import { checkPatch } from '../checks/patch';
 import { applyPatch } from '../core/binary-patch';
-import { isPortInUse, killAntigravityProcesses } from '../core/process';
+import { isPortInUse, killAntigravityProcesses, resolveProxyRuntime, proxySpawnEnv } from '../core/process';
 import { ensureDataDir } from '../core/custom-models';
 import { snapshotBefore } from '../core/snapshot';
 import { getProxyStatus } from './proxy';
 import { ensureCa } from '../core/cert';
+import { applyIdePatch, getIdePatchStatus } from '../core/ide-patch';
 import { c, header, ok, warn, error, info } from '../cli/output';
 import { confirm } from '../cli/prompts';
 import { Spinner } from '../cli/spinner';
@@ -46,6 +47,11 @@ export async function runRepair(ctx: CommandContext): Promise<number> {
   const caPath = path.join(process.env.HOME || process.env.USERPROFILE || '', '.gemini', 'antigravity', 'ca.crt');
   if (!fs.existsSync(caPath)) {
     actions.push('generate MITM CA certificate');
+  }
+  // 4b. IDE (v1.107.0+) cloud endpoint override
+  const idePatch = getIdePatchStatus();
+  if (idePatch.installDir && !idePatch.applied) {
+    actions.push('apply IDE (Antigravity IDE) cloud endpoint patch');
   }
   // 5. Data dir
   ensureDataDir();
@@ -100,6 +106,13 @@ export async function runRepair(ctx: CommandContext): Promise<number> {
         } catch (e) {
           sp.fail(`CA generation failed: ${(e as Error).message}`);
         }
+      } else if (a.startsWith('apply IDE')) {
+        const r = applyIdePatch();
+        if (!r.ok) {
+          sp.fail(r.message);
+          return 2;
+        }
+        sp.succeed(r.message);
       }
     } catch (e) {
       sp.fail((e as Error).message);
@@ -124,6 +137,8 @@ async function startProxyWithFallback(port: number): Promise<boolean> {
   }
   // Fallback to stub
   const stubCandidates = [
+    path.join(__dirname, '..', '..', '..', 'scripts', 'proxy', 'proxy-stub.js'),
+    path.join(process.cwd(), 'scripts', 'proxy', 'proxy-stub.js'),
     path.join(__dirname, '..', '..', 'scripts', 'proxy', 'proxy-stub.js'),
     path.join(__dirname, '..', '..', 'bin', 'stub-proxy.js'),
   ];
@@ -138,11 +153,16 @@ async function startProxyWithFallback(port: number): Promise<boolean> {
 
 async function trySpawnProxy(scriptPath: string, port: number, waitMs: number): Promise<boolean> {
   try {
-    const proc = spawn(process.execPath, [scriptPath], {
+    const runtime = resolveProxyRuntime();
+    const proc = spawn(runtime.bin, [...runtime.args, scriptPath], {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
-      env: { ...process.env, AG_PROXY_PORT: String(port), AG_STUB_PORT: String(port) },
+      env: {
+        ...proxySpawnEnv(),
+        AG_PROXY_PORT: String(port),
+        AG_STUB_PORT: String(port),
+      },
     });
     proc.unref();
     const deadline = Date.now() + waitMs;

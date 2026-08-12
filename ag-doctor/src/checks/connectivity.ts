@@ -68,11 +68,21 @@ export async function checkConnectivity(): Promise<CheckResult> {
   const raw = await Promise.all(urls.map(async (u) => {
     const target = buildModelsUrl(u);
     const model = urlToModel.get(u);
+    // Some providers take >5s to respond to an unauthenticated /v1/models
+    // probe (they answer 401 once the request reaches the auth layer). A
+    // single 15s timeout with one retry prevents slow-but-alive hosts from
+    // being mislabelled as "down" (false outage alarms). The retry is
+    // limited to timeouts — deterministic failures (DNS, refused, TLS,
+    // HTTP status) are not retried, keeping the check fast.
+    let result = await probe(target, 15000, { provider: model?.provider, apiKey: model?.apiKey });
+    if (!result.ok && result.errorCategory === 'timeout') {
+      result = await probe(target, 15000, { provider: model?.provider, apiKey: model?.apiKey });
+    }
     return {
       source: u,
       target,
       keyUsable: isKeyUsable(model),
-      result: await probe(target, 5000, { provider: model?.provider, apiKey: model?.apiKey }),
+      result,
     };
   }));
 

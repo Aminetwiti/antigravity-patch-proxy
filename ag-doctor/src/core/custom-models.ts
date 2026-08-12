@@ -228,6 +228,50 @@ export function looksEncrypted(filePath?: string): boolean {
   });
 }
 
+/**
+ * True when the key was encrypted by the language server's own scheme:
+ * "enc:" + base64 of a blob starting with the 3-byte ASCII marker "v10"
+ * (0x76 0x31 0x30). The local proxy's cryptoStore cannot decrypt this format
+ * (it is not Chromium OSCrypt v10 and not raw DPAPI) — only the Go language
+ * server can. Such keys must be re-entered via `ag-doctor models rekey`.
+ */
+export function isLsEncryptedKey(apiKey: string | undefined): boolean {
+  if (typeof apiKey !== 'string' || !apiKey.startsWith('enc:')) return false;
+  try {
+    const buf = Buffer.from(apiKey.slice(4), 'base64');
+    return buf.length >= 3 && buf[0] === 0x76 && buf[1] === 0x31 && buf[2] === 0x30;
+  } catch {
+    return false;
+  }
+}
+
+/** Number of models whose key is in the language server's own format. */
+export function countLsEncryptedKeys(filePath?: string): number {
+  const fp = filePath ?? getCustomModelsPath();
+  if (!fs.existsSync(fp)) return 0;
+  try {
+    const file = loadCustomModels(fp);
+    return file.models.filter((m) => isLsEncryptedKey(m.apiKey)).length;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Encode a plaintext API key in the proxy-compatible fallback format
+ * ("fallback:" + base64). The local proxy's cryptoStore decrypts this format
+ * without requiring Electron safeStorage, so keys re-entered through the CLI
+ * keep working when the proxy runs standalone.
+ *
+ * SECURITY NOTE: this is base64 obfuscation, not encryption — anyone with
+ * read access to custom_models.json can recover the plaintext key. It exists
+ * because the CLI cannot use Electron's safeStorage; it matches the existing
+ * `fallback:` convention the proxy already understands.
+ */
+export function toFallbackKey(plaintext: string): string {
+  return 'fallback:' + Buffer.from(plaintext, 'utf-8').toString('base64');
+}
+
 export interface ValidationIssue {
   model: string;
   field: string;

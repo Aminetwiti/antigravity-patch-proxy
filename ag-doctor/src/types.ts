@@ -27,6 +27,8 @@ export interface CustomModel {
   timeout?: number;
   maxRetries?: number;
   enabled?: boolean;
+  /** True when apiKey is stored in an encrypted/opaque format. */
+  encrypted?: boolean;
 }
 
 export interface CustomModelsFile {
