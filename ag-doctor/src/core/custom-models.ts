@@ -200,24 +200,45 @@ export function addCustomModel(model: CustomModel, filePath?: string): CustomMod
 
 export function removeCustomModel(name: string, filePath?: string): CustomModelsFile {
   const file = loadCustomModels(filePath);
+  const cleanName = name.replace(/^models\//, '');
   // Match by name only when no provider is encoded, otherwise by full key.
   // Accept either the legacy plain name or the "provider::name" form.
   file.models = file.models.filter((m) => {
     if (name.includes('::')) return modelKey(m) !== name;
     return m.name !== name;
   });
-  saveCustomModels(file, filePath);
+
+  // Dual-format sync: loadCustomModels merges providers[] back into the model
+  // list, so a model removed from models[] but still referenced by a provider
+  // entry would resurrect in every consumer (CLI list, doctor UI, proxy).
+  // loadCustomModels only returns { models }, so prune the raw file directly.
+  const fp = filePath ?? getCustomModelsPath();
+  let raw: any = { models: file.models };
+  try {
+    if (fs.existsSync(fp)) {
+      raw = JSON.parse(fs.readFileSync(fp, 'utf-8').replace(/^\uFEFF/, ''));
+    }
+  } catch {
+    raw = { models: file.models };
+  }
+  raw.models = file.models;
+  if (Array.isArray(raw.providers)) {
+    for (const p of raw.providers) {
+      if (!Array.isArray(p.models)) continue;
+      p.models = p.models.filter((pm: any) => {
+        if (!pm) return false;
+        const pmId = String(pm.id ?? pm.displayName ?? '').replace(/^models\//, '');
+        const pmName = String(pm.name ?? '').replace(/^models\//, '');
+        return pmId !== cleanName && pmName !== cleanName && pmId !== name && pmName !== name;
+      });
+    }
+  }
+  const dir = path.dirname(fp);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(fp, JSON.stringify(raw, null, 2), 'utf-8');
   return file;
 }
 
-/**
- * Heuristic: detect if the file contains encrypted API keys (opaque strings).
- *
- * A key is considered "encrypted" if it's non-empty AND doesn't match any
- * known plaintext prefix. This catches safeStorage-encrypted blobs (which are
- * base64 with no recognizable prefix) without false-positives on legitimate
- * keys from any supported provider.
- */
 export function looksEncrypted(filePath?: string): boolean {
   const fp = filePath ?? getCustomModelsPath();
   if (!fs.existsSync(fp)) return false;

@@ -490,6 +490,7 @@ function navigate(viewName: string): void {
   views.forEach((v) => v.classList.toggle('active', v.id === `view-${viewName}`));
   // Trigger view-specific loaders
   if (viewName === 'models') void loadModels();
+
   if (viewName === 'patch') void loadPatchStatus();
   if (viewName === 'info') void loadInfo();
   if (viewName === 'logs') void loadLogs();
@@ -3580,6 +3581,17 @@ const pmModalClose2 = $('#pmModalClose2') as HTMLButtonElement;
 const pmFormTest = $('#pmFormTest') as HTMLButtonElement;
 
 let providersCache: ProviderEntry[] = [];
+
+// Live sync: react to external custom_models.json changes (CLI add/remove,
+// file edits, proxy migrations). The main process broadcasts
+// ag:providers:changed via its file watcher; without this subscription the
+// UI only refreshes on navigation, so CLI-side changes would stay invisible
+// until the user re-navigates. Register once at boot.
+window.ag.providers.onChanged(() => {
+  providersCache = [];
+  const modelsViewActive = !!document.getElementById('view-models')?.classList.contains('active');
+  if (modelsViewActive) void loadModels();
+});
 let editingProviderId: string | null = null;
 let currentFetchedModels: Array<{ id: string; displayName?: string; enabled: boolean }> = [];
 let pmModelsSearchQuery = '';

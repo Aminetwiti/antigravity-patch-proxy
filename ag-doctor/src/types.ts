@@ -33,6 +33,8 @@ export interface CustomModel {
 
 export interface CustomModelsFile {
   models: CustomModel[];
+  /** Newer dual-format section managed by the doctor UI / language server. */
+  providers?: Array<Record<string, any>>;
 }
 
 export interface SystemInfo {
