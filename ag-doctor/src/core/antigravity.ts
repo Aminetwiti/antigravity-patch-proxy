@@ -105,40 +105,15 @@ function readWindowsFileVersion(exePath: string): string | null {
  */
 function readAsarPackageJson(asarPath: string): { version?: string; name?: string; productName?: string } | null {
   try {
-    const fd = fs.openSync(asarPath, 'r');
-    try {
-      const sizeBuf = Buffer.alloc(8);
-      fs.readSync(fd, sizeBuf, 0, 8, 0);
-      const jsonSize = sizeBuf.readUInt32LE(4);
-      if (!Number.isFinite(jsonSize) || jsonSize <= 0 || jsonSize > 64 * 1024 * 1024) return null;
-      const jsonBuf = Buffer.alloc(jsonSize);
-      // Double pickle framing: [4B size][4B jsonSize] twice, so the JSON
-      // header starts at byte 16. The size field includes trailing padding,
-      // so trim to the closing brace before parsing.
-      fs.readSync(fd, jsonBuf, 0, jsonSize, 16);
-      const jsonText = jsonBuf.toString('utf-8');
-      const jsonEnd = jsonText.lastIndexOf('}');
-      if (jsonEnd < 0) return null;
-      const header = JSON.parse(jsonText.slice(0, jsonEnd + 1));
-      // File data starts right after the JSON document (4-byte aligned).
-      const dataStart = (16 + jsonEnd + 1 + 3) & ~3;
-      const files = (header && header.files) || {};
-      const pkg = files['package.json'];
-      if (!pkg || pkg.offset === undefined || pkg.size === undefined) return null;
-      // asar v4 stores offset/size as strings; coerce defensively.
-      const pkgOffset = Number(pkg.offset);
-      const pkgSize = Number(pkg.size);
-      if (!Number.isFinite(pkgOffset) || !Number.isFinite(pkgSize) || pkgSize <= 0) return null;
-      const buf = Buffer.alloc(pkgSize);
-      fs.readSync(fd, buf, 0, pkgSize, dataStart + pkgOffset);
-      return JSON.parse(buf.toString('utf-8')) as {
-        version?: string;
-        name?: string;
-        productName?: string;
-      };
-    } finally {
-      fs.closeSync(fd);
-    }
+    // Shared dependency-free reader (works on Node 18 / Electron-as-node too).
+    const { readAsarFile } = require('./asar-reader') as typeof import('./asar-reader');
+    const buf = readAsarFile(asarPath, 'package.json');
+    if (!buf) return null;
+    return JSON.parse(buf.toString('utf-8')) as {
+      version?: string;
+      name?: string;
+      productName?: string;
+    };
   } catch {
     return null;
   }

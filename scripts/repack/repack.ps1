@@ -27,6 +27,20 @@ if (-not (Test-Path $SourceDir)) {
     exit 1
 }
 
+# Remove transient build junk that must never reach the asar
+# (a stray nested dist/dist or dist/__mocks__ bricked the app on 2026-07-11).
+$JunkTargets = @(
+  (Join-Path $SourceDir "dist\dist"),
+  (Join-Path $SourceDir "dist\node_modules"),
+  (Join-Path $SourceDir "dist\__mocks__")
+)
+foreach ($Junk in $JunkTargets) {
+  if (Test-Path $Junk) {
+    Write-Host "Removing build junk: $Junk" -ForegroundColor DarkYellow
+    Remove-Item -Recurse -Force $Junk -ErrorAction SilentlyContinue
+  }
+}
+
 # Repack using @electron/asar (excluding large/unnecessary directories)
 $AsarBin = Join-Path $SourceDir "node_modules\@electron\asar\bin\asar.js"
 if (Test-Path $AsarBin) {
