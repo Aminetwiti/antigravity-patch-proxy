@@ -1409,6 +1409,9 @@ async function loadModels(): Promise<void> {
     const result = await window.ag.run(['models', 'list', '--json']);
     const data = JSON.parse(result.stdout) as ModelsFile;
     allLoadedModels = data.models || [];
+    // Keep the dashboard models stat in sync with the live list (it is a
+    // doctor-run snapshot otherwise and goes stale when models change).
+    statModels.textContent = String(allLoadedModels.length);
     renderModelsView();
     setStatus(`${allLoadedModels.length} model(s) loaded`);
   } catch (e) {
