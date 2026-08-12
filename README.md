@@ -278,6 +278,31 @@ npm run doctor:models
 
 # Stream real-time diagnostic logs
 npm run doctor:logs
+
+# One-click repatch (IDE or classic, auto-detected): patch + proxy + launch
+repatch.bat
+```
+
+### Antigravity IDE (v1.107.0+) Support
+
+Since mid-2026 the desktop client ships as **Antigravity IDE**, a VS Code-based
+Electron app, in addition to the classic 2.x shell. `ag-doctor` handles both:
+
+- **IDE patch**: the IDE resolves its Cloud Code endpoint from the standard VS
+  Code setting `jetski.cloudCodeUrl`. `ag-doctor patch apply` writes
+  `http://localhost:50999` there (with a `.bak` backup), so the IDE's language
+  server routes through the local proxy — no binary surgery needed.
+- **Standalone proxy**: `ag-doctor proxy start` runs the real proxy under the
+  bundled Electron (so DPAPI-encrypted keys decrypt), replacing any leftover
+  stub on port 50999. `proxy stub` / `proxy stop` manage the emergency stub.
+- **`models rekey`**: the language server stores API keys in its own `v10`
+  format that the local proxy cannot decrypt. `ag-doctor models rekey` walks
+  each affected model and re-enters the key in the proxy-compatible format
+  (interactive, or `--keys-file <json>` for batch).
+
+> Tip: add or re-key custom models via `ag-doctor models add` / `models rekey`
+> rather than the IDE's own settings UI — the IDE re-encrypts keys into its
+> private format, which the proxy cannot read.
 ```
 
 ### CLI Architecture & Worker Mode
@@ -305,8 +330,9 @@ In addition to the terminal CLI, this repository includes **`ag-doctor-ui`**, a 
 
 ### Version-Aware Patching Engine
 
-- **Multi-Version Binary Patching**: `ag-doctor` automatically detects installed Antigravity releases (v2.0.x through v2.3.x) and performs binary string replacement without corrupting Go executable alignment.
+- **Multi-Version Binary Patching**: `ag-doctor` automatically detects installed Antigravity releases (v2.0.x through v2.6.x) and performs binary string replacement without corrupting Go executable alignment.
 - **Backup & Rollback Safety**: Creates timestamped `.bak` copies of `app.asar` before modifying binary payloads, allowing instant 1-command rollbacks (`npm run doctor:repair`).
+- **Auto-Healing Diagnostics**: the doctor check starts the emergency proxy stub when port 50999 is closed (so the patched language server can initialise), and `proxy start` replaces a stub with the real proxy. Provider probes use a 15s timeout with a retry on timeouts to avoid false "down" alarms.
 
 
 

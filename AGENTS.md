@@ -304,7 +304,7 @@ What was changed and why.
 - **safeStorage fallback** — headless Linux without keychain → base64 (reversible, not OS-protected)
 - **No protobuf library** — manual varint encoding only
 - **Partial strict mode** — `noImplicitAny: false`, `strictNullChecks: false`
-- **Binary patch is version-sensitive** — separate scripts for 2.2.1, 2.3.x/2.4.x, vs 2.5.x
+- **Binary patch is version-sensitive** — separate scripts for 2.2.1, 2.3.x/2.4.x, vs 2.5.x/2.6.x. The VS Code-based "Antigravity IDE" (v1.107.0+) is patched via the `jetski.cloudCodeUrl` settings override (ag-doctor/src/core/ide-patch.ts), not binary surgery; `ag-doctor models rekey` re-enters language-server-encrypted (v10) API keys in a proxy-compatible format.
 - **Windows** — repatch.bat requires PowerShell ExecutionPolicy Bypass
 
 ---
