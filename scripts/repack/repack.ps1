@@ -41,12 +41,33 @@ foreach ($Junk in $JunkTargets) {
   }
 }
 
-# Repack using @electron/asar (excluding large/unnecessary directories)
+# Repack using @electron/asar.
+# NOTE: pack from a STAGING dir containing only what the app.asar needs
+# (package.json + dist/ + proxy-runner.js). Packing the repo root directly
+# dragged nested node_modules (ag-doctor-ui/node_modules with the 176 MB
+# Electron binary) into the archive — a 569 MB junk asar that broke version
+# detection and bloated the install.
 $AsarBin = Join-Path $SourceDir "node_modules\@electron\asar\bin\asar.js"
+$StageDir = Join-Path $env:TEMP "antigravity-repack-stage"
+if (Test-Path $StageDir) { Remove-Item -Recurse -Force $StageDir }
+New-Item -ItemType Directory -Path $StageDir | Out-Null
+Copy-Item (Join-Path $SourceDir "package.json") (Join-Path $StageDir "package.json") -Force
+Copy-Item (Join-Path $SourceDir "dist") (Join-Path $StageDir "dist") -Recurse -Force
+if (Test-Path (Join-Path $SourceDir "proxy-runner.js")) {
+    Copy-Item (Join-Path $SourceDir "proxy-runner.js") (Join-Path $StageDir "proxy-runner.js") -Force
+}
 if (Test-Path $AsarBin) {
-    node $AsarBin pack $SourceDir $DestAsar --unpack-dir "{node_modules,scratch,.git}"
+    node $AsarBin pack $StageDir $DestAsar
 } else {
-    npx -y @electron/asar pack $SourceDir $DestAsar --unpack-dir "{node_modules,scratch,.git}"
+    npx -y @electron/asar pack $StageDir $DestAsar
+}
+Remove-Item -Recurse -Force $StageDir -ErrorAction SilentlyContinue
+if ((Get-Item $DestAsar).Length -gt 100MB) {
+    Write-Host "==============================================" -ForegroundColor Red
+    Write-Host "Error: app.asar is suspiciously large (expect < 100MB). Aborting." -ForegroundColor Red
+    Write-Host "Restore the previous asar from app.asar.bak before continuing." -ForegroundColor Red
+    Write-Host "==============================================" -ForegroundColor Red
+    exit 1
 }
 
 if ($LASTEXITCODE -eq 0) {

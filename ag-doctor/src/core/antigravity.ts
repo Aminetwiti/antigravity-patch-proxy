@@ -29,7 +29,7 @@ const execFileAsync = promisify(execFile);
 export interface AntigravityVersion {
   version: string;
   channel?: string;
-  source: 'asar' | 'product.json' | 'app-update.yml' | 'exe' | 'pak' | 'unknown';
+  source: 'asar' | 'product.json' | 'app-update.yml' | 'exe' | 'asar.bak' | 'pak' | 'unknown';
   raw?: string;
 }
 
@@ -162,13 +162,34 @@ export function detectAntigravityVersion(installDir?: string): AntigravityVersio
   const asarPath = getAppAsarPath(dir);
   if (asarPath && fs.existsSync(asarPath)) {
     const pkg = readAsarPackageJson(asarPath);
-    if (pkg?.version) {
+    // Guard: only trust the asar when it actually is the Antigravity package.
+    // A junk repack (e.g. repack.ps1 packing the repo root, or a half-written
+    // asar) would surface bogus versions like "3.0.2 Antigravity Patch Proxy".
+    if (pkg?.version && (!pkg.name || pkg.name === "antigravity")) {
       return {
         version: pkg.version,
         channel: pkg.productName && pkg.productName !== pkg.name ? pkg.productName : undefined,
         source: 'asar',
         raw: JSON.stringify({ name: pkg.name, productName: pkg.productName }),
       };
+    }
+  }
+
+  // 1b. app.asar.bak fallback: the backup always holds the original
+  // Antigravity package.json even when app.asar was repacked from this repo
+  // (name "antigravity-patch-proxy") or is being rewritten.
+  if (asarPath) {
+    const bakPath = asarPath + '.bak';
+    if (fs.existsSync(bakPath)) {
+      const bakPkg = readAsarPackageJson(bakPath);
+      if (bakPkg?.version && (!bakPkg.name || bakPkg.name === 'antigravity')) {
+        return {
+          version: bakPkg.version,
+          channel: bakPkg.productName && bakPkg.productName !== bakPkg.name ? bakPkg.productName : undefined,
+          source: 'asar.bak',
+          raw: JSON.stringify({ name: bakPkg.name, productName: bakPkg.productName }),
+        };
+      }
     }
   }
 
