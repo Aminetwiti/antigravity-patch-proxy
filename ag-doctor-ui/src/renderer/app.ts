@@ -3221,7 +3221,7 @@ async function loadSettings(): Promise<void> {
       window.ag.run(['config', 'list', '--json']),
     ]);
     const theme = (cfg.ui as Record<string, string> | undefined)?.theme ?? 'dark';
-    themeToggle.textContent = theme === 'dark' ? 'Switch to light' : 'Switch to dark';
+    themeToggle.textContent = theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
     settingsConfigPath.textContent = pathResult.stdout.trim();
     settingsConfigBody.textContent = JSON.stringify(JSON.parse(listResult.stdout), null, 2);
     setStatus('Ready');
@@ -3941,6 +3941,11 @@ function openProviderManagerModal(): void {
 }
 
 pmClose.addEventListener('click', () => { pmBackdrop.hidden = true; });
+// Close the provider manager with Escape or a backdrop click (standard modal UX).
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !pmBackdrop.hidden) pmBackdrop.hidden = true;
+});
+pmBackdrop.addEventListener('click', (e) => { if (e.target === pmBackdrop) pmBackdrop.hidden = true; });
 if (pmModalClose2) pmModalClose2.addEventListener('click', () => { pmBackdrop.hidden = true; });
 pmAddBtn.addEventListener('click', () => openProviderForm());
 pmFormBack.addEventListener('click', () => showPmView('list'));
