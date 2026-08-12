@@ -126,8 +126,15 @@ export async function runPatchStatus(ctx: CommandContext): Promise<number> {
       console.log(`  • ${patch.versionRange}: ${patch.originalUrl}`);
     }
   } else {
-    warn('No known URL patterns detected in binary');
-    warn('This may indicate a new Antigravity version that requires patch definition update');
+    if (status.applied) {
+      // A successfully patched binary no longer contains any known ORIGINAL URL
+      // — the patch replaced it with the local proxy redirect. Report the
+      // patched state instead of a false "no patterns" alarm.
+      info('Detected patched URL pattern in binary (original URL replaced by the proxy redirect)');
+    } else {
+      warn('No known URL patterns detected in binary');
+      warn('This may indicate a new Antigravity version that requires patch definition update');
+    }
   }
   if (status.overlayFingerprintDetected) {
     info('Detected JS overlay fingerprint:');

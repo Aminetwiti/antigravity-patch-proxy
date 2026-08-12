@@ -148,6 +148,19 @@ export async function getMitmStatus(port = DEFAULT_MITM_PORT): Promise<MitmStatu
     }
   }
 
+  // When the classic binary patch is active, MITM interception is bypassed
+  // by design (the language server talks to the local proxy directly). The
+  // doctor's MITM check reflects this; surface it here too so mitm status
+  // does not look like a failure when no MITM proxy is running.
+  try {
+    const { getPatchStatus } = require('./binary-patch');
+    if (getPatchStatus().applied) {
+      details.push('Interception bypassed — binary patch active (MITM not required)');
+    }
+  } catch {
+    // ignore
+  }
+
   let expiresAt: string | null = null;
   let isExpired = false;
   if (ca?.certPath && fs.existsSync(ca.certPath)) {
