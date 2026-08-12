@@ -283,6 +283,7 @@ interface MitmStatus {
   interception: {
     listening: boolean;
     reachable: boolean;
+    bypassed: boolean;
   };
 }
 
@@ -2003,7 +2004,7 @@ async function loadMitmStatus(): Promise<void> {
     // Dynamically toggle top required warning banner based on actual interception health
     const reqBanner = document.getElementById('mitmRequiredBanner') as HTMLDivElement | null;
     if (reqBanner) {
-      const isFullyFunctional = s.interception.reachable && s.ca.installed && !s.ca.isExpired && s.proxy.redirected;
+      const isFullyFunctional = (s.interception.reachable || s.interception.bypassed) && s.ca.installed && !s.ca.isExpired;
       reqBanner.style.display = isFullyFunctional ? 'none' : 'flex';
     }
 
@@ -2052,14 +2053,22 @@ async function loadMitmStatus(): Promise<void> {
            </div>
          </div>`;
 
-    const interceptionBanner = s.interception.reachable
-      ? `<div class="patch-banner ok">
+    const interceptionBanner = (s.interception.reachable || s.interception.bypassed)
+      ? (s.interception.bypassed
+        ? `<div class="patch-banner ok">
+           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+           <div class="patch-banner-body">
+             <div class="patch-banner-title">Interception bypassed</div>
+             <div class="patch-banner-text">The binary patch redirects the language server to the local proxy — MITM interception is not required.</div>
+           </div>
+         </div>`
+        : `<div class="patch-banner ok">
            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
            <div class="patch-banner-body">
              <div class="patch-banner-title">Interception reachable</div>
              <div class="patch-banner-text">The proxy is listening and responding to requests.</div>
            </div>
-         </div>`
+         </div>`)
       : `<div class="patch-banner err">
            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
            <div class="patch-banner-body">
@@ -2089,7 +2098,7 @@ async function loadMitmStatus(): Promise<void> {
           ${proxyBanner}
         </div>
         <div class="mitm-card">
-          <div class="mitm-card-header"><h3>Interception status</h3><span class="badge ${s.interception.reachable ? 'ok' : 'err'}">${s.interception.reachable ? 'reachable' : 'unreachable'}</span></div>
+          <div class="mitm-card-header"><h3>Interception status</h3><span class="badge ${s.interception.bypassed ? 'ok' : s.interception.reachable ? 'ok' : 'err'}">${s.interception.bypassed ? 'bypassed' : s.interception.reachable ? 'reachable' : 'unreachable'}</span></div>
           <div class="mitm-card-body">
             <div class="patch-row"><div class="patch-row-label">Listening</div><div class="patch-row-value ${s.interception.listening ? 'ok' : ''}">${s.interception.listening ? 'yes' : 'no'}</div></div>
             <div class="patch-row"><div class="patch-row-label">Connectivity</div><div class="patch-row-value ${s.interception.reachable ? 'ok' : 'err'}">${s.interception.reachable ? 'ok' : 'failed'}</div></div>
@@ -2097,7 +2106,7 @@ async function loadMitmStatus(): Promise<void> {
           ${interceptionBanner}
         </div>
       </div>
-      ${(!s.ca.installed || !s.proxy.redirected || !s.interception.reachable) ? `
+      ${(!s.interception.bypassed && (!s.ca.installed || !s.proxy.redirected || !s.interception.reachable)) ? `
       <div style="margin-top: 20px; text-align: center;">
         <button id="repair-all-btn" class="btn btn-primary" style="padding: 10px 20px; font-size: 14px;">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: text-bottom; margin-right: 6px;"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 9.36l-7.1 7.1a1 1 0 0 1-1.4 0l-2.8-2.8a1 1 0 0 1 0-1.4l7.1-7.1a6 6 0 0 1 9.36-7.94z"/></svg>

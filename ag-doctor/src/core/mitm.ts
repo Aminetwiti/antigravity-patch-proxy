@@ -80,6 +80,8 @@ export interface MitmStatus {
   interception: {
     listening: boolean;
     reachable: boolean;
+    /** True when the classic binary patch redirects traffic, so MITM interception is not required. */
+    bypassed: boolean;
   };
 }
 
@@ -152,13 +154,15 @@ export async function getMitmStatus(port = DEFAULT_MITM_PORT): Promise<MitmStatu
   // by design (the language server talks to the local proxy directly). The
   // doctor's MITM check reflects this; surface it here too so mitm status
   // does not look like a failure when no MITM proxy is running.
+  let binaryPatchBypass = false;
   try {
     const { getPatchStatus } = require('./binary-patch');
-    if (getPatchStatus().applied) {
-      details.push('Interception bypassed — binary patch active (MITM not required)');
-    }
+    binaryPatchBypass = getPatchStatus().applied;
   } catch {
     // ignore
+  }
+  if (binaryPatchBypass) {
+    details.push('Interception bypassed ' + String.fromCharCode(8212) + ' binary patch active (MITM not required)');
   }
 
   let expiresAt: string | null = null;
@@ -208,6 +212,7 @@ export async function getMitmStatus(port = DEFAULT_MITM_PORT): Promise<MitmStatu
       // listening: check if something is actually listening on the proxy port
       listening: proxyListening,
       reachable: interceptionOk === true,
+      bypassed: binaryPatchBypass,
     },
   };
 }
