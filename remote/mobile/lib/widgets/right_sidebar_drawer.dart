@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 
+import '../core/protocol/daemon_api.dart';
 import '../theme/app_colors.dart';
+import 'artifact_viewer_modal.dart';
 
-class RightSidebarDrawer extends StatelessWidget {
+class RightSidebarDrawer extends StatefulWidget {
+  final DaemonApi? api;
+  final String activeSessionId;
   final int subagentsCount;
   final int filesChangedCount;
   final int artifactsCount;
@@ -11,12 +15,60 @@ class RightSidebarDrawer extends StatelessWidget {
 
   const RightSidebarDrawer({
     super.key,
+    this.api,
+    this.activeSessionId = '',
     this.subagentsCount = 0,
-    this.filesChangedCount = 10,
-    this.artifactsCount = 1,
+    this.filesChangedCount = 0,
+    this.artifactsCount = 0,
     this.uploadsCount = 0,
     this.backgroundTasksCount = 0,
   });
+
+  @override
+  State<RightSidebarDrawer> createState() => _RightSidebarDrawerState();
+}
+
+class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
+  bool _isLoadingArtifacts = false;
+  List<Map<String, dynamic>> _artifacts = [];
+  bool _artifactsExpanded = false;
+
+  Future<void> _fetchArtifacts() async {
+    if (widget.api == null || widget.activeSessionId.isEmpty) return;
+    setState(() => _isLoadingArtifacts = true);
+    try {
+      // Fetch files from the brain directory
+      final path = '.gemini/antigravity-ide/brain/${widget.activeSessionId}/';
+      final res = await widget.api!.listFiles(path);
+      final files = res['data']?['files'] as List<dynamic>? ?? [];
+      
+      final arts = <Map<String, dynamic>>[];
+      for (final f in files) {
+        if (f is Map && f['name'] != null && f['name'].toString().endsWith('.md')) {
+          arts.add({'name': f['name'], 'path': f['path'] ?? '$path${f['name']}'});
+        }
+      }
+      if (mounted) setState(() => _artifacts = arts);
+    } catch (e) {
+      debugPrint('Failed to fetch artifacts: $e');
+    } finally {
+      if (mounted) setState(() => _isLoadingArtifacts = false);
+    }
+  }
+
+  void _openArtifact(Map<String, dynamic> artifact) {
+    if (widget.api == null) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => ArtifactViewerModal(
+        api: widget.api!,
+        artifactPath: artifact['path'],
+        artifactName: artifact['name'],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -70,27 +122,78 @@ class RightSidebarDrawer extends StatelessWidget {
                 children: [
                   _ContextItemRow(
                     title: 'Subagents',
-                    badgeCount: subagentsCount,
+                    badgeCount: widget.subagentsCount,
                     onTap: () {},
                   ),
                   _ContextItemRow(
                     title: 'Files Changed',
-                    badgeCount: filesChangedCount,
+                    badgeCount: widget.filesChangedCount,
                     onTap: () {},
                   ),
-                  _ContextItemRow(
-                    title: 'Artifacts',
-                    badgeCount: artifactsCount,
-                    onTap: () {},
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _ContextItemRow(
+                        title: 'Artifacts',
+                        badgeCount: widget.artifactsCount,
+                        onTap: () {
+                          setState(() {
+                            _artifactsExpanded = !_artifactsExpanded;
+                          });
+                          if (_artifactsExpanded && _artifacts.isEmpty) {
+                            _fetchArtifacts();
+                          }
+                        },
+                        isExpanded: _artifactsExpanded,
+                      ),
+                      if (_artifactsExpanded)
+                        AnimatedContainer(
+                          duration: AppMotion.fast,
+                          padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
+                          child: _isLoadingArtifacts
+                              ? const Padding(
+                                  padding: EdgeInsets.all(8.0),
+                                  child: Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))),
+                                )
+                              : _artifacts.isEmpty
+                                  ? Padding(
+                                      padding: const EdgeInsets.all(8.0),
+                                      child: Text('Aucun artefact', style: TextStyle(color: AppColors.inkMuted, fontSize: 12)),
+                                    )
+                                  : Column(
+                                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                                      children: _artifacts.map((art) => InkWell(
+                                        onTap: () => _openArtifact(art),
+                                        borderRadius: BorderRadius.circular(4),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.article_outlined, size: 14, color: AppColors.accentBlue),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: Text(
+                                                  art['name'] ?? 'Document',
+                                                  style: const TextStyle(fontSize: 12, color: AppColors.inkPrimary),
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      )).toList(),
+                                    ),
+                        ),
+                    ],
                   ),
                   _ContextItemRow(
                     title: 'Uploads',
-                    badgeCount: uploadsCount,
+                    badgeCount: widget.uploadsCount,
                     onTap: () {},
                   ),
                   _ContextItemRow(
                     title: 'Background Tasks',
-                    badgeCount: backgroundTasksCount,
+                    badgeCount: widget.backgroundTasksCount,
                     onTap: () {},
                   ),
                 ],
@@ -107,11 +210,13 @@ class _ContextItemRow extends StatelessWidget {
   final String title;
   final int badgeCount;
   final VoidCallback onTap;
+  final bool isExpanded;
 
   const _ContextItemRow({
     required this.title,
     required this.badgeCount,
     required this.onTap,
+    this.isExpanded = false,
   });
 
   @override
@@ -127,7 +232,7 @@ class _ContextItemRow extends StatelessWidget {
           // PC .nav-item : hover surfaceHover
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            color: Colors.transparent,
+            color: isExpanded ? AppColors.surfaceInput.withValues(alpha: 0.5) : Colors.transparent,
             borderRadius: BorderRadius.circular(AppRadius.md),
           ),
           child: Row(
@@ -147,23 +252,27 @@ class _ContextItemRow extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
-                  color: AppColors.surfaceInput,
+                  color: AppColors.surfaceHover,
                   borderRadius: BorderRadius.circular(AppRadius.pill),
                 ),
                 child: Text(
                   '$badgeCount',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
-                    color: AppColors.inkSecondary,
+                    color: badgeCount > 0 ? AppColors.accentBlue : AppColors.inkSecondary,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
               const SizedBox(width: 6),
-              Icon(
-                Icons.chevron_right,
-                size: 16,
-                color: AppColors.inkMuted,
+              AnimatedRotation(
+                turns: isExpanded ? 0.25 : 0,
+                duration: AppMotion.fast,
+                child: const Icon(
+                  Icons.chevron_right,
+                  size: 16,
+                  color: AppColors.inkMuted,
+                ),
               ),
             ],
           ),

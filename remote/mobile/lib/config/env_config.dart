@@ -8,7 +8,7 @@ class EnvConfig {
 
   static const String daemonHost = String.fromEnvironment(
     'DAEMON_HOST',
-    defaultValue: '127.0.0.1',
+    defaultValue: '10.0.2.2',
   );
 
   static const int daemonPort = int.fromEnvironment(

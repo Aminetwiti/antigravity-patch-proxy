@@ -118,6 +118,36 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           ? ConnectionStatus.connected
           : ConnectionStatus.disconnected;
     }
+    _loadHistoryIfEmpty();
+  }
+
+  void _loadHistoryIfEmpty() {
+    if (_messages.isEmpty && widget.activeSessionId.isNotEmpty) {
+      widget.api?.getSessionHistory(widget.activeSessionId).then((data) {
+        if (!mounted) return;
+        final rawMessages = data['messages'] as List?;
+        if (rawMessages != null && rawMessages.isNotEmpty) {
+          setState(() {
+            _messages.clear();
+            for (final m in rawMessages) {
+              if (m is Map) {
+                _messages.add(ChatMessage(
+                  id: m['id']?.toString() ?? '',
+                  sender: m['sender']?.toString() ?? 'assistant',
+                  text: m['text']?.toString() ?? '',
+                  thought: m['thought']?.toString(),
+                  timestamp: m['timestamp']?.toString() ?? '',
+                  isError: m['isError'] == true,
+                ));
+              }
+            }
+          });
+          Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
+        }
+      }).catchError((_) {
+        // Ignorer l'erreur
+      });
+    }
   }
 
   /// B2 — tap-to-deep-link : quand l'utilisateur tape la notification locale
@@ -252,6 +282,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         _expiredCallIds.clear();
         _pendingApprovalCallIds.clear();
       }
+      _loadHistoryIfEmpty();
     }
     if (oldWidget.api != widget.api) {
       // Bug agent bloqué : réinitialiser le compteur de streams actifs à la
@@ -829,25 +860,16 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.folder_outlined, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                          const SizedBox(width: 8),
-                          Text(
-                            widget.activeProjectName,
-                            style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                          ),
-                          const SizedBox(width: 4),
-                          Icon(Icons.keyboard_arrow_down, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                        ],
+                      _WelcomeEmptyState(
+                        projectName: widget.activeProjectName,
+                        onSuggestionTap: (text) => _handleSendMessage(text, queued: false),
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 32),
                       ChatInputBar(
                         onSend: _handleSendMessage,
                         isConnected: isConnected,
                       ),
-                      const SizedBox(height: 64),
+                      const SizedBox(height: 48),
                     ],
                   ),
                 ),
@@ -1121,6 +1143,134 @@ class _MessageBubble extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _WelcomeEmptyState extends StatelessWidget {
+  final String projectName;
+  final ValueChanged<String> onSuggestionTap;
+
+  const _WelcomeEmptyState({
+    required this.projectName,
+    required this.onSuggestionTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Animated Logo/Icon
+        TweenAnimationBuilder<double>(
+          duration: const Duration(milliseconds: 800),
+          curve: Curves.easeOutBack,
+          tween: Tween(begin: 0.0, end: 1.0),
+          builder: (context, value, child) {
+            return Transform.scale(
+              scale: value,
+              child: Opacity(
+                opacity: value,
+                child: child,
+              ),
+            );
+          },
+          child: Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                colors: [
+                  Theme.of(context).colorScheme.primary.withOpacity(0.2),
+                  Theme.of(context).colorScheme.tertiary.withOpacity(0.2),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              border: Border.all(
+                color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                width: 1,
+              ),
+            ),
+            child: Icon(
+              Icons.auto_awesome,
+              size: 32,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        // Greetings
+        Text(
+          'Welcome to',
+          style: TextStyle(
+            fontSize: 16,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          projectName,
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+            color: Theme.of(context).colorScheme.onSurface,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 32),
+        // Suggestion Chips
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          alignment: WrapAlignment.center,
+          children: [
+            _SuggestionChip(
+              icon: Icons.search,
+              label: 'Search codebase',
+              onTap: () => onSuggestionTap('Search codebase for '),
+            ),
+            _SuggestionChip(
+              icon: Icons.bug_report_outlined,
+              label: 'Find bugs',
+              onTap: () => onSuggestionTap('Can you find any bugs in this project?'),
+            ),
+            _SuggestionChip(
+              icon: Icons.add_circle_outline,
+              label: 'Add feature',
+              onTap: () => onSuggestionTap('I want to add a new feature: '),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _SuggestionChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _SuggestionChip({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ActionChip(
+      avatar: Icon(icon, size: 16, color: Theme.of(context).colorScheme.primary),
+      label: Text(label, style: const TextStyle(fontSize: 12.5)),
+      onPressed: () {
+        HapticFeedback.lightImpact();
+        onTap();
+      },
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     );
   }
 }

@@ -283,7 +283,7 @@ void _a8() {
 
       _delta(ctrl, sid, [{'kind': 'text', 'delta': 'première étape'}]);
       // L'utilisateur annule pendant que les deltas continuent d'arriver.
-      final cancelFuture = api.call('cancel_cascade', {'cascadeId': 'c1'});
+      final cancelFuture = api.rpc('cancel_cascade', {'cascadeId': 'c1'});
       await Future<void>.delayed(Duration.zero);
       _respond(ctrl, out[1]['requestId'] as String, {'ok': true});
       await cancelFuture;

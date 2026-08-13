@@ -53,6 +53,15 @@ class ApprovalNotifier {
   /// silencieusement désactivées.
   bool get initialized => _initialized;
 
+  /// Contrôle global des notifications (toggle « Notifications Push » dans
+  /// les réglages). Désactivé → toutes les notify* sont des no-op.
+  bool _enabled = true;
+
+  /// Active/désactive toutes les notifications locales.
+  void setEnabled(bool enabled) => _enabled = enabled;
+
+  bool get isEnabled => _enabled;
+
   /// ID stable de la notification « perte/rétablissement de connexion » :
   /// le rétablissement remplace la perte (même id) au lieu d'empiler.
   static const int _connectionNotificationId = 0x41C0EE; // 'CONNECT'
@@ -138,7 +147,7 @@ class ApprovalNotifier {
     _lastCallId = callId;
     _lastShownAt = now;
 
-    if (!_initialized) return;
+    if (!_initialized || !_enabled) return;
     final plugin = _plugin;
     if (plugin == null) return;
 
@@ -178,7 +187,7 @@ class ApprovalNotifier {
     required String outcome, // 'done' | 'error' | 'approval'
     required String message,
   }) async {
-    if (!_initialized) return;
+    if (!_initialized || !_enabled) return;
     final now = DateTime.now();
     if (cascadeId == _lastTaskDoneCascade &&
         _lastTaskDoneAt != null &&
@@ -270,7 +279,7 @@ class ApprovalNotifier {
   /// Notifie la perte de connexion au daemon (l'utilisateur n'est peut-être
   /// pas sur l'app). Dédupliquée : on ne sonne qu'une fois par coupure.
   Future<void> notifyConnectionLost() async {
-    if (!_initialized) return;
+    if (!_initialized || !_enabled) return;
 
     const androidDetails = AndroidNotificationDetails(
       'connection_events',
@@ -302,7 +311,7 @@ class ApprovalNotifier {
   /// Notifie le rétablissement de la connexion (remplace la notification
   /// « Connexion perdue » par un état rétabli).
   Future<void> notifyConnectionRestored() async {
-    if (!_initialized) return;
+    if (!_initialized || !_enabled) return;
 
     const androidDetails = AndroidNotificationDetails(
       'connection_events',

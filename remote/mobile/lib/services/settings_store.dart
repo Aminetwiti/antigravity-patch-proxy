@@ -14,6 +14,7 @@ class SettingsStore {
   static const _kDisplayName = 'settings.displayName';
   static const _kRole = 'settings.role';
   static const _kStatus = 'settings.status';
+  static const _kToolNotifications = 'settings.toolNotifications';
 
   SettingsStore._();
 
@@ -30,6 +31,7 @@ class SettingsStore {
       'displayName': prefs.getString(_kDisplayName) ?? 'Amine Developer',
       'role': prefs.getString(_kRole) ?? 'Remote Host Controller',
       'status': prefs.getString(_kStatus) ?? 'Online',
+      'toolNotifications': prefs.getBool(_kToolNotifications) ?? true,
     };
   }
 
@@ -56,6 +58,8 @@ class SettingsStore {
           await prefs.setString(_kRole, entry.value as String);
         case 'status':
           await prefs.setString(_kStatus, entry.value as String);
+        case 'toolNotifications':
+          await prefs.setBool(_kToolNotifications, entry.value as bool);
       }
     }
   }

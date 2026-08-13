@@ -602,6 +602,19 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: sessionsOut(raw)})
 		return
 
+	case "get_session_history":
+		if msg.CascadeID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId is required"})
+			return
+		}
+		history, err := GetSessionHistory(msg.CascadeID)
+		if err != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
+			return
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"messages": history}})
+		return
+
 	case "send_prompt":
 		if msg.CascadeID == "" || msg.Prompt == "" {
 			err = fmt.Errorf("cascadeId + prompt requis")

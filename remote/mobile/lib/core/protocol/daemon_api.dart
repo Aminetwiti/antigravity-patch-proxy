@@ -3,8 +3,16 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import '../../data/db/database_helper.dart';
 import '../network/outbox.dart';
 import 'messages.dart';
+
+class CallError implements Exception {
+  final String message;
+  CallError(this.message);
+  @override
+  String toString() => 'CallError: $message';
+}
 
 /// High-level typed client over the Daemon Bridge WebSocket (protocol v1).
 ///
@@ -202,7 +210,7 @@ class DaemonApi {
 
   /// Unary call resolved when a `response`/`error` with the same requestId
   /// arrives (30s timeout).
-  Future<Map<String, dynamic>> call(
+  Future<Map<String, dynamic>> rpc(
     String type, [
     Map<String, dynamic> params = const {},
   ]) {
@@ -224,27 +232,55 @@ class DaemonApi {
     );
   }
 
-  Future<Map<String, dynamic>> heartbeat() => call('heartbeat');
+  Future<Map<String, dynamic>> heartbeat() => rpc('heartbeat');
 
-  /// Lists sessions (raw protobuf field dump from the daemon; `fields`
-  /// length == trajectory count).
-  Future<Map<String, dynamic>> listSessions() => call('list_sessions');
+  Future<Map<String, dynamic>> listSessions() async {
+    try {
+      final data = await rpc('list_sessions');
+      if (data['fields'] != null) {
+        try {
+          await DatabaseHelper.instance.saveSessions(data['fields'] as List<dynamic>);
+        } catch (_) {}
+      }
+      return data;
+    } catch (e) {
+      // Offline fallback
+      final sessions = await DatabaseHelper.instance.getSessions();
+      return {'fields': sessions};
+    }
+  }
+
+  Future<Map<String, dynamic>> getSessionHistory(String cascadeId) async {
+    try {
+      final data = await rpc('get_session_history', {'cascadeId': cascadeId});
+      if (data['messages'] != null) {
+        await DatabaseHelper.instance.saveSessionMessages(cascadeId, data['messages'] as List<dynamic>);
+      }
+      return data;
+    } catch (e) {
+      final messages = await DatabaseHelper.instance.getSessionMessages(cascadeId);
+      if (messages != null) {
+        return {'messages': messages};
+      }
+      rethrow;
+    }
+  }
 
   Future<Map<String, dynamic>> createCascade(String workspacePath) =>
-      call('create_cascade', {'workspacePath': workspacePath});
+      rpc('create_cascade', {'workspacePath': workspacePath});
 
   Future<Map<String, dynamic>> listFiles(String workspacePath) =>
-      call('list_files', {'workspacePath': workspacePath});
+      rpc('list_files', {'workspacePath': workspacePath});
 
   Future<Map<String, dynamic>> readFile(
     String filePath, {
     String? workspacePath,
-  }) => call('read_file', {
+  }) => rpc('read_file', {
     'filePath': filePath,
     if (workspacePath != null) 'workspacePath': workspacePath,
   });
 
-  Future<Map<String, dynamic>> getContext() => call('get_context');
+  Future<Map<String, dynamic>> getContext() => rpc('get_context');
 
   Future<Map<String, dynamic>> submitApproval({
     required String cascadeId,
@@ -255,7 +291,7 @@ class DaemonApi {
     String approvalType = 'approval',
     String command = '',
     ApprovalScope scope = ApprovalScope.once,
-  }) => call('submit_approval', {
+  }) => rpc('submit_approval', {
     'cascadeId': cascadeId,
     'callId': callId,
     'trajectoryId': trajectoryId,
@@ -270,7 +306,7 @@ class DaemonApi {
   /// locale alors que le stream_delta d'origine a pu être perdu). Renvoie
   /// null si aucune approbation n'est en attente pour cette cascade.
   Future<Map<String, dynamic>?> getPendingApproval(String cascadeId) async {
-    final data = await call('get_pending_approval', {'cascadeId': cascadeId});
+    final data = await rpc('get_pending_approval', {'cascadeId': cascadeId});
     final info = data['data'] ?? data;
     return info is Map && info.isNotEmpty ? info.cast<String, dynamic>() : null;
   }
@@ -329,7 +365,7 @@ class DaemonApi {
       if (e.toString().contains('401') || e.toString().contains('auth')) {
         // Tentative automatique de rafraîchissement du jeton OAuth au lieu de supprimer les identifiants
         await refreshOAuthToken(serverName);
-        return call('call_mcp_tool', {
+        return rpc('call_mcp_tool', {
           'serverName': serverName,
           'toolName': toolName,
           'arguments': arguments,
@@ -348,7 +384,7 @@ class DaemonApi {
             ? 'https://auth.atlassian.com/oauth/token'
             : '/oauth/token';
 
-    return call('refresh_mcp_oauth_token', {
+    return rpc('refresh_mcp_oauth_token', {
       'serverName': serverName,
       'endpoint': endpoint,
       'grantType': 'refresh_token',
@@ -357,7 +393,7 @@ class DaemonApi {
 
   /// Connexion à un serveur MCP avec timeout de 15s.
   Future<Map<String, dynamic>> connectMcpServer(String serverName) async {
-    return call('connect_mcp_server', {'serverName': serverName}).timeout(
+    return rpc('connect_mcp_server', {'serverName': serverName}).timeout(
       mcpTimeout,
       onTimeout: () => throw TimeoutException('Connexion au serveur MCP "$serverName" a expiré après 15s.'),
     );
@@ -367,7 +403,7 @@ class DaemonApi {
   /// routes it to the language server via HandleStreamingCommand (terminal
   /// source). Unary call: resolves with the `response` message data.
   Future<Map<String, dynamic>> sendCommand(String command) {
-    return call('send_command', {'command': command});
+    return rpc('send_command', {'command': command});
   }
 
   void _onMessage(dynamic raw) {

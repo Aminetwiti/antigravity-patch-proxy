@@ -8,7 +8,11 @@ class LeftSidebarDrawer extends StatefulWidget {
   final VoidCallback? onOpenSettings;
   final VoidCallback? onDiscover;
   final VoidCallback? onOpenWorkspace;
+  final VoidCallback? onConversationHistory;
+  final VoidCallback? onScheduledTasks;
   final List<CascadeSession>? sessions;
+  final bool isConnected;
+  final VoidCallback onToggleConnection;
 
   const LeftSidebarDrawer({
     super.key,
@@ -18,7 +22,11 @@ class LeftSidebarDrawer extends StatefulWidget {
     this.onOpenSettings,
     this.onDiscover,
     this.onOpenWorkspace,
+    this.onConversationHistory,
+    this.onScheduledTasks,
     this.sessions,
+    this.isConnected = false,
+    required this.onToggleConnection,
   });
 
   @override
@@ -26,29 +34,29 @@ class LeftSidebarDrawer extends StatefulWidget {
 }
 
 class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Replicating the sessions from the Antigravity 2.0 desktop screenshot for the 100% visual match
-    final List<dynamic> rawSessionsFolder1 = const [
-      _SessionItemData('s1', 'Run Flutter On Android', '', isLoading: true),
-      _SessionItemData('s2', 'Project Analysis And Comparison', '5m'),
-      _SessionItemData('s3', 'Mobile App Project Planning', '', isLoading: true),
-      _SessionItemData('s4', 'Antigravity App Design Replication', '', isLoading: true),
-    ];
-
-    final List<dynamic> rawSessionsFolder2 = const [
-      _SessionItemData('s5', 'Running Flutter On Device', '2d'),
-      _SessionItemData('s6', 'Audit Forensic Technique Complet', '2d'),
-    ];
-
-    final List<dynamic> rawSessionsFolder3 = const [
-      _SessionItemData('s7', 'No conversations yet', '', isPlaceholder: true),
-    ];
-
-    final activeId = widget.activeSessionId.isEmpty ? 's2' : widget.activeSessionId;
+    final sessionsList = widget.sessions ?? [];
+    final Map<String, List<CascadeSession>> groupedSessions = {};
+    for (final s in sessionsList) {
+      final folderName = s.workspacePath.isEmpty 
+          ? 'Other' 
+          : s.workspacePath.split(RegExp(r'[\\/]')).last;
+      groupedSessions.putIfAbsent(folderName, () => []).add(s);
+    }
+    
+    // Sort keys if needed, or leave as is
+    final folderNames = groupedSessions.keys.toList()..sort();
 
     return Drawer(
-      // The background in the screenshot is very dark, almost black (#111111 or #18181b)
       backgroundColor: const Color(0xFF141414), // Using a hardcoded near-black to match 100%
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.zero,
@@ -57,21 +65,6 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // 1. "Window" Menu Bar (Antigravity File View Window)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              child: Row(
-                children: [
-                  const Text('Antigravity', style: TextStyle(color: Color(0xFF9E9E9E), fontSize: 13, fontWeight: FontWeight.w500)),
-                  const SizedBox(width: 16),
-                  const Text('File', style: TextStyle(color: Color(0xFF757575), fontSize: 13, fontWeight: FontWeight.w500)),
-                  const SizedBox(width: 16),
-                  const Text('View', style: TextStyle(color: Color(0xFF757575), fontSize: 13, fontWeight: FontWeight.w500)),
-                  const SizedBox(width: 16),
-                  const Text('Window', style: TextStyle(color: Color(0xFF757575), fontSize: 13, fontWeight: FontWeight.w500)),
-                ],
-              ),
-            ),
             const SizedBox(height: 12),
 
             // 2. Navigation controls (Sidebar toggle, Back, Forward)
@@ -106,12 +99,18 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
             _SidebarAction(
               icon: Icons.history,
               label: 'Conversation History',
-              onTap: () {},
+              onTap: () {
+                Navigator.of(context).pop();
+                if (widget.onConversationHistory != null) widget.onConversationHistory!();
+              },
             ),
             _SidebarAction(
               icon: Icons.schedule,
               label: 'Scheduled Tasks',
-              onTap: () {},
+              onTap: () {
+                Navigator.of(context).pop();
+                if (widget.onScheduledTasks != null) widget.onScheduledTasks!();
+              },
             ),
             const SizedBox(height: 16),
             
@@ -137,72 +136,50 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
               ),
             ),
 
-            // 5. Scrollable Projects List
+            // 5. Scrollable session list
             Expanded(
               child: RawScrollbar(
-                thumbColor: const Color(0xFF424242), // Dark scrollbar
-                radius: const Radius.circular(8),
-                thickness: 4,
+                controller: _scrollController,
+                thumbVisibility: true,
+                thickness: 6,
+                radius: const Radius.circular(3),
+                thumbColor: const Color(0xFF2C2C2C),
                 child: ListView(
+                  controller: _scrollController,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   children: [
-                    _ProjectFolderGroup(
-                      folderName: 'antigravity-add-model-main',
-                      sessions: rawSessionsFolder1,
-                      activeSessionId: activeId,
-                      onSessionTap: (id) {
-                        Navigator.of(context).pop();
-                        widget.onSessionSelected(id);
-                      },
-                    ),
-                    const SizedBox(height: 4),
-                    _ProjectFolderGroup(
-                      folderName: 'www - Copie',
-                      sessions: rawSessionsFolder2,
-                      activeSessionId: activeId,
-                      hasTrailingPlus: true, // Some folders have a small + on hover
-                      onSessionTap: (id) {
-                        Navigator.of(context).pop();
-                        widget.onSessionSelected(id);
-                      },
-                    ),
-                    const SizedBox(height: 4),
-                    _ProjectFolderGroup(
-                      folderName: 'c:\\Users\\amine\\Desktop\\ooredoo\\p...',
-                      sessions: rawSessionsFolder3,
-                      activeSessionId: activeId,
-                      onSessionTap: (id) {},
-                    ),
-                    const SizedBox(height: 4),
-                    _ProjectFolderGroup(
-                      folderName: 'c:\\Users\\amine\\OmniRoute',
-                      sessions: rawSessionsFolder3,
-                      activeSessionId: activeId,
-                      onSessionTap: (id) {},
-                    ),
-                    const SizedBox(height: 4),
-                    _ProjectFolderGroup(
-                      folderName: 'mo7i',
-                      sessions: rawSessionsFolder3,
-                      activeSessionId: activeId,
-                      onSessionTap: (id) {},
-                    ),
-                    const SizedBox(height: 4),
-                    _ProjectFolderGroup(
-                      folderName: 'sols-pro-vision',
-                      sessions: const [],
-                      activeSessionId: activeId,
-                      onSessionTap: (id) {},
-                    ),
+                    if (folderNames.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.all(16.0),
+                        child: Text(
+                          'No projects found. Connect to see sessions.',
+                          style: TextStyle(color: Color(0xFF757575), fontSize: 13),
+                        ),
+                      )
+                    else
+                      ...folderNames.map((folder) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: _ProjectFolderGroup(
+                            folderName: folder,
+                            sessions: groupedSessions[folder]!,
+                            activeSessionId: widget.activeSessionId,
+                            onSessionTap: (id) {
+                              Navigator.of(context).pop();
+                              widget.onSessionSelected(id);
+                            },
+                          ),
+                        );
+                      }),
                     const SizedBox(height: 16),
                   ],
                 ),
               ),
             ),
             
-            // 6. Settings at bottom
+            // 6. Settings and Connection at bottom
             Padding(
-              padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
               child: _SidebarAction(
                 icon: Icons.settings_outlined,
                 label: 'Settings',
@@ -210,6 +187,15 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                   Navigator.of(context).pop();
                   if (widget.onOpenSettings != null) widget.onOpenSettings!();
                 },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+              child: _SidebarAction(
+                icon: widget.isConnected ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
+                label: widget.isConnected ? 'Connected' : 'Offline',
+                textColor: widget.isConnected ? Colors.green : Colors.redAccent,
+                onTap: widget.onToggleConnection,
               ),
             ),
           ],
@@ -273,8 +259,9 @@ class _SidebarAction extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback? onTap;
+  final Color? textColor;
 
-  const _SidebarAction({required this.icon, required this.label, this.onTap});
+  const _SidebarAction({required this.icon, required this.label, this.onTap, this.textColor});
 
   @override
   Widget build(BuildContext context) {
@@ -288,14 +275,14 @@ class _SidebarAction extends StatelessWidget {
           margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
           child: Row(
             children: [
-              Icon(icon, size: 16, color: const Color(0xFF9E9E9E)),
+              Icon(icon, size: 16, color: textColor ?? const Color(0xFF9E9E9E)),
               const SizedBox(width: 12),
               Text(
                 label,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w400,
-                  color: Color(0xFF9E9E9E),
+                  color: textColor ?? const Color(0xFF9E9E9E),
                 ),
               ),
             ],
@@ -310,9 +297,6 @@ class _SessionItemData {
   final String id;
   final String title;
   final String time;
-  final bool isUnread;
-  final bool isPinned;
-  final bool isScheduled;
   final bool isLoading;
   final bool isPlaceholder;
 

@@ -366,7 +366,7 @@ void _scenario7() {
     test('cancel envoie la requête cancel_cascade', () async {
       final (:api, :ctrl, :out) = _mkApi();
 
-      final future = api.call('cancel_cascade', {'cascadeId': 'c-danger'});
+      final future = api.rpc('cancel_cascade', {'cascadeId': 'c-danger'});
       await Future<void>.delayed(Duration.zero);
 
       expect(out.first['type'], 'cancel_cascade');

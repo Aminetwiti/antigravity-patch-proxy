@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'custom_dropdown_overlay.dart';
 
 /// Modes d'envoi : immédiat ou mis en file pour exécution séquentielle.
 enum SendMode { immediate, queued }
@@ -25,7 +26,7 @@ class ChatInputBar extends StatefulWidget {
 
 class _ChatInputBarState extends State<ChatInputBar> {
   final TextEditingController _controller = TextEditingController();
-  final String _selectedModel = 'Gemini 3.1 Pro High';
+  String _selectedModel = 'Gemini 3.1 Pro High';
 
   bool _isSendPressed = false;
   SendMode _sendMode = SendMode.immediate;
@@ -34,6 +35,35 @@ class _ChatInputBarState extends State<ChatInputBar> {
   // Feature attachement .txt
   String? _attachedFileName;
   String? _attachedFileContent;
+
+  final GlobalKey _modelButtonKey = GlobalKey();
+  final GlobalKey _textFieldKey = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_onTextChanged);
+  }
+
+  void _onTextChanged() {
+    final text = _controller.text;
+    final selection = _controller.selection;
+    if (!selection.isValid || selection.isCollapsed == false) {
+      // Don't close if they just clicked inside the model dropdown
+      // Actually, we'll just let the dropdown manage its own state when clicking away
+      return;
+    }
+    final textBeforeCursor = text.substring(0, selection.start);
+    if (textBeforeCursor.endsWith('@') || textBeforeCursor.contains(RegExp(r'\B@\w+$'))) {
+      _showMentionDropdown();
+    } else if (textBeforeCursor.startsWith('/') || textBeforeCursor.contains(RegExp(r'\n/\w*$'))) {
+      _showActionDropdown();
+    } else {
+      // We don't hide everything because model dropdown might be open.
+      // But if we have a specific tag for mention dropdown, we could hide it.
+      // For now, if they type something else, we hide if it was a mention/action.
+    }
+  }
 
   @override
   void dispose() {
@@ -262,6 +292,230 @@ class _ChatInputBarState extends State<ChatInputBar> {
     );
   }
 
+  void _insertTextAtCursor(String insertText) {
+    final text = _controller.text;
+    final selection = _controller.selection;
+    if (selection.isValid) {
+      // find where the @ or / started
+      int start = selection.start;
+      while (start > 0 && text[start - 1] != '@' && text[start - 1] != '/') {
+        start--;
+      }
+      if (start > 0) start--; // include the @ or /
+      
+      final newText = text.replaceRange(start, selection.end, insertText + ' ');
+      _controller.text = newText;
+      _controller.selection = TextSelection.collapsed(offset: start + insertText.length + 1);
+    }
+  }
+
+  void _showMentionDropdown() {
+    CustomDropdownOverlay.show(
+      context: context,
+      targetKey: _textFieldKey,
+      width: 250,
+      maxHeight: 200,
+      child: Material(
+        color: Colors.transparent,
+        child: ListView(
+          padding: EdgeInsets.zero,
+          shrinkWrap: true,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Text('Mentions', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white.withValues(alpha: 0.5))),
+            ),
+            _buildPopupItem(Icons.insert_drive_file_outlined, 'file', 'Mention a file', () {
+              _insertTextAtCursor('@file');
+              CustomDropdownOverlay.hide();
+            }),
+            _buildPopupItem(Icons.folder_outlined, 'folder', 'Mention a folder', () {
+              _insertTextAtCursor('@folder');
+              CustomDropdownOverlay.hide();
+            }),
+            _buildPopupItem(Icons.public, 'web', 'Search the web', () {
+              _insertTextAtCursor('@web');
+              CustomDropdownOverlay.hide();
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showActionDropdown() {
+    CustomDropdownOverlay.show(
+      context: context,
+      targetKey: _textFieldKey,
+      width: 250,
+      maxHeight: 200,
+      child: Material(
+        color: Colors.transparent,
+        child: ListView(
+          padding: EdgeInsets.zero,
+          shrinkWrap: true,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Text('Actions', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white.withValues(alpha: 0.5))),
+            ),
+            _buildPopupItem(Icons.design_services, '/design', 'Generate UI', () {
+              _insertTextAtCursor('/design');
+              CustomDropdownOverlay.hide();
+            }),
+            _buildPopupItem(Icons.code, '/code', 'Generate Code', () {
+              _insertTextAtCursor('/code');
+              CustomDropdownOverlay.hide();
+            }),
+            _buildPopupItem(Icons.search, '/search', 'Search Project', () {
+              _insertTextAtCursor('/search');
+              CustomDropdownOverlay.hide();
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPopupItem(IconData icon, String title, String subtitle, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: Colors.white.withValues(alpha: 0.7)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: TextStyle(fontSize: 13, color: Colors.white.withValues(alpha: 0.9), fontWeight: FontWeight.w500)),
+                  Text(subtitle, style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.5))),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showModelDropdown(BuildContext context) {
+    CustomDropdownOverlay.show(
+      context: context,
+      targetKey: _modelButtonKey,
+      width: 280,
+      child: Material(
+        color: Colors.transparent,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Text(
+                'Model',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white.withValues(alpha: 0.5),
+                ),
+              ),
+            ),
+            _buildModelItem('Gemini 3.6 Flash Medium', tag: 'Fast', icon: Icons.info_outline),
+            _buildModelItem('Gemini 3.5 Flash Medium', tag: 'Fast', icon: Icons.info_outline),
+            _buildModelItem('Gemini 3.1 Pro High', isSelected: _selectedModel.contains('3.1 Pro')),
+            _buildModelItem('Claude Sonnet 4.6 (Thinking)'),
+            _buildModelItem('Claude Opus 4.6 (Thinking)'),
+            _buildModelItem('GPT-OSS 120B (Medium)'),
+            Divider(color: Colors.white.withValues(alpha: 0.1), height: 1),
+            _buildCustomModelItem('502ms • deepseek-v4-flash'),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildModelItem(String name, {bool isSelected = false, String? tag, IconData? icon}) {
+    return InkWell(
+      onTap: () {
+        setState(() => _selectedModel = name.split(' ').take(3).join(' '));
+        CustomDropdownOverlay.hide();
+      },
+      child: Container(
+        color: isSelected ? Colors.white.withValues(alpha: 0.1) : Colors.transparent,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                name,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.white.withValues(alpha: 0.9),
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                ),
+              ),
+            ),
+            if (tag != null) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(tag, style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.6))),
+                    if (icon != null) ...[
+                      const SizedBox(width: 4),
+                      Icon(icon, size: 10, color: Colors.white.withValues(alpha: 0.6)),
+                    ]
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(width: 8),
+            Icon(Icons.chevron_right, size: 14, color: Colors.white.withValues(alpha: 0.4)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCustomModelItem(String text) {
+    return InkWell(
+      onTap: () {
+        setState(() => _selectedModel = text.split('•').last.trim());
+        CustomDropdownOverlay.hide();
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            const Icon(Icons.star, size: 14, color: Colors.amber),
+            const SizedBox(width: 6),
+            Container(
+              width: 8,
+              height: 8,
+              decoration: const BoxDecoration(color: Colors.yellow, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              text,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.white.withValues(alpha: 0.6),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -374,29 +628,32 @@ class _ChatInputBarState extends State<ChatInputBar> {
                     const SingleActivator(LogicalKeyboardKey.keyL, control: true): _quoteSelectedText,
                     const SingleActivator(LogicalKeyboardKey.keyL, meta: true): _quoteSelectedText,
                   },
-                  child: TextField(
-                    controller: _controller,
-                    autofocus: false,
-                    maxLines: 6,
-                    minLines: 1,
-                    style: TextStyle(fontSize: 14, color: scheme.onSurface),
-                    decoration: InputDecoration(
-                      hintText: widget.isConnected
-                          ? (isQueued
-                              ? "Message en file — sera exécuté après la tâche en cours"
-                              : 'Ask anything, @ to mention, / for actions (Cmd+L pour citer)')
-                          : 'Hors ligne — le message sera envoyé à la reconnexion',
-                      hintStyle: TextStyle(
-                        color: widget.isConnected ? Colors.grey : scheme.error,
-                        fontSize: 14,
+                  child: Container(
+                    key: _textFieldKey,
+                    child: TextField(
+                      controller: _controller,
+                      autofocus: false,
+                      maxLines: 6,
+                      minLines: 1,
+                      style: TextStyle(fontSize: 14, color: scheme.onSurface),
+                      decoration: InputDecoration(
+                        hintText: widget.isConnected
+                            ? (isQueued
+                                ? "Message en file — sera exécuté après la tâche en cours"
+                                : 'Ask anything, @ to mention, / for actions (Cmd+L pour citer)')
+                            : 'Hors ligne — le message sera envoyé à la reconnexion',
+                        hintStyle: TextStyle(
+                          color: widget.isConnected ? Colors.grey : scheme.error,
+                          fontSize: 14,
+                        ),
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        disabledBorder: InputBorder.none,
+                        contentPadding: EdgeInsets.zero,
+                        fillColor: Colors.transparent,
+                        filled: false,
                       ),
-                      border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      disabledBorder: InputBorder.none,
-                      contentPadding: EdgeInsets.zero,
-                      fillColor: Colors.transparent,
-                      filled: false,
                     ),
                   ),
                 ),
@@ -419,7 +676,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
                     // Model & Reasoning Effort Pill
                     Flexible(
                       child: InkWell(
-                        onTap: () => _showQueueSettings(context),
+                        key: _modelButtonKey,
+                        onTap: () => _showModelDropdown(context),
                         borderRadius: BorderRadius.circular(6),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),

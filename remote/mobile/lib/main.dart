@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -248,9 +249,18 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
 
     return Scaffold(
       key: _scaffoldKey,
+      extendBodyBehindAppBar: true,
       drawer: LeftSidebarDrawer(
         activeSessionId: _activeSessionId,
         sessions: _sessions,
+        isConnected: isConnected,
+        onToggleConnection: () {
+          if (isConnected) {
+            _wsClient.disconnect();
+          } else {
+            _wsClient.connect();
+          }
+        },
         onSessionSelected: (id) {
           setState(() {
             _activeSessionId = id;
@@ -265,6 +275,16 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
             _activeSessionTitle = 'New Conversation';
           });
         },
+        onConversationHistory: () {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Conversation History - Coming soon!')),
+          );
+        },
+        onScheduledTasks: () {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Scheduled Tasks - Coming soon!')),
+          );
+        },
         onOpenSettings: () {
           Navigator.of(context).push(
             MaterialPageRoute(
@@ -272,6 +292,8 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                 initialSettings: _savedSettings,
                 onThemeModeChanged: widget.onThemeModeChanged,
                 onDaemonSaved: _applyDaemonSettings,
+                api: _api,
+                notifier: ApprovalNotifier.instance,
               ),
             ),
           );
@@ -313,6 +335,8 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         },
       ),
       endDrawer: RightSidebarDrawer(
+        api: _api,
+        activeSessionId: _activeSessionId,
         subagentsCount: _contextStats['subagentsCount'] as int? ?? 0,
         filesChangedCount: _contextStats['filesChangedCount'] as int? ?? 0,
         artifactsCount: _contextStats['artifactsCount'] as int? ?? 0,
@@ -320,6 +344,14 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         backgroundTasksCount: _contextStats['backgroundTasksCount'] as int? ?? 0,
       ),
       appBar: AppBar(
+        backgroundColor: Theme.of(context).colorScheme.surface.withValues(alpha: 0.75),
+        elevation: 0,
+        flexibleSpace: ClipRect(
+          child: BackdropFilter(
+            filter: ui.ImageFilter.blur(sigmaX: 10.0, sigmaY: 10.0),
+            child: Container(color: Colors.transparent),
+          ),
+        ),
         leading: IconButton(
           icon: Icon(Icons.dock_outlined, size: 20, color: Theme.of(context).colorScheme.onSurface),
           onPressed: () => _scaffoldKey.currentState?.openDrawer(),
@@ -391,20 +423,6 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           ],
         ),
         actions: [
-          TextButton.icon(
-            onPressed: () {},
-            icon: Icon(Icons.change_history, size: 14, color: Theme.of(context).colorScheme.primary),
-            label: Text(
-              'Open IDE',
-              style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurface),
-            ),
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-          ),
-          const SizedBox(width: 4),
           IconButton(
             icon: Icon(Icons.vertical_split_outlined, size: 20, color: Theme.of(context).colorScheme.onSurface),
             onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),

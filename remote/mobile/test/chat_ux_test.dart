@@ -86,18 +86,19 @@ void main() {
         (tester) async {
       final (:api, :ctrl, :out) = _mkApi();
       await _pumpScreen(tester, api: api, ctrl: ctrl);
+      out.clear(); // Ignorer l'appel get_session_history initial
 
       // Envoi via la barre → l'écran écoute le stream (requestId 'r1').
       await _sendViaBar(tester, 'fais deux trucs');
-      expect(out.first['type'], 'send_prompt');
+      final reqId = out.last['requestId'] as String;
 
-      _approval(ctrl, 'r1', 'call-1', 'run_command');
+      _approval(ctrl, reqId, 'call-1', 'run_command');
       await tester.pump(const Duration(milliseconds: 120));
       expect(find.byType(ToolApprovalCard), findsOneWidget);
       expect(find.textContaining('Approbation 1/2'), findsNothing);
 
       // 2ᵉ approbation pendant que la 1ʳᵉ est encore affichée.
-      _approval(ctrl, 'r1', 'call-2', 'edit_file');
+      _approval(ctrl, reqId, 'call-2', 'edit_file');
       await tester.pump(const Duration(milliseconds: 120));
 
       // Les deux demandes coexistent : compteur « 1/2 » + navigation.
@@ -141,12 +142,17 @@ void main() {
         (tester) async {
       final (:api, :ctrl, :out) = _mkApi();
       await _pumpScreen(tester, api: api, ctrl: ctrl);
+      out.clear(); // Ignorer l'appel get_session_history initial
 
       await _sendViaBar(tester, 'raisonne');
+      final reqId = out.last['requestId'] as String;
+      // Il faut d'abord répondre au send_prompt pour que l'écran mappe le reqId
+      ctrl.add(jsonEncode({'requestId': reqId, 'data': {}}));
+      await tester.pump(const Duration(milliseconds: 10));
 
       ctrl.add(jsonEncode({
         'type': 'stream_delta',
-        'requestId': 'r1',
+        'requestId': reqId,
         'data': {
           'events': [
             {'kind': 'thinking', 'delta': 'je réfléchis profondément à ce problème très complexe'},
@@ -220,12 +226,17 @@ void main() {
         (tester) async {
       final (:api, :ctrl, :out) = _mkApi();
       await _pumpScreen(tester, api: api, ctrl: ctrl);
+      out.clear(); // Ignorer l'appel get_session_history initial
 
       await _sendViaBar(tester, 'plante');
+      final reqId = out.last['requestId'] as String;
+      // On répond au send_prompt pour mapper le reqId
+      ctrl.add(jsonEncode({'requestId': reqId, 'data': {}}));
+      await tester.pump(const Duration(milliseconds: 10));
 
       ctrl.add(jsonEncode({
         'type': 'stream_end',
-        'requestId': 'r1',
+        'requestId': reqId,
         'error': 'internal daemon failure',
         'data': {'outcome': 'error'},
       }));
@@ -244,6 +255,7 @@ void main() {
         (tester) async {
       final (:api, :ctrl, :out) = _mkApi();
       await _pumpScreen(tester, api: api, ctrl: ctrl);
+      out.clear(); // Ignorer l'appel get_session_history initial
 
       // Aucune carte au départ.
       expect(find.byType(ToolApprovalCard), findsNothing);

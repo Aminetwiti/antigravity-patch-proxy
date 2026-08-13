@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../theme/app_colors.dart';
 import '../../core/protocol/daemon_api.dart';
+import '../../widgets/custom_dropdown_overlay.dart';
 
 class WorkspaceScreen extends StatefulWidget {
   final DaemonApi? api;
@@ -29,6 +30,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   final TextEditingController _findController = TextEditingController();
   String _findQuery = '';
   bool _showFindBar = false;
+  final GlobalKey _workspaceButtonKey = GlobalKey();
 
   @override
   void initState() {
@@ -122,17 +124,25 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    Icon(Icons.folder_open, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                    const SizedBox(width: 8),
-                    Text(
-                      _workspaceLabel,
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface),
-                    ),
-                  ],
+              InkWell(
+                key: _workspaceButtonKey,
+                onTap: () => _showWorkspaceDropdown(context),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Icon(Icons.folder_open, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _workspaceLabel,
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Icon(Icons.keyboard_arrow_down, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ],
+                  ),
                 ),
               ),
               // Bug #5 : barre de recherche substring.
@@ -327,6 +337,91 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       ),
     );
       },
+    );
+  }
+
+  void _showWorkspaceDropdown(BuildContext context) {
+    CustomDropdownOverlay.show(
+      context: context,
+      targetKey: _workspaceButtonKey,
+      width: 320,
+      child: Material(
+        color: Colors.transparent,
+        child: ListView(
+          shrinkWrap: true,
+          padding: EdgeInsets.zero,
+          children: [
+            _buildWorkspaceItem('antigravity-add-model-main', true),
+            _buildWorkspaceItem('www - Copie', false),
+            _buildWorkspaceItem('sols-pro-vision', false),
+            _buildWorkspaceItem(r'c:\Users\amine\Desktop\ooredoo\posweb', false),
+            _buildWorkspaceItem(r'c:\Users\amine\OmniRoute', false),
+            _buildWorkspaceItem('mo7i', false),
+            Divider(color: Colors.white.withValues(alpha: 0.1), height: 1),
+            _buildWorkspaceActionItem(Icons.create_new_folder_outlined, 'New Project'),
+            _buildWorkspaceActionItem(Icons.bolt_outlined, 'Quick Start'),
+            Divider(color: Colors.white.withValues(alpha: 0.1), height: 1),
+            _buildWorkspaceActionItem(Icons.do_disturb_alt_outlined, 'No Project'),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWorkspaceItem(String title, bool isSelected) {
+    return InkWell(
+      onTap: () {
+        CustomDropdownOverlay.hide();
+        // Here we would actually change the workspace
+      },
+      child: Container(
+        color: isSelected ? Colors.white.withValues(alpha: 0.1) : Colors.transparent,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            Icon(Icons.folder_outlined, size: 16, color: Colors.white.withValues(alpha: 0.7)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                  color: Colors.white.withValues(alpha: 0.9),
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWorkspaceActionItem(IconData icon, String title) {
+    return InkWell(
+      onTap: () {
+        CustomDropdownOverlay.hide();
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: Colors.white.withValues(alpha: 0.7)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.white.withValues(alpha: 0.9),
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
