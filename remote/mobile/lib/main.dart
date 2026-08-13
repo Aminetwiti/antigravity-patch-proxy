@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'config/env_config.dart';
 import 'core/network/outbox.dart';
 import 'core/network/websocket_client.dart';
 import 'core/notifications/approval_notifier.dart';
@@ -29,7 +30,11 @@ class AntigravityRemoteApp extends StatelessWidget {
     return MaterialApp(
       title: 'Antigravity Mobile',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.darkTheme,
+      // Feature #6 : respecter les préférences système (clair/sombre) au lieu
+      // de forcer le dark mode. ThemeMode.system délègue à MediaQuery.
+      theme: AppTheme.lightTheme,
+      darkTheme: AppTheme.darkTheme,
+      themeMode: ThemeMode.system,
       home: const AntigravityMainScreen(),
     );
   }
@@ -56,6 +61,8 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
   final OutboxQueue _outbox = OutboxQueue();
 
   List<CascadeSession> _sessions = const [];
+  // Bug #15 : guard pour éviter le double fetch concurrent de sessions.
+  bool _sessionsFetching = false;
 
   ConnectionStatus _prevStatus = ConnectionStatus.disconnected;
 
@@ -65,6 +72,12 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     _prevStatus = _wsClient.statusNotifier.value;
     _wsClient.statusNotifier.addListener(_onStatusChanged);
     ApprovalNotifier.instance.init();
+    // Auto-connexion dev : `adb reverse tcp:8090` + jeton par défaut.
+    // ponytail: plafond connu — pas de persistance de l'appairage; le QR /
+    // discovery reste le chemin production.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _wsClient.connect(authToken: EnvConfig.authToken);
+    });
   }
 
   void _onStatusChanged() {
@@ -110,8 +123,11 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
   }
 
   Future<void> _refreshSessions() async {
+    // Bug #15 : évite le double appel concurrent (connexion + reconnectVersion).
+    if (_sessionsFetching) return;
+    _sessionsFetching = true;
     final api = _api;
-    if (api == null) return;
+    if (api == null) { _sessionsFetching = false; return; }
     try {
       final data = await api.listSessions();
       final sessions = SessionParser.parseListSessions(data);
@@ -123,6 +139,8 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         });
       }
     } catch (_) {
+    } finally {
+      _sessionsFetching = false;
     }
   }
 
@@ -160,6 +178,8 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
             final s = _sessions.firstWhere((s) => s.id == id, orElse: () => const CascadeSession(id: '', workspacePath: '', title: 'Session', status: '', time: ''));
             _activeSessionTitle = s.title;
           });
+          // Bug #2 : rafraîchir le contexte pour la nouvelle session.
+          _refreshContext();
         },
         onNewConversation: () {
           setState(() {
@@ -312,6 +332,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         activeSessionId: _activeSessionId,
         activeProjectName: _activeProjectName,
         isConnected: isConnected,
+        wsClient: _wsClient,
       ),
     );
   }

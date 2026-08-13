@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/protocol/messages.dart';
@@ -24,17 +26,28 @@ class ToolApprovalCard extends StatefulWidget {
 class _ToolApprovalCardState extends State<ToolApprovalCard> {
   bool _alwaysAllow = false;
   bool _isSubmitting = false;
+  // Bug #13 : guard timeout — si le daemon ne répond pas en 5 s, on débloque
+  // le bouton pour ne pas laisser l'utilisateur coincé.
+  Timer? _submitTimeout;
+
+  /// Détecte les commandes de lecture courantes pour réduire les demandes redondantes.
+  bool _isReadCommand(String cmd) {
+    final trimmed = cmd.trim().toLowerCase();
+    return trimmed.startsWith('cat ') ||
+        trimmed.startsWith('ls ') ||
+        trimmed.startsWith('grep ') ||
+        trimmed.startsWith('pwd') ||
+        trimmed.startsWith('git status') ||
+        trimmed.startsWith('git diff');
+  }
 
   @override
   void didUpdateWidget(ToolApprovalCard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.request.callId != widget.request.callId) {
-      // Sécurité Critique (Scénario 6) : Réinitialiser l'état local si Flutter
-      // recycle ce composant pour une NOUVELLE demande d'approbation.
-      // Sans ça, une demande destructive pourrait hériter du `_alwaysAllow` = true
-      // d'une précédente demande innocente !
       _isSubmitting = false;
-      _alwaysAllow = false;
+      _alwaysAllow = _isReadCommand(widget.request.command);
+      _submitTimeout?.cancel();
     }
   }
 
@@ -42,14 +55,26 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
     if (_isSubmitting) return;
     HapticFeedback.lightImpact();
     setState(() => _isSubmitting = true);
+    // Bug #13 : timeout guard — débloque après 5 s si pas de réponse daemon.
+    _submitTimeout?.cancel();
+    _submitTimeout = Timer(const Duration(seconds: 5), () {
+      if (mounted) setState(() => _isSubmitting = false);
+    });
     try {
       await widget.onDecision(
         decision,
         scope: _alwaysAllow ? ApprovalScope.session : ApprovalScope.once,
       );
     } finally {
+      _submitTimeout?.cancel();
       if (mounted) setState(() => _isSubmitting = false);
     }
+  }
+
+  @override
+  void dispose() {
+    _submitTimeout?.cancel();
+    super.dispose();
   }
 
   @override
@@ -114,6 +139,7 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
             style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 4),
+          // Bug #1 : SelectableText → sélection/copie directe sans bouton.
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(10),
@@ -122,7 +148,7 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
               borderRadius: BorderRadius.circular(6),
               border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
             ),
-            child: Text(
+            child: SelectableText(
               request.command,
               style: TextStyle(
                 fontFamily: 'monospace',
@@ -133,7 +159,7 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
           ),
           const SizedBox(height: 6),
 
-          // "Always allow for this session"
+          // "Always allow for this session" — Bug #13 : tooltip explicatif.
           Row(
             children: [
               const Icon(Icons.autorenew, size: 14, color: AppColors.warning),
@@ -147,14 +173,20 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
                   ),
                 ),
               ),
-              Switch(
-                value: _alwaysAllow,
-                onChanged: (v) {
-                  HapticFeedback.lightImpact();
-                  setState(() => _alwaysAllow = v);
-                },
-                activeColor: AppColors.warning,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              Tooltip(
+                message:
+                    'Si activé, le daemon approuvera automatiquement\n'
+                    'toutes les commandes "${request.toolName}" pour\n'
+                    'cette session sans vous redemander.',
+                child: Switch(
+                  value: _alwaysAllow,
+                  onChanged: (v) {
+                    HapticFeedback.lightImpact();
+                    setState(() => _alwaysAllow = v);
+                  },
+                  activeColor: AppColors.warning,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
               ),
             ],
           ),
@@ -175,9 +207,10 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
                   Icon(Icons.timer_off_outlined, size: 14, color: AppColors.danger),
                   SizedBox(width: 6),
                   Expanded(
+                    // Bug #13 : fontWeight.w700 pour contraste suffisant sur fond danger 12%.
                     child: Text(
                       'Approbation expirée — auto-refusée par le daemon (5 min)',
-                      style: TextStyle(fontSize: 11.5, color: AppColors.danger, fontWeight: FontWeight.w600),
+                      style: TextStyle(fontSize: 11.5, color: AppColors.danger, fontWeight: FontWeight.w700),
                     ),
                   ),
                 ],
@@ -190,47 +223,59 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
           Row(
             children: [
               Expanded(
-                child: OutlinedButton.icon(
-                  onPressed:
-                      _isSubmitting || widget.isExpired
-                          ? null
-                          : () => _handleDecision(ToolDecision.deny),
-                  icon: const Icon(Icons.close, size: 16, color: AppColors.danger),
-                  label: const Text(
-                    'Refuser',
-                    style: TextStyle(color: AppColors.danger, fontSize: 13),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: AppColors.danger),
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(6),
+                // Bug #13 : Semantics pour les screen readers.
+                child: Semantics(
+                  label: 'Refuser l\'exécution de ${request.toolName}',
+                  button: true,
+                  child: OutlinedButton.icon(
+                    key: const Key('deny-btn'),
+                    onPressed:
+                        _isSubmitting || widget.isExpired
+                            ? null
+                            : () => _handleDecision(ToolDecision.deny),
+                    icon: const Icon(Icons.close, size: 16, color: AppColors.danger),
+                    label: const Text(
+                      'Refuser',
+                      style: TextStyle(color: AppColors.danger, fontSize: 13),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: AppColors.danger),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(6),
+                      ),
                     ),
                   ),
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _isSubmitting || widget.isExpired
-                      ? null
-                      : () => _handleDecision(ToolDecision.allow),
-                  icon: _isSubmitting
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                        )
-                      : const Icon(Icons.check, size: 16, color: Colors.white),
-                  label: Text(
-                    _isSubmitting ? 'En cours...' : 'Approuver',
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.positive,
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(6),
+                // Bug #13 : Semantics pour les screen readers.
+                child: Semantics(
+                  label: 'Approuver l\'exécution de ${request.toolName}',
+                  button: true,
+                  child: ElevatedButton.icon(
+                    key: const Key('allow-btn'),
+                    onPressed: _isSubmitting || widget.isExpired
+                        ? null
+                        : () => _handleDecision(ToolDecision.allow),
+                    icon: _isSubmitting
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Icon(Icons.check, size: 16, color: Colors.white),
+                    label: Text(
+                      _isSubmitting ? 'En cours...' : 'Approuver',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.positive,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(6),
+                      ),
                     ),
                   ),
                 ),

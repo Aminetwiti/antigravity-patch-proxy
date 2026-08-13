@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/core/protocol/messages.dart';
@@ -27,9 +26,7 @@ void main() {
                 // By keeping the SAME Key or no key, Flutter reuses the State object.
                 return ToolApprovalCard(
                   request: request,
-                  onDecision: (decision, {scope}) async {
-                     await Future.delayed(const Duration(seconds: 2));
-                  },
+                  onDecision: (decision, {scope = ApprovalScope.once}) {},
                 );
               },
             ),
@@ -48,8 +45,8 @@ void main() {
       final switchWidget = tester.widget<Switch>(switchFinder);
       expect(switchWidget.value, true, reason: 'Switch should be ON');
 
-      // 3. User taps "Approve" - simulate a race condition where the request changes immediately
-      final allowBtn = find.text('Autoriser');
+      // 3. User taps "Approuver" - simulate a race condition where the request changes immediately
+      final allowBtn = find.byKey(const Key('allow-btn'));
       await tester.tap(allowBtn);
       await tester.pump(); // We are now _isSubmitting = true for call-1
 
@@ -70,7 +67,7 @@ void main() {
       expect(newSwitchWidget.value, false, reason: 'Switch MUST be reset to OFF for a new callId to prevent silent override!');
 
       // Check if buttons are enabled (not stuck in _isSubmitting)
-      final denyBtn = tester.widget<ElevatedButton>(find.byKey(const Key('deny-btn')));
+      final denyBtn = tester.widget<OutlinedButton>(find.byKey(const Key('deny-btn')));
       expect(denyBtn.onPressed, isNotNull, reason: 'Deny button must be clickable for the new request');
     });
   });

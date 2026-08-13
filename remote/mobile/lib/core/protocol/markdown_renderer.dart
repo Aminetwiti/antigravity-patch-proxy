@@ -118,13 +118,24 @@ class MarkdownRenderer {
         continue;
       }
 
-      // 2. Link.
+      // 2. Link with tooltip showing full target path/URL on hover.
       final linkMatch = linkRe.firstMatch(remaining);
       if (linkMatch != null && linkMatch.start == 0) {
-        spans.add(TextSpan(
-          text: linkMatch.group(1),
-          style: base.copyWith(color: const Color(0xFF3B82F6)),
-          recognizer: null,
+        final label = linkMatch.group(1) ?? '';
+        final url = linkMatch.group(2) ?? '';
+        spans.add(WidgetSpan(
+          alignment: PlaceholderAlignment.baseline,
+          baseline: TextBaseline.alphabetic,
+          child: Tooltip(
+            message: 'Chemin complet : $url',
+            child: Text(
+              label,
+              style: base.copyWith(
+                color: const Color(0xFF3B82F6),
+                decoration: TextDecoration.underline,
+              ),
+            ),
+          ),
         ));
         remaining = remaining.substring(linkMatch.end);
         continue;

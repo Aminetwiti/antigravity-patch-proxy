@@ -4,7 +4,6 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
-import 'package:meta/meta.dart';
 import '../../config/env_config.dart';
 
 enum ConnectionStatus { disconnected, connecting, connected, error }
@@ -49,6 +48,20 @@ class DaemonWebSocketClient {
   Stream<dynamic> get stream =>
       _messageController?.stream ?? const Stream.empty();
 
+  /// Étape 6 : la connexion a été abandonnée (dispose). Les callbacks async
+  /// tardifs (WebSocket.connect en vol, onDone, onError) doivent devenir no-op
+  /// au lieu de notifier des ValueNotifier déjà disposés.
+  bool _disposed = false;
+
+  /// Jeton de connexion : COMPLÉTÉ par [dispose]. Le `connect` en vol fait la
+  /// course avec ce jeton ; si dispose gagne, on renonce sans notifier.
+  Completer<void>? _connectToken;
+
+  /// Timer de timeout 5 s pour `WebSocket.connect` en vol : annulé dans
+  /// dispose/disconnect pour ne pas laisser de timer pendant après la
+  /// destruction (tests « A Timer is still pending »).
+  Timer? _connectTimeout;
+
   Future<void> connect({String? customUrl, String? authToken}) async {
     if (customUrl != null && customUrl.isNotEmpty) {
       _targetUrl = customUrl;
@@ -57,6 +70,7 @@ class DaemonWebSocketClient {
       _authToken = authToken;
     }
 
+    if (_disposed) return;
     if (statusNotifier.value == ConnectionStatus.connected ||
         statusNotifier.value == ConnectionStatus.connecting) {
       return;
@@ -72,9 +86,34 @@ class DaemonWebSocketClient {
         finalUrl += '${finalUrl.contains('?') ? '&' : '?'}token=$_authToken';
       }
       final uri = Uri.parse(finalUrl);
-      _socket = await WebSocket.connect(uri.toString()).timeout(
-        const Duration(seconds: 5),
-      );
+      final token = Completer<void>();
+      _connectToken = token;
+      // Course à trois : socket | timeout 5 s | abandon (dispose).
+      // Un `.timeout()` standard créerait un timer interne non annulable qui
+      // laisserait le test sur « A Timer is still pending » ; ce Timer
+      // explicite est annulé dans dispose/disconnect.
+      final socketFuture = WebSocket.connect(uri.toString());
+      final completer = Completer<WebSocket>();
+      socketFuture.then(completer.complete, onError: completer.completeError);
+      _connectTimeout?.cancel();
+      _connectTimeout = Timer(const Duration(seconds: 5), () {
+        socketFuture.then((s) => s.close());
+        if (!completer.isCompleted) {
+          completer.completeError(TimeoutException('WebSocket connect timeout'));
+        }
+      });
+      try {
+        _socket = await completer.future;
+      } finally {
+        _connectTimeout?.cancel();
+        _connectTimeout = null;
+      }
+      if (_disposed || token.isCompleted) {
+        _socket?.close();
+        _socket = null;
+        return;
+      }
+      _connectToken = null;
 
       statusNotifier.value = ConnectionStatus.connected;
       _reconnectAttempts = 0;
@@ -121,6 +160,11 @@ class DaemonWebSocketClient {
   }
 
   void _handleDisconnect() {
+    if (_disposed) {
+      _socket?.close();
+      _socket = null;
+      return;
+    }
     statusNotifier.value = ConnectionStatus.disconnected;
     _socket?.close();
     _socket = null;
@@ -150,6 +194,7 @@ class DaemonWebSocketClient {
       effective,
       () {
         _stopRetryCountdown();
+        if (_disposed) return;
         retryInfo.value = retryInfo.value.copyWith(nextRetryIn: Duration.zero);
         if (statusNotifier.value == ConnectionStatus.disconnected) {
           connect();
@@ -164,8 +209,18 @@ class DaemonWebSocketClient {
   }
 
   void disconnect() {
+    if (_disposed) {
+      _socket?.close();
+      _socket = null;
+      _connectToken?.complete();
+      _connectTimeout?.cancel();
+      _connectTimeout = null;
+      return;
+    }
     _manualDisconnect = true;
     _reconnectTimer?.cancel();
+    _connectToken?.complete();
+    _connectToken = null;
     _stopRetryCountdown();
     _socket?.close();
     _socket = null;
@@ -189,6 +244,11 @@ class DaemonWebSocketClient {
   }
 
   void dispose() {
+    _disposed = true;
+    _reconnectTimer?.cancel();
+    _connectToken?.complete();
+    _connectToken = null;
+    _stopRetryCountdown();
     disconnect();
     _messageController?.close();
     _messageController = null;

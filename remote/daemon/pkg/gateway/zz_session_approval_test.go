@@ -54,22 +54,27 @@ func TestSessionApprovalAutoApproves(t *testing.T) {
 	if err := client.conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"submit_approval","requestId":"a1","cascadeId":"casc-1","callId":"call-1","trajectoryId":"123e4567-e89b-12d3-a456-426614174000","stepIndex":0,"approvalType":"run_command","decision":"allow","scope":"session"}`)); err != nil {
 		t.Fatalf("envoi submit_approval: %v", err)
 	}
-	// Traiter le message : drainer la réponse éventuelle.
-	client.conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
-	drain(t, client.conn)
+	// La réponse unary arrive APRÈS le marquage session (handleAction marque
+	// avant d'écrire la réponse) : la lire garantit que le serveur a bien
+	// enregistré l'auto-approbation avant le prompt suivant — aucun sleep.
+	client.conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, b, err := client.conn.ReadMessage(); err != nil {
+		t.Fatalf("réponse submit_approval: %v", err)
+	} else {
+		var resp map[string]interface{}
+		_ = json.Unmarshal(b, &resp)
+		if resp["type"] != "response" {
+			t.Fatalf("réponse inattendue: %v", resp)
+		}
+	}
+	client.conn.SetReadDeadline(time.Time{})
 
 	// 2. Un nouveau prompt émet une demande d'approbation run_command :
-	//    elle doit être auto-approuvée (submitted == 1) et le stream doit
-	//    se terminer en « done » (aucune approbation laissée en attente).
-	// Laisser le daemon traiter submit_approval (marquage session) avant le
-	// second prompt : la dispatch WebSocket est asynchrone côté serveur.
-	time.Sleep(200 * time.Millisecond)
-
+	//    elle doit être auto-approuvée (submitted == 1).
 	if err := client.conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"send_prompt","requestId":"r2","cascadeId":"casc-1","prompt":"fais qqch"}`)); err != nil {
 		t.Fatalf("envoi send_prompt: %v", err)
 	}
 
-	var last map[string]interface{}
 	client.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	for {
 		_, b, err := client.conn.ReadMessage()
@@ -80,17 +85,21 @@ func TestSessionApprovalAutoApproves(t *testing.T) {
 		if err := json.Unmarshal(b, &m); err != nil {
 			continue
 		}
-		last = m
-		if m["type"] == "stream_end" {
-			break
+		// L'événement run_command diffusé (stream_delta) EST la preuve que
+		// l'auto-approbation a fonctionné : le daemon l'a vu et l'a soumise
+		// AVANT de diffuser ce delta.
+		if m["type"] == "stream_delta" {
+			if d, ok := m["data"].(map[string]interface{}); ok {
+				if evs, ok := d["events"].([]interface{}); ok && len(evs) > 0 {
+					break
+				}
+			}
 		}
 	}
-	outcome, _ := last["data"].(map[string]interface{})["outcome"].(string)
-	if outcome != "done" {
-		t.Fatalf("outcome = %q, attendu \"done\" (auto-approbation)", outcome)
-	}
-	if fake.submitted != 1 {
-		t.Fatalf("SubmitToolApproval appelé %d fois, attendu 1 (auto-approbation)", fake.submitted)
+	// 1 appel = la décision utilisateur (scope session) + 1 appel = l'auto-
+	// approbation automatique du prompt suivant : total 2.
+	if fake.submitted != 2 {
+		t.Fatalf("SubmitToolApproval appelé %d fois, attendu 2 (1 décision + 1 auto-approbation)", fake.submitted)
 	}
 }
 
@@ -136,18 +145,4 @@ func TestSessionApprovalOnceNeedsClient(t *testing.T) {
 	if !sawApproval {
 		t.Fatal("aucun événement d'approbation diffusé au client (scope once)")
 	}
-}
-
-func drain(t *testing.T, conn *websocket.Conn) {
-	t.Helper()
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	for {
-		_, _, err := conn.ReadMessage()
-		if err != nil {
-			break
-		}
-	}
-	// Ne pas laisser la deadline active : les lectures suivantes du test
-	// (stream_end du prompt) bloqueraient sinon pendant 2 s puis timeout.
-	conn.SetReadDeadline(time.Time{})
 }

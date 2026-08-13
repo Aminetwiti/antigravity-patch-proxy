@@ -132,6 +132,8 @@ void _a3() {
       await done.future;
       expect(localFrames.join(), 'mobile: réponse');
       expect(localFrames.join(), isNot(contains('PC')));
+      // Fenêtre de batch 100 ms (UX) : attendre le flush du broadcast.
+      await Future<void>.delayed(const Duration(milliseconds: 150));
       expect(external, isNotEmpty);
       expect(StreamDeltaParser.textOf(external.first), 'PC: refactoring...');
 

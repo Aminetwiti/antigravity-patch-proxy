@@ -512,7 +512,7 @@ void _scenario10() {
       final broadcastEvents = <Map<String, dynamic>>[];
       final sub = api.events.listen(broadcastEvents.add);
 
-      _streamDelta(ctrl, rid, [], endData: {'cascadeId': 'c1', 'outcome': 'done'});
+      ctrl.add(jsonEncode({'type': 'stream_end', 'requestId': rid, 'data': {'cascadeId': 'c1', 'outcome': 'done'}}));
       await stream.toList();
       await Future<void>.delayed(Duration.zero);
 

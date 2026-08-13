@@ -17,18 +17,42 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   String _selectedFilePath = '';
   bool _isLoadingTree = true;
   bool _isLoadingCode = false;
+  String? _loadError;
   List<Map<String, dynamic>> _files = [];
   String _codeContent = '// Sélectionnez un fichier';
+  // Bug #5 : recherche substring dans l'arbre
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  // Find-in-page (Cmd+F) dans le viewer de code
+  final TextEditingController _findController = TextEditingController();
+  String _findQuery = '';
+  bool _showFindBar = false;
+  // Preview tabs (temporaires) vs Permanent tabs
+  final Set<String> _permanentTabs = {};
+  bool _isPreviewTab = true;
 
   @override
   void initState() {
     super.initState();
     _loadFiles();
+    _searchController.addListener(() {
+      setState(() => _searchQuery = _searchController.text.toLowerCase());
+    });
+    _findController.addListener(() {
+      setState(() => _findQuery = _findController.text);
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _findController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadFiles() async {
     if (widget.api == null) {
-      if (mounted) setState(() => _isLoadingTree = false);
+      if (mounted) setState(() { _isLoadingTree = false; _loadError = null; });
       return;
     }
     try {
@@ -37,18 +61,30 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         setState(() {
           _files = List<Map<String, dynamic>>.from(res['files'] ?? []);
           _isLoadingTree = false;
+          _loadError = null;
         });
       }
     } catch (e) {
-      if (mounted) setState(() => _isLoadingTree = false);
+      // Bug #6 : afficher l'erreur explicitement au lieu de silencer.
+      if (mounted) {
+        setState(() {
+          _isLoadingTree = false;
+          _loadError = e.toString();
+        });
+      }
     }
   }
 
-  Future<void> _loadFile(String path) async {
-    if (widget.api == null) return;
+  void _loadFile(String path, {bool promoteToPermanent = false}) async {
+    final isAlreadyPermanent = _permanentTabs.contains(path);
     setState(() {
       _selectedFilePath = path;
       _isLoadingCode = true;
+      _codeContent = '';
+      _isPreviewTab = !isAlreadyPermanent && !promoteToPermanent;
+      if (promoteToPermanent) {
+        _permanentTabs.add(path);
+      }
     });
     try {
       final res = await widget.api!.readFile(path, workspacePath: widget.workspacePath);
@@ -96,31 +132,50 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                   ],
                 ),
               ),
-              const Divider(),
-              Expanded(
-                child: _isLoadingTree 
-                  ? _buildSkeletonTree()
-                  : ListView.builder(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      itemCount: _files.length,
-                      itemBuilder: (context, index) {
-                        final file = _files[index];
-                        final isDir = file['isDir'] == true;
-                        final name = file['name'] as String;
-                        final depth = file['depth'] as int;
-                        final fullPath = file['fullPath'] as String;
-
-                        if (isDir) {
-                          return _TreeFolder(title: name, depth: depth);
-                        } else {
-                          return _TreeFile(
-                            title: name,
-                            depth: depth,
-                            onTap: () => _loadFile(fullPath),
-                          );
-                        }
-                      },
+              // Bug #5 : barre de recherche substring.
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                child: TextField(
+                  controller: _searchController,
+                  style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurface),
+                  decoration: InputDecoration(
+                    hintText: 'Rechercher...',
+                    hintStyle: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    prefixIcon: Icon(Icons.search, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: Icon(Icons.close, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            onPressed: () => _searchController.clear(),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                          )
+                        : null,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                     ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: Theme.of(context).colorScheme.primary),
+                    ),
+                    filled: true,
+                    fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  ),
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: _isLoadingTree
+                  ? _buildSkeletonTree()
+                  : _loadError != null
+                      ? _buildErrorState(_loadError!)
+                      : _buildFileList(),
               ),
             ],
           ),
@@ -149,10 +204,42 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                       Icon(Icons.description_outlined, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: Text(
-                          _selectedFilePath,
-                          style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurface),
-                          overflow: TextOverflow.ellipsis,
+                        child: Row(
+                          children: [
+                            Text(
+                              _selectedFilePath,
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                color: Theme.of(context).colorScheme.onSurface,
+                                fontStyle: _isPreviewTab ? FontStyle.italic : FontStyle.normal,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (_isPreviewTab && _selectedFilePath.isNotEmpty) ...[
+                              const SizedBox(width: 8),
+                              InkWell(
+                                onTap: () => setState(() {
+                                  _permanentTabs.add(_selectedFilePath);
+                                  _isPreviewTab = false;
+                                }),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context).colorScheme.primaryContainer,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    'Aperçu (cliquer pour fixer)',
+                                    style: TextStyle(
+                                      fontSize: 10.5,
+                                      color: Theme.of(context).colorScheme.primary,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ),
                       IconButton(
@@ -172,10 +259,69 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                                 );
                               },
                       ),
+                      // Find-in-page toggle
+                      IconButton(
+                        icon: Icon(
+                          Icons.search,
+                          size: 16,
+                          color: _showFindBar
+                              ? Theme.of(context).colorScheme.primary
+                              : Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                        tooltip: 'Rechercher dans le fichier (Cmd+F)',
+                        onPressed: _selectedFilePath.isEmpty
+                            ? null
+                            : () => setState(() {
+                                _showFindBar = !_showFindBar;
+                                if (!_showFindBar) _findController.clear();
+                              }),
+                      ),
                     ],
                   ),
                 ),
                 const Divider(height: 1),
+                // Find-in-page bar (toggle via icône loupe)
+                if (_showFindBar)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    color: Theme.of(context).colorScheme.surfaceContainer,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _findController,
+                            autofocus: true,
+                            style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurface),
+                            decoration: InputDecoration(
+                              hintText: 'Trouver dans le fichier...',
+                              hintStyle: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                              prefixIcon: Icon(Icons.search, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                              filled: true,
+                              fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        if (_findQuery.isNotEmpty)
+                          Text(
+                            '${_countMatches(_codeContent, _findQuery)} rés.',
+                            style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                          ),
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 16),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                          onPressed: () => setState(() {
+                            _showFindBar = false;
+                            _findController.clear();
+                          }),
+                        ),
+                      ],
+                    ),
+                  ),
                 Expanded(
                   child: Container(
                     width: double.infinity,
@@ -183,17 +329,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                     color: Theme.of(context).colorScheme.surfaceContainerHighest,
                     child: _isLoadingCode
                         ? _buildSkeletonCode()
-                        : SingleChildScrollView(
-                            child: Text(
-                              _codeContent,
-                              style: TextStyle(
-                                fontFamily: 'monospace',
-                                fontSize: 12,
-                                height: 1.5,
-                                color: Theme.of(context).colorScheme.onSurface,
-                              ),
-                            ),
-                          ),
+                        : _buildCodeView(),
                   ),
                 ),
               ],
@@ -206,7 +342,153 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
+  // Bug #3 : perf — construit la liste une seule fois, filtrée par _searchQuery.
+  Widget _buildFileList() {
+    final filtered = _searchQuery.isEmpty
+        ? _files
+        : _files.where((f) {
+            final name = (f['name'] as String).toLowerCase();
+            return name.contains(_searchQuery);
+          }).toList();
+
+    if (filtered.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            _searchQuery.isEmpty
+                ? 'Aucun fichier dans ce workspace'
+                : 'Aucun résultat pour «\u00a0$_searchQuery\u00a0»',
+            style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.only(bottom: 12),
+      itemCount: filtered.length,
+      itemBuilder: (context, index) {
+        final file = filtered[index];
+        final isDir = file['isDir'] == true;
+        final name = file['name'] as String;
+        final depth = (file['depth'] as num?)?.toInt() ?? 0;
+        final fullPath = file['fullPath'] as String? ?? name;
+        final isSelected = fullPath == _selectedFilePath;
+
+        if (isDir) {
+          return _TreeFolder(title: name, depth: depth);
+        } else {
+          return _TreeFile(
+            title: name,
+            depth: depth,
+            isSelected: isSelected,
+            onTap: () => _loadFile(fullPath),
+          );
+        }
+      },
+    );
+  }
+
+  // Bug #6 : état d'erreur explicite avec bouton de rechargement.
+  Widget _buildErrorState(String error) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.error_outline, size: 32, color: Theme.of(context).colorScheme.error),
+            const SizedBox(height: 12),
+            Text(
+              'Impossible de charger les fichiers',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              error,
+              style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              textAlign: TextAlign.center,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: () {
+                setState(() { _isLoadingTree = true; _loadError = null; });
+                _loadFiles();
+              },
+              icon: const Icon(Icons.refresh, size: 16),
+              label: const Text('Réessayer'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Find-in-page : comptage des occurrences (insensible à la casse).\n  // ponytail: allMatches() d'une RegExp — stdlib, zéro allocation custom.
+  int _countMatches(String content, String query) {
+    if (query.isEmpty) return 0;
+    return RegExp(RegExp.escape(query), caseSensitive: false)
+        .allMatches(content)
+        .length;
+  }
+
+  // Bug find-in-page + Bug #4 (diffs > 1000 lignes) :
+  // — Quand _findQuery est vide : ListView.builder ligne par ligne (virtualisation)
+  //   → corrige le rendu défaillant sur les fichiers volumineux (>1000 lignes).
+  // — Quand _findQuery est non-vide : RichText avec spans surlignés ligne par ligne.
+  // ponytail: on ne reconstruit que les lignes visibles (itemBuilder à la volée).
+  Widget _buildCodeView() {
+    final lines = _codeContent.split('\n');
+    final textStyle = TextStyle(
+      fontFamily: 'monospace',
+      fontSize: 12,
+      height: 1.5,
+      color: Theme.of(context).colorScheme.onSurface,
+    );
+
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      itemCount: lines.length,
+      itemBuilder: (context, index) {
+        final line = lines[index];
+        if (_findQuery.isEmpty) {
+          return Text(line, style: textStyle);
+        }
+        // Surlignage : découper la ligne en spans autour de chaque match.
+        final spans = <TextSpan>[];
+        final pattern = RegExp(RegExp.escape(_findQuery), caseSensitive: false);
+        int cursor = 0;
+        for (final match in pattern.allMatches(line)) {
+          if (match.start > cursor) {
+            spans.add(TextSpan(text: line.substring(cursor, match.start)));
+          }
+          spans.add(TextSpan(
+            text: line.substring(match.start, match.end),
+            style: TextStyle(
+              backgroundColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.30),
+              color: Theme.of(context).colorScheme.onSurface,
+              fontWeight: FontWeight.bold,
+            ),
+          ));
+          cursor = match.end;
+        }
+        if (cursor < line.length) {
+          spans.add(TextSpan(text: line.substring(cursor)));
+        }
+        return RichText(
+          text: TextSpan(style: textStyle, children: spans),
+        );
+      },
+    );
+  }
+
   Widget _buildSkeletonTree() {
+
     return ListView.builder(
       itemCount: 8,
       padding: const EdgeInsets.only(bottom: 12, left: 12, right: 12),
@@ -283,24 +565,42 @@ class _TreeFolder extends StatelessWidget {
 class _TreeFile extends StatelessWidget {
   final String title;
   final int depth;
+  final bool isSelected;
   final VoidCallback onTap;
 
-  const _TreeFile({required this.title, required this.depth, required this.onTap});
+  // Bug #3 : isSelected en param → le widget peut rester const dans les cas
+  // non-sélectionnés, évite les rebuilds inutiles sur le reste de la liste.
+  const _TreeFile({
+    required this.title,
+    required this.depth,
+    required this.onTap,
+    this.isSelected = false,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return InkWell(
       onTap: onTap,
-      child: Padding(
+      child: Container(
+        color: isSelected ? scheme.primary.withValues(alpha: 0.12) : null,
         padding: EdgeInsets.only(left: 8.0 + depth * 14, top: 2, bottom: 2),
         child: Row(
           children: [
-            Icon(Icons.insert_drive_file_outlined, size: 15, color: Theme.of(context).colorScheme.onSurfaceVariant),
+            Icon(
+              Icons.insert_drive_file_outlined,
+              size: 15,
+              color: isSelected ? scheme.primary : scheme.onSurfaceVariant,
+            ),
             const SizedBox(width: 6),
             Expanded(
               child: Text(
                 title,
-                style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                ),
                 overflow: TextOverflow.ellipsis,
               ),
             ),

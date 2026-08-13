@@ -278,6 +278,52 @@ class DaemonApi {
     return controller.stream;
   }
 
+  static const Duration mcpTimeout = Duration(seconds: 15);
+
+  /// Exécute un outil MCP avec un délai d'attente explicite de 15s
+  /// pour éviter le blocage indéfini de l'agent.
+  Future<Map<String, dynamic>> executeMcpTool({
+    required String serverName,
+    required String toolName,
+    Map<String, dynamic> arguments = const {},
+  }) async {
+    final id = _newRequestId();
+    final completer = Completer<Map<String, dynamic>>();
+    _pending[id] = completer;
+    final message = {
+      'type': 'call_mcp_tool',
+      'requestId': id,
+      'serverName': serverName,
+      'toolName': toolName,
+      'arguments': arguments,
+    };
+    _send(message);
+    try {
+      return await completer.future.timeout(
+        mcpTimeout,
+        onTimeout: () {
+          _pending.remove(id);
+          throw TimeoutException(
+            'L\'appel de l\'outil MCP "$toolName" sur le serveur "$serverName" a expiré après ${mcpTimeout.inSeconds}s.',
+          );
+        },
+      );
+    } catch (e) {
+      if (e.toString().contains('401') || e.toString().contains('auth')) {
+        throw Exception('Échec d\'authentification MCP [$serverName] : Jeton ou identifiants invalides ($e)');
+      }
+      rethrow;
+    }
+  }
+
+  /// Connexion à un serveur MCP avec timeout de 15s.
+  Future<Map<String, dynamic>> connectMcpServer(String serverName) async {
+    return call('connect_mcp_server', {'serverName': serverName}).timeout(
+      mcpTimeout,
+      onTimeout: () => throw TimeoutException('Connexion au serveur MCP "$serverName" a expiré après 15s.'),
+    );
+  }
+
   /// Sends a slash command (e.g. `/model`, `/compact`) to the daemon, which
   /// routes it to the language server via HandleStreamingCommand (terminal
   /// source). Unary call: resolves with the `response` message data.

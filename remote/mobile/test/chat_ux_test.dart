@@ -3,8 +3,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mobile/core/notifications/approval_notifier.dart';
 import 'package:mobile/core/protocol/daemon_api.dart';
-import 'package:mobile/core/protocol/messages.dart';
 import 'package:mobile/features/chat_stream/chat_stream_screen.dart';
 import 'package:mobile/widgets/tool_approval_card.dart';
 
@@ -47,6 +47,7 @@ Future<void> _pumpScreen(
   WidgetTester tester, {
   required DaemonApi api,
   required StreamController<dynamic> ctrl,
+  bool isConnected = true,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -61,12 +62,22 @@ Future<void> _pumpScreen(
           api: api,
           activeSessionId: 'c1',
           activeProjectName: 'Test',
-          isConnected: true,
+          isConnected: isConnected,
         ),
       ),
     ),
   );
   await tester.pumpAndSettle();
+}
+
+/// Envoie un message via la barre de saisie — le SEUL chemin qui abonne
+/// vraiment l'écran au stream (le probe l'a prouvé : api.sendPrompt seul
+/// crée un stream sans listener côté écran → les deltas sont perdus).
+Future<void> _sendViaBar(WidgetTester tester, String text) async {
+  await tester.enterText(find.byType(TextField), text);
+  await tester.pump();
+  await tester.tap(find.byIcon(Icons.arrow_forward));
+  await tester.pump();
 }
 
 void main() {
@@ -76,10 +87,9 @@ void main() {
       final (:api, :ctrl, :out) = _mkApi();
       await _pumpScreen(tester, api: api, ctrl: ctrl);
 
-      // Prompt local → ouvre un stream (les deltas d'approbation sont
-      // routés par requestId local).
-      final s = api.sendPrompt('c1', 'fais deux trucs');
-      await tester.pump();
+      // Envoi via la barre → l'écran écoute le stream (requestId 'r1').
+      await _sendViaBar(tester, 'fais deux trucs');
+      expect(out.first['type'], 'send_prompt');
 
       _approval(ctrl, 'r1', 'call-1', 'run_command');
       await tester.pump(const Duration(milliseconds: 120));
@@ -99,7 +109,10 @@ void main() {
       await tester.tap(find.byKey(const Key('approval-next')));
       await tester.pump(const Duration(milliseconds: 120));
       expect(find.textContaining('2/2'), findsOneWidget);
-      expect(find.textContaining('edit_file'), findsOneWidget);
+      // La carte edit_file est affichée — le nom du tool apparaît dans le
+      // badge, la commande et le label « toujours autoriser » : on accepte
+      // plusieurs occurrences.
+      expect(find.textContaining('edit_file'), findsWidgets);
 
       // Décision sur la 2ᵉ → retour automatique à la 1ʳᵉ restante.
       await tester.tap(find.text('Approuver'));
@@ -118,7 +131,6 @@ void main() {
         hasLength(2),
       );
 
-      await s.drain<void>();
       await ctrl.close();
       api.dispose();
     });
@@ -130,13 +142,11 @@ void main() {
       final (:api, :ctrl, :out) = _mkApi();
       await _pumpScreen(tester, api: api, ctrl: ctrl);
 
-      final s = api.sendPrompt('c1', 'raisonne');
-      await tester.pump();
-      final requestId = out.first['requestId'] as String;
+      await _sendViaBar(tester, 'raisonne');
 
       ctrl.add(jsonEncode({
         'type': 'stream_delta',
-        'requestId': requestId,
+        'requestId': 'r1',
         'data': {
           'events': [
             {'kind': 'thinking', 'delta': 'je réfléchis profondément à ce problème très complexe'},
@@ -145,18 +155,17 @@ void main() {
       }));
       await tester.pump(const Duration(milliseconds: 120));
 
-      final thoughtText = find.byKey(Key('thought-m$requestId'));
+      // 1ᵉʳ envoi : m1 (user) + a2 (assistant) → la pensée vit sur la bulle a2.
+      final thoughtText = find.byKey(const Key('thought-a2'));
       expect(thoughtText, findsOneWidget);
       final collapsed = tester.widget<Text>(thoughtText);
       expect(collapsed.maxLines, 1, reason: 'Thought doit être replié par défaut');
 
-      // Tap sur le header de la pensée → déplié.
       await tester.tap(find.byIcon(Icons.psychology_outlined));
       await tester.pump();
       final expanded = tester.widget<Text>(thoughtText);
       expect(expanded.maxLines, isNull, reason: 'Le toggle doit vraiment déplier');
 
-      await s.drain<void>();
       await ctrl.close();
       api.dispose();
     });
@@ -212,13 +221,11 @@ void main() {
       final (:api, :ctrl, :out) = _mkApi();
       await _pumpScreen(tester, api: api, ctrl: ctrl);
 
-      final s = api.sendPrompt('c1', 'plante');
-      await tester.pump();
-      final requestId = out.first['requestId'] as String;
+      await _sendViaBar(tester, 'plante');
 
       ctrl.add(jsonEncode({
         'type': 'stream_end',
-        'requestId': requestId,
+        'requestId': 'r1',
         'error': 'internal daemon failure',
         'data': {'outcome': 'error'},
       }));
@@ -227,7 +234,63 @@ void main() {
       // L'erreur est rendue dans un état visuel dédié (icône + fond danger).
       expect(find.byIcon(Icons.error_outline), findsOneWidget);
 
-      await s.drain<void>();
+      await ctrl.close();
+      api.dispose();
+    });
+  });
+
+  group('B2 — tap notification → ré-ouverture de l\'approbation', () {
+    testWidgets('le tap re-fetch get_pending_approval et affiche la carte',
+        (tester) async {
+      final (:api, :ctrl, :out) = _mkApi();
+      await _pumpScreen(tester, api: api, ctrl: ctrl);
+
+      // Aucune carte au départ.
+      expect(find.byType(ToolApprovalCard), findsNothing);
+
+      // L'utilisateur tape la notification « Approbation requise » (émise
+      // pendant que l'app était en arrière-plan). Le daemon répond avec le
+      // contexte de l'approbation encore en attente.
+      ApprovalNotifier.instance.tapsSink.add({
+        'kind': 'approval',
+        'cascadeId': 'c1',
+      });
+      await tester.pump();
+
+      // get_pending_approval part bien vers le daemon…
+      final getReq =
+          out.where((m) => m['type'] == 'get_pending_approval').toList();
+      expect(getReq, hasLength(1));
+      expect(getReq.first['cascadeId'], 'c1');
+
+      // … et sa réponse fait apparaître la carte.
+      ctrl.add(jsonEncode({
+        'type': 'response',
+        'requestId': getReq.first['requestId'],
+        'data': {
+          'cascadeId': 'c1',
+          'callId': 'call_tap',
+          'trajectoryId': 'traj_t',
+          'stepIndex': 2,
+          'approvalType': 'run_command',
+          'command': 'git push',
+        },
+      }));
+      await tester.pump(const Duration(milliseconds: 120));
+
+      expect(find.byType(ToolApprovalCard), findsOneWidget);
+      expect(find.textContaining('git push'), findsOneWidget);
+
+      // Approuver → submit_approval avec les métadonnées re-fetchées.
+      await tester.tap(find.text('Approuver'));
+      await tester.pump(const Duration(milliseconds: 120));
+      final submits = out.where((m) => m['type'] == 'submit_approval').toList();
+      expect(submits, hasLength(1));
+      expect(submits.first['callId'], 'call_tap');
+      expect(submits.first['trajectoryId'], 'traj_t');
+      expect(submits.first['stepIndex'], 2);
+      expect(find.byType(ToolApprovalCard), findsNothing);
+
       await ctrl.close();
       api.dispose();
     });

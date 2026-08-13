@@ -71,7 +71,7 @@ class _ConnectionBannerState extends State<ConnectionBanner> {
       case ConnectionStatus.connecting:
         return 'Tentative en cours vers le daemon…';
       case ConnectionStatus.error:
-        return 'Une erreur est survenue, nouvelle tentative dans ${_remaining}';
+        return 'Une erreur est survenue, nouvelle tentative dans $_remaining';
       case ConnectionStatus.disconnected:
         if (widget.attempt <= 0) return 'Tentative de connexion…';
         final seconds = widget.nextRetryIn.inSeconds;
@@ -88,7 +88,10 @@ class _ConnectionBannerState extends State<ConnectionBanner> {
 
   @override
   Widget build(BuildContext context) {
-    if (_dismissed) return const SizedBox.shrink();
+    // Connecté → pas de banner : le widget se replie (AnimatedSize parent).
+    if (_dismissed || widget.status == ConnectionStatus.connected) {
+      return const SizedBox.shrink();
+    }
     final scheme = Theme.of(context).colorScheme;
     final (icon, color, bg) = switch (widget.status) {
       ConnectionStatus.connected => (

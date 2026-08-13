@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../../core/protocol/messages.dart';
 import '../../theme/app_colors.dart';
 
-class LeftSidebarDrawer extends StatelessWidget {
+class LeftSidebarDrawer extends StatefulWidget {
   final String activeSessionId;
   final Function(String sessionId) onSessionSelected;
   final VoidCallback onNewConversation;
@@ -23,7 +23,27 @@ class LeftSidebarDrawer extends StatelessWidget {
   });
 
   @override
+  State<LeftSidebarDrawer> createState() => _LeftSidebarDrawerState();
+}
+
+class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
+  bool _onlyUnread = false;
+
+  @override
   Widget build(BuildContext context) {
+    final List<dynamic> rawSessions = widget.sessions ?? const [
+      _SessionItemData('s1', 'Mobile App Project Plan...', '3m', isUnread: true),
+      _SessionItemData('s2', 'Mobile App Remote Infra...', '10m', isUnread: false),
+      _SessionItemData('s3', 'Poème Sur La Gravité', '50m', isUnread: false),
+      _SessionItemData('s4', 'Configuration Des Niveaux...', '6d', isUnread: true),
+      _SessionItemData('s5', 'Doctor UI Data Issue', '6d', isUnread: false),
+    ];
+    final displaySessions = rawSessions.where((s) {
+      if (!_onlyUnread) return true;
+      if (s is _SessionItemData) return s.isUnread;
+      return false;
+    }).toList();
+
     return Drawer(
       backgroundColor: Theme.of(context).colorScheme.surface,
       child: SafeArea(
@@ -64,7 +84,7 @@ class LeftSidebarDrawer extends StatelessWidget {
                     label: 'New Conversation',
                     onTap: () {
                       Navigator.of(context).pop();
-                      onNewConversation();
+                      widget.onNewConversation();
                     },
                     isPrimary: true,
                   ),
@@ -77,7 +97,7 @@ class LeftSidebarDrawer extends StatelessWidget {
               label: 'Discover Daemon',
               onTap: () {
                 Navigator.of(context).pop();
-                if (onDiscover != null) onDiscover!();
+                if (widget.onDiscover != null) widget.onDiscover!();
               },
             ),
             _SidebarAction(
@@ -85,7 +105,7 @@ class LeftSidebarDrawer extends StatelessWidget {
               label: 'Explorer le Workspace',
               onTap: () {
                 Navigator.of(context).pop();
-                if (onOpenWorkspace != null) onOpenWorkspace!();
+                if (widget.onOpenWorkspace != null) widget.onOpenWorkspace!();
               },
             ),
             _SidebarAction(
@@ -93,27 +113,48 @@ class LeftSidebarDrawer extends StatelessWidget {
               label: 'Settings & Profile',
               onTap: () {
                 Navigator.of(context).pop();
-                if (onOpenSettings != null) onOpenSettings!();
+                if (widget.onOpenSettings != null) widget.onOpenSettings!();
               },
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
+
+            // Filtre "Seulement non lu"
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: Row(
+                children: [
+                  Icon(Icons.filter_list, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Seulement non lu',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                  const Spacer(),
+                  Switch(
+                    value: _onlyUnread,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    onChanged: (val) => setState(() => _onlyUnread = val),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(),
+
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 children: [
                   _ProjectFolderGroup(
                     folderName: 'antigravity-add-model-main',
-                    sessions: sessions ?? const [
-                      _SessionItemData('s1', 'Mobile App Project Plan...', '3m'),
-                      _SessionItemData('s2', 'Mobile App Remote Infra...', '10m'),
-                      _SessionItemData('s3', 'Poème Sur La Gravité', '50m'),
-                      _SessionItemData('s4', 'Configuration Des Niveaux...', '6d'),
-                      _SessionItemData('s5', 'Doctor UI Data Issue', '6d'),
-                    ],
-                    activeSessionId: activeSessionId,
+                    sessions: displaySessions,
+                    activeSessionId: widget.activeSessionId,
                     onSessionTap: (id) {
                       Navigator.of(context).pop();
-                      onSessionSelected(id);
+                      widget.onSessionSelected(id);
                     },
                   ),
                 ],
@@ -205,8 +246,9 @@ class _SessionItemData {
   final String id;
   final String title;
   final String time;
+  final bool isUnread;
 
-  const _SessionItemData(this.id, this.title, this.time);
+  const _SessionItemData(this.id, this.title, this.time, {this.isUnread = false});
 }
 
 class _ProjectFolderGroup extends StatelessWidget {

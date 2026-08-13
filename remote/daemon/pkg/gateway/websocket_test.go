@@ -61,6 +61,9 @@ type fakeRPCClient struct {
 	// lastApproval : dernier SubmitToolApproval reçu (vérifié par les tests
 	// d'approbation : décision utilisateur ou auto-refus d'expiration).
 	lastApproval interface{}
+	// lastCommand : dernière slash commande routée (vérifié par le test
+	// de routing send_command).
+	lastCommand string
 }
 
 func (f *fakeRPCClient) Heartbeat() ([]byte, error) {
@@ -84,24 +87,83 @@ func (f *fakeRPCClient) SendMessage(cascadeID, text string) ([]byte, error) {
 
 func (f *fakeRPCClient) SendMessageStream(cascadeID, text string, onFrame func([]byte) error) error {
 	for _, delta := range f.streamDeltas {
-		if err := onFrame(connectrpc.Frame(pbTextFrame(delta))); err != nil {
+		if err := onFrame(f.approvalFrame(delta)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// approvalFrame construit une frame protobuf identique à celle du vrai
+// Language Server pour un événement d'approbation : un champ #1 length-delimited
+// contenant les sous-champs de corrélation trajectory_id (#1) + step_index (#2)
+// PUIS le blob JSON (run_command, …) (#3). Le parseur (event_parser.go) cherche
+// le texte "run_command" et les sous-champs de corrélation DANS LE MÊME champ —
+// c'est ainsi qu'il retrouve la cible de HandleCascadeUserInteraction.
+func (f *fakeRPCClient) approvalFrame(delta string) []byte {
+	blob := &protoWriter{}
+	blob.string(1, "123e4567-e89b-12d3-a456-426614174000") // trajectory_id
+	blob.varint(2, 1)                                      // step_index
+	blob.bytes(3, []byte(delta))                           // blob JSON
+	outer := &protoWriter{}
+	outer.bytes(1, blob.buf)
+	// Le vrai CallStream/splitFrames retire l'en-tête gRPC-Web (5 octets)
+	// avant d'invoquer onFrame : le fake doit imiter ce contrat, sinon
+	// ParseFrameEvents décode l'en-tête comme des champs fantômes et avale
+	// le message (run_command jamais détecté → outcome=done).
+	return outer.buf
+}
+
+// protoWriter : encodeur protobuf de test calqué sur connectrpc/writer
+// (mêmes conventions de clé/varint/length-delimited) — sans dépendance.
+type protoWriter struct {
+	buf []byte
+}
+
+func (w *protoWriter) rawVarint(v uint64) {
+	for v >= 0x80 {
+		w.buf = append(w.buf, byte(v)|0x80)
+		v >>= 7
+	}
+	w.buf = append(w.buf, byte(v))
+}
+
+func (w *protoWriter) key(n, wireType int) {
+	w.rawVarint(uint64(n<<3 | wireType))
+}
+
+func (w *protoWriter) varint(n int, v uint64) {
+	w.key(n, 0)
+	w.rawVarint(v)
+}
+
+func (w *protoWriter) string(n int, s string) {
+	w.bytes(n, []byte(s))
+}
+
+func (w *protoWriter) bytes(n int, b []byte) {
+	w.key(n, 2)
+	w.rawVarint(uint64(len(b)))
+	w.buf = append(w.buf, b...)
+}
+
 func (f *fakeRPCClient) SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error) {
 	f.lastApproval = &submitApprovalCall{
-		cascadeID: cascadeID,
-		stepIndex: stepIndex,
-		confirm:   connectrpc.DecodeFields(oneofPayload)[0].Varint == 1,
+		cascadeID:    cascadeID,
+		trajectoryID: trajectoryID,
+		stepIndex:    stepIndex,
+		confirm:      connectrpc.DecodeFields(oneofPayload)[0].Varint == 1,
 	}
 	return connectrpc.Frame(pbTextFrame("ok")), nil
 }
 
 func (f *fakeRPCClient) SetBrowserOpenConversation(cascadeID string) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("ok")), nil
+}
+
+func (f *fakeRPCClient) SendCommand(commandText string) ([]byte, error) {
+	f.lastCommand = commandText
+	return connectrpc.Frame(pbTextFrame("cmd-ok")), nil
 }
 
 // --- Tests WebSocket ---
@@ -453,18 +515,10 @@ func TestWebSocketApprovalExpiry(t *testing.T) {
 			}
 		}
 
-		// Le timer expire → auto-refus + broadcast approval_expired.
-		var expired map[string]interface{}
-		deadline := time.Now().Add(3 * time.Second)
-		for time.Now().Before(deadline) {
-			msg := client.recv(t)
-			if msg["type"] == "approval_expired" {
-				expired = msg
-				break
-			}
-		}
-		if expired == nil {
-			t.Fatal("approval_expired jamais reçu après expiration")
+		// Le timer expire → auto-refus + broadcast approval_expired (bloquant).
+		expired := client.recv(t)
+		if expired["type"] != "approval_expired" {
+			t.Fatalf("Attendu approval_expired après expiration, reçu %v", expired)
 		}
 		data, _ := expired["data"].(map[string]interface{})
 		if data == nil || data["cascadeId"] != "casc-1" {
@@ -479,7 +533,7 @@ func TestWebSocketApprovalExpiry(t *testing.T) {
 		if got.confirm {
 			t.Fatalf("Auto-refus attendu avec confirm=false, reçu confirm=%v", got.confirm)
 		}
-		if got.cascadeID != "casc-1" || got.stepIndex != 1 {
+		if got.cascadeID != "casc-1" || got.stepIndex != 1 || got.trajectoryID != "123e4567-e89b-12d3-a456-426614174000" {
 			t.Fatalf("Auto-refus cible erronée: %+v", got)
 		}
 	})
@@ -508,15 +562,13 @@ func TestWebSocketApprovalExpiry(t *testing.T) {
 		}
 
 		// L'utilisateur répond avant le timeout → pas d'expiration.
-		client.send(t, map[string]string{
-			"type": "submit_approval", "requestId": "r10",
-			"cascadeId": "casc-1",
-			"trajectoryID": "123e4567-e89b-12d3-a456-426614174000",
-			"stepIndex": "1",
-			"approvalType": "run_command",
-			"decision": "allow",
-			"command": "npx jest",
-		})
+		// NOTE: envoi en JSON brut — le helper `send` (map[string]string)
+		// sérialiserait stepIndex en chaîne, que le serveur rejette
+		// (int64 strict, validation à la frontière de confiance) → le test
+		// attendrait un "response" qui ne viendrait jamais.
+		if err := client.conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"submit_approval","requestId":"r10","cascadeId":"casc-1","trajectoryId":"123e4567-e89b-12d3-a456-426614174000","stepIndex":1,"approvalType":"run_command","decision":"allow","command":"npx jest"}`)); err != nil {
+			t.Fatalf("envoi submit_approval: %v", err)
+		}
 		// réponse unary
 		for {
 			msg := client.recv(t)
@@ -536,7 +588,40 @@ func TestWebSocketApprovalExpiry(t *testing.T) {
 }
 
 type submitApprovalCall struct {
-	cascadeID  string
-	stepIndex  uint32
-	confirm    bool
+	cascadeID    string
+	trajectoryID string
+	stepIndex    uint32
+	confirm      bool
+}
+
+// TestWebSocketSendCommand — route une slash commande vers le backend.
+func TestWebSocketSendCommand(t *testing.T) {
+	backend := &fakeRPCClient{}
+	srv := newTestServer(backend)
+	defer srv.Close()
+	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	client.send(t, map[string]string{"type": "send_command", "requestId": "r1", "command": "/model gemini-3-pro"})
+	msg := client.recv(t)
+	if msg["type"] != "response" || msg["requestId"] != "r1" {
+		t.Fatalf("Réponse inattendue: %v", msg)
+	}
+	if backend.lastCommand != "/model gemini-3-pro" {
+		t.Fatalf("Commande non routée: %q", backend.lastCommand)
+	}
+}
+
+// TestWebSocketSendCommandMissingArg — send_command sans command → erreur.
+func TestWebSocketSendCommandMissingArg(t *testing.T) {
+	srv := newTestServer(&fakeRPCClient{})
+	defer srv.Close()
+	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	client.send(t, map[string]string{"type": "send_command", "requestId": "r2"})
+	msg := client.recv(t)
+	if msg["type"] != "response" || msg["error"] == "" {
+		t.Fatalf("Attendu une erreur command manquante, reçu %v", msg)
+	}
 }

@@ -45,6 +45,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   // ponytail: Map simple, pas de provider — l'historique n'est pas persisté sur
   // disque (session restart repart de zéro, ce qui est le comportement voulu).
   final Map<String, List<ChatMessage>> _sessionMessages = {};
+  static final Map<String, String> _sessionDrafts = {};
+  String get currentDraft => _sessionDrafts[widget.activeSessionId] ?? '';
+  void setDraft(String draft) => _sessionDrafts[widget.activeSessionId] = draft;
+
   List<ChatMessage> get _messages {
     return _sessionMessages.putIfAbsent(widget.activeSessionId, () => []);
   }
@@ -82,6 +86,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   Timer? _throttleTimer;
   bool _needsStateUpdate = false;
   static const _throttleDuration = Duration(milliseconds: 100);
+
+  // Bug persistance pensées : état d'expansion stocké ici par message ID
+  // pour survivre aux switches de session et aux rebuilds de la liste.
+  // ponytail: Set suffit (expandé = dans le Set, replié = absent).
+  final Set<String> _expandedThoughts = {};
 
   // Auto-scroll pendant le streaming (audit UX P1-6).
   final ScrollController _scrollController = ScrollController();
@@ -148,7 +157,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         trajectoryId: info['trajectoryId'] as String? ?? '',
         stepIndex: (info['stepIndex'] as num?)?.toInt() ?? -1,
         approvalType: info['approvalType'] as String? ?? 'approval',
-      ));
+      ), fromTap: true);
     } catch (_) {
       // Daemon injoignable ou pas d'approbation en attente : silencieux.
     }
@@ -245,6 +254,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       }
     }
     if (oldWidget.api != widget.api) {
+      // Bug agent bloqué : réinitialiser le compteur de streams actifs à la
+      // reconnexion pour ne pas rester bloqué si des stream_end ont été perdus
+      // pendant la coupure réseau.
+      _activeStreamCount = 0;
+      _stillWorkingTimer?.cancel();
+      if (mounted && _showStillWorking) setState(() => _showStillWorking = false);
       _watchBroadcastStreams();
     }
   }
@@ -288,6 +303,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       if (_showStillWorking && mounted) {
         setState(() => _showStillWorking = false);
       }
+      if (_messageQueue.isNotEmpty) {
+        final next = _messageQueue.removeAt(0);
+        final text = next['text'] as String;
+        _sendPromptToDaemon(text);
+      }
     }
   }
 
@@ -305,7 +325,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     );
   }
 
-  void _addApproval(ToolApprovalRequest approval, {bool hostActive = false}) {
+  void _addApproval(ToolApprovalRequest approval,
+      {bool hostActive = false, bool fromTap = false}) {
     // Bug #7 : guard broadcast path — un même callId ne doit jamais re-afficher
     // sa carte après reconnexion si l'utilisateur l'a déjà traitée.
     if (_processedCallIds.contains(approval.callId)) return;
@@ -315,11 +336,14 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       HapticFeedback.mediumImpact();
     }
     setState(() {
+      final wasEmpty = _pendingApprovals.isEmpty;
       _pendingApprovals.add(approval);
-      _approvalIndex = _pendingApprovals.length - 1;
+      // UX P0-1 : une 2ᵉ approbation ne « vole » pas la carte affichée —
+      // l'index reste sur la demande en cours (la nouvelle se rejoint via ▶).
+      if (wasEmpty) _approvalIndex = 0;
       _pendingApprovalCallIds.add(approval.callId);
     });
-    if (!hostActive) {
+    if (!hostActive && !fromTap && ApprovalNotifier.instance.initialized) {
       ApprovalNotifier.instance.notifyApprovalRequired(
         callId: approval.callId,
         cascadeId: approval.cascadeId.isEmpty
@@ -336,9 +360,13 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     if (i < 0) return;
     setState(() {
       _pendingApprovals.removeAt(i);
+      // L'index reste sur la demande qui suit celle retirée (ou la dernière
+      // restante) : la carte visible bascule proprement et le compteur
+      // « x/total » reflète la pile restante. P0-1 : après décision sur la
+      // 2ᵉ de 2, on retombe sur la 1ʳᵉ (1/1), pas sur une pile vide.
       _approvalIndex = _pendingApprovals.isEmpty
           ? -1
-          : math.min(_approvalIndex, _pendingApprovals.length - 1);
+          : math.min(i, _pendingApprovals.length - 1);
       _pendingApprovalCallIds.remove(callId);
     });
     ApprovalNotifier.instance.cancelApproval(callId);
@@ -352,7 +380,43 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       final type = msg['type'] as String?;
       final requestId = msg['requestId'] as String? ?? '';
       final sessionId = msg['data']?['cascadeId'] as String?;
-      if (sessionId != null && sessionId != widget.activeSessionId) return;
+
+      // Bug tâches arrière-plan : si l'évènement concerne une autre session,
+      // on le bufferise dans _sessionMessages[sessionId] au lieu de le jeter.
+      // L'utilisateur verra les messages à jour quand il reviendra sur la session.
+      final isActiveSession = sessionId == null || sessionId == widget.activeSessionId;
+      if (!isActiveSession) {
+        // sessionId is non-null here (isActiveSession=false implies sessionId != null)
+        final buf = _sessionMessages.putIfAbsent(sessionId, () => []);
+        if (type == 'stream_start') {
+          buf.add(ChatMessage(
+            id: 'ext-$requestId',
+            sender: 'assistant',
+            text: '',
+            timestamp: _timestamp(),
+            isStreaming: true,
+          ));
+        } else if (type == 'stream_delta') {
+          final idx = buf.indexWhere((m) => m.id == 'ext-$requestId');
+          if (idx >= 0) {
+            final textDelta = StreamDeltaParser.textOf(msg);
+            final thoughtDelta = StreamDeltaParser.thinkingOf(msg);
+            _externalThoughts[requestId] =
+                (_externalThoughts[requestId] ?? '') + thoughtDelta;
+            buf[idx] = buf[idx].copyWith(
+              text: buf[idx].text + textDelta,
+              thought: _externalThoughts[requestId]!.isNotEmpty
+                  ? _externalThoughts[requestId]!.trim()
+                  : buf[idx].thought,
+            );
+          }
+        } else if (type == 'stream_end') {
+          final idx = buf.indexWhere((m) => m.id == 'ext-$requestId');
+          if (idx >= 0) buf[idx] = buf[idx].copyWith(isStreaming: false);
+          _externalThoughts.remove(requestId);
+        }
+        return; // ne pas toucher l'état UI de la session active
+      }
 
       if (type == 'stream_start') {
         _onStreamStarted();
@@ -427,17 +491,31 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     });
   }
 
-  void _handleSendMessage(String text) {
+  final List<Map<String, dynamic>> _messageQueue = [];
+
+  void _handleSendMessage(String text, {bool queued = false}) {
     final api = widget.api;
     setState(() {
       _messages.add(ChatMessage(
         id: 'm${++_messageCounter}',
         sender: 'user',
-        text: text,
+        text: text + (queued ? ' (File d\'attente)' : ''),
         timestamp: _timestamp(),
       ));
     });
 
+    if (api == null) return;
+
+    if (queued && _activeStreamCount > 0) {
+      _messageQueue.add({'text': text, 'activeSessionId': widget.activeSessionId});
+      return;
+    }
+
+    _sendPromptToDaemon(text);
+  }
+
+  void _sendPromptToDaemon(String text) {
+    final api = widget.api;
     if (api == null) return;
 
     _onStreamEnded();
@@ -646,9 +724,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (total > 1)
-            Row(
-              children: [
+          Row(
+            children: [
+              if (total > 1)
                 IconButton(
                   key: const Key('approval-prev'),
                   icon: const Icon(Icons.chevron_left, size: 18),
@@ -658,14 +736,15 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                         (_approvalIndex - 1 + total) % total;
                   }),
                 ),
-                Text(
-                  'Approbation ${_approvalIndex + 1}/$total',
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w600,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+              Text(
+                'Approbation ${_approvalIndex + 1}/$total',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
+              ),
+              if (total > 1)
                 IconButton(
                   key: const Key('approval-next'),
                   icon: const Icon(Icons.chevron_right, size: 18),
@@ -790,7 +869,19 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                         ),
                       );
                     },
-                    child: _MessageBubble(message: msg),
+                    child: _MessageBubble(
+                        message: msg,
+                        // Bug persistance pensées : state d'expansion géré
+                        // dans le parent pour survivre aux rebuilds.
+                        isThoughtExpanded: _expandedThoughts.contains(msg.id),
+                        onToggleThought: () => setState(() {
+                          if (_expandedThoughts.contains(msg.id)) {
+                            _expandedThoughts.remove(msg.id);
+                          } else {
+                            _expandedThoughts.add(msg.id);
+                          }
+                        }),
+                      ),
                   )),
             ],
           ),
@@ -799,6 +890,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         ChatInputBar(
           onSend: _handleSendMessage,
           isConnected: isConnected,
+          hasActiveStream: _activeStreamCount > 0,
         ),
       ],
     );
@@ -837,23 +929,20 @@ class _ReminderBanner extends StatelessWidget {
   }
 }
 
-class _MessageBubble extends StatefulWidget {
+class _MessageBubble extends StatelessWidget {
   final ChatMessage message;
+  final bool isThoughtExpanded;
+  final VoidCallback? onToggleThought;
 
-  const _MessageBubble({required this.message});
-
-  @override
-  State<_MessageBubble> createState() => _MessageBubbleState();
-}
-
-class _MessageBubbleState extends State<_MessageBubble> {
-  // Audit UX P0-3 : le raisonnement est REPLIÉ par défaut (une ligne) — le
-  // toggle le déplie vraiment au lieu de ne changer qu'une flèche.
-  bool _isThoughtExpanded = false;
+  const _MessageBubble({
+    required this.message,
+    this.isThoughtExpanded = false,
+    this.onToggleThought,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final isUser = widget.message.sender == 'user';
+    final isUser = message.sender == 'user';
     final scheme = Theme.of(context).colorScheme;
 
     if (isUser) {
@@ -867,29 +956,23 @@ class _MessageBubbleState extends State<_MessageBubble> {
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: scheme.outlineVariant),
           ),
-          // Bug #1 : SelectableText pour permettre la sélection/copie dans
-          // les messages utilisateur (idem assistant via MarkdownBubble).
           child: SelectableText(
-            widget.message.text,
+            message.text,
             style: TextStyle(fontSize: 13.5, color: scheme.onSurface),
           ),
         ),
       );
     }
 
-    final isError = widget.message.isError;
+    final isError = message.isError;
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (widget.message.thought != null) ...[
+          if (message.thought != null) ...[
             InkWell(
-              onTap: () {
-                setState(() {
-                  _isThoughtExpanded = !_isThoughtExpanded;
-                });
-              },
+              onTap: onToggleThought,
               borderRadius: BorderRadius.circular(6),
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
@@ -902,10 +985,10 @@ class _MessageBubbleState extends State<_MessageBubble> {
                     ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 240),
                       child: Text(
-                        widget.message.thought!,
-                        key: Key('thought-${widget.message.id}'),
-                        maxLines: _isThoughtExpanded ? null : 1,
-                        overflow: _isThoughtExpanded
+                        message.thought!,
+                        key: Key('thought-${message.id}'),
+                        maxLines: isThoughtExpanded ? null : 1,
+                        overflow: isThoughtExpanded
                             ? TextOverflow.visible
                             : TextOverflow.ellipsis,
                         style: TextStyle(
@@ -918,7 +1001,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
                     ),
                     const SizedBox(width: 4),
                     Icon(
-                      _isThoughtExpanded
+                      isThoughtExpanded
                           ? Icons.expand_less
                           : Icons.expand_more,
                       size: 16,
@@ -945,7 +1028,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      widget.message.text,
+                      message.text,
                       style: const TextStyle(
                         fontSize: 13,
                         color: AppColors.danger,
@@ -958,15 +1041,15 @@ class _MessageBubbleState extends State<_MessageBubble> {
             )
           else
             MarkdownBubble(
-              text: widget.message.text,
-              isStreaming: widget.message.isStreaming,
+              text: message.text,
+              isStreaming: message.isStreaming,
             ),
           const SizedBox(height: 8),
           Row(
             children: [
               // Timestamp capturé mais jamais affiché (audit UX P1-7).
               Text(
-                widget.message.timestamp,
+                message.timestamp,
                 style: TextStyle(fontSize: 10.5, color: scheme.onSurfaceVariant),
               ),
               const Spacer(),
@@ -974,10 +1057,11 @@ class _MessageBubbleState extends State<_MessageBubble> {
                 message: 'Copier le message',
                 child: InkWell(
                   onTap: () {
-                    Clipboard.setData(ClipboardData(text: widget.message.text));
+                    Clipboard.setData(ClipboardData(text: message.text));
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text('Message copié dans le presse-papiers'),
+
                         duration: Duration(seconds: 1),
                       ),
                     );

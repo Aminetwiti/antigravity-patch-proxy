@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
@@ -16,8 +18,23 @@ class ApprovalNotifier {
 
   static final ApprovalNotifier instance = ApprovalNotifier._();
 
-  final FlutterLocalNotificationsPlugin _plugin =
-      FlutterLocalNotificationsPlugin();
+  /// Callbacks des taps sur notification (B2) : le payload est
+  /// `approval:<cascadeId>` ou `task:<cascadeId>` — l'UI écoute ce stream pour
+  /// naviguer vers la session concernée. Broadcast : plusieurs écrans peuvent
+  /// écouter sans conflit.
+  final StreamController<Map<String, String>> _tapController =
+      StreamController.broadcast();
+  Stream<Map<String, String>> get taps => _tapController.stream;
+
+  /// Sink de simulation (tests uniquement) : émet un tap comme si le plugin
+  /// avait décodé le payload d'une notification. ponytail: plafond = les
+  /// tests n'exercent pas le plugin natif ; upgrade = fake platform.
+  @visibleForTesting
+  StreamSink<Map<String, String>> get tapsSink => _tapController.sink;
+
+  /// null avant init() réussi ou quand le registrant de plugin est absent
+  /// (flutter test headless) : les méthodes notify* ignorent alors l'appel.
+  FlutterLocalNotificationsPlugin? _plugin;
 
   /// Dernière demande notifiée (callId) pour éviter les doublons quand
   /// plusieurs clients reçoivent le même broadcast.
@@ -31,8 +48,20 @@ class ApprovalNotifier {
 
   bool _initialized = false;
 
+  /// true après un init() réussi (plugin disponible). En test headless le
+  /// registrant de plugin est absent → init échoue et les notifications sont
+  /// silencieusement désactivées.
+  bool get initialized => _initialized;
+
+  /// ID stable de la notification « perte/rétablissement de connexion » :
+  /// le rétablissement remplace la perte (même id) au lieu d'empiler.
+  static const int _connectionNotificationId = 0x41C0EE; // 'CONNECT'
+
   Future<void> init() async {
     if (_initialized) return;
+
+    final plugin = FlutterLocalNotificationsPlugin();
+    _plugin = plugin;
 
     try {
       const android = AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -42,7 +71,7 @@ class ApprovalNotifier {
         requestSoundPermission: true,
       );
       const settings = InitializationSettings(android: android, iOS: ios);
-      await _plugin.initialize(settings);
+      await plugin.initialize(settings);
 
       // Sur les environnements sans registrant de plugin (flutter test,
       // headless), resolvePlatformSpecificImplementation renvoie null :
@@ -51,16 +80,44 @@ class ApprovalNotifier {
       // ponytail: plafond = les tests ne vérifient pas la vraie chaîne de
       // notification ; chemin d'upgrade = fake platform dans widget_test.dart
       // (FlutterLocalNotificationsPlatform.instance = …) si besoin plus tard.
-      final androidImpl = _plugin
+      final androidImpl = plugin
           .resolvePlatformSpecificImplementation<
               AndroidFlutterLocalNotificationsPlugin>();
       if (androidImpl != null) {
         await androidImpl.requestNotificationsPermission();
       }
+
+      // B2 — tap-to-deep-link : chaque notification porte un payload
+      // `approval:<cascadeId>` / `task:<cascadeId>`. Le tap (app en
+      // arrière-plan ou tuée) est publié sur [taps] ; l'UI navigue vers la
+      // session et ré-ouvre l'approbation via get_pending_approval.
+      await plugin.initialize(
+        settings,
+        onDidReceiveNotificationResponse: _handleTap,
+      );
       _initialized = true;
     } catch (e) {
+      _plugin = null;
       debugPrint('[Notifier] notifications indisponibles: $e');
     }
+  }
+
+  /// Payload d'une notification : `approval:<cascadeId>` ou `task:<cascadeId>`.
+  static String payloadForApproval(String cascadeId) => 'approval:$cascadeId';
+  static String payloadForTask(String cascadeId) => 'task:$cascadeId';
+
+  /// Décode le payload et publie la cible de navigation sur [taps].
+  /// Hors try/catch : tout échec (plugin indisponible en test headless) est
+  /// déjà avalé par init() — ici on ne fait que notifier les écouteurs.
+  void _handleTap(NotificationResponse response) {
+    final payload = response.payload ?? '';
+    if (!payload.contains(':')) return;
+    final kind = payload.substring(0, payload.indexOf(':'));
+    final cascadeId = payload.substring(payload.indexOf(':') + 1);
+    if (cascadeId.isEmpty || cascadeId == 'null') return;
+    if (kind != 'approval' && kind != 'task') return;
+    _tapController.add({'kind': kind, 'cascadeId': cascadeId});
+    debugPrint('[Notifier] tap -> $kind $cascadeId');
   }
 
   /// Notifie une demande d'approbation — dédupliquée par [callId] avec un
@@ -68,6 +125,7 @@ class ApprovalNotifier {
   /// événement à tous les clients connectés).
   Future<void> notifyApprovalRequired({
     required String callId,
+    required String cascadeId,
     required String toolName,
     required String command,
   }) async {
@@ -80,29 +138,35 @@ class ApprovalNotifier {
     _lastCallId = callId;
     _lastShownAt = now;
 
-    const androidDetails = AndroidNotificationDetails(
-      'approval_required',
-      'Approbations',
-      channelDescription: 'Demandes d\'approbation de commandes distantes',
-      importance: Importance.max,
-      priority: Priority.high,
-      category: AndroidNotificationCategory.call,
-      visibility: NotificationVisibility.public,
-      playSound: true,
-      enableVibration: true,
-    );
-    const iosDetails = DarwinNotificationDetails(
-      presentAlert: true,
-      presentBadge: true,
-      presentSound: true,
-    );
-    const details = NotificationDetails(android: androidDetails, iOS: iosDetails);
+    if (!_initialized) return;
+    final plugin = _plugin;
+    if (plugin == null) return;
 
-    await _plugin.show(
+    const details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        'approval_required',
+        'Approbations',
+        channelDescription: 'Demandes d\'approbation de commandes distantes',
+        importance: Importance.max,
+        priority: Priority.high,
+        category: AndroidNotificationCategory.call,
+        visibility: NotificationVisibility.public,
+        playSound: true,
+        enableVibration: true,
+      ),
+      iOS: DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
+      ),
+    );
+
+    await plugin.show(
       callId.hashCode,
       'Approbation requise — $toolName',
       command.length > 120 ? '${command.substring(0, 120)}…' : command,
       details,
+      payload: payloadForApproval(cascadeId),
     );
     debugPrint('[Notifier] approval notification -> $callId ($toolName)');
   }
@@ -185,22 +249,101 @@ class ApprovalNotifier {
     );
     final details = NotificationDetails(android: android, iOS: iosDetails);
 
-    await _plugin.show(
+    final plugin = _plugin;
+    if (plugin == null) return;
+
+    await plugin.show(
       cascadeId.hashCode,
       title,
       body.length > 120 ? '${body.substring(0, 120)}…' : body,
       details,
+      payload: payloadForTask(cascadeId),
     );
     debugPrint('[Notifier] task notification -> $cascadeId ($outcome)');
+
+    // Restauration du comportement automatique par défaut de 5 secondes pour les notifications in-app
+    Timer(const Duration(seconds: 5), () {
+      plugin.cancel(cascadeId.hashCode);
+    });
+  }
+
+  /// Notifie la perte de connexion au daemon (l'utilisateur n'est peut-être
+  /// pas sur l'app). Dédupliquée : on ne sonne qu'une fois par coupure.
+  Future<void> notifyConnectionLost() async {
+    if (!_initialized) return;
+
+    const androidDetails = AndroidNotificationDetails(
+      'connection_events',
+      'Connexion au PC hôte',
+      channelDescription: 'Perte et rétablissement de la connexion au daemon',
+      importance: Importance.high,
+      priority: Priority.high,
+      visibility: NotificationVisibility.public,
+    );
+    const iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+    );
+    final details = NotificationDetails(android: androidDetails, iOS: iosDetails);
+
+    final plugin = _plugin;
+    if (plugin == null) return;
+
+    await plugin.show(
+      _connectionNotificationId,
+      'Connexion perdue',
+      "L'application se reconnecte automatiquement au PC hôte…",
+      details,
+    );
+    debugPrint('[Notifier] connection lost notification');
+  }
+
+  /// Notifie le rétablissement de la connexion (remplace la notification
+  /// « Connexion perdue » par un état rétabli).
+  Future<void> notifyConnectionRestored() async {
+    if (!_initialized) return;
+
+    const androidDetails = AndroidNotificationDetails(
+      'connection_events',
+      'Connexion au PC hôte',
+      channelDescription: 'Perte et rétablissement de la connexion au daemon',
+      importance: Importance.defaultImportance,
+      priority: Priority.defaultPriority,
+      visibility: NotificationVisibility.public,
+    );
+    const iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+    );
+    final details = NotificationDetails(android: androidDetails, iOS: iosDetails);
+
+    final plugin = _plugin;
+    if (plugin == null) return;
+
+    await plugin.show(
+      _connectionNotificationId,
+      'Connexion rétablie',
+      'Vous êtes de nouveau connecté au PC hôte.',
+      details,
+    );
+    debugPrint('[Notifier] connection restored notification');
   }
 
   /// Annule la notification (l'utilisateur a répondu sur une autre surface).
   Future<void> cancelApproval(String callId) async {
-    await _plugin.cancel(callId.hashCode);
+    if (!_initialized) return;
+    final plugin = _plugin;
+    if (plugin == null) return;
+    await plugin.cancel(callId.hashCode);
   }
 
   /// Annule la notification de fin de tâche d'une cascade.
   Future<void> cancelTask(String cascadeId) async {
-    await _plugin.cancel(cascadeId.hashCode);
+    if (!_initialized) return;
+    final plugin = _plugin;
+    if (plugin == null) return;
+    await plugin.cancel(cascadeId.hashCode);
   }
 }

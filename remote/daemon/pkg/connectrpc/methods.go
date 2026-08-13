@@ -1,7 +1,6 @@
 package connectrpc
 
 import (
-	"fmt"
 	"time"
 )
 
@@ -36,7 +35,11 @@ func (c *Client) Heartbeat() ([]byte, error) {
 	return c.Call("Heartbeat", nil)
 }
 
-var _ = fmt.Sprintf // garde l'import fmt si les messages d'erreur évoluent
+// SendCommand route une slash commande vers le Language Server comme si elle
+// venait du terminal IDE (source=4), via HandleStreamingCommand.
+func (c *Client) SendCommand(commandText string) ([]byte, error) {
+	return c.Call("HandleStreamingCommand", BuildHandleStreamingCommand(commandText, CommandRequestSourceTerminal))
+}
 
 // SetBrowserOpenConversation force l'IDE Antigravity à s'abonner et ouvrir une session spécifique.
 func (c *Client) SetBrowserOpenConversation(cascadeID string) ([]byte, error) {

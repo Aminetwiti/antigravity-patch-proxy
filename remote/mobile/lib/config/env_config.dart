@@ -16,6 +16,15 @@ class EnvConfig {
     defaultValue: 8090,
   );
 
+  /// Jeton d'appairage par défaut (dev) : correspond au démon lancé avec
+  /// `-auth-token demo123`. Surchargé par l'appairage QR/discovery réel.
+  /// ponytail: plafond connu — jeton partagé en dur; remplacer par un
+  /// appairage persisté (QR → stockage sécurisé) en production.
+  static const String authToken = String.fromEnvironment(
+    'AUTH_TOKEN',
+    defaultValue: 'demo123',
+  );
+
   static const bool useSsl = bool.fromEnvironment(
     'USE_SSL',
     defaultValue: false,

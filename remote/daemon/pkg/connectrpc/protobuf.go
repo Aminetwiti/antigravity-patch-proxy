@@ -41,6 +41,17 @@ func (w *writer) bytesField(fieldNum int, data []byte) {
 	w.b = append(w.b, data...)
 }
 
+// Sources CommandRequestSource (énum exa.codeium_common_pb, décodée du binaire) :
+const (
+	CommandRequestSourceDefault       = 1
+	CommandRequestSourcePlan          = 2
+	CommandRequestSourceFastApply     = 3
+	CommandRequestSourceTerminal      = 4 // injection slash command depuis le mobile
+	CommandRequestSourceSupercomplete = 5
+	CommandRequestSourceTabJump       = 6
+	CommandRequestSourceCascadeChat   = 7
+)
+
 // StartCascadeRequest : field 4 source=1, 5 trajectory_type=1,
 // 8 workspace_uris (string), 14 requested_model (varint).
 // BuildStartCascade génère un message StartCascadeRequest brut.
@@ -69,6 +80,27 @@ func BuildSendMessage(cascadeID, text string) []byte {
 	w := &writer{}
 	w.stringField(1, cascadeID)
 	w.bytesField(2, item.b)
+	return w.b
+}
+
+// HandleStreamingCommandRequest (champs validés par décodage du DescriptorProto
+// réel dans language_server.exe, offset 47540541) :
+//
+//	1 metadata (Metadata)   2 document (Document)   3 editor_options
+//	4 requested_model_id    5 experiment_config    6 selection_start_line
+//	7 selection_end_line    8 command_text          9 request_source
+//	10 mentioned_scope      11 action_pointer      12 parent_completion_id
+//	13 diff_type            14 diagnostics         15 supercomplete_trigger_condition
+//	16 terminal_command_data 17 ignore_supercomplete_debounce
+//	18 clipboard_entry      19 intellisense_suggestions
+//
+// BuildHandleStreamingCommand construit une demande de commande minimale
+// (source = Terminal, comme si la commande venait du terminal IDE) pour
+// router une slash commande vers le Language Server sans passer par le chat.
+func BuildHandleStreamingCommand(commandText string, source uint64) []byte {
+	w := &writer{}
+	w.stringField(8, commandText)
+	w.varintField(9, source)
 	return w.b
 }
 
