@@ -534,7 +534,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       );
     }
 
-    final lines = _codeContent.split('\n');
+    // Tronquage de sécurité pour éviter les plantages sur les sorties > 2000 lignes ou > 50 000 caractères
+    final bool isLargeFile = _codeContent.length > 50000;
+    final safeContent = isLargeFile ? _codeContent.substring(0, 50000) : _codeContent;
+    final rawLines = safeContent.split('\n');
+    final lines = rawLines.length > 2000 ? rawLines.sublist(0, 2000) : rawLines;
+
     final textStyle = TextStyle(
       fontFamily: 'monospace',
       fontSize: 12,

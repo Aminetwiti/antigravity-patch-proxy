@@ -161,7 +161,7 @@ void main() {
       final collapsed = tester.widget<Text>(thoughtText);
       expect(collapsed.maxLines, 1, reason: 'Thought doit être replié par défaut');
 
-      await tester.tap(find.byIcon(Icons.psychology_outlined));
+      await tester.tap(find.byKey(const Key('thought-toggle-a2')));
       await tester.pump();
       final expanded = tester.widget<Text>(thoughtText);
       expect(expanded.maxLines, isNull, reason: 'Le toggle doit vraiment déplier');

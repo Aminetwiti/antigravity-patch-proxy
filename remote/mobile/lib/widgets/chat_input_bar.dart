@@ -449,10 +449,12 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
                     const Spacer(),
 
-                    // Voice
+                    // Voice (placeholder — pas de backend audio : tooltip
+                    // honnête au lieu d'un contrôle mort silencieux)
                     IconButton(
                       icon: Icon(Icons.mic_none, size: 20, color: scheme.onSurfaceVariant),
                       onPressed: () {},
+                      tooltip: 'Saisie vocale — bientôt disponible',
                     ),
                     const SizedBox(width: 4),
 
@@ -499,36 +501,42 @@ class _ChatInputBarState extends State<ChatInputBar> {
           const SizedBox(height: 8),
           Row(
             children: [
-              InkWell(
-                onTap: () {},
-                borderRadius: BorderRadius.circular(4),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.monitor_outlined, size: 14, color: scheme.onSurfaceVariant),
-                      const SizedBox(width: 6),
-                      Text('Local', style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant)),
-                      const SizedBox(width: 2),
-                      Icon(Icons.keyboard_arrow_down, size: 14, color: scheme.onSurfaceVariant),
-                    ],
+              Tooltip(
+                message: 'Exécution locale (statique — bientôt configurable)',
+                child: InkWell(
+                  onTap: () {},
+                  borderRadius: BorderRadius.circular(4),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.monitor_outlined, size: 14, color: scheme.onSurfaceVariant),
+                        const SizedBox(width: 6),
+                        Text('Local', style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant)),
+                        const SizedBox(width: 2),
+                        Icon(Icons.keyboard_arrow_down, size: 14, color: scheme.onSurfaceVariant),
+                      ],
+                    ),
                   ),
                 ),
               ),
               const Spacer(),
-              InkWell(
-                onTap: () {},
-                borderRadius: BorderRadius.circular(4),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text('Main Agent', style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant)),
-                      const SizedBox(width: 2),
-                      Icon(Icons.keyboard_arrow_down, size: 14, color: scheme.onSurfaceVariant),
-                    ],
+              Tooltip(
+                message: 'Agent principal (statique — bientôt configurable)',
+                child: InkWell(
+                  onTap: () {},
+                  borderRadius: BorderRadius.circular(4),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('Main Agent', style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant)),
+                        const SizedBox(width: 2),
+                        Icon(Icons.keyboard_arrow_down, size: 14, color: scheme.onSurfaceVariant),
+                      ],
+                    ),
                   ),
                 ),
               ),

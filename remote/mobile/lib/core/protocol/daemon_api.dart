@@ -47,6 +47,20 @@ class DaemonApi {
 
   int _nextRequestId = 0;
 
+  /// Résolution et migration automatique des anciens chemins de stockage 1.x vers Antigravity 2.0
+  /// Prise en charge explicite des caractères CJK (Chinois/Japonais/Coréen) et accents.
+  static String resolveWorkspacePath(String rawPath) {
+    try {
+      final decoded = utf8.decode(rawPath.codeUnits, allowMalformed: true);
+      if (decoded.contains('.gemini/antigravity') && !decoded.contains('antigravity-ide')) {
+        return decoded.replaceAll('.gemini/antigravity', '.gemini/antigravity-ide');
+      }
+      return decoded;
+    } catch (_) {
+      return rawPath;
+    }
+  }
+
   /// Broadcast de chaque message daemon décodé (UI listeners, logging).
   Stream<Map<String, dynamic>> get events => _events.stream;
 
@@ -130,7 +144,9 @@ class DaemonApi {
   }
 
   // Étape 5 : si un outbox est fourni, les messages envoyés hors-ligne sont
-  // mis en file ; à la reconnexion (reconnectVersion change), on les rejoue.
+  // mis en file ; à la reconnexion (reconnectVersion change), on les rejoue
+  // PUIS on re-synchronise toujours (même file vide : les sessions peuvent
+  // avoir changé pendant la coupure).
   final OutboxQueue? _outbox;
   OutboxReplayer? _replayer;
   int _lastReconnectVersion = 0;
@@ -143,22 +159,23 @@ class DaemonApi {
   ) {
     _reconnectVersion?.removeListener(_reconnectListener!);
     _reconnectVersion = version;
+    final outbox = _outbox;
+    // Le replayer est créé une fois : onReconnect() rejoue la file (si non
+    // vide) puis appelle toujours resync — la re-synchronisation n'est donc
+    // plus conditionnée à outbox.hasPending (reconnexion « silencieuse »).
+    _replayer = OutboxReplayer(
+      queue: outbox ?? OutboxQueue(),
+      send: (msg) {
+        final clean = Map<String, dynamic>.from(msg)..remove('queuedAt');
+        _send(clean);
+      },
+      resync: resync,
+    );
     _reconnectListener = () {
       final v = version.value;
       if (v == _lastReconnectVersion) return;
       _lastReconnectVersion = v;
-      final outbox = _outbox;
-      if (outbox != null && outbox.hasPending) {
-        _replayer ??= OutboxReplayer(
-          queue: outbox,
-          send: (msg) {
-            final clean = Map<String, dynamic>.from(msg)..remove('queuedAt');
-            _send(clean);
-          },
-          resync: resync,
-        );
-        _replayer!.onReconnect();
-      }
+      _replayer!.onReconnect();
     };
     version.addListener(_reconnectListener!);
   }

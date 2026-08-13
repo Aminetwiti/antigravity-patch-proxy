@@ -984,6 +984,7 @@ class _MessageBubble extends StatelessWidget {
         children: [
           if (message.thought != null) ...[
             InkWell(
+              key: Key('thought-toggle-${message.id}'),
               onTap: onToggleThought,
               borderRadius: BorderRadius.circular(6),
               child: Padding(

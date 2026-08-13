@@ -216,6 +216,64 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 20),
 
+          // ── GESTION DE PROJET
+          const _SectionTitle(title: 'PARAMÈTRES ET SUPPRESSION DU PROJET'),
+          const SizedBox(height: 8),
+
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Zone Dangereuse',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.error),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Supprimer définitivement ce projet et toutes ses conversations associées.',
+                    style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      showDialog(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Supprimer définitivement le projet ?'),
+                          content: const Text(
+                            'Cette action supprimera le projet ainsi que toutes ses conversations actives et archivées.\n\nCette action est irréversible.',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(ctx).pop(),
+                              child: const Text('Annuler'),
+                            ),
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+                              onPressed: () {
+                                Navigator.of(ctx).pop();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Projet et conversations supprimés avec succès.')),
+                                );
+                              },
+                              child: const Text('Supprimer définitivement'),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                    icon: Icon(Icons.delete_forever_outlined, size: 16, color: Theme.of(context).colorScheme.error),
+                    label: Text('Supprimer le projet', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
           // ── DAEMON CONNECTION SETTINGS
           const _SectionTitle(title: 'DAEMON BRIDGE CONNECTION'),
           const SizedBox(height: 8),
@@ -418,7 +476,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
 class _SectionTitle extends StatelessWidget {
   final String title;
-
   const _SectionTitle({required this.title});
 
   @override

@@ -161,10 +161,11 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
               border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
             ),
             child: SelectableText(
-              request.command,
+              request.command.replaceAll('\\n', '\n'),
               style: TextStyle(
                 fontFamily: 'monospace',
                 fontSize: 12.5,
+                height: 1.4,
                 color: Theme.of(context).colorScheme.onSurface,
               ),
             ),

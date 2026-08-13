@@ -288,11 +288,11 @@ void main() {
         await Future<void>.delayed(Duration.zero);
         expect(outbox.pendingCount, 0);
 
-        // Nouvelle reconnexion : la queue est vide → le replayer ne tourne pas
-        // (pas de re-sync). Seul le flush de la reconnexion v1 a resyncé.
+        // Nouvelle reconnexion : la queue est VIDE mais le re-sync doit quand
+        // même tourner (les sessions peuvent avoir changé pendant la coupure).
         version.value = 2;
         await Future<void>.delayed(Duration.zero);
-        expect(resyncCount, 1);
+        expect(resyncCount, 2);
 
         await controller.close();
         api.dispose();
