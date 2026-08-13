@@ -240,7 +240,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                             style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
                             decoration: InputDecoration(
                               prefixIcon: Icon(Icons.numbers, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                              hintText: '8090',
+                              hintText: EnvConfig.daemonPort.toString(),
                             ),
                           ),
                         ],

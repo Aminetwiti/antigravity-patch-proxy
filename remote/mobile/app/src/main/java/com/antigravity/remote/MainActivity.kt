@@ -1,4 +1,4 @@
-package com.antigravity.remote
+﻿package com.antigravity.remote
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -22,7 +22,7 @@ class MainActivity : ComponentActivity() {
 
         wsClient = RemoteWebSocketClient(
             host = "10.0.2.2",
-            port = 8089,
+            port = 8090,
             onMessageReceived = { json ->
                 val type = json.optString("type")
                 if (type == "response") {
@@ -59,3 +59,4 @@ class MainActivity : ComponentActivity() {
         wsClient.disconnect()
     }
 }
+

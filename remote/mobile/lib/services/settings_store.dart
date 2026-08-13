@@ -1,5 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../config/env_config.dart';
+
 /// Persistance des réglages utilisateur via `shared_preferences`.
 /// Écriture atomique par clé, lecture paresseuse au démarrage (initState).
 /// ponytail: stockage clé/valeur simple — pas de schéma versionné; ajouter
@@ -23,7 +25,7 @@ class SettingsStore {
     final prefs = await SharedPreferences.getInstance();
     return {
       'host': prefs.getString(_kHost) ?? '127.0.0.1',
-      'port': prefs.getInt(_kPort) ?? 8090,
+      'port': prefs.getInt(_kPort) ?? EnvConfig.daemonPort,
       'ssl': prefs.getBool(_kSsl) ?? false,
       'csrf': prefs.getString(_kCsrf) ?? '',
       'themeMode': prefs.getInt(_kThemeMode) ?? 0,

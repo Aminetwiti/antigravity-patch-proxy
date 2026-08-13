@@ -126,7 +126,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       if (!mounted) return;
       _savedSettings = s;
       final host = (s['host'] as String?)?.trim() ?? '';
-      final port = (s['port'] as int?) ?? 8090;
+      final port = (s['port'] as int?) ?? EnvConfig.daemonPort;
       final ssl = (s['ssl'] as bool?) ?? false;
       final csrf = (s['csrf'] as String?)?.trim() ?? '';
       if (host.isEmpty) {
@@ -149,7 +149,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
   void _applyDaemonSettings(Map<String, dynamic> v) {
     setState(() => _savedSettings = v);
     final host = (v['host'] as String?)?.trim() ?? '';
-    final port = (v['port'] as int?) ?? 8090;
+    final port = (v['port'] as int?) ?? EnvConfig.daemonPort;
     final ssl = (v['ssl'] as bool?) ?? false;
     final csrf = (v['csrf'] as String?)?.trim() ?? '';
     final url = '${ssl ? 'wss' : 'ws'}://$host:$port/ws';
@@ -184,6 +184,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         _wsClient.reconnectVersion,
         _resyncSessions,
       );
+      _watchSessionEvents();
       _refreshSessions();
       _refreshContext();
     }
@@ -213,15 +214,41 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       final sessions = SessionParser.parseListSessions(data);
       if (sessions.isNotEmpty) {
         setState(() {
+          // Préserve la session active si elle existe toujours (rafraîchissement
+          // en arrière-plan : ne pas faire sauter l'utilisateur vers la première).
+          final stillActive = sessions.any((s) => s.id == _activeSessionId);
           _sessions = sessions;
-          _activeSessionId = sessions.first.id;
-          _activeSessionTitle = sessions.first.title;
+          if (!stillActive) {
+            _activeSessionId = sessions.first.id;
+            _activeSessionTitle = sessions.first.title;
+          } else {
+            final cur = sessions.firstWhere((s) => s.id == _activeSessionId);
+            _activeSessionTitle = cur.title;
+          }
         });
       }
     } catch (_) {
     } finally {
       _sessionsFetching = false;
     }
+  }
+
+  /// Rafraîchit la liste des sessions à chaque événement daemon (stream_end,
+  /// approval_expired, …) pour que le sidebar reste synchronisé en direct.
+  /// ponytail: rafraîchissement plein — pas de delta — plafond acceptable pour
+  /// un volume faible de sessions ; à affiner si le daemon émet > 5 events/s.
+  StreamSubscription<Map<String, dynamic>>? _sessionsSub;
+
+  void _watchSessionEvents() {
+    _sessionsSub?.cancel();
+    _sessionsSub = _api?.events.listen((msg) {
+      if (!mounted) return;
+      final type = msg['type'] as String?;
+      // stream_delta à haute fréquence → on ne rafraîchit qu'à la fin du
+      // stream et sur les événements discrets (approbation expirée, etc.).
+      if (type == 'stream_delta') return;
+      _refreshSessions();
+    });
   }
 
   Future<Map<String, dynamic>> _resyncSessions() async {
@@ -267,6 +294,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
 
   @override
   void dispose() {
+    _sessionsSub?.cancel();
     _api?.dispose();
     _wsClient.dispose();
     super.dispose();

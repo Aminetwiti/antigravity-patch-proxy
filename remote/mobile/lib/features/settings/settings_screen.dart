@@ -469,8 +469,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           controller: _portController,
                           keyboardType: TextInputType.number,
                           style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
-                          decoration: const InputDecoration(
-                            hintText: '8090',
+                          decoration: InputDecoration(
+                            hintText: EnvConfig.daemonPort.toString(),
                           ),
                         ),
                       ],

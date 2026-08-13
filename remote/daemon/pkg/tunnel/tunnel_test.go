@@ -1,4 +1,4 @@
-package tunnel
+﻿package tunnel
 
 import (
 	"strings"
@@ -11,12 +11,12 @@ func TestWebsocketURLConversion(t *testing.T) {
 
 	wsURL := strings.Replace(httpsURL, "https://", "wss://", 1) + "/ws"
 	if wsURL != expectedWSS {
-		t.Errorf("Attendu %s, reçu %s", expectedWSS, wsURL)
+		t.Errorf("Attendu %s, reÃ§u %s", expectedWSS, wsURL)
 	}
 }
 
-// TestCloudflareURLRegex — le parseur doit extraire l'URL trycloudflare depuis
-// la sortie stderr réelle de cloudflared (lignes de logs mélangées).
+// TestCloudflareURLRegex â€” le parseur doit extraire l'URL trycloudflare depuis
+// la sortie stderr rÃ©elle de cloudflared (lignes de logs mÃ©langÃ©es).
 func TestCloudflareURLRegex(t *testing.T) {
 	lines := []string{
 		"INF Registered tunnel connection connIndex=0",
@@ -33,7 +33,7 @@ func TestCloudflareURLRegex(t *testing.T) {
 		}
 	}
 	if got != "https://random-words-123.trycloudflare.com" {
-		t.Fatalf("Attendu https://random-words-123.trycloudflare.com, reçu %q", got)
+		t.Fatalf("Attendu https://random-words-123.trycloudflare.com, reÃ§u %q", got)
 	}
 
 	// Pas de faux positif sur des lignes sans URL.
@@ -42,13 +42,13 @@ func TestCloudflareURLRegex(t *testing.T) {
 	}
 }
 
-// TestPinggyURLRegex — le parseur doit extraire l'URL pinggy depuis stdout
+// TestPinggyURLRegex â€” le parseur doit extraire l'URL pinggy depuis stdout
 // (ssh) et forcer https:// sur les occurrences http://.
 func TestPinggyURLRegex(t *testing.T) {
 	lines := []string{
 		"Pinggy tunnel is ready!",
 		"https://abc-123.a.pinggy.link",
-		"http://abc-123.a.pinggy.link forwarded to 127.0.0.1:8089",
+		"http://abc-123.a.pinggy.link forwarded to 127.0.0.1:8090",
 	}
 	var got string
 	for _, line := range lines {
@@ -58,16 +58,17 @@ func TestPinggyURLRegex(t *testing.T) {
 		}
 	}
 	if !strings.HasPrefix(got, "https://") {
-		t.Fatalf("Attendu https://, reçu %q", got)
+		t.Fatalf("Attendu https://, reÃ§u %q", got)
 	}
 	if !strings.Contains(got, "pinggy.link") {
-		t.Fatalf("Attendu .pinggy.link, reçu %q", got)
+		t.Fatalf("Attendu .pinggy.link, reÃ§u %q", got)
 	}
 }
 
-// TestProviderPrefDispatch supprimé (Étape 6) — il dépendait de l'absence de
-// binaires tunnel sur $PATH ; sur Windows, ssh.exe est TOUJOURS présent
-// (C:\Windows\System32\OpenSSH) et le test lançait un vrai tunnel pinggy →
-// flaky. Le dispatch "provider inconnu → auto" est couvert par le code review
+// TestProviderPrefDispatch supprimÃ© (Ã‰tape 6) â€” il dÃ©pendait de l'absence de
+// binaires tunnel sur $PATH ; sur Windows, ssh.exe est TOUJOURS prÃ©sent
+// (C:\Windows\System32\OpenSSH) et le test lanÃ§ait un vrai tunnel pinggy â†’
+// flaky. Le dispatch "provider inconnu â†’ auto" est couvert par le code review
 // et par les tests unitaires de parsing (TestCloudflareURLRegex,
 // TestPinggyURLRegex).
+

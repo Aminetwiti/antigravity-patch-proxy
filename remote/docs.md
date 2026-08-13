@@ -1,4 +1,4 @@
-Https://github.com/mrkungfudn/antigravity-ide-mobile
+﻿Https://github.com/mrkungfudn/antigravity-ide-mobile
 https://github.com/chillinh/AntiBridge-Antigravity-remote
 
 https://github.com/emreturkmencom/antigravity-telegram-suite
@@ -69,40 +69,40 @@ All 5 projects focus on **extending the mobile remote-control capabilities of Go
 1. **Web / Local Dashboards:** `antigravity-ide-mobile`, `AntiBridge-Antigravity-remote`, `OmniAntigravityRemoteChat`, `antigravity_phone_chat`.
 2. **Chat Bot Interfaces:** `antigravity-telegram-suite` (for messaging platform integration).
 
-Passer d'un simple "miroir" de l'interface via le protocole CDP (comme le fait le dépôt Omni) à une véritable application native (APK) est la bonne approche pour avoir un outil professionnel, stable et réactif.
-​Pour réussir à répliquer l'expérience de Antigravity 2.0 sur mobile avec une synchronisation parfaite des workspaces et des sessions, il faut repenser l'architecture. On ne va plus "capturer l'écran", on va échanger des données structurées.
+Passer d'un simple "miroir" de l'interface via le protocole CDP (comme le fait le dÃ©pÃ´t Omni) Ã  une vÃ©ritable application native (APK) est la bonne approche pour avoir un outil professionnel, stable et rÃ©actif.
+â€‹Pour rÃ©ussir Ã  rÃ©pliquer l'expÃ©rience de Antigravity 2.0 sur mobile avec une synchronisation parfaite des workspaces et des sessions, il faut repenser l'architecture. On ne va plus "capturer l'Ã©cran", on va Ã©changer des donnÃ©es structurÃ©es.
 
-C'est **exactement** le saut architectural qu'il faut faire pour dépasser le stade du simple "bricolage / scraping".
+C'est **exactement** le saut architectural qu'il faut faire pour dÃ©passer le stade du simple "bricolage / scraping".
 
-Passer du mirroring visual/DOM via Chrome DevTools Protocol (CDP) à un **modèle Data-Driven / Headless** via une application Android native (APK) résout le problème à la racine :
+Passer du mirroring visual/DOM via Chrome DevTools Protocol (CDP) Ã  un **modÃ¨le Data-Driven / Headless** via une application Android native (APK) rÃ©sout le problÃ¨me Ã  la racine :
 
-- **Performance :** Vous échangez des deltas JSON légers au lieu de re-rendre du DOM lourd ou de faire transiter du flux d'images/WebSocket verbeux.
-- **Ergonomie :** Vous bénéficiez des composants natifs d'Android (scroll à 120Hz, gestion de la mémoire, stockage local SQLite/Room, notifications push système).
-- **Résilience :** En cas de coupure réseau, l'APK conserve l'état local et réaligne la synchronisation dès la réconnexion.
+- **Performance :** Vous Ã©changez des deltas JSON lÃ©gers au lieu de re-rendre du DOM lourd ou de faire transiter du flux d'images/WebSocket verbeux.
+- **Ergonomie :** Vous bÃ©nÃ©ficiez des composants natifs d'Android (scroll Ã  120Hz, gestion de la mÃ©moire, stockage local SQLite/Room, notifications push systÃ¨me).
+- **RÃ©silience :** En cas de coupure rÃ©seau, l'APK conserve l'Ã©tat local et rÃ©aligne la synchronisation dÃ¨s la rÃ©connexion.
 
-Voici l'architecture cible recommandée pour concrétiser cette vision "Antigravity 2.0 Mobile Native" :
+Voici l'architecture cible recommandÃ©e pour concrÃ©tiser cette vision "Antigravity 2.0 Mobile Native" :
 
 ---
 
-## 1. Modèle d'Architecture Globale (Client / Agent / Proxy)
+## 1. ModÃ¨le d'Architecture Globale (Client / Agent / Proxy)
 
 ```
-┌──────────────────────────────────────────────┐
-│            Google Antigravity IDE            │
-│       (Desktop Client / Extension Core)       │
-└──────────────────────┬───────────────────────┘
-                       │ Local IPC / Internal Bus
-                       ▼
-┌──────────────────────────────────────────────┐
-│         Antigravity Bridge Server            │
-│   (Node.js / Go daemon running on Desktop)   │
-└──────────────────────┬───────────────────────┘
-                       │ Secure WebSocket / gRPC (Data-only)
-                       ▼
-┌──────────────────────────────────────────────┐
-│           Native Android App (APK)           │
-│    (Kotlin / Jetpack Compose + Local DB)     │
-└──────────────────────────────────────────────┘
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚            Google Antigravity IDE            â”‚
+â”‚       (Desktop Client / Extension Core)       â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                       â”‚ Local IPC / Internal Bus
+                       â–¼
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚         Antigravity Bridge Server            â”‚
+â”‚   (Node.js / Go daemon running on Desktop)   â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                       â”‚ Secure WebSocket / gRPC (Data-only)
+                       â–¼
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚           Native Android App (APK)           â”‚
+â”‚    (Kotlin / Jetpack Compose + Local DB)     â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 
 ```
 
@@ -110,126 +110,126 @@ Voici l'architecture cible recommandée pour concrétiser cette vision "Antigrav
 
 ## 2. Les 4 Piliers de l'Architecture Data-Driven
 
-### A. Le Daemon "Bridge" (Côté PC)
+### A. Le Daemon "Bridge" (CÃ´tÃ© PC)
 
-Plutôt que d'attacher un écouteur CDP sur l'interface graphique de l'IDE, le serveur hôte (écrit de préférence en **Go** ou **Rust** pour la légèreté) s'interfère au niveau de l'état applicatif d'Antigravity :
+PlutÃ´t que d'attacher un Ã©couteur CDP sur l'interface graphique de l'IDE, le serveur hÃ´te (Ã©crit de prÃ©fÃ©rence en **Go** ou **Rust** pour la lÃ©gÃ¨retÃ©) s'interfÃ¨re au niveau de l'Ã©tat applicatif d'Antigravity :
 
-- **State Manager :** Lit/Écrit directement l'état des sessions, l'arbre des fichiers et les journaux de l'agent.
-- **Diff Engine :** Génère des correctifs JSON (JSON Patches / Operational Transformation) au lieu de renvoyer le contexte complet à chaque modification.
+- **State Manager :** Lit/Ã‰crit directement l'Ã©tat des sessions, l'arbre des fichiers et les journaux de l'agent.
+- **Diff Engine :** GÃ©nÃ¨re des correctifs JSON (JSON Patches / Operational Transformation) au lieu de renvoyer le contexte complet Ã  chaque modification.
 
 ### B. Le Protocole de Synchronisation (WebSocket + gRPC / Protobuf)
 
-- Utilisez **Protocol Buffers (Protobuf)** sur WebSocket pour le transport des données. Le typage strict garantit qu'une mise à jour de modèle ou de prompt ne cassera pas le client Android.
-- **Modèle Event-Driven :**
+- Utilisez **Protocol Buffers (Protobuf)** sur WebSocket pour le transport des donnÃ©es. Le typage strict garantit qu'une mise Ã  jour de modÃ¨le ou de prompt ne cassera pas le client Android.
+- **ModÃ¨le Event-Driven :**
 - `WorkspaceTreeUpdated`
-- `AgentThinkingProgress` (stream de jetons/pensées)
+- `AgentThinkingProgress` (stream de jetons/pensÃ©es)
 - `FileDiffApplied`
 - `QuotaStateChanged`
 
-### C. Moteur de Stockage & Cache Local (Côté Android APK)
+### C. Moteur de Stockage & Cache Local (CÃ´tÃ© Android APK)
 
-- **Room / SQLite :** L'application persiste l'historique complet des chats, les états de workspace et les sessions localement. L'UI s'affiche instantanément sans attendre le réseau (approche _Offline-First_).
-- **Sync Engine :** Un gestionnaire de synchronisation en arrière-plan réaligne l'état du téléphone avec le PC à chaque reconnexion.
+- **Room / SQLite :** L'application persiste l'historique complet des chats, les Ã©tats de workspace et les sessions localement. L'UI s'affiche instantanÃ©ment sans attendre le rÃ©seau (approche _Offline-First_).
+- **Sync Engine :** Un gestionnaire de synchronisation en arriÃ¨re-plan rÃ©aligne l'Ã©tat du tÃ©lÃ©phone avec le PC Ã  chaque reconnexion.
 
-### D. Interface Utilisateur Adaptée au Mobile (Jetpack Compose)
+### D. Interface Utilisateur AdaptÃ©e au Mobile (Jetpack Compose)
 
-L'UI ne cherche pas à ressembler à un IDE de bureau (trop étroit sur mobile), mais adapte les workflows :
+L'UI ne cherche pas Ã  ressembler Ã  un IDE de bureau (trop Ã©troit sur mobile), mais adapte les workflows :
 
-- **Mode "Agent Executive" :** Focus sur les plans d'action générés par l'agent, les validations de commandes shell et les révisions de diffs de code.
-- **Composant de Code Dedié :** Intégration d'un éditeur natif léger (ex: basé sur Tree-sitter ou CodeEditor Android) pour réviser rapidement les modifications apportées par l'agent.
+- **Mode "Agent Executive" :** Focus sur les plans d'action gÃ©nÃ©rÃ©s par l'agent, les validations de commandes shell et les rÃ©visions de diffs de code.
+- **Composant de Code DediÃ© :** IntÃ©gration d'un Ã©diteur natif lÃ©ger (ex: basÃ© sur Tree-sitter ou CodeEditor Android) pour rÃ©viser rapidement les modifications apportÃ©es par l'agent.
 
 ---
 
 ## 3. Comparatif : Miroir CDP vs Application Native
 
-| Critère                   | Approche Miroir / WebApp (CDP)      | Approche Native Data-Driven (APK)           |
+| CritÃ¨re                   | Approche Miroir / WebApp (CDP)      | Approche Native Data-Driven (APK)           |
 | ------------------------- | ----------------------------------- | ------------------------------------------- |
-| **Bande passante**        | Élevée (DOM continu / Images)       | Extrêmement faible (Deltas JSON/Protobuf)   |
-| **Consommation Batterie** | Très lourde (Rendu web continu)     | Optimisée (Exécution native / Jetpack)      |
-| **Réactivité (UX)**       | Latence réseau visible              | Instantanée (Rendu local + optimistic UI)   |
-| **Arrière-plan**          | Limité par le navigateur mobile     | Notifications système & WorkManager natifs  |
-| **Robustesse UI**         | Casse à chaque màj de l'IDE desktop | Stable grâce à l'API typée du daemon bridge |
+| **Bande passante**        | Ã‰levÃ©e (DOM continu / Images)       | ExtrÃªmement faible (Deltas JSON/Protobuf)   |
+| **Consommation Batterie** | TrÃ¨s lourde (Rendu web continu)     | OptimisÃ©e (ExÃ©cution native / Jetpack)      |
+| **RÃ©activitÃ© (UX)**       | Latence rÃ©seau visible              | InstantanÃ©e (Rendu local + optimistic UI)   |
+| **ArriÃ¨re-plan**          | LimitÃ© par le navigateur mobile     | Notifications systÃ¨me & WorkManager natifs  |
+| **Robustesse UI**         | Casse Ã  chaque mÃ j de l'IDE desktop | Stable grÃ¢ce Ã  l'API typÃ©e du daemon bridge |
 
 ---
 
-## Prochaine Étape Recommandée
+## Prochaine Ã‰tape RecommandÃ©e
 
-Pour passer à la mise en œuvre, par quoi préférez-vous commencer ?
+Pour passer Ã  la mise en Å“uvre, par quoi prÃ©fÃ©rez-vous commencer ?
 
-1. **Définir la spécification des protocoles de communication** (schémas Protobuf / JSON pour les sessions et workspaces).
-2. **Concevoir la structure du Daemon Bridge** (côté PC) pour extraire proprement la data d'Antigravity.
+1. **DÃ©finir la spÃ©cification des protocoles de communication** (schÃ©mas Protobuf / JSON pour les sessions et workspaces).
+2. **Concevoir la structure du Daemon Bridge** (cÃ´tÃ© PC) pour extraire proprement la data d'Antigravity.
 3. **Mettre en place le squelette de l'application Android** (Architecture Clean + Jetpack Compose + Room).
 
 Mais esque ses possible avec antigravity
 
-## Analyse et faisabilité : Antigravity 2.0 & Application Mobile Native
+## Analyse et faisabilitÃ© : Antigravity 2.0 & Application Mobile Native
 
-Pour répondre directement à votre question : **Oui, c'est tout à fait possible**, et c'est précisément la direction technique qu'il faut emprunter pour créer une solution professionnelle.
+Pour rÃ©pondre directement Ã  votre question : **Oui, c'est tout Ã  fait possible**, et c'est prÃ©cisÃ©ment la direction technique qu'il faut emprunter pour crÃ©er une solution professionnelle.
 
-Le rapport détaillé que vous avez partagé pose un constat lucide : si la communauté s'est d'abord tournée vers le mirroring DOM via le protocole CDP (Chrome DevTools Protocol) ou l'injection SQLite, ces solutions de contournement restent fragiles et limitées.
+Le rapport dÃ©taillÃ© que vous avez partagÃ© pose un constat lucide : si la communautÃ© s'est d'abord tournÃ©e vers le mirroring DOM via le protocole CDP (Chrome DevTools Protocol) ou l'injection SQLite, ces solutions de contournement restent fragiles et limitÃ©es.
 
-Votre vision d'une **application native Android (APK)** s'inscrit parfaitement dans la trajectoire du **Vecteur C (Le Pont LSP / ConnectRPC)** décrit dans le rapport.
+Votre vision d'une **application native Android (APK)** s'inscrit parfaitement dans la trajectoire du **Vecteur C (Le Pont LSP / ConnectRPC)** dÃ©crit dans le rapport.
 
 ---
 
 ## Pourquoi l'approche native est la seule viable pour Antigravity 2.0
 
-En combinant un binaire léger (Daemon) sur le PC et une application native (Kotlin/Jetpack Compose) sur le smartphone, vous résolvez les verrous de sécurité d'Antigravity tout en éliminant la fragilité du scraping web :
+En combinant un binaire lÃ©ger (Daemon) sur le PC et une application native (Kotlin/Jetpack Compose) sur le smartphone, vous rÃ©solvez les verrous de sÃ©curitÃ© d'Antigravity tout en Ã©liminant la fragilitÃ© du scraping web :
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│              Machine de Développement (PC)              │
-│                                                         │
-│  ┌──────────────────┐          ┌─────────────────────┐  │
-│  │ Antigravity IDE  │          │   Localharness Go   │  │
-│  │    (Electron)    │          │ (ConnectRPC/gRPC)   │  │
-│  └──────────────────┘          └──────────┬──────────┘  │
-│                                           │ Loopback    │
-│                                           ▼             │
-│                        ┌─────────────────────────────┐  │
-│                        │    Daemon Bridge Native     │  │
-│                        │       (Go / Rust)           │  │
-│                        └──────────────┬──────────────┘  │
-└───────────────────────────────────────┼─────────────────┘
-                                        │ WebSocket / Protobuf
-                                        │ (via Tailscale / Tunnel)
-                                        ▼
-                         ┌─────────────────────────────┐
-                         │   Application Native APK    │
-                         │ (Kotlin / Jetpack Compose)  │
-                         └─────────────────────────────┘
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚              Machine de DÃ©veloppement (PC)              â”‚
+â”‚                                                         â”‚
+â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”          â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”  â”‚
+â”‚  â”‚ Antigravity IDE  â”‚          â”‚   Localharness Go   â”‚  â”‚
+â”‚  â”‚    (Electron)    â”‚          â”‚ (ConnectRPC/gRPC)   â”‚  â”‚
+â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜          â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜  â”‚
+â”‚                                           â”‚ Loopback    â”‚
+â”‚                                           â–¼             â”‚
+â”‚                        â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”  â”‚
+â”‚                        â”‚    Daemon Bridge Native     â”‚  â”‚
+â”‚                        â”‚       (Go / Rust)           â”‚  â”‚
+â”‚                        â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜  â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                                        â”‚ WebSocket / Protobuf
+                                        â”‚ (via Tailscale / Tunnel)
+                                        â–¼
+                         â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+                         â”‚   Application Native APK    â”‚
+                         â”‚ (Kotlin / Jetpack Compose)  â”‚
+                         â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 
 ```
 
 ---
 
-## Les 3 piliers techniques pour réussir l'implémentation
+## Les 3 piliers techniques pour rÃ©ussir l'implÃ©mentation
 
-### 1. Le Daemon "Bridge" Hôte (Côté PC)
+### 1. Le Daemon "Bridge" HÃ´te (CÃ´tÃ© PC)
 
-Plutôt que d'utiliser un proxy Node.js générique, créez un daemon ultra-léger en **Go** ou **Rust** :
+PlutÃ´t que d'utiliser un proxy Node.js gÃ©nÃ©rique, crÃ©ez un daemon ultra-lÃ©ger en **Go** ou **Rust** :
 
-- **Découverte dynamique :** Il inspecte les processus système pour extraire dynamiquement le port `--extensionPort` et le **jeton CSRF éphémère** du binaire `localharness`.
-- **Multiplexage & Protobuf :** Il se connecte en local via ConnectRPC (gRPC-Web) au backend Antigravity et traduit ces flux binaires en messages **Protobuf typés** transmis via WebSockets sécurisés vers le mobile.
-- **Sécurité :** Il s'assure que le jeton CSRF et les identifiants OAuth Google ne quittent jamais la mémoire vive du PC.
+- **DÃ©couverte dynamique :** Il inspecte les processus systÃ¨me pour extraire dynamiquement le port `--extensionPort` et le **jeton CSRF Ã©phÃ©mÃ¨re** du binaire `localharness`.
+- **Multiplexage & Protobuf :** Il se connecte en local via ConnectRPC (gRPC-Web) au backend Antigravity et traduit ces flux binaires en messages **Protobuf typÃ©s** transmis via WebSockets sÃ©curisÃ©s vers le mobile.
+- **SÃ©curitÃ© :** Il s'assure que le jeton CSRF et les identifiants OAuth Google ne quittent jamais la mÃ©moire vive du PC.
 
 ### 2. Le Client Android Natif (APK)
 
-L'application Android n'a pas besoin de re-rendre un IDE lourd. Elle se concentre sur les rôles d'orchestration et de supervision :
+L'application Android n'a pas besoin de re-rendre un IDE lourd. Elle se concentre sur les rÃ´les d'orchestration et de supervision :
 
-- **Architecture Clean + Jetpack Compose :** Réactivité maximale à 120Hz et interface utilisateur adaptée aux contraintes tactiles.
-- **Base de données local (Room / SQLite) :** Conservation locale des fils de discussion, des arbres de projet et des diffs de code. En cas de perte de réseau (mode déconnecté / 4G instable), l'application reste fluide et réaligne l'état dès la reconnexion.
-- **Moteur de Diffs de Code :** Intégration d'un composant de visualisation de diffs d'éditeurs natifs (type Tree-sitter) pour valider rapidement les modifications proposées par les sous-agents.
+- **Architecture Clean + Jetpack Compose :** RÃ©activitÃ© maximale Ã  120Hz et interface utilisateur adaptÃ©e aux contraintes tactiles.
+- **Base de donnÃ©es local (Room / SQLite) :** Conservation locale des fils de discussion, des arbres de projet et des diffs de code. En cas de perte de rÃ©seau (mode dÃ©connectÃ© / 4G instable), l'application reste fluide et rÃ©aligne l'Ã©tat dÃ¨s la reconnexion.
+- **Moteur de Diffs de Code :** IntÃ©gration d'un composant de visualisation de diffs d'Ã©diteurs natifs (type Tree-sitter) pour valider rapidement les modifications proposÃ©es par les sous-agents.
 
-### 3. La Gestion des "Hooks" de Décision (Validations)
+### 3. La Gestion des "Hooks" de DÃ©cision (Validations)
 
-C'est le point névralgique pour contrôler l'agent à distance :
+C'est le point nÃ©vralgique pour contrÃ´ler l'agent Ã  distance :
 
-1. L'agent Antigravity rencontre une instruction nécessitant une approbation (ex: `run_command` en mode `ask_user`).
-2. Le `localharness` suspend le thread et émet un événement RPC.
-3. Le Daemon Bridge intercepte l'événement et envoie une **notification push Android native** au téléphone.
+1. L'agent Antigravity rencontre une instruction nÃ©cessitant une approbation (ex: `run_command` en mode `ask_user`).
+2. Le `localharness` suspend le thread et Ã©met un Ã©vÃ©nement RPC.
+3. Le Daemon Bridge intercepte l'Ã©vÃ©nement et envoie une **notification push Android native** au tÃ©lÃ©phone.
 4. Sur l'APK, vous appuyez sur **Approuver** ou **Refuser** (ou vous ajustez la commande).
-5. L'APK renvoie le résultat au Daemon, qui forge la réponse ConnectRPC signée avec le jeton CSRF local. L'agent reprend son exécution sur le PC instantanément.
+5. L'APK renvoie le rÃ©sultat au Daemon, qui forge la rÃ©ponse ConnectRPC signÃ©e avec le jeton CSRF local. L'agent reprend son exÃ©cution sur le PC instantanÃ©ment.
 
 ---
 
@@ -237,27 +237,27 @@ C'est le point névralgique pour contrôler l'agent à distance :
 
 | Composant                  | Solution CDP (Scraping / Extension) | Solution PWA (Porta / Web)     | **Solution APK Natif + Daemon (Cible)**     |
 | -------------------------- | ----------------------------------- | ------------------------------ | ------------------------------------------- |
-| **Transport**              | Capture DOM / Rendu visuel          | JSON / WebSockets              | **Protobuf / WebSockets chiffrés**          |
-| **Poids / Bande passante** | Très lourd (Images / Éléments DOM)  | Faible (JSON)                  | **Extrêmement faible (Deltas binaires)**    |
-| **Rendu UI**               | Vue PC étirée ou instable           | Responsive Web                 | **Composants natifs Android (Compose)**     |
-| **Stabilité**              | Casse à chaque mise à jour UI       | Moyenne (dépend du navigateur) | **Élevée (Basée sur les schémas Protobuf)** |
-| **Notifications**          | Non supportées / Limitées           | Web Push (Inconstantes)        | **FCM / Notifications Push système**        |
+| **Transport**              | Capture DOM / Rendu visuel          | JSON / WebSockets              | **Protobuf / WebSockets chiffrÃ©s**          |
+| **Poids / Bande passante** | TrÃ¨s lourd (Images / Ã‰lÃ©ments DOM)  | Faible (JSON)                  | **ExtrÃªmement faible (Deltas binaires)**    |
+| **Rendu UI**               | Vue PC Ã©tirÃ©e ou instable           | Responsive Web                 | **Composants natifs Android (Compose)**     |
+| **StabilitÃ©**              | Casse Ã  chaque mise Ã  jour UI       | Moyenne (dÃ©pend du navigateur) | **Ã‰levÃ©e (BasÃ©e sur les schÃ©mas Protobuf)** |
+| **Notifications**          | Non supportÃ©es / LimitÃ©es           | Web Push (Inconstantes)        | **FCM / Notifications Push systÃ¨me**        |
 
 ---
 
-## Résumé
+## RÃ©sumÃ©
 
-Développer un **APK Android natif** adossé à un **daemon de pontage local (Bridge)** est la méthode la plus pérenne pour interagir avec Antigravity 2.0. Cela transforme votre smartphone en un véritable **centre de commandement d'agents**, tout en gardant l'ensemble de l'exécution, du code et des secrets strictement confinés sur votre station de travail.
+DÃ©velopper un **APK Android natif** adossÃ© Ã  un **daemon de pontage local (Bridge)** est la mÃ©thode la plus pÃ©renne pour interagir avec Antigravity 2.0. Cela transforme votre smartphone en un vÃ©ritable **centre de commandement d'agents**, tout en gardant l'ensemble de l'exÃ©cution, du code et des secrets strictement confinÃ©s sur votre station de travail.
 
-D'un point de vue purement technique et protocolaire, créer une nouvelle session dans un workspace et lui envoyer un prompt via le backend ConnectRPC d'Antigravity (`localharness`) se déroule en **4 étapes séquentielles**.
+D'un point de vue purement technique et protocolaire, crÃ©er une nouvelle session dans un workspace et lui envoyer un prompt via le backend ConnectRPC d'Antigravity (`localharness`) se dÃ©roule en **4 Ã©tapes sÃ©quentielles**.
 
-Voici le détail du flux de requêtes, des entêtes obligatoires et des structures de données (JSON/Protobuf) échangées.
+Voici le dÃ©tail du flux de requÃªtes, des entÃªtes obligatoires et des structures de donnÃ©es (JSON/Protobuf) Ã©changÃ©es.
 
 ---
 
-## 0. Entêtes Réseau et Authentification Obligatoires
+## 0. EntÃªtes RÃ©seau et Authentification Obligatoires
 
-Chaque requête HTTP/2 transmise au binaire Go `localharness` (sur le port identifié `extensionPort + offset`) doit impérativement inclure les entêtes suivants :
+Chaque requÃªte HTTP/2 transmise au binaire Go `localharness` (sur le port identifiÃ© `extensionPort + offset`) doit impÃ©rativement inclure les entÃªtes suivants :
 
 ```http
 POST /antigravity.v1.CascadeService/[NomDeLaMethode] HTTP/2
@@ -270,14 +270,14 @@ Connect-Protocol-Version: 1
 
 ---
 
-## Étape 1 : Initialisation de la Session (Cascade)
+## Ã‰tape 1 : Initialisation de la Session (Cascade)
 
-Dans le jargon interne d'Antigravity, une session de chat / agent est appelée une **Cascade**. Pour instancier une session rattachée à un répertoire (workspace), vous devez appeler la méthode d'initialisation de cascade.
+Dans le jargon interne d'Antigravity, une session de chat / agent est appelÃ©e une **Cascade**. Pour instancier une session rattachÃ©e Ã  un rÃ©pertoire (workspace), vous devez appeler la mÃ©thode d'initialisation de cascade.
 
 - **Endpoint RPC :** `/antigravity.v1.CascadeService/CreateCascade`
-- **Type de requête :** HTTP POST (ConnectRPC unitaire)
+- **Type de requÃªte :** HTTP POST (ConnectRPC unitaire)
 
-### Payload envoyé par le Daemon/Proxy :
+### Payload envoyÃ© par le Daemon/Proxy :
 
 ```json
 {
@@ -294,7 +294,7 @@ Dans le jargon interne d'Antigravity, une session de chat / agent est appelée u
 }
 ```
 
-### Réponse renvoyée par `localharness` :
+### RÃ©ponse renvoyÃ©e par `localharness` :
 
 ```json
 {
@@ -304,18 +304,18 @@ Dans le jargon interne d'Antigravity, une session de chat / agent est appelée u
 }
 ```
 
-> **Note :** Le `cascadeId` renvoyé est l'identifiant unique à conserver côté mobile/APK pour toutes les interactions futures.
+> **Note :** Le `cascadeId` renvoyÃ© est l'identifiant unique Ã  conserver cÃ´tÃ© mobile/APK pour toutes les interactions futures.
 
 ---
 
-## Étape 2 : Envoi du Prompt (Streaming Request)
+## Ã‰tape 2 : Envoi du Prompt (Streaming Request)
 
-Une fois la cascade créée, l'envoi d'un prompt déclenche l'exécution de l'agent. Cette méthode utilise le **streaming serveur** pour recevoir la réponse en temps réel (jeton par jeton, ainsi que les appels d'outils).
+Une fois la cascade crÃ©Ã©e, l'envoi d'un prompt dÃ©clenche l'exÃ©cution de l'agent. Cette mÃ©thode utilise le **streaming serveur** pour recevoir la rÃ©ponse en temps rÃ©el (jeton par jeton, ainsi que les appels d'outils).
 
 - **Endpoint RPC :** `/antigravity.v1.CascadeService/SendCascadeMessage`
-- **Type de requête :** HTTP POST (Stream Server-Sent Events / SSE)
+- **Type de requÃªte :** HTTP POST (Stream Server-Sent Events / SSE)
 
-### Payload envoyé par le Daemon/Proxy :
+### Payload envoyÃ© par le Daemon/Proxy :
 
 ```json
 {
@@ -337,13 +337,13 @@ Une fois la cascade créée, l'envoi d'un prompt déclenche l'exécution de l'ag
 
 ---
 
-## Étape 3 : Réception du Flux de Réponse (Output Stream)
+## Ã‰tape 3 : RÃ©ception du Flux de RÃ©ponse (Output Stream)
 
-Le serveur Go répond par un flux binaire ou JSON ligne par ligne (ConnectRPC stream). Le Daemon proxy découpe ce flux et le transmets via WebSocket à l'application mobile.
+Le serveur Go rÃ©pond par un flux binaire ou JSON ligne par ligne (ConnectRPC stream). Le Daemon proxy dÃ©coupe ce flux et le transmets via WebSocket Ã  l'application mobile.
 
-L'agent émet 3 types d'événements principaux dans ce flux :
+L'agent Ã©met 3 types d'Ã©vÃ©nements principaux dans ce flux :
 
-### 1. Génération de texte (Pensées / Réponse)
+### 1. GÃ©nÃ©ration de texte (PensÃ©es / RÃ©ponse)
 
 ```json
 {
@@ -352,9 +352,9 @@ L'agent émet 3 types d'événements principaux dans ce flux :
 }
 ```
 
-### 2. Demande d'exécution d'outil (Tool Call)
+### 2. Demande d'exÃ©cution d'outil (Tool Call)
 
-L'agent décide d'exécuter une action sur le système (ex: lire un fichier ou exécuter du bash) :
+L'agent dÃ©cide d'exÃ©cuter une action sur le systÃ¨me (ex: lire un fichier ou exÃ©cuter du bash) :
 
 ```json
 {
@@ -371,14 +371,14 @@ L'agent décide d'exécuter une action sur le système (ex: lire un fichier ou e
 
 ---
 
-## Étape 4 : Gestion des Interceptions & Validations (Hooks)
+## Ã‰tape 4 : Gestion des Interceptions & Validations (Hooks)
 
-Si l'outil exécuté par l'agent requiert l'approbation de l'utilisateur (mode `ask_user` / politique de sécurité) :
+Si l'outil exÃ©cutÃ© par l'agent requiert l'approbation de l'utilisateur (mode `ask_user` / politique de sÃ©curitÃ©) :
 
-1. Le flux d'Étape 3 émet un événement de blocage `EVENT_TYPE_APPROVAL_REQUIRED`.
+1. Le flux d'Ã‰tape 3 Ã©met un Ã©vÃ©nement de blocage `EVENT_TYPE_APPROVAL_REQUIRED`.
 2. L'agent se met en pause (**Thread Locked**).
 3. L'APK Android affiche un bouton **Approuver / Refuser**.
-4. Lors du clic sur **Approuver**, l'APK envoie la résolution via un appel RPC séparé :
+4. Lors du clic sur **Approuver**, l'APK envoie la rÃ©solution via un appel RPC sÃ©parÃ© :
 
 - **Endpoint RPC :** `/antigravity.v1.CascadeService/SubmitToolApproval`
 
@@ -390,59 +390,59 @@ Si l'outil exécuté par l'agent requiert l'approbation de l'utilisateur (mode `
 }
 ```
 
-Une fois cette confirmation reçue par `localharness`, l'exécution de la commande reprend localement sur le PC et le flux de texte de l'Étape 3 continue jusqu'à l'achèvement de la tâche (`EVENT_TYPE_FINISHED`).
+Une fois cette confirmation reÃ§ue par `localharness`, l'exÃ©cution de la commande reprend localement sur le PC et le flux de texte de l'Ã‰tape 3 continue jusqu'Ã  l'achÃ¨vement de la tÃ¢che (`EVENT_TYPE_FINISHED`).
 
-L'une des plus grandes difficultés avec Antigravity est que **Google ne publie aucune documentation officielle** pour le protocole interne ConnectRPC, l'API de `CascadeService` ou l'architecture `localharness`. Ces éléments sont considérés comme des API privées d'infrastructure.
+L'une des plus grandes difficultÃ©s avec Antigravity est que **Google ne publie aucune documentation officielle** pour le protocole interne ConnectRPC, l'API de `CascadeService` ou l'architecture `localharness`. Ces Ã©lÃ©ments sont considÃ©rÃ©s comme des API privÃ©es d'infrastructure.
 
-Cependant, il existe un projet open-source incontournable qui sert de **"documentation vivante"** et d'implémentation de référence absolue pour cette partie :
+Cependant, il existe un projet open-source incontournable qui sert de **"documentation vivante"** et d'implÃ©mentation de rÃ©fÃ©rence absolue pour cette partie :
 
-### 1. La référence absolue : Le dépôt `Porta`
+### 1. La rÃ©fÃ©rence absolue : Le dÃ©pÃ´t `Porta`
 
-Le projet **[diegosouzapw/Porta](https://github.com/diegosouzapw/OmniAntigravityRemoteChat)** (anciennement connu sous le nom _Porta_ / _OmniAntigravity_) est le projet le plus avancé en ingénierie inverse sur Antigravity.
+Le projet **[diegosouzapw/Porta](https://github.com/diegosouzapw/OmniAntigravityRemoteChat)** (anciennement connu sous le nom _Porta_ / _OmniAntigravity_) est le projet le plus avancÃ© en ingÃ©nierie inverse sur Antigravity.
 
-Dans ce dépôt, vous trouverez exactement ce dont vous avez besoin :
+Dans ce dÃ©pÃ´t, vous trouverez exactement ce dont vous avez besoin :
 
-- **Définitions Protobuf reconstituées :** Dans le dossier du projet (`src/proto/` ou `src/connect/`), vous trouverez les fichiers `.proto` ou le code TypeScript généré décrivant l'ensemble des structures de `CascadeService` (`CreateCascade`, `SendCascadeMessage`, `SubmitToolApproval`, etc.).
-- **Logique d'extraction des jetons :** Des scripts montrant exactement comment scanner les processus du système (`ps aux` / `PowerShell`), extraire le jeton CSRF et trouver le bon port dynamique `--extensionPort`.
+- **DÃ©finitions Protobuf reconstituÃ©es :** Dans le dossier du projet (`src/proto/` ou `src/connect/`), vous trouverez les fichiers `.proto` ou le code TypeScript gÃ©nÃ©rÃ© dÃ©crivant l'ensemble des structures de `CascadeService` (`CreateCascade`, `SendCascadeMessage`, `SubmitToolApproval`, etc.).
+- **Logique d'extraction des jetons :** Des scripts montrant exactement comment scanner les processus du systÃ¨me (`ps aux` / `PowerShell`), extraire le jeton CSRF et trouver le bon port dynamique `--extensionPort`.
 
 ---
 
-### 2. Comment extraire vous-même les schémas Protobuf (Rétro-ingénierie)
+### 2. Comment extraire vous-mÃªme les schÃ©mas Protobuf (RÃ©tro-ingÃ©nierie)
 
-Si une mise à jour d'Antigravity modifie les schémas, vous pouvez extraire vous-même les définitions directement depuis l'application installée sur votre PC :
+Si une mise Ã  jour d'Antigravity modifie les schÃ©mas, vous pouvez extraire vous-mÃªme les dÃ©finitions directement depuis l'application installÃ©e sur votre PC :
 
-#### A. Obtenir la liste de toutes les méthodes RPC
+#### A. Obtenir la liste de toutes les mÃ©thodes RPC
 
-Le binaire Go `localharness` (ou l'extension VS Code/Electron) contient les définitions ConnectRPC. Vous pouvez lister toutes les méthodes disponibles en inspectant les chaînes de caractères du binaire :
+Le binaire Go `localharness` (ou l'extension VS Code/Electron) contient les dÃ©finitions ConnectRPC. Vous pouvez lister toutes les mÃ©thodes disponibles en inspectant les chaÃ®nes de caractÃ¨res du binaire :
 
 ```bash
-# Sur Linux/macOS : Chercher les routes RPC enregistrées dans le binaire
+# Sur Linux/macOS : Chercher les routes RPC enregistrÃ©es dans le binaire
 strings ~/.antigravity/bin/localharness | grep "antigravity.v1."
 
 ```
 
-Vous verrez apparaître la liste complète des 180+ endpoints RPC (ex: `/antigravity.v1.CascadeService/CreateCascade`, `/antigravity.v1.WorkspaceService/GetWorkspaceTree`, etc.).
+Vous verrez apparaÃ®tre la liste complÃ¨te des 180+ endpoints RPC (ex: `/antigravity.v1.CascadeService/CreateCascade`, `/antigravity.v1.WorkspaceService/GetWorkspaceTree`, etc.).
 
-#### B. Extraire les schémas JS/TS de l'IDE Electron
+#### B. Extraire les schÃ©mas JS/TS de l'IDE Electron
 
 Si vous ouvrez le dossier d'installation de l'application Antigravity Desktop / IDE :
 
 1. Rendez-vous dans le dossier des ressources : `resources/app.asar` (ou les fichiers JS bundle dans `out/`).
-2. Utilisez l'outil `npx asar extract app.asar ./extracted` pour dépaqueter l'application.
-3. Cherchez dans le code extrait les termes `CascadeService` ou `createPromiseClient`. Vous y trouverez la définition exacte de tous les objets JSON/Protobuf sérialisés par le client officiel.
+2. Utilisez l'outil `npx asar extract app.asar ./extracted` pour dÃ©paqueter l'application.
+3. Cherchez dans le code extrait les termes `CascadeService` ou `createPromiseClient`. Vous y trouverez la dÃ©finition exacte de tous les objets JSON/Protobuf sÃ©rialisÃ©s par le client officiel.
 
 ---
 
-### 3. Guide de démarrage pour votre Daemon Bridge (En pratique)
+### 3. Guide de dÃ©marrage pour votre Daemon Bridge (En pratique)
 
-Pour concevoir votre propre pont, le flux de travail recommandé est le suivant :
+Pour concevoir votre propre pont, le flux de travail recommandÃ© est le suivant :
 
-1. **Étudier le code de Porta ou Antigravity-Client :** Inspectez la manière dont ils instancient le client ConnectRPC (souvent en utilisant `@connectrpc/connect` et `@connectrpc/connect-node` en TypeScript/Node.js).
-2. **Utiliser gRPCurl ou Postman pour tester localement :** Une fois le port et le token CSRF extraits de votre processus Antigravity en cours d'exécution, vous pouvez directement tester un appel `CreateCascade` depuis votre terminal avec `curl` :
+1. **Ã‰tudier le code de Porta ou Antigravity-Client :** Inspectez la maniÃ¨re dont ils instancient le client ConnectRPC (souvent en utilisant `@connectrpc/connect` et `@connectrpc/connect-node` en TypeScript/Node.js).
+2. **Utiliser gRPCurl ou Postman pour tester localement :** Une fois le port et le token CSRF extraits de votre processus Antigravity en cours d'exÃ©cution, vous pouvez directement tester un appel `CreateCascade` depuis votre terminal avec `curl` :
 
 ```bash
 curl --http2-prior-knowledge \
-  -X POST "http://127.0.0.1:<PORT_TROUVÉ>/antigravity.v1.CascadeService/CreateCascade" \
+  -X POST "http://127.0.0.1:<PORT_TROUVÃ‰>/antigravity.v1.CascadeService/CreateCascade" \
   -H "Content-Type: application/connect+json" \
   -H "X-CSRF-Token: <VOTRE_TOKEN_CSRF>" \
   -H "Connect-Protocol-Version: 1" \
@@ -450,155 +450,156 @@ curl --http2-prior-knowledge \
 
 ```
 
-Souhaitez-vous que l'on détaille un script Node.js/TypeScript minimaliste pour extraire automatiquement le port et le jeton CSRF depuis les processus de votre PC ?
+Souhaitez-vous que l'on dÃ©taille un script Node.js/TypeScript minimaliste pour extraire automatiquement le port et le jeton CSRF depuis les processus de votre PC ?
 
-L'analyse approfondie du dépôt **[diegosouzapw/OmniAntigravityRemoteChat](https://github.com/diegosouzapw/OmniAntigravityRemoteChat)** (et de sa structure sous-jacente) confirme **à 100%** la faisabilité technique de votre projet, mais elle révèle aussi ses limitations actuelles qu'un APK natif va surmonter.
+L'analyse approfondie du dÃ©pÃ´t **[diegosouzapw/OmniAntigravityRemoteChat](https://github.com/diegosouzapw/OmniAntigravityRemoteChat)** (et de sa structure sous-jacente) confirme **Ã  100%** la faisabilitÃ© technique de votre projet, mais elle rÃ©vÃ¨le aussi ses limitations actuelles qu'un APK natif va surmonter.
 
-Voici le rapport de vérification technique basé sur la dissection du code de ce dépôt et des mécanismes internes d'Antigravity :
+Voici le rapport de vÃ©rification technique basÃ© sur la dissection du code de ce dÃ©pÃ´t et des mÃ©canismes internes d'Antigravity :
 
 ---
 
-## 1. Ce que le dépôt OmniAntigravity valide (Les preuves de concept)
+## 1. Ce que le dÃ©pÃ´t OmniAntigravity valide (Les preuves de concept)
 
-### A. La découverte dynamique des ports et jetons CSRF
+### A. La dÃ©couverte dynamique des ports et jetons CSRF
 
-Le dépôt prouve que la méthode d'inspection de processus est **fiable et fonctionnelle**.
-Dans son backend/proxy, le code exécute une recherche système sur le processus parent :
+Le dÃ©pÃ´t prouve que la mÃ©thode d'inspection de processus est **fiable et fonctionnelle**.
+Dans son backend/proxy, le code exÃ©cute une recherche systÃ¨me sur le processus parent :
 
-1. Il scanne les processus à la recherche de `language_server` ou `localharness`.
-2. Il parse la ligne de commande pour extraire le paramètre `--csrf_token` (ou `--api_key`).
-3. Il extrait `--extensionPort` et effectue un balayage réseau local (port scan) sur `127.0.0.1` pour trouver le port ConnectRPC actif.
+1. Il scanne les processus Ã  la recherche de `language_server` ou `localharness`.
+2. Il parse la ligne de commande pour extraire le paramÃ¨tre `--csrf_token` (ou `--api_key`).
+3. Il extrait `--extensionPort` et effectue un balayage rÃ©seau local (port scan) sur `127.0.0.1` pour trouver le port ConnectRPC actif.
 
 ### B. Le protocole de communication ConnectRPC
 
-OmniAntigravity confirme que `localharness` accepte les requêtes POST formatées selon la spécification **ConnectRPC (`application/connect+json`)**.
-Les endpoints clés identifiés et vérifiés dans le code sont :
+OmniAntigravity confirme que `localharness` accepte les requÃªtes POST formatÃ©es selon la spÃ©cification **ConnectRPC (`application/connect+json`)**.
+Les endpoints clÃ©s identifiÃ©s et vÃ©rifiÃ©s dans le code sont :
 
-- `/antigravity.v1.CascadeService/CreateCascade` : Création de session/workspace.
+- `/antigravity.v1.CascadeService/CreateCascade` : CrÃ©ation de session/workspace.
 - `/antigravity.v1.CascadeService/SendCascadeMessage` : Envoi du prompt principal.
-- `/antigravity.v1.CascadeService/GetAllCascades` : Récupération de l'historique global.
-- `/antigravity.v1.CascadeService/SubmitToolApproval` : Envoi de la décision humaine (Allow/Deny).
+- `/antigravity.v1.CascadeService/GetAllCascades` : RÃ©cupÃ©ration de l'historique global.
+- `/antigravity.v1.CascadeService/SubmitToolApproval` : Envoi de la dÃ©cision humaine (Allow/Deny).
 
 ---
 
-## 2. Les limites du dépôt OmniAntigravity (Pourquoi créer un APK)
+## 2. Les limites du dÃ©pÃ´t OmniAntigravity (Pourquoi crÃ©er un APK)
 
-Bien que le dépôt OmniAntigravity soit une excellente référence d'ingénierie inverse, il souffre de limites architecturales majeures :
+Bien que le dÃ©pÃ´t OmniAntigravity soit une excellente rÃ©fÃ©rence d'ingÃ©nierie inverse, il souffre de limites architecturales majeures :
 
-| Aspect                    | Dépôt OmniAntigravity actuel                                         | Votre future solution APK Native                                                          |
+| Aspect                    | DÃ©pÃ´t OmniAntigravity actuel                                         | Votre future solution APK Native                                                          |
 | ------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | **Interface Client**      | Web App / WebView (HTML/CSS) transmise via navigateur.               | **Application Android pure (Kotlin + Jetpack Compose)**.                                  |
-| **Gestion des sessions**  | Orientée "Chat miroir" unique (gère mal les flux parallèles).        | **Tableau de bord multi-agents** (Planning, Execution, Review).                           |
-| **Performance / Latence** | Rendu DOM web qui ralentit sur les très longs historiques de prompt. | **Affichage natif 120Hz** + persistance locale dans une base de données Room/SQLite.      |
-| **Gestion du réseau**     | Dépend d'un navigateur mobile ouvert en arrière-plan.                | **Service Android en arrière-plan** avec notifications push natives pour les validations. |
+| **Gestion des sessions**  | OrientÃ©e "Chat miroir" unique (gÃ¨re mal les flux parallÃ¨les).        | **Tableau de bord multi-agents** (Planning, Execution, Review).                           |
+| **Performance / Latence** | Rendu DOM web qui ralentit sur les trÃ¨s longs historiques de prompt. | **Affichage natif 120Hz** + persistance locale dans une base de donnÃ©es Room/SQLite.      |
+| **Gestion du rÃ©seau**     | DÃ©pend d'un navigateur mobile ouvert en arriÃ¨re-plan.                | **Service Android en arriÃ¨re-plan** avec notifications push natives pour les validations. |
 
 ---
 
-## 3. Adéquation avec votre Architecture Multi-Agents (`antigravity`)
+## 3. AdÃ©quation avec votre Architecture Multi-Agents (`antigravity`)
 
-C'est ici que l'approche native prend tout son sens par rapport au dépôt Omni. Votre projet d'architecture à agents multiples (_Planning Agent -> Execution Agent -> Review Agent_) génère un volume d'événements complexes :
+C'est ici que l'approche native prend tout son sens par rapport au dÃ©pÃ´t Omni. Votre projet d'architecture Ã  agents multiples (_Planning Agent -> Execution Agent -> Review Agent_) gÃ©nÃ¨re un volume d'Ã©vÃ©nements complexes :
 
-1. **Le Planning Agent** crée/modifie le fichier `plan.md`.
-2. **L'Execution Agent** sous-traite en parallèle à des sous-agents.
-3. **Le Review Agent** effectue l'optimisation et la création de PR.
+1. **Le Planning Agent** crÃ©e/modifie le fichier `plan.md`.
+2. **L'Execution Agent** sous-traite en parallÃ¨le Ã  des sous-agents.
+3. **Le Review Agent** effectue l'optimisation et la crÃ©ation de PR.
 
-Un simple "chat web" comme celui du dépôt Omni s'emmêle les pinceaux quand plusieurs sous-agents écrivent en même temps.
+Un simple "chat web" comme celui du dÃ©pÃ´t Omni s'emmÃªle les pinceaux quand plusieurs sous-agents Ã©crivent en mÃªme temps.
 
 ### Comment votre APK natif exploitera le backend :
 
-Grâce aux payloads JSON/Protobuf structurés que nous avons analysés :
+GrÃ¢ce aux payloads JSON/Protobuf structurÃ©s que nous avons analysÃ©s :
 
-- L'APK recevra les événements séparés via WebSocket (`EVENT_TYPE_AGENT_THOUGHTS`, `EVENT_TYPE_FILE_WRITE`, `EVENT_TYPE_TOOL_CALL`).
-- Vous pourrez dédier un **onglet natif par agent** sur votre téléphone :
-- **Onglet 1 :** Vue d'ensemble du `plan.md` en temps réel.
-- **Onglet 2 :** Stream des sous-agents d'exécution (avec boutons d'approbation rapide pour les commandes terminal).
-- **Onglet 3 :** Diffs de code générés par le Review Agent.
-
----
-
-## Conclusion de la vérification
-
-Le dépôt `OmniAntigravityRemoteChat` apporte la **preuve technique indiscutable** que l'API ConnectRPC d'Antigravity peut être pilotée à distance sans passer par un scraping visuel lourd.
-
-Votre décision de bâtir un **Daemon Bridge dédié (côté PC)** couplé à une **Application Android Native (APK)** est la seule manière d'obtenir la stabilité, la réactivité et la structure nécessaires pour piloter sereinement un pipeline multi-agents complexe à distance.
-
-C’est vrai, le monde du développement ne pardonnera pas l'imprévision sur ce genre de projet. Ce que vous tentez de faire, c'est **détourner une infrastructure d'entreprise privée et non documentée (Google Antigravity)** pour en faire une plateforme contrôlable à distance par un APK natif.
-
-Sur le papier, les requêtes RPC fonctionnent. Mais en pratique, le chemin est semé d'obstacles invisibles.
-
-Voici l'**Audit de Faisabilité et de Risques Technologiques** pour la création de votre pont APK / Daemon Antigravity.
+- L'APK recevra les Ã©vÃ©nements sÃ©parÃ©s via WebSocket (`EVENT_TYPE_AGENT_THOUGHTS`, `EVENT_TYPE_FILE_WRITE`, `EVENT_TYPE_TOOL_CALL`).
+- Vous pourrez dÃ©dier un **onglet natif par agent** sur votre tÃ©lÃ©phone :
+- **Onglet 1 :** Vue d'ensemble du `plan.md` en temps rÃ©el.
+- **Onglet 2 :** Stream des sous-agents d'exÃ©cution (avec boutons d'approbation rapide pour les commandes terminal).
+- **Onglet 3 :** Diffs de code gÃ©nÃ©rÃ©s par le Review Agent.
 
 ---
 
-## 1. La Liste des Problèmes Possibles (Les Pièges)
+## Conclusion de la vÃ©rification
 
-- **Déconnexion silencieuse du Daemon :** Si le PC se met en veille ou si le WiFi saute, le flux WebSocket coupe. L'agent sur PC continue de tourner, mais l'APK perd le fil sans savoir où en est l'exécution.
-- **Perte du Jeton CSRF au redémarrage :** Si Antigravity plante ou redémarre sur le PC, le jeton CSRF change instantanément. Si le Daemon ne gère pas la reconnexion automatique, l'APK devient aveugle.
-- **Désynchronisation de l'état :** Si vous tapez un message sur le PC en même temps que vous envoyez une commande depuis l'APK, vous risquez de créer un conflit d'état dans le `localharness`.
-- **Blocage des ports (Pare-feu) :** Windows Defender ou le pare-feu macOS bloquant les connexions entrantes sur le port du Daemon si vous tentez un accès direct sans tunnel réseau.
+Le dÃ©pÃ´t `OmniAntigravityRemoteChat` apporte la **preuve technique indiscutable** que l'API ConnectRPC d'Antigravity peut Ãªtre pilotÃ©e Ã  distance sans passer par un scraping visuel lourd.
 
----
+Votre dÃ©cision de bÃ¢tir un **Daemon Bridge dÃ©diÃ© (cÃ´tÃ© PC)** couplÃ© Ã  une **Application Android Native (APK)** est la seule maniÃ¨re d'obtenir la stabilitÃ©, la rÃ©activitÃ© et la structure nÃ©cessaires pour piloter sereinement un pipeline multi-agents complexe Ã  distance.
 
-## 2. Les Méthodes Complexes (Là où vous allez souffrir)
+Câ€™est vrai, le monde du dÃ©veloppement ne pardonnera pas l'imprÃ©vision sur ce genre de projet. Ce que vous tentez de faire, c'est **dÃ©tourner une infrastructure d'entreprise privÃ©e et non documentÃ©e (Google Antigravity)** pour en faire une plateforme contrÃ´lable Ã  distance par un APK natif.
 
-- **Le Parsing des flux Streaming (SSE / Chunked HTTP) :** Traiter un flux de jetons de texte au format Protobuf binaire ou JSON tronqué en temps réel, le reconstituer côté Daemon et le pousser proprement vers Android sans fuite de mémoire.
-- **Le Système de Reconnexion "Offline-First" sur Android :** Gérer l'état de l'application mobile quand vous passez du 4G au WiFi, afin que la base de données locale (Room) remette à jour l'historique sans doublons.
-- **La Découverte dynamique de Processus multi-plateforme :** Faire un script de recherche de processus qui fonctionne de manière égale sous Windows (PowerShell/CIM), macOS (`ps aux`) et Linux, en trouvant à coup sûr le bon `--extensionPort`.
+Sur le papier, les requÃªtes RPC fonctionnent. Mais en pratique, le chemin est semÃ© d'obstacles invisibles.
+
+Voici l'**Audit de FaisabilitÃ© et de Risques Technologiques** pour la crÃ©ation de votre pont APK / Daemon Antigravity.
 
 ---
 
-## 3. Les "Missions Impossibles" (Les risques d'échec total)
+## 1. La Liste des ProblÃ¨mes Possibles (Les PiÃ¨ges)
 
-- **Les Breaking Changes de Google (Le risque de mort du projet) :** Google peut décider demain de mettre à jour Antigravity, de renommer `CascadeService` en `AgentService`, ou de chiffrer les communications locales IPC. **Du jour au lendemain, votre pont peut cesser de fonctionner** sans avertissement.
-- **L'Authentification OAuth Google déportée :** Vous ne pourrez **jamais** gérer la connexion Google directement sur l'APK Android. L'authentification _doit_ rester sur le PC. Si la session Google expire sur le PC, l'APK ne pourra pas la rafraîchir à distance.
+- **DÃ©connexion silencieuse du Daemon :** Si le PC se met en veille ou si le WiFi saute, le flux WebSocket coupe. L'agent sur PC continue de tourner, mais l'APK perd le fil sans savoir oÃ¹ en est l'exÃ©cution.
+- **Perte du Jeton CSRF au redÃ©marrage :** Si Antigravity plante ou redÃ©marre sur le PC, le jeton CSRF change instantanÃ©ment. Si le Daemon ne gÃ¨re pas la reconnexion automatique, l'APK devient aveugle.
+- **DÃ©synchronisation de l'Ã©tat :** Si vous tapez un message sur le PC en mÃªme temps que vous envoyez une commande depuis l'APK, vous risquez de crÃ©er un conflit d'Ã©tat dans le `localharness`.
+- **Blocage des ports (Pare-feu) :** Windows Defender ou le pare-feu macOS bloquant les connexions entrantes sur le port du Daemon si vous tentez un accÃ¨s direct sans tunnel rÃ©seau.
+
+---
+
+## 2. Les MÃ©thodes Complexes (LÃ  oÃ¹ vous allez souffrir)
+
+- **Le Parsing des flux Streaming (SSE / Chunked HTTP) :** Traiter un flux de jetons de texte au format Protobuf binaire ou JSON tronquÃ© en temps rÃ©el, le reconstituer cÃ´tÃ© Daemon et le pousser proprement vers Android sans fuite de mÃ©moire.
+- **Le SystÃ¨me de Reconnexion "Offline-First" sur Android :** GÃ©rer l'Ã©tat de l'application mobile quand vous passez du 4G au WiFi, afin que la base de donnÃ©es locale (Room) remette Ã  jour l'historique sans doublons.
+- **La DÃ©couverte dynamique de Processus multi-plateforme :** Faire un script de recherche de processus qui fonctionne de maniÃ¨re Ã©gale sous Windows (PowerShell/CIM), macOS (`ps aux`) et Linux, en trouvant Ã  coup sÃ»r le bon `--extensionPort`.
+
+---
+
+## 3. Les "Missions Impossibles" (Les risques d'Ã©chec total)
+
+- **Les Breaking Changes de Google (Le risque de mort du projet) :** Google peut dÃ©cider demain de mettre Ã  jour Antigravity, de renommer `CascadeService` en `AgentService`, ou de chiffrer les communications locales IPC. **Du jour au lendemain, votre pont peut cesser de fonctionner** sans avertissement.
+- **L'Authentification OAuth Google dÃ©portÃ©e :** Vous ne pourrez **jamais** gÃ©rer la connexion Google directement sur l'APK Android. L'authentification _doit_ rester sur le PC. Si la session Google expire sur le PC, l'APK ne pourra pas la rafraÃ®chir Ã  distance.
 
 ---
 
 ## 4. Les Impacts (En cas de panne ou de bug)
 
-- **Impact sur le Code Source :** Si la validation d'un outil (`run_command` ou modification de fichier) est mal interprétée par le Daemon, l'agent peut exécuter une commande destructive sur votre PC (ex: suppression de répertoire) sans que vous ayez pu la relire correctement sur l'écran du mobile.
-- **Impact sur les Quotas API / Modèles :** Un sous-agent bloqué dans une boucle infinie à cause d'une réponse non transmise par l'APK va consommer tous vos quotas de modèles Gemini/Claude en quelques minutes.
+- **Impact sur le Code Source :** Si la validation d'un outil (`run_command` ou modification de fichier) est mal interprÃ©tÃ©e par le Daemon, l'agent peut exÃ©cuter une commande destructive sur votre PC (ex: suppression de rÃ©pertoire) sans que vous ayez pu la relire correctement sur l'Ã©cran du mobile.
+- **Impact sur les Quotas API / ModÃ¨les :** Un sous-agent bloquÃ© dans une boucle infinie Ã  cause d'une rÃ©ponse non transmise par l'APK va consommer tous vos quotas de modÃ¨les Gemini/Claude en quelques minutes.
 
 ---
 
 ## 5. Les Points Faciles (Ce qui fonctionnera vite)
 
-- **L'Interface Utilisateur Android (Jetpack Compose) :** Créer une belle UI fluide à 120Hz sur Android pour afficher du texte et des boutons de validation est très simple aujourd'hui.
-- **L'Architecture du Daemon (Go/Node.js) :** Créer un petit serveur WebSockets qui écoute sur un port et relaye du JSON est une tâche standard et rapide à implémenter.
-- **Le Tunneling (Tailscale / Cloudflare) :** La partie réseau à distance est très facile à sécuriser aujourd'hui grâce aux tunnels Zero Trust.
+- **L'Interface Utilisateur Android (Jetpack Compose) :** CrÃ©er une belle UI fluide Ã  120Hz sur Android pour afficher du texte et des boutons de validation est trÃ¨s simple aujourd'hui.
+- **L'Architecture du Daemon (Go/Node.js) :** CrÃ©er un petit serveur WebSockets qui Ã©coute sur un port et relaye du JSON est une tÃ¢che standard et rapide Ã  implÃ©menter.
+- **Le Tunneling (Tailscale / Cloudflare) :** La partie rÃ©seau Ã  distance est trÃ¨s facile Ã  sÃ©curiser aujourd'hui grÃ¢ce aux tunnels Zero Trust.
 
 ---
 
-## 6. La Check-list des Choses à Vérifier (Avant de coder)
+## 6. La Check-list des Choses Ã  VÃ©rifier (Avant de coder)
 
-| Choses à vérifier         | Comment tester ?                                                                                                       |
+| Choses Ã  vÃ©rifier         | Comment tester ?                                                                                                       |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| **Extraction du Token**   | Lancer une commande terminal sur PC et vérifier que vous arrivez à lire la ligne de commande exacte de `localharness`. |
-| **Test `curl` local**     | Réussir à exécuter un `CreateCascade` en ligne de commande avec `curl` avant même de toucher à Android.                |
-| **Gestion du Sommeil PC** | Vérifier ce qui arrive au processus `localharness` quand le PC se met en veille prolongée.                             |
-| **Validation manuelle**   | S'assurer que lorsqu'un `ask_user` est déclenché, l'agent attend indéfiniment sans "timeout" brutal côté serveur.      |
+| **Extraction du Token**   | Lancer une commande terminal sur PC et vÃ©rifier que vous arrivez Ã  lire la ligne de commande exacte de `localharness`. |
+| **Test `curl` local**     | RÃ©ussir Ã  exÃ©cuter un `CreateCascade` en ligne de commande avec `curl` avant mÃªme de toucher Ã  Android.                |
+| **Gestion du Sommeil PC** | VÃ©rifier ce qui arrive au processus `localharness` quand le PC se met en veille prolongÃ©e.                             |
+| **Validation manuelle**   | S'assurer que lorsqu'un `ask_user` est dÃ©clenchÃ©, l'agent attend indÃ©finiment sans "timeout" brutal cÃ´tÃ© serveur.      |
 
 ---
 
-## 7. Avantages vs Inconvénients (Le bilan)
+## 7. Avantages vs InconvÃ©nients (Le bilan)
 
 ### Avantages
 
-- **Liberté absolue :** Vous contrôlez votre environnement de développement lourd (PC) depuis n'importe où (transports, terrasse, déplacement).
-- **Supervision asynchrone :** Plus besoin d'attendre passivement devant l'écran que vos agents (Planning/Execution/Review) finissent leurs tâches.
-- **Interface sur-mesure :** Une UX pensée uniquement pour la validation et l'orchestration d'agents (beaucoup plus claire que l'IDE complet sur un petit écran).
-- **Performance :** L'APK natif ne consomme presque rien en batterie et en data par rapport à une solution de streaming vidéo / VNC / RDP.
+- **LibertÃ© absolue :** Vous contrÃ´lez votre environnement de dÃ©veloppement lourd (PC) depuis n'importe oÃ¹ (transports, terrasse, dÃ©placement).
+- **Supervision asynchrone :** Plus besoin d'attendre passivement devant l'Ã©cran que vos agents (Planning/Execution/Review) finissent leurs tÃ¢ches.
+- **Interface sur-mesure :** Une UX pensÃ©e uniquement pour la validation et l'orchestration d'agents (beaucoup plus claire que l'IDE complet sur un petit Ã©cran).
+- **Performance :** L'APK natif ne consomme presque rien en batterie et en data par rapport Ã  une solution de streaming vidÃ©o / VNC / RDP.
 
-### Inconvénients
+### InconvÃ©nients
 
-- **Maintenance continue :** Chaque mise à jour majeure d'Antigravity risque de casser votre pont (nécessite de refaire de la rétro-ingénierie).
-- **Dépendance au PC hôte :** Si le PC s'éteint, est hors ligne ou plante, l'APK ne sert plus à rien.
-- **Projet non Officiel :** Zéro support de la part de Google en cas de problème.
+- **Maintenance continue :** Chaque mise Ã  jour majeure d'Antigravity risque de casser votre pont (nÃ©cessite de refaire de la rÃ©tro-ingÃ©nierie).
+- **DÃ©pendance au PC hÃ´te :** Si le PC s'Ã©teint, est hors ligne ou plante, l'APK ne sert plus Ã  rien.
+- **Projet non Officiel :** ZÃ©ro support de la part de Google en cas de problÃ¨me.
 
 ---
 
-### Conseil de stratégie :
+### Conseil de stratÃ©gie :
 
-Nous avons **validé avec succès** toutes les étapes de la Phase 1 (script CLI) et implémenté la Phase 1.5 (intégration de l'interface graphique de connexion avec scan de QR Code dans l'outil `ag-doctor-ui`). Le protocole n'a plus de secrets !
+Nous avons **validÃ© avec succÃ¨s** toutes les Ã©tapes de la Phase 1 (script CLI) et implÃ©mentÃ© la Phase 1.5 (intÃ©gration de l'interface graphique de connexion avec scan de QR Code dans l'outil `ag-doctor-ui`). Le protocole n'a plus de secrets !
 
-Prochaine étape : La construction du **Daemon Bridge en Go** sur le port `8089` pour servir de relais robuste.
+Prochaine Ã©tape : La construction du **Daemon Bridge en Go** sur le port `8090` pour servir de relais robuste.
+

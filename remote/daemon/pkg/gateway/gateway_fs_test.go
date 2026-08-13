@@ -143,8 +143,9 @@ func TestHomeRoot(t *testing.T) {
 	if !filepath.IsAbs(rel) {
 		t.Fatalf("homeRoot(relatif) = %q, attendu un chemin absolu", rel)
 	}
-	if filepath.Dir(filepath.Dir(filepath.Dir(rel))) != filepath.Clean(home) {
-		t.Fatalf("homeRoot(relatif) = %q ne pointe pas sous le home %q", rel, home)
+	want := filepath.Join(home, ".gemini", "antigravity-ide", "brain", "s1")
+	if rel != filepath.Clean(want) {
+		t.Fatalf("homeRoot(relatif) = %q, attendu %q", rel, want)
 	}
 
 	abs := homeRoot(filepath.Join(home, "x", "y"))

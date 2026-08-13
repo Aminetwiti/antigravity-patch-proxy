@@ -40,7 +40,7 @@ class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
       );
       if (mounted) {
         setState(() {
-          _content = res['data']?['content'] ?? res['content'] ?? 'Contenu vide';
+          _content = res['content'] as String? ?? 'Contenu vide';
           _isLoading = false;
         });
       }

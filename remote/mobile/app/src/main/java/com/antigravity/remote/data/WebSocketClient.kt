@@ -1,4 +1,4 @@
-package com.antigravity.remote.data
+﻿package com.antigravity.remote.data
 
 import okhttp3.*
 import org.json.JSONObject
@@ -6,7 +6,7 @@ import java.util.concurrent.TimeUnit
 
 class RemoteWebSocketClient(
     private val host: String = "10.0.2.2", // Default for Android Emulator to localhost
-    private val port: Int = 8089,
+    private val port: Int = 8090,
     private val onMessageReceived: (JSONObject) -> Unit,
     private val onStatusChanged: (Boolean) -> Unit
 ) {
@@ -69,3 +69,4 @@ class RemoteWebSocketClient(
         webSocket?.close(1000, "App closed")
     }
 }
+

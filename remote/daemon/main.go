@@ -19,7 +19,7 @@ func main() {
 	var tunnelFlag string
 	var authToken string
 
-	flag.IntVar(&listenPort, "port", 8089, "Port for the WebSocket server")
+	flag.IntVar(&listenPort, "port", 8090, "Port for the WebSocket server")
 	flag.StringVar(&host, "host", "0.0.0.0", "Host for the WebSocket server")
 	flag.StringVar(&tunnelFlag, "tunnel", "", "Tunnel provider (ngrok, cloudflare, pinggy)")
 	flag.StringVar(&authToken, "auth-token", "", "Authentication token for Mobile App")

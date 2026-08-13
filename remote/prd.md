@@ -1,197 +1,198 @@
-# PRD — Antigravity Remote Control OS (V1 Étendue)
+﻿# PRD â€” Antigravity Remote Control OS (V1 Ã‰tendue)
 
 ## Product Requirements Document
 
 ---
 
-## 1. Périmètre de la V1 Étendue
+## 1. PÃ©rimÃ¨tre de la V1 Ã‰tendue
 
-La V1 couvre les fonctionnalités suivantes, classées par priorité :
+La V1 couvre les fonctionnalitÃ©s suivantes, classÃ©es par prioritÃ© :
 
-### P0 — Critique (sans ça, le produit ne sert à rien)
+### P0 â€” Critique (sans Ã§a, le produit ne sert Ã  rien)
 
-| # | Fonctionnalité | Endpoint RPC associé | Description |
+| # | FonctionnalitÃ© | Endpoint RPC associÃ© | Description |
 |:--|:---|:---|:---|
-| 1 | Découverte du `localharness` | — (processus système) | Scanner les processus, extraire le port + token CSRF |
-| 2 | Création de session | `CreateCascade` | Instancier une Cascade rattachée à un workspace |
-| 3 | Envoi de prompt | `SendCascadeMessage` | Envoyer un message texte à l'agent et recevoir le stream de réponse |
-| 4 | Approbation d'outils | `SubmitToolApproval` | Valider ou refuser les commandes `run_command` bloquées par `ask_user` |
-| 5 | Liste des sessions | `GetAllCascades` | Récupérer toutes les sessions actives pour basculer entre elles |
+| 1 | DÃ©couverte du `localharness` | â€” (processus systÃ¨me) | Scanner les processus, extraire le port + token CSRF |
+| 2 | CrÃ©ation de session | `CreateCascade` | Instancier une Cascade rattachÃ©e Ã  un workspace |
+| 3 | Envoi de prompt | `SendCascadeMessage` | Envoyer un message texte Ã  l'agent et recevoir le stream de rÃ©ponse |
+| 4 | Approbation d'outils | `SubmitToolApproval` | Valider ou refuser les commandes `run_command` bloquÃ©es par `ask_user` |
+| 5 | Liste des sessions | `GetAllCascades` | RÃ©cupÃ©rer toutes les sessions actives pour basculer entre elles |
 
-### P1 — Important (V1 étendue)
+### P1 â€” Important (V1 Ã©tendue)
 
-| # | Fonctionnalité | Endpoint RPC associé | Description |
+| # | FonctionnalitÃ© | Endpoint RPC associÃ© | Description |
 |:--|:---|:---|:---|
 | 6 | Arborescence du workspace | `GetWorkspaceTree` | Afficher la structure du projet (dossiers, fichiers) |
-| 7 | Lecture de fichiers | `GetFileContent` (à confirmer) | Lire le contenu d'un fichier du workspace |
-| 8 | Visualisation des diffs | (via les événements du stream) | Afficher les modifications de code apportées par l'agent |
-| 9 | Historique de conversation | `GetCascadeHistory` (à confirmer) | Relire les échanges passés d'une session |
+| 7 | Lecture de fichiers | `GetFileContent` (Ã  confirmer) | Lire le contenu d'un fichier du workspace |
+| 8 | Visualisation des diffs | (via les Ã©vÃ©nements du stream) | Afficher les modifications de code apportÃ©es par l'agent |
+| 9 | Historique de conversation | `GetCascadeHistory` (Ã  confirmer) | Relire les Ã©changes passÃ©s d'une session |
 
-### P2 — Souhaitable (peut attendre la V2)
+### P2 â€” Souhaitable (peut attendre la V2)
 
-| # | Fonctionnalité | Description |
+| # | FonctionnalitÃ© | Description |
 |:--|:---|:---|
-| 10 | Édition de fichiers à distance | Modifier du code depuis le mobile |
-| 11 | Tableau de bord multi-agents | Onglets séparés : Planning / Execution / Review |
-| 12 | Mode Offline-First | Room DB locale avec synchronisation au retour du réseau |
-| 13 | Notifications push FCM | Alertes système Android quand un agent attend une validation |
-| 14 | Changement de modèle à distance | Basculer entre Gemini, Claude, DeepSeek depuis le mobile |
+| 10 | Ã‰dition de fichiers Ã  distance | Modifier du code depuis le mobile |
+| 11 | Tableau de bord multi-agents | Onglets sÃ©parÃ©s : Planning / Execution / Review |
+| 12 | Mode Offline-First | Room DB locale avec synchronisation au retour du rÃ©seau |
+| 13 | Notifications push FCM | Alertes systÃ¨me Android quand un agent attend une validation |
+| 14 | Changement de modÃ¨le Ã  distance | Basculer entre Gemini, Claude, DeepSeek depuis le mobile |
 
 ---
 
-## 2. Les 7 Sous-Problèmes Techniques
+## 2. Les 7 Sous-ProblÃ¨mes Techniques
 
-Le projet se décompose en 7 problèmes indépendants à résoudre séquentiellement :
+Le projet se dÃ©compose en 7 problÃ¨mes indÃ©pendants Ã  rÃ©soudre sÃ©quentiellement :
 
-### SP1 — Découverte du `localharness`
-**Entrée :** Un PC avec Antigravity IDE ouvert  
+### SP1 â€” DÃ©couverte du `localharness`
+**EntrÃ©e :** Un PC avec Antigravity IDE ouvert  
 **Sortie :** Le PID du processus, le port ConnectRPC, le token CSRF  
-**Méthode :** Inspection des processus système  
-**Difficulté :** 🟢 Facile (déjà résolu par la communauté)  
+**MÃ©thode :** Inspection des processus systÃ¨me  
+**DifficultÃ© :** ðŸŸ¢ Facile (dÃ©jÃ  rÃ©solu par la communautÃ©)  
 **Risque :** Multi-plateforme (Windows PowerShell vs macOS/Linux `ps aux`)
 
-### SP2 — Authentification ConnectRPC
-**Entrée :** Port + Token CSRF  
-**Sortie :** Requête HTTP/2 valide acceptée par `localharness`  
-**Méthode :** Forger les headers (`Content-Type: application/connect+json`, `X-CSRF-Token`, `Connect-Protocol-Version: 1`)  
-**Difficulté :** 🟢 Facile  
-**Risque :** Le token change à chaque redémarrage → il faut détecter et ré-extraire automatiquement
+### SP2 â€” Authentification ConnectRPC
+**EntrÃ©e :** Port + Token CSRF  
+**Sortie :** RequÃªte HTTP/2 valide acceptÃ©e par `localharness`  
+**MÃ©thode :** Forger les headers (`Content-Type: application/connect+json`, `X-CSRF-Token`, `Connect-Protocol-Version: 1`)  
+**DifficultÃ© :** ðŸŸ¢ Facile  
+**Risque :** Le token change Ã  chaque redÃ©marrage â†’ il faut dÃ©tecter et rÃ©-extraire automatiquement
 
-### SP3 — Gestion de Sessions (Cascades)
-**Entrée :** Un workspace path  
+### SP3 â€” Gestion de Sessions (Cascades)
+**EntrÃ©e :** Un workspace path  
 **Sortie :** Un `cascadeId` valide  
-**Méthode :** `POST /antigravity.v1.CascadeService/CreateCascade`  
-**Difficulté :** 🟡 Moyen  
-**Risque :** Les schémas Protobuf exacts ne sont pas documentés — il faut les confirmer par rétro-ingénierie
+**MÃ©thode :** `POST /antigravity.v1.CascadeService/CreateCascade`  
+**DifficultÃ© :** ðŸŸ¡ Moyen  
+**Risque :** Les schÃ©mas Protobuf exacts ne sont pas documentÃ©s â€” il faut les confirmer par rÃ©tro-ingÃ©nierie
 
-### SP4 — Streaming de Réponse Agent
-**Entrée :** Un prompt envoyé via `SendCascadeMessage`  
-**Sortie :** Un flux d'événements (`TEXT_DELTA`, `TOOL_CALL`, `APPROVAL_REQUIRED`, `FINISHED`)  
-**Méthode :** SSE / Chunked HTTP avec parsing JSON ou Protobuf  
-**Difficulté :** 🟡 Moyen  
-**Risque :** Chunks tronqués, fragments incomplets, gestion mémoire
+### SP4 â€” Streaming de RÃ©ponse Agent
+**EntrÃ©e :** Un prompt envoyÃ© via `SendCascadeMessage`  
+**Sortie :** Un flux d'Ã©vÃ©nements (`TEXT_DELTA`, `TOOL_CALL`, `APPROVAL_REQUIRED`, `FINISHED`)  
+**MÃ©thode :** SSE / Chunked HTTP avec parsing JSON ou Protobuf  
+**DifficultÃ© :** ðŸŸ¡ Moyen  
+**Risque :** Chunks tronquÃ©s, fragments incomplets, gestion mÃ©moire
 
-### SP5 — Approbation d'Outils
-**Entrée :** Un événement `APPROVAL_REQUIRED` dans le stream  
+### SP5 â€” Approbation d'Outils
+**EntrÃ©e :** Un Ã©vÃ©nement `APPROVAL_REQUIRED` dans le stream  
 **Sortie :** Un appel `SubmitToolApproval` avec `DECISION_ALLOW` ou `DECISION_DENY`  
-**Méthode :** Requête POST unitaire au même endpoint ConnectRPC  
-**Difficulté :** 🟢 Facile (une fois SP2 et SP4 résolus)  
-**Risque :** S'assurer que l'agent attend indéfiniment sans timeout côté serveur
+**MÃ©thode :** RequÃªte POST unitaire au mÃªme endpoint ConnectRPC  
+**DifficultÃ© :** ðŸŸ¢ Facile (une fois SP2 et SP4 rÃ©solus)  
+**Risque :** S'assurer que l'agent attend indÃ©finiment sans timeout cÃ´tÃ© serveur
 
-### SP6 — Gestion des Workspaces
-**Entrée :** Un cascadeId ou un chemin de workspace  
+### SP6 â€” Gestion des Workspaces
+**EntrÃ©e :** Un cascadeId ou un chemin de workspace  
 **Sortie :** L'arborescence du projet + le contenu des fichiers  
-**Méthode :** Endpoints RPC à identifier (`GetWorkspaceTree`, `GetFileContent`)  
-**Difficulté :** 🟡 Moyen  
-**Risque :** Ces endpoints existent-ils vraiment ? À confirmer par la cartographie des méthodes RPC
+**MÃ©thode :** Endpoints RPC Ã  identifier (`GetWorkspaceTree`, `GetFileContent`)  
+**DifficultÃ© :** ðŸŸ¡ Moyen  
+**Risque :** Ces endpoints existent-ils vraiment ? Ã€ confirmer par la cartographie des mÃ©thodes RPC
 
-### SP7 — Résilience Réseau
-**Entrée :** Coupure réseau (4G ↔ WiFi, mise en veille PC)  
+### SP7 â€” RÃ©silience RÃ©seau
+**EntrÃ©e :** Coupure rÃ©seau (4G â†” WiFi, mise en veille PC)  
 **Sortie :** L'application mobile se resynchronise automatiquement sans doublons  
-**Méthode :** Architecture Offline-First (Room DB) + Reconnexion automatique du Daemon  
-**Difficulté :** 🔴 Difficile  
-**Risque :** Désynchronisation d'état si le PC et le mobile envoient des commandes simultanément
+**MÃ©thode :** Architecture Offline-First (Room DB) + Reconnexion automatique du Daemon  
+**DifficultÃ© :** ðŸ”´ Difficile  
+**Risque :** DÃ©synchronisation d'Ã©tat si le PC et le mobile envoient des commandes simultanÃ©ment
 
 ---
 
 ## 3. Architecture en 3 Couches
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│                    COUCHE 1 : PC HÔTE                    │
-│                                                          │
-│  Antigravity IDE ──► localharness (Go, ConnectRPC)       │
-│                           │ 127.0.0.1 (loopback)        │
-│                           ▼                              │
-│                    Daemon Bridge (Go)                     │
-│                    - Découverte auto du port + CSRF       │
-│                    - Traducteur ConnectRPC → WebSocket    │
-│                    - Reconnexion auto si crash IDE        │
-└──────────────────────────┬───────────────────────────────┘
-                           │ WebSocket + Protobuf
-                           │ (LAN direct ou Tunnel Zero Trust)
-┌──────────────────────────┴───────────────────────────────┐
-│              COUCHE 2 : RÉSEAU DE TRANSPORT              │
-│                                                          │
-│  Option A : WiFi local (même réseau)                     │
-│  Option B : Cloudflare Tunnel / Tailscale (accès global) │
-└──────────────────────────┬───────────────────────────────┘
-                           │
-┌──────────────────────────┴───────────────────────────────┐
-│               COUCHE 3 : APK ANDROID NATIF               │
-│                                                          │
-│  Kotlin + Jetpack Compose                                │
-│  - Tableau de bord des sessions                          │
-│  - Arborescence du workspace                             │
-│  - Visualiseur de diffs de code                          │
-│  - Boutons d'approbation (Approuver / Refuser)           │
-│  - Room DB (historique hors-ligne)                       │
-│  - FCM (notifications push système)                      │
-└──────────────────────────────────────────────────────────┘
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚                    COUCHE 1 : PC HÃ”TE                    â”‚
+â”‚                                                          â”‚
+â”‚  Antigravity IDE â”€â”€â–º localharness (Go, ConnectRPC)       â”‚
+â”‚                           â”‚ 127.0.0.1 (loopback)        â”‚
+â”‚                           â–¼                              â”‚
+â”‚                    Daemon Bridge (Go)                     â”‚
+â”‚                    - DÃ©couverte auto du port + CSRF       â”‚
+â”‚                    - Traducteur ConnectRPC â†’ WebSocket    â”‚
+â”‚                    - Reconnexion auto si crash IDE        â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                           â”‚ WebSocket + Protobuf
+                           â”‚ (LAN direct ou Tunnel Zero Trust)
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚              COUCHE 2 : RÃ‰SEAU DE TRANSPORT              â”‚
+â”‚                                                          â”‚
+â”‚  Option A : WiFi local (mÃªme rÃ©seau)                     â”‚
+â”‚  Option B : Cloudflare Tunnel / Tailscale (accÃ¨s global) â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                           â”‚
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚               COUCHE 3 : APK ANDROID NATIF               â”‚
+â”‚                                                          â”‚
+â”‚  Kotlin + Jetpack Compose                                â”‚
+â”‚  - Tableau de bord des sessions                          â”‚
+â”‚  - Arborescence du workspace                             â”‚
+â”‚  - Visualiseur de diffs de code                          â”‚
+â”‚  - Boutons d'approbation (Approuver / Refuser)           â”‚
+â”‚  - Room DB (historique hors-ligne)                       â”‚
+â”‚  - FCM (notifications push systÃ¨me)                      â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 ```
 
 ---
 
 ## 4. Feuille de Route en Escalier
 
-Chaque marche doit fonctionner à 100% avant de passer à la suivante.
+Chaque marche doit fonctionner Ã  100% avant de passer Ã  la suivante.
 
-### Phase 1 — Validation du Protocole (CLI sur PC)
+### Phase 1 â€” Validation du Protocole (CLI sur PC)
 
-| Marche | Objectif | Critère de Succès | Statut |
+| Marche | Objectif | CritÃ¨re de SuccÃ¨s | Statut |
 |:---|:---|:---|:---|
-| **0** | Découvrir le `localharness` | Un script affiche le PID, le port et le token CSRF | ✅ Validé |
-| **1** | Test unitaire | Un `POST CreateCascade` renvoie un `cascadeId` valide, envoi de prompt et réception | ✅ Validé (`test-1` à `test-3`) |
-| **2** | CLI - Gestion des Workspaces | Ajouter un workspace et changer de projet actif | ✅ Validé (`test-7-workspace.ts`) |
-| **3** | CLI - Gestion des Modèles | Lister les modèles LLM disponibles, changer le modèle actif | ✅ Validé (`test-6-model.ts`) |
-| **4** | CLI - Gestion des Sessions | Lister toutes les sessions (Cascades) actives | ✅ Validé (`test-4-list.ts`) |
-| **5** | CLI - Interaction Session | Ouvrir une session existante, envoyer un prompt, récupérer les données | ✅ Validé (`test-5-history.ts` et `test-marche.ts`) |
-| **6** | CLI - Actions Avancées | Appels d'outils, Focus (SmartFocusConversation), GetSidecars | ✅ Validé (`test-8` à `test-17`) |
+| **0** | DÃ©couvrir le `localharness` | Un script affiche le PID, le port et le token CSRF | âœ… ValidÃ© |
+| **1** | Test unitaire | Un `POST CreateCascade` renvoie un `cascadeId` valide, envoi de prompt et rÃ©ception | âœ… ValidÃ© (`test-1` Ã  `test-3`) |
+| **2** | CLI - Gestion des Workspaces | Ajouter un workspace et changer de projet actif | âœ… ValidÃ© (`test-7-workspace.ts`) |
+| **3** | CLI - Gestion des ModÃ¨les | Lister les modÃ¨les LLM disponibles, changer le modÃ¨le actif | âœ… ValidÃ© (`test-6-model.ts`) |
+| **4** | CLI - Gestion des Sessions | Lister toutes les sessions (Cascades) actives | âœ… ValidÃ© (`test-4-list.ts`) |
+| **5** | CLI - Interaction Session | Ouvrir une session existante, envoyer un prompt, rÃ©cupÃ©rer les donnÃ©es | âœ… ValidÃ© (`test-5-history.ts` et `test-marche.ts`) |
+| **6** | CLI - Actions AvancÃ©es | Appels d'outils, Focus (SmartFocusConversation), GetSidecars | âœ… ValidÃ© (`test-8` Ã  `test-17`) |
 
-### Phase 1.5 — Intégration UI (Doctor UI)
+### Phase 1.5 â€” IntÃ©gration UI (Doctor UI)
 
-| Marche | Objectif | Critère de Succès | Statut |
+| Marche | Objectif | CritÃ¨re de SuccÃ¨s | Statut |
 |:---|:---|:---|:---|
-| **7** | Onglet Remote App | Ajouter une vue "Remote Server" dans l'UI d'Antigravity Doctor | ✅ Validé |
-| **8** | Génération de QR Code | Le Main process génère un QR code avec l'adresse IP locale et le port (`8089`) | ✅ Validé |
+| **7** | Onglet Remote App | Ajouter une vue "Remote Server" dans l'UI d'Antigravity Doctor | âœ… ValidÃ© |
+| **8** | GÃ©nÃ©ration de QR Code | Le Main process gÃ©nÃ¨re un QR code avec l'adresse IP locale et le port (`8090`) | âœ… ValidÃ© |
 
-### Phase 2 — Daemon Bridge (Go)
+### Phase 2 â€” Daemon Bridge (Go)
 
-| Marche | Objectif | Critère de Succès |
+| Marche | Objectif | CritÃ¨re de SuccÃ¨s |
 |:---|:---|:---|
-| **9** | Le CLI devient un Daemon | Le Daemon Go écoute sur le port `:8089` WebSocket et relaye vers ConnectRPC |
-| **10** | Reconnexion automatique | Si le token CSRF change, le Daemon se ré-authentifie seul |
-| **11** | Tunneling réseau | Le Daemon est accessible via Cloudflare Tunnel ou Tailscale |
+| **9** | Le CLI devient un Daemon | Le Daemon Go Ã©coute sur le port `:8090` WebSocket et relaye vers ConnectRPC |
+| **10** | Reconnexion automatique | Si le token CSRF change, le Daemon se rÃ©-authentifie seul |
+| **11** | Tunneling rÃ©seau | Le Daemon est accessible via Cloudflare Tunnel ou Tailscale |
 
-### Phase 3 — APK Android Natif
+### Phase 3 â€” APK Android Natif
 
-| Marche | Objectif | Critère de Succès |
+| Marche | Objectif | CritÃ¨re de SuccÃ¨s |
 |:---|:---|:---|
 | **12** | Connexion au Daemon | L'APK scanne le QR code, se connecte via WebSocket et affiche les sessions |
-| **13** | Envoi de prompt + streaming | L'APK envoie un message et affiche la réponse en temps réel |
+| **13** | Envoi de prompt + streaming | L'APK envoie un message et affiche la rÃ©ponse en temps rÃ©el |
 | **14** | Approbation tactile | L'APK affiche un bouton Approuver/Refuser quand l'agent bloque |
 | **15** | Workspace browser | L'APK affiche l'arborescence du projet et les diffs de code |
-| **16** | Notifications FCM | L'APK réveille l'écran quand un agent attend une validation |
+| **16** | Notifications FCM | L'APK rÃ©veille l'Ã©cran quand un agent attend une validation |
 
 ---
 
-## 5. Risques Identifiés et Mitigations
+## 5. Risques IdentifiÃ©s et Mitigations
 
-| Risque | Impact | Probabilité | Mitigation |
+| Risque | Impact | ProbabilitÃ© | Mitigation |
 |:---|:---|:---|:---|
-| **Breaking changes Google** (renommage des endpoints RPC) | 🔴 Critique | Moyenne | Couche d'abstraction dans le Daemon : un mapping de noms d'endpoints modifiable sans recompiler |
-| **Token CSRF qui change** au redémarrage IDE | 🟡 Élevé | Certaine | Watchdog dans le Daemon qui surveille le processus `localharness` et ré-extrait le token automatiquement |
-| **Concurrence Desktop + Mobile** (deux sources de commandes simultanées) | 🟡 Élevé | Moyenne | À investiguer : est-ce que `localharness` supporte plusieurs clients ConnectRPC ? Sinon → verrouillage optimiste |
-| **Coupure réseau** (4G ↔ WiFi) | 🟡 Moyen | Certaine | Architecture Offline-First avec Room DB + queue de resynchronisation |
-| **Parsing de chunks Protobuf tronqués** | 🟡 Moyen | Élevée | Utiliser `application/connect+json` (JSON) plutôt que le binaire pour simplifier le parsing initial |
-| **Expiration OAuth Google sur le PC** | 🟠 Moyen | Faible | L'APK ne gère pas l'auth — si la session expire, afficher un message "Reconnectez-vous sur le PC" |
+| **Breaking changes Google** (renommage des endpoints RPC) | ðŸ”´ Critique | Moyenne | Couche d'abstraction dans le Daemon : un mapping de noms d'endpoints modifiable sans recompiler |
+| **Token CSRF qui change** au redÃ©marrage IDE | ðŸŸ¡ Ã‰levÃ© | Certaine | Watchdog dans le Daemon qui surveille le processus `localharness` et rÃ©-extrait le token automatiquement |
+| **Concurrence Desktop + Mobile** (deux sources de commandes simultanÃ©es) | ðŸŸ¡ Ã‰levÃ© | Moyenne | Ã€ investiguer : est-ce que `localharness` supporte plusieurs clients ConnectRPC ? Sinon â†’ verrouillage optimiste |
+| **Coupure rÃ©seau** (4G â†” WiFi) | ðŸŸ¡ Moyen | Certaine | Architecture Offline-First avec Room DB + queue de resynchronisation |
+| **Parsing de chunks Protobuf tronquÃ©s** | ðŸŸ¡ Moyen | Ã‰levÃ©e | Utiliser `application/connect+json` (JSON) plutÃ´t que le binaire pour simplifier le parsing initial |
+| **Expiration OAuth Google sur le PC** | ðŸŸ  Moyen | Faible | L'APK ne gÃ¨re pas l'auth â€” si la session expire, afficher un message "Reconnectez-vous sur le PC" |
 
 ---
 
-## 6. Ce qui est hors périmètre (V1)
+## 6. Ce qui est hors pÃ©rimÃ¨tre (V1)
 
-- ❌ Exécution de code sur le téléphone (toute l'exécution reste sur le PC)
-- ❌ Gestion de l'authentification Google depuis le mobile
-- ❌ Support iOS (V1 = Android uniquement, une PWA de fallback pourra être ajoutée en V2)
-- ❌ Interface d'édition de code complète (V1 = lecture seule + diffs, pas un éditeur)
-- ❌ Déploiement sur le Google Play Store (V1 = APK distribué directement)
+- âŒ ExÃ©cution de code sur le tÃ©lÃ©phone (toute l'exÃ©cution reste sur le PC)
+- âŒ Gestion de l'authentification Google depuis le mobile
+- âŒ Support iOS (V1 = Android uniquement, une PWA de fallback pourra Ãªtre ajoutÃ©e en V2)
+- âŒ Interface d'Ã©dition de code complÃ¨te (V1 = lecture seule + diffs, pas un Ã©diteur)
+- âŒ DÃ©ploiement sur le Google Play Store (V1 = APK distribuÃ© directement)
+

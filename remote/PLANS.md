@@ -1,130 +1,130 @@
-# Plans d'Implémentation — Par Sous-Projet
+﻿# Plans d'ImplÃ©mentation â€” Par Sous-Projet
 
-> Plans détaillés par composant. Chaque plan suit le principe directeur : **chaque marche doit fonctionner à 100% avant de passer à la suivante** (voir [objectif.md](objectif.md)).
+> Plans dÃ©taillÃ©s par composant. Chaque plan suit le principe directeur : **chaque marche doit fonctionner Ã  100% avant de passer Ã  la suivante** (voir [objectif.md](objectif.md)).
 
 ---
 
-## Plan A — CLI de Validation (Terminé ✅)
+## Plan A â€” CLI de Validation (TerminÃ© âœ…)
 
-**Objectif :** Prouver que le contrôle RPC du `language_server` est possible.
-**Statut :** ✅ Terminé et validé (Phase 1 du PRD)
+**Objectif :** Prouver que le contrÃ´le RPC du `language_server` est possible.
+**Statut :** âœ… TerminÃ© et validÃ© (Phase 1 du PRD)
 
-### Étapes
-| # | Étape | Statut |
+### Ã‰tapes
+| # | Ã‰tape | Statut |
 |:--|:---|:---|
-| A1 | Découverte du processus (PID + port + CSRF) | ✅ |
-| A2 | Client gRPC-Web manuel (framing, headers) | ✅ |
-| A3 | Encodage protobuf manuel (StartCascade, SendMessage) | ✅ |
-| A4 | Création de session + envoi de prompt | ✅ |
-| A5 | Liste des sessions (GetAllCascadeTrajectories) | ✅ |
-| A6 | Gestion des modèles (GetAvailableModels) | ✅ |
-| A7 | Workspace tree + lecture de fichiers | ✅ |
+| A1 | DÃ©couverte du processus (PID + port + CSRF) | âœ… |
+| A2 | Client gRPC-Web manuel (framing, headers) | âœ… |
+| A3 | Encodage protobuf manuel (StartCascade, SendMessage) | âœ… |
+| A4 | CrÃ©ation de session + envoi de prompt | âœ… |
+| A5 | Liste des sessions (GetAllCascadeTrajectories) | âœ… |
+| A6 | Gestion des modÃ¨les (GetAvailableModels) | âœ… |
+| A7 | Workspace tree + lecture de fichiers | âœ… |
 
 ### Fichiers
-- `cli/src/discovery.ts` — découverte processus + probe Heartbeat
-- `cli/src/grpcweb.ts` — client gRPC-Web
-- `cli/src/protobuf.ts` — encodeur/décodeur varint manuel
-- `cli/src/client.ts` — méthodes RPC haut niveau
-- `cli/src/index.ts` — script de validation
+- `cli/src/discovery.ts` â€” dÃ©couverte processus + probe Heartbeat
+- `cli/src/grpcweb.ts` â€” client gRPC-Web
+- `cli/src/protobuf.ts` â€” encodeur/dÃ©codeur varint manuel
+- `cli/src/client.ts` â€” mÃ©thodes RPC haut niveau
+- `cli/src/index.ts` â€” script de validation
 
-### Découverte clé validée
-> L'instance qui expose le service RPC est le **hub standalone** (`--subclient_type hub`), pas les instances IDE qui répondent 404.
+### DÃ©couverte clÃ© validÃ©e
+> L'instance qui expose le service RPC est le **hub standalone** (`--subclient_type hub`), pas les instances IDE qui rÃ©pondent 404.
 
 ---
 
-## Plan B — Daemon Bridge Go (En cours 🔄)
+## Plan B â€” Daemon Bridge Go (En cours ðŸ”„)
 
 **Objectif :** Pont WebSocket entre le mobile et le `language_server`.
-**Statut :** 🔄 Fonctionnel — validation E2E en cours
+**Statut :** ðŸ”„ Fonctionnel â€” validation E2E en cours
 
-### Étapes
-| # | Étape | Statut |
+### Ã‰tapes
+| # | Ã‰tape | Statut |
 |:--|:---|:---|
-| B1 | Découverte automatique (hub + probe Heartbeat) | ✅ |
-| B2 | Client gRPC-Web Go (`pkg/connectrpc`) | ✅ |
-| B3 | Gateway WebSocket (`pkg/gateway`) | ✅ |
-| B4 | CreateCascade via WebSocket | ✅ (testé, reçoit cascadeId) |
-| B5 | ListSessions via WebSocket | ✅ (55 trajectoires lues) |
-| B6 | **Streaming SendMessage (multi-frames)** | ⏳ EN COURS |
-| B7 | SubmitToolApproval via WebSocket | ⏳ |
-| B8 | Watchdog : ré-authentification si l'IDE redémarre | ⏳ |
-| B9 | Sécurisation (token d'accès, origine, TLS optionnel) | ⏳ |
+| B1 | DÃ©couverte automatique (hub + probe Heartbeat) | âœ… |
+| B2 | Client gRPC-Web Go (`pkg/connectrpc`) | âœ… |
+| B3 | Gateway WebSocket (`pkg/gateway`) | âœ… |
+| B4 | CreateCascade via WebSocket | âœ… (testÃ©, reÃ§oit cascadeId) |
+| B5 | ListSessions via WebSocket | âœ… (55 trajectoires lues) |
+| B6 | **Streaming SendMessage (multi-frames)** | â³ EN COURS |
+| B7 | SubmitToolApproval via WebSocket | â³ |
+| B8 | Watchdog : rÃ©-authentification si l'IDE redÃ©marre | â³ |
+| B9 | SÃ©curisation (token d'accÃ¨s, origine, TLS optionnel) | â³ |
 
-### Plan d'implémentation B6 — Streaming multi-frames
-1. **Client** : modifier `client.go` → `CallStream(method, payload, onFrame)` qui itère TOUTES les frames gRPC-Web (pas seulement la première), et ne s'arrête pas sur une frame vide.
-2. **Gateway** : `send_prompt` → émettre un événement WS par frame reçue :
+### Plan d'implÃ©mentation B6 â€” Streaming multi-frames
+1. **Client** : modifier `client.go` â†’ `CallStream(method, payload, onFrame)` qui itÃ¨re TOUTES les frames gRPC-Web (pas seulement la premiÃ¨re), et ne s'arrÃªte pas sur une frame vide.
+2. **Gateway** : `send_prompt` â†’ Ã©mettre un Ã©vÃ©nement WS par frame reÃ§ue :
    ```json
    {"type":"stream","requestId":"p1","frame":1,"data":{...decoded...}}
    {"type":"stream_end","requestId":"p1"}
    ```
-3. **Timeout** : 120 s par prompt (les agents longs dépassent 60 s).
-4. **Test** : `scratch/test_ws_prompt.ps1` — attendre ≥ 3 frames ou un `finished`.
+3. **Timeout** : 120 s par prompt (les agents longs dÃ©passent 60 s).
+4. **Test** : `scratch/test_ws_prompt.ps1` â€” attendre â‰¥ 3 frames ou un `finished`.
 
-### Plan d'implémentation B7 — SubmitToolApproval
-1. **Schéma protobuf** : confirmer les numéros de champs exacts (actuellement : 1=cascadeID, 2=callID, 3=decision — à vérifier contre le stream).
-2. **Gateway** : `submit_approval` → appeler `SubmitToolApproval` avec `DECISION_ALLOW` (1) / `DECISION_DENY` (2).
-3. **Test** : prompt déclenchant `run_command`, attendre l'événement d'approbation, approuver, vérifier la reprise du stream.
+### Plan d'implÃ©mentation B7 â€” SubmitToolApproval
+1. **SchÃ©ma protobuf** : confirmer les numÃ©ros de champs exacts (actuellement : 1=cascadeID, 2=callID, 3=decision â€” Ã  vÃ©rifier contre le stream).
+2. **Gateway** : `submit_approval` â†’ appeler `SubmitToolApproval` avec `DECISION_ALLOW` (1) / `DECISION_DENY` (2).
+3. **Test** : prompt dÃ©clenchant `run_command`, attendre l'Ã©vÃ©nement d'approbation, approuver, vÃ©rifier la reprise du stream.
 
-### Plan d'implémentation B8 — Watchdog CSRF
+### Plan d'implÃ©mentation B8 â€” Watchdog CSRF
 1. Goroutine toutes les 10 s : `discovery.Discover()`.
-2. Si PID/token changent → recréer le `connectrpc.Client`, logguer « re-authentifié ».
-3. Les connexions WS actives restent ouvertes (le client RPC est partagé).
+2. Si PID/token changent â†’ recrÃ©er le `connectrpc.Client`, logguer Â« re-authentifiÃ© Â».
+3. Les connexions WS actives restent ouvertes (le client RPC est partagÃ©).
 
 ### Fichiers
-- `daemon/main.go` — bootstrap + endpoints HTTP
-- `daemon/pkg/discovery/scanner.go` — découverte hub + probe
-- `daemon/pkg/connectrpc/client.go` — transport gRPC-Web
-- `daemon/pkg/connectrpc/protobuf.go` — encodeurs varint manuels
-- `daemon/pkg/connectrpc/methods.go` — méthodes RPC
-- `daemon/pkg/gateway/websocket.go` — protocole JSON mobile
+- `daemon/main.go` â€” bootstrap + endpoints HTTP
+- `daemon/pkg/discovery/scanner.go` â€” dÃ©couverte hub + probe
+- `daemon/pkg/connectrpc/client.go` â€” transport gRPC-Web
+- `daemon/pkg/connectrpc/protobuf.go` â€” encodeurs varint manuels
+- `daemon/pkg/connectrpc/methods.go` â€” mÃ©thodes RPC
+- `daemon/pkg/gateway/websocket.go` â€” protocole JSON mobile
 
 ### Protocole WS v1 (en vigueur)
 ```json
-→ {"type":"heartbeat","requestId":"r1"}
-← {"type":"response","requestId":"r1","data":{...}}
+â†’ {"type":"heartbeat","requestId":"r1"}
+â† {"type":"response","requestId":"r1","data":{...}}
 
-→ {"type":"list_sessions","requestId":"r2"}
-← {"type":"response","requestId":"r2","data":{"fields":[...]}}
+â†’ {"type":"list_sessions","requestId":"r2"}
+â† {"type":"response","requestId":"r2","data":{"fields":[...]}}
 
-→ {"type":"create_cascade","requestId":"r3","workspacePath":"C:\\path"}
-← {"type":"response","requestId":"r3","data":{"fields":[{"field":1,"text":"<cascadeId>"}]}}
+â†’ {"type":"create_cascade","requestId":"r3","workspacePath":"C:\\path"}
+â† {"type":"response","requestId":"r3","data":{"fields":[{"field":1,"text":"<cascadeId>"}]}}
 ```
 
 ---
 
-## Plan C — Application Mobile Android (À venir 📋)
+## Plan C â€” Application Mobile Android (Ã€ venir ðŸ“‹)
 
-**Objectif :** Télécommande native — tableau de bord, chat, approbations, workspace.
-**Statut :** 📋 Planifié — dépend de B6/B7 validés
+**Objectif :** TÃ©lÃ©commande native â€” tableau de bord, chat, approbations, workspace.
+**Statut :** ðŸ“‹ PlanifiÃ© â€” dÃ©pend de B6/B7 validÃ©s
 
-### Étapes
-| # | Étape | Critère de succès |
+### Ã‰tapes
+| # | Ã‰tape | CritÃ¨re de succÃ¨s |
 |:--|:---|:---|
-| C1 | Connexion WebSocket au Daemon (OkHttp) | État de connexion visible, reconnexion auto |
-| C2 | Écran tableau de bord (liste sessions) | 55 sessions affichées depuis le hub |
-| C3 | Écran chat + streaming | Deltas affichés en temps réel |
-| C4 | Boutons d'approbation | Approuver/Refuser un `run_command` bloqué |
+| C1 | Connexion WebSocket au Daemon (OkHttp) | Ã‰tat de connexion visible, reconnexion auto |
+| C2 | Ã‰cran tableau de bord (liste sessions) | 55 sessions affichÃ©es depuis le hub |
+| C3 | Ã‰cran chat + streaming | Deltas affichÃ©s en temps rÃ©el |
+| C4 | Boutons d'approbation | Approuver/Refuser un `run_command` bloquÃ© |
 | C5 | Workspace browser | Arborescence + diffs (lecture seule) |
 | C6 | Room DB offline-first | Historique consultable hors-ligne |
-| C7 | Notifications FCM | Alerte système quand un agent attend |
+| C7 | Notifications FCM | Alerte systÃ¨me quand un agent attend |
 
-### Plan d'implémentation C1 — Connexion WebSocket
-1. **Dépendance** : OkHttp 4.12 (déjà dans `build.gradle.kts`).
+### Plan d'implÃ©mentation C1 â€” Connexion WebSocket
+1. **DÃ©pendance** : OkHttp 4.12 (dÃ©jÃ  dans `build.gradle.kts`).
 2. **Service** : `WebSocketService` (foreground) qui maintient la connexion et expose un `StateFlow<ConnectionState>`.
-3. **Repository** : `DaemonRepository` — mapping messages JSON ↔ modèles Kotlin (`DaemonEvent`).
-4. **Écran** : champ « Adresse du PC » (ex. `ws://192.168.1.20:8089/ws`), bouton connecter.
-5. **Test** : émulateur Android + daemon local → liste des sessions affichée.
+3. **Repository** : `DaemonRepository` â€” mapping messages JSON â†” modÃ¨les Kotlin (`DaemonEvent`).
+4. **Ã‰cran** : champ Â« Adresse du PC Â» (ex. `ws://192.168.1.20:8090/ws`), bouton connecter.
+5. **Test** : Ã©mulateur Android + daemon local â†’ liste des sessions affichÃ©e.
 
-### Plan d'implémentation C4 — Approbation tactile
-1. **Modèle** : `ApprovalRequest(cascadeId, callId, toolName, command)`.
-2. **UI** : carte avec la commande à exécuter + boutons Approuver (vert) / Refuser (rouge).
+### Plan d'implÃ©mentation C4 â€” Approbation tactile
+1. **ModÃ¨le** : `ApprovalRequest(cascadeId, callId, toolName, command)`.
+2. **UI** : carte avec la commande Ã  exÃ©cuter + boutons Approuver (vert) / Refuser (rouge).
 3. **Action** : `submit_approval` avec `decision:"allow"|"deny"`.
-4. **Feedback** : le stream reprend → l'UI passe en mode « exécution en cours ».
+4. **Feedback** : le stream reprend â†’ l'UI passe en mode Â« exÃ©cution en cours Â».
 
-### Plan d'implémentation C6 — Offline-first
+### Plan d'implÃ©mentation C6 â€” Offline-first
 1. **Room** : `SessionEntity`, `MessageEntity`, `ApprovalEntity`.
-2. **Sync** : au retour du réseau, rejouer les actions en attente (queue).
-3. **Anti-doublon** : `requestId` généré côté mobile → idempotence côté daemon.
+2. **Sync** : au retour du rÃ©seau, rejouer les actions en attente (queue).
+3. **Anti-doublon** : `requestId` gÃ©nÃ©rÃ© cÃ´tÃ© mobile â†’ idempotence cÃ´tÃ© daemon.
 
 ### Fichiers cibles
 - `mobile/app/src/main/java/com/antigravity/remote/`
@@ -136,24 +136,25 @@
 
 ---
 
-## Plan D — Infrastructure & Déploiement (À venir 📋)
+## Plan D â€” Infrastructure & DÃ©ploiement (Ã€ venir ðŸ“‹)
 
-| # | Étape | Détail |
+| # | Ã‰tape | DÃ©tail |
 |:--|:---|:---|
 | D1 | Packaging Daemon | Binaire Windows/macOS/Linux (cross-compile Go) |
-| D2 | Autostart | Tâche planifiée Windows / launchd macOS |
-| D3 | Tunnel | `cloudflared` ou Tailscale — script d'installation + config |
-| D4 | Versioning | `daemon --version`, protocole WS versionné |
-| D5 | Sécurité | Token d'accès aléatoire exigé par le gateway, TLS optionnel |
+| D2 | Autostart | TÃ¢che planifiÃ©e Windows / launchd macOS |
+| D3 | Tunnel | `cloudflared` ou Tailscale â€” script d'installation + config |
+| D4 | Versioning | `daemon --version`, protocole WS versionnÃ© |
+| D5 | SÃ©curitÃ© | Token d'accÃ¨s alÃ©atoire exigÃ© par le gateway, TLS optionnel |
 
 ---
 
-## Dépendances entre plans
+## DÃ©pendances entre plans
 
 ```
-A (CLI) ✅ ──► B (Daemon) 🔄 ──► C (Mobile) 📋
-                        │
-                        └──► D (Déploiement) 📋
+A (CLI) âœ… â”€â”€â–º B (Daemon) ðŸ”„ â”€â”€â–º C (Mobile) ðŸ“‹
+                        â”‚
+                        â””â”€â”€â–º D (DÃ©ploiement) ðŸ“‹
 ```
 
-**Règle :** ne pas commencer C avant la fin de B6 (streaming) et B7 (approbation).
+**RÃ¨gle :** ne pas commencer C avant la fin de B6 (streaming) et B7 (approbation).
+

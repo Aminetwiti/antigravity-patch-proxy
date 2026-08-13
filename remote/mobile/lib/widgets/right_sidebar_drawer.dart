@@ -40,7 +40,7 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
       // Fetch files from the brain directory
       final path = '.gemini/antigravity-ide/brain/${widget.activeSessionId}/';
       final res = await widget.api!.listFiles(path);
-      final files = res['data']?['files'] as List<dynamic>? ?? [];
+      final files = res['files'] as List<dynamic>? ?? [];
       
       final arts = <Map<String, dynamic>>[];
       for (final f in files) {

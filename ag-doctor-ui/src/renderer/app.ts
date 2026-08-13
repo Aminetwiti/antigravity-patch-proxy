@@ -4178,7 +4178,7 @@ if (startRemoteBtn) {
       if (remoteStatusText) remoteStatusText.textContent = 'Starting server...';
       if (remoteConsole) remoteConsole.value = ''; // clear console
       
-      const port = parseInt(remotePort?.value || '8080');
+      const port = parseInt(remotePort?.value || '8090');
       const tunnel = remoteTunnel?.value || 'none';
       let token = remoteAuthToken?.value || '';
 

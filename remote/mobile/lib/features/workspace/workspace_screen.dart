@@ -31,10 +31,24 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   String _findQuery = '';
   bool _showFindBar = false;
   final GlobalKey _workspaceButtonKey = GlobalKey();
+  // Workspace résolu en chemin absolu pour le daemon (resolvePath).
+  String _workspaceResolved = '.';
+
+  /// Normalise le workspace en chemin absolu exploitable par le daemon.
+  static String resolveWorkspace(String raw) {
+    final w = raw.trim();
+    if (w.startsWith('file:///')) return w.substring(8);
+    if (w.startsWith('file://')) return w.substring(7);
+    return w;
+  }
 
   @override
   void initState() {
     super.initState();
+    // Le daemon confine list_files/read_file sous une racine ABSOLUE (resolvePath
+    // fait filepath.Abs). On envoie donc le workspace en chemin absolu dès le
+    // départ : '.', 'workspace/', 'file:///...' → path réel côté PC.
+    _workspaceResolved = resolveWorkspace(widget.workspacePath);
     _loadFiles();
     _searchController.addListener(() {
       setState(() => _searchQuery = _searchController.text.toLowerCase());
@@ -66,7 +80,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       return;
     }
     try {
-      final res = await widget.api!.listFiles(widget.workspacePath);
+      final res = await widget.api!.listFiles(_workspaceResolved);
       if (mounted) {
         setState(() {
           _files = List<Map<String, dynamic>>.from(res['files'] ?? []);
@@ -92,7 +106,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       _codeContent = '';
     });
     try {
-      final res = await widget.api!.readFile(path, workspacePath: widget.workspacePath);
+      final res = await widget.api!.readFile(path, workspacePath: _workspaceResolved);
       if (mounted) {
         setState(() {
           _codeContent = res['content'] as String? ?? '';
