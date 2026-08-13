@@ -107,3 +107,28 @@ func TestBuildHandleCascadeUserInteraction_RoundTrip(t *testing.T) {
 		t.Fatalf("round-trip KO: traj=%s step=%d oneof=%d confirm=%v", gotTraj, gotStep, gotOneof, gotConfirm)
 	}
 }
+
+func TestBuildHandleStreamingCommand(t *testing.T) {
+	cmd := "/model gemini-3-pro"
+	buf := BuildHandleStreamingCommand(cmd, CommandRequestSourceTerminal)
+	fields := DecodeFields(buf)
+	if len(fields) != 2 {
+		t.Fatalf("Attendu 2 champs (command_text + request_source), reçu %d: %+v", len(fields), fields)
+	}
+	var gotText string
+	var gotSource uint64
+	for _, f := range fields {
+		switch f.Num {
+		case 8:
+			gotText = string(f.Bytes)
+		case 9:
+			gotSource = f.Varint
+		}
+	}
+	if gotText != cmd {
+		t.Errorf("Attendu command_text=%q, reçu=%q", cmd, gotText)
+	}
+	if gotSource != CommandRequestSourceTerminal {
+		t.Errorf("Attendu request_source=%d (TERMINAL), reçu=%d", CommandRequestSourceTerminal, gotSource)
+	}
+}

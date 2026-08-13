@@ -1,9 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart'
-    show ValueListenable, VoidCallback;
-import 'package:meta/meta.dart';
+import 'package:flutter/foundation.dart';
 
 import '../network/outbox.dart';
 import 'messages.dart';
@@ -36,10 +34,16 @@ class DaemonApi {
   /// émission toutes les 100 ms au lieu de N setState — l'UI reste fluide
   /// (le rendu des bulles est déjà throttlé côté écran, celui-ci protège
   /// les autres auditeurs globaux comme la liste des sessions).
+  ///
+  /// La PREMIÈRE frame d'une rafale est émise immédiatement (zéro latence
+  /// pour un événement isolé comme approval_expired) ; les suivantes qui
+  /// arrivent dans la fenêtre de 100 ms sont regroupées puis délivrées en
+  /// une seule passe.
   /// ponytail: délai fixe de 100 ms (pas de fenêtre glissante adaptative),
   /// plafond acceptable — chemin d'upgrade si le daemon émet par salves > 10/s.
   Timer? _batchTimer;
   final List<Map<String, dynamic>> _batch = [];
+  static const _batchWindow = Duration(milliseconds: 100);
 
   int _nextRequestId = 0;
 
@@ -56,10 +60,10 @@ class DaemonApi {
     required void Function(dynamic) send,
     Duration timeout = const Duration(seconds: 5),
     OutboxQueue? outbox,
-  })  : _incoming = incoming,
-        _send = send,
-        _timeout = timeout,
-        _outbox = outbox {
+  }) : _incoming = incoming,
+       _send = send,
+       _timeout = timeout,
+       _outbox = outbox {
     _incoming.listen(_onMessage);
   }
 
@@ -96,24 +100,33 @@ class DaemonApi {
     }
   }
 
-  /// Émet un message broadcast vers tous les abonnés, en le groupant dans la
-  /// fenêtre de 100 ms. Si un seul message arrive, il est émis immédiatement
-  /// (pas de latence ajoutée au cas nominal).
+  /// Émet un message broadcast vers tous les abonnés : le premier message
+  /// d'une rafale part immédiatement, les suivants dans la fenêtre de 100 ms
+  /// sont regroupés. Un événement isolé ne subit donc AUCUNE latence.
   void _emitBatched(Map<String, dynamic> msg) {
-    if (_batch.isEmpty && (_batchTimer == null || !_batchTimer!.isActive)) {
+    if (_batchTimer == null || !_batchTimer!.isActive) {
       // Cas nominal : émission immédiate, sans latence.
       _events.add(msg);
+      // Ouvre la fenêtre : tout ce qui arrive pendant 100 ms est groupé.
+      _batchTimer = Timer(_batchWindow, _flushBatch);
       return;
     }
     _batch.add(msg);
-    _batchTimer ??= Timer(const Duration(milliseconds: 100), () {
-      final pending = List<Map<String, dynamic>>.from(_batch);
-      _batch.clear();
-      _batchTimer = null;
-      for (final m in pending) {
-        _events.add(m);
-      }
-    });
+  }
+
+  /// Vide la fenêtre de batch immédiatement. Appelée par le timer (fin de
+  /// fenêtre) et par [DaemonApi._onMessage] sur un `stream_end` : un état
+  /// terminal (tâche finie, annulée, bloquée) doit atteindre l'UI sans
+  /// latence résiduelle, même s'il arrive 30 ms après un delta.
+  void _flushBatch() {
+    _batchTimer?.cancel();
+    _batchTimer = null;
+    if (_batch.isEmpty) return;
+    final pending = List<Map<String, dynamic>>.from(_batch);
+    _batch.clear();
+    for (final m in pending) {
+      _events.add(m);
+    }
   }
 
   // Étape 5 : si un outbox est fourni, les messages envoyés hors-ligne sont
@@ -139,8 +152,7 @@ class DaemonApi {
         _replayer ??= OutboxReplayer(
           queue: outbox,
           send: (msg) {
-            final clean = Map<String, dynamic>.from(msg)
-              ..remove('queuedAt');
+            final clean = Map<String, dynamic>.from(msg)..remove('queuedAt');
             _send(clean);
           },
           resync: resync,
@@ -170,6 +182,7 @@ class DaemonApi {
     }
     _streams.clear();
   }
+
   /// Unary call resolved when a `response`/`error` with the same requestId
   /// arrives (30s timeout).
   Future<Map<String, dynamic>> call(
@@ -206,11 +219,13 @@ class DaemonApi {
   Future<Map<String, dynamic>> listFiles(String workspacePath) =>
       call('list_files', {'workspacePath': workspacePath});
 
-  Future<Map<String, dynamic>> readFile(String filePath, {String? workspacePath}) =>
-      call('read_file', {
-        'filePath': filePath,
-        if (workspacePath != null) 'workspacePath': workspacePath,
-      });
+  Future<Map<String, dynamic>> readFile(
+    String filePath, {
+    String? workspacePath,
+  }) => call('read_file', {
+    'filePath': filePath,
+    if (workspacePath != null) 'workspacePath': workspacePath,
+  });
 
   Future<Map<String, dynamic>> getContext() => call('get_context');
 
@@ -223,17 +238,25 @@ class DaemonApi {
     String approvalType = 'approval',
     String command = '',
     ApprovalScope scope = ApprovalScope.once,
-  }) =>
-      call('submit_approval', {
-        'cascadeId': cascadeId,
-        'callId': callId,
-        'trajectoryId': trajectoryId,
-        'stepIndex': stepIndex,
-        'approvalType': approvalType,
-        'command': command,
-        'scope': scope == ApprovalScope.session ? 'session' : 'once',
-        'decision': allow ? 'allow' : 'deny',
-      });
+  }) => call('submit_approval', {
+    'cascadeId': cascadeId,
+    'callId': callId,
+    'trajectoryId': trajectoryId,
+    'stepIndex': stepIndex,
+    'approvalType': approvalType,
+    'command': command,
+    'scope': scope == ApprovalScope.session ? 'session' : 'once',
+    'decision': allow ? 'allow' : 'deny',
+  });
+
+  /// B2 — contexte d'une approbation en attente (tap sur la notification
+  /// locale alors que le stream_delta d'origine a pu être perdu). Renvoie
+  /// null si aucune approbation n'est en attente pour cette cascade.
+  Future<Map<String, dynamic>?> getPendingApproval(String cascadeId) async {
+    final data = await call('get_pending_approval', {'cascadeId': cascadeId});
+    final info = data['data'] ?? data;
+    return info is Map && info.isNotEmpty ? info.cast<String, dynamic>() : null;
+  }
 
   /// Streaming call: emits each decoded message (`stream_start`,
   /// `stream_delta`, ...) until `stream_end` closes the stream.
@@ -255,6 +278,13 @@ class DaemonApi {
     return controller.stream;
   }
 
+  /// Sends a slash command (e.g. `/model`, `/compact`) to the daemon, which
+  /// routes it to the language server via HandleStreamingCommand (terminal
+  /// source). Unary call: resolves with the `response` message data.
+  Future<Map<String, dynamic>> sendCommand(String command) {
+    return call('send_command', {'command': command});
+  }
+
   void _onMessage(dynamic raw) {
     if (raw is! String) return; // daemon sends JSON text only
     Map<String, dynamic> msg;
@@ -266,12 +296,17 @@ class DaemonApi {
 
     final type = msg['type'] as String? ?? '';
     final requestId = msg['requestId'] as String? ?? '';
-    final data = (msg['data'] as Map<String, dynamic>?) ?? const {};
+    final rawData = msg['data'];
+    // Tolerant : certaines réponses poussées par le daemon portent un payload
+    // non-map (string, nombre…). On les neutralise plutôt que de planter —
+    // l'événement reste broadcasté avec data vide (A6).
+    final data =
+        rawData is Map
+            ? rawData.map((k, v) => MapEntry('$k', v))
+            : const <String, dynamic>{};
     final error = msg['error'] as String?;
 
-    if (type == 'stream_start' ||
-        type == 'stream_delta' ||
-        type == 'stream_end') {
+    if (type == 'stream_start' || type == 'stream_delta') {
       final controller = _streams[requestId];
       if (controller == null) {
         // Stream déclenché par une AUTRE surface (PC ou autre téléphone) :
@@ -280,21 +315,28 @@ class DaemonApi {
         _emitBatched({...msg, 'broadcast': true});
         return;
       }
-      if (type == 'stream_end') {
-        // Livre le message stream_end (outcome structuré) au listener local
-        // AVANT de fermer : onDone ne transporte pas de données.
-        _outbox?.remove(requestId);
-        controller.add(msg);
-        controller.close();
-        _streams.remove(requestId);
-      } else {
-        controller.add(msg);
-      }
+      controller.add(msg);
       _emitBatched(msg);
       return;
     }
 
-    _emitBatched(msg);
+    if (type == 'stream_end') {
+      _outbox?.remove(requestId);
+      final controller = _streams[requestId];
+      if (controller != null) {
+        // Livre le message stream_end (outcome structuré) au listener local
+        // AVANT de fermer : onDone ne transporte pas de données.
+        controller.add(msg);
+        controller.close();
+        _streams.remove(requestId);
+      }
+      // Toujours broadcasté — un stream_end sans controller local (session
+      // pilotée depuis une autre surface, ou stream déjà fermé) doit quand
+      // même fermer le statut « en cours » dans l'UI (A8).
+      _emitBatched(msg);
+      return;
+    }
+
     final completer = _pending.remove(requestId);
     // Drain même si le completer a expiré (timeout) : la réponse est arrivée,
     // rejouer ce message à la reconnexion créerait un doublon.
@@ -305,11 +347,11 @@ class DaemonApi {
       _emitBatched({...msg, 'broadcast': true});
       return;
     }
-    _emitBatched(msg);
     if (type == 'error' || error != null) {
       completer.completeError(Exception(error ?? 'Unknown daemon error'));
     } else {
       completer.complete(data);
     }
+    _emitBatched(msg);
   }
 }

@@ -51,6 +51,9 @@ class ChatMessage {
   final String? thought;
   final String timestamp;
   final bool isStreaming;
+  // true quand le stream s'est terminé sur une erreur : la bulle affiche un
+  // état « erreur » dédié (fond danger) au lieu d'un texte markdown mélangé.
+  final bool isError;
 
   const ChatMessage({
     required this.id,
@@ -59,12 +62,14 @@ class ChatMessage {
     this.thought,
     required this.timestamp,
     this.isStreaming = false,
+    this.isError = false,
   });
 
   ChatMessage copyWith({
     String? text,
     String? thought,
     bool? isStreaming,
+    bool? isError,
   }) {
     return ChatMessage(
       id: id,
@@ -73,6 +78,7 @@ class ChatMessage {
       thought: thought ?? this.thought,
       timestamp: timestamp,
       isStreaming: isStreaming ?? this.isStreaming,
+      isError: isError ?? this.isError,
     );
   }
 }

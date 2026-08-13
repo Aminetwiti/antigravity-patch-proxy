@@ -75,7 +75,9 @@ func TestWebSocketCreateCascadeRequiresWorkspace(t *testing.T) {
 // ─── Test de concurrence : N clients simultanés ───
 
 type loadRPCClient struct {
-	heartbeats atomic.Int64
+	heartbeats   atomic.Int64
+	streamDeltas []string
+	lastApproval interface{}
 }
 
 func (l *loadRPCClient) Heartbeat() ([]byte, error) {
@@ -89,13 +91,30 @@ func (l *loadRPCClient) GetAllCascades() ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("sess")), nil
 }
 func (l *loadRPCClient) SendMessageStream(cascadeID, text string, onFrame func([]byte) error) error {
-	return onFrame(connectrpc.Frame(pbTextFrame("ok")))
+	if len(l.streamDeltas) == 0 {
+		return onFrame(connectrpc.Frame(pbTextFrame("ok")))
+	}
+	for _, delta := range l.streamDeltas {
+		if err := onFrame((&fakeRPCClient{}).approvalFrame(delta)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func (l *loadRPCClient) SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error) {
+	l.lastApproval = &submitApprovalCall{
+		cascadeID:    cascadeID,
+		trajectoryID: trajectoryID,
+		stepIndex:    stepIndex,
+		confirm:      len(oneofPayload) > 0 && connectrpc.DecodeFields(oneofPayload)[0].Varint == 1,
+	}
 	return connectrpc.Frame(pbTextFrame("ok")), nil
 }
 func (l *loadRPCClient) SetBrowserOpenConversation(cascadeID string) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("ok")), nil
+}
+func (l *loadRPCClient) SendCommand(commandText string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("cmd-ok")), nil
 }
 
 // TestWebSocketConcurrentClients — 20 clients en parallèle, 30 messages chacun :
@@ -216,11 +235,15 @@ func BenchmarkGatewayHeartbeat(b *testing.B) {
 // le gateway doit propager stream_end avec erreur et terminer proprement.
 type failingStreamClient struct{}
 
-func (f *failingStreamClient) Heartbeat() ([]byte, error) { return connectrpc.Frame(pbTextFrame("ok")), nil }
+func (f *failingStreamClient) Heartbeat() ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("ok")), nil
+}
 func (f *failingStreamClient) CreateCascade(uri, projectID string, model uint64) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("casc")), nil
 }
-func (f *failingStreamClient) GetAllCascades() ([]byte, error) { return connectrpc.Frame(pbTextFrame("s")), nil }
+func (f *failingStreamClient) GetAllCascades() ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("s")), nil
+}
 func (f *failingStreamClient) SendMessageStream(cascadeID, text string, onFrame func([]byte) error) error {
 	_ = onFrame(connectrpc.Frame(pbTextFrame("hello")))
 	return fmt.Errorf("stream interrompu par le backend")
@@ -230,6 +253,9 @@ func (f *failingStreamClient) SubmitToolApproval(cascadeID, trajectoryID string,
 }
 func (f *failingStreamClient) SetBrowserOpenConversation(cascadeID string) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("ok")), nil
+}
+func (f *failingStreamClient) SendCommand(commandText string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("cmd-ok")), nil
 }
 
 func TestWebSocketStreamBackendError(t *testing.T) {

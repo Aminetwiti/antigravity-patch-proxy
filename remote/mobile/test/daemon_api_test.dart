@@ -23,11 +23,17 @@ void main() {
       expect(outgoing.first['type'], 'list_sessions');
       final requestId = outgoing.first['requestId'] as String;
 
-      controller.add(jsonEncode({
-        'type': 'response',
-        'requestId': requestId,
-        'data': {'fields': [{'field': 1, 'text': 'cascade-1'}]},
-      }));
+      controller.add(
+        jsonEncode({
+          'type': 'response',
+          'requestId': requestId,
+          'data': {
+            'fields': [
+              {'field': 1, 'text': 'cascade-1'},
+            ],
+          },
+        }),
+      );
 
       final result = await future;
       expect((result['fields'] as List), hasLength(1));
@@ -50,29 +56,27 @@ void main() {
 
       final deltas = <String>[];
       final done = Completer<void>();
-      stream.listen(
-        (msg) {
-          final t = StreamDeltaParser.textOf(msg);
-          if (t.isNotEmpty) deltas.add(t);
-        },
-        onDone: done.complete,
-      );
+      stream.listen((msg) {
+        final t = StreamDeltaParser.textOf(msg);
+        if (t.isNotEmpty) deltas.add(t);
+      }, onDone: done.complete);
 
-      controller.add(jsonEncode({
-        'type': 'stream_delta',
-        'requestId': requestId,
-        'data': {
-          'events': [
-            {'kind': 'thinking', 'delta': 'thinking...'},
-            {'kind': 'text', 'delta': 'Hel'},
-            {'kind': 'text', 'delta': 'lo'},
-          ],
-        },
-      }));
-      controller.add(jsonEncode({
-        'type': 'stream_end',
-        'requestId': requestId,
-      }));
+      controller.add(
+        jsonEncode({
+          'type': 'stream_delta',
+          'requestId': requestId,
+          'data': {
+            'events': [
+              {'kind': 'thinking', 'delta': 'thinking...'},
+              {'kind': 'text', 'delta': 'Hel'},
+              {'kind': 'text', 'delta': 'lo'},
+            ],
+          },
+        }),
+      );
+      controller.add(
+        jsonEncode({'type': 'stream_end', 'requestId': requestId}),
+      );
 
       await done.future;
       expect(deltas, ['Hello']);
@@ -94,35 +98,33 @@ void main() {
 
       ToolApproval? approval;
       final done = Completer<void>();
-      stream.listen(
-        (msg) {
-          final a = StreamDeltaParser.approvalOf(msg);
-          if (a != null) approval = a;
-        },
-        onDone: done.complete,
-      );
+      stream.listen((msg) {
+        final a = StreamDeltaParser.approvalOf(msg);
+        if (a != null) approval = a;
+      }, onDone: done.complete);
 
-      controller.add(jsonEncode({
-        'type': 'stream_delta',
-        'requestId': requestId,
-        'data': {
-          'events': [
-            {
-              'kind': 'approval_required',
-              'callId': 'call_1',
-              'tool': 'run_command',
-              'detail': '{"command_line":"git status"}',
-              'cascadeId': 'c1',
-              'trajectoryId': 'traj_9',
-              'stepIndex': 4,
-            },
-          ],
-        },
-      }));
-      controller.add(jsonEncode({
-        'type': 'stream_end',
-        'requestId': requestId,
-      }));
+      controller.add(
+        jsonEncode({
+          'type': 'stream_delta',
+          'requestId': requestId,
+          'data': {
+            'events': [
+              {
+                'kind': 'approval_required',
+                'callId': 'call_1',
+                'tool': 'run_command',
+                'detail': '{"command_line":"git status"}',
+                'cascadeId': 'c1',
+                'trajectoryId': 'traj_9',
+                'stepIndex': 4,
+              },
+            ],
+          },
+        }),
+      );
+      controller.add(
+        jsonEncode({'type': 'stream_end', 'requestId': requestId}),
+      );
 
       await done.future;
       expect(approval, isNotNull);
@@ -145,10 +147,7 @@ void main() {
         timeout: const Duration(milliseconds: 200),
       );
 
-      await expectLater(
-        api.heartbeat(),
-        throwsA(isA<TimeoutException>()),
-      );
+      await expectLater(api.heartbeat(), throwsA(isA<TimeoutException>()));
       await controller.close();
       api.dispose();
     });
@@ -166,25 +165,30 @@ void main() {
 
       // Un stream déclenché par le PC (requestId inconnu localement) :
       // le daemon le broadcast, l'API doit le réémettre sur _events.
-      controller.add(jsonEncode({
-        'type': 'stream_delta',
-        'requestId': 'r-external',
-        'data': {
-          'events': [
-            {'kind': 'text', 'delta': 'Réponse depuis le PC'},
-          ],
-        },
-      }));
-      controller.add(jsonEncode({
-        'type': 'stream_end',
-        'requestId': 'r-external',
-      }));
+      controller.add(
+        jsonEncode({
+          'type': 'stream_delta',
+          'requestId': 'r-external',
+          'data': {
+            'events': [
+              {'kind': 'text', 'delta': 'Réponse depuis le PC'},
+            ],
+          },
+        }),
+      );
+      controller.add(
+        jsonEncode({'type': 'stream_end', 'requestId': 'r-external'}),
+      );
 
-      await Future<void>.delayed(Duration.zero);
+      // Fenêtre de batch 100 ms (UX) : attendre le flush avant de compter.
+      await Future<void>.delayed(const Duration(milliseconds: 150));
       expect(broadcastEvents, hasLength(2));
       expect(broadcastEvents.first['broadcast'], isTrue);
       expect(broadcastEvents.first['type'], 'stream_delta');
-      expect(StreamDeltaParser.textOf(broadcastEvents.first), 'Réponse depuis le PC');
+      expect(
+        StreamDeltaParser.textOf(broadcastEvents.first),
+        'Réponse depuis le PC',
+      );
       expect(broadcastEvents.last['type'], 'stream_end');
 
       await sub.cancel();
@@ -192,7 +196,110 @@ void main() {
       api.dispose();
     });
 
-    test('surfaces server-pushed approval_expired as broadcast (Phase 6)', () async {
+    test(
+      'surfaces server-pushed approval_expired as broadcast (Phase 6)',
+      () async {
+        final outgoing = <Map<String, dynamic>>[];
+        final controller = StreamController<dynamic>();
+        final api = DaemonApi(
+          incoming: controller.stream,
+          send: (data) => outgoing.add(data as Map<String, dynamic>),
+        );
+
+        final broadcastEvents = <Map<String, dynamic>>[];
+        final sub = api.events.listen(broadcastEvents.add);
+
+        // Le daemon pousse approval_expired sans requestId (pas de requête
+        // locale) : l'API doit le réémettre marqué broadcast pour que l'UI
+        // nettoie la carte d'approbation expirée.
+        controller.add(
+          jsonEncode({
+            'type': 'approval_expired',
+            'data': {'cascadeId': 'c1'},
+          }),
+        );
+
+        await Future<void>.delayed(Duration.zero);
+        expect(broadcastEvents, hasLength(1));
+        expect(broadcastEvents.first['type'], 'approval_expired');
+        expect(broadcastEvents.first['broadcast'], isTrue);
+        expect(broadcastEvents.first['data']?['cascadeId'], 'c1');
+
+        await sub.cancel();
+        await controller.close();
+        api.dispose();
+      },
+    );
+
+    test(
+      'outbox: sendPrompt offline is replayed on reconnect (Étape 5)',
+      () async {
+        final outgoing = <Map<String, dynamic>>[];
+        final controller = StreamController<dynamic>();
+        final outbox = OutboxQueue();
+        // Simule le gate réseau du vrai client : hors-ligne, _send est un no-op.
+        var online = false;
+        final api = DaemonApi(
+          incoming: controller.stream,
+          send: (data) {
+            if (online) outgoing.add(data as Map<String, dynamic>);
+          },
+          outbox: outbox,
+        );
+        final version = ValueNotifier<int>(0);
+
+        var resyncCount = 0;
+        api.attachReconnect(version, () async {
+          resyncCount++;
+          return const {'ok': true};
+        });
+
+        // Hors-ligne : le prompt est mis en file, rien n'est envoyé au daemon
+        // (le send est un no-op tant que le socket est coupé).
+        api.sendPrompt('c1', 'important prompt');
+        expect(outbox.pendingCount, 1);
+        expect(outgoing, isEmpty);
+
+        // Reconnexion : version++ → replay de la queue puis re-sync.
+        online = true;
+        version.value = 1;
+        await Future<void>.delayed(Duration.zero);
+        expect(outgoing, hasLength(1));
+        expect(outgoing.first['type'], 'send_prompt');
+        expect(outgoing.first['prompt'], 'important prompt');
+        expect(outgoing.first.containsKey('queuedAt'), isFalse);
+
+        // La réponse arrive → le message est drainé de la queue (stream_end).
+        final requestId = outgoing.first['requestId'] as String;
+        controller.add(
+          jsonEncode({
+            'type': 'stream_start',
+            'requestId': requestId,
+            'data': {'cascadeId': 'c1'},
+          }),
+        );
+        controller.add(
+          jsonEncode({
+            'type': 'stream_end',
+            'requestId': requestId,
+            'data': {'cascadeId': 'c1', 'outcome': 'done'},
+          }),
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(outbox.pendingCount, 0);
+
+        // Nouvelle reconnexion : la queue est vide → le replayer ne tourne pas
+        // (pas de re-sync). Seul le flush de la reconnexion v1 a resyncé.
+        version.value = 2;
+        await Future<void>.delayed(Duration.zero);
+        expect(resyncCount, 1);
+
+        await controller.close();
+        api.dispose();
+      },
+    );
+
+    test('sendCommand sends slash command and resolves on response', () async {
       final outgoing = <Map<String, dynamic>>[];
       final controller = StreamController<dynamic>();
       final api = DaemonApi(
@@ -200,85 +307,121 @@ void main() {
         send: (data) => outgoing.add(data as Map<String, dynamic>),
       );
 
-      final broadcastEvents = <Map<String, dynamic>>[];
-      final sub = api.events.listen(broadcastEvents.add);
-
-      // Le daemon pousse approval_expired sans requestId (pas de requête
-      // locale) : l'API doit le réémettre marqué broadcast pour que l'UI
-      // nettoie la carte d'approbation expirée.
-      controller.add(jsonEncode({
-        'type': 'approval_expired',
-        'data': {'cascadeId': 'c1'},
-      }));
-
+      final future = api.sendCommand('/model gemini-3-pro');
       await Future<void>.delayed(Duration.zero);
-      expect(broadcastEvents, hasLength(1));
-      expect(broadcastEvents.first['type'], 'approval_expired');
-      expect(broadcastEvents.first['broadcast'], isTrue);
-      expect(broadcastEvents.first['data']?['cascadeId'], 'c1');
+      expect(outgoing, hasLength(1));
+      expect(outgoing.first['type'], 'send_command');
+      expect(outgoing.first['command'], '/model gemini-3-pro');
+      final requestId = outgoing.first['requestId'] as String;
 
-      await sub.cancel();
+      controller.add(
+        jsonEncode({
+          'type': 'response',
+          'requestId': requestId,
+          'data': {'content': 'ok'},
+        }),
+      );
+
+      final result = await future;
+      expect(result['content'], 'ok');
       await controller.close();
       api.dispose();
     });
 
-    test('outbox: sendPrompt offline is replayed on reconnect (Étape 5)', () async {
+    test('sendCommand surfaces daemon errors', () async {
       final outgoing = <Map<String, dynamic>>[];
       final controller = StreamController<dynamic>();
-      final outbox = OutboxQueue();
-      // Simule le gate réseau du vrai client : hors-ligne, _send est un no-op.
-      var online = false;
       final api = DaemonApi(
         incoming: controller.stream,
-        send: (data) {
-          if (online) outgoing.add(data as Map<String, dynamic>);
-        },
-        outbox: outbox,
+        send: (data) => outgoing.add(data as Map<String, dynamic>),
       );
-      final version = ValueNotifier<int>(0);
 
-      var resyncCount = 0;
-      api.attachReconnect(version, () async {
-        resyncCount++;
-        return const {'ok': true};
-      });
+      final future = api.sendCommand('/compact');
+      await Future<void>.delayed(Duration.zero);
+      final requestId = outgoing.first['requestId'] as String;
 
-      // Hors-ligne : le prompt est mis en file, rien n'est envoyé au daemon
-      // (le send est un no-op tant que le socket est coupé).
-      api.sendPrompt('c1', 'important prompt');
-      expect(outbox.pendingCount, 1);
-      expect(outgoing, isEmpty);
+      controller.add(
+        jsonEncode({
+          'type': 'error',
+          'requestId': requestId,
+          'error': 'unknown command',
+        }),
+      );
 
-      // Reconnexion : version++ → replay de la queue puis re-sync.
-      online = true;
-      version.value = 1;
+      await expectLater(
+        future,
+        throwsA(
+          isA<Exception>().having(
+            (e) => e.toString(),
+            'message',
+            contains('unknown command'),
+          ),
+        ),
+      );
+      await controller.close();
+      api.dispose();
+    });
+
+    test('getPendingApproval fetches context and returns null when none', () async {
+      final outgoing = <Map<String, dynamic>>[];
+      final controller = StreamController<dynamic>();
+      final api = DaemonApi(
+        incoming: controller.stream,
+        send: (data) => outgoing.add(data as Map<String, dynamic>),
+      );
+
+      final future = api.getPendingApproval('c2');
       await Future<void>.delayed(Duration.zero);
       expect(outgoing, hasLength(1));
-      expect(outgoing.first['type'], 'send_prompt');
-      expect(outgoing.first['prompt'], 'important prompt');
-      expect(outgoing.first.containsKey('queuedAt'), isFalse);
-
-      // La réponse arrive → le message est drainé de la queue (stream_end).
+      expect(outgoing.first['type'], 'get_pending_approval');
+      expect(outgoing.first['cascadeId'], 'c2');
       final requestId = outgoing.first['requestId'] as String;
-      controller.add(jsonEncode({
-        'type': 'stream_start',
-        'requestId': requestId,
-        'data': {'cascadeId': 'c1'},
-      }));
-      controller.add(jsonEncode({
-        'type': 'stream_end',
-        'requestId': requestId,
-        'data': {'cascadeId': 'c1', 'outcome': 'done'},
-      }));
-      await Future<void>.delayed(Duration.zero);
-      expect(outbox.pendingCount, 0);
 
-      // Nouvelle reconnexion : la queue est vide → le replayer ne tourne pas
-      // (pas de re-sync). Seul le flush de la reconnexion v1 a resyncé.
-      version.value = 2;
-      await Future<void>.delayed(Duration.zero);
-      expect(resyncCount, 1);
+      controller.add(
+        jsonEncode({
+          'type': 'response',
+          'requestId': requestId,
+          'data': {
+            'cascadeId': 'c2',
+            'callId': 'call_7',
+            'trajectoryId': 'traj_1',
+            'stepIndex': 3,
+            'approvalType': 'run_command',
+            'command': 'git status',
+          },
+        }),
+      );
 
+      final info = await future;
+      expect(info, isNotNull);
+      expect(info!['callId'], 'call_7');
+      expect(info['stepIndex'], 3);
+      expect(info['command'], 'git status');
+      await controller.close();
+      api.dispose();
+    });
+
+    test('getPendingApproval returns null when nothing pending', () async {
+      final outgoing = <Map<String, dynamic>>[];
+      final controller = StreamController<dynamic>();
+      final api = DaemonApi(
+        incoming: controller.stream,
+        send: (data) => outgoing.add(data as Map<String, dynamic>),
+      );
+
+      final future = api.getPendingApproval('c9');
+      await Future<void>.delayed(Duration.zero);
+      final requestId = outgoing.first['requestId'] as String;
+
+      controller.add(
+        jsonEncode({
+          'type': 'response',
+          'requestId': requestId,
+          'data': null,
+        }),
+      );
+
+      expect(await future, isNull);
       await controller.close();
       api.dispose();
     });

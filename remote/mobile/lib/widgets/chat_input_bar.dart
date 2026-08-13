@@ -22,10 +22,6 @@ class _ChatInputBarState extends State<ChatInputBar> {
   bool _isSendPressed = false;
 
   void _handleSend() {
-    if (!widget.isConnected) {
-      HapticFeedback.selectionClick();
-      return;
-    }
     final text = _controller.text.trim();
     if (text.isNotEmpty) {
       HapticFeedback.lightImpact();
@@ -50,22 +46,25 @@ class _ChatInputBarState extends State<ChatInputBar> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Input TextField
+                // Input TextField — toujours éditable : hors-ligne, le message
+                // part en outbox et sera envoyé à la reconnexion (promesse du
+                // banner, audit UX P1-5).
                 TextField(
                   controller: _controller,
-                  enabled: widget.isConnected,
                   maxLines: 6,
                   minLines: 1,
                   style: TextStyle(
-                    fontSize: 14, 
-                    color: widget.isConnected 
-                        ? Theme.of(context).colorScheme.onSurface
-                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontSize: 14,
+                    color: Theme.of(context).colorScheme.onSurface,
                   ),
                   decoration: InputDecoration(
-                    hintText: widget.isConnected ? 'Ask anything, @ to mention, / for actions' : 'Hors ligne. Reconnexion en cours...',
+                    hintText: widget.isConnected
+                        ? 'Ask anything, @ to mention, / for actions'
+                        : 'Hors ligne — le message sera envoyé à la reconnexion',
                     hintStyle: TextStyle(
-                      color: widget.isConnected ? Colors.grey : Theme.of(context).colorScheme.error, 
+                      color: widget.isConnected
+                          ? Colors.grey
+                          : Theme.of(context).colorScheme.error,
                       fontSize: 14,
                     ),
                     border: InputBorder.none,

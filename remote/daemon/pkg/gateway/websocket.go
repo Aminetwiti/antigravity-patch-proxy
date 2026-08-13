@@ -32,6 +32,7 @@ type RPCClient interface {
 	SendMessageStream(cascadeID, text string, onFrame func([]byte) error) error
 	SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error)
 	SetBrowserOpenConversation(cascadeID string) ([]byte, error)
+	SendCommand(commandText string) ([]byte, error)
 }
 
 // checkOrigin rejette les navigateurs web arbitraires (CSWSH) tout en
@@ -50,9 +51,13 @@ func checkOrigin(r *http.Request) bool {
 }
 
 // pendingApproval : une approbation émise mais pas encore répondue, avec les
-// infos nécessaires à l'auto-refus (trajectoryId + stepIndex + payload) et le
-// timer d'expiration (approvalTimeout, défaut 5 min).
+// infos nécessaires à l'auto-refus (trajectoryId + stepIndex + payload), le
+// timer d'expiration (approvalTimeout, défaut 5 min) et la corrélation mobile
+// (callId + cascadeId : le client peut la ré-ouvrir après un tap-notification
+// via get_pending_approval).
 type pendingApproval struct {
+	callID       string
+	cascadeID    string
 	trajectoryID string
 	stepIndex    uint32
 	approvalType string
@@ -175,6 +180,8 @@ func (s *Server) MarkApprovalPending(cascadeID string, ev connectrpc.StreamEvent
 		prev.timer.Stop() // une nouvelle approbation remplace l'ancienne
 	}
 	p := &pendingApproval{
+		callID:       ev.CallID,
+		cascadeID:    cascadeID,
 		trajectoryID: ev.TrajectoryID,
 		stepIndex:    ev.StepIndex,
 		approvalType: ev.Tool,
@@ -184,6 +191,32 @@ func (s *Server) MarkApprovalPending(cascadeID string, ev connectrpc.StreamEvent
 	s.approvals[cascadeID] = p
 	if s.approvalTimeout > 0 {
 		p.timer = time.AfterFunc(s.approvalTimeout, func() { s.expireApproval(cascadeID) })
+	}
+}
+
+// pendingApprovalInfo renvoie le contexte d'approbation en attente pour un
+// client qui la ré-ouvre (tap sur la notification locale) : null si aucune.
+// Les champs sont stables même si le stream_delta d'origine a été perdu
+// (app tuée entre l'émission et le tap).
+func (s *Server) pendingApprovalInfo(cascadeID string) map[string]interface{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.approvals[cascadeID]
+	if !ok {
+		return nil
+	}
+	expiresAt := int64(0)
+	if p.timer != nil {
+		expiresAt = time.Now().Add(s.approvalTimeout).UnixMilli()
+	}
+	return map[string]interface{}{
+		"cascadeId":    p.cascadeID,
+		"callId":       p.callID,
+		"trajectoryId": p.trajectoryID,
+		"stepIndex":    p.stepIndex,
+		"approvalType": p.approvalType,
+		"command":      p.command,
+		"expiresAt":    expiresAt,
 	}
 }
 
@@ -227,8 +260,9 @@ func (s *Server) expireApproval(cascadeID string) {
 }
 
 // commandLineRe extrait la commande proposée du détail d'approbation
-// run_command (même format que l'extraction mobile, voir stream_parser.dart).
-var commandLineRe = regexp.MustCompile(`"(?:command_line|commandline)"\s*:\s*"((?:[^"\\]|\\.)*)"`)
+// run_command — accepte "command_line" (format réel) et "run_command"
+// (format du blob de corrélation), comme le fallback mobile (stream_parser.dart).
+var commandLineRe = regexp.MustCompile(`"(?:command_line|commandline|run_command)"\s*:\s*"((?:[^"\\]|\\.)*)"`)
 
 func extractCommand(detail string) string {
 	if m := commandLineRe.FindStringSubmatch(detail); m != nil {
@@ -455,6 +489,15 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			raw, err = s.RPCClient.CreateCascade(uri, projectID, 190)
 		}
 
+	case "send_command":
+		if msg.Command == "" {
+			err = fmt.Errorf("command requis (ex: /model, /compact)")
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
+			return
+		}
+		log.Printf("[WS] Commande slash: %s", msg.Command)
+		raw, err = s.RPCClient.SendCommand(msg.Command)
+
 	case "list_sessions":
 		raw, err = s.RPCClient.GetAllCascades()
 		if err != nil {
@@ -498,6 +541,19 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 						}
 					} else {
 						s.MarkApprovalPending(msg.CascadeID, ev)
+					}
+				}
+			}
+			// B2 : push dédié approval_pending (avec contexte) en plus du
+			// stream_delta — le mobile s'en sert au tap-notification pour
+			// ré-ouvrir l'approbation même si le delta a été perdu.
+			if len(events) > 0 {
+				for _, ev := range events {
+					if ev.Kind == connectrpc.EventKindApprovalRequired && !s.hasSessionApproval(msg.CascadeID, ev.Tool) {
+						s.broadcast(OutgoingMessage{
+							Type: "approval_pending",
+							Data: s.pendingApprovalInfo(msg.CascadeID),
+						})
 					}
 				}
 			}
@@ -557,6 +613,17 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 
 		oneofField, oneofPayload := buildApprovalPayload(msg.ApprovalType, confirm, msg.Command, msg.FilePath)
 		raw, err = s.RPCClient.SubmitToolApproval(msg.CascadeID, msg.TrajectoryID, uint32(msg.StepIndex), oneofField, oneofPayload)
+
+	case "get_pending_approval":
+		// B2 : un client qui revient (tap sur la notification locale) demande
+		// le contexte de l'approbation en attente — même si son stream_delta
+		// d'origine a été perdu (app tuée). Réponse unary, null si aucune.
+		s.writeJSON(conn, OutgoingMessage{
+			Type:      "response",
+			RequestID: msg.RequestID,
+			Data:      s.pendingApprovalInfo(msg.CascadeID),
+		})
+		return
 
 	case "list_files":
 		if msg.WorkspacePath == "" {

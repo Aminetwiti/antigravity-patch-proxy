@@ -150,20 +150,55 @@ class _CodeBlockView extends StatelessWidget {
   }
 }
 
-class _StreamingCursor extends StatelessWidget {
+class _StreamingCursor extends StatefulWidget {
   const _StreamingCursor();
 
   @override
+  State<_StreamingCursor> createState() => _StreamingCursorState();
+}
+
+class _StreamingCursorState extends State<_StreamingCursor>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 800),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    // Accessibilité : ne pas animer si l'utilisateur a désactivé les
+    // animations système (audit UX P2-8).
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
     return Padding(
       padding: const EdgeInsets.only(top: 2),
-      child: Container(
-        width: 8,
-        height: 14,
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.primary,
-          borderRadius: BorderRadius.circular(2),
-        ),
+      child: reduceMotion
+          ? const _CursorBox()
+          : FadeTransition(
+              opacity: Tween<double>(begin: 0.35, end: 1.0)
+                  .animate(_controller),
+              child: const _CursorBox(),
+            ),
+    );
+  }
+}
+
+class _CursorBox extends StatelessWidget {
+  const _CursorBox();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 8,
+      height: 14,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primary,
+        borderRadius: BorderRadius.circular(2),
       ),
     );
   }

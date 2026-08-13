@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +9,7 @@ import '../../core/notifications/approval_notifier.dart';
 import '../../core/protocol/daemon_api.dart';
 import '../../core/protocol/messages.dart';
 import '../../core/protocol/stream_parser.dart';
+import '../../theme/app_colors.dart';
 import '../../widgets/chat_input_bar.dart';
 import '../../widgets/connection_banner.dart';
 import '../../widgets/markdown_bubble.dart';
@@ -36,14 +38,36 @@ class ChatStreamScreen extends StatefulWidget {
   State<ChatStreamScreen> createState() => _ChatStreamScreenState();
 }
 
-class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBindingObserver {
-  final List<ChatMessage> _messages = [];
-  ToolApprovalRequest? _pendingApproval;
-  // true quand le daemon a broadcasté approval_expired pour la carte courante :
-  // on affiche l'état « expiré » et on désactive les boutons.
-  bool _approvalExpired = false;
-  
+class _ChatStreamScreenState extends State<ChatStreamScreen>
+    with WidgetsBindingObserver {
+  // Bug #9 : messages sauvegardés par session pour ne pas les perdre lors d'un
+  // changement d'onglet pendant un stream actif.
+  // ponytail: Map simple, pas de provider — l'historique n'est pas persisté sur
+  // disque (session restart repart de zéro, ce qui est le comportement voulu).
+  final Map<String, List<ChatMessage>> _sessionMessages = {};
+  List<ChatMessage> get _messages {
+    return _sessionMessages.putIfAbsent(widget.activeSessionId, () => []);
+  }
+
+  // File d'attente des approbations (audit UX P0-1) : une 2ᵉ demande ne doit
+  // PLUS écraser la 1ʳᵉ — chaque carte reste approvable via ◀ ▶.
+  final List<ToolApprovalRequest> _pendingApprovals = [];
+  int _approvalIndex = -1;
+  // callIds dont le daemon a broadcasté approval_expired : la carte reste
+  // affichée (pourquoi elle a disparu) mais passe en lecture seule.
+  final Set<String> _expiredCallIds = {};
+
+  ToolApprovalRequest? get _currentApproval {
+    if (_pendingApprovals.isEmpty ||
+        _approvalIndex < 0 ||
+        _approvalIndex >= _pendingApprovals.length) {
+      return null;
+    }
+    return _pendingApprovals[_approvalIndex];
+  }
+
   StreamSubscription<Map<String, dynamic>>? _streamSub;
+  StreamSubscription<Map<String, String>>? _tapSub;
   int _messageCounter = 0;
 
   static const _stillWorkingDelay = Duration(seconds: 15);
@@ -59,12 +83,18 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
   bool _needsStateUpdate = false;
   static const _throttleDuration = Duration(milliseconds: 100);
 
+  // Auto-scroll pendant le streaming (audit UX P1-6).
+  final ScrollController _scrollController = ScrollController();
+
   // ── État de connexion live (alimenté par wsClient) ─────────────────────
   ConnectionStatus _status = ConnectionStatus.disconnected;
   int _attempt = 0;
   Duration _nextRetryIn = Duration.zero;
   bool _isManualDisconnect = false;
   bool _notifiedLost = false;
+  // L'app est au premier plan : le banner suffit, pas besoin de notification
+  // locale (qui vise l'écran verrouillé / l'app en arrière-plan).
+  bool _appInForeground = true;
 
   @override
   void initState() {
@@ -72,6 +102,56 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
     WidgetsBinding.instance.addObserver(this);
     _watchBroadcastStreams();
     _setupConnectionListeners();
+    _watchNotificationTaps();
+    // Sans wsClient (tests/aperçu), l'état vient de la prop isConnected.
+    if (widget.wsClient == null) {
+      _status = widget.isConnected
+          ? ConnectionStatus.connected
+          : ConnectionStatus.disconnected;
+    }
+  }
+
+  /// B2 — tap-to-deep-link : quand l'utilisateur tape la notification locale
+  /// « Approbation requise » (app en arrière-plan ou tuée), on re-fetch le
+  /// contexte via get_pending_approval et on pousse la carte. Le daemon garde
+  /// l'approbation même si le stream_delta d'origine a été perdu.
+  void _watchNotificationTaps() {
+    _tapSub?.cancel();
+    _tapSub = ApprovalNotifier.instance.taps.listen((tap) {
+      if (!mounted) return;
+      final cascadeId = tap['cascadeId'] ?? '';
+      if (tap['kind'] != 'approval' || cascadeId.isEmpty) return;
+      if (cascadeId != widget.activeSessionId) {
+        // La session concernée n'est pas celle affichée : on ne peut pas
+        // re-router ici (l'écran chat est monté par main.dart). Le daemon a
+        // déjà pushé approval_pending — il sera consommé quand l'utilisateur
+        // ouvrira la session. On se contente d'afficher la carte si la
+        // session affichée EST la bonne.
+        return;
+      }
+      _pendingApprovalFromTap();
+    });
+  }
+
+  Future<void> _pendingApprovalFromTap() async {
+    final api = widget.api;
+    if (api == null) return;
+    try {
+      final info = await api.getPendingApproval(widget.activeSessionId);
+      if (!mounted || info == null || info.isEmpty) return;
+      _addApproval(ToolApprovalRequest(
+        callId: info['callId'] as String? ?? '',
+        toolName: info['approvalType'] as String? ?? 'run_command',
+        command: info['command'] as String? ?? '',
+        description: 'Tool execution requires your confirmation',
+        cascadeId: widget.activeSessionId,
+        trajectoryId: info['trajectoryId'] as String? ?? '',
+        stepIndex: (info['stepIndex'] as num?)?.toInt() ?? -1,
+        approvalType: info['approvalType'] as String? ?? 'approval',
+      ));
+    } catch (_) {
+      // Daemon injoignable ou pas d'approbation en attente : silencieux.
+    }
   }
 
   void _setupConnectionListeners() {
@@ -79,45 +159,75 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
     if (client == null) return;
 
     setState(() {
-      _status = client.status.value;
+      _status = client.status;
     });
 
-    client.status.addListener(() {
-      if (!mounted) return;
-      final newStatus = client.status.value;
-      
-      if (_status == ConnectionStatus.connected && 
-          newStatus != ConnectionStatus.connected) {
-        if (!_notifiedLost) {
-          _notifiedLost = true;
-          // Notification optionnelle :
-          // ApprovalNotifier.instance.notifyConnectionLost();
-        }
-      } else if (newStatus == ConnectionStatus.connected) {
-        _notifiedLost = false;
+    client.statusNotifier.addListener(_onConnectionStatusChanged);
+    client.retryInfo.addListener(_onRetryInfoChanged);
+  }
+
+  void _onConnectionStatusChanged() {
+    if (!mounted) return;
+    final client = widget.wsClient;
+    if (client == null) return;
+    final newStatus = client.status;
+    final manual = client.isManualDisconnect;
+
+    if (_status == ConnectionStatus.connected &&
+        newStatus != ConnectionStatus.connected &&
+        !manual &&
+        !_notifiedLost) {
+      _notifiedLost = true;
+      // Phase UX : notification locale quand la connexion au daemon est
+      // perdue alors que l'utilisateur n'est PAS sur l'app (écran verrouillé
+      // ou app en arrière-plan). Au premier plan, le banner suffit.
+      if (!_appInForeground) {
+        ApprovalNotifier.instance.notifyConnectionLost();
       }
+    } else if (newStatus == ConnectionStatus.connected) {
+      if (_notifiedLost) {
+        // On était en panne : prévenir du retour à la normale (même id de
+        // notification → remplace la « perdue »).
+        ApprovalNotifier.instance.notifyConnectionRestored();
+      }
+      _notifiedLost = false;
+    }
 
-      setState(() {
-        _status = newStatus;
-      });
+    setState(() {
+      _status = newStatus;
+      _isManualDisconnect = manual;
     });
+  }
 
-    client.retryInfo.addListener(() {
-      if (!mounted) return;
-      setState(() {
-        _attempt = client.retryInfo.value.attempt;
-        _nextRetryIn = client.retryInfo.value.nextRetryIn;
-      });
+  void _onRetryInfoChanged() {
+    if (!mounted) return;
+    final client = widget.wsClient;
+    if (client == null) return;
+    setState(() {
+      _attempt = client.retryInfo.value.attempt;
+      _nextRetryIn = client.retryInfo.value.nextRetryIn;
     });
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused) {
+    // Track du premier plan pour ne notifier la perte de connexion que si
+    // l'utilisateur ne regarde pas l'app (écran verrouillé / background).
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _appInForeground = true;
+        break;
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        _appInForeground = false;
+        break;
+    }
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
       _streamSub?.pause();
     } else if (state == AppLifecycleState.resumed) {
       _streamSub?.resume();
-      // Optionally request history resync here.
     }
   }
 
@@ -125,9 +235,14 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
   void didUpdateWidget(covariant ChatStreamScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.activeSessionId != widget.activeSessionId) {
-      _messages.clear();
-      _pendingApproval = null;
-      _pendingApprovalCallIds.clear();
+      // Bug #9 : ne vider que si aucun stream actif pour cette session.
+      // Les messages sont préservés dans _sessionMessages par session.
+      if (_activeStreamCount == 0) {
+        _pendingApprovals.clear();
+        _approvalIndex = -1;
+        _expiredCallIds.clear();
+        _pendingApprovalCallIds.clear();
+      }
     }
     if (oldWidget.api != widget.api) {
       _watchBroadcastStreams();
@@ -139,7 +254,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
     WidgetsBinding.instance.removeObserver(this);
     _throttleTimer?.cancel();
     _streamSub?.cancel();
+    _tapSub?.cancel();
     _stillWorkingTimer?.cancel();
+    _scrollController.dispose();
+    final client = widget.wsClient;
+    client?.statusNotifier.removeListener(_onConnectionStatusChanged);
+    client?.retryInfo.removeListener(_onRetryInfoChanged);
     super.dispose();
   }
 
@@ -185,6 +305,45 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
     );
   }
 
+  void _addApproval(ToolApprovalRequest approval, {bool hostActive = false}) {
+    // Bug #7 : guard broadcast path — un même callId ne doit jamais re-afficher
+    // sa carte après reconnexion si l'utilisateur l'a déjà traitée.
+    if (_processedCallIds.contains(approval.callId)) return;
+    if (_pendingApprovals.any((a) => a.callId == approval.callId)) return;
+    _expiredCallIds.remove(approval.callId);
+    if (_currentApproval == null) {
+      HapticFeedback.mediumImpact();
+    }
+    setState(() {
+      _pendingApprovals.add(approval);
+      _approvalIndex = _pendingApprovals.length - 1;
+      _pendingApprovalCallIds.add(approval.callId);
+    });
+    if (!hostActive) {
+      ApprovalNotifier.instance.notifyApprovalRequired(
+        callId: approval.callId,
+        cascadeId: approval.cascadeId.isEmpty
+            ? widget.activeSessionId
+            : approval.cascadeId,
+        toolName: approval.toolName,
+        command: approval.command,
+      );
+    }
+  }
+
+  void _removeApproval(String callId) {
+    final i = _pendingApprovals.indexWhere((a) => a.callId == callId);
+    if (i < 0) return;
+    setState(() {
+      _pendingApprovals.removeAt(i);
+      _approvalIndex = _pendingApprovals.isEmpty
+          ? -1
+          : math.min(_approvalIndex, _pendingApprovals.length - 1);
+      _pendingApprovalCallIds.remove(callId);
+    });
+    ApprovalNotifier.instance.cancelApproval(callId);
+  }
+
   void _watchBroadcastStreams() {
     _streamSub?.cancel();
     _streamSub = widget.api?.events.listen((msg) {
@@ -210,7 +369,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
         final textDelta = StreamDeltaParser.textOf(msg);
         final thoughtDelta = StreamDeltaParser.thinkingOf(msg);
         final approval = StreamDeltaParser.approvalOf(msg);
-        
+
         final idx = _messages.indexWhere((m) => m.id == 'ext-$requestId');
         if (idx >= 0) {
           final current = _messages[idx];
@@ -219,17 +378,14 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
           _messages[idx] = current.copyWith(
             text: current.text + textDelta,
             thought: _externalThoughts[requestId]!.isNotEmpty
-                ? 'Thought · ${_externalThoughts[requestId]!.trim()}'
+                ? _externalThoughts[requestId]!.trim()
                 : current.thought,
           );
         }
         if (approval != null) {
-          if (!_processedCallIds.contains(approval.callId)) {
-            if (_pendingApproval == null) {
-              HapticFeedback.mediumImpact();
-            }
-            _approvalExpired = false;
-            _pendingApproval = ToolApprovalRequest(
+          final hostActive = msg['data']?['hostActive'] == true;
+          _addApproval(
+            ToolApprovalRequest(
               callId: approval.callId,
               toolName: approval.tool,
               command: approval.command,
@@ -238,19 +394,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
               trajectoryId: approval.trajectoryId,
               stepIndex: approval.stepIndex,
               approvalType: approval.approvalType,
-            );
-            _pendingApprovalCallIds.add(approval.callId);
-            final hostActive = msg['data']?['hostActive'] == true;
-            if (!hostActive) {
-              ApprovalNotifier.instance.notifyApprovalRequired(
-                callId: approval.callId,
-                toolName: approval.tool,
-                command: approval.command,
-              );
-            }
-          }
+            ),
+            hostActive: hostActive,
+          );
         }
-        
+
         _scheduleThrottledUpdate();
       } else if (type == 'stream_end') {
         _onStreamEnded();
@@ -262,17 +410,18 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
           }
           _externalThoughts.remove(requestId);
         });
+        _scrollToBottom();
       } else if (type == 'approval_expired') {
-        // Phase 6 : le daemon a auto-refusé l'approbation (timeout) — on
-        // retire la carte et on annule la notification locale.
-        final expired = _pendingApproval;
-        setState(() {
-          _pendingApproval = null;
-          _approvalExpired = true;
-        });
-        if (expired != null) {
-          ApprovalNotifier.instance.cancelApproval(expired.callId);
-          _pendingApprovalCallIds.remove(expired.callId);
+        // Phase 6 : le daemon a auto-refusé l'approbation (timeout) — la carte
+        // reste visible en lecture seule pour expliquer la disparition, et la
+        // notification locale est annulée.
+        final callId = msg['data']?['callId'] as String? ??
+            msg['data']?['approvalId'] as String? ??
+            '';
+        if (callId.isNotEmpty && _pendingApprovalCallIds.contains(callId)) {
+          setState(() => _expiredCallIds.add(callId));
+          _pendingApprovalCallIds.remove(callId);
+          ApprovalNotifier.instance.cancelApproval(callId);
         }
       }
     });
@@ -291,7 +440,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
 
     if (api == null) return;
 
-    _onStreamEnded(); 
+    _onStreamEnded();
     final assistantId = 'a${++_messageCounter}';
     _lastLocalStreamEnd = null;
     setState(() {
@@ -303,6 +452,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
         isStreaming: true,
       ));
     });
+    _scrollToBottom();
 
     var thoughtBuffer = StringBuffer();
     _onStreamStarted();
@@ -315,7 +465,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
         final thoughtDelta = StreamDeltaParser.thinkingOf(msg);
         final approval = StreamDeltaParser.approvalOf(msg);
         if (!mounted) return;
-        
+
         if (textDelta.isNotEmpty || thoughtDelta.isNotEmpty) {
           final idx = _messages.indexWhere((m) => m.id == assistantId);
           if (idx >= 0) {
@@ -324,15 +474,15 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
             _messages[idx] = current.copyWith(
               text: current.text + textDelta,
               thought: thoughtBuffer.isNotEmpty
-                  ? 'Thought · ${thoughtBuffer.toString().trim()}'
+                  ? thoughtBuffer.toString().trim()
                   : current.thought,
             );
           }
         }
         if (approval != null) {
-          if (!_processedCallIds.contains(approval.callId)) {
-            _approvalExpired = false;
-            _pendingApproval = ToolApprovalRequest(
+          final hostActive = msg['data']?['hostActive'] == true;
+          _addApproval(
+            ToolApprovalRequest(
               callId: approval.callId,
               toolName: approval.tool,
               command: approval.command,
@@ -341,19 +491,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
               trajectoryId: approval.trajectoryId,
               stepIndex: approval.stepIndex,
               approvalType: approval.approvalType,
-            );
-            _pendingApprovalCallIds.add(approval.callId);
-            final hostActive = msg['data']?['hostActive'] == true;
-            if (!hostActive) {
-              ApprovalNotifier.instance.notifyApprovalRequired(
-                callId: approval.callId,
-                toolName: approval.tool,
-                command: approval.command,
-              );
-            }
-          }
+            ),
+            hostActive: hostActive,
+          );
         }
-        
+
         _scheduleThrottledUpdate();
       },
       onDone: () {
@@ -363,9 +505,27 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
         setState(() {
           final idx = _messages.indexWhere((m) => m.id == assistantId);
           if (idx >= 0) {
-            _messages[idx] = _messages[idx].copyWith(isStreaming: false);
+            // Audit UX P2-9 : un stream_end avec error/outcome error doit
+            // afficher la bulle d'erreur dédiée (fond danger), pas une bulle
+            // vide ni du markdown brut.
+            final end = _lastLocalStreamEnd ?? const {};
+            final error =
+                end['error'] as String? ??
+                (end['data'] is Map
+                    ? (end['data'] as Map)['outcome'] == 'error'
+                        ? (end['data'] as Map)['message'] as String? ?? 'Erreur'
+                        : null
+                    : null);
+            _messages[idx] = _messages[idx].copyWith(
+              isStreaming: false,
+              isError: error != null,
+              text: error != null
+                  ? (_messages[idx].text.isEmpty ? error : _messages[idx].text)
+                  : _messages[idx].text,
+            );
           }
         });
+        _scrollToBottom();
       },
       onError: (e) {
         if (!mounted) return;
@@ -379,10 +539,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
           final idx = _messages.indexWhere((m) => m.id == assistantId);
           if (idx >= 0) {
             _messages[idx] = _messages[idx].copyWith(
-              text: _messages[idx].text.isEmpty
-                  ? '⚠ Erreur : $e'
-                  : _messages[idx].text,
+              text: _messages[idx].text.isEmpty ? 'Erreur : $e' : _messages[idx].text,
               isStreaming: false,
+              isError: _messages[idx].text.isEmpty,
             );
           }
         });
@@ -390,24 +549,21 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
     );
   }
 
-  void _handleToolDecision(ToolDecision decision, {ApprovalScope scope = ApprovalScope.once}) {
-    final pending = _pendingApproval;
-    if (pending == null) return;
-    
+  void _handleToolDecision(ToolDecision decision,
+      {ApprovalScope scope = ApprovalScope.once}) {
+    final approval = _currentApproval;
+    if (approval == null) return;
+
     // Scénarios Extrêmes (1 & 7) : On marque cet appel comme traité pour ne plus jamais
     // ré-afficher cette carte si le serveur rejoue le message après une perte de connexion.
-    _processedCallIds.add(pending.callId);
+    _processedCallIds.add(approval.callId);
 
-    setState(() {
-      _pendingApproval = null;
-    });
-    if (_approvalExpired) {
+    if (_expiredCallIds.contains(approval.callId)) {
       // La carte affichait déjà l'état expiré : on nettoie juste l'état.
-      _approvalExpired = false;
+      _removeApproval(approval.callId);
       return;
     }
-    ApprovalNotifier.instance.cancelApproval(approval.callId);
-    _pendingApprovalCallIds.remove(approval.callId);
+    _removeApproval(approval.callId);
     widget.api?.submitApproval(
       cascadeId: approval.cascadeId.isEmpty
           ? widget.activeSessionId
@@ -427,14 +583,27 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
       _needsStateUpdate = true;
       return;
     }
-    
+
     setState(() {}); // Immediate update
-    
+
     _throttleTimer = Timer(_throttleDuration, () {
       if (_needsStateUpdate && mounted) {
         setState(() {});
         _needsStateUpdate = false;
       }
+      _scrollToBottom();
+    });
+  }
+
+  void _scrollToBottom() {
+    if (!_scrollController.hasClients) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOutQuart,
+      );
     });
   }
 
@@ -463,6 +632,80 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
     );
   }
 
+  /// Carte d'approbation épinglée au-dessus de la barre de saisie (audit UX
+  /// P0-2) : toujours visible, même en fin de longue conversation. Navigable
+  /// ◀ ▶ quand plusieurs demandes sont empilées.
+  Widget _buildApprovalArea() {
+    final approval = _currentApproval;
+    if (approval == null) return const SizedBox.shrink();
+    final total = _pendingApprovals.length;
+    final expired = _expiredCallIds.contains(approval.callId);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (total > 1)
+            Row(
+              children: [
+                IconButton(
+                  key: const Key('approval-prev'),
+                  icon: const Icon(Icons.chevron_left, size: 18),
+                  tooltip: 'Approbation précédente',
+                  onPressed: () => setState(() {
+                    _approvalIndex =
+                        (_approvalIndex - 1 + total) % total;
+                  }),
+                ),
+                Text(
+                  'Approbation ${_approvalIndex + 1}/$total',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                IconButton(
+                  key: const Key('approval-next'),
+                  icon: const Icon(Icons.chevron_right, size: 18),
+                  tooltip: 'Approbation suivante',
+                  onPressed: () => setState(() {
+                    _approvalIndex = (_approvalIndex + 1) % total;
+                  }),
+                ),
+                const Spacer(),
+                IconButton(
+                  key: const Key('approval-dismiss'),
+                  icon: const Icon(Icons.close, size: 16),
+                  tooltip: 'Fermer cette approbation',
+                  onPressed: () => _removeApproval(approval.callId),
+                ),
+              ],
+            ),
+          TweenAnimationBuilder<double>(
+            key: ValueKey('approval-${approval.callId}'),
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOutQuart,
+            tween: Tween(begin: 0.0, end: 1.0),
+            builder: (context, value, child) => Opacity(
+              opacity: value,
+              child: Transform.translate(
+                offset: Offset(0, 8 * (1 - value)),
+                child: child,
+              ),
+            ),
+            child: ToolApprovalCard(
+              request: approval,
+              onDecision: _handleToolDecision,
+              isExpired: expired,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     Widget connectivityBanner = AnimatedSize(
@@ -473,13 +716,20 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
         attempt: _attempt,
         nextRetryIn: _nextRetryIn,
         isManualDisconnect: _isManualDisconnect,
-        onRetry: _wsClient?.retryNow,
+        onRetry: widget.wsClient?.retryNow,
       ),
     );
 
-    if (_messages.isEmpty && _pendingApproval == null) {
+    // Source unique de vérité pour l'état connecté de la barre de saisie :
+    // le banner et l'input partagent le même statut (audit UX P2-12).
+    final isConnected = widget.wsClient == null
+        ? widget.isConnected
+        : _status == ConnectionStatus.connected;
+
+    if (_messages.isEmpty && _currentApproval == null) {
       return Column(
         children: [
+          connectivityBanner,
           Expanded(
             child: Center(
               child: SingleChildScrollView(
@@ -504,7 +754,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
                       const SizedBox(height: 16),
                       ChatInputBar(
                         onSend: _handleSendMessage,
-                        isConnected: widget.isConnected,
+                        isConnected: isConnected,
                       ),
                       const SizedBox(height: 64),
                     ],
@@ -513,7 +763,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
               ),
             ),
           ),
-          connectivityBanner,
         ],
       );
     }
@@ -523,52 +772,33 @@ class _ChatStreamScreenState extends State<ChatStreamScreen> with WidgetsBinding
         connectivityBanner,
         Expanded(
           child: ListView(
+            controller: _scrollController,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             children: [
               _buildReminderBanners(),
               ..._messages.map((msg) => TweenAnimationBuilder<double>(
-                key: ValueKey(msg.id),
-                duration: const Duration(milliseconds: 400),
-                curve: Curves.easeOutQuart,
-                tween: Tween(begin: 0.0, end: 1.0),
-                builder: (context, value, child) {
-                  return Opacity(
-                    opacity: value,
-                    child: Transform.translate(
-                      offset: Offset(0, 10 * (1 - value)),
-                      child: child,
-                    ),
-                  );
-                },
-                child: _MessageBubble(message: msg),
-              )),
-              if (_pendingApproval != null)
-                TweenAnimationBuilder<double>(
-                  key: const ValueKey('pending-approval'),
-                  duration: const Duration(milliseconds: 400),
-                  curve: Curves.easeOutQuart,
-                  tween: Tween(begin: 0.0, end: 1.0),
-                  builder: (context, value, child) {
-                    return Opacity(
-                      opacity: value,
-                      child: Transform.translate(
-                        offset: Offset(0, 10 * (1 - value)),
-                        child: child,
-                      ),
-                    );
-                  },
-                  child: ToolApprovalCard(
-                    request: _pendingApproval!,
-                    onDecision: _handleToolDecision,
-                    isExpired: _approvalExpired,
-                  ),
-                ),
+                    key: ValueKey(msg.id),
+                    duration: const Duration(milliseconds: 400),
+                    curve: Curves.easeOutQuart,
+                    tween: Tween(begin: 0.0, end: 1.0),
+                    builder: (context, value, child) {
+                      return Opacity(
+                        opacity: value,
+                        child: Transform.translate(
+                          offset: Offset(0, 10 * (1 - value)),
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: _MessageBubble(message: msg),
+                  )),
             ],
           ),
         ),
+        _buildApprovalArea(),
         ChatInputBar(
           onSend: _handleSendMessage,
-          isConnected: widget.isConnected,
+          isConnected: isConnected,
         ),
       ],
     );
@@ -617,11 +847,14 @@ class _MessageBubble extends StatefulWidget {
 }
 
 class _MessageBubbleState extends State<_MessageBubble> {
-  bool _isThoughtExpanded = true;
+  // Audit UX P0-3 : le raisonnement est REPLIÉ par défaut (une ligne) — le
+  // toggle le déplie vraiment au lieu de ne changer qu'une flèche.
+  bool _isThoughtExpanded = false;
 
   @override
   Widget build(BuildContext context) {
     final isUser = widget.message.sender == 'user';
+    final scheme = Theme.of(context).colorScheme;
 
     if (isUser) {
       return Container(
@@ -630,18 +863,21 @@ class _MessageBubbleState extends State<_MessageBubble> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            color: scheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+            border: Border.all(color: scheme.outlineVariant),
           ),
-          child: Text(
+          // Bug #1 : SelectableText pour permettre la sélection/copie dans
+          // les messages utilisateur (idem assistant via MarkdownBubble).
+          child: SelectableText(
             widget.message.text,
-            style: TextStyle(fontSize: 13.5, color: Theme.of(context).colorScheme.onSurface),
+            style: TextStyle(fontSize: 13.5, color: scheme.onSurface),
           ),
         ),
       );
     }
 
+    final isError = widget.message.isError;
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       child: Column(
@@ -660,19 +896,33 @@ class _MessageBubbleState extends State<_MessageBubble> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      widget.message.thought!,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w500,
+                    Icon(Icons.psychology_outlined,
+                        size: 13, color: scheme.onSurfaceVariant),
+                    const SizedBox(width: 6),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 240),
+                      child: Text(
+                        widget.message.thought!,
+                        key: Key('thought-${widget.message.id}'),
+                        maxLines: _isThoughtExpanded ? null : 1,
+                        overflow: _isThoughtExpanded
+                            ? TextOverflow.visible
+                            : TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: scheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w500,
+                          fontStyle: FontStyle.italic,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 4),
                     Icon(
-                      _isThoughtExpanded ? Icons.chevron_right : Icons.expand_more,
-                      size: 14,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      _isThoughtExpanded
+                          ? Icons.expand_less
+                          : Icons.expand_more,
+                      size: 16,
+                      color: scheme.onSurfaceVariant,
                     ),
                   ],
                 ),
@@ -680,33 +930,96 @@ class _MessageBubbleState extends State<_MessageBubble> {
             ),
             const SizedBox(height: 6),
           ],
-          MarkdownBubble(
-            text: widget.message.text,
-            isStreaming: widget.message.isStreaming,
-          ),
+          if (isError)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.danger.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.danger.withValues(alpha: 0.4)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline, size: 16, color: AppColors.danger),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      widget.message.text,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppColors.danger,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            MarkdownBubble(
+              text: widget.message.text,
+              isStreaming: widget.message.isStreaming,
+            ),
           const SizedBox(height: 8),
           Row(
             children: [
-              InkWell(
-                onTap: () {
-                  Clipboard.setData(ClipboardData(text: widget.message.text));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Message copié dans le presse-papiers'),
-                      duration: Duration(seconds: 1),
+              // Timestamp capturé mais jamais affiché (audit UX P1-7).
+              Text(
+                widget.message.timestamp,
+                style: TextStyle(fontSize: 10.5, color: scheme.onSurfaceVariant),
+              ),
+              const Spacer(),
+              Tooltip(
+                message: 'Copier le message',
+                child: InkWell(
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: widget.message.text));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Message copié dans le presse-papiers'),
+                        duration: Duration(seconds: 1),
+                      ),
+                    );
+                  },
+                  borderRadius: BorderRadius.circular(4),
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: Semantics(
+                      label: 'Copier le message',
+                      button: true,
+                      child: Icon(Icons.copy_outlined,
+                          size: 14, color: scheme.onSurfaceVariant),
                     ),
-                  );
-                },
-                borderRadius: BorderRadius.circular(4),
-                child: Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: Icon(Icons.copy_outlined, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
-              Icon(Icons.thumb_up_outlined, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              Tooltip(
+                message: 'Utile',
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Semantics(
+                    label: 'Marquer comme utile',
+                    button: true,
+                    child: Icon(Icons.thumb_up_outlined,
+                        size: 14, color: scheme.onSurfaceVariant),
+                  ),
+                ),
+              ),
               const SizedBox(width: 12),
-              Icon(Icons.thumb_down_outlined, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              Tooltip(
+                message: 'Pas utile',
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Semantics(
+                    label: 'Marquer comme pas utile',
+                    button: true,
+                    child: Icon(Icons.thumb_down_outlined,
+                        size: 14, color: scheme.onSurfaceVariant),
+                  ),
+                ),
+              ),
             ],
           ),
         ],
