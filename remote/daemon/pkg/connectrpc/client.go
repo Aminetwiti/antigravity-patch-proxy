@@ -19,6 +19,16 @@ type Client struct {
 	CSRFToken string
 	Host      string
 	HTTP      *http.Client
+	// APIKey est la clé d'API envoyée au Language Server (champ metadata 3).
+	// Sans elle le LS répond « untrusted workspace ».
+	APIKey string
+	// SessionID stable sur la session — le LS associe l'état du panneau à
+	// cette valeur (voir buildMetadata champ 10).
+	SessionID string
+	// ModelUID / ModelEnum : modèle demandé pour les messages cascade
+	// (cascade_config requested_model_uid/id). Renseigné au démarrage.
+	ModelUID  string
+	ModelEnum uint64
 }
 
 func NewClient(port int, csrfToken string) *Client {

@@ -73,13 +73,54 @@ func BuildStartCascade(workspaceURI, projectID string, requestedModel uint64) []
 
 // SendUserCascadeMessageRequest : field 1 cascade_id, field 2 items[]
 // où chaque item est TextOrScopeItem{ 1: chunk.text }.
-func BuildSendMessage(cascadeID, text string) []byte {
+//
+// Le LS 2.5.0 refuse tout message sans cascade_config (field 5) contenant
+// requested_model_id (14) ou requested_model_uid (15) : l'exécuteur plante
+// avec « neither PlanModel nor RequestedModel specified ». Même schéma que
+// buildSendCascadeMessageRequest de windsurf_main.js (éprouvé en prod).
+// Le modelUID est fourni par le client mobile ; s'il est vide on retombe
+// sur l'enum historique (requested_model_id).
+func BuildSendMessage(cascadeID, text, apiKey, sessionID, modelUID string, modelEnum uint64) []byte {
 	item := &writer{}
 	item.stringField(1, text)
 
 	w := &writer{}
 	w.stringField(1, cascadeID)
 	w.bytesField(2, item.b)
+	if apiKey != "" {
+		w.bytesField(3, buildMetadata(apiKey, sessionID))
+	}
+	w.bytesField(5, BuildCascadeConfig(modelUID, modelEnum))
+	return w.b
+}
+
+// BuildCascadeConfig construit le sous-message cascade_config (champs
+// validés par décodage du payload réel émis par l'IDE) :
+//
+//	1  conversational_planner_config (CascadeConversationalPlannerConfig)
+//	10 memory_config
+//
+// CascadeConversationalPlannerConfig :
+//
+//	1  system_prompt          2  user_instructions       3  tool_config
+//	4  planner_mode           5  requested_model_id      6  requested_model_uid
+//	7  model_tool_config      8  model_context_config    9  memory_config
+//	10 thinking_config        11 reinforcement          12 additional_instructions_section
+//
+// Le planner_mode 3 = NO_TOOL (pas de boucle d'outils — le mobile ne voit
+// que le texte). requested_model_uid (6) est la clé qui débloque le LS.
+func BuildCascadeConfig(modelUID string, modelEnum uint64) []byte {
+	planner := &writer{}
+	planner.stringField(1, "You are a helpful coding assistant.")
+	planner.varintField(4, 3) // planner_mode = NO_TOOL
+	if modelUID != "" {
+		planner.stringField(6, modelUID)
+	} else if modelEnum != 0 {
+		planner.varintField(5, modelEnum)
+	}
+
+	w := &writer{}
+	w.bytesField(1, planner.b)
 	return w.b
 }
 

@@ -85,6 +85,25 @@ type Server struct {
 	// « toujours autoriser pour cette session » (B3). Les demandes suivantes
 	// du même type sont auto-approuvées sans repasser par le téléphone.
 	sessionApprovals map[string]bool
+	// activeCascades : cascadeId → le daemon est en train de streamer un tour
+	// pour cette cascade (C5 : compteur d'activité exposé au /health).
+	activeCascades map[string]bool
+	// lastError : dernière erreur RPC notable, exposée au /health (C5).
+	lastError string
+	// startedAt : horodatage de démarrage du serveur (C5, uptime).
+	startedAt time.Time
+}
+
+// Stats snapshot de l'état du serveur pour l'endpoint /health (C5).
+// Champs JSON stables — le mobile (ou un script) peut les afficher tels quels.
+type Stats struct {
+	Status       string   `json:"status"`
+	Sessions     int      `json:"sessions"`
+	Streams      int      `json:"streams"`
+	Clients      int      `json:"clients"`
+	Uptime       string   `json:"uptime"`
+	ActiveCascades []string `json:"activeCascades"`
+	LastError    string   `json:"lastError,omitempty"`
 }
 
 func NewServer(client RPCClient, authToken string) *Server {
@@ -95,7 +114,48 @@ func NewServer(client RPCClient, authToken string) *Server {
 		approvals:        make(map[string]*pendingApproval),
 		approvalTimeout:  5 * time.Minute,
 		sessionApprovals: make(map[string]bool),
+		activeCascades:   make(map[string]bool),
+		startedAt:        time.Now(),
 	}
+}
+
+// MarkCascadeActive marque une cascade comme « en cours de stream » (posé à
+// l'entrée de send_prompt, retiré à la sortie). Servi au /health.
+func (s *Server) MarkCascadeActive(cascadeID string) {
+	s.mu.Lock()
+	s.activeCascades[cascadeID] = true
+	s.mu.Unlock()
+}
+
+// ClearCascadeActive retire la marque de stream en cours.
+func (s *Server) ClearCascadeActive(cascadeID string) {
+	s.mu.Lock()
+	delete(s.activeCascades, cascadeID)
+	s.mu.Unlock()
+}
+
+// Stats renvoie un snapshot cohérent de l'état du serveur (C5).
+func (s *Server) Stats() Stats {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	active := make([]string, 0, len(s.activeCascades))
+	for c := range s.activeCascades {
+		active = append(active, c)
+	}
+	sort.Strings(active)
+	st := Stats{
+		Sessions:       len(s.activeCascades),
+		Streams:        len(s.activeCascades),
+		Clients:        len(s.clients),
+		Uptime:         time.Since(s.startedAt).Round(time.Second).String(),
+		ActiveCascades: active,
+		LastError:      s.lastError,
+	}
+	st.Status = "ok"
+	if s.lastError != "" {
+		st.Status = "degraded"
+	}
+	return st
 }
 
 // SetApprovalTimeout configure le délai avant auto-refus d'une approbation
@@ -513,6 +573,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
 			return
 		}
+		s.MarkCascadeActive(msg.CascadeID)
+		defer s.ClearCascadeActive(msg.CascadeID)
 		s.broadcast(OutgoingMessage{Type: "stream_start", RequestID: msg.RequestID, Data: map[string]string{"cascadeId": msg.CascadeID}})
 
 		// 1. Force l'IDE à afficher la conversation avant de lancer le prompt
@@ -580,6 +642,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		case err != nil:
 			endData["outcome"] = "error"
 			endData["message"] = err.Error()
+			s.mu.Lock()
+			s.lastError = err.Error()
+			s.mu.Unlock()
 			s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, Data: endData, Error: err.Error()})
 		case s.hasPendingApproval(msg.CascadeID):
 			endData["outcome"] = "approval"

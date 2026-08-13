@@ -16,12 +16,12 @@ func (c *Client) GetAllCascades() ([]byte, error) {
 
 // SendMessage envoie un prompt et retourne la première frame de réponse.
 func (c *Client) SendMessage(cascadeID, text string) ([]byte, error) {
-	return c.Call("SendUserCascadeMessage", BuildSendMessage(cascadeID, text))
+	return c.Call("SendUserCascadeMessage", BuildSendMessage(cascadeID, text, c.APIKey, c.SessionID, c.ModelUID, c.ModelEnum))
 }
 
 // SendMessageStream envoie un prompt et transmet chaque frame de réponse reçue au callback onFrame.
 func (c *Client) SendMessageStream(cascadeID, text string, onFrame func([]byte) error) error {
-	return c.CallStream("SendUserCascadeMessage", BuildSendMessage(cascadeID, text), 120*time.Second, onFrame)
+	return c.CallStream("SendUserCascadeMessage", BuildSendMessage(cascadeID, text, c.APIKey, c.SessionID, c.ModelUID, c.ModelEnum), 120*time.Second, onFrame)
 }
 
 // SubmitToolApproval approuve/refuse une interaction d'outil via le RPC officiel

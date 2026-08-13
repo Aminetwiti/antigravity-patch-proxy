@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import '../../core/protocol/messages.dart';
+import 'package:flutter/services.dart';
+import '../../core/protocol/session_parser.dart';
 import '../../theme/app_colors.dart';
 
 class LeftSidebarDrawer extends StatefulWidget {
@@ -72,7 +73,12 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
     }).toList();
 
     return Drawer(
-      backgroundColor: Theme.of(context).colorScheme.surface,
+      // Rail PC : canvas Zinc-950 + bordure droite (--glass-bg-tier-1 sur --bg-0)
+      backgroundColor: AppColors.surfaceBase,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.zero,
+        side: BorderSide(color: AppColors.borderSubtle, width: 1),
+      ),
       child: SafeArea(
         child: Column(
           children: [
@@ -310,28 +316,42 @@ class _NavButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: isPrimary ? Theme.of(context).colorScheme.primaryContainer : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 18, color: Theme.of(context).colorScheme.onSurface),
-            const SizedBox(width: 10),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        child: AnimatedContainer(
+          duration: AppMotion.fast,
+          curve: AppMotion.easeOut,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          decoration: BoxDecoration(
+            // PC .btn-primary vs .btn-ghost
+            color: isPrimary ? AppColors.accentBlueDeep : AppColors.surfaceInput,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            border: Border.all(
+              color: isPrimary
+                  ? AppColors.accentBlueDeep
+                  : AppColors.borderSubtle,
             ),
-          ],
+            boxShadow: isPrimary
+                ? [BoxShadow(color: AppColors.accentBlue.withValues(alpha: 0.25), blurRadius: 12, offset: const Offset(0, 2))]
+                : null,
+          ),
+          child: Row(
+            children: [
+              Icon(icon, size: 18, color: isPrimary ? Colors.white : AppColors.inkSecondary),
+              const SizedBox(width: 10),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: isPrimary ? FontWeight.w600 : FontWeight.w500,
+                  color: isPrimary ? Colors.white : AppColors.inkPrimary,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -347,23 +367,34 @@ class _SidebarAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
-          children: [
-            Icon(icon, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
-            const SizedBox(width: 12),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w500,
-                color: Theme.of(context).colorScheme.onSurface,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        child: AnimatedContainer(
+          duration: AppMotion.fast,
+          curve: AppMotion.easeOut,
+          // PC .nav-item : hauteur 40px, hover surfaceHover
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, size: 18, color: AppColors.inkSecondary),
+              const SizedBox(width: 12),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.inkSecondary,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -412,15 +443,17 @@ class _ProjectFolderGroup extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           child: Row(
             children: [
-              Icon(Icons.folder_open_outlined, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              Icon(Icons.folder_open_outlined, size: 14, color: AppColors.inkMuted),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   folderName,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  style: const TextStyle(
+                    // PC .nav-group-label : 10px uppercase espacé
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.7,
+                    color: AppColors.inkFaint,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -443,8 +476,20 @@ class _ProjectFolderGroup extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 decoration: BoxDecoration(
+                  // PC .nav-item.active : fond raised + glow bleu
                   color: isSelected ? AppColors.surfaceInput : Colors.transparent,
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                  boxShadow: isSelected
+                      ? [
+                          BoxShadow(
+                            color: AppColors.accentBlue.withValues(alpha: 0.20),
+                            blurRadius: 10,
+                          ),
+                        ]
+                      : null,
+                  border: isSelected
+                      ? Border.all(color: AppColors.accentBlue.withValues(alpha: 0.35))
+                      : null,
                 ),
                 child: Row(
                   children: [
