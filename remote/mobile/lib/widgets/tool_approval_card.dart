@@ -41,6 +41,18 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
         trimmed.startsWith('git diff');
   }
 
+  IconData _iconForTool(String toolName) {
+    final lower = toolName.toLowerCase();
+    if (lower.contains('bash') || lower.contains('command') || lower.contains('run')) {
+      return Icons.terminal;
+    } else if (lower.contains('file') || lower.contains('read') || lower.contains('write')) {
+      return Icons.folder_outlined;
+    } else if (lower.contains('browser') || lower.contains('web') || lower.contains('search')) {
+      return Icons.language;
+    }
+    return Icons.build_outlined;
+  }
+
   @override
   void didUpdateWidget(ToolApprovalCard oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -103,7 +115,7 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header Badge
+          // Header Badge avec icône d'outil dédiée
           Row(
             children: [
               Container(
@@ -115,7 +127,7 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.security, size: 14, color: AppColors.warning),
+                    Icon(_iconForTool(request.toolName), size: 14, color: AppColors.warning),
                     const SizedBox(width: 6),
                     Text(
                       'APPROVAL REQUIRED (${request.toolName})',
@@ -281,6 +293,109 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Modal "Poser une question" : sélection d'option claire + bouton "Continuer" désactivé tant qu'aucune option n'est choisie.
+class AskQuestionModal extends StatefulWidget {
+  final String question;
+  final List<String> options;
+  final Function(String selectedOption) onSubmit;
+
+  const AskQuestionModal({
+    super.key,
+    required this.question,
+    required this.options,
+    required this.onSubmit,
+  });
+
+  @override
+  State<AskQuestionModal> createState() => _AskQuestionModalState();
+}
+
+class _AskQuestionModalState extends State<AskQuestionModal> {
+  String? _selectedOption;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            widget.question,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 14),
+          ...widget.options.map((opt) {
+            final isSelected = _selectedOption == opt;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: InkWell(
+                onTap: () => setState(() => _selectedOption = opt),
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? Theme.of(context).colorScheme.primaryContainer
+                        : Theme.of(context).colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: isSelected
+                          ? Theme.of(context).colorScheme.primary
+                          : Theme.of(context).colorScheme.outlineVariant,
+                      width: isSelected ? 1.5 : 1.0,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
+                        size: 18,
+                        color: isSelected
+                            ? Theme.of(context).colorScheme.primary
+                            : Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          opt,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Theme.of(context).colorScheme.onSurface,
+                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _selectedOption == null
+                  ? null
+                  : () {
+                      widget.onSubmit(_selectedOption!);
+                      Navigator.of(context).pop();
+                    },
+              child: const Text('Continuer'),
+            ),
           ),
         ],
       ),

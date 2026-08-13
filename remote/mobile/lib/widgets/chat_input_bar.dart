@@ -41,21 +41,37 @@ class _ChatInputBarState extends State<ChatInputBar> {
     super.dispose();
   }
 
+  String _sanitizeInput(String raw) {
+    // Supprime les lignes vides en trop lors du collage de texte brut multi-lignes
+    return raw.replaceAll(RegExp(r'(\r?\n){3,}'), '\n\n').trim();
+  }
+
   void _handleSend() {
-    final text = _controller.text.trim();
+    final rawText = _controller.text;
+    final text = _sanitizeInput(rawText);
     final hasContent = text.isNotEmpty || _attachedFileContent != null;
     if (!hasContent) return;
 
     HapticFeedback.lightImpact();
 
+    // Normaliser les commandes barriques avec saut de ligne \n ou tabulation \t
+    String finalPayload = text;
+    if (text.startsWith('/') && (text.contains('\n') || text.contains('\t'))) {
+      final parts = text.split(RegExp(r'[\n\t]'));
+      final cmd = parts.first.trim();
+      final args = parts.sublist(1).join(' ').trim();
+      finalPayload = '$cmd $args'.trim();
+    }
+
     // Préfixe le contenu du fichier attaché avant le texte utilisateur.
     final fullMessage = _attachedFileContent != null
         ? '${_attachedFileName != null ? "[Fichier: $_attachedFileName]\n" : ""}'
-              '$_attachedFileContent\n\n$text'.trim()
-        : text;
+              '$_attachedFileContent\n\n$finalPayload'.trim()
+        : finalPayload;
 
     widget.onSend(fullMessage, queued: _sendMode == SendMode.queued);
     _controller.clear();
+    FocusScope.of(context).unfocus(); // Ferme le clavier sur mobile après l'envoi
     setState(() {
       _attachedFileName = null;
       _attachedFileContent = null;
@@ -79,6 +95,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   Color _badgeColorForExtension(String name) {
+    if (name.endsWith('/') || !name.contains('.')) return Colors.indigo.shade700;
     final ext = name.split('.').last.toLowerCase();
     switch (ext) {
       case 'json':
@@ -93,6 +110,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   IconData _iconForExtension(String name) {
+    if (name.endsWith('/') || !name.contains('.')) return Icons.folder_outlined;
     final ext = name.split('.').last.toLowerCase();
     switch (ext) {
       case 'json':

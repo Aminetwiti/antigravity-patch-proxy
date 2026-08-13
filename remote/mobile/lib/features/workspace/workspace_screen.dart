@@ -243,8 +243,16 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                         ),
                       ),
                       IconButton(
-                        icon: Icon(Icons.copy_all_outlined, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                        tooltip: 'Copier le contenu',
+                        icon: Icon(
+                          _selectedFilePath.endsWith('.png') || _selectedFilePath.endsWith('.jpg') || _selectedFilePath.endsWith('.svg')
+                              ? Icons.image_search_outlined
+                              : Icons.copy_all_outlined,
+                          size: 16,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                        tooltip: _selectedFilePath.endsWith('.png') || _selectedFilePath.endsWith('.jpg') || _selectedFilePath.endsWith('.svg')
+                            ? 'Copier l\'image'
+                            : 'Copier le contenu',
                         onPressed: _selectedFilePath.isEmpty || _isLoadingCode
                             ? null
                             : () async {
@@ -253,7 +261,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                                 if (!mounted) return;
                                 messenger.showSnackBar(
                                   SnackBar(
-                                    content: Text('Contenu copié : ${_selectedFilePath.split('/').last}'),
+                                    content: Text(_selectedFilePath.endsWith('.png') || _selectedFilePath.endsWith('.jpg') || _selectedFilePath.endsWith('.svg')
+                                        ? 'Image copiée dans le presse-papier !'
+                                        : 'Contenu copié : ${_selectedFilePath.split('/').last}'),
                                     duration: const Duration(seconds: 1),
                                   ),
                                 );
@@ -475,17 +485,52 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
               children: [
                 Icon(Icons.image_outlined, size: 16, color: Theme.of(context).colorScheme.primary),
                 const SizedBox(width: 8),
-                Text('Aperçu SVG (Fichier vectoriel)', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.primary)),
+                Text('Aperçu Vectoriel SVG', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.primary)),
               ],
             ),
           ),
           const SizedBox(height: 8),
           Expanded(
-            child: SingleChildScrollView(
-              child: SelectableText(_codeContent),
+            child: Container(
+              constraints: const BoxConstraints(minWidth: 200, minHeight: 200),
+              padding: const EdgeInsets.all(12),
+              child: SingleChildScrollView(
+                child: SelectableText(_codeContent),
+              ),
             ),
           ),
         ],
+      );
+    }
+
+    // Fichiers binaires (images, audio, vidéo) : pas de numéros de ligne
+    final isBinary = _selectedFilePath.endsWith('.png') ||
+        _selectedFilePath.endsWith('.jpg') ||
+        _selectedFilePath.endsWith('.mp3') ||
+        _selectedFilePath.endsWith('.mp4');
+    if (isBinary) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              _selectedFilePath.endsWith('.mp3')
+                  ? Icons.audio_file_outlined
+                  : _selectedFilePath.endsWith('.mp4')
+                      ? Icons.video_file_outlined
+                      : Icons.image_outlined,
+              size: 48,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Aperçu multimédia (${_selectedFilePath.split('.').last.toUpperCase()})',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface),
+            ),
+            const SizedBox(height: 4),
+            Text('Fichier binaire — numéros de ligne masqués', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          ],
+        ),
       );
     }
 

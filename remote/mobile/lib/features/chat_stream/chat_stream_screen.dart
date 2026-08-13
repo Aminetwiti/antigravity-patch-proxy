@@ -684,15 +684,17 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   void _scrollToBottom() {
-    if (!_scrollController.hasClients) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) return;
+    if (!mounted || !_scrollController.hasClients) return;
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final currentScroll = _scrollController.position.pixels;
+    // N'auto-scroll pendant la lecture que si l'utilisateur est déjà proche du bas (< 120px).
+    if ((maxScroll - currentScroll) < 120 || currentScroll == 0) {
       _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOutQuart,
+        maxScroll,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
       );
-    });
+    }
   }
 
   Widget _buildReminderBanners() {

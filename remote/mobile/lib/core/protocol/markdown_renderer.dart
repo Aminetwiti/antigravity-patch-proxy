@@ -131,6 +131,7 @@ class MarkdownRenderer {
           alignment: PlaceholderAlignment.baseline,
           baseline: TextBaseline.alphabetic,
           child: Tooltip(
+            waitDuration: const Duration(milliseconds: 100),
             message: 'Chemin complet : $url',
             child: Text(
               label,

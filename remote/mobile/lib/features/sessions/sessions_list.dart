@@ -28,6 +28,7 @@ class LeftSidebarDrawer extends StatefulWidget {
 
 class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
   bool _onlyUnread = false;
+  bool _showScheduledOnly = false;
   final TextEditingController _projectSearchCtrl = TextEditingController();
   String _projectSearchQuery = '';
 
@@ -51,12 +52,15 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
       _SessionItemData('s1', 'Mobile App Project Plan...', '3m', isUnread: true, isPinned: true, workspaceName: 'remote/mobile'),
       _SessionItemData('s2', 'Mobile App Remote Infra...', '10m', isUnread: false),
       _SessionItemData('s3', 'Poème Sur La Gravité', '50m', isUnread: false, isPinned: true, workspaceName: 'antigravity-main'),
-      _SessionItemData('s4', 'Configuration Des Niveaux...', '6d', isUnread: true),
+      _SessionItemData('s4', 'Configuration Des Niveaux...', '6d', isUnread: true, isScheduled: true),
       _SessionItemData('s5', 'Doctor UI Data Issue', '6d', isUnread: false),
     ];
     final displaySessions = rawSessions.where((s) {
       if (_onlyUnread) {
         if (s is _SessionItemData && !s.isUnread) return false;
+      }
+      if (_showScheduledOnly) {
+        if (s is _SessionItemData && !s.isScheduled) return false;
       }
       if (_projectSearchQuery.isNotEmpty) {
         final title = s is CascadeSession ? s.title : (s as _SessionItemData).title;
@@ -283,6 +287,7 @@ class _SessionItemData {
   final String time;
   final bool isUnread;
   final bool isPinned;
+  final bool isScheduled;
   final String? workspaceName;
 
   const _SessionItemData(
@@ -291,6 +296,7 @@ class _SessionItemData {
     this.time, {
     this.isUnread = false,
     this.isPinned = false,
+    this.isScheduled = false,
     this.workspaceName,
   });
 }
@@ -371,10 +377,23 @@ class _ProjectFolderGroup extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                           ),
                           if (workspaceName != null)
-                            Text(
-                              workspaceName,
-                              style: const TextStyle(fontSize: 10, color: AppColors.accentBlue),
-                              overflow: TextOverflow.ellipsis,
+                            Row(
+                              children: [
+                                const Icon(Icons.folder_outlined, size: 11, color: AppColors.accentBlue),
+                                const SizedBox(width: 4),
+                                Text(
+                                  workspaceName,
+                                  style: const TextStyle(fontSize: 10, color: AppColors.accentBlue),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(width: 6),
+                                const Icon(Icons.call_split, size: 10, color: AppColors.inkMuted),
+                                const SizedBox(width: 2),
+                                const Text(
+                                  'main',
+                                  style: TextStyle(fontSize: 9.5, color: AppColors.inkMuted),
+                                ),
+                              ],
                             ),
                         ],
                       ),
