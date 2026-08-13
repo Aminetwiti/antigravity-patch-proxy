@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -15,8 +16,9 @@ import (
 //   x-codeium-csrf-token: <token>   (et non X-CSRF-Token)
 //   Framing: 1 octet flags + 4 octets BE longueur + payload protobuf
 type Client struct {
-	Port      int
-	CSRFToken string
+	mu        sync.RWMutex
+	port      int
+	csrfToken string
 	Host      string
 	HTTP      *http.Client
 	// APIKey est la clé d'API envoyée au Language Server (champ metadata 3).
@@ -33,11 +35,26 @@ type Client struct {
 
 func NewClient(port int, csrfToken string) *Client {
 	return &Client{
-		Port:      port,
-		CSRFToken: csrfToken,
+		port:      port,
+		csrfToken: csrfToken,
 		Host:      "127.0.0.1",
 		HTTP:      &http.Client{Timeout: 60 * time.Second},
 	}
+}
+
+// Endpoint retourne le port et le jeton CSRF de maniÃ¨re thread-safe.
+func (c *Client) Endpoint() (int, string) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.port, c.csrfToken
+}
+
+// UpdateEndpoint met Ã  jour le port et le jeton CSRF suite Ã  un dÃ©marrage du hub.
+func (c *Client) UpdateEndpoint(port int, csrfToken string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.port = port
+	c.csrfToken = csrfToken
 }
 
 // Frame encadre un message protobuf pour gRPC-Web.
@@ -51,7 +68,8 @@ func Frame(payload []byte) []byte {
 
 // Call exécute une méthode RPC et retourne les messages protobuf bruts.
 func (c *Client) Call(method string, payload []byte) ([]byte, error) {
-	url := fmt.Sprintf("http://%s:%d/exa.language_server_pb.LanguageServerService/%s", c.Host, c.Port, method)
+	port, csrfToken := c.Endpoint()
+	url := fmt.Sprintf("http://%s:%d/exa.language_server_pb.LanguageServerService/%s", c.Host, port, method)
 	body := Frame(payload)
 
 	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
@@ -60,7 +78,7 @@ func (c *Client) Call(method string, payload []byte) ([]byte, error) {
 	}
 	req.Header.Set("Content-Type", "application/grpc-web+proto")
 	req.Header.Set("Accept", "application/grpc-web+proto,application/grpc-web-text")
-	req.Header.Set("x-codeium-csrf-token", c.CSRFToken)
+	req.Header.Set("x-codeium-csrf-token", csrfToken)
 	req.Header.Set("Connect-Protocol-Version", "1")
 	req.Header.Set("X-Grpc-Web", "1")
 
@@ -98,7 +116,8 @@ func (c *Client) Call(method string, payload []byte) ([]byte, error) {
 
 // CallStream exécute une méthode RPC en streaming gRPC-Web et invoque onFrame pour chaque frame protobuf reçue.
 func (c *Client) CallStream(method string, payload []byte, timeout time.Duration, onFrame func([]byte) error) error {
-	url := fmt.Sprintf("http://%s:%d/exa.language_server_pb.LanguageServerService/%s", c.Host, c.Port, method)
+	port, csrfToken := c.Endpoint()
+	url := fmt.Sprintf("http://%s:%d/exa.language_server_pb.LanguageServerService/%s", c.Host, port, method)
 	body := Frame(payload)
 
 	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
@@ -107,7 +126,7 @@ func (c *Client) CallStream(method string, payload []byte, timeout time.Duration
 	}
 	req.Header.Set("Content-Type", "application/grpc-web+proto")
 	req.Header.Set("Accept", "application/grpc-web+proto,application/grpc-web-text")
-	req.Header.Set("x-codeium-csrf-token", c.CSRFToken)
+	req.Header.Set("x-codeium-csrf-token", csrfToken)
 	req.Header.Set("Connect-Protocol-Version", "1")
 	req.Header.Set("X-Grpc-Web", "1")
 

@@ -1,19 +1,34 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_colors.dart';
+import '../../services/settings_store.dart';
 
 /// Préférences d'apparence : mode clair/sombre + style de l'interface chat.
-/// La thématisation est réelle (carte themeMode) — pas de contrôles factices.
+/// Le theme mode est persisté (SettingsStore) et remonté à l'app (changement
+/// immédiat du ThemeMode).
 class AppearanceSettingsSection extends StatefulWidget {
-  const AppearanceSettingsSection({super.key});
+  const AppearanceSettingsSection({
+    super.key,
+    required this.initialIndex,
+    required this.onThemeModeChanged,
+  });
+
+  final int initialIndex;
+  final ValueChanged<int> onThemeModeChanged;
 
   @override
   State<AppearanceSettingsSection> createState() => _AppearanceSettingsSectionState();
 }
 
 class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
-  int _themeModeIndex = 0; // 0: system, 1: light, 2: dark
+  late int _themeModeIndex = widget.initialIndex;
   bool _compactBubbles = false;
   bool _monospaceCode = true;
+
+  void _setThemeMode(int index) {
+    setState(() => _themeModeIndex = index);
+    widget.onThemeModeChanged(index);
+    SettingsStore.save({'themeMode': index});
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -119,7 +134,7 @@ class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
   Widget _buildToggleBtn(int index, IconData icon, String label) {
     final isSelected = _themeModeIndex == index;
     return InkWell(
-      onTap: () => setState(() => _themeModeIndex = index),
+      onTap: () => _setThemeMode(index),
       borderRadius: BorderRadius.circular(AppRadius.sm),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),

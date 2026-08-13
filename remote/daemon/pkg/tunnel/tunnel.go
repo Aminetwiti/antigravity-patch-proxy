@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -63,9 +64,17 @@ func (m *Manager) StartAutoTunnel(localPort int) (string, error) {
 }
 
 func (m *Manager) tryCloudflare(localPort int) (string, error) {
-	path, err := exec.LookPath("cloudflared")
-	if err != nil {
-		return "", fmt.Errorf("cloudflared introuvable")
+	path := "cloudflared"
+	if _, err := os.Stat("cloudflared.exe"); err == nil {
+		path = ".\\cloudflared.exe"
+	} else if _, err := os.Stat("cloudflared"); err == nil {
+		path = "./cloudflared"
+	} else {
+		var err error
+		path, err = exec.LookPath("cloudflared")
+		if err != nil {
+			return "", fmt.Errorf("cloudflared introuvable")
+		}
 	}
 	log.Printf("[Tunnel] Lancement de Cloudflare Quick Tunnel (%s)...", path)
 	url, err := m.startCloudflare(path, localPort)

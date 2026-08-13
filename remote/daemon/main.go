@@ -79,7 +79,8 @@ func main() {
 			status = "degraded"
 		}
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, `{"status":"%s","rpcPort":%d,"pid":%d,"heartbeatOk":%t,"tunnelProvider":"%s","publicUrl":"%s","error":"%s"}`, status, rpcClient.Port, info.PID, hbErr == "", tunnelMgr.Provider, tunnelMgr.PublicURL, hbErr)
+		port, _ := rpcClient.Endpoint()
+		fmt.Fprintf(w, `{"status":"%s","rpcPort":%d,"pid":%d,"heartbeatOk":%t,"tunnelProvider":"%s","publicUrl":"%s","error":"%s"}`, status, port, info.PID, hbErr == "", tunnelMgr.Provider, tunnelMgr.PublicURL, hbErr)
 	})
 
 	fmt.Printf("🌐 Daemon listening on ws://localhost:%d/ws\n", listenPort)

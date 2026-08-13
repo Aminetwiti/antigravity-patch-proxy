@@ -1,8 +1,7 @@
-import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Persistance des réglages utilisateur via `shared_preferences`.
-/// Écriture atomique, lecture paresseuse au démarrage (initState).
+/// Écriture atomique par clé, lecture paresseuse au démarrage (initState).
 /// ponytail: stockage clé/valeur simple — pas de schéma versionné; ajouter
 /// un `settingsVersion` si le nombre de clés grandit.
 class SettingsStore {

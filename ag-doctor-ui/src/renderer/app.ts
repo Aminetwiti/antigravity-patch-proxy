@@ -4150,6 +4150,10 @@ if (window.ag && window.ag.onDaemonLog) {
           if (remoteQrContainer) remoteQrContainer.style.display = 'block';
           if (remoteStatusText) remoteStatusText.innerHTML = `Tunnel ready: <b>${tunnelUrl}</b>`;
         });
+      } else if (data.includes('Échec') || data.includes('Tunnel non démarré') || data.includes('introuvable')) {
+          if (remoteStatusText) remoteStatusText.innerHTML = `<span style="color: var(--bs-danger);">Tunnel Failed. Check console.</span>`;
+          if (remoteQrPlaceholder) remoteQrPlaceholder.style.display = 'flex';
+          if (remoteQrContainer) remoteQrContainer.style.display = 'none';
       }
     }
   });

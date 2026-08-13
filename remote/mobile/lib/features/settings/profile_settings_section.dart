@@ -1,9 +1,20 @@
 import 'package:flutter/material.dart';
+import '../../services/settings_store.dart';
 import '../../theme/app_colors.dart';
 
 /// Éditeur de profil utilisateur : avatar, nom, rôle et statut de présence.
+/// Les champs sont persistés (SettingsStore) à chaque modification.
 class ProfileSettingsSection extends StatefulWidget {
-  const ProfileSettingsSection({super.key});
+  const ProfileSettingsSection({
+    super.key,
+    this.initialName = 'Amine Developer',
+    this.initialRole = 'Remote Host Controller',
+    this.initialStatus = 'Online',
+  });
+
+  final String initialName;
+  final String initialRole;
+  final String initialStatus;
 
   @override
   State<ProfileSettingsSection> createState() => _ProfileSettingsSectionState();
@@ -19,8 +30,9 @@ class _ProfileSettingsSectionState extends State<ProfileSettingsSection> {
   @override
   void initState() {
     super.initState();
-    _nameController = TextEditingController(text: 'Amine Developer');
-    _roleController = TextEditingController(text: 'Remote Host Controller');
+    _nameController = TextEditingController(text: widget.initialName);
+    _roleController = TextEditingController(text: widget.initialRole);
+    _status = widget.initialStatus;
   }
 
   @override
@@ -96,6 +108,7 @@ class _ProfileSettingsSectionState extends State<ProfileSettingsSection> {
                           hintText: 'Nom d\'affichage',
                           contentPadding: EdgeInsets.zero,
                         ),
+                        onChanged: (v) => SettingsStore.save({'displayName': v}),
                       ),
                       const SizedBox(height: 4),
                       Row(
@@ -132,6 +145,7 @@ class _ProfileSettingsSectionState extends State<ProfileSettingsSection> {
                               onChanged: (val) {
                                 if (val != null) {
                                   setState(() => _status = val);
+                                  SettingsStore.save({'status': val});
                                 }
                               },
                             ),
@@ -142,37 +156,6 @@ class _ProfileSettingsSectionState extends State<ProfileSettingsSection> {
                   ),
                 ),
               ],
-            ),
-
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(AppRadius.lg),
-                border: Border.all(color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3)),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.workspace_premium, size: 18, color: Theme.of(context).colorScheme.primary),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Abonnement Antigravity 2.0 & Crédits Google One',
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.primary),
-                        ),
-                        Text(
-                          'Crédits appliqués avec succès • Licence GE-Plus active',
-                          style: TextStyle(fontSize: 10.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
             ),
             const SizedBox(height: 14),
 
@@ -188,6 +171,7 @@ class _ProfileSettingsSectionState extends State<ProfileSettingsSection> {
                 prefixIcon: Icon(Icons.badge_outlined,
                     size: 18, color: AppColors.inkMuted),
               ),
+              onChanged: (v) => SettingsStore.save({'role': v}),
             ),
           ],
         ),

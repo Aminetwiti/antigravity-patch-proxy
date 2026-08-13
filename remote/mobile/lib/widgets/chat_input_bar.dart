@@ -417,32 +417,38 @@ class _ChatInputBarState extends State<ChatInputBar> {
                     const SizedBox(width: 4),
 
                     // Model & Reasoning Effort Pill
-                    InkWell(
-                      onTap: () => _showQueueSettings(context),
-                      borderRadius: BorderRadius.circular(6),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                        child: Row(
-                          children: [
-                            Icon(
-                              isQueued
-                                  ? Icons.playlist_add_check_outlined
-                                  : Icons.psychology_outlined,
-                              size: 15,
-                              color: isQueued ? scheme.primary : scheme.onSurfaceVariant,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              '$_selectedModel ($_reasoningEffort)',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: scheme.onSurface,
-                                fontWeight: FontWeight.w500,
+                    Flexible(
+                      child: InkWell(
+                        onTap: () => _showQueueSettings(context),
+                        borderRadius: BorderRadius.circular(6),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                isQueued
+                                    ? Icons.playlist_add_check_outlined
+                                    : Icons.psychology_outlined,
+                                size: 15,
+                                color: isQueued ? scheme.primary : scheme.onSurfaceVariant,
                               ),
-                            ),
-                            const SizedBox(width: 4),
-                            Icon(Icons.keyboard_arrow_down, size: 16, color: scheme.onSurfaceVariant),
-                          ],
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  '$_selectedModel ($_reasoningEffort)',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: scheme.onSurface,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Icon(Icons.keyboard_arrow_down, size: 16, color: scheme.onSurfaceVariant),
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -498,49 +504,58 @@ class _ChatInputBarState extends State<ChatInputBar> {
           ),
 
           // Footer
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Tooltip(
-                message: 'Exécution locale (statique — bientôt configurable)',
-                child: InkWell(
-                  onTap: () {},
-                  borderRadius: BorderRadius.circular(4),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.monitor_outlined, size: 14, color: scheme.onSurfaceVariant),
-                        const SizedBox(width: 6),
-                        Text('Local', style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant)),
-                        const SizedBox(width: 2),
-                        Icon(Icons.keyboard_arrow_down, size: 14, color: scheme.onSurfaceVariant),
-                      ],
+          Container(
+            margin: const EdgeInsets.only(top: 8, left: 4, right: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest.withValues(alpha: 0.3),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Tooltip(
+                  message: 'Exécution locale (statique — bientôt configurable)',
+                  child: InkWell(
+                    onTap: () {},
+                    borderRadius: BorderRadius.circular(8),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.monitor_outlined, size: 13, color: scheme.onSurfaceVariant),
+                          const SizedBox(width: 6),
+                          Text('Local', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant, fontWeight: FontWeight.w500)),
+                          const SizedBox(width: 4),
+                          Icon(Icons.keyboard_arrow_down, size: 13, color: scheme.onSurfaceVariant),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-              const Spacer(),
-              Tooltip(
-                message: 'Agent principal (statique — bientôt configurable)',
-                child: InkWell(
-                  onTap: () {},
-                  borderRadius: BorderRadius.circular(4),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text('Main Agent', style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant)),
-                        const SizedBox(width: 2),
-                        Icon(Icons.keyboard_arrow_down, size: 14, color: scheme.onSurfaceVariant),
-                      ],
+                const Spacer(),
+                Tooltip(
+                  message: 'Agent principal (statique — bientôt configurable)',
+                  child: InkWell(
+                    onTap: () {},
+                    borderRadius: BorderRadius.circular(8),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.smart_toy_outlined, size: 13, color: scheme.onSurfaceVariant),
+                          const SizedBox(width: 6),
+                          Text('Main Agent', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant, fontWeight: FontWeight.w500)),
+                          const SizedBox(width: 4),
+                          Icon(Icons.keyboard_arrow_down, size: 13, color: scheme.onSurfaceVariant),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),

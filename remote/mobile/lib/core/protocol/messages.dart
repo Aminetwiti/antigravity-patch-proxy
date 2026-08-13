@@ -27,7 +27,7 @@ class CascadeSession {
   static String _relativeTime(Object? iso) {
     if (iso is! String) return 'Just now';
     final parsed = DateTime.tryParse(iso);
-    if (parsed == null) return 'Just now';
+    if (parsed == null || parsed.year < 2000) return 'Just now';
     final diff = DateTime.now().difference(parsed.toLocal());
     if (diff.inMinutes < 1) return 'Just now';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m';

@@ -28,15 +28,17 @@ func TestWatchdogUpdatesClientOnRestart(t *testing.T) {
 	defer w.Stop()
 
 	deadline := time.Now().Add(2 * time.Second)
-	for client.Port != 51234 || client.CSRFToken != "new-token" {
+	port, token := client.Endpoint()
+	for port != 51234 || token != "new-token" {
 		if time.Now().After(deadline) {
-			t.Fatalf("Watchdog n'a pas mis à jour le client (port=%d token=%s)", client.Port, client.CSRFToken)
+			t.Fatalf("Watchdog n'a pas mis à jour le client (port=%d token=%s)", port, token)
 		}
 		time.Sleep(5 * time.Millisecond)
+		port, token = client.Endpoint()
 	}
 
-	if client.Port != 51234 || client.CSRFToken != "new-token" {
-		t.Fatalf("Client non mis à jour: port=%d token=%s", client.Port, client.CSRFToken)
+	if port != 51234 || token != "new-token" {
+		t.Fatalf("Client non mis à jour: port=%d token=%s", port, token)
 	}
 }
 
@@ -53,7 +55,8 @@ func TestWatchdogIgnoresDiscoveryErrors(t *testing.T) {
 	defer w.Stop()
 
 	time.Sleep(100 * time.Millisecond)
-	if client.Port != 51000 || client.CSRFToken != "stable-token" {
-		t.Fatalf("Le client ne doit pas changer après une erreur de découverte: port=%d token=%s", client.Port, client.CSRFToken)
+	port, token := client.Endpoint()
+	if port != 51000 || token != "stable-token" {
+		t.Fatalf("Le client ne doit pas changer après une erreur de découverte: port=%d token=%s", port, token)
 	}
 }

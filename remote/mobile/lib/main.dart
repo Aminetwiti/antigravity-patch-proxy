@@ -16,17 +16,42 @@ import 'features/workspace/workspace_screen.dart';
 import 'theme/app_colors.dart';
 import 'theme/app_theme.dart';
 import 'features/sessions/sessions_list.dart';
+import 'services/settings_store.dart';
 import 'widgets/right_sidebar_drawer.dart';
 
 void main() {
   runApp(const AntigravityRemoteApp());
 }
 
-class AntigravityRemoteApp extends StatelessWidget {
+class AntigravityRemoteApp extends StatefulWidget {
   const AntigravityRemoteApp({super.key});
 
   @override
+  State<AntigravityRemoteApp> createState() => _AntigravityRemoteAppState();
+}
+
+class _AntigravityRemoteAppState extends State<AntigravityRemoteApp> {
+  int _themeModeIndex = 0; // 0: system, 1: light, 2: dark
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTheme();
+  }
+
+  Future<void> _loadTheme() async {
+    try {
+      final s = await SettingsStore.load();
+      if (!mounted) return;
+      setState(() => _themeModeIndex = (s['themeMode'] as int?) ?? 0);
+    } catch (_) {
+      // Tests sans mock SharedPreferences : thème système par défaut.
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final idx = (_themeModeIndex >= 0 && _themeModeIndex < 3) ? _themeModeIndex : 0;
     return MaterialApp(
       title: 'Antigravity Mobile',
       debugShowCheckedModeBanner: false,
@@ -34,14 +59,24 @@ class AntigravityRemoteApp extends StatelessWidget {
       // de forcer le dark mode. ThemeMode.system délègue à MediaQuery.
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
-      themeMode: ThemeMode.system,
-      home: const AntigravityMainScreen(),
+      themeMode: ThemeMode.values[idx],
+      home: AntigravityMainScreen(
+        themeModeIndex: idx,
+        onThemeModeChanged: (i) => setState(() => _themeModeIndex = i),
+      ),
     );
   }
 }
 
 class AntigravityMainScreen extends StatefulWidget {
-  const AntigravityMainScreen({super.key});
+  const AntigravityMainScreen({
+    super.key,
+    this.themeModeIndex = 0,
+    required this.onThemeModeChanged,
+  });
+
+  final int themeModeIndex;
+  final ValueChanged<int> onThemeModeChanged;
 
   @override
   State<AntigravityMainScreen> createState() => _AntigravityMainScreenState();
@@ -66,18 +101,62 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
 
   ConnectionStatus _prevStatus = ConnectionStatus.disconnected;
 
+  Map<String, dynamic> _savedSettings = const {};
+
   @override
   void initState() {
     super.initState();
     _prevStatus = _wsClient.statusNotifier.value;
     _wsClient.statusNotifier.addListener(_onStatusChanged);
     ApprovalNotifier.instance.init();
-    // Auto-connexion dev : `adb reverse tcp:8090` + jeton par défaut.
+    // Auto-connexion : réglages persistés (host/port/ssl/token) si présents,
+    // sinon repli sur la config d'environnement. `adb reverse tcp:8090` + jeton
+    // par défaut restent le chemin dev.
     // ponytail: plafond connu — pas de persistance de l'appairage; le QR /
     // discovery reste le chemin production.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _wsClient.connect(authToken: EnvConfig.authToken);
+      _connectWithSavedSettings();
     });
+  }
+
+  Future<void> _connectWithSavedSettings() async {
+    try {
+      final s = await SettingsStore.load();
+      if (!mounted) return;
+      _savedSettings = s;
+      final host = (s['host'] as String?)?.trim() ?? '';
+      final port = (s['port'] as int?) ?? 8090;
+      final ssl = (s['ssl'] as bool?) ?? false;
+      final csrf = (s['csrf'] as String?)?.trim() ?? '';
+      if (host.isEmpty) {
+        _wsClient.connect(authToken: EnvConfig.authToken);
+        return;
+      }
+      final url = '${ssl ? 'wss' : 'ws'}://$host:$port/ws';
+      _wsClient.connect(
+        customUrl: url,
+        authToken: csrf.isNotEmpty ? csrf : EnvConfig.authToken,
+      );
+    } catch (_) {
+      // Tests sans mock SharedPreferences : repli sur la config par défaut.
+      if (mounted) _wsClient.connect(authToken: EnvConfig.authToken);
+    }
+  }
+
+  /// Applique les réglages daemon sauvegardés depuis Settings : reconnexion
+  /// immédiate sur la nouvelle cible.
+  void _applyDaemonSettings(Map<String, dynamic> v) {
+    setState(() => _savedSettings = v);
+    final host = (v['host'] as String?)?.trim() ?? '';
+    final port = (v['port'] as int?) ?? 8090;
+    final ssl = (v['ssl'] as bool?) ?? false;
+    final csrf = (v['csrf'] as String?)?.trim() ?? '';
+    final url = '${ssl ? 'wss' : 'ws'}://$host:$port/ws';
+    _wsClient.disconnect();
+    _wsClient.connect(
+      customUrl: url,
+      authToken: csrf.isNotEmpty ? csrf : EnvConfig.authToken,
+    );
   }
 
   void _onStatusChanged() {
@@ -188,7 +267,13 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         },
         onOpenSettings: () {
           Navigator.of(context).push(
-            MaterialPageRoute(builder: (context) => const SettingsScreen()),
+            MaterialPageRoute(
+              builder: (context) => SettingsScreen(
+                initialSettings: _savedSettings,
+                onThemeModeChanged: widget.onThemeModeChanged,
+                onDaemonSaved: _applyDaemonSettings,
+              ),
+            ),
           );
         },
         onDiscover: () {

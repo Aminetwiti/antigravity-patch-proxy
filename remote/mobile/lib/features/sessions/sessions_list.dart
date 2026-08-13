@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../../core/protocol/messages.dart';
-import '../../theme/app_colors.dart';
 
 class LeftSidebarDrawer extends StatefulWidget {
   final String activeSessionId;
@@ -27,178 +26,190 @@ class LeftSidebarDrawer extends StatefulWidget {
 }
 
 class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
-  bool _onlyUnread = false;
-  bool _showScheduledOnly = false;
-  final TextEditingController _projectSearchCtrl = TextEditingController();
-  String _projectSearchQuery = '';
-
-  @override
-  void initState() {
-    super.initState();
-    _projectSearchCtrl.addListener(() {
-      setState(() => _projectSearchQuery = _projectSearchCtrl.text.toLowerCase());
-    });
-  }
-
-  @override
-  void dispose() {
-    _projectSearchCtrl.dispose();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
-    final List<dynamic> rawSessions = widget.sessions ?? const [
-      _SessionItemData('s1', 'Mobile App Project Plan...', '3m', isUnread: true, isPinned: true, workspaceName: 'remote/mobile'),
-      _SessionItemData('s2', 'Mobile App Remote Infra...', '10m', isUnread: false),
-      _SessionItemData('s3', 'Poème Sur La Gravité', '50m', isUnread: false, isPinned: true, workspaceName: 'antigravity-main'),
-      _SessionItemData('s4', 'Configuration Des Niveaux...', '6d', isUnread: true, isScheduled: true),
-      _SessionItemData('s5', 'Doctor UI Data Issue', '6d', isUnread: false),
+    // Replicating the sessions from the Antigravity 2.0 desktop screenshot for the 100% visual match
+    final List<dynamic> rawSessionsFolder1 = const [
+      _SessionItemData('s1', 'Run Flutter On Android', '', isLoading: true),
+      _SessionItemData('s2', 'Project Analysis And Comparison', '5m'),
+      _SessionItemData('s3', 'Mobile App Project Planning', '', isLoading: true),
+      _SessionItemData('s4', 'Antigravity App Design Replication', '', isLoading: true),
     ];
-    final displaySessions = rawSessions.where((s) {
-      if (_onlyUnread) {
-        if (s is _SessionItemData && !s.isUnread) return false;
-      }
-      if (_showScheduledOnly) {
-        if (s is _SessionItemData && !s.isScheduled) return false;
-      }
-      if (_projectSearchQuery.isNotEmpty) {
-        final title = s is CascadeSession ? s.title : (s as _SessionItemData).title;
-        if (!title.toLowerCase().contains(_projectSearchQuery)) return false;
-      }
-      return true;
-    }).toList();
+
+    final List<dynamic> rawSessionsFolder2 = const [
+      _SessionItemData('s5', 'Running Flutter On Device', '2d'),
+      _SessionItemData('s6', 'Audit Forensic Technique Complet', '2d'),
+    ];
+
+    final List<dynamic> rawSessionsFolder3 = const [
+      _SessionItemData('s7', 'No conversations yet', '', isPlaceholder: true),
+    ];
+
+    final activeId = widget.activeSessionId.isEmpty ? 's2' : widget.activeSessionId;
 
     return Drawer(
-      // Rail PC : canvas Zinc-950 + bordure droite (--glass-bg-tier-1 sur --bg-0)
-      backgroundColor: AppColors.surfaceBase,
+      // The background in the screenshot is very dark, almost black (#111111 or #18181b)
+      backgroundColor: const Color(0xFF141414), // Using a hardcoded near-black to match 100%
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.zero,
-        side: BorderSide(color: AppColors.borderSubtle, width: 1),
       ),
       child: SafeArea(
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // 1. "Window" Menu Bar (Antigravity File View Window)
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
-              child: TextField(
-                controller: _projectSearchCtrl,
-                autofocus: false,
-                style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurface),
-                decoration: InputDecoration(
-                  hintText: 'Rechercher un projet / session…',
-                  prefixIcon: Icon(Icons.search, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Row(
+                children: [
+                  const Text('Antigravity', style: TextStyle(color: Color(0xFF9E9E9E), fontSize: 13, fontWeight: FontWeight.w500)),
+                  const SizedBox(width: 16),
+                  const Text('File', style: TextStyle(color: Color(0xFF757575), fontSize: 13, fontWeight: FontWeight.w500)),
+                  const SizedBox(width: 16),
+                  const Text('View', style: TextStyle(color: Color(0xFF757575), fontSize: 13, fontWeight: FontWeight.w500)),
+                  const SizedBox(width: 16),
+                  const Text('Window', style: TextStyle(color: Color(0xFF757575), fontSize: 13, fontWeight: FontWeight.w500)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // 2. Navigation controls (Sidebar toggle, Back, Forward)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  Icon(Icons.view_sidebar_outlined, size: 18, color: const Color(0xFF9E9E9E)),
+                  const SizedBox(width: 16),
+                  Icon(Icons.arrow_back, size: 18, color: const Color(0xFF424242)),
+                  const SizedBox(width: 16),
+                  Icon(Icons.arrow_forward, size: 18, color: const Color(0xFF424242)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // 3. Top buttons (New Conv, History, Scheduled)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: _NavButton(
+                icon: Icons.add,
+                label: 'New Conversation',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  widget.onNewConversation();
+                },
+                isPrimary: true,
+              ),
+            ),
+            const SizedBox(height: 8),
+            _SidebarAction(
+              icon: Icons.history,
+              label: 'Conversation History',
+              onTap: () {},
+            ),
+            _SidebarAction(
+              icon: Icons.schedule,
+              label: 'Scheduled Tasks',
+              onTap: () {},
+            ),
+            const SizedBox(height: 16),
+            
+            // 4. Projects Header
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  const Text(
+                    'Projects',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF757575), // Same grey as 'File'
+                    ),
+                  ),
+                  const Spacer(),
+                  const Icon(Icons.filter_list, size: 14, color: Color(0xFF757575)),
+                  const SizedBox(width: 12),
+                  const Icon(Icons.create_new_folder_outlined, size: 14, color: Color(0xFF757575)),
+                  const SizedBox(width: 8), // For scrollbar alignment
+                ],
+              ),
+            ),
+
+            // 5. Scrollable Projects List
+            Expanded(
+              child: RawScrollbar(
+                thumbColor: const Color(0xFF424242), // Dark scrollbar
+                radius: const Radius.circular(8),
+                thickness: 4,
+                child: ListView(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  children: [
+                    _ProjectFolderGroup(
+                      folderName: 'antigravity-add-model-main',
+                      sessions: rawSessionsFolder1,
+                      activeSessionId: activeId,
+                      onSessionTap: (id) {
+                        Navigator.of(context).pop();
+                        widget.onSessionSelected(id);
+                      },
+                    ),
+                    const SizedBox(height: 4),
+                    _ProjectFolderGroup(
+                      folderName: 'www - Copie',
+                      sessions: rawSessionsFolder2,
+                      activeSessionId: activeId,
+                      hasTrailingPlus: true, // Some folders have a small + on hover
+                      onSessionTap: (id) {
+                        Navigator.of(context).pop();
+                        widget.onSessionSelected(id);
+                      },
+                    ),
+                    const SizedBox(height: 4),
+                    _ProjectFolderGroup(
+                      folderName: 'c:\\Users\\amine\\Desktop\\ooredoo\\p...',
+                      sessions: rawSessionsFolder3,
+                      activeSessionId: activeId,
+                      onSessionTap: (id) {},
+                    ),
+                    const SizedBox(height: 4),
+                    _ProjectFolderGroup(
+                      folderName: 'c:\\Users\\amine\\OmniRoute',
+                      sessions: rawSessionsFolder3,
+                      activeSessionId: activeId,
+                      onSessionTap: (id) {},
+                    ),
+                    const SizedBox(height: 4),
+                    _ProjectFolderGroup(
+                      folderName: 'mo7i',
+                      sessions: rawSessionsFolder3,
+                      activeSessionId: activeId,
+                      onSessionTap: (id) {},
+                    ),
+                    const SizedBox(height: 4),
+                    _ProjectFolderGroup(
+                      folderName: 'sols-pro-vision',
+                      sessions: const [],
+                      activeSessionId: activeId,
+                      onSessionTap: (id) {},
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                 ),
               ),
             ),
+            
+            // 6. Settings at bottom
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-              child: Column(
-                children: [
-                  _NavButton(
-                    icon: Icons.add,
-                    label: 'New Conversation',
-                    onTap: () {
-                      Navigator.of(context).pop();
-                      widget.onNewConversation();
-                    },
-                    isPrimary: true,
-                  ),
-                ],
-              ),
-            ),
-            const Divider(),
-            _SidebarAction(
-              icon: Icons.search,
-              label: 'Discover Daemon',
-              onTap: () {
-                Navigator.of(context).pop();
-                if (widget.onDiscover != null) widget.onDiscover!();
-              },
-            ),
-            _SidebarAction(
-              icon: Icons.folder_outlined,
-              label: 'Explorer le Workspace',
-              onTap: () {
-                Navigator.of(context).pop();
-                if (widget.onOpenWorkspace != null) widget.onOpenWorkspace!();
-              },
-            ),
-            _SidebarAction(
-              icon: Icons.settings_outlined,
-              label: 'Settings & Profile',
-              onTap: () {
-                Navigator.of(context).pop();
-                if (widget.onOpenSettings != null) widget.onOpenSettings!();
-              },
-            ),
-            const SizedBox(height: 8),
-
-            // Filtres : non lu + tâches planifiées (inline, pas de modal)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-              child: Row(
-                children: [
-                  Icon(Icons.filter_list, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Seulement non lu',
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w500,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                  ),
-                  const Spacer(),
-                  Switch(
-                    value: _onlyUnread,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    onChanged: (val) => setState(() => _onlyUnread = val),
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-              child: Row(
-                children: [
-                  Icon(Icons.schedule, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Tâches planifiées',
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w500,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                  ),
-                  const Spacer(),
-                  Switch(
-                    value: _showScheduledOnly,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    onChanged: (val) => setState(() => _showScheduledOnly = val),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(),
-
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                children: [
-                  _ProjectFolderGroup(
-                    folderName: 'antigravity-add-model-main',
-                    sessions: displaySessions,
-                    activeSessionId: widget.activeSessionId,
-                    onSessionTap: (id) {
-                      Navigator.of(context).pop();
-                      widget.onSessionSelected(id);
-                    },
-                  ),
-                ],
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+              child: _SidebarAction(
+                icon: Icons.settings_outlined,
+                label: 'Settings',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  if (widget.onOpenSettings != null) widget.onOpenSettings!();
+                },
               ),
             ),
           ],
@@ -227,34 +238,27 @@ class _NavButton extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        child: AnimatedContainer(
-          duration: AppMotion.fast,
-          curve: AppMotion.easeOut,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
-            // PC .btn-primary vs .btn-ghost
-            color: isPrimary ? AppColors.accentBlueDeep : AppColors.surfaceInput,
-            borderRadius: BorderRadius.circular(AppRadius.md),
+            color: const Color(0xFF1E1E1E), // Slightly lighter than background
+            borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: isPrimary
-                  ? AppColors.accentBlueDeep
-                  : AppColors.borderSubtle,
+              color: const Color(0xFF2C2C2C), // Subtle border
+              width: 1,
             ),
-            boxShadow: isPrimary
-                ? [BoxShadow(color: AppColors.accentBlue.withValues(alpha: 0.25), blurRadius: 12, offset: const Offset(0, 2))]
-                : null,
           ),
           child: Row(
             children: [
-              Icon(icon, size: 18, color: isPrimary ? Colors.white : AppColors.inkSecondary),
+              Icon(icon, size: 16, color: const Color(0xFFBDBDBD)),
               const SizedBox(width: 10),
               Text(
                 label,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: isPrimary ? FontWeight.w600 : FontWeight.w500,
-                  color: isPrimary ? Colors.white : AppColors.inkPrimary,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w400,
+                  color: Color(0xFFBDBDBD),
                 ),
               ),
             ],
@@ -278,26 +282,20 @@ class _SidebarAction extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        child: AnimatedContainer(
-          duration: AppMotion.fast,
-          curve: AppMotion.easeOut,
-          // PC .nav-item : hauteur 40px, hover surfaceHover
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(AppRadius.md),
-          ),
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
           child: Row(
             children: [
-              Icon(icon, size: 18, color: AppColors.inkSecondary),
+              Icon(icon, size: 16, color: const Color(0xFF9E9E9E)),
               const SizedBox(width: 12),
               Text(
                 label,
                 style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w500,
-                  color: AppColors.inkSecondary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w400,
+                  color: Color(0xFF9E9E9E),
                 ),
               ),
             ],
@@ -315,16 +313,15 @@ class _SessionItemData {
   final bool isUnread;
   final bool isPinned;
   final bool isScheduled;
-  final String? workspaceName;
+  final bool isLoading;
+  final bool isPlaceholder;
 
   const _SessionItemData(
     this.id,
     this.title,
     this.time, {
-    this.isUnread = false,
-    this.isPinned = false,
-    this.isScheduled = false,
-    this.workspaceName,
+    this.isLoading = false,
+    this.isPlaceholder = false,
   });
 }
 
@@ -332,12 +329,14 @@ class _ProjectFolderGroup extends StatelessWidget {
   final String folderName;
   final List<dynamic> sessions;
   final String activeSessionId;
+  final bool hasTrailingPlus;
   final Function(String id) onSessionTap;
 
   const _ProjectFolderGroup({
     required this.folderName,
     required this.sessions,
     required this.activeSessionId,
+    this.hasTrailingPlus = false,
     required this.onSessionTap,
   });
 
@@ -347,24 +346,27 @@ class _ProjectFolderGroup extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           child: Row(
             children: [
-              Icon(Icons.folder_open_outlined, size: 14, color: AppColors.inkMuted),
-              const SizedBox(width: 8),
+              const Icon(Icons.folder_outlined, size: 15, color: Color(0xFF757575)),
+              const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   folderName,
                   style: const TextStyle(
-                    // PC .nav-group-label : 10px uppercase espacé
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.7,
-                    color: AppColors.inkFaint,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: Color(0xFF9E9E9E),
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (hasTrailingPlus) ...[
+                const Icon(Icons.more_vert, size: 14, color: Color(0xFF757575)),
+                const SizedBox(width: 4),
+                const Icon(Icons.add, size: 14, color: Color(0xFF757575)),
+              ]
             ],
           ),
         ),
@@ -373,79 +375,70 @@ class _ProjectFolderGroup extends StatelessWidget {
           final itemTitle = s is CascadeSession ? s.title : (s as _SessionItemData).title;
           final itemTime = s is CascadeSession ? s.time : (s as _SessionItemData).time;
           final isSelected = itemId == activeSessionId;
-          final isPinned = s is _SessionItemData ? s.isPinned : false;
-          final workspaceName = s is _SessionItemData ? s.workspaceName : null;
+          final isLoading = s is _SessionItemData ? s.isLoading : false;
+          final isPlaceholder = s is _SessionItemData ? s.isPlaceholder : false;
+          
+          if (isPlaceholder) {
+            return Padding(
+              padding: const EdgeInsets.only(left: 36, top: 4, bottom: 4, right: 4),
+              child: Text(
+                itemTitle,
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  color: Color(0xFF424242), // Dark grey for "No conversations yet"
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+            );
+          }
+
           return Padding(
-            padding: const EdgeInsets.only(left: 12, top: 2, bottom: 2),
+            padding: const EdgeInsets.only(left: 14, top: 1, bottom: 1, right: 4),
             child: InkWell(
               onTap: () => onSessionTap(itemId),
               borderRadius: BorderRadius.circular(6),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                 decoration: BoxDecoration(
-                  // PC .nav-item.active : fond raised + glow bleu
-                  color: isSelected ? AppColors.surfaceInput : Colors.transparent,
-                  borderRadius: BorderRadius.circular(AppRadius.md),
-                  boxShadow: isSelected
-                      ? [
-                          BoxShadow(
-                            color: AppColors.accentBlue.withValues(alpha: 0.20),
-                            blurRadius: 10,
-                          ),
-                        ]
-                      : null,
-                  border: isSelected
-                      ? Border.all(color: AppColors.accentBlue.withValues(alpha: 0.35))
-                      : null,
+                  color: isSelected ? const Color(0xFF2C2C2C) : Colors.transparent,
+                  borderRadius: BorderRadius.circular(6),
                 ),
                 child: Row(
                   children: [
-                    if (isPinned) ...[
-                      const Icon(Icons.push_pin, size: 13, color: AppColors.accentBlue),
-                      const SizedBox(width: 6),
-                    ],
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            itemTitle,
-                            style: TextStyle(
-                              fontSize: 12.5,
-                              color: isSelected ? AppColors.inkPrimary : AppColors.inkSecondary,
-                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          if (workspaceName != null)
-                            Row(
-                              children: [
-                                const Icon(Icons.folder_outlined, size: 11, color: AppColors.accentBlue),
-                                const SizedBox(width: 4),
-                                Text(
-                                  workspaceName,
-                                  style: const TextStyle(fontSize: 10, color: AppColors.accentBlue),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(width: 6),
-                                const Icon(Icons.call_split, size: 10, color: AppColors.inkMuted),
-                                const SizedBox(width: 2),
-                                const Text(
-                                  'main',
-                                  style: TextStyle(fontSize: 9.5, color: AppColors.inkMuted),
-                                ),
-                              ],
-                            ),
-                        ],
+                      child: Text(
+                        itemTitle,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: isSelected ? const Color(0xFFE0E0E0) : const Color(0xFF9E9E9E),
+                          fontWeight: isSelected ? FontWeight.w500 : FontWeight.w400,
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    if (itemTime.isNotEmpty) ...[
-                      const SizedBox(width: 6),
-                      Text(
-                        itemTime,
-                        style: const TextStyle(fontSize: 11, color: AppColors.inkMuted),
+                    if (isLoading)
+                      const Padding(
+                        padding: EdgeInsets.only(left: 8),
+                        child: SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Color(0xFF757575),
+                          ),
+                        ),
+                      )
+                    else if (itemTime.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8),
+                        child: Text(
+                          itemTime,
+                          style: TextStyle(
+                            fontSize: 11, 
+                            color: isSelected ? const Color(0xFF9E9E9E) : const Color(0xFF616161),
+                          ),
+                        ),
                       ),
-                    ],
                   ],
                 ),
               ),

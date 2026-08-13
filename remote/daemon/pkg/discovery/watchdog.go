@@ -37,10 +37,10 @@ func (w *Watchdog) Start() {
 					log.Printf("[Watchdog] Avertissement découverte hub: %v", err)
 					continue
 				}
-				if info.ConnectRPCPort != w.Client.Port || info.ExtensionCSRF != w.Client.CSRFToken {
-					log.Printf("[Watchdog] Hub redémarré détecté ! Mise à jour du port (%d -> %d) et du jeton CSRF", w.Client.Port, info.ConnectRPCPort)
-					w.Client.Port = info.ConnectRPCPort
-					w.Client.CSRFToken = info.ExtensionCSRF
+				port, token := w.Client.Endpoint()
+				if info.ConnectRPCPort != port || info.ExtensionCSRF != token {
+					log.Printf("[Watchdog] Hub redémarré détecté ! Mise à jour du port (%d -> %d) et du jeton CSRF", port, info.ConnectRPCPort)
+					w.Client.UpdateEndpoint(info.ConnectRPCPort, info.ExtensionCSRF)
 				}
 			case <-w.stopChan:
 				ticker.Stop()
