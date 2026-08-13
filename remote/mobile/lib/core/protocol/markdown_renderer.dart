@@ -18,14 +18,33 @@ class CodeBlock {
   const CodeBlock(this.language, this.code);
 }
 
+/// A raw tool invocation embedded in the agent's text stream
+/// (e.g. `<function_call>{"name":"bash",...}</function_call>` or
+/// `{"tool_name":"grep","arguments":{...}}`). Rendered as a pill, not text.
+class ToolCallBlock {
+  final String toolName;
+  final String summary;
+  final String raw;
+  const ToolCallBlock(this.toolName, this.summary, this.raw);
+}
+
 class MarkdownBlock {
   final String? paragraph; // null when this block is a code block
   final CodeBlock? code;
+  final ToolCallBlock? toolCall;
   final bool isListItem;
 
   const MarkdownBlock.paragraph(this.paragraph, {this.isListItem = false})
-      : code = null;
-  const MarkdownBlock.codeBlock(this.code) : paragraph = null, isListItem = false;
+      : code = null,
+        toolCall = null;
+  const MarkdownBlock.codeBlock(this.code)
+      : paragraph = null,
+        toolCall = null,
+        isListItem = false;
+  const MarkdownBlock.toolCall(this.toolCall)
+      : paragraph = null,
+        code = null,
+        isListItem = false;
 }
 
 class MarkdownRenderer {
@@ -37,11 +56,23 @@ class MarkdownRenderer {
     var inFence = false;
     var fenceLang = '';
 
+    // Tool-invocation markers: XML tags (function_call / function_results) or
+    // JSON with a tool name + arguments — rendered as pills, not raw text.
+    final toolCallRe = RegExp(
+      r'<function_call>|<function_results>|"tool(_name)?"\s*:|(\{|\[)\s*"name"\s*:\s*"[a-zA-Z_]+"\s*,\s*"arguments"',
+    );
+
     void flushParagraph() {
       if (buffer.isEmpty) return;
       final raw = buffer.join('\n').trim();
       buffer.clear();
       if (raw.isEmpty) return;
+      // Single-line tool invocation → dedicated pill block.
+      if (toolCallRe.hasMatch(raw)) {
+        final parsed = _toolCallOf(raw);
+        blocks.add(MarkdownBlock.toolCall(parsed));
+        return;
+      }
       for (final line in raw.split('\n')) {
         if (RegExp(r'^\s*[-*+]\s+').hasMatch(line)) {
           blocks.add(MarkdownBlock.paragraph(
@@ -89,6 +120,17 @@ class MarkdownRenderer {
     }
     flushParagraph();
     return blocks;
+  }
+
+  /// Parses a raw tool-invocation string into a [ToolCallBlock].
+  static ToolCallBlock _toolCallOf(String raw) {
+    final nameRe = RegExp(r'"(name|tool|tool_name)"\s*:\s*"([^"]+)"');
+    final name = nameRe.firstMatch(raw)?.group(2) ?? 'tool';
+    // Compact one-line summary: first quoted argument value, else first line.
+    final argRe = RegExp(r'"(command|query|pattern|path|file_path)"\s*:\s*"([^"]+)"');
+    final summary = argRe.firstMatch(raw)?.group(2) ??
+        raw.replaceAll(RegExp(r'\s+'), ' ').substring(0, raw.length > 80 ? 80 : raw.length);
+    return ToolCallBlock(name, summary, raw);
   }
 
   /// Builds inline [TextSpan]s for a paragraph, resolving bold/italic/code.

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/app_colors.dart';
 
 class CustomDropdownOverlay {
   static OverlayEntry? _currentOverlay;
@@ -56,9 +57,9 @@ class CustomDropdownOverlay {
                 child: Container(
                   constraints: BoxConstraints(maxHeight: maxHeight ?? 300),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF1E1E1E), // Dark theme from screenshot
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                    color: AppColors.surfaceRaised, // Using the design system token
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                    border: Border.all(color: AppColors.borderSubtle),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withValues(alpha: 0.5),
@@ -68,7 +69,7 @@ class CustomDropdownOverlay {
                     ],
                   ),
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(AppRadius.md),
                     child: child,
                   ),
                 ),

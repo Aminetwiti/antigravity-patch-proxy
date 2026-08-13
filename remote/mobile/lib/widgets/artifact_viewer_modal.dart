@@ -61,9 +61,21 @@ class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // Drag handle
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 8, bottom: 4),
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.borderSubtle,
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                ),
+              ),
+            ),
             // Header
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: const BoxDecoration(
                 border: Border(bottom: BorderSide(color: AppColors.borderSubtle)),
               ),
@@ -93,7 +105,7 @@ class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
             // Content
             Expanded(
               child: _isLoading
-                  ? const Center(child: CircularProgressIndicator())
+                  ? const Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(AppColors.accentBlue)))
                   : _error != null
                       ? Center(
                           child: Padding(

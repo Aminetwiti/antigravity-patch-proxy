@@ -294,13 +294,14 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                         duration: const Duration(milliseconds: 300),
                         child: _isConnecting
                             ? const SizedBox(key: ValueKey('loading'), width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                            : const Icon(Icons.link, key: ValueKey('link'), size: 16),
+                            : const Icon(Icons.link, key: ValueKey('link'), size: 16, color: Colors.white),
                       ),
                       label: AnimatedSwitcher(
                         duration: const Duration(milliseconds: 300),
                         child: Text(
                           _isConnecting ? 'Connexion…' : 'Appairer & Connecter',
                           key: ValueKey<bool>(_isConnecting),
+                          style: const TextStyle(color: Colors.white),
                         ),
                       ),
                     ),

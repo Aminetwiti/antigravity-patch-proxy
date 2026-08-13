@@ -26,6 +26,8 @@ class MarkdownBubble extends StatelessWidget {
         for (final block in blocks) ...[
           if (block.code != null)
             _CodeBlockView(code: block.code!)
+          else if (block.toolCall != null)
+            _ToolCallPill(call: block.toolCall!)
           else
             _ParagraphView(block: block),
           const SizedBox(height: 10),
@@ -112,6 +114,7 @@ class _CodeBlockView extends StatelessWidget {
                 const Spacer(),
                 InkWell(
                   onTap: () {
+                    HapticFeedback.lightImpact();
                     Clipboard.setData(ClipboardData(text: code.code));
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
@@ -142,6 +145,67 @@ class _CodeBlockView extends StatelessWidget {
                 height: 1.5,
                 color: AppColors.inkPrimary,
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ToolCallPill extends StatelessWidget {
+  final ToolCallBlock call;
+
+  const _ToolCallPill({required this.call});
+
+  IconData _iconFor(String tool) {
+    final t = tool.toLowerCase();
+    if (t.contains('bash') || t.contains('command') || t.contains('run')) {
+      return Icons.terminal;
+    } else if (t.contains('file') || t.contains('read') || t.contains('write')) {
+      return Icons.folder_outlined;
+    } else if (t.contains('browser') || t.contains('web') || t.contains('search') || t.contains('grep')) {
+      return Icons.language;
+    }
+    return Icons.build_outlined;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.secondaryContainer.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: scheme.secondary.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        children: [
+          Icon(_iconFor(call.toolName), size: 15, color: scheme.secondary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              call.summary.isEmpty ? call.toolName : '${call.toolName} — ${call.summary}',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                fontFamily: 'monospace',
+                color: scheme.onSecondaryContainer,
+              ),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: scheme.secondary.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: const Text(
+              'TOOL',
+              style: TextStyle(fontSize: 9, letterSpacing: 0.8, fontWeight: FontWeight.w700),
             ),
           ),
         ],

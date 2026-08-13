@@ -17,10 +17,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 //   3. Toggle notifications → ApprovalNotifier.setEnabled synchronisé.
 //   4. Modèle par défaut → persisté + /model envoyé au daemon.
 //
-// Le viewport de test est agrandi (800×2400) pour que toutes les sections
-// soient construites : la ListView de Settings est plus haute que le
-// viewport par défaut (800×600) et les widgets hors-champ ne sont pas
-// trouvables par les finders.
+// La ListView de Settings est très longue : le viewport de test est agrandi
+// (800×6000) pour que toutes les sections soient construites et tapables.
 // ──────────────────────────────────────────────────────────────────────────────
 
 Future<void> _pumpScreen(
@@ -31,7 +29,7 @@ Future<void> _pumpScreen(
   ValueChanged<Map<String, dynamic>>? onDaemonSaved,
   Map<String, dynamic> initialSettings = const {},
 }) async {
-  tester.view.physicalSize = const Size(800, 2400);
+  tester.view.physicalSize = const Size(800, 6000);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
 
@@ -80,9 +78,9 @@ void main() {
 
     expect(requested, isTrue,
         reason: 'le tap doit déclencher un appel au daemon');
-    // En test headless, le partage natif et path_provider ne sont pas
-    // disponibles : l'erreur est avalée par le catch de l'écran (SnackBar
-    // « Export impossible ») — le point vérifié ici est la requête HTTP.
+    // En test headless, path_provider/share_plus ne sont pas disponibles :
+    // l'écran avale l'erreur (SnackBar « Export impossible ») — le point
+    // vérifié ici est la requête HTTP, pas le partage natif.
   });
 
   testWidgets('daemon: enregistrer persiste via SettingsStore + callback',
@@ -138,7 +136,13 @@ void main() {
 
     await _pumpScreen(tester, api: api);
 
-    await tester.tap(find.text('Modèle par défaut'));
+    // Le dropdown du modèle est identifiable par sa valeur initiale
+    // (« Gemini 3.6 Flash Medium ») — les deux autres dropdowns ont des
+    // valeurs différentes (tier GE, région d'inférence).
+    final modelDropdown = find.byWidgetPredicate(
+      (w) => w is DropdownButtonFormField<String> && w.value == 'Gemini 3.6 Flash Medium',
+    );
+    await tester.tap(modelDropdown);
     await tester.pumpAndSettle();
     await tester.tap(find.text('GPT-4o').last);
     await tester.pumpAndSettle();

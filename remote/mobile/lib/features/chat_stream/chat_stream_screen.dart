@@ -364,6 +364,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       outcome: outcome,
       message: message,
     );
+    // Micro-retour : vibration discrète quand une tâche se termine
+    // (le daemon peut tourner en arrière-plan sur le PC distant).
+    if (outcome == 'done' || outcome == 'cancelled') {
+      HapticFeedback.lightImpact();
+    }
   }
 
   void _addApproval(ToolApprovalRequest approval,
@@ -1007,7 +1012,10 @@ class _MessageBubble extends StatelessWidget {
           if (message.thought != null) ...[
             InkWell(
               key: Key('thought-toggle-${message.id}'),
-              onTap: onToggleThought,
+              onTap: () {
+                HapticFeedback.selectionClick();
+                onToggleThought?.call();
+              },
               borderRadius: BorderRadius.circular(6),
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
@@ -1182,14 +1190,14 @@ class _WelcomeEmptyState extends StatelessWidget {
               shape: BoxShape.circle,
               gradient: LinearGradient(
                 colors: [
-                  Theme.of(context).colorScheme.primary.withOpacity(0.2),
-                  Theme.of(context).colorScheme.tertiary.withOpacity(0.2),
+                  Theme.of(context).colorScheme.primary.withValues(alpha: 0.2),
+                  Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.2),
                 ],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               border: Border.all(
-                color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
                 width: 1,
               ),
             ),
@@ -1268,7 +1276,7 @@ class _SuggestionChip extends StatelessWidget {
         HapticFeedback.lightImpact();
         onTap();
       },
-      backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
       side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     );

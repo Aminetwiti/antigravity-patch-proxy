@@ -153,18 +153,18 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
                           child: _isLoadingArtifacts
                               ? const Padding(
                                   padding: EdgeInsets.all(8.0),
-                                  child: Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))),
+                                  child: Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(AppColors.accentBlue)))),
                                 )
                               : _artifacts.isEmpty
-                                  ? Padding(
-                                      padding: const EdgeInsets.all(8.0),
+                                  ? const Padding(
+                                      padding: EdgeInsets.all(8.0),
                                       child: Text('Aucun artefact', style: TextStyle(color: AppColors.inkMuted, fontSize: 12)),
                                     )
                                   : Column(
                                       crossAxisAlignment: CrossAxisAlignment.stretch,
                                       children: _artifacts.map((art) => InkWell(
                                         onTap: () => _openArtifact(art),
-                                        borderRadius: BorderRadius.circular(4),
+                                        borderRadius: BorderRadius.circular(AppRadius.sm),
                                         child: Padding(
                                           padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
                                           child: Row(

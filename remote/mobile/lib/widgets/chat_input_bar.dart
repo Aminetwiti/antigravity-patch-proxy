@@ -218,8 +218,20 @@ class _ChatInputBarState extends State<ChatInputBar> {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // Drag handle
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.borderSubtle,
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                ),
+              ),
+            ),
             Text(
               "Mode d'envoi",
               style: TextStyle(

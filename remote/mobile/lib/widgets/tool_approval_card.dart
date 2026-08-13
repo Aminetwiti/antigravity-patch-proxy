@@ -281,7 +281,7 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
                         : const Icon(Icons.check, size: 16, color: Colors.white),
                     label: Text(
                       _isSubmitting ? 'En cours...' : 'Approuver',
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white),
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.positive,

@@ -244,9 +244,15 @@ class DaemonApi {
       }
       return data;
     } catch (e) {
-      // Offline fallback
-      final sessions = await DatabaseHelper.instance.getSessions();
-      return {'fields': sessions};
+      // Offline fallback : le cache local est best-effort — s'il est
+      // indisponible (ex. sqflite non initialisé en test headless), on
+      // rejette l'erreur réseau d'ORIGINE, pas l'échec de la base.
+      try {
+        final sessions = await DatabaseHelper.instance.getSessions();
+        return {'fields': sessions};
+      } catch (_) {
+        rethrow;
+      }
     }
   }
 
@@ -254,14 +260,18 @@ class DaemonApi {
     try {
       final data = await rpc('get_session_history', {'cascadeId': cascadeId});
       if (data['messages'] != null) {
-        await DatabaseHelper.instance.saveSessionMessages(cascadeId, data['messages'] as List<dynamic>);
+        try {
+          await DatabaseHelper.instance.saveSessionMessages(cascadeId, data['messages'] as List<dynamic>);
+        } catch (_) {}
       }
       return data;
     } catch (e) {
-      final messages = await DatabaseHelper.instance.getSessionMessages(cascadeId);
-      if (messages != null) {
-        return {'messages': messages};
-      }
+      try {
+        final messages = await DatabaseHelper.instance.getSessionMessages(cascadeId);
+        if (messages != null) {
+          return {'messages': messages};
+        }
+      } catch (_) {}
       rethrow;
     }
   }
