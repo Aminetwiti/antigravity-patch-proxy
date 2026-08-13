@@ -129,3 +129,30 @@ func TestBuildFileTreeIgnoresSymlinks(t *testing.T) {
 		}
 	}
 }
+
+// TestHomeRoot : un chemin relatif (ex: .gemini/antigravity-ide/brain/...) doit
+// être résolu contre le home utilisateur, pas le CWD du daemon. Un chemin
+// absolu doit passer inchangé.
+func TestHomeRoot(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rel := homeRoot(".gemini/antigravity-ide/brain/s1")
+	if !filepath.IsAbs(rel) {
+		t.Fatalf("homeRoot(relatif) = %q, attendu un chemin absolu", rel)
+	}
+	if filepath.Dir(filepath.Dir(filepath.Dir(rel))) != filepath.Clean(home) {
+		t.Fatalf("homeRoot(relatif) = %q ne pointe pas sous le home %q", rel, home)
+	}
+
+	abs := homeRoot(filepath.Join(home, "x", "y"))
+	if abs != filepath.Join(home, "x", "y") {
+		t.Fatalf("homeRoot(absolu) = %q, attendu inchangé", abs)
+	}
+	if got := homeRoot(""); got != "" {
+		t.Fatalf("homeRoot(vide) = %q, attendu vide", got)
+	}
+}
+

@@ -151,6 +151,17 @@ class ApprovalNotifier {
     final plugin = _plugin;
     if (plugin == null) return;
 
+    // C7 : permission plein écran (Android 14+). Sur les versions
+    // antérieures canUseFullScreenIntent renvoie true sans dialog — l'appel
+    // est donc un no-op propre. Le tap sur la notification full-screen est
+    // délivré par le même callback onDidReceiveNotificationResponse que le
+    // tap normal : pas de chemin de code supplémentaire côté UI.
+    final androidImpl = plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    if (androidImpl != null) {
+      await androidImpl.requestFullScreenIntentPermission();
+    }
+
     const details = NotificationDetails(
       android: AndroidNotificationDetails(
         'approval_required',
@@ -162,6 +173,11 @@ class ApprovalNotifier {
         visibility: NotificationVisibility.public,
         playSound: true,
         enableVibration: true,
+        // C7 : réveille l'écran verrouillé / l'app en arrière-plan avec
+        // l'activité principale (le plugin l'utilise pour le content intent).
+        // La notification « vole » l'écran — l'utilisateur approuve ou refuse
+        // directement, sans devoir déverrouiller ni ouvrir l'app.
+        fullScreenIntent: true,
       ),
       iOS: DarwinNotificationDetails(
         presentAlert: true,

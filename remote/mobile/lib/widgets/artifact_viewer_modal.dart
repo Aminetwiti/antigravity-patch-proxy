@@ -7,12 +7,14 @@ class ArtifactViewerModal extends StatefulWidget {
   final DaemonApi api;
   final String artifactPath;
   final String artifactName;
+  final String? workspacePath;
 
   const ArtifactViewerModal({
     super.key,
     required this.api,
     required this.artifactPath,
     required this.artifactName,
+    this.workspacePath,
   });
 
   @override
@@ -32,7 +34,10 @@ class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
 
   Future<void> _fetchArtifactContent() async {
     try {
-      final res = await widget.api.readFile(widget.artifactPath);
+      final res = await widget.api.readFile(
+        widget.artifactPath,
+        workspacePath: widget.workspacePath,
+      );
       if (mounted) {
         setState(() {
           _content = res['data']?['content'] ?? res['content'] ?? 'Contenu vide';

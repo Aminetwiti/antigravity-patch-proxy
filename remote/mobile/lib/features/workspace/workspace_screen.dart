@@ -357,10 +357,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             _buildWorkspaceItem(r'c:\Users\amine\Desktop\ooredoo\posweb', false),
             _buildWorkspaceItem(r'c:\Users\amine\OmniRoute', false),
             _buildWorkspaceItem('mo7i', false),
-            Divider(color: Colors.white.withValues(alpha: 0.1), height: 1),
+            Divider(color: AppColors.borderSubtle, height: 1),
             _buildWorkspaceActionItem(Icons.create_new_folder_outlined, 'New Project'),
             _buildWorkspaceActionItem(Icons.bolt_outlined, 'Quick Start'),
-            Divider(color: Colors.white.withValues(alpha: 0.1), height: 1),
+            Divider(color: AppColors.borderSubtle, height: 1),
             _buildWorkspaceActionItem(Icons.do_disturb_alt_outlined, 'No Project'),
           ],
         ),
@@ -375,11 +375,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         // Here we would actually change the workspace
       },
       child: Container(
-        color: isSelected ? Colors.white.withValues(alpha: 0.1) : Colors.transparent,
+        color: isSelected ? AppColors.surfaceInput : Colors.transparent,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: [
-            Icon(Icons.folder_outlined, size: 16, color: Colors.white.withValues(alpha: 0.7)),
+            Icon(Icons.folder_outlined, size: 16, color: AppColors.inkMuted),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
@@ -387,7 +387,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                  color: Colors.white.withValues(alpha: 0.9),
+                  color: AppColors.inkPrimary,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -407,14 +407,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: [
-            Icon(icon, size: 16, color: Colors.white.withValues(alpha: 0.7)),
+            Icon(icon, size: 16, color: AppColors.inkMuted),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
                 title,
                 style: TextStyle(
                   fontSize: 13,
-                  color: Colors.white.withValues(alpha: 0.9),
+                  color: AppColors.inkPrimary,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),

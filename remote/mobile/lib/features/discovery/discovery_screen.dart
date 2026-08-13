@@ -211,27 +211,59 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Hôte PC / Domaine', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                  const SizedBox(height: 6),
-                  TextField(
-                    controller: _hostController,
-                    style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
-                    decoration: InputDecoration(
-                      prefixIcon: Icon(Icons.lan_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                      hintText: '192.168.1.50',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text('Port Daemon', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                  const SizedBox(height: 6),
-                  TextField(
-                    controller: _portController,
-                    keyboardType: TextInputType.number,
-                    style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
-                    decoration: InputDecoration(
-                      prefixIcon: Icon(Icons.numbers, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                      hintText: '8090',
-                    ),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final hostWidget = Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Hôte PC / Domaine', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                          const SizedBox(height: 6),
+                          TextField(
+                            controller: _hostController,
+                            style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                            decoration: InputDecoration(
+                              prefixIcon: Icon(Icons.lan_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                              hintText: '192.168.1.50',
+                            ),
+                          ),
+                        ],
+                      );
+
+                      final portWidget = Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Port Daemon', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                          const SizedBox(height: 6),
+                          TextField(
+                            controller: _portController,
+                            keyboardType: TextInputType.number,
+                            style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                            decoration: InputDecoration(
+                              prefixIcon: Icon(Icons.numbers, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                              hintText: '8090',
+                            ),
+                          ),
+                        ],
+                      );
+
+                      if (constraints.maxWidth > 500) {
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(flex: 2, child: hostWidget),
+                            const SizedBox(width: 12),
+                            Expanded(flex: 1, child: portWidget),
+                          ],
+                        );
+                      }
+                      return Column(
+                        children: [
+                          hostWidget,
+                          const SizedBox(height: 12),
+                          portWidget,
+                        ],
+                      );
+                    },
                   ),
                   const SizedBox(height: 12),
                   Text('Token Auth (optionnel)', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
@@ -293,15 +325,15 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                       icon: AnimatedSwitcher(
                         duration: const Duration(milliseconds: 300),
                         child: _isConnecting
-                            ? const SizedBox(key: ValueKey('loading'), width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                            : const Icon(Icons.link, key: ValueKey('link'), size: 16, color: Colors.white),
+                            ? const SizedBox(key: ValueKey('loading'), width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.inkPrimary))
+                            : const Icon(Icons.link, key: ValueKey('link'), size: 16, color: AppColors.inkPrimary),
                       ),
                       label: AnimatedSwitcher(
                         duration: const Duration(milliseconds: 300),
                         child: Text(
                           _isConnecting ? 'Connexion…' : 'Appairer & Connecter',
                           key: ValueKey<bool>(_isConnecting),
-                          style: const TextStyle(color: Colors.white),
+                          style: const TextStyle(color: AppColors.inkPrimary),
                         ),
                       ),
                     ),

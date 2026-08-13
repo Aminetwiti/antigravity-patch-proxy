@@ -66,9 +66,16 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
         api: widget.api!,
         artifactPath: artifact['path'],
         artifactName: artifact['name'],
+        workspacePath: _brainRoot,
       ),
     );
   }
+
+  /// Racine du brain pour la session active — le daemon confine read_file
+  /// sous ce workspace (resolvePath), donc les chemins relatifs des artifacts
+  /// doivent être résolus contre `~/.gemini/antigravity-ide/brain/<sessionId>/`.
+  String get _brainRoot =>
+      '.gemini/antigravity-ide/brain/${widget.activeSessionId}';
 
   @override
   Widget build(BuildContext context) {

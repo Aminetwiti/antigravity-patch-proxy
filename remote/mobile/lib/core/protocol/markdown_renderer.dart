@@ -11,6 +11,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import '../../theme/app_colors.dart';
 
 class CodeBlock {
   final String language;
@@ -156,8 +157,8 @@ class MarkdownRenderer {
           style: base.copyWith(
             fontFamily: 'monospace',
             fontSize: base.fontSize! * 0.92,
-            color: const Color(0xFFEAB308),
-            backgroundColor: const Color(0xFF27272A),
+            color: AppColors.warning,
+            backgroundColor: AppColors.surfaceInput,
           ),
         ));
         remaining = remaining.substring(codeMatch.end);
@@ -178,7 +179,7 @@ class MarkdownRenderer {
             child: Text(
               label,
               style: base.copyWith(
-                color: const Color(0xFF3B82F6),
+                color: AppColors.accentBlue,
                 decoration: TextDecoration.underline,
               ),
             ),
@@ -251,7 +252,7 @@ class MarkdownRenderer {
       spans.add(TextSpan(
         text: code.substring(match.start, match.end),
         style: baseStyle.copyWith(
-          color: const Color(0xFF60A5FA),
+          color: AppColors.info,
           fontWeight: FontWeight.bold,
         ),
       ));

@@ -232,68 +232,80 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
             const SizedBox(height: 10),
           ],
 
-          // Actions Buttons (Approuver / Refuser)
-          Row(
-            children: [
-              Expanded(
-                // Bug #13 : Semantics pour les screen readers.
-                child: Semantics(
-                  label: 'Refuser l\'exécution de ${request.toolName}',
-                  button: true,
-                  child: OutlinedButton.icon(
-                    key: const Key('deny-btn'),
-                    onPressed:
-                        _isSubmitting || widget.isExpired
-                            ? null
-                            : () => _handleDecision(ToolDecision.deny),
-                    icon: const Icon(Icons.close, size: 16, color: AppColors.danger),
-                    label: const Text(
-                      'Refuser',
-                      style: TextStyle(color: AppColors.danger, fontSize: 13),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: AppColors.danger),
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(6),
-                      ),
+          // Actions Buttons (Approuver / Refuser) — Adaptive Layout
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final denyBtn = Semantics(
+                label: 'Refuser l\'exécution de ${request.toolName}',
+                button: true,
+                child: OutlinedButton.icon(
+                  key: const Key('deny-btn'),
+                  onPressed: _isSubmitting || widget.isExpired
+                      ? null
+                      : () => _handleDecision(ToolDecision.deny),
+                  icon: const Icon(Icons.close, size: 16, color: AppColors.danger),
+                  label: const Text(
+                    'Refuser',
+                    style: TextStyle(color: AppColors.danger, fontSize: 13),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: AppColors.danger),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(6),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                // Bug #13 : Semantics pour les screen readers.
-                child: Semantics(
-                  label: 'Approuver l\'exécution de ${request.toolName}',
-                  button: true,
-                  child: ElevatedButton.icon(
-                    key: const Key('allow-btn'),
-                    onPressed: _isSubmitting || widget.isExpired
-                        ? null
-                        : () => _handleDecision(ToolDecision.allow),
-                    icon: _isSubmitting
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                          )
-                        : const Icon(Icons.check, size: 16, color: Colors.white),
-                    label: Text(
-                      _isSubmitting ? 'En cours...' : 'Approuver',
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.positive,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(6),
-                      ),
+              );
+
+              final allowBtn = Semantics(
+                label: 'Approuver l\'exécution de ${request.toolName}',
+                button: true,
+                child: ElevatedButton.icon(
+                  key: const Key('allow-btn'),
+                  onPressed: _isSubmitting || widget.isExpired
+                      ? null
+                      : () => _handleDecision(ToolDecision.allow),
+                  icon: _isSubmitting
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.inkPrimary),
+                        )
+                      : const Icon(Icons.check, size: 16, color: AppColors.inkPrimary),
+                  label: Text(
+                    _isSubmitting ? 'En cours...' : 'Approuver',
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.inkPrimary),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.positive,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(6),
                     ),
                   ),
                 ),
-              ),
-            ],
+              );
+
+              if (constraints.maxWidth < 280) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    allowBtn,
+                    const SizedBox(height: 8),
+                    denyBtn,
+                  ],
+                );
+              }
+
+              return Row(
+                children: [
+                  Expanded(child: denyBtn),
+                  const SizedBox(width: 12),
+                  Expanded(child: allowBtn),
+                ],
+              );
+            },
           ),
         ],
       ),

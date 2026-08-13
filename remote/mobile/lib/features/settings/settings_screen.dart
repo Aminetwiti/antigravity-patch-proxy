@@ -1,9 +1,21 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+
+import '../../config/env_config.dart';
 import '../../core/notifications/approval_notifier.dart';
 import '../../core/protocol/daemon_api.dart';
+import '../../services/settings_store.dart';
+import '../../theme/app_colors.dart';
+import 'appearance_settings_section.dart';
+import 'profile_settings_section.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
     super.key,
     this.initialSettings = const {},
@@ -22,364 +34,625 @@ class SettingsScreen extends StatelessWidget {
   final http.Client? httpClient;
 
   @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  late TextEditingController _hostController;
+  late TextEditingController _portController;
+  late TextEditingController _csrfController;
+  bool _useSsl = EnvConfig.useSsl;
+  bool _toolNotifications = true;
+  bool _diagnosticsBusy = false;
+  String _selectedDefaultModel = 'Gemini 3.6 Flash Medium';
+
+  final List<String> _models = [
+    'Gemini 3.6 Flash Medium',
+    'Claude 3.7 Sonnet',
+    'DeepSeek R1',
+    'GPT-4o',
+    'Ollama Local Model',
+  ];
+
+  // Feature Gemini Enterprise & Enterprise Admin Policies
+  bool _isGeminiEnterprise = true;
+  String _geTier = 'GE-Plus';
+  String _inferenceRegion = 'UE (Europe)';
+  bool _mcpAllowlistStrict = true;
+  bool _browserFeaturesEnabled = true;
+
+  @override
+  void initState() {
+    super.initState();
+    final s = widget.initialSettings;
+    _hostController = TextEditingController(
+      text: (s['host'] as String?)?.trim().isNotEmpty == true
+          ? (s['host'] as String).trim()
+          : EnvConfig.daemonHost,
+    );
+    _portController = TextEditingController(
+      text: ((s['port'] as int?) ?? EnvConfig.daemonPort).toString(),
+    );
+    _csrfController = TextEditingController(text: (s['csrf'] as String?) ?? '');
+    _useSsl = (s['ssl'] as bool?) ?? EnvConfig.useSsl;
+    _selectedDefaultModel =
+        (s['defaultModel'] as String?) ?? 'Gemini 3.6 Flash Medium';
+    _toolNotifications = (s['toolNotifications'] as bool?) ?? true;
+    _isGeminiEnterprise = (s['isGeminiEnterprise'] as bool?) ?? true;
+    _geTier = (s['geTier'] as String?) ?? 'GE-Plus';
+    _inferenceRegion = (s['inferenceRegion'] as String?) ?? 'UE (Europe)';
+    _mcpAllowlistStrict = (s['mcpAllowlistStrict'] as bool?) ?? true;
+    _browserFeaturesEnabled = (s['browserFeaturesEnabled'] as bool?) ?? true;
+    // Applique le réglage persisté dès l'ouverture (le notifier est un
+    // singleton : il faut re-synchroniser son état global).
+    widget.notifier?.setEnabled(_toolNotifications);
+  }
+
+  @override
+  void dispose() {
+    _hostController.dispose();
+    _portController.dispose();
+    _csrfController.dispose();
+    super.dispose();
+  }
+
+  /// URL ws(s)://host:port du daemon — source unique pour l'export de
+  /// diagnostics et toute future connexion directe.
+  Uri _daemonUri() {
+    final scheme = _useSsl ? 'https' : 'http';
+    final host = _hostController.text.trim().isEmpty
+        ? EnvConfig.daemonHost
+        : _hostController.text.trim();
+    final port = int.tryParse(_portController.text.trim()) ?? EnvConfig.daemonPort;
+    return Uri(scheme: scheme, host: host, port: port);
+  }
+
+  /// Persiste la config bridge + prévient le main screen (reconnexion).
+  Future<void> _saveDaemonConfig() async {
+    final port = int.tryParse(_portController.text.trim());
+    final config = {
+      'host': _hostController.text.trim(),
+      if (port != null) 'port': port,
+      'ssl': _useSsl,
+      'csrf': _csrfController.text.trim(),
+    };
+    await SettingsStore.save(config);
+    widget.onDaemonSaved?.call(config);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Connexion Daemon enregistrée !')),
+    );
+  }
+
+  /// Persiste le modèle par défaut choisi.
+  Future<void> _setDefaultModel(String model) async {
+    setState(() => _selectedDefaultModel = model);
+    await SettingsStore.save({'defaultModel': model});
+    // Le daemon connaît la commande /model : on l'applique si connecté.
+    try {
+      await widget.api?.sendCommand('/model $model');
+    } catch (_) {}
+  }
+
+  /// GET /health/diagnostic → export JSON (logs + state) → partage.
+  Future<void> _downloadDiagnostics() async {
+    setState(() => _diagnosticsBusy = true);
+    try {
+      final client = widget.httpClient ?? http.Client();
+      final response = await client
+          .get(_daemonUri().replace(path: '/health/diagnostic'))
+          .timeout(const Duration(seconds: 10));
+      final file = File(
+        '${(await getApplicationDocumentsDirectory()).path}/diagnostics_${DateTime.now().millisecondsSinceEpoch}.json',
+      );
+      await file.writeAsString(
+        const JsonEncoder.withIndent('  ').convert(jsonDecode(response.body)),
+      );
+      await Share.shareXFiles([XFile(file.path)]);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Paquet de diagnostic exporté avec succès (logs + state) !',
+          ),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Export impossible : $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _diagnosticsBusy = false);
+    }
+  }
+
+  Widget _buildAdaptivePair(BuildContext context, Widget child1, Widget child2) {
+    final isCompact = MediaQuery.sizeOf(context).width < 500;
+    if (isCompact) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          child1,
+          const SizedBox(height: 12),
+          child2,
+        ],
+      );
+    }
+    return Row(
+      children: [
+        Expanded(child: child1),
+        const SizedBox(width: 12),
+        Expanded(child: child2),
+      ],
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF141414), // Exact dark background
-      body: SafeArea(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Left Sidebar Menu (Desktop style)
-            Container(
-              width: 220,
-              color: const Color(0xFF141414),
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      appBar: AppBar(
+        title: const Text('Paramètres'),
+        backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          // ── USER PROFILE (éditable)
+          const _SectionTitle(title: 'PROFILE'),
+          const SizedBox(height: 8),
+          const ProfileSettingsSection(),
+
+          const SizedBox(height: 20),
+
+          // ── GEMINI ENTERPRISE & GOOGLE CLOUD
+          const _SectionTitle(title: 'GEMINI ENTERPRISE & COMPLIANCE'),
+          const SizedBox(height: 8),
+
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(16, 20, 16, 12),
-                    child: Text(
-                      'Settings',
-                      style: TextStyle(
-                        color: Color(0xFF9E9E9E),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                      ),
+                  SwitchListTile(
+                    title: Text(
+                      'Compte Gemini Enterprise',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface),
                     ),
-                  ),
-                  _SidebarItem(label: 'Account', isActive: false),
-                  _SidebarItem(label: 'General', isActive: true),
-                  _SidebarItem(label: 'Appearance', isActive: false),
-                  _SidebarItem(label: 'Models', isActive: false),
-                  _SidebarItem(label: 'Customizations', isActive: false),
-                  _SidebarItem(label: 'Browser', isActive: false),
-                  _SidebarItem(label: 'App', isActive: false),
-                  
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-                    child: Text(
-                      'Projects',
-                      style: TextStyle(
-                        color: Color(0xFF9E9E9E),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                      ),
+                    subtitle: Text(
+                      'Contrôles administrateur d\'organisation & Conditions Google Cloud',
+                      style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
+                    value: _isGeminiEnterprise,
+                    activeColor: Theme.of(context).colorScheme.primary,
+                    contentPadding: EdgeInsets.zero,
+                    onChanged: (val) {
+                      setState(() => _isGeminiEnterprise = val);
+                      SettingsStore.save({'isGeminiEnterprise': val});
+                    },
                   ),
-                  _SidebarItem(label: 'antigravity-add-model-m...', isActive: false),
-                  _SidebarItem(label: 'www - Copie', isActive: false),
-                  _SidebarItem(label: 'sols-pro-vision', isActive: false),
-                  _SidebarItem(label: 'Show all', isActive: false, isMuted: true),
-
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-                    child: Text(
-                      'Not in Project',
-                      style: TextStyle(
-                        color: Color(0xFF9E9E9E),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                  _SidebarItem(label: 'Conversations', isActive: false),
-                  
-                  const Spacer(),
-                  _SidebarItem(label: 'Shortcuts', isActive: false),
-                  _SidebarItem(label: 'Provide Feedback', isActive: false),
-                  const SizedBox(height: 16),
-                ],
-              ),
-            ),
-            
-            // Right Content Area (General Tab)
-            Expanded(
-              child: Container(
-                decoration: const BoxDecoration(
-                  color: Color(0xFF141414),
-                  border: Border(left: BorderSide(color: Color(0xFF1E1E1E), width: 1)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Header Row
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(32, 24, 24, 0),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  if (_isGeminiEnterprise) ...[
+                    const Divider(),
+                    const SizedBox(height: 8),
+                    _buildAdaptivePair(
+                      context,
+                      Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'General',
-                                  style: TextStyle(
-                                    color: Color(0xFFE0E0E0),
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                const Text(
-                                  'Configure agent execution, queued message delivery, and permissions.',
-                                  style: TextStyle(
-                                    color: Color(0xFF757575),
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ],
-                            ),
+                          Text('Niveau d\'abonnement',
+                              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                          const SizedBox(height: 6),
+                          DropdownButtonFormField<String>(
+                            value: _geTier,
+                            dropdownColor: Theme.of(context).colorScheme.surfaceContainer,
+                            style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                            items: ['GE-Standard', 'GE-Plus']
+                                .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                                .toList(),
+                            onChanged: (val) {
+                              if (val != null) {
+                                setState(() => _geTier = val);
+                                SettingsStore.save({'geTier': val});
+                              }
+                            },
                           ),
-                          IconButton(
-                            icon: const Icon(Icons.close, color: Color(0xFF9E9E9E), size: 20),
-                            onPressed: () => Navigator.of(context).pop(),
-                            hoverColor: Colors.transparent,
-                            splashColor: Colors.transparent,
+                        ],
+                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Inférence Régionalisée',
+                              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                          const SizedBox(height: 6),
+                          DropdownButtonFormField<String>(
+                            value: _inferenceRegion,
+                            dropdownColor: Theme.of(context).colorScheme.surfaceContainer,
+                            style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                            items: ['États-Unis', 'UE (Europe)', 'Global']
+                                .map((r) => DropdownMenuItem(value: r, child: Text(r)))
+                                .toList(),
+                            onChanged: (val) {
+                              if (val != null) {
+                                setState(() => _inferenceRegion = val);
+                                SettingsStore.save({'inferenceRegion': val});
+                              }
+                            },
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 24),
-                    
-                    // Scrollable Settings Cards
-                    Expanded(
-                      child: ListView(
-                        padding: const EdgeInsets.symmetric(horizontal: 32),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
                         children: [
-                          _SectionHeader(title: 'Execution'),
-                          _SettingsCard(
-                            title: 'Queued Messages',
-                            subtitle: 'Configure when follow-up messages are sent.',
-                            linkText: 'Keyboard shortcuts',
-                            control: Container(
-                              height: 32,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF141414),
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: const Color(0xFF2C2C2C)),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF2C2C2C),
-                                      borderRadius: BorderRadius.circular(5),
-                                    ),
-                                    alignment: Alignment.center,
-                                    child: const Text('Queue', style: TextStyle(color: Color(0xFFE0E0E0), fontSize: 12, fontWeight: FontWeight.w500)),
-                                  ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                                    alignment: Alignment.center,
-                                    child: const Text('Send Immediately', style: TextStyle(color: Color(0xFF757575), fontSize: 12)),
-                                  ),
-                                ],
-                              ),
+                          Icon(Icons.verified_user_outlined, size: 16, color: Theme.of(context).colorScheme.primary),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Licence attribuée automatiquement sous les conditions Google Cloud (Région : $_inferenceRegion).',
+                              style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.primary),
                             ),
                           ),
-                          
-                          const SizedBox(height: 24),
-                          _SectionHeader(title: 'Agent Settings'),
-                          _SettingsCard(
-                            title: 'Security Preset',
-                            subtitle: 'Choose a predefined security preset for the agent. This controls terminal auto-\nexecution policy, and file access policy.',
-                            linkText: 'Learn more about Turbo mode',
-                            control: _DropdownControl(text: 'T...'), // Obscured in screenshot
-                          ),
-                          
-                          const SizedBox(height: 24),
-                          _SectionHeader(title: 'Agent Behavior'),
-                          _SettingsCard(
-                            title: 'Artifact Review Policy',
-                            subtitle: 'Specifies Agent\'s behavior when asking for review on artifacts, which are\ndocuments it creates to enable a richer conversation experience.',
-                            control: _DropdownControl(text: 'Always Proceed'),
-                          ),
-                          
-                          const SizedBox(height: 24),
-                          _SectionHeader(title: 'File Permissions'),
-                          _SettingsCard(
-                            title: 'File Access Rules',
-                            subtitle: 'Configure allowed and denied paths for file reads and writes.',
-                            control: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF2C2C2C),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: const Text('Open', style: TextStyle(color: Color(0xFFE0E0E0), fontSize: 13, fontWeight: FontWeight.w500)),
-                            ),
-                          ),
-                          
-                          const SizedBox(height: 24),
-                          _SectionHeader(title: 'Network Permissions'),
-                          // Cutoff in screenshot, leaving empty space to match
-                          const SizedBox(height: 40),
                         ],
                       ),
                     ),
                   ],
-                ),
+                ],
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SidebarItem extends StatelessWidget {
-  final String label;
-  final bool isActive;
-  final bool isMuted;
-
-  const _SidebarItem({required this.label, required this.isActive, this.isMuted = false});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: isActive ? const Color(0xFF2C2C2C) : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isActive 
-                ? const Color(0xFFE0E0E0) 
-                : (isMuted ? const Color(0xFF757575) : const Color(0xFF9E9E9E)),
-            fontSize: 13,
-            fontWeight: isActive ? FontWeight.w500 : FontWeight.w400,
           ),
-          overflow: TextOverflow.ellipsis,
-        ),
-      ),
-    );
-  }
-}
 
-class _SectionHeader extends StatelessWidget {
-  final String title;
+          const SizedBox(height: 20),
 
-  const _SectionHeader({required this.title});
+          // ── POLITIQUES D'ADMINISTRATION D'ENTREPRISE
+          const _SectionTitle(title: 'POLITIQUES D\'ADMINISTRATION D\'ENTREPRISE'),
+          const SizedBox(height: 8),
 
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Text(
-        title,
-        style: const TextStyle(
-          color: Color(0xFFE0E0E0),
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-}
-
-class _SettingsCard extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final String? linkText;
-  final Widget control;
-
-  const _SettingsCard({
-    required this.title,
-    required this.subtitle,
-    this.linkText,
-    required this.control,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF191919), // Slightly lighter than background, very subtle
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFF2C2C2C), width: 1), // Exact subtle border
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    color: Color(0xFFE0E0E0),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SwitchListTile(
+                    title: Text(
+                      'Liste d\'autorisation MCP stricte',
+                      style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                    ),
+                    subtitle: Text(
+                      'Seuls les serveurs MCP approuvés par l\'organisation sont autorisés',
+                      style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                    value: _mcpAllowlistStrict,
+                    activeColor: Theme.of(context).colorScheme.primary,
+                    contentPadding: EdgeInsets.zero,
+                    onChanged: (val) {
+                      setState(() => _mcpAllowlistStrict = val);
+                      SettingsStore.save({'mcpAllowlistStrict': val});
+                    },
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: const TextStyle(
-                    color: Color(0xFF757575),
-                    fontSize: 12,
-                    height: 1.4,
+                  const Divider(),
+                  SwitchListTile(
+                    title: Text(
+                      'Fonctionnalités du navigateur web',
+                      style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                    ),
+                    subtitle: Text(
+                      'Autoriser le sous-agent navigateur pour les tâches d\'exploration',
+                      style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                    value: _browserFeaturesEnabled,
+                    activeColor: Theme.of(context).colorScheme.primary,
+                    contentPadding: EdgeInsets.zero,
+                    onChanged: (val) {
+                      setState(() => _browserFeaturesEnabled = val);
+                      SettingsStore.save({'browserFeaturesEnabled': val});
+                    },
                   ),
-                ),
-                if (linkText != null) ...[
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Text(
-                        linkText!,
-                        style: const TextStyle(
-                          color: Color(0xFF9E9E9E),
-                          fontSize: 12,
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // ── GESTION DE PROJET
+          const _SectionTitle(title: 'PARAMÈTRES ET SUPPRESSION DU PROJET'),
+          const SizedBox(height: 8),
+
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Zone Dangereuse',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.error),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Supprimer définitivement ce projet et toutes ses conversations associées.',
+                    style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      showDialog(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          backgroundColor: AppColors.surfaceRaised,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(AppRadius.lg),
+                            side: const BorderSide(color: AppColors.borderSubtle),
+                          ),
+                          title: const Text('Supprimer définitivement le projet ?'),
+                          content: const Text(
+                            'Cette action supprimera le projet ainsi que toutes ses conversations actives et archivées.\n\nCette action est irréversible.',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(ctx).pop(),
+                              child: const Text('Annuler'),
+                            ),
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+                              onPressed: () async {
+                                Navigator.of(ctx).pop();
+                                if (widget.api != null) {
+                                  try {
+                                    await widget.api!.sendCommand('/clear');
+                                  } catch (_) {}
+                                }
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Projet et conversations réinitialisés avec succès.')),
+                                  );
+                                }
+                              },
+                              child: const Text('Supprimer définitivement'),
+                            ),
+                          ],
                         ),
-                      ),
-                      const SizedBox(width: 4),
-                      const Icon(Icons.info_outline, size: 12, color: Color(0xFF757575)),
-                    ],
+                      );
+                    },
+                    icon: Icon(Icons.delete_forever_outlined, size: 16, color: Theme.of(context).colorScheme.error),
+                    label: Text('Supprimer le projet', style: TextStyle(color: Theme.of(context).colorScheme.error)),
                   ),
-                ]
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // ── DAEMON CONNECTION SETTINGS
+          const _SectionTitle(title: 'DAEMON BRIDGE CONNECTION'),
+          const SizedBox(height: 8),
+
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Daemon Host IP / Domain',
+                      style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: _hostController,
+                    style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                    decoration: InputDecoration(
+                      hintText: 'e.g. 192.168.1.50 or tunnel.domain.com',
+                      prefixIcon: Icon(Icons.lan_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  _buildAdaptivePair(
+                    context,
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Port',
+                            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                        const SizedBox(height: 6),
+                        TextField(
+                          controller: _portController,
+                          keyboardType: TextInputType.number,
+                          style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                          decoration: const InputDecoration(
+                            hintText: '8090',
+                          ),
+                        ),
+                      ],
+                    ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('SSL / TLS (WSS)',
+                            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                        const SizedBox(height: 6),
+                        SwitchListTile(
+                          value: _useSsl,
+                          contentPadding: EdgeInsets.zero,
+                          onChanged: (val) => setState(() => _useSsl = val),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  Text('CSRF Security Token',
+                      style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: _csrfController,
+                    obscureText: true,
+                    style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                    decoration: InputDecoration(
+                      prefixIcon: Icon(Icons.key_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _saveDaemonConfig,
+                      icon: const Icon(Icons.save_outlined, size: 16),
+                      label: const Text('Enregistrer la configuration'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // ── PREFERENCES & MODEL SETTINGS
+          const _SectionTitle(title: 'PREFERENCES & AI MODEL'),
+          const SizedBox(height: 8),
+
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Modèle par défaut',
+                      style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String>(
+                    value: _selectedDefaultModel,
+                    dropdownColor: Theme.of(context).colorScheme.surfaceContainer,
+                    style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                    decoration: InputDecoration(
+                      prefixIcon: Icon(Icons.smart_toy_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                    items: _models
+                        .map((m) => DropdownMenuItem(value: m, child: Text(m)))
+                        .toList(),
+                    onChanged: (val) {
+                      if (val != null) _setDefaultModel(val);
+                    },
+                  ),
+                  const SizedBox(height: 12),
+
+                  SwitchListTile(
+                    title: Text(
+                      'Notifications Push (Tool Approvals)',
+                      style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                    ),
+                    subtitle: Text(
+                      'Recevoir une alerte sonore quand une commande requiert votre accord',
+                      style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                    value: _toolNotifications,
+                    activeColor: Theme.of(context).colorScheme.primary,
+                    contentPadding: EdgeInsets.zero,
+                    onChanged: (val) {
+                      setState(() => _toolNotifications = val);
+                      SettingsStore.save({'toolNotifications': val});
+                      widget.notifier?.setEnabled(val);
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // ── APPEARANCE
+          const _SectionTitle(title: 'APPEARANCE'),
+          const SizedBox(height: 8),
+          AppearanceSettingsSection(
+            initialIndex: ((widget.initialSettings['themeMode'] as int?) ?? 0)
+                .clamp(0, 2),
+            onThemeModeChanged: widget.onThemeModeChanged ?? (_) {},
+          ),
+
+          const SizedBox(height: 20),
+
+          // ── ABOUT & VERSION
+          const _SectionTitle(title: 'SYSTEM & DIAGNOSTICS'),
+          const SizedBox(height: 8),
+
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  dense: true,
+                  leading: Icon(Icons.info_outline, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  title: Text('Version de l\'application', style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface)),
+                  trailing: Text('v1.0.0 (Build 42)', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                ),
+                const Divider(),
+                ListTile(
+                  dense: true,
+                  enabled: !_diagnosticsBusy,
+                  leading: _diagnosticsBusy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Icon(Icons.download_outlined,
+                          size: 18,
+                          color: Theme.of(context).colorScheme.primary),
+                  title: Text(
+                    'Télécharger les diagnostics',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Theme.of(context).colorScheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  subtitle: Text(
+                    'Exporter les journaux d\'exécution et l\'état de l\'agent (.json)',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  onTap: _downloadDiagnostics,
+                ),
               ],
             ),
           ),
-          const SizedBox(width: 16),
-          control,
         ],
       ),
     );
   }
 }
 
-class _DropdownControl extends StatelessWidget {
-  final String text;
+class _SectionTitle extends StatelessWidget {
+  final String title;
 
-  const _DropdownControl({required this.text});
+  const _SectionTitle({required this.title});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFF2C2C2C),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(text, style: const TextStyle(color: Color(0xFFE0E0E0), fontSize: 13)),
-          const SizedBox(width: 8),
-          const Icon(Icons.keyboard_arrow_down, size: 16, color: Color(0xFF9E9E9E)),
-        ],
+    final displayTitle = title == 'AGENT' ? 'GÉNÉRAL' : title;
+    return Semantics(
+      header: true,
+      label: displayTitle,
+      child: Text(
+        displayTitle,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          letterSpacing: 0.8,
+        ),
       ),
     );
   }

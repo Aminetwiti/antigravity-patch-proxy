@@ -74,7 +74,11 @@ void main() {
     await _pumpScreen(tester, httpClient: client);
 
     await tester.tap(find.text('Télécharger les diagnostics'));
-    await tester.pumpAndSettle();
+    // L'export échoue en test headless (path_provider/share_plus absents) :
+    // la SnackBar d'erreur s'affiche puis se retire. pumpAndSettle bloquerait
+    // sur l'animation d'entrée sous fake time — on pompe borné.
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(seconds: 5));
 
     expect(requested, isTrue,
         reason: 'le tap doit déclencher un appel au daemon');
@@ -131,21 +135,26 @@ void main() {
     final api = DaemonApi(
       incoming: ctrl.stream,
       send: (d) => out.add(d as Map<String, dynamic>),
+      timeout: const Duration(seconds: 1), // rÃ©sout vite : aucun daemon dans le test
     );
     addTearDown(ctrl.close);
+    // Un RPC sans rÃ©ponse laisse un Timer de timeout tourner : le rÃ©soudre
+    // immÃ©diatement Ã©vite l'Ã©chec « A Timer is still pending » en fin de test.
+    addTearDown(api.dispose);
 
     await _pumpScreen(tester, api: api);
 
     // Le dropdown du modèle est identifiable par sa valeur initiale
     // (« Gemini 3.6 Flash Medium ») — les deux autres dropdowns ont des
     // valeurs différentes (tier GE, région d'inférence).
-    final modelDropdown = find.byWidgetPredicate(
-      (w) => w is DropdownButtonFormField<String> && w.value == 'Gemini 3.6 Flash Medium',
-    );
-    await tester.tap(modelDropdown);
-    await tester.pumpAndSettle();
+    await tester.tap(find.text('Gemini 3.6 Flash Medium').last);
+    await tester.pump(const Duration(milliseconds: 300));
     await tester.tap(find.text('GPT-4o').last);
-    await tester.pumpAndSettle();
+    // Le choix envoie /model au daemon ; sans daemon, le RPC expire au bout
+    // de 1 s (timeout court configuré) — on pompe au-delà pour ne laisser
+    // aucun Timer fake en attente en fin de test.
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump(const Duration(seconds: 2));
 
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('settings.defaultModel'), 'GPT-4o');

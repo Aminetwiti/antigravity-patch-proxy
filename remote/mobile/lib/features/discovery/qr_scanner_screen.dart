@@ -64,7 +64,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
               child: Text(
                 'Pointez vers le QR Code du Daemon',
                 style: TextStyle(
-                  color: Colors.white,
+                  color: AppColors.inkPrimary,
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
                   shadows: [Shadow(color: Colors.black, blurRadius: 4)],

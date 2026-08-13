@@ -235,6 +235,36 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     }
   }
 
+  void _showSessionHistory() {
+    final api = _api;
+    if (api == null || _activeSessionId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Connectez le Daemon pour voir l\'historique')),
+      );
+      return;
+    }
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surfaceRaised,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      ),
+      builder: (context) => _SessionHistorySheet(
+        api: api,
+        sessionId: _activeSessionId,
+      ),
+    );
+  }
+
+  void _showScheduledTasks() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _ScheduledTasksSheet(outbox: _outbox),
+    );
+  }
+
   @override
   void dispose() {
     _api?.dispose();
@@ -258,7 +288,18 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           if (isConnected) {
             _wsClient.disconnect();
           } else {
-            _wsClient.connect();
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => DiscoveryScreen(
+                  onConnect: (host, port, token) async {
+                    final url = host.startsWith('ws') ? host : (host.startsWith('wss') ? host : 'ws://$host:$port/ws');
+                    _wsClient.disconnect();
+                    await _wsClient.connect(customUrl: url, authToken: token);
+                    return _wsClient.statusNotifier.value == ConnectionStatus.connected;
+                  },
+                ),
+              ),
+            );
           }
         },
         onSessionSelected: (id) {
@@ -276,14 +317,10 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           });
         },
         onConversationHistory: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Conversation History - Coming soon!')),
-          );
+          _showSessionHistory();
         },
         onScheduledTasks: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Scheduled Tasks - Coming soon!')),
-          );
+          _showScheduledTasks();
         },
         onOpenSettings: () {
           Navigator.of(context).push(
@@ -436,6 +473,233 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         activeProjectName: _activeProjectName,
         isConnected: isConnected,
         wsClient: _wsClient,
+      ),
+    );
+  }
+}
+
+/// Feuille « Historique des conversations » : charge get_session_history de la
+/// session active via DaemonApi (repli offline : cache sqflite). Affiche les
+/// messages dans l'ordre chronologique avec des bulles user/assistant.
+class _SessionHistorySheet extends StatefulWidget {
+  final DaemonApi api;
+  final String sessionId;
+
+  const _SessionHistorySheet({required this.api, required this.sessionId});
+
+  @override
+  State<_SessionHistorySheet> createState() => _SessionHistorySheetState();
+}
+
+class _SessionHistorySheetState extends State<_SessionHistorySheet> {
+  bool _isLoading = true;
+  String? _error;
+  List<ChatMessage> _messages = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final data = await widget.api.getSessionHistory(widget.sessionId);
+      if (!mounted) return;
+      final raw = data['messages'] as List? ?? [];
+      final msgs = <ChatMessage>[];
+      for (final m in raw) {
+        if (m is Map) {
+          msgs.add(ChatMessage(
+            id: m['id']?.toString() ?? '',
+            sender: m['sender']?.toString() ?? 'assistant',
+            text: m['text']?.toString() ?? '',
+            thought: m['thought']?.toString(),
+            timestamp: m['timestamp']?.toString() ?? '',
+            isError: m['isError'] == true,
+          ));
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _messages = msgs;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.75,
+      decoration: const BoxDecoration(
+        color: AppColors.surfaceBase,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      ),
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Drag handle
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 8, bottom: 4),
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.borderSubtle,
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.history, size: 18, color: AppColors.accentBlue),
+                  const SizedBox(width: 10),
+                  const Text(
+                    'Conversation History',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.inkPrimary),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18, color: AppColors.inkSecondary),
+                    onPressed: () => Navigator.of(context).pop(),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1, color: AppColors.borderSubtle),
+            Expanded(
+              child: _isLoading
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation(AppColors.accentBlue),
+                      ),
+                    )
+                  : _error != null
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Text(
+                              'Impossible de charger l\'historique:\n$_error',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(fontSize: 12, color: AppColors.danger),
+                            ),
+                          ),
+                        )
+                      : _messages.isEmpty
+                          ? const Center(
+                              child: Text(
+                                'Aucun message dans cette session.',
+                                style: TextStyle(fontSize: 12, color: AppColors.inkMuted),
+                              ),
+                            )
+                          : ListView.builder(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              itemCount: _messages.length,
+                              itemBuilder: (context, i) {
+                                final m = _messages[i];
+                                final isUser = m.sender == 'user';
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                                  child: Align(
+                                    alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                                    child: Container(
+                                      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                      decoration: BoxDecoration(
+                                        color: isUser ? AppColors.accentBlue.withValues(alpha: 0.18) : AppColors.surfaceInput,
+                                        borderRadius: BorderRadius.circular(AppRadius.lg),
+                                      ),
+                                      child: Text(
+                                        m.text.isEmpty ? (m.thought ?? '') : m.text,
+                                        style: TextStyle(
+                                          fontSize: 12.5,
+                                          height: 1.4,
+                                          color: AppColors.inkPrimary,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Feuille « Tâches planifiées » : reflète l'état réel de la file d'attente
+/// hors-ligne (outbox). Le daemon n'expose pas encore de RPC
+/// `list_scheduled_tasks` — ce panneau est prêt à s'y brancher.
+class _ScheduledTasksSheet extends StatelessWidget {
+  final OutboxQueue outbox;
+
+  const _ScheduledTasksSheet({required this.outbox});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.surfaceBase,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      ),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 32,
+                height: 4,
+                decoration: BoxDecoration(color: AppColors.borderSubtle, borderRadius: BorderRadius.circular(AppRadius.pill)),
+              ),
+              const SizedBox(height: 16),
+              const Icon(Icons.schedule, size: 32, color: AppColors.accentBlue),
+              const SizedBox(height: 12),
+              const Text('Tâches planifiées', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.inkPrimary)),
+              const SizedBox(height: 6),
+              if (outbox.hasPending)
+                ...outbox.snapshot().map((m) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.hourglass_top, size: 14, color: AppColors.warning),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              m['prompt']?.toString() ?? m['type']?.toString() ?? 'Message en attente',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 12, color: AppColors.inkSecondary),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ))
+              else
+                const Text('Aucune tâche planifiée en arrière-plan.', style: TextStyle(fontSize: 12, color: AppColors.inkMuted)),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -192,6 +192,11 @@ const maxWSMessageSize = 1 << 20
 // téléphone ne peut pas saturer le hub.
 const maxConcurrentStreams = 2
 
+// hostActiveWindow : fenêtre d'activité clavier/souris du PC hôte (C7-B).
+// Si l'utilisateur a interagi dans les 90 dernières secondes, on considère
+// qu'il est devant le PC → le mobile supprime la notification d'approbation.
+const hostActiveWindow = 90 * time.Second
+
 // pingInterval / pongWait : garde-fous de connexions mortes. Le ping échoue
 // si le pair ne répond pas (network parti, app fermée) → read error → le
 // client est retiré du broadcast.
@@ -686,9 +691,14 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			if len(events) > 0 {
 				for _, ev := range events {
 					if ev.Kind == connectrpc.EventKindApprovalRequired && !s.hasSessionApproval(msg.CascadeID, ev.Tool) {
+						pending := s.pendingApprovalInfo(msg.CascadeID)
+						// C7-B : idle detection hôte — si l'utilisateur est actif sur
+						// le PC, le mobile ne sonne pas (la boîte de dialogue
+						// d'approbation est déjà sous ses yeux).
+						pending["hostActive"] = hostActiveSince(hostActiveWindow)
 						s.broadcast(OutgoingMessage{
 							Type: "approval_pending",
-							Data: s.pendingApprovalInfo(msg.CascadeID),
+							Data: pending,
 						})
 					}
 				}
@@ -697,6 +707,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				"frameIndex": frameIndex,
 				"events":     events,
 				"raw":        toOutgoing(frame),
+				// C7-B : hostActive=true quand l'utilisateur interagit avec le
+				// PC hôte → le mobile supprime ses notifications d'approbation
+				// (le dialogue d'approbation est visible sur l'écran du PC).
+				"hostActive": hostActiveSince(hostActiveWindow),
 			}
 			s.broadcast(OutgoingMessage{
 				Type:      "stream_delta",
@@ -712,6 +726,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 
 		endData := map[string]interface{}{"cascadeId": msg.CascadeID}
+		// C7-B : le mobile n'affiche pas de notification « tâche terminée »
+		// quand l'utilisateur est actif sur le PC (le résultat est sous ses
+		// yeux). hostActive est absent → false côté mobile.
+		endData["hostActive"] = hostActiveSince(hostActiveWindow)
 		switch {
 		case err != nil:
 			endData["outcome"] = "error"
@@ -770,7 +788,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			err = fmt.Errorf("workspacePath requis")
 			break
 		}
-		tree, errList := buildFileTree(msg.WorkspacePath, "", 0)
+		tree, errList := buildFileTree(homeRoot(msg.WorkspacePath), "", 0)
 		if errList != nil {
 			err = errList
 			break
@@ -784,7 +802,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			break
 		}
 		// Confinement : le fichier doit être sous la racine workspace.
-		abs, errRes := resolvePath(msg.WorkspacePath, msg.FilePath)
+		abs, errRes := resolvePath(homeRoot(msg.WorkspacePath), msg.FilePath)
 		if errRes != nil {
 			err = errRes
 			break
@@ -827,6 +845,19 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 	// les autres surfaces (elles n'ont pas ce requestId) et casserait la
 	// corrélation des tests.
 	s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+}
+
+// homeRoot : résout un chemin relatif (ex: .gemini/antigravity-ide/brain/...)
+// contre le home de l'utilisateur — le CWD du daemon n'est pas fiable (il peut
+// être lancé depuis n'importe où). Les chemins absolus passent inchangés.
+func homeRoot(root string) string {
+	if root == "" || filepath.IsAbs(root) {
+		return root
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, root)
+	}
+	return root
 }
 
 // resolvePath confine un chemin demandé sous une racine : rejette les

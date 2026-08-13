@@ -39,6 +39,8 @@
     <!-- Notifications locales (approbations distantes) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- C7 : alerte plein écran pour les approbations urgentes (Android 14+) -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>

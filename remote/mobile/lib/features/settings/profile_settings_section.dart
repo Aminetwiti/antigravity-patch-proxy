@@ -65,7 +65,7 @@ class _ProfileSettingsSectionState extends State<ProfileSettingsSection> {
                         style: const TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                          color: AppColors.inkPrimary,
                         ),
                       ),
                     ),

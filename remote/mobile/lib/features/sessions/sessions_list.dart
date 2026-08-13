@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/protocol/messages.dart';
+import '../../theme/app_colors.dart';
 
 class LeftSidebarDrawer extends StatefulWidget {
   final String activeSessionId;
@@ -57,7 +58,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
     final folderNames = groupedSessions.keys.toList()..sort();
 
     return Drawer(
-      backgroundColor: const Color(0xFF141414), // Using a hardcoded near-black to match 100%
+      backgroundColor: AppColors.surfaceBase,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.zero,
       ),
@@ -67,22 +68,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
           children: [
             const SizedBox(height: 12),
 
-            // 2. Navigation controls (Sidebar toggle, Back, Forward)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                children: [
-                  Icon(Icons.view_sidebar_outlined, size: 18, color: const Color(0xFF9E9E9E)),
-                  const SizedBox(width: 16),
-                  Icon(Icons.arrow_back, size: 18, color: const Color(0xFF424242)),
-                  const SizedBox(width: 16),
-                  Icon(Icons.arrow_forward, size: 18, color: const Color(0xFF424242)),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // 3. Top buttons (New Conv, History, Scheduled)
+            // 2. Top buttons (New Conv, History, Scheduled)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: _NavButton(
@@ -124,13 +110,13 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
-                      color: Color(0xFF757575), // Same grey as 'File'
+                      color: AppColors.inkMuted,
                     ),
                   ),
                   const Spacer(),
-                  const Icon(Icons.filter_list, size: 14, color: Color(0xFF757575)),
+                  const Icon(Icons.filter_list, size: 14, color: AppColors.inkMuted),
                   const SizedBox(width: 12),
-                  const Icon(Icons.create_new_folder_outlined, size: 14, color: Color(0xFF757575)),
+                  const Icon(Icons.create_new_folder_outlined, size: 14, color: AppColors.inkMuted),
                   const SizedBox(width: 8), // For scrollbar alignment
                 ],
               ),
@@ -143,17 +129,44 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                 thumbVisibility: true,
                 thickness: 6,
                 radius: const Radius.circular(3),
-                thumbColor: const Color(0xFF2C2C2C),
+                thumbColor: AppColors.borderStrong,
                 child: ListView(
                   controller: _scrollController,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   children: [
                     if (folderNames.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.all(16.0),
-                        child: Text(
-                          'No projects found. Connect to see sessions.',
-                          style: TextStyle(color: Color(0xFF757575), fontSize: 13),
+                      Container(
+                        margin: const EdgeInsets.all(8),
+                        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceInput.withValues(alpha: 0.25),
+                          borderRadius: BorderRadius.circular(AppRadius.md),
+                          border: Border.all(color: AppColors.borderSubtle),
+                        ),
+                        child: Column(
+                          children: [
+                            const Icon(Icons.cloud_off_outlined, size: 28, color: AppColors.inkMuted),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Aucun projet connecté',
+                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.inkSecondary),
+                            ),
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Connectez le Daemon PC pour afficher vos sessions actives.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(fontSize: 11, color: AppColors.inkMuted),
+                            ),
+                            const SizedBox(height: 12),
+                            OutlinedButton.icon(
+                              onPressed: () {
+                                Navigator.of(context).pop();
+                                widget.onToggleConnection();
+                              },
+                              icon: const Icon(Icons.qr_code_scanner, size: 16),
+                              label: const Text('Se connecter au Daemon', style: TextStyle(fontSize: 12)),
+                            ),
+                          ],
                         ),
                       )
                     else
@@ -194,8 +207,11 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
               child: _SidebarAction(
                 icon: widget.isConnected ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
                 label: widget.isConnected ? 'Connected' : 'Offline',
-                textColor: widget.isConnected ? Colors.green : Colors.redAccent,
-                onTap: widget.onToggleConnection,
+                textColor: widget.isConnected ? AppColors.positive : AppColors.danger,
+                onTap: () {
+                  Navigator.of(context).pop();
+                  widget.onToggleConnection();
+                },
               ),
             ),
           ],
@@ -228,23 +244,23 @@ class _NavButton extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
-            color: const Color(0xFF1E1E1E), // Slightly lighter than background
+            color: AppColors.surfaceRaised,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: const Color(0xFF2C2C2C), // Subtle border
+              color: AppColors.borderStrong,
               width: 1,
             ),
           ),
           child: Row(
             children: [
-              Icon(icon, size: 16, color: const Color(0xFFBDBDBD)),
+              Icon(icon, size: 16, color: AppColors.inkSecondary),
               const SizedBox(width: 10),
               Text(
                 label,
                 style: const TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w400,
-                  color: Color(0xFFBDBDBD),
+                  color: AppColors.inkSecondary,
                 ),
               ),
             ],
@@ -275,14 +291,14 @@ class _SidebarAction extends StatelessWidget {
           margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
           child: Row(
             children: [
-              Icon(icon, size: 16, color: textColor ?? const Color(0xFF9E9E9E)),
+              Icon(icon, size: 16, color: textColor ?? AppColors.inkMuted),
               const SizedBox(width: 12),
               Text(
                 label,
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w400,
-                  color: textColor ?? const Color(0xFF9E9E9E),
+                  color: textColor ?? AppColors.inkMuted,
                 ),
               ),
             ],
@@ -293,34 +309,16 @@ class _SidebarAction extends StatelessWidget {
   }
 }
 
-class _SessionItemData {
-  final String id;
-  final String title;
-  final String time;
-  final bool isLoading;
-  final bool isPlaceholder;
-
-  const _SessionItemData(
-    this.id,
-    this.title,
-    this.time, {
-    this.isLoading = false,
-    this.isPlaceholder = false,
-  });
-}
-
 class _ProjectFolderGroup extends StatelessWidget {
   final String folderName;
-  final List<dynamic> sessions;
+  final List<CascadeSession> sessions;
   final String activeSessionId;
-  final bool hasTrailingPlus;
   final Function(String id) onSessionTap;
 
   const _ProjectFolderGroup({
     required this.folderName,
     required this.sessions,
     required this.activeSessionId,
-    this.hasTrailingPlus = false,
     required this.onSessionTap,
   });
 
@@ -333,7 +331,7 @@ class _ProjectFolderGroup extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           child: Row(
             children: [
-              const Icon(Icons.folder_outlined, size: 15, color: Color(0xFF757575)),
+              const Icon(Icons.folder_outlined, size: 15, color: AppColors.inkMuted),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -341,94 +339,80 @@ class _ProjectFolderGroup extends StatelessWidget {
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w500,
-                    color: Color(0xFF9E9E9E),
+                    color: AppColors.inkMuted,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              if (hasTrailingPlus) ...[
-                const Icon(Icons.more_vert, size: 14, color: Color(0xFF757575)),
-                const SizedBox(width: 4),
-                const Icon(Icons.add, size: 14, color: Color(0xFF757575)),
-              ]
             ],
           ),
         ),
-        ...sessions.map((s) {
-          final itemId = s is CascadeSession ? s.id : (s as _SessionItemData).id;
-          final itemTitle = s is CascadeSession ? s.title : (s as _SessionItemData).title;
-          final itemTime = s is CascadeSession ? s.time : (s as _SessionItemData).time;
-          final isSelected = itemId == activeSessionId;
-          final isLoading = s is _SessionItemData ? s.isLoading : false;
-          final isPlaceholder = s is _SessionItemData ? s.isPlaceholder : false;
-          
-          if (isPlaceholder) {
+        if (sessions.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(left: 28, top: 4, bottom: 8),
+            child: Text(
+              'No conversations yet',
+              style: TextStyle(
+                fontSize: 11,
+                color: AppColors.inkFaint,
+              ),
+            ),
+          )
+        else
+          ...sessions.map((s) {
+            final isSelected = s.id == activeSessionId;
+
             return Padding(
-              padding: const EdgeInsets.only(left: 36, top: 4, bottom: 4, right: 4),
-              child: Text(
-                itemTitle,
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  color: Color(0xFF424242), // Dark grey for "No conversations yet"
-                  fontWeight: FontWeight.w400,
+              padding: const EdgeInsets.only(left: 14, top: 1, bottom: 1, right: 4),
+              child: InkWell(
+                onTap: () => onSessionTap(s.id),
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: isSelected ? AppColors.surfaceInput : Colors.transparent,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          s.title,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: isSelected ? AppColors.inkPrimary : AppColors.inkMuted,
+                            fontWeight: isSelected ? FontWeight.w500 : FontWeight.w400,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (isSelected) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: const BoxDecoration(
+                            color: AppColors.accentBlue,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ] else if (s.time.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: Text(
+                            s.time,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: AppColors.inkFaint,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             );
-          }
-
-          return Padding(
-            padding: const EdgeInsets.only(left: 14, top: 1, bottom: 1, right: 4),
-            child: InkWell(
-              onTap: () => onSessionTap(itemId),
-              borderRadius: BorderRadius.circular(6),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFF2C2C2C) : Colors.transparent,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        itemTitle,
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          color: isSelected ? const Color(0xFFE0E0E0) : const Color(0xFF9E9E9E),
-                          fontWeight: isSelected ? FontWeight.w500 : FontWeight.w400,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    if (isLoading)
-                      const Padding(
-                        padding: EdgeInsets.only(left: 8),
-                        child: SizedBox(
-                          width: 12,
-                          height: 12,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Color(0xFF757575),
-                          ),
-                        ),
-                      )
-                    else if (itemTime.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 8),
-                        child: Text(
-                          itemTime,
-                          style: TextStyle(
-                            fontSize: 11, 
-                            color: isSelected ? const Color(0xFF9E9E9E) : const Color(0xFF616161),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        }),
+          }),
       ],
     );
   }

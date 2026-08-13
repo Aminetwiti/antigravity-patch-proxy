@@ -243,7 +243,7 @@ class DaemonApi {
         } catch (_) {}
       }
       return data;
-    } catch (e) {
+    } catch (e, st) {
       // Offline fallback : le cache local est best-effort — s'il est
       // indisponible (ex. sqflite non initialisé en test headless), on
       // rejette l'erreur réseau d'ORIGINE, pas l'échec de la base.
@@ -251,7 +251,7 @@ class DaemonApi {
         final sessions = await DatabaseHelper.instance.getSessions();
         return {'fields': sessions};
       } catch (_) {
-        rethrow;
+        Error.throwWithStackTrace(e, st);
       }
     }
   }
@@ -265,14 +265,14 @@ class DaemonApi {
         } catch (_) {}
       }
       return data;
-    } catch (e) {
+    } catch (e, st) {
       try {
         final messages = await DatabaseHelper.instance.getSessionMessages(cascadeId);
         if (messages != null) {
           return {'messages': messages};
         }
       } catch (_) {}
-      rethrow;
+      Error.throwWithStackTrace(e, st);
     }
   }
 
