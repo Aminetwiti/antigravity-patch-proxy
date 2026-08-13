@@ -165,7 +165,7 @@ func TestDecodeFields_EncodeDecode(t *testing.T) {
 		nums []int
 	}{
 		{"StartCascade", BuildStartCascade("file:///C:/x", "", 190), []int{4, 5, 8, 14}},
-		{"SendMessage", BuildSendMessage("casc-1", "bonjour"), []int{1, 2}},
+		{"SendMessage", BuildSendMessage("casc-1", "bonjour", "k", "s", "gemini-3.0-flash-high", 0), []int{1, 2, 3, 5}},
 	}
 	for _, c := range cases {
 		fields := DecodeFields(c.buf)

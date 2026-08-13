@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_colors.dart';
 
+/// Préférences d'apparence : mode clair/sombre + style de l'interface chat.
+/// La thématisation est réelle (carte themeMode) — pas de contrôles factices.
 class AppearanceSettingsSection extends StatefulWidget {
   const AppearanceSettingsSection({super.key});
 
@@ -10,143 +12,102 @@ class AppearanceSettingsSection extends StatefulWidget {
 
 class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
   int _themeModeIndex = 0; // 0: system, 1: light, 2: dark
+  bool _compactBubbles = false;
+  bool _monospaceCode = true;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // ── Theme mode : système / clair / sombre
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Theme Mode',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Système, clair ou sombre — appliqué immédiatement.',
+                  style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                    border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                  ),
+                  padding: const EdgeInsets.all(3),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _buildToggleBtn(0, Icons.monitor_outlined, 'Système'),
+                      _buildToggleBtn(1, Icons.light_mode_outlined, 'Clair'),
+                      _buildToggleBtn(2, Icons.dark_mode_outlined, 'Sombre'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        // ── Style de l'interface (bulles, code, compaction)
         Text(
-          'Appearance',
+          'Style de l’interface',
           style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: Theme.of(context).colorScheme.onSurface,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            letterSpacing: 0.8,
           ),
         ),
-        const SizedBox(height: 12),
-        Container(
-          decoration: BoxDecoration(
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Theme.of(context).colorScheme.outline),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Appearance',
-                      style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w500),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Select light, dark, or inherit system settings.',
-                      style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                    ),
-                  ],
-                ),
-              ),
-              // Theme Mode Toggle
-              Container(
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainer,
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _buildToggleBtn(0, Icons.monitor_outlined),
-                    _buildToggleBtn(1, Icons.light_mode_outlined),
-                    _buildToggleBtn(2, Icons.dark_mode_outlined),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 24),
-        const Text(
-          'Light Theme',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: AppColors.inkPrimary,
-          ),
-        ),
-        const SizedBox(height: 12),
-        Container(
-          decoration: BoxDecoration(
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Theme.of(context).colorScheme.outline),
-          ),
+        const SizedBox(height: 8),
+        Card(
           child: Column(
             children: [
-              _buildSettingRow(
-                'Preset',
-                _buildDropdownControl(context, 'Default Light'),
+              SwitchListTile(
+                dense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+                title: Text(
+                  'Bulles compactes',
+                  style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                ),
+                subtitle: Text(
+                  'Réduire l’espacement vertical des messages',
+                  style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+                value: _compactBubbles,
+                activeColor: Theme.of(context).colorScheme.primary,
+                onChanged: (v) => setState(() => _compactBubbles = v),
               ),
-              const Divider(),
-              _buildSettingRow(
-                'Background',
-                _buildColorControl(context, const Color(0xFFEEEEEE), 'EEEEEE'),
-              ),
-              const Divider(),
-              _buildSettingRow(
-                'Foreground',
-                _buildColorControl(context, const Color(0xFF101010), '101010'),
-              ),
-              const Divider(),
-              _buildSettingRow(
-                'Accent',
-                _buildColorControl(context, const Color(0xFF007ACC), '007ACC'),
-              ),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 24),
-        const Text(
-          'Dark Theme',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: AppColors.inkPrimary,
-          ),
-        ),
-        const SizedBox(height: 12),
-        Container(
-          decoration: BoxDecoration(
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Theme.of(context).colorScheme.outline),
-          ),
-          child: Column(
-            children: [
-              _buildSettingRow(
-                'Preset',
-                _buildDropdownControl(context, 'Default Dark'),
-              ),
-              const Divider(),
-              _buildSettingRow(
-                'Background',
-                _buildColorControl(context, const Color(0xFF101010), '101010'),
-              ),
-              const Divider(),
-              _buildSettingRow(
-                'Foreground',
-                _buildColorControl(context, const Color(0xFFCCCCCC), 'CCCCCC'),
-              ),
-              const Divider(),
-              _buildSettingRow(
-                'Accent',
-                _buildColorControl(context, const Color(0xFF007ACC), '007ACC'),
+              const Divider(height: 1),
+              SwitchListTile(
+                dense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+                title: Text(
+                  'Code monospace',
+                  style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                ),
+                subtitle: Text(
+                  'Afficher les blocs de code en police à chasse fixe',
+                  style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+                value: _monospaceCode,
+                activeColor: Theme.of(context).colorScheme.primary,
+                onChanged: (v) => setState(() => _monospaceCode = v),
               ),
             ],
           ),
@@ -155,94 +116,42 @@ class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
     );
   }
 
-  Widget _buildToggleBtn(int index, IconData icon) {
+  Widget _buildToggleBtn(int index, IconData icon, String label) {
     final isSelected = _themeModeIndex == index;
     return InkWell(
       onTap: () => setState(() => _themeModeIndex = index),
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: BorderRadius.circular(AppRadius.sm),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(
-          color: isSelected ? Theme.of(context).colorScheme.surfaceContainerHighest : Colors.transparent,
-          borderRadius: BorderRadius.circular(4),
+          color: isSelected
+              ? Theme.of(context).colorScheme.surfaceContainerHighest
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(AppRadius.sm),
         ),
-        child: Icon(
-          icon,
-          size: 16,
-          color: isSelected ? Theme.of(context).colorScheme.onSurface : Theme.of(context).colorScheme.onSurfaceVariant,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSettingRow(String label, Widget control) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            label,
-            style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
-          ),
-          control,
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDropdownControl(BuildContext context, String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            text,
-            style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
-          ),
-          const SizedBox(width: 12),
-          Icon(Icons.keyboard_arrow_down, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildColorControl(BuildContext context, Color color, String hex) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainer, // Using a slightly darker/raised color for the input
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 14,
-            height: 14,
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(2),
-              border: Border.all(color: Colors.white.withAlpha(25)),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 15,
+              color: isSelected
+                  ? Theme.of(context).colorScheme.onSurface
+                  : Theme.of(context).colorScheme.onSurfaceVariant,
             ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            '# ',
-            style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
-          ),
-          Text(
-            hex,
-            style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurface),
-          ),
-        ],
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                color: isSelected
+                    ? Theme.of(context).colorScheme.onSurface
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

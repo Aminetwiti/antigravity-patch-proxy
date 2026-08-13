@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import '../../core/protocol/session_parser.dart';
+import '../../core/protocol/messages.dart';
 import '../../theme/app_colors.dart';
 
 class LeftSidebarDrawer extends StatefulWidget {
@@ -30,8 +29,6 @@ class LeftSidebarDrawer extends StatefulWidget {
 class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
   bool _onlyUnread = false;
   bool _showScheduledOnly = false;
-  String _groupBy = 'Par projet'; // 'Par projet', 'Par statut', 'Liste combinée'
-  String _sortBy = 'Dernière invite'; // 'Dernière invite', 'Titre'
   final TextEditingController _projectSearchCtrl = TextEditingController();
   String _projectSearchQuery = '';
 
@@ -83,7 +80,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
               child: TextField(
                 controller: _projectSearchCtrl,
                 autofocus: false,
@@ -97,33 +94,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Row(
-                children: [
-                  Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primary,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Icon(Icons.api_outlined, size: 18, color: Colors.white),
-                  ),
-                  const SizedBox(width: 12),
-                  const Text(
-                    'Antigravity',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
               child: Column(
                 children: [
                   _NavButton(
@@ -165,9 +136,9 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
             ),
             const SizedBox(height: 8),
 
-            // Filtre "Seulement non lu"
+            // Filtres : non lu + tâches planifiées (inline, pas de modal)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
               child: Row(
                 children: [
                   Icon(Icons.filter_list, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
@@ -186,10 +157,28 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     onChanged: (val) => setState(() => _onlyUnread = val),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.tune_outlined, size: 18),
-                    tooltip: 'Options d\'affichage',
-                    onPressed: () => _showDisplayOptionsModal(context),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+              child: Row(
+                children: [
+                  Icon(Icons.schedule, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Tâches planifiées',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                  const Spacer(),
+                  Switch(
+                    value: _showScheduledOnly,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    onChanged: (val) => setState(() => _showScheduledOnly = val),
                   ),
                 ],
               ),
@@ -213,88 +202,6 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  void _showDisplayOptionsModal(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setModalState) => Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Options d\'affichage',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurface),
-              ),
-              const SizedBox(height: 14),
-
-              // Section Regroupement
-              Text('REGROUPEMENT', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-              const SizedBox(height: 6),
-              Row(
-                children: ['Par projet', 'Par statut', 'Liste combinée'].map((g) {
-                  final sel = _groupBy == g;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: ChoiceChip(
-                      label: Text(g),
-                      selected: sel,
-                      onSelected: (val) {
-                        if (val) {
-                          setState(() => _groupBy = g);
-                          setModalState(() {});
-                        }
-                      },
-                    ),
-                  );
-                }).toList(),
-              ),
-
-              const SizedBox(height: 14),
-
-              // Section Tri
-              Text('TRI PAR', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-              const SizedBox(height: 6),
-              Row(
-                children: ['Dernière invite', 'Titre'].map((t) {
-                  final sel = _sortBy == t;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: ChoiceChip(
-                      label: Text(t),
-                      selected: sel,
-                      onSelected: (val) {
-                        if (val) {
-                          setState(() => _sortBy = t);
-                          setModalState(() {});
-                        }
-                      },
-                    ),
-                  );
-                }).toList(),
-              ),
-
-              const SizedBox(height: 14),
-              SwitchListTile(
-                title: const Text('Tâches planifiées seulement', style: TextStyle(fontSize: 13)),
-                value: _showScheduledOnly,
-                onChanged: (v) {
-                  setState(() => _showScheduledOnly = v);
-                  setModalState(() {});
-                },
-                contentPadding: EdgeInsets.zero,
-              ),
-            ],
-          ),
         ),
       ),
     );

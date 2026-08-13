@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -61,18 +60,14 @@ func main() {
 		}
 	}()
 
+	// C4 : branche le logger structuré rotatif (AG_REMOTE_LOG_FILE) ou stdout
+	// (AG_REMOTE_LOG_LEVEL) — les logs du gateway partent en JSON exploitable.
+	gateway.SetLogJSON(gateway.NewLogger())
+
 	server := gateway.NewServer(rpcClient, authToken)
 
 	http.HandleFunc("/ws", server.HandleWebSocket)
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		st := server.Stats()
-		if st.Status == "degraded" {
-			w.WriteHeader(http.StatusServiceUnavailable)
-		}
-		json.NewEncoder(w).Encode(st)
-	})
+	http.HandleFunc("/health", server.HTTPHandler)
 	http.HandleFunc("/health/diagnostic", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		hbErr := ""

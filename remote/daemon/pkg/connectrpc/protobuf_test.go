@@ -41,8 +41,11 @@ func TestBuildStartCascadeAndDecode(t *testing.T) {
 func TestBuildSendMessage(t *testing.T) {
 	cascadeID := "casc-1234-abcd"
 	promptText := "Hello Antigravity!"
+	apiKey := "test-api-key"
+	sessionID := "sess-1"
+	modelUID := "gemini-3.0-flash-high"
 
-	buf := BuildSendMessage(cascadeID, promptText)
+	buf := BuildSendMessage(cascadeID, promptText, apiKey, sessionID, modelUID, 0)
 	fields := DecodeFields(buf)
 
 	if len(fields) < 2 {
@@ -51,6 +54,33 @@ func TestBuildSendMessage(t *testing.T) {
 
 	if string(fields[0].Bytes) != cascadeID {
 		t.Errorf("Attendu cascadeID=%s dans champ #1, reçu=%s", cascadeID, string(fields[0].Bytes))
+	}
+
+	// Le LS 2.5.0 exige cascade_config (champ 5) avec un modèle demandé :
+	// sans lui l'exécuteur plante « neither PlanModel nor RequestedModel specified ».
+	foundConfig := false
+	for _, f := range fields {
+		if f.Num == 5 && len(f.Bytes) > 0 {
+			foundConfig = true
+			inner := DecodeFields(f.Bytes)
+			for _, sub := range inner {
+				if sub.Num == 1 { // conversational_planner_config
+					planner := DecodeFields(sub.Bytes)
+					foundUID := false
+					for _, p := range planner {
+						if p.Num == 6 && string(p.Bytes) == modelUID {
+							foundUID = true
+						}
+					}
+					if !foundUID {
+						t.Errorf("cascade_config: requested_model_uid=%s introuvable dans le planner", modelUID)
+					}
+				}
+			}
+		}
+	}
+	if !foundConfig {
+		t.Errorf("cascade_config (champ 5) manquant dans BuildSendMessage")
 	}
 }
 

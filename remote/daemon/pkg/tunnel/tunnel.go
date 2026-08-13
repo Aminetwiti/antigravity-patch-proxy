@@ -137,6 +137,7 @@ func (m *Manager) startCloudflare(binPath string, localPort int) (string, error)
 
 func (m *Manager) startPinggy(binPath string, localPort int) (string, error) {
 	args := []string{
+		"-p", "443",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "ServerAliveInterval=30",
 		"-R", fmt.Sprintf("0:127.0.0.1:%d", localPort),

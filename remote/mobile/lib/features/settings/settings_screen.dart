@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../../config/env_config.dart';
-import '../../theme/app_colors.dart';
 import 'appearance_settings_section.dart';
 import 'profile_settings_section.dart';
 
@@ -55,7 +54,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.surface,
       appBar: AppBar(
-        title: const Text('Settings & Profile'),
+        title: const Text('Paramètres'),
         backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
       ),
       body: ListView(
@@ -440,13 +439,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const Divider(),
                 ListTile(
                   dense: true,
-                  leading: Icon(Icons.terminal_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  title: Text('Protocole ConnectRPC / gRPC-Web', style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface)),
-                  trailing: const Text('Active (v1)', style: TextStyle(fontSize: 12, color: AppColors.positive)),
-                ),
-                const Divider(),
-                ListTile(
-                  dense: true,
                   leading: Icon(Icons.download_outlined, size: 18, color: Theme.of(context).colorScheme.primary),
                   title: Text(
                     'Télécharger les diagnostics',
@@ -476,6 +468,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
 class _SectionTitle extends StatelessWidget {
   final String title;
+
   const _SectionTitle({required this.title});
 
   @override

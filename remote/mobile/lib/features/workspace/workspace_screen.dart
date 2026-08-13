@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../theme/app_colors.dart';
@@ -27,9 +29,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   final TextEditingController _findController = TextEditingController();
   String _findQuery = '';
   bool _showFindBar = false;
-  // Preview tabs (temporaires) vs Permanent tabs
-  final Set<String> _permanentTabs = {};
-  bool _isPreviewTab = true;
 
   @override
   void initState() {
@@ -48,6 +47,15 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     _searchController.dispose();
     _findController.dispose();
     super.dispose();
+  }
+
+  // Basename réel du workspace (antigravity-add-model-main, pas le path complet).
+  String get _workspaceLabel {
+    final p = widget.workspacePath.trim();
+    if (p.isEmpty || p == '.') return 'antigravity-add-model-main';
+    final cleaned = p.endsWith('/') ? p.substring(0, p.length - 1) : p;
+    final i = cleaned.lastIndexOf(RegExp(r'[/\\]'));
+    return i >= 0 ? cleaned.substring(i + 1) : cleaned;
   }
 
   Future<void> _loadFiles() async {
@@ -75,16 +83,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     }
   }
 
-  void _loadFile(String path, {bool promoteToPermanent = false}) async {
-    final isAlreadyPermanent = _permanentTabs.contains(path);
+  void _loadFile(String path) async {
     setState(() {
       _selectedFilePath = path;
       _isLoadingCode = true;
       _codeContent = '';
-      _isPreviewTab = !isAlreadyPermanent && !promoteToPermanent;
-      if (promoteToPermanent) {
-        _permanentTabs.add(path);
-      }
     });
     try {
       final res = await widget.api!.readFile(path, workspacePath: widget.workspacePath);
@@ -126,7 +129,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                     Icon(Icons.folder_open, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     const SizedBox(width: 8),
                     Text(
-                      'antigravity-add-model-main',
+                      _workspaceLabel,
                       style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface),
                     ),
                   ],
@@ -153,15 +156,15 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(vertical: 8),
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(AppRadius.md),
                       borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(AppRadius.md),
                       borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(AppRadius.md),
                       borderSide: BorderSide(color: Theme.of(context).colorScheme.primary),
                     ),
                     filled: true,
@@ -211,34 +214,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                               style: TextStyle(
                                 fontSize: 12.5,
                                 color: Theme.of(context).colorScheme.onSurface,
-                                fontStyle: _isPreviewTab ? FontStyle.italic : FontStyle.normal,
                               ),
                               overflow: TextOverflow.ellipsis,
                             ),
-                            if (_isPreviewTab && _selectedFilePath.isNotEmpty) ...[
-                              const SizedBox(width: 8),
-                              InkWell(
-                                onTap: () => setState(() {
-                                  _permanentTabs.add(_selectedFilePath);
-                                  _isPreviewTab = false;
-                                }),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: Theme.of(context).colorScheme.primaryContainer,
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Text(
-                                    'Aperçu (cliquer pour fixer)',
-                                    style: TextStyle(
-                                      fontSize: 10.5,
-                                      color: Theme.of(context).colorScheme.primary,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
                           ],
                         ),
                       ),
@@ -414,7 +392,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             title: name,
             depth: depth,
             isSelected: isSelected,
-            onTap: () => _loadFile(fullPath),
+            onTap: () {
+              // Mobile : le drawer reste ouvert après sélection sinon.
+              final scaffold = Scaffold.maybeOf(context);
+              if (scaffold != null && scaffold.isDrawerOpen) {
+                scaffold.closeDrawer();
+              }
+              _loadFile(fullPath);
+            },
           );
         }
       },
@@ -553,7 +538,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
     );
 
-    return ListView.builder(
+    // Lignes du viewer : numéros + contenu (softWrap:false pour permettre le
+    // scroll horizontal du conteneur parent au lieu du wrap silencieux).
+    final codeList = ListView.builder(
       padding: const EdgeInsets.symmetric(vertical: 4),
       itemCount: lines.length,
       itemBuilder: (context, index) {
@@ -564,7 +551,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('$lineNum │ ', style: lineNumberStyle),
-              Expanded(child: SelectableText(line, style: textStyle)),
+              Expanded(
+                child: SelectableText(
+                  line,
+                  style: textStyle,
+                  // Longues lignes → scroll horizontal, pas de wrap.
+                  maxLines: null,
+                ),
+              ),
             ],
           );
         }
@@ -593,6 +587,40 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           text: TextSpan(style: textStyle, children: spans),
         );
       },
+    );
+
+    return Column(
+      children: [
+        if (isLargeFile || rawLines.length > 2000)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.10),
+            child: Text(
+              isLargeFile && rawLines.length > 2000
+                  ? 'Fichier volumineux — ${rawLines.length} lignes, 2000 affichées (contenu tronqué à 50 000 caractères)'
+                  : isLargeFile
+                      ? 'Fichier volumineux — contenu tronqué à 50 000 caractères'
+                      : 'Fichier volumineux — ${rawLines.length} lignes, 2000 affichées',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.primary),
+            ),
+          ),
+        Expanded(
+          // ponytail: largeur estimée (7.2px/char monospace 12px) pour le
+          // scroll horizontal — pas de mesure de layout coûteuse sur les gros
+          // fichiers. À remplacer par un TextPainter si les lignes débordent.
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: math.max(
+                MediaQuery.sizeOf(context).width,
+                lines.fold<int>(0, (m, l) => l.length > m ? l.length : m) * 7.2 + 60,
+              ),
+              child: codeList,
+            ),
+          ),
+        ),
+      ],
     );
   }
 

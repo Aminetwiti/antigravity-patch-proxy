@@ -102,6 +102,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
         children: [
           // ── Intro Card
           Card(
+            margin: EdgeInsets.zero,
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Row(
@@ -111,7 +112,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                     height: 44,
                     decoration: BoxDecoration(
                       color: AppColors.accentBlue.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(AppRadius.lg),
                     ),
                     child: const Icon(Icons.podcasts, color: AppColors.accentBlue, size: 24),
                   ),
@@ -162,10 +163,10 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Text(
                 'RÉSEAU LOCAL (mDNS)',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.inkFaint,
                   letterSpacing: 1.2,
                 ),
               ),
@@ -195,7 +196,12 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
           // ── Manual Entry Section
           Text(
             'CONNEXION MANUELLE',
-            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurfaceVariant, letterSpacing: 0.8),
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: AppColors.inkFaint,
+              letterSpacing: 0.8,
+            ),
           ),
           const SizedBox(height: 8),
 

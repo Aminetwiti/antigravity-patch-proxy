@@ -48,3 +48,5 @@ scripts/freebuff/extraction-output.txt
 scripts/freebuff/pkce-output.txt
 remote/tools/*
 remote/mobile/.gradle/*
+remote/daemon/*
+remote/daemon/daemon.exe

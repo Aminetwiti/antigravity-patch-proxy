@@ -4,7 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -22,6 +22,14 @@ import (
 var upgrader = websocket.Upgrader{
 	CheckOrigin: checkOrigin,
 }
+
+// logJSON : logger structuré du gateway (JSON, niveau configurable).
+// Utilisé par les événements lifecycle ; les erreurs portent requestId pour
+// corréler mobile ↔ hub (C4).
+var logJSON = slog.Default()
+
+// SetLogJSON permet au main de brancher le logger rotatif (health.go).
+func SetLogJSON(l *slog.Logger) { logJSON = l }
 
 // RPCClient est l'ensemble des méthodes du backend LanguageServer utilisées
 // par le gateway (interface minimale pour permettre les tests avec un faux).
@@ -92,6 +100,13 @@ type Server struct {
 	lastError string
 	// startedAt : horodatage de démarrage du serveur (C5, uptime).
 	startedAt time.Time
+	// sentRequestIDs : requestId déjà traités (C1, idempotence). Un send_prompt
+	// retransmis après coupure Wi-Fi ne duplique pas le tour : le hub reçoit
+	// chaque requête au plus une fois.
+	sentRequestIDs map[string]bool
+	// clientInFlight : nombre de send_prompt en cours PAR CLIENT (C3, limite
+	// de streams simultanés — un client ne peut pas saturer le hub).
+	clientInFlight map[*websocket.Conn]int
 }
 
 // Stats snapshot de l'état du serveur pour l'endpoint /health (C5).
@@ -116,6 +131,8 @@ func NewServer(client RPCClient, authToken string) *Server {
 		sessionApprovals: make(map[string]bool),
 		activeCascades:   make(map[string]bool),
 		startedAt:        time.Now(),
+		sentRequestIDs:   make(map[string]bool),
+		clientInFlight:   make(map[*websocket.Conn]int),
 	}
 }
 
@@ -170,6 +187,11 @@ func (s *Server) SetApprovalTimeout(d time.Duration) {
 // pour empêcher un client de faire un DoS mémoire.
 const maxWSMessageSize = 1 << 20
 
+// maxConcurrentStreams : nombre maximum de send_prompt simultanés PAR CLIENT
+// (C3). Au-delà, la requête est refusée avec une erreur explicite — un seul
+// téléphone ne peut pas saturer le hub.
+const maxConcurrentStreams = 2
+
 // pingInterval / pongWait : garde-fous de connexions mortes. Le ping échoue
 // si le pair ne répond pas (network parti, app fermée) → read error → le
 // client est retiré du broadcast.
@@ -183,7 +205,7 @@ func (s *Server) writeJSON(conn *websocket.Conn, msg OutgoingMessage) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	if err := conn.WriteJSON(msg); err != nil {
-		log.Printf("[WS] Write error: %v", err)
+		logJSON.Warn("write_error", "err", err)
 	}
 }
 
@@ -216,6 +238,7 @@ type IncomingMessage struct {
 	Scope         string `json:"scope,omitempty"`
 	Prompt        string `json:"prompt,omitempty"`
 	FilePath      string `json:"filePath,omitempty"`
+	StreamCount   int    `json:"streamCount,omitempty"`
 	Command       string `json:"command,omitempty"`
 }
 
@@ -306,11 +329,11 @@ func (s *Server) expireApproval(cascadeID string) {
 	delete(s.approvals, cascadeID)
 	s.mu.Unlock()
 
-	log.Printf("[WS] Approbation expirée pour %s — auto-refus", cascadeID)
+	logJSON.Info("approval_expired", "cascadeId", cascadeID)
 	if p.trajectoryID != "" {
 		oneofField, oneofPayload := buildApprovalPayload(p.approvalType, false, p.command, p.filePath)
 		if _, err := s.RPCClient.SubmitToolApproval(cascadeID, p.trajectoryID, p.stepIndex, oneofField, oneofPayload); err != nil {
-			log.Printf("[WS] Auto-refus échoué pour %s: %v", cascadeID, err)
+		logJSON.Error("auto_deny_failed", "cascadeId", cascadeID, "err", err)
 		}
 	}
 	s.broadcast(OutgoingMessage{
@@ -448,7 +471,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if subtle.ConstantTimeCompare([]byte(clientToken), []byte(s.AuthToken)) != 1 {
-			log.Printf("[WS] Tentative de connexion rejetée : token invalide")
+			logJSON.Warn("auth_rejected", "remote", r.RemoteAddr)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -456,7 +479,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("[WS] Upgrade error: %v", err)
+		logJSON.Error("upgrade_error", "err", err)
 		return
 	}
 
@@ -470,7 +493,10 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		s.mu.Lock()
 		delete(s.clients, conn)
+		delete(s.clientInFlight, conn)
+		clients := len(s.clients)
 		s.mu.Unlock()
+		logJSON.Info("client_disconnected", "remote", conn.RemoteAddr().String(), "clients", clients)
 		conn.Close()
 	}()
 
@@ -478,7 +504,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.clients[conn] = true
 	s.mu.Unlock()
 
-	log.Println("[WS] Mobile Client Connected")
+	logJSON.Info("client_connected", "remote", conn.RemoteAddr().String())
 
 	// Goroutine de ping : si le pair est mort, l'écriture échoue et la
 	// prochaine lecture échoue aussi → le client est purgé du broadcast.
@@ -499,13 +525,22 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
-			log.Printf("[WS] Read error: %v", err)
+			logJSON.Debug("read_error", "err", err)
 			break
 		}
 
 		var msg IncomingMessage
 		if err := json.Unmarshal(message, &msg); err != nil {
 			s.writeJSON(conn, OutgoingMessage{Type: "error", Error: "Invalid JSON format"})
+			continue
+		}
+		// send_prompt est long (streaming jusqu'à 120 s) : il tourne en
+		// goroutine pour ne PAS bloquer la boucle de lecture — sinon un hub
+		// lent gèlerait heartbeat, submit_approval et les autres messages
+		// de la même connexion (C3). Les réponses portent leur requestId,
+		// donc le client les corrèle sans ordre garanti.
+		if msg.Type == "send_prompt" {
+			go s.handleAction(conn, msg)
 			continue
 		}
 		s.handleAction(conn, msg)
@@ -541,9 +576,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 
 			if projectID != "" {
-				log.Printf("[WS] Création de cascade rattachée au projet: %s", projectID)
+				logJSON.Info("cascade_created", "projectId", projectID)
 			} else {
-				log.Printf("[WS] Création de cascade orpheline (aucun projet trouvé)")
+				logJSON.Info("cascade_created_orphan")
 			}
 
 			raw, err = s.RPCClient.CreateCascade(uri, projectID, 190)
@@ -555,7 +590,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
 			return
 		}
-		log.Printf("[WS] Commande slash: %s", msg.Command)
+		logJSON.Info("slash_command", "command", msg.Command)
 		raw, err = s.RPCClient.SendCommand(msg.Command)
 
 	case "list_sessions":
@@ -573,13 +608,39 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
 			return
 		}
+		// C1 — idempotence : un requestId déjà traité ne rejoue PAS le tour
+		// (retransmission après coupure Wi-Fi). Réponse dédupliquée.
+		s.mu.Lock()
+		if s.sentRequestIDs[msg.RequestID] {
+			s.mu.Unlock()
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"deduplicated": true}})
+			return
+		}
+		// C3 — plafond de streams simultanés PAR CLIENT (anti-saturation hub).
+		// Vérifié AVANT le marquage idempotent : un requestId refusé ici doit
+		// pouvoir être retransmis une fois un slot libéré.
+		if s.clientInFlight[conn] >= maxConcurrentStreams {
+			s.mu.Unlock()
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "trop de streams simultanés (max " + itoa(maxConcurrentStreams) + ")"})
+			return
+		}
+		s.sentRequestIDs[msg.RequestID] = true
+		s.clientInFlight[conn]++
+		s.mu.Unlock()
+
 		s.MarkCascadeActive(msg.CascadeID)
-		defer s.ClearCascadeActive(msg.CascadeID)
+		defer func() {
+			s.ClearCascadeActive(msg.CascadeID)
+			s.mu.Lock()
+			s.clientInFlight[conn]--
+			s.mu.Unlock()
+		}()
 		s.broadcast(OutgoingMessage{Type: "stream_start", RequestID: msg.RequestID, Data: map[string]string{"cascadeId": msg.CascadeID}})
+		logJSON.Info("stream_start", "requestId", msg.RequestID, "cascadeId", msg.CascadeID)
 
 		// 1. Force l'IDE à afficher la conversation avant de lancer le prompt
 		if _, errSet := s.RPCClient.SetBrowserOpenConversation(msg.CascadeID); errSet != nil {
-			log.Printf("[WS] Erreur SetBrowserOpenConversation: %v", errSet)
+			logJSON.Warn("open_conversation_failed", "cascadeId", msg.CascadeID, "err", errSet)
 		}
 
 		frameIndex := 0
@@ -599,7 +660,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 							msg.CascadeID, ev.TrajectoryID, ev.StepIndex,
 							oneofField, oneofPayload,
 						); errSubmit != nil {
-							log.Printf("[WS] Auto-approbation session %s/%s: %v", msg.CascadeID, ev.Tool, errSubmit)
+							logJSON.Error("auto_approve_failed", "cascadeId", msg.CascadeID, "tool", ev.Tool, "err", errSubmit)
 						}
 					} else {
 						s.MarkApprovalPending(msg.CascadeID, ev)
@@ -634,7 +695,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 
 		// 3. Force l'IDE à ouvrir cette nouvelle session
 		if _, errSet := s.RPCClient.SetBrowserOpenConversation(msg.CascadeID); errSet != nil {
-			log.Printf("[WS] Erreur SetBrowserOpenConversation: %v", errSet)
+			logJSON.Warn("open_conversation_failed", "cascadeId", msg.CascadeID, "err", errSet)
 		}
 
 		endData := map[string]interface{}{"cascadeId": msg.CascadeID}
@@ -655,6 +716,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			endData["message"] = ""
 			s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, Data: endData})
 		}
+		logJSON.Info("stream_end", "requestId", msg.RequestID, "cascadeId", msg.CascadeID, "outcome", endData["outcome"])
 		return
 
 	case "submit_approval":

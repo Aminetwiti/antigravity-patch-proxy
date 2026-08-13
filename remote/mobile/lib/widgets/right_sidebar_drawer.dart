@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_colors.dart';
+
 class RightSidebarDrawer extends StatelessWidget {
   final int subagentsCount;
   final int filesChangedCount;
@@ -19,37 +21,47 @@ class RightSidebarDrawer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Drawer(
-      backgroundColor: Theme.of(context).colorScheme.surface,
+      // Rail PC : canvas Zinc-950 + bordure gauche
+      backgroundColor: AppColors.surfaceBase,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.zero,
+        side: BorderSide(color: AppColors.borderSubtle, width: 1),
+      ),
       child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Drawer Header
+            // Drawer Header — PC .nav-group-label : 10px uppercase espacé
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Row(
                 children: [
-                  Icon(Icons.vertical_split_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  Icon(Icons.vertical_split_outlined, size: 16, color: AppColors.inkFaint),
                   const SizedBox(width: 8),
-                  Text(
+                  const Text(
                     'CONTEXT',
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: 10,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 1.2,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      color: AppColors.inkFaint,
                     ),
                   ),
                   const Spacer(),
-                    IconButton(
-                      icon: Icon(Icons.dock_outlined, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                      onPressed: () => Navigator.of(context).pop(),
-                      tooltip: 'Fermer le panneau',
+                  IconButton(
+                    icon: Icon(Icons.close, size: 18, color: AppColors.inkSecondary),
+                    onPressed: () => Navigator.of(context).pop(),
+                    tooltip: 'Fermer le panneau',
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 32,
+                      minHeight: 32,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              const Divider(),
+            ),
+            const Divider(),
 
             // Context Accordion List
             Expanded(
@@ -104,43 +116,57 @@ class _ContextItemRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        child: Row(
-          children: [
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w400,
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                '$badgeCount',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w600,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        child: AnimatedContainer(
+          duration: AppMotion.fast,
+          curve: AppMotion.easeOut,
+          // PC .nav-item : hover surfaceHover
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w400,
+                    color: AppColors.inkPrimary,
+                  ),
                 ),
               ),
-            ),
-            const Spacer(),
-            Icon(
-              Icons.chevron_right,
-              size: 16,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ],
+              const SizedBox(width: 8),
+              // Badge pill — PC --r-pill
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceInput,
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                ),
+                child: Text(
+                  '$badgeCount',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: AppColors.inkSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Icon(
+                Icons.chevron_right,
+                size: 16,
+                color: AppColors.inkMuted,
+              ),
+            ],
+          ),
         ),
       ),
     );
