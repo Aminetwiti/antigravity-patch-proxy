@@ -303,7 +303,106 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
               ),
             ),
           ),
+
+          const SizedBox(height: 20),
+          const _SectionHeader(title: 'AGENTS PERSONNALISÉS'),
+          const SizedBox(height: 8),
+
+          _CustomAgentManager(),
         ],
+      ),
+    );
+  }
+}
+
+class _CustomAgentManager extends StatefulWidget {
+  @override
+  State<_CustomAgentManager> createState() => _CustomAgentManagerState();
+}
+
+class _CustomAgentManagerState extends State<_CustomAgentManager> {
+  final List<Map<String, dynamic>> _customAgents = [
+    {'id': 'ca1', 'name': 'Code Reviewer Agent', 'active': true},
+    {'id': 'ca2', 'name': 'Refactoring Specialist', 'active': false},
+    {'id': 'ca3', 'name': 'Doc Generator', 'active': true},
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    if (_customAgents.isEmpty) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text(
+            'Aucun agent personnalisé configuré.',
+            style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
+        ),
+      );
+    }
+
+    return Card(
+      child: Column(
+        children: [
+          for (int i = 0; i < _customAgents.length; i++) ...[
+            if (i > 0) const Divider(),
+            ListTile(
+              dense: true,
+              leading: Icon(
+                Icons.smart_toy_outlined,
+                size: 18,
+                color: _customAgents[i]['active'] ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              title: Text(
+                _customAgents[i]['name'],
+                style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                _customAgents[i]['active'] ? 'Activé' : 'Désactivé',
+                style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Switch(
+                    value: _customAgents[i]['active'],
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    onChanged: (val) => setState(() => _customAgents[i]['active'] = val),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 16),
+                    tooltip: 'Supprimer l\'agent',
+                    onPressed: () {
+                      final name = _customAgents[i]['name'];
+                      setState(() => _customAgents.removeAt(i));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Agent "$name" supprimé.')),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  const _SectionHeader({required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      title,
+      style: TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w700,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+        letterSpacing: 0.8,
       ),
     );
   }

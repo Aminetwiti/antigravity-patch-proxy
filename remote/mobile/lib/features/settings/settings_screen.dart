@@ -27,6 +27,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     'Ollama Local Model',
   ];
 
+  // Feature Gemini Enterprise & Enterprise Admin Policies
+  bool _isGeminiEnterprise = true;
+  String _geTier = 'GE-Plus';
+  String _inferenceRegion = 'UE (Europe)';
+  bool _mcpAllowlistStrict = true;
+  bool _browserFeaturesEnabled = true;
+
   @override
   void initState() {
     super.initState();
@@ -58,6 +65,154 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const _SectionTitle(title: 'PROFILE'),
           const SizedBox(height: 8),
           const ProfileSettingsSection(),
+
+          const SizedBox(height: 20),
+
+          // ── GEMINI ENTERPRISE & GOOGLE CLOUD
+          const _SectionTitle(title: 'GEMINI ENTERPRISE & COMPLIANCE'),
+          const SizedBox(height: 8),
+
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SwitchListTile(
+                    title: Text(
+                      'Compte Gemini Enterprise',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface),
+                    ),
+                    subtitle: Text(
+                      'Contrôles administrateur d\'organisation & Conditions Google Cloud',
+                      style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                    value: _isGeminiEnterprise,
+                    activeColor: Theme.of(context).colorScheme.primary,
+                    contentPadding: EdgeInsets.zero,
+                    onChanged: (val) => setState(() => _isGeminiEnterprise = val),
+                  ),
+                  if (_isGeminiEnterprise) ...[
+                    const Divider(),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Niveau d\'abonnement',
+                                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                              const SizedBox(height: 6),
+                              DropdownButtonFormField<String>(
+                                value: _geTier,
+                                dropdownColor: Theme.of(context).colorScheme.surfaceContainer,
+                                style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                                items: ['GE-Standard', 'GE-Plus']
+                                    .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                                    .toList(),
+                                onChanged: (val) {
+                                  if (val != null) setState(() => _geTier = val);
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Inférence Régionalisée',
+                                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                              const SizedBox(height: 6),
+                              DropdownButtonFormField<String>(
+                                value: _inferenceRegion,
+                                dropdownColor: Theme.of(context).colorScheme.surfaceContainer,
+                                style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                                items: ['États-Unis', 'UE (Europe)', 'Global']
+                                    .map((r) => DropdownMenuItem(value: r, child: Text(r)))
+                                    .toList(),
+                                onChanged: (val) {
+                                  if (val != null) setState(() => _inferenceRegion = val);
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.verified_user_outlined, size: 16, color: Theme.of(context).colorScheme.primary),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Licence attribuée automatiquement sous les conditions Google Cloud (Région : $_inferenceRegion).',
+                              style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.primary),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // ── POLITIQUES D'ADMINISTRATION D'ENTREPRISE
+          const _SectionTitle(title: 'POLITIQUES D\'ADMINISTRATION D\'ENTREPRISE'),
+          const SizedBox(height: 8),
+
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SwitchListTile(
+                    title: Text(
+                      'Liste d\'autorisation MCP stricte',
+                      style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                    ),
+                    subtitle: Text(
+                      'Seuls les serveurs MCP approuvés par l\'organisation sont autorisés',
+                      style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                    value: _mcpAllowlistStrict,
+                    activeColor: Theme.of(context).colorScheme.primary,
+                    contentPadding: EdgeInsets.zero,
+                    onChanged: (val) => setState(() => _mcpAllowlistStrict = val),
+                  ),
+                  const Divider(),
+                  SwitchListTile(
+                    title: Text(
+                      'Fonctionnalités du navigateur web',
+                      style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                    ),
+                    subtitle: Text(
+                      'Autoriser le sous-agent navigateur pour les tâches d\'exploration',
+                      style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                    value: _browserFeaturesEnabled,
+                    activeColor: Theme.of(context).colorScheme.primary,
+                    contentPadding: EdgeInsets.zero,
+                    onChanged: (val) => setState(() => _browserFeaturesEnabled = val),
+                  ),
+                ],
+              ),
+            ),
+          ),
 
           const SizedBox(height: 20),
 

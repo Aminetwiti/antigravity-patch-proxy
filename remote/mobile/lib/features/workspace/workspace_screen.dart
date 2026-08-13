@@ -344,6 +344,26 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
 
   // Bug #3 : perf — construit la liste une seule fois, filtrée par _searchQuery.
   Widget _buildFileList() {
+    if (_files.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.folder_open_outlined, size: 40, color: Theme.of(context).colorScheme.onSurfaceVariant),
+            const SizedBox(height: 8),
+            Text(
+              'Espace de travail vide',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Aucun fichier à afficher dans ce répertoire.',
+              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+            ),
+          ],
+        ),
+      );
+    }
     final filtered = _searchQuery.isEmpty
         ? _files
         : _files.where((f) {
@@ -443,6 +463,32 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   // — Quand _findQuery est non-vide : RichText avec spans surlignés ligne par ligne.
   // ponytail: on ne reconstruit que les lignes visibles (itemBuilder à la volée).
   Widget _buildCodeView() {
+    // Handling SVG previews safely without crashing on raw binary
+    if (_selectedFilePath.endsWith('.svg')) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            color: Theme.of(context).colorScheme.surfaceContainer,
+            child: Row(
+              children: [
+                Icon(Icons.image_outlined, size: 16, color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 8),
+                Text('Aperçu SVG (Fichier vectoriel)', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.primary)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: SingleChildScrollView(
+              child: SelectableText(_codeContent),
+            ),
+          ),
+        ],
+      );
+    }
+
     final lines = _codeContent.split('\n');
     final textStyle = TextStyle(
       fontFamily: 'monospace',
@@ -450,14 +496,27 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       height: 1.5,
       color: Theme.of(context).colorScheme.onSurface,
     );
+    final lineNumberStyle = TextStyle(
+      fontFamily: 'monospace',
+      fontSize: 11,
+      height: 1.5,
+      color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+    );
 
     return ListView.builder(
       padding: const EdgeInsets.symmetric(vertical: 4),
       itemCount: lines.length,
       itemBuilder: (context, index) {
+        final lineNum = '${index + 1}'.padLeft(4, ' ');
         final line = lines[index];
         if (_findQuery.isEmpty) {
-          return Text(line, style: textStyle);
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('$lineNum │ ', style: lineNumberStyle),
+              Expanded(child: SelectableText(line, style: textStyle)),
+            ],
+          );
         }
         // Surlignage : découper la ligne en spans autour de chaque match.
         final spans = <TextSpan>[];

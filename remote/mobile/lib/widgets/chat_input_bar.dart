@@ -29,6 +29,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
   bool _isSendPressed = false;
   SendMode _sendMode = SendMode.immediate;
+  // Feature Niveaux d'effort de raisonnement (Faible, Moyen, Élevé)
+  String _reasoningEffort = 'Moyen'; // Options: 'Faible', 'Moyen', 'Élevé'
   // Feature attachement .txt
   String? _attachedFileName;
   String? _attachedFileContent;
@@ -205,6 +207,36 @@ class _ChatInputBarState extends State<ChatInputBar> {
                 Navigator.of(ctx).pop();
               },
             ),
+            const SizedBox(height: 16),
+            Text(
+              "Effort de raisonnement par modèle",
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: ['Faible', 'Moyen', 'Élevé'].map((effort) {
+                final selected = _reasoningEffort == effort;
+                return Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: ChoiceChip(
+                      label: Text(effort),
+                      selected: selected,
+                      onSelected: (val) {
+                        if (val) {
+                          setState(() => _reasoningEffort = effort);
+                          Navigator.of(ctx).pop();
+                        }
+                      },
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
             const SizedBox(height: 12),
           ],
         ),
@@ -318,7 +350,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                     ),
                   ),
 
-                // Input TextField avec raccourci Cmd+L / Ctrl+L (citation)
+                // Input TextField avec raccourci Cmd+L / Ctrl+L (autofocus: false pour éviter l'ouverture du clavier au chargement)
                 CallbackShortcuts(
                   bindings: {
                     const SingleActivator(LogicalKeyboardKey.keyL, control: true): _quoteSelectedText,
@@ -326,6 +358,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   },
                   child: TextField(
                     controller: _controller,
+                    autofocus: false,
                     maxLines: 6,
                     minLines: 1,
                     style: TextStyle(fontSize: 14, color: scheme.onSurface),
@@ -365,7 +398,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                     ),
                     const SizedBox(width: 4),
 
-                    // Model picker + queue toggle
+                    // Model & Reasoning Effort Pill
                     InkWell(
                       onTap: () => _showQueueSettings(context),
                       borderRadius: BorderRadius.circular(6),
@@ -376,13 +409,13 @@ class _ChatInputBarState extends State<ChatInputBar> {
                             Icon(
                               isQueued
                                   ? Icons.playlist_add_check_outlined
-                                  : Icons.playlist_add_outlined,
+                                  : Icons.psychology_outlined,
                               size: 15,
                               color: isQueued ? scheme.primary : scheme.onSurfaceVariant,
                             ),
                             const SizedBox(width: 4),
                             Text(
-                              _selectedModel,
+                              '$_selectedModel ($_reasoningEffort)',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: scheme.onSurface,

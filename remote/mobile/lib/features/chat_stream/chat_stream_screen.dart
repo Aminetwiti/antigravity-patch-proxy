@@ -303,7 +303,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       if (_showStillWorking && mounted) {
         setState(() => _showStillWorking = false);
       }
-      if (_messageQueue.isNotEmpty) {
+      final outcome = _lastLocalStreamEnd?['data']?['outcome'] as String? ?? 'done';
+      // Ne pas vider automatiquement la file si l'étape a été annulée ou s'est terminée par une erreur
+      if (outcome == 'cancelled' || outcome == 'error') {
+        _messageQueue.clear();
+      } else if (_messageQueue.isNotEmpty) {
         final next = _messageQueue.removeAt(0);
         final text = next['text'] as String;
         _sendPromptToDaemon(text);
@@ -318,6 +322,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final outcome = data['outcome'] as String? ?? 'done';
     final cascadeId = data['cascadeId'] as String? ?? widget.activeSessionId;
     final message = data['message'] as String? ?? '';
+
+    // Si une étape a été annulée, vider la file d'attente pour éviter les envois auto
+    if (outcome == 'cancelled') {
+      _messageQueue.clear();
+    }
+
     ApprovalNotifier.instance.notifyTaskEnded(
       cascadeId: cascadeId,
       outcome: outcome,

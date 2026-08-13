@@ -4,9 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/core/protocol/daemon_api.dart';
-import 'package:mobile/core/protocol/messages.dart';
 import 'package:mobile/features/chat_stream/chat_stream_screen.dart';
-import 'package:mobile/widgets/chat_input_bar.dart';
 import 'package:mobile/widgets/tool_approval_card.dart';
 
 void main() {

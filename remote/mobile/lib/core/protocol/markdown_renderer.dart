@@ -53,6 +53,10 @@ class MarkdownRenderer {
             line.replaceFirst(RegExp(r'^\s*\d+[.)]\s+'), ''),
             isListItem: true,
           ));
+        } else if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
+          // Table row: convert pipe separators to formatted columns
+          final cells = line.split('|').where((c) => c.trim().isNotEmpty).map((c) => c.trim()).join('  │  ');
+          blocks.add(MarkdownBlock.paragraph('│ $cells │'));
         } else {
           blocks.add(MarkdownBlock.paragraph(line));
         }
@@ -176,6 +180,42 @@ class MarkdownRenderer {
       }
       spans.add(TextSpan(text: remaining.substring(0, nextIndex)));
       remaining = remaining.substring(nextIndex);
+    }
+    return spans;
+  }
+
+  /// Surlignage de syntaxe pour Dart, Swift et Objective-C dans les blocs de code.
+  static List<TextSpan> highlightCode(String code, String language, TextStyle baseStyle) {
+    final lang = language.toLowerCase();
+    final isLangSupported = lang == 'dart' || lang == 'swift' || lang == 'objc' || lang == 'objective-c';
+
+    if (!isLangSupported) {
+      return [TextSpan(text: code, style: baseStyle)];
+    }
+
+    final keywords = switch (lang) {
+      'swift' => RegExp(r'\b(func|let|var|struct|class|enum|guard|if|else|import|return|self|switch)\b'),
+      'objc' || 'objective-c' => RegExp(r'(@interface|@implementation|@property|@end|@synthesize|NSString|NSInteger|BOOL|id|void|return)\b'),
+      _ => RegExp(r'\b(class|final|void|async|await|Widget|setState|return|import|override|const|required)\b'),
+    };
+
+    final spans = <TextSpan>[];
+    int cursor = 0;
+    for (final match in keywords.allMatches(code)) {
+      if (match.start > cursor) {
+        spans.add(TextSpan(text: code.substring(cursor, match.start), style: baseStyle));
+      }
+      spans.add(TextSpan(
+        text: code.substring(match.start, match.end),
+        style: baseStyle.copyWith(
+          color: const Color(0xFF60A5FA),
+          fontWeight: FontWeight.bold,
+        ),
+      ));
+      cursor = match.end;
+    }
+    if (cursor < code.length) {
+      spans.add(TextSpan(text: code.substring(cursor), style: baseStyle));
     }
     return spans;
   }

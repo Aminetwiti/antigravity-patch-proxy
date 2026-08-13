@@ -310,10 +310,32 @@ class DaemonApi {
       );
     } catch (e) {
       if (e.toString().contains('401') || e.toString().contains('auth')) {
-        throw Exception('Échec d\'authentification MCP [$serverName] : Jeton ou identifiants invalides ($e)');
+        // Tentative automatique de rafraîchissement du jeton OAuth au lieu de supprimer les identifiants
+        await refreshOAuthToken(serverName);
+        return call('call_mcp_tool', {
+          'serverName': serverName,
+          'toolName': toolName,
+          'arguments': arguments,
+        });
       }
       rethrow;
     }
+  }
+
+  /// Rafraîchissement automatique des jetons OAuth pour Salesforce et Atlassian MCP
+  Future<Map<String, dynamic>> refreshOAuthToken(String serverName) async {
+    final provider = serverName.toLowerCase();
+    final endpoint = provider.contains('salesforce')
+        ? '/services/oauth2/token'
+        : provider.contains('atlassian')
+            ? 'https://auth.atlassian.com/oauth/token'
+            : '/oauth/token';
+
+    return call('refresh_mcp_oauth_token', {
+      'serverName': serverName,
+      'endpoint': endpoint,
+      'grantType': 'refresh_token',
+    });
   }
 
   /// Connexion à un serveur MCP avec timeout de 15s.

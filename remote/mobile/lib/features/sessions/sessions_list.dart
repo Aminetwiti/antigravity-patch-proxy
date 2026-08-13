@@ -28,20 +28,41 @@ class LeftSidebarDrawer extends StatefulWidget {
 
 class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
   bool _onlyUnread = false;
+  final TextEditingController _projectSearchCtrl = TextEditingController();
+  String _projectSearchQuery = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _projectSearchCtrl.addListener(() {
+      setState(() => _projectSearchQuery = _projectSearchCtrl.text.toLowerCase());
+    });
+  }
+
+  @override
+  void dispose() {
+    _projectSearchCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final List<dynamic> rawSessions = widget.sessions ?? const [
-      _SessionItemData('s1', 'Mobile App Project Plan...', '3m', isUnread: true),
+      _SessionItemData('s1', 'Mobile App Project Plan...', '3m', isUnread: true, isPinned: true, workspaceName: 'remote/mobile'),
       _SessionItemData('s2', 'Mobile App Remote Infra...', '10m', isUnread: false),
-      _SessionItemData('s3', 'Poème Sur La Gravité', '50m', isUnread: false),
+      _SessionItemData('s3', 'Poème Sur La Gravité', '50m', isUnread: false, isPinned: true, workspaceName: 'antigravity-main'),
       _SessionItemData('s4', 'Configuration Des Niveaux...', '6d', isUnread: true),
       _SessionItemData('s5', 'Doctor UI Data Issue', '6d', isUnread: false),
     ];
     final displaySessions = rawSessions.where((s) {
-      if (!_onlyUnread) return true;
-      if (s is _SessionItemData) return s.isUnread;
-      return false;
+      if (_onlyUnread) {
+        if (s is _SessionItemData && !s.isUnread) return false;
+      }
+      if (_projectSearchQuery.isNotEmpty) {
+        final title = s is CascadeSession ? s.title : (s as _SessionItemData).title;
+        if (!title.toLowerCase().contains(_projectSearchQuery)) return false;
+      }
+      return true;
     }).toList();
 
     return Drawer(
@@ -49,6 +70,20 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
       child: SafeArea(
         child: Column(
           children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: TextField(
+                controller: _projectSearchCtrl,
+                autofocus: false,
+                style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurface),
+                decoration: InputDecoration(
+                  hintText: 'Rechercher un projet / session…',
+                  prefixIcon: Icon(Icons.search, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                ),
+              ),
+            ),
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: Row(
@@ -247,8 +282,17 @@ class _SessionItemData {
   final String title;
   final String time;
   final bool isUnread;
+  final bool isPinned;
+  final String? workspaceName;
 
-  const _SessionItemData(this.id, this.title, this.time, {this.isUnread = false});
+  const _SessionItemData(
+    this.id,
+    this.title,
+    this.time, {
+    this.isUnread = false,
+    this.isPinned = false,
+    this.workspaceName,
+  });
 }
 
 class _ProjectFolderGroup extends StatelessWidget {
@@ -294,6 +338,8 @@ class _ProjectFolderGroup extends StatelessWidget {
           final itemTitle = s is CascadeSession ? s.title : (s as _SessionItemData).title;
           final itemTime = s is CascadeSession ? s.time : (s as _SessionItemData).time;
           final isSelected = itemId == activeSessionId;
+          final isPinned = s is _SessionItemData ? s.isPinned : false;
+          final workspaceName = s is _SessionItemData ? s.workspaceName : null;
           return Padding(
             padding: const EdgeInsets.only(left: 12, top: 2, bottom: 2),
             child: InkWell(
@@ -307,15 +353,30 @@ class _ProjectFolderGroup extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
+                    if (isPinned) ...[
+                      const Icon(Icons.push_pin, size: 13, color: AppColors.accentBlue),
+                      const SizedBox(width: 6),
+                    ],
                     Expanded(
-                      child: Text(
-                        itemTitle,
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          color: isSelected ? AppColors.inkPrimary : AppColors.inkSecondary,
-                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            itemTitle,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              color: isSelected ? AppColors.inkPrimary : AppColors.inkSecondary,
+                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (workspaceName != null)
+                            Text(
+                              workspaceName,
+                              style: const TextStyle(fontSize: 10, color: AppColors.accentBlue),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                        ],
                       ),
                     ),
                     if (itemTime.isNotEmpty) ...[
