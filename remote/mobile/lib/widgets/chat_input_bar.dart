@@ -3,7 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../core/protocol/daemon_api.dart';
+import '../core/protocol/model_catalog.dart';
+import '../services/settings_store.dart';
 import '../theme/app_colors.dart';
+import '../features/chat_stream/models/mention_item.dart';
+import '../features/chat_stream/widgets/action_pills_bar.dart';
+import '../features/chat_stream/widgets/mention_autocomplete_overlay.dart';
 import 'custom_dropdown_overlay.dart';
 
 /// Modes d'envoi : immédiat ou mis en file pour exécution séquentielle.
@@ -16,11 +22,20 @@ class ChatInputBar extends StatefulWidget {
   /// Feature queue : true si l'agent a un travail actif.
   final bool hasActiveStream;
 
+  final DaemonApi? api;
+  final String? cascadeId;
+  final ValueChanged<String>? onModelChanged;
+  final VoidCallback? onStop;
+
   const ChatInputBar({
     super.key,
     required this.onSend,
     this.isConnected = true,
     this.hasActiveStream = false,
+    this.api,
+    this.cascadeId,
+    this.onModelChanged,
+    this.onStop,
   });
 
   @override
@@ -29,7 +44,8 @@ class ChatInputBar extends StatefulWidget {
 
 class _ChatInputBarState extends State<ChatInputBar> {
   final TextEditingController _controller = TextEditingController();
-  String _selectedModel = 'Gemini 3.1 Pro High';
+  String _selectedModel = 'Gemini 3.7 Flash';
+  List<AntigravityModel> _availableModels = ModelCatalog.standardModels;
 
   bool _isSendPressed = false;
   SendMode _sendMode = SendMode.immediate;
@@ -51,6 +67,36 @@ class _ChatInputBarState extends State<ChatInputBar> {
   void initState() {
     super.initState();
     _controller.addListener(_onTextChanged);
+    _loadModelsAndPreferences();
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatInputBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.api != widget.api || oldWidget.isConnected != widget.isConnected) {
+      _loadModelsAndPreferences();
+    }
+  }
+
+  Future<void> _loadModelsAndPreferences() async {
+    try {
+      final s = await SettingsStore.load();
+      final savedModel = s['defaultModel'] as String?;
+      if (savedModel != null && savedModel.isNotEmpty && mounted) {
+        setState(() {
+          _selectedModel = savedModel.split(' ').take(3).join(' ');
+        });
+      }
+    } catch (_) {}
+
+    if (widget.api != null) {
+      final models = await ModelCatalog.getAllAvailableModels(widget.api);
+      if (mounted && models.isNotEmpty) {
+        setState(() {
+          _availableModels = models;
+        });
+      }
+    }
   }
 
   void _onTextChanged() {
@@ -63,8 +109,10 @@ class _ChatInputBarState extends State<ChatInputBar> {
     }
     final textBeforeCursor = text.substring(0, selection.start);
     if (textBeforeCursor.endsWith('@') ||
-        textBeforeCursor.contains(RegExp(r'\B@\w+$'))) {
-      _showMentionDropdown();
+        textBeforeCursor.contains(RegExp(r'\B@\w*$'))) {
+      final atIndex = textBeforeCursor.lastIndexOf('@');
+      final query = atIndex >= 0 ? textBeforeCursor.substring(atIndex + 1) : '';
+      _showMentionDropdown(query);
     } else if (textBeforeCursor.startsWith('/') ||
         textBeforeCursor.contains(RegExp(r'\n/\w*$'))) {
       _showActionDropdown();
@@ -242,6 +290,127 @@ class _ChatInputBarState extends State<ChatInputBar> {
     }
   }
 
+  /// Feature attachement image/photo (Multimodal)
+  Future<void> _pickImage() async {
+    final result = await showDialog<Map<String, String>?>(
+      context: context,
+      builder: (ctx) {
+        final nameCtrl = TextEditingController(text: 'screenshot.png');
+        final mimeCtrl = TextEditingController(text: 'image/png');
+        final base64Ctrl = TextEditingController();
+        return AlertDialog(
+          backgroundColor: AppColors.surfaceRaised,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+            side: const BorderSide(color: AppColors.borderSubtle),
+          ),
+          title: const Text('Joindre une image / photo'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Nom du fichier (ex: photo.png, img.jpg)',
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: mimeCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Type MIME (ex: image/png, image/jpeg)',
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: base64Ctrl,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Données Base64',
+                  isDense: true,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Annuler'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop({
+                'fileName': nameCtrl.text.trim().isEmpty ? 'screenshot.png' : nameCtrl.text.trim(),
+                'mimeType': mimeCtrl.text.trim().isEmpty ? 'image/png' : mimeCtrl.text.trim(),
+                'base64Data': base64Ctrl.text.trim(),
+              }),
+              child: const Text('Joindre'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (result != null && result['base64Data']!.isNotEmpty) {
+      final fileName = result['fileName']!;
+      final mimeType = result['mimeType']!;
+      final base64Data = result['base64Data']!;
+
+      if (widget.api != null && widget.cascadeId != null) {
+        widget.api!.uploadMedia(
+          cascadeId: widget.cascadeId!,
+          fileName: fileName,
+          mimeType: mimeType,
+          base64Data: base64Data,
+        );
+      }
+
+      setState(() {
+        _attachedFileName = fileName;
+        _attachedFileContent = '[Image: $fileName ($mimeType)]';
+      });
+    }
+  }
+
+  void _showAttachmentMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surfaceRaised,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.image_outlined, color: AppColors.accentBlue),
+                title: const Text('Joindre une image / photo'),
+                subtitle: const Text('PNG, JPEG, WebP, GIF'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _pickImage();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.description_outlined, color: AppColors.inkPrimary),
+                title: const Text('Joindre un fichier'),
+                subtitle: const Text('.txt, .json, .md, .csv'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _pickTextFile();
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _showQueueSettings(BuildContext context) {
     showModalBottomSheet(
       context: context,
@@ -359,57 +528,43 @@ class _ChatInputBarState extends State<ChatInputBar> {
       _controller.selection = TextSelection.collapsed(
         offset: start + insertText.length + 1,
       );
+    } else {
+      final prefix = text.isEmpty ? '' : '$text ';
+      _controller.text = '$prefix$insertText ';
+      _controller.selection = TextSelection.collapsed(
+        offset: _controller.text.length,
+      );
     }
   }
 
-  void _showMentionDropdown() {
+  void _showMentionDropdown([String query = '']) {
     _mentionOrActionOpen = true;
+    final items = const [
+      MentionItem(type: MentionType.file, label: 'main.dart', detail: 'lib/main.dart'),
+      MentionItem(type: MentionType.file, label: 'pubspec.yaml', detail: 'Configuration & dependencies'),
+      MentionItem(type: MentionType.file, label: 'README.md', detail: 'Project documentation'),
+      MentionItem(type: MentionType.rule, label: 'clean_code', detail: '.agents/rules/clean_code.md'),
+      MentionItem(type: MentionType.rule, label: 'ponytail', detail: 'Lazy senior dev / YAGNI architecture'),
+      MentionItem(type: MentionType.rule, label: 'security', detail: 'Sandbox & security policies'),
+      MentionItem(type: MentionType.mcp, label: 'coolify', detail: 'Coolify deploy & server management'),
+      MentionItem(type: MentionType.mcp, label: 'github', detail: 'GitHub issues & PR automation'),
+      MentionItem(type: MentionType.mcp, label: 'postgres', detail: 'PostgreSQL database inspection'),
+      MentionItem(type: MentionType.conversation, label: 'previous_session', detail: 'Include previous turn context'),
+      MentionItem(type: MentionType.terminal, label: 'active_terminal', detail: 'Include active terminal buffer'),
+    ];
+
     CustomDropdownOverlay.show(
       context: context,
       targetKey: _textFieldKey,
-      width: 250,
-      maxHeight: 200,
-      child: Material(
-        color: Colors.transparent,
-        child: ListView(
-          padding: EdgeInsets.zero,
-          shrinkWrap: true,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Text(
-                'Mentions',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.inkMuted,
-                ),
-              ),
-            ),
-            _buildPopupItem(
-              Icons.insert_drive_file_outlined,
-              'file',
-              'Mention a file',
-              () {
-                _insertTextAtCursor('@file');
-                CustomDropdownOverlay.hide();
-              },
-            ),
-            _buildPopupItem(
-              Icons.folder_outlined,
-              'folder',
-              'Mention a folder',
-              () {
-                _insertTextAtCursor('@folder');
-                CustomDropdownOverlay.hide();
-              },
-            ),
-            _buildPopupItem(Icons.public, 'web', 'Search the web', () {
-              _insertTextAtCursor('@web');
-              CustomDropdownOverlay.hide();
-            }),
-          ],
-        ),
+      width: 280,
+      maxHeight: 260,
+      child: MentionAutocompleteOverlay(
+        query: query,
+        items: items,
+        onSelected: (item) {
+          _insertTextAtCursor(item.tag);
+          CustomDropdownOverlay.hide();
+        },
       ),
     );
   }
@@ -430,7 +585,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Text(
-                'Actions',
+                'Slash Commands & Actions',
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
@@ -439,22 +594,86 @@ class _ChatInputBarState extends State<ChatInputBar> {
               ),
             ),
             _buildPopupItem(
-              Icons.design_services,
-              '/design',
-              'Generate UI',
+              Icons.chat_bubble_outline_rounded,
+              '/btw',
+              'Side question without breaking flow',
               () {
-                _insertTextAtCursor('/design');
+                _insertTextAtCursor('/btw ');
                 CustomDropdownOverlay.hide();
               },
             ),
-            _buildPopupItem(Icons.code, '/code', 'Generate Code', () {
-              _insertTextAtCursor('/code');
-              CustomDropdownOverlay.hide();
-            }),
-            _buildPopupItem(Icons.search, '/search', 'Search Project', () {
-              _insertTextAtCursor('/search');
-              CustomDropdownOverlay.hide();
-            }),
+            _buildPopupItem(
+              Icons.quiz_outlined,
+              '/grill-me',
+              'Interactive planning interview',
+              () {
+                _insertTextAtCursor('/grill-me ');
+                CustomDropdownOverlay.hide();
+              },
+            ),
+            _buildPopupItem(
+              Icons.flag_outlined,
+              '/goal',
+              'Autonomous goal until fully achieved',
+              () {
+                _insertTextAtCursor('/goal ');
+                CustomDropdownOverlay.hide();
+              },
+            ),
+            _buildPopupItem(
+              Icons.schedule_outlined,
+              '/schedule',
+              'Set recurring timer / background cron',
+              () {
+                _insertTextAtCursor('/schedule ');
+                CustomDropdownOverlay.hide();
+              },
+            ),
+            _buildPopupItem(
+              Icons.rate_review_outlined,
+              '/review',
+              'Audit code diffs and complexity',
+              () {
+                _insertTextAtCursor('/review ');
+                CustomDropdownOverlay.hide();
+              },
+            ),
+            _buildPopupItem(
+              Icons.edit_note_rounded,
+              '/plan',
+              'Draft technical implementation plan',
+              () {
+                _insertTextAtCursor('/plan ');
+                CustomDropdownOverlay.hide();
+              },
+            ),
+            _buildPopupItem(
+              Icons.design_services,
+              '/design',
+              'Generate UI components & screens',
+              () {
+                _insertTextAtCursor('/design ');
+                CustomDropdownOverlay.hide();
+              },
+            ),
+            _buildPopupItem(
+              Icons.code,
+              '/code',
+              'Generate Code Implementation',
+              () {
+                _insertTextAtCursor('/code ');
+                CustomDropdownOverlay.hide();
+              },
+            ),
+            _buildPopupItem(
+              Icons.search,
+              '/search',
+              'Semantic project search',
+              () {
+                _insertTextAtCursor('/search ');
+                CustomDropdownOverlay.hide();
+              },
+            ),
           ],
         ),
       ),
@@ -502,18 +721,24 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
   void _showModelDropdown(BuildContext context) {
     _mentionOrActionOpen = false;
+    _loadModelsAndPreferences();
+
+    final standard = _availableModels.where((m) => !m.isCustom).toList();
+    final custom = _availableModels.where((m) => m.isCustom).toList();
+
     CustomDropdownOverlay.show(
       context: context,
       targetKey: _modelButtonKey,
-      width: 280,
+      width: 290,
+      maxHeight: 460,
       child: Material(
         color: Colors.transparent,
         child: ListView(
-          padding: EdgeInsets.zero,
+          padding: const EdgeInsets.symmetric(vertical: 4),
           shrinkWrap: true,
           children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Text(
                 'Model',
                 style: TextStyle(
@@ -523,122 +748,181 @@ class _ChatInputBarState extends State<ChatInputBar> {
                 ),
               ),
             ),
-            _buildModelItem(
-              'Gemini 3.6 Flash Medium',
-              tag: 'Fast',
-              icon: Icons.info_outline,
-            ),
-            _buildModelItem(
-              'Gemini 3.5 Flash Medium',
-              tag: 'Fast',
-              icon: Icons.info_outline,
-            ),
-            _buildModelItem(
-              'Gemini 3.1 Pro High',
-              isSelected: _selectedModel.contains('3.1 Pro'),
-            ),
-            _buildModelItem('Claude Sonnet 4.6 (Thinking)'),
-            _buildModelItem('Claude Opus 4.6 (Thinking)'),
-            _buildModelItem('GPT-OSS 120B (Medium)'),
-            Divider(color: AppColors.borderSubtle, height: 1),
-            _buildCustomModelItem('502ms • deepseek-v4-flash'),
+            ...standard.map((m) => _buildModelRow(m)),
+            if (custom.isNotEmpty) ...[
+              const Divider(color: AppColors.borderSubtle, height: 1),
+              ...custom.map((m) => _buildCustomModelRow(m)),
+            ],
+            const Divider(color: AppColors.borderSubtle, height: 1),
+            _buildViewUsageRow(context),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildModelItem(
-    String name, {
-    bool isSelected = false,
-    String? tag,
-    IconData? icon,
-  }) {
+  Widget _buildModelRow(AntigravityModel model) {
+    final isSelected = _selectedModel.toLowerCase().contains(model.shortName.toLowerCase()) ||
+        _selectedModel.toLowerCase() == model.displayName.toLowerCase();
+
     return InkWell(
-      onTap: () {
-        setState(() => _selectedModel = name.split(' ').take(3).join(' '));
-        CustomDropdownOverlay.hide();
-      },
+      onTap: () => _selectModel(model),
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color: isSelected ? AppColors.surfaceInput : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(AppRadius.md),
         ),
         child: Row(
           children: [
             Expanded(
               child: Text(
-                name,
+                model.displayName,
                 style: TextStyle(
                   fontSize: 13,
                   color: isSelected ? AppColors.inkPrimary : AppColors.inkSecondary,
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
                 ),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-            if (tag != null) ...[
+            if (model.tag != null) ...[
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: AppColors.surfaceInput,
-                  borderRadius: BorderRadius.circular(4),
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      tag,
+                      model.tag!,
                       style: const TextStyle(fontSize: 10, color: AppColors.inkMuted),
                     ),
-                    if (icon != null) ...[
-                      const SizedBox(width: 4),
-                      Icon(icon, size: 10, color: AppColors.inkMuted),
-                    ],
+                    const SizedBox(width: 4),
+                    const Icon(Icons.info_outline, size: 10, color: AppColors.inkMuted),
                   ],
                 ),
               ),
             ],
             const SizedBox(width: 8),
-            Icon(Icons.chevron_right, size: 14, color: isSelected ? AppColors.inkSecondary : AppColors.inkFaint),
+            if (isSelected)
+              const Icon(Icons.check, size: 16, color: AppColors.accentBlue)
+            else
+              const Icon(Icons.chevron_right, size: 14, color: AppColors.inkFaint),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildCustomModelItem(String text) {
+  Widget _buildCustomModelRow(AntigravityModel model) {
+    final isSelected = _selectedModel.toLowerCase().contains(model.id.toLowerCase()) ||
+        _selectedModel.toLowerCase().contains(model.displayName.toLowerCase());
+
+    Color statusColor = AppColors.positive;
+    if (model.status == 'degraded') {
+      statusColor = AppColors.warning;
+    } else if (model.status == 'offline') {
+      statusColor = AppColors.danger;
+    }
+
     return InkWell(
-      onTap: () {
-        setState(() => _selectedModel = text.split('•').last.trim());
-        CustomDropdownOverlay.hide();
-      },
+      onTap: () => _selectModel(model),
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.surfaceInput : Colors.transparent,
+          borderRadius: BorderRadius.circular(AppRadius.md),
+        ),
         child: Row(
           children: [
-            const Icon(Icons.star, size: 13, color: AppColors.warning),
-            const SizedBox(width: 6),
             Container(
-              width: 7,
-              height: 7,
-              decoration: const BoxDecoration(
-                color: AppColors.warning,
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: statusColor,
                 shape: BoxShape.circle,
               ),
             ),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                text,
-                style: const TextStyle(fontSize: 12, color: AppColors.inkMuted),
+                model.customLabel,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: isSelected ? AppColors.inkPrimary : AppColors.inkSecondary,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
+            if (isSelected)
+              const Icon(Icons.check, size: 16, color: AppColors.accentBlue),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildViewUsageRow(BuildContext context) {
+    return InkWell(
+      onTap: () {
+        CustomDropdownOverlay.hide();
+        _showUsageLimitsDialog(context);
+      },
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: const Row(
+          children: [
+            Icon(Icons.query_stats_outlined, size: 15, color: AppColors.inkSecondary),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'View Usage',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.inkPrimary,
+                ),
+              ),
+            ),
+            Icon(Icons.chevron_right, size: 14, color: AppColors.inkFaint),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _selectModel(AntigravityModel model) async {
+    HapticFeedback.selectionClick();
+    final short = model.shortName;
+    setState(() => _selectedModel = short);
+    CustomDropdownOverlay.hide();
+
+    widget.onModelChanged?.call(model.displayName);
+
+    // Persist choice in local settings
+    await SettingsStore.save({'defaultModel': model.displayName});
+
+    // Send /model command to daemon to synchronize active session model without conflict
+    try {
+      await widget.api?.sendCommand('/model ${model.id}');
+    } catch (_) {}
+  }
+
+  void _showUsageLimitsDialog(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surfaceBase,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      ),
+      builder: (ctx) => const _UsageLimitsModal(),
     );
   }
 
@@ -655,6 +939,14 @@ class _ChatInputBarState extends State<ChatInputBar> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: ActionPillsBar(
+                onActionSelected: (cmd) {
+                  _insertTextAtCursor(cmd);
+                },
+              ),
+            ),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -823,9 +1115,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   // Bottom Action Bar
                   Row(
                     children: [
-                      // Attach .txt
+                      // Attach media/file
                       InkWell(
-                        onTap: _pickTextFile,
+                        onTap: _showAttachmentMenu,
                         borderRadius: BorderRadius.circular(8),
                         child: Padding(
                           padding: const EdgeInsets.all(10),
@@ -899,7 +1191,44 @@ class _ChatInputBarState extends State<ChatInputBar> {
                         onPressed: () {},
                         tooltip: 'Saisie vocale — bientôt disponible',
                       ),
-                      const SizedBox(width: 4),
+                      // Stop button (Emergency Stop)
+                      if (widget.hasActiveStream && widget.onStop != null) ...[
+                        Tooltip(
+                          message: 'Arrêter la génération (Emergency Stop)',
+                          child: InkWell(
+                            key: const Key('stop-generation-button'),
+                            onTap: () {
+                              HapticFeedback.heavyImpact();
+                              widget.onStop!();
+                            },
+                            borderRadius: BorderRadius.circular(AppRadius.pill),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: AppColors.danger.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(AppRadius.pill),
+                                border: Border.all(color: AppColors.danger.withValues(alpha: 0.4)),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.stop_circle_outlined, size: 16, color: AppColors.danger),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'Arrêter',
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.danger,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                      ],
 
                       // Send button
                       GestureDetector(
@@ -1121,3 +1450,152 @@ class _QueueTile extends StatelessWidget {
     );
   }
 }
+
+/// Antigravity 2.0 Quotas / Limits flyout sheet (matching the desktop IDE UI).
+class _UsageLimitsModal extends StatelessWidget {
+  const _UsageLimitsModal();
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.borderSubtle,
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Gemini Models',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.inkSecondary,
+              ),
+            ),
+            const SizedBox(height: 12),
+            _buildUsageTile(
+              title: 'Weekly Limit Remaining',
+              subtitle: 'You have used some of your weekly ...',
+              percent: 51,
+            ),
+            const SizedBox(height: 10),
+            _buildUsageTile(
+              title: 'Five Hour Limit Remaining',
+              subtitle: 'You have used some of your 5-hour ...',
+              percent: 95,
+            ),
+            const SizedBox(height: 20),
+            const Divider(color: AppColors.borderSubtle, height: 1),
+            const SizedBox(height: 16),
+            const Text(
+              'Claude and GPT models',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.inkSecondary,
+              ),
+            ),
+            const SizedBox(height: 12),
+            _buildUsageTile(
+              title: 'Weekly Limit Remaining',
+              subtitle: 'You have used some of your weekly ...',
+              percent: 81,
+            ),
+            const SizedBox(height: 10),
+            _buildUsageTile(
+              title: 'Five Hour Limit Remaining',
+              subtitle: 'Full 5-hour quota available',
+              percent: 100,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUsageTile({
+    required String title,
+    required String subtitle,
+    required int percent,
+  }) {
+    Color progressColor = AppColors.positive;
+    if (percent < 30) {
+      progressColor = AppColors.danger;
+    } else if (percent < 60) {
+      progressColor = AppColors.warning;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceRaised,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: AppColors.borderSubtle),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.inkPrimary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: AppColors.inkMuted,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              SizedBox(
+                width: 36,
+                height: 36,
+                child: CircularProgressIndicator(
+                  value: percent / 100.0,
+                  backgroundColor: AppColors.surfaceInput,
+                  color: progressColor,
+                  strokeWidth: 3,
+                ),
+              ),
+              Text(
+                '$percent%',
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.inkPrimary,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+

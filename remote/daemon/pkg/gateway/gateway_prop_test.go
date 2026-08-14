@@ -72,6 +72,66 @@ func TestWebSocketCreateCascadeRequiresWorkspace(t *testing.T) {
 	}
 }
 
+// TestWebSocketCreateCascadeModelPropagation - le modèle sélectionné dans
+// l'app mobile (modelUID) traverse le WebSocket jusqu'à CreateCascade ; en
+// l'absence de sélection, le repli historique (190) est conservé.
+func TestWebSocketCreateCascadeModelPropagation(t *testing.T) {
+	t.Run("modelUID transmis", func(t *testing.T) {
+		backend := &fakeRPCClient{}
+		srv := newTestServer(backend)
+		defer srv.Close()
+
+		client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+		defer client.conn.Close()
+
+		client.send(t, map[string]string{
+			"type": "create_cascade", "requestId": "rM",
+			"workspaceUri": "file:///C:/proj",
+			"modelUID":     "gemini-3.1-pro-low",
+		})
+		resp := client.recv(t)
+		if resp["error"] != nil {
+			t.Fatalf("create_cascade a renvoyé une erreur: %v", resp["error"])
+		}
+		if backend.lastCascade == nil {
+			t.Fatal("CreateCascade n'a jamais été appelé")
+		}
+		if backend.lastCascade.modelUID != "gemini-3.1-pro-low" {
+			t.Errorf("Attendu modelUID=gemini-3.1-pro-low, reçu %q", backend.lastCascade.modelUID)
+		}
+		if backend.lastCascade.modelEnum != 0 {
+			t.Errorf("Attendu modelEnum=0 (repli inactif quand UID présent), reçu %d", backend.lastCascade.modelEnum)
+		}
+	})
+
+	t.Run("repli enum 190", func(t *testing.T) {
+		backend := &fakeRPCClient{}
+		srv := newTestServer(backend)
+		defer srv.Close()
+
+		client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+		defer client.conn.Close()
+
+		client.send(t, map[string]string{
+			"type": "create_cascade", "requestId": "rE",
+			"workspaceUri": "file:///C:/proj",
+		})
+		resp := client.recv(t)
+		if resp["error"] != nil {
+			t.Fatalf("create_cascade a renvoyé une erreur: %v", resp["error"])
+		}
+		if backend.lastCascade == nil {
+			t.Fatal("CreateCascade n'a jamais été appelé")
+		}
+		if backend.lastCascade.modelEnum != 190 {
+			t.Errorf("Attendu repli modelEnum=190, reçu %d", backend.lastCascade.modelEnum)
+		}
+		if backend.lastCascade.modelUID != "" {
+			t.Errorf("Attendu modelUID vide (repli enum), reçu %q", backend.lastCascade.modelUID)
+		}
+	})
+}
+
 // ─── Test de concurrence : N clients simultanés ───
 
 type loadRPCClient struct {
@@ -84,7 +144,7 @@ func (l *loadRPCClient) Heartbeat() ([]byte, error) {
 	l.heartbeats.Add(1)
 	return connectrpc.Frame(pbTextFrame("ok")), nil
 }
-func (l *loadRPCClient) CreateCascade(uri string, projectID string, model uint64) ([]byte, error) {
+func (l *loadRPCClient) CreateCascade(uri string, projectID string, modelUID string, modelEnum uint64) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("casc-1")), nil
 }
 func (l *loadRPCClient) GetAllCascades() ([]byte, error) {
@@ -238,7 +298,7 @@ type failingStreamClient struct{}
 func (f *failingStreamClient) Heartbeat() ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("ok")), nil
 }
-func (f *failingStreamClient) CreateCascade(uri, projectID string, model uint64) ([]byte, error) {
+func (f *failingStreamClient) CreateCascade(uri, projectID, modelUID string, modelEnum uint64) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("casc")), nil
 }
 func (f *failingStreamClient) GetAllCascades() ([]byte, error) {

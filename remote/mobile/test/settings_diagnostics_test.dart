@@ -147,7 +147,7 @@ void main() {
     // Le dropdown du modèle est identifiable par sa valeur initiale
     // (« Gemini 3.6 Flash Medium ») — les deux autres dropdowns ont des
     // valeurs différentes (tier GE, région d'inférence).
-    await tester.tap(find.text('Gemini 3.6 Flash Medium').last);
+    await tester.tap(find.text('Gemini 3.7 Flash Medium').last);
     await tester.pump(const Duration(milliseconds: 300));
     await tester.tap(find.text('GPT-4o').last);
     // Le choix envoie /model au daemon ; sans daemon, le RPC expire au bout

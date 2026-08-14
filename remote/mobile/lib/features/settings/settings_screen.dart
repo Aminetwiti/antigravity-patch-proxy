@@ -10,6 +10,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../config/env_config.dart';
 import '../../core/notifications/approval_notifier.dart';
 import '../../core/protocol/daemon_api.dart';
+import '../../core/protocol/model_catalog.dart';
 import '../../services/settings_store.dart';
 import '../../theme/app_colors.dart';
 import 'appearance_settings_section.dart';
@@ -44,14 +45,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _useSsl = EnvConfig.useSsl;
   bool _toolNotifications = true;
   bool _diagnosticsBusy = false;
-  String _selectedDefaultModel = 'Gemini 3.6 Flash Medium';
+  String _selectedDefaultModel = 'Gemini 3.7 Flash Medium';
 
   final List<String> _models = [
+    'Gemini 3.7 Flash Medium',
     'Gemini 3.6 Flash Medium',
+    'Gemini 3.5 Flash Medium',
+    'Gemini 3.1 Pro Low',
+    'Claude Sonnet 4.6 (Thinking)',
+    'Claude Opus 4.6 (Thinking)',
+    'GPT-OSS 120B (Medium)',
+    'GPT-4o',
     'Claude 3.7 Sonnet',
     'DeepSeek R1',
-    'GPT-4o',
-    'Ollama Local Model',
   ];
 
   // Feature Gemini Enterprise & Enterprise Admin Policies
@@ -76,7 +82,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _csrfController = TextEditingController(text: (s['csrf'] as String?) ?? '');
     _useSsl = (s['ssl'] as bool?) ?? EnvConfig.useSsl;
     _selectedDefaultModel =
-        (s['defaultModel'] as String?) ?? 'Gemini 3.6 Flash Medium';
+        (s['defaultModel'] as String?) ?? 'Gemini 3.7 Flash Medium';
+    if (!_models.contains(_selectedDefaultModel)) {
+      _models.insert(0, _selectedDefaultModel);
+    }
     _toolNotifications = (s['toolNotifications'] as bool?) ?? true;
     _isGeminiEnterprise = (s['isGeminiEnterprise'] as bool?) ?? true;
     _geTier = (s['geTier'] as String?) ?? 'GE-Plus';
@@ -86,6 +95,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // Applique le réglage persisté dès l'ouverture (le notifier est un
     // singleton : il faut re-synchroniser son état global).
     widget.notifier?.setEnabled(_toolNotifications);
+    _fetchCustomModels();
+  }
+
+  Future<void> _fetchCustomModels() async {
+    if (widget.api != null) {
+      final models = await ModelCatalog.fetchCustomModels(widget.api);
+      if (mounted && models.isNotEmpty) {
+        setState(() {
+          for (final m in models) {
+            if (!_models.contains(m.displayName)) {
+              _models.add(m.displayName);
+            }
+          }
+        });
+      }
+    }
   }
 
   @override

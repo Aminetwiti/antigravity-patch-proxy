@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../core/protocol/daemon_api.dart';
+import '../features/subagents/models/subagent_item.dart';
+import '../features/subagents/subagents_drawer.dart';
 import '../theme/app_colors.dart';
 import 'artifact_viewer_modal.dart';
 
@@ -130,7 +132,20 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
                   _ContextItemRow(
                     title: 'Subagents',
                     badgeCount: widget.subagentsCount,
-                    onTap: () {},
+                    onTap: () {
+                      showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (ctx) => SizedBox(
+                          height: MediaQuery.of(context).size.height * 0.7,
+                          child: SubagentsDrawer(
+                            subagents: const [],
+                            onKillAgent: (_) {},
+                          ),
+                        ),
+                      );
+                    },
                   ),
                   _ContextItemRow(
                     title: 'Files Changed',

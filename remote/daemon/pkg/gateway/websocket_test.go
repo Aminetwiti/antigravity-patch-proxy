@@ -64,13 +64,26 @@ type fakeRPCClient struct {
 	// lastCommand : dernière slash commande routée (vérifié par le test
 	// de routing send_command).
 	lastCommand string
+	// lastCascade : dernier CreateCascade reçu (vérifié par le test de
+	// propagation du modèle mobile).
+	lastCascade *createCascadeCall
+}
+
+// createCascadeCall capture les arguments du dernier CreateCascade pour
+// vérifier la propagation modelUID/modelEnum du mobile jusqu'au RPC.
+type createCascadeCall struct {
+	uri       string
+	projectID string
+	modelUID  string
+	modelEnum uint64
 }
 
 func (f *fakeRPCClient) Heartbeat() ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("ok")), nil
 }
 
-func (f *fakeRPCClient) CreateCascade(uri string, projectID string, model uint64) ([]byte, error) {
+func (f *fakeRPCClient) CreateCascade(uri string, projectID string, modelUID string, modelEnum uint64) ([]byte, error) {
+	f.lastCascade = &createCascadeCall{uri: uri, projectID: projectID, modelUID: modelUID, modelEnum: modelEnum}
 	return connectrpc.Frame(pbTextFrame("casc-1")), nil
 }
 

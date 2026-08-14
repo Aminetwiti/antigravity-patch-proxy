@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'messages.dart';
+
 /// Parses daemon `stream_delta` payloads into UI-ready message parts.
 ///
 /// The daemon sends `{"type":"stream_delta","data":{"events":[{...}]}}`
@@ -44,6 +47,8 @@ class StreamDeltaParser {
     for (final e in events) {
       if (e is Map<String, dynamic> && e['kind'] == 'approval_required') {
         final tool = e['tool'] ?? 'generic_tool';
+        // Si c'est ask_question, ce n'est pas un tool standard d'approbation binaire
+        if (tool == 'ask_question' || tool == 'ask_user') continue;
         return ToolApproval(
           callId: e['callId'] ?? '',
           tool: tool,
@@ -56,6 +61,63 @@ class StreamDeltaParser {
       }
     }
     return null;
+  }
+
+  /// Extracts an interactive question request if the delta carries one.
+  static AskQuestionChoiceRequest? questionOf(Map<String, dynamic> message) {
+    final data = message['data'];
+    if (data is! Map<String, dynamic>) return null;
+    final events = data['events'];
+    if (events is! List) return null;
+    for (final e in events) {
+      if (e is Map<String, dynamic> && e['kind'] == 'approval_required') {
+        final tool = (e['tool'] ?? '').toString().toLowerCase();
+        final detail = (e['detail'] ?? '').toString();
+        if (tool == 'ask_question' ||
+            tool == 'ask_user' ||
+            detail.contains('"questions"') ||
+            detail.contains('"options"')) {
+          return _parseQuestionDetail(e);
+        }
+      }
+    }
+    return null;
+  }
+
+  static AskQuestionChoiceRequest _parseQuestionDetail(Map<String, dynamic> event) {
+    final detail = (event['detail'] ?? '').toString();
+    final callId = event['callId'] ?? '';
+    final cascadeId = event['cascadeId'] ?? '';
+    final trajectoryId = event['trajectoryId'] ?? '';
+    final stepIndex =
+        event['stepIndex'] is num ? (event['stepIndex'] as num).toInt() : -1;
+
+    try {
+      final startIndex = detail.indexOf('{');
+      final endIndex = detail.lastIndexOf('}');
+      if (startIndex >= 0 && endIndex > startIndex) {
+        final jsonStr = detail.substring(startIndex, endIndex + 1);
+        final decoded = json.decode(jsonStr);
+        if (decoded is Map<String, dynamic>) {
+          return AskQuestionChoiceRequest.fromJson({
+            ...decoded,
+            'callId': callId,
+            'cascadeId': cascadeId,
+            'trajectoryId': trajectoryId,
+            'stepIndex': stepIndex,
+          });
+        }
+      }
+    } catch (_) {}
+
+    return AskQuestionChoiceRequest(
+      requestId: callId,
+      cascadeId: cascadeId,
+      trajectoryId: trajectoryId,
+      stepIndex: stepIndex,
+      question: 'Please review and choose an option:',
+      options: const ['Yes, proceed', 'No, cancel'],
+    );
   }
 }
 

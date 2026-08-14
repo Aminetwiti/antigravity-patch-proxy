@@ -30,6 +30,7 @@ class CallError implements Exception {
 class DaemonApi {
   final Stream<dynamic> _incoming;
   final void Function(dynamic) _send;
+  final void Function(ClientMessage)? _sendRaw;
 
   final Map<String, Completer<Map<String, dynamic>>> _pending = {};
   final Map<String, StreamController<Map<String, dynamic>>> _streams = {};
@@ -78,12 +79,14 @@ class DaemonApi {
   int get pendingBatchCount => _batch.length;
 
   DaemonApi({
-    required Stream<dynamic> incoming,
-    required void Function(dynamic) send,
+    Stream<dynamic>? incoming,
+    void Function(dynamic)? send,
+    void Function(ClientMessage)? sendRaw,
     Duration timeout = const Duration(seconds: 5),
     OutboxQueue? outbox,
-  }) : _incoming = incoming,
-       _send = send,
+  }) : _incoming = incoming ?? const Stream.empty(),
+       _send = send ?? ((_) {}),
+       _sendRaw = sendRaw,
        _timeout = timeout,
        _outbox = outbox {
     _incoming.listen(_onMessage);
@@ -321,9 +324,110 @@ class DaemonApi {
     return info is Map && info.isNotEmpty ? info.cast<String, dynamic>() : null;
   }
 
+  /// Répond à une question à choix interactifs posée par l'agent (AskQuestion).
+  Future<Map<String, dynamic>> submitQuestionResponse({
+    required String cascadeId,
+    String? trajectoryId,
+    int? stepIndex,
+    List<String> selectedAnswers = const [],
+    String? customAnswer,
+  }) =>
+      rpc('submit_question_response', {
+        'cascadeId': cascadeId,
+        if (trajectoryId != null) 'trajectoryId': trajectoryId,
+        if (stepIndex != null) 'stepIndex': stepIndex,
+        'selectedAnswers': selectedAnswers,
+        if (customAnswer != null) 'customAnswer': customAnswer,
+      });
+
+  /// Interrompt ou annule la génération / tâche en cours pour une cascade.
+  void stopGeneration({required String cascadeId}) {
+    final clientMsg = ClientMessage(
+      type: 'cancel_generation',
+      requestId: _newRequestId(),
+      cascadeId: cascadeId,
+    );
+    if (_sendRaw != null) {
+      _sendRaw!(clientMsg);
+    }
+    _send(clientMsg.toJson());
+  }
+
+
+  /// StepRecovery : synchronise les événements manqués lors d'une perte réseau.
+  Future<Map<String, dynamic>> syncSession({
+    required String cascadeId,
+    required int lastStepIndex,
+  }) =>
+      rpc('sync_session', {
+        'cascadeId': cascadeId,
+        'lastStepIndex': lastStepIndex,
+      });
+
+  /// Upload d'une image vers le dossier scratch de la cascade.
+  Future<Map<String, dynamic>> uploadImage({
+    required String cascadeId,
+    required String base64Data,
+    String? fileName,
+    String? mimeType,
+  }) =>
+      rpc('upload_image', {
+        'cascadeId': cascadeId,
+        'base64Data': base64Data,
+        if (fileName != null) 'fileName': fileName,
+        if (mimeType != null) 'mimeType': mimeType,
+      });
+
+  /// Upload de média multimodal (images/photos) vers le daemon.
+  void uploadMedia({
+    required String cascadeId,
+    required String fileName,
+    required String mimeType,
+    required String base64Data,
+  }) {
+    final clientMsg = ClientMessage(
+      type: 'upload_media',
+      requestId: _newRequestId(),
+      cascadeId: cascadeId,
+      data: {
+        'fileName': fileName,
+        'mimeType': mimeType,
+        'base64Data': base64Data,
+      },
+    );
+    if (_sendRaw != null) {
+      _sendRaw!(clientMsg);
+    }
+    _send(clientMsg.toJson());
+  }
+
+  /// Liste les branches Git du workspace.
+  Future<List<String>> listGitBranches({String? workspacePath}) async {
+    final res = await rpc('list_git_branches', {
+      if (workspacePath != null) 'workspacePath': workspacePath,
+    });
+    final list = res['branches'] as List?;
+    return list?.cast<String>() ?? [];
+  }
+
+  /// Liste les worktrees Git du workspace.
+  Future<List<Map<String, dynamic>>> listGitWorktrees({String? workspacePath}) async {
+    final res = await rpc('list_git_worktrees', {
+      if (workspacePath != null) 'workspacePath': workspacePath,
+    });
+    final list = res['worktrees'] as List?;
+    return list?.map((e) => (e as Map).cast<String, dynamic>()).toList() ?? [];
+  }
+
   /// Streaming call: emits each decoded message (`stream_start`,
   /// `stream_delta`, ...) until `stream_end` closes the stream.
-  Stream<Map<String, dynamic>> sendPrompt(String cascadeId, String prompt) {
+  Stream<Map<String, dynamic>> sendPrompt(
+    String cascadeId,
+    String prompt, {
+    String? base64Data,
+    String? fileName,
+    List<String>? images,
+  }) {
     final id = _newRequestId();
     final controller = StreamController<Map<String, dynamic>>();
     _streams[id] = controller;
@@ -332,6 +436,9 @@ class DaemonApi {
       'requestId': id,
       'cascadeId': cascadeId,
       'prompt': prompt,
+      if (base64Data != null) 'base64Data': base64Data,
+      if (fileName != null) 'fileName': fileName,
+      if (images != null) 'images': images,
     };
     final outbox = _outbox;
     if (outbox != null) {

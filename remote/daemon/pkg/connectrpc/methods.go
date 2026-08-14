@@ -4,9 +4,11 @@ import (
 	"time"
 )
 
-// CreateCascade crée une session via StartCascade.
-func (c *Client) CreateCascade(workspaceURI, projectID string, requestedModel uint64) ([]byte, error) {
-	return c.Call("StartCascade", BuildStartCascade(workspaceURI, projectID, requestedModel))
+// CreateCascade crée une session via StartCascade. Le modèle demandé est
+// transmis par le mobile : ModelUID (requested_model_uid) si fourni, sinon
+// l'enum historique (requested_model_id).
+func (c *Client) CreateCascade(workspaceURI, projectID, modelUID string, modelEnum uint64) ([]byte, error) {
+	return c.Call("StartCascade", BuildStartCascade(workspaceURI, projectID, modelUID, modelEnum))
 }
 
 // GetAllCascades liste toutes les sessions via GetAllCascadeTrajectories.

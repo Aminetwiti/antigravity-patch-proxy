@@ -25,7 +25,7 @@ func TestBuilders_ConcurrentSafety(t *testing.T) {
 				cascID := fmt.Sprintf("casc-%d-%d", g, i)
 				msg := fmt.Sprintf("message %d goroutine %d — accents éèà", i, g)
 
-				b1 := BuildStartCascade("file:///C:/proj", "", 190)
+				b1 := BuildStartCascade("file:///C:/proj", "", "", 190)
 				b2 := BuildSendMessage(cascID, msg, "k", "s", "gemini-3.0-flash-high", 0)
 				b3 := BuildHandleCascadeUserInteraction(cascID, "traj-1", 2, InteractionRunCommand, BuildRunCommandInteraction(true, "ls", ""))
 				_ = Frame(b1)

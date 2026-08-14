@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/protocol/markdown_renderer.dart';
 import '../theme/app_colors.dart';
+import 'unified_diff_viewer.dart';
 
 /// Renders an assistant message with Markdown: fenced code blocks get a
 /// console-style dark surface with a copy button; paragraphs get inline
@@ -81,11 +82,19 @@ class _CodeBlockView extends StatelessWidget {
 
   const _CodeBlockView({required this.code});
 
+  bool get _isDiff {
+    final lang = code.language.toLowerCase();
+    return lang == 'diff' || lang == 'patch';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isDiff = _isDiff;
+    final lines = code.code.split('\n');
+
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.symmetric(vertical: 2),
+      margin: const EdgeInsets.symmetric(vertical: 4),
       decoration: BoxDecoration(
         color: AppColors.surfaceInput,
         borderRadius: BorderRadius.circular(8),
@@ -95,23 +104,60 @@ class _CodeBlockView extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header row: language badge + copy button
+          // Header row: language badge + review trigger + copy button
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             color: AppColors.surfaceRaised,
             child: Row(
               children: [
-                Icon(Icons.code, size: 13, color: AppColors.inkMuted),
+                Icon(
+                  isDiff ? Icons.difference_outlined : Icons.code,
+                  size: 13,
+                  color: isDiff ? AppColors.accentBlue : AppColors.inkMuted,
+                ),
                 const SizedBox(width: 6),
                 Text(
                   code.language.isEmpty ? 'code' : code.language,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
                     fontFamily: 'monospace',
-                    color: AppColors.inkSecondary,
+                    fontWeight: isDiff ? FontWeight.w600 : FontWeight.normal,
+                    color: isDiff ? AppColors.accentBlue : AppColors.inkSecondary,
                   ),
                 ),
                 const Spacer(),
+                if (isDiff) ...[
+                  InkWell(
+                    onTap: () {
+                      HapticFeedback.lightImpact();
+                      showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (ctx) => FractionallySizedBox(
+                          heightFactor: 0.9,
+                          child: UnifiedDiffViewer(
+                            diffContent: code.code,
+                            fileName: 'Code Diff',
+                            onClose: () => Navigator.of(ctx).pop(),
+                          ),
+                        ),
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(4),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      child: Row(
+                        children: const [
+                          Icon(Icons.rate_review_outlined, size: 13, color: AppColors.accentBlue),
+                          SizedBox(width: 4),
+                          Text('Review', style: TextStyle(fontSize: 11, color: AppColors.accentBlue, fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 InkWell(
                   onTap: () {
                     HapticFeedback.lightImpact();
@@ -126,28 +172,80 @@ class _CodeBlockView extends StatelessWidget {
                   borderRadius: BorderRadius.circular(4),
                   child: const Padding(
                     padding: EdgeInsets.all(4),
-                    child: Icon(Icons.copy_outlined,
-                        size: 14, color: AppColors.inkMuted),
+                    child: Icon(Icons.copy_outlined, size: 14, color: AppColors.inkMuted),
                   ),
                 ),
               ],
             ),
           ),
-          // Code body
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.all(12),
-            child: Text(
-              code.code,
-              style: const TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 12,
-                height: 1.5,
-                color: AppColors.inkPrimary,
+          // Code body with line-by-line diff formatting if diff
+          if (isDiff)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final line in lines)
+                    _DiffLineRow(line: line),
+                ],
+              ),
+            )
+          else
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.all(12),
+              child: Text(
+                code.code,
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  height: 1.5,
+                  color: AppColors.inkPrimary,
+                ),
               ),
             ),
-          ),
         ],
+      ),
+    );
+  }
+}
+
+class _DiffLineRow extends StatelessWidget {
+  final String line;
+
+  const _DiffLineRow({required this.line});
+
+  @override
+  Widget build(BuildContext context) {
+    Color? bgColor;
+    Color textColor = AppColors.inkPrimary;
+    FontWeight fontWeight = FontWeight.normal;
+
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      bgColor = AppColors.positive.withValues(alpha: 0.15);
+      textColor = AppColors.positive;
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      bgColor = AppColors.danger.withValues(alpha: 0.15);
+      textColor = AppColors.danger;
+    } else if (line.startsWith('@@')) {
+      bgColor = AppColors.accentBlue.withValues(alpha: 0.12);
+      textColor = AppColors.accentBlue;
+      fontWeight = FontWeight.w600;
+    }
+
+    return Container(
+      color: bgColor,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 1.5),
+      child: Text(
+        line.isEmpty ? ' ' : line,
+        style: TextStyle(
+          fontFamily: 'monospace',
+          fontSize: 11.5,
+          color: textColor,
+          fontWeight: fontWeight,
+          height: 1.4,
+        ),
       ),
     );
   }

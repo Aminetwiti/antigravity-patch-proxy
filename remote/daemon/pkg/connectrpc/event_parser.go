@@ -41,7 +41,7 @@ func ParseFrameEvents(raw []byte, cascadeID string) []StreamEvent {
 		}
 
 		// Détection empirique des blocs d'approbation ou de texte
-		if strings.Contains(s, "run_command") || strings.Contains(s, "write_to_file") {
+		if strings.Contains(s, "run_command") || strings.Contains(s, "write_to_file") || strings.Contains(s, "ask_question") || strings.Contains(s, "ask_user") {
 			ev := StreamEvent{
 				Kind:      EventKindApprovalRequired,
 				CascadeID: cascadeID,
@@ -84,6 +84,9 @@ func ParseFrameEvents(raw []byte, cascadeID string) []StreamEvent {
 }
 
 func extractToolName(s string) string {
+	if strings.Contains(s, "ask_question") || strings.Contains(s, "ask_user") {
+		return "ask_question"
+	}
 	if strings.Contains(s, "run_command") {
 		return "run_command"
 	}

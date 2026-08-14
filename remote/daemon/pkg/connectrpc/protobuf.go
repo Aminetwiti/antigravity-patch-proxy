@@ -53,9 +53,12 @@ const (
 )
 
 // StartCascadeRequest : field 4 source=1, 5 trajectory_type=1,
-// 8 workspace_uris (string), 14 requested_model (varint).
-// BuildStartCascade génère un message StartCascadeRequest brut.
-func BuildStartCascade(workspaceURI, projectID string, requestedModel uint64) []byte {
+// 8 workspace_uris (string), 14 requested_model (varint),
+// 15 requested_model_uid (string).
+// BuildStartCascade génère un message StartCascadeRequest brut. Le modèle
+// demandé est transmis par le mobile : requested_model_uid (15) si fourni,
+// sinon repli sur requested_model (14, enum historique).
+func BuildStartCascade(workspaceURI, projectID, modelUID string, modelEnum uint64) []byte {
 	w := &writer{}
 	w.varintField(4, 1)
 	w.varintField(5, 1)
@@ -67,7 +70,11 @@ func BuildStartCascade(workspaceURI, projectID string, requestedModel uint64) []
 	} else {
 		w.stringField(8, workspaceURI)
 	}
-	w.varintField(14, requestedModel)
+	if modelUID != "" {
+		w.stringField(15, modelUID)
+	} else if modelEnum != 0 {
+		w.varintField(14, modelEnum)
+	}
 	return w.b
 }
 

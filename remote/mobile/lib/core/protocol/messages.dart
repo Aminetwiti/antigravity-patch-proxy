@@ -135,3 +135,90 @@ class ToolApprovalRequest {
     );
   }
 }
+
+class AskQuestionChoiceRequest {
+  final String requestId;
+  final String cascadeId;
+  final String trajectoryId;
+  final int stepIndex;
+  final String question;
+  final List<String> options;
+  final bool isMultiSelect;
+  final bool allowCustom;
+
+  const AskQuestionChoiceRequest({
+    required this.requestId,
+    this.cascadeId = '',
+    this.trajectoryId = '',
+    this.stepIndex = -1,
+    required this.question,
+    required this.options,
+    this.isMultiSelect = false,
+    this.allowCustom = true,
+  });
+
+  factory AskQuestionChoiceRequest.fromJson(Map<String, dynamic> json) {
+    List<String> parsedOptions = [];
+    if (json['options'] is List) {
+      parsedOptions = (json['options'] as List).map((e) => e.toString()).toList();
+    } else if (json['questions'] is List && (json['questions'] as List).isNotEmpty) {
+      final firstQ = (json['questions'] as List).first;
+      if (firstQ is Map && firstQ['options'] is List) {
+        parsedOptions = (firstQ['options'] as List).map((e) => e.toString()).toList();
+      }
+    }
+
+    String parsedQuestion = json['question'] ?? '';
+    if (parsedQuestion.isEmpty && json['questions'] is List && (json['questions'] as List).isNotEmpty) {
+      final firstQ = (json['questions'] as List).first;
+      if (firstQ is Map && firstQ['question'] != null) {
+        parsedQuestion = firstQ['question'].toString();
+      }
+    }
+    if (parsedQuestion.isEmpty) {
+      parsedQuestion = 'The agent needs your feedback:';
+    }
+
+    return AskQuestionChoiceRequest(
+      requestId: json['requestId'] ?? json['callId'] ?? '',
+      cascadeId: json['cascadeId'] ?? '',
+      trajectoryId: json['trajectoryId'] ?? '',
+      stepIndex: (json['stepIndex'] as num?)?.toInt() ?? -1,
+      question: parsedQuestion,
+      options: parsedOptions,
+      isMultiSelect: json['isMultiSelect'] == true || json['is_multi_select'] == true,
+      allowCustom: json['allowCustom'] ?? true,
+    );
+  }
+}
+
+class ClientMessage {
+  final String type;
+  final String? requestId;
+  final String? cascadeId;
+  final Map<String, dynamic>? data;
+
+  const ClientMessage({
+    required this.type,
+    this.requestId,
+    this.cascadeId,
+    this.data,
+  });
+
+  factory ClientMessage.fromJson(Map<String, dynamic> json) {
+    return ClientMessage(
+      type: json['type'] as String? ?? '',
+      requestId: json['requestId'] as String?,
+      cascadeId: json['cascadeId'] as String?,
+      data: json['data'] is Map ? (json['data'] as Map).cast<String, dynamic>() : null,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'type': type,
+    if (requestId != null) 'requestId': requestId,
+    if (cascadeId != null) 'cascadeId': cascadeId,
+    if (data != null) ...data!,
+  };
+}
+

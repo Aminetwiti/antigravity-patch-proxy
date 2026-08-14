@@ -1,8 +1,11 @@
 package gateway
 
 import (
+	"context"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -16,6 +19,7 @@ import (
 	"time"
 
 	"github.com/antigravity/remote-daemon/pkg/connectrpc"
+	"github.com/antigravity/remote-daemon/pkg/discovery"
 	"github.com/gorilla/websocket"
 )
 
@@ -35,7 +39,7 @@ func SetLogJSON(l *slog.Logger) { logJSON = l }
 // par le gateway (interface minimale pour permettre les tests avec un faux).
 type RPCClient interface {
 	Heartbeat() ([]byte, error)
-	CreateCascade(uri string, projectID string, model uint64) ([]byte, error)
+	CreateCascade(uri string, projectID string, modelUID string, modelEnum uint64) ([]byte, error)
 	GetAllCascades() ([]byte, error)
 	SendMessageStream(cascadeID, text string, onFrame func([]byte) error) error
 	SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error)
@@ -55,7 +59,10 @@ func checkOrigin(r *http.Request) bool {
 		return false
 	}
 	h := strings.ToLower(u.Hostname())
-	return h == "localhost" || h == "127.0.0.1" || h == "::1"
+	return h == "localhost" || h == "127.0.0.1" || h == "::1" ||
+		strings.HasPrefix(h, "192.168.") || strings.HasPrefix(h, "10.") || strings.HasPrefix(h, "172.") ||
+		strings.HasSuffix(h, ".trycloudflare.com") || strings.HasSuffix(h, ".pinggy.link") ||
+		strings.HasSuffix(h, ".ngrok.io") || strings.HasSuffix(h, ".ngrok-free.app")
 }
 
 // pendingApproval : une approbation émise mais pas encore répondue, avec les
@@ -107,6 +114,12 @@ type Server struct {
 	// clientInFlight : nombre de send_prompt en cours PAR CLIENT (C3, limite
 	// de streams simultanés — un client ne peut pas saturer le hub).
 	clientInFlight map[*websocket.Conn]int
+	// streamBuffer : tampon circulaire StepRecovery pour reprise sur déconnexion 4G/Wi-Fi
+	streamBuffer *SessionStreamBuffer
+	// activeCancels : cascadeId → fonction d'annulation active
+	activeCancels map[string]context.CancelFunc
+	// activeRequestIDs : cascadeId → requestId en cours
+	activeRequestIDs map[string]string
 }
 
 // Stats snapshot de l'état du serveur pour l'endpoint /health (C5).
@@ -133,7 +146,35 @@ func NewServer(client RPCClient, authToken string) *Server {
 		startedAt:        time.Now(),
 		sentRequestIDs:   make(map[string]bool),
 		clientInFlight:   make(map[*websocket.Conn]int),
+		streamBuffer:     NewSessionStreamBuffer(100),
+		activeCancels:    make(map[string]context.CancelFunc),
+		activeRequestIDs: make(map[string]string),
 	}
+}
+
+// CancelGeneration interrompt une cascade active et diffuse stream_end(cancelled).
+func (s *Server) CancelGeneration(cascadeID string) {
+	s.mu.Lock()
+	cancel, hasCancel := s.activeCancels[cascadeID]
+	reqID := s.activeRequestIDs[cascadeID]
+	s.mu.Unlock()
+
+	if hasCancel && cancel != nil {
+		cancel()
+	}
+	s.clearApproval(cascadeID)
+	s.ClearCascadeActive(cascadeID)
+
+	s.broadcast(OutgoingMessage{
+		Type:      "stream_end",
+		RequestID: reqID,
+		Data: map[string]interface{}{
+			"cascadeId":  cascadeID,
+			"outcome":    "cancelled",
+			"message":    "Generation stopped by user",
+			"hostActive": false,
+		},
+	})
 }
 
 // MarkCascadeActive marque une cascade comme « en cours de stream » (posé à
@@ -230,21 +271,34 @@ func (s *Server) broadcast(msg OutgoingMessage) {
 }
 
 type IncomingMessage struct {
-	Type          string `json:"type"`
-	RequestID     string `json:"requestId"`
-	WorkspaceURI  string `json:"workspaceUri"`
-	WorkspacePath string `json:"workspacePath,omitempty"`
-	CascadeID     string `json:"cascadeId,omitempty"`
-	CallID        string `json:"callId,omitempty"`
-	TrajectoryID  string `json:"trajectoryID,omitempty"`
-	StepIndex     int64  `json:"stepIndex,omitempty"`
-	ApprovalType  string `json:"approvalType,omitempty"`
-	Decision      string `json:"decision,omitempty"`
-	Scope         string `json:"scope,omitempty"`
-	Prompt        string `json:"prompt,omitempty"`
-	FilePath      string `json:"filePath,omitempty"`
-	StreamCount   int    `json:"streamCount,omitempty"`
-	Command       string `json:"command,omitempty"`
+	Type            string   `json:"type"`
+	RequestID       string   `json:"requestId"`
+	WorkspaceURI    string   `json:"workspaceUri"`
+	WorkspacePath   string   `json:"workspacePath,omitempty"`
+	CascadeID       string   `json:"cascadeId,omitempty"`
+	CallID          string   `json:"callId,omitempty"`
+	TrajectoryID    string   `json:"trajectoryID,omitempty"`
+	StepIndex       int64    `json:"stepIndex,omitempty"`
+	ApprovalType    string   `json:"approvalType,omitempty"`
+	Decision        string   `json:"decision,omitempty"`
+	Scope           string   `json:"scope,omitempty"`
+	Prompt          string   `json:"prompt,omitempty"`
+	FilePath        string   `json:"filePath,omitempty"`
+	StreamCount     int      `json:"streamCount,omitempty"`
+	Command         string   `json:"command,omitempty"`
+	LastStepIndex   int64    `json:"lastStepIndex,omitempty"`
+	SelectedAnswers []string `json:"selectedAnswers,omitempty"`
+	CustomAnswer    string   `json:"customAnswer,omitempty"`
+	Base64Data      string                 `json:"base64Data,omitempty"`
+	FileName        string                 `json:"fileName,omitempty"`
+	MimeType        string                 `json:"mimeType,omitempty"`
+	Data            map[string]interface{} `json:"data,omitempty"`
+	Images          []string               `json:"images,omitempty"`
+	// ModelUID : identifiant du modèle sélectionné dans l'app mobile
+	// (requested_model_uid du cascade_config). Vide  repli sur ModelEnum.
+	ModelUID string `json:"modelUID,omitempty"`
+	// ModelEnum : repli historique (requested_model_id) quand ModelUID est vide.
+	ModelEnum uint64 `json:"modelEnum,omitempty"`
 }
 
 // hasPendingApproval rapporte si une approbation est en attente pour cette
@@ -415,6 +469,61 @@ func toWorkspaceURI(path string) string {
 		return path
 	}
 	return "file:///" + strings.ReplaceAll(path, "\\", "/")
+}
+
+// saveUploadedImage décode une image base64 et la sauvegarde dans le dossier scratch de la cascade.
+func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, error) {
+	if cascadeID == "" {
+		return "", "", fmt.Errorf("cascadeId requis")
+	}
+	if base64Data == "" {
+		return "", "", fmt.Errorf("base64Data requis")
+	}
+
+	if idx := strings.Index(base64Data, ","); idx != -1 {
+		base64Data = base64Data[idx+1:]
+	}
+
+	rawBytes, err := base64.StdEncoding.DecodeString(base64Data)
+	if err != nil {
+		return "", "", fmt.Errorf("erreur de décodage base64: %w", err)
+	}
+
+	if len(rawBytes) > 15<<20 {
+		return "", "", fmt.Errorf("image trop volumineuse (max 15 Mo)")
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", "", fmt.Errorf("impossible de localiser le home directory: %w", err)
+	}
+
+	scratchDir := filepath.Join(home, ".gemini", "antigravity", "brain", cascadeID, "scratch")
+	if err := os.MkdirAll(scratchDir, 0755); err != nil {
+		return "", "", fmt.Errorf("erreur de création du dossier scratch: %w", err)
+	}
+
+	ext := ".png"
+	lower := strings.ToLower(fileName)
+	if strings.HasSuffix(lower, ".jpg") || strings.HasSuffix(lower, ".jpeg") {
+		ext = ".jpg"
+	} else if strings.HasSuffix(lower, ".webp") {
+		ext = ".webp"
+	} else if strings.HasSuffix(lower, ".gif") {
+		ext = ".gif"
+	}
+
+	timestamp := time.Now().UnixMilli()
+	safeName := fmt.Sprintf("upload_%d%s", timestamp, ext)
+	targetPath := filepath.Join(scratchDir, safeName)
+
+	if err := os.WriteFile(targetPath, rawBytes, 0644); err != nil {
+		return "", "", fmt.Errorf("erreur d'écriture du fichier image: %w", err)
+	}
+
+	absPath := filepath.ToSlash(targetPath)
+	markdownRef := fmt.Sprintf("![Uploaded Image](file:///%s)", absPath)
+	return targetPath, markdownRef, nil
 }
 
 // toOutgoing convertit une réponse protobuf brute en JSON lisible (hex + champs).
@@ -590,7 +699,13 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				logJSON.Info("cascade_created_orphan")
 			}
 
-			raw, err = s.RPCClient.CreateCascade(uri, projectID, 190)
+			// Le modèle vient du mobile (ModelUID) ; en l'absence de sélection
+			// explicite on garde le repli historique 190 (enum gemini-3.7-flash).
+			modelEnum := msg.ModelEnum
+			if modelEnum == 0 {
+				modelEnum = 190
+			}
+			raw, err = s.RPCClient.CreateCascade(uri, projectID, msg.ModelUID, modelEnum)
 		}
 
 	case "send_command":
@@ -624,6 +739,66 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"messages": history}})
 		return
 
+	case "sync_session":
+		if msg.CascadeID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
+			return
+		}
+		missed, currentSeq := s.streamBuffer.GetEventsSince(msg.CascadeID, msg.LastStepIndex)
+		s.writeJSON(conn, OutgoingMessage{
+			Type:      "sync_catchup",
+			RequestID: msg.RequestID,
+			Data: map[string]interface{}{
+				"cascadeId":        msg.CascadeID,
+				"missedEvents":     missed,
+				"currentStepIndex": currentSeq,
+			},
+		})
+		return
+
+	case "submit_question_response":
+		if msg.CascadeID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
+			return
+		}
+		var responseText string
+		if len(msg.SelectedAnswers) > 0 {
+			responseText = strings.Join(msg.SelectedAnswers, ", ")
+		}
+		if msg.CustomAnswer != "" {
+			if responseText != "" {
+				responseText += " (" + msg.CustomAnswer + ")"
+			} else {
+				responseText = msg.CustomAnswer
+			}
+		}
+		if responseText == "" {
+			responseText = "Option confirmed"
+		}
+		logJSON.Info("question_response", "cascadeId", msg.CascadeID, "answer", responseText)
+
+		if s.hasPendingApproval(msg.CascadeID) {
+			s.clearApproval(msg.CascadeID)
+			oneofField, oneofPayload := buildApprovalPayload("ask_question", true, responseText, "")
+			raw, err = s.RPCClient.SubmitToolApproval(msg.CascadeID, msg.TrajectoryID, uint32(msg.StepIndex), oneofField, oneofPayload)
+		} else {
+			go func() {
+				_ = s.RPCClient.SendMessageStream(msg.CascadeID, responseText, func([]byte) error { return nil })
+			}()
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "submitted"}})
+			return
+		}
+
+	case "cancel_generation", "stop_generation":
+		if msg.CascadeID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
+			return
+		}
+		logJSON.Info("cancel_generation", "cascadeId", msg.CascadeID)
+		s.CancelGeneration(msg.CascadeID)
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "cancelled", "cascadeId": msg.CascadeID}})
+		return
+
 	case "send_prompt":
 		if msg.CascadeID == "" || msg.Prompt == "" {
 			err = fmt.Errorf("cascadeId + prompt requis")
@@ -650,12 +825,21 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.clientInFlight[conn]++
 		s.mu.Unlock()
 
+		ctx, cancel := context.WithCancel(context.Background())
+		s.mu.Lock()
+		s.activeCancels[msg.CascadeID] = cancel
+		s.activeRequestIDs[msg.CascadeID] = msg.RequestID
+		s.mu.Unlock()
+
 		s.MarkCascadeActive(msg.CascadeID)
 		defer func() {
 			s.ClearCascadeActive(msg.CascadeID)
 			s.mu.Lock()
+			delete(s.activeCancels, msg.CascadeID)
+			delete(s.activeRequestIDs, msg.CascadeID)
 			s.clientInFlight[conn]--
 			s.mu.Unlock()
+			cancel()
 		}()
 		s.broadcast(OutgoingMessage{Type: "stream_start", RequestID: msg.RequestID, Data: map[string]string{"cascadeId": msg.CascadeID}})
 		logJSON.Info("stream_start", "requestId", msg.RequestID, "cascadeId", msg.CascadeID)
@@ -665,8 +849,25 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			logJSON.Warn("open_conversation_failed", "cascadeId", msg.CascadeID, "err", errSet)
 		}
 
+		promptText := msg.Prompt
+		if msg.Base64Data != "" {
+			if _, mdRef, errImg := saveUploadedImage(msg.CascadeID, msg.FileName, msg.Base64Data); errImg == nil {
+				promptText += "\n\n" + mdRef
+			}
+		}
+		for i, b64 := range msg.Images {
+			if _, mdRef, errImg := saveUploadedImage(msg.CascadeID, fmt.Sprintf("img_%d.png", i), b64); errImg == nil {
+				promptText += "\n\n" + mdRef
+			}
+		}
+
 		frameIndex := 0
-		err = s.RPCClient.SendMessageStream(msg.CascadeID, msg.Prompt, func(frame []byte) error {
+		err = s.RPCClient.SendMessageStream(msg.CascadeID, promptText, func(frame []byte) error {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("generation cancelled")
+			default:
+			}
 			frameIndex++
 			events := connectrpc.ParseFrameEvents(frame, msg.CascadeID)
 			// Étape 4/6 : si la frame porte une demande d'approbation, la cascade
@@ -716,11 +917,14 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				// (le dialogue d'approbation est visible sur l'écran du PC).
 				"hostActive": hostActiveSince(hostActiveWindow),
 			}
-			s.broadcast(OutgoingMessage{
+			deltaMsg := OutgoingMessage{
 				Type:      "stream_delta",
 				RequestID: msg.RequestID,
 				Data:      data,
-			})
+			}
+			stepIdx := s.streamBuffer.RecordEvent(msg.CascadeID, deltaMsg)
+			data["stepIndex"] = stepIdx
+			s.broadcast(deltaMsg)
 			return nil
 		})
 
@@ -735,6 +939,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		// yeux). hostActive est absent → false côté mobile.
 		endData["hostActive"] = hostActiveSince(hostActiveWindow)
 		switch {
+		case errors.Is(ctx.Err(), context.Canceled) || (err != nil && strings.Contains(err.Error(), "cancelled")):
+			endData["outcome"] = "cancelled"
+			endData["message"] = "Generation stopped by user"
+			s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, Data: endData})
 		case err != nil:
 			endData["outcome"] = "error"
 			endData["message"] = err.Error()
@@ -834,6 +1042,68 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			"backgroundTasksCount": 0,
 		}
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: stats})
+		return
+
+	case "upload_media", "upload_image":
+		cascadeID := msg.CascadeID
+		base64Data := msg.Base64Data
+		fileName := msg.FileName
+		if msg.Data != nil {
+			if cid, ok := msg.Data["cascadeId"].(string); ok && cascadeID == "" {
+				cascadeID = cid
+			}
+			if b64, ok := msg.Data["base64Data"].(string); ok && base64Data == "" {
+				base64Data = b64
+			}
+			if fn, ok := msg.Data["fileName"].(string); ok && fileName == "" {
+				fileName = fn
+			}
+		}
+		if cascadeID == "" || base64Data == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId + base64Data requis"})
+			return
+		}
+		path, mdRef, errUpload := saveUploadedImage(cascadeID, fileName, base64Data)
+		if errUpload != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errUpload.Error()})
+			return
+		}
+		logJSON.Info("media_uploaded", "cascadeId", cascadeID, "path", path)
+		s.writeJSON(conn, OutgoingMessage{
+			Type:      "response",
+			RequestID: msg.RequestID,
+			Data: map[string]interface{}{
+				"filePath":    path,
+				"markdownRef": mdRef,
+				"status":      "ok",
+			},
+		})
+		return
+
+	case "list_git_branches":
+		targetPath := msg.WorkspacePath
+		if targetPath == "" {
+			targetPath = "."
+		}
+		branches, errBranches := discovery.ListGitBranches(targetPath)
+		if errBranches != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errBranches.Error()})
+			return
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"branches": branches}})
+		return
+
+	case "list_git_worktrees":
+		targetPath := msg.WorkspacePath
+		if targetPath == "" {
+			targetPath = "."
+		}
+		wts, errWts := discovery.ListGitWorktrees(targetPath)
+		if errWts != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errWts.Error()})
+			return
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"worktrees": wts}})
 		return
 
 	default:

@@ -10,6 +10,7 @@ import '../../core/protocol/daemon_api.dart';
 import '../../core/protocol/messages.dart';
 import '../../core/protocol/stream_parser.dart';
 import '../../theme/app_colors.dart';
+import '../../widgets/ask_question_choice_card.dart';
 import '../../widgets/chat_input_bar.dart';
 import '../../widgets/connection_banner.dart';
 import '../../widgets/markdown_bubble.dart';
@@ -57,6 +58,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   // PLUS écraser la 1ʳᵉ — chaque carte reste approvable via ◀ ▶.
   final List<ToolApprovalRequest> _pendingApprovals = [];
   int _approvalIndex = -1;
+  // Questions interactives à choix multiples (AskQuestion)
+  final List<AskQuestionChoiceRequest> _pendingQuestions = [];
   // callIds dont le daemon a broadcasté approval_expired : la carte reste
   // affichée (pourquoi elle a disparu) mais passe en lecture seule.
   final Set<String> _expiredCallIds = {};
@@ -418,6 +421,37 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     ApprovalNotifier.instance.cancelApproval(callId);
   }
 
+  void _addQuestion(AskQuestionChoiceRequest q) {
+    if (_pendingQuestions.any((item) => item.requestId == q.requestId)) return;
+    HapticFeedback.mediumImpact();
+    setState(() {
+      _pendingQuestions.add(q);
+    });
+  }
+
+  void _removeQuestion(String requestId) {
+    setState(() {
+      _pendingQuestions.removeWhere((item) => item.requestId == requestId);
+    });
+  }
+
+  void _handleQuestionSubmit(
+    AskQuestionChoiceRequest q,
+    List<String> selectedAnswers,
+    String? customAnswer,
+  ) async {
+    _removeQuestion(q.requestId);
+    try {
+      await widget.api?.submitQuestionResponse(
+        cascadeId: q.cascadeId.isNotEmpty ? q.cascadeId : widget.activeSessionId,
+        trajectoryId: q.trajectoryId.isNotEmpty ? q.trajectoryId : null,
+        stepIndex: q.stepIndex >= 0 ? q.stepIndex : null,
+        selectedAnswers: selectedAnswers,
+        customAnswer: customAnswer,
+      );
+    } catch (_) {}
+  }
+
   void _watchBroadcastStreams() {
     _streamSub?.cancel();
     _streamSub = widget.api?.events.listen((msg) {
@@ -507,6 +541,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             ),
             hostActive: hostActive,
           );
+        }
+
+        final question = StreamDeltaParser.questionOf(msg);
+        if (question != null) {
+          _addQuestion(question);
         }
 
         _scheduleThrottledUpdate();
@@ -762,6 +801,18 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   /// P0-2) : toujours visible, même en fin de longue conversation. Navigable
   /// ◀ ▶ quand plusieurs demandes sont empilées.
   Widget _buildApprovalArea() {
+    if (_pendingQuestions.isNotEmpty) {
+      final q = _pendingQuestions.first;
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+        child: AskQuestionChoiceCard(
+          request: q,
+          onSubmit: (selected, custom) =>
+              _handleQuestionSubmit(q, selected, custom),
+        ),
+      );
+    }
+
     final approval = _currentApproval;
     if (approval == null) return const SizedBox.shrink();
     final total = _pendingApprovals.length;
@@ -873,6 +924,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                       ChatInputBar(
                         onSend: _handleSendMessage,
                         isConnected: isConnected,
+                        hasActiveStream: _activeStreamCount > 0,
+                        onStop: () {
+                          widget.api?.stopGeneration(cascadeId: widget.activeSessionId);
+                        },
+                        api: widget.api,
                       ),
                       const SizedBox(height: 48),
                     ],
@@ -930,6 +986,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           onSend: _handleSendMessage,
           isConnected: isConnected,
           hasActiveStream: _activeStreamCount > 0,
+          onStop: () {
+            widget.api?.stopGeneration(cascadeId: widget.activeSessionId);
+          },
+          api: widget.api,
         ),
       ],
     );

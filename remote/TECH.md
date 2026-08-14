@@ -1,6 +1,6 @@
-# Stack Technique â€” Antigravity Remote Control OS
+# Stack Technique — Antigravity Remote Control OS
 
-> DÃ©cisions technologiques, justifications et contraintes. Chaque choix est validÃ© par le terrain (tests rÃ©els sur machine), pas par la thÃ©orie.
+> Décisions technologiques, justifications et contraintes. Chaque choix est validé par le terrain (tests réels sur machine), pas par la théorie.
 
 ---
 
@@ -8,104 +8,75 @@
 
 | Composant | Choix | Justification |
 |:---|:---|:---|
-| **Daemon Bridge (PC)** | Go 1.22 â€” binaire unique | MÃªme langage que le `language_server` (Go), stdlib `net/http`, aucun runtime requis, binaire ~10 MB |
-| **Client mobile** | APK Android natif â€” Kotlin + Jetpack Compose | Notifications FCM, service arriÃ¨re-plan, Room DB, performances 120 Hz, vrai contrÃ´le systÃ¨me |
-| **Transport PC â†” Mobile** | WebSocket (JSON v1) | Typage strict, streaming temps rÃ©el, bidirectionnel, supportÃ© nativement par OkHttp et Gorilla |
-| **Stockage local mobile** | Room / SQLite | Mode offline-first, synchronisation au retour du rÃ©seau |
-| **AccÃ¨s rÃ©seau distant** | Cloudflare Tunnel ou Tailscale | Zero Trust, aucun port ouvert sur le routeur |
-| **SÃ©rialisation RPC interne** | Protobuf manuel (varint) | Contrainte AGENTS.md : aucune lib protobuf â€” encodage manuel validÃ© |
+| **Daemon Bridge (PC)** | Go 1.22 — binaire unique | Même langage que le `language_server` (Go), stdlib `net/http`, aucun runtime requis, binaire ~10 MB |
+| **Client mobile** | Flutter (Dart) / Android & iOS | Base de code multi-plateforme, rendu réactif 120 Hz, composants UI "Quiet Console", persistance locale |
+| **Transport PC ↔ Mobile** | WebSocket (JSON v1) | Typage strict, streaming temps réel, bidirectionnel, support natif |
+| **Accès réseau distant** | Pinggy SSH / Cloudflare Tunnel | Zero Trust, URL publique sécurisée en 1 seconde sans port ouvert sur le routeur |
+| **Sérialisation RPC interne** | ConnectRPC / gRPC-Web natif | Communication directe avec le `language_server` sans intermédiaire |
+| **Source de Vérité Protobuf** | **`antigravity-client`** | Référence canonique des 188 RPC methods et schémas Protobuf officiels |
 
 ---
 
-## 2. Couche 1 â€” PC : Daemon Bridge (Go)
+## 2. Source de Vérité & Référence Officielle : `antigravity-client`
 
-### 2.1 Pourquoi Go
-- Le moteur cible (`language_server`) est **Ã©crit en Go** â†’ mÃªmes primitives, mÃªmes formats.
-- **Binaire unique** sans dÃ©pendance systÃ¨me (facile Ã  distribuer, Ã  lancer au dÃ©marrage).
-- Goroutines naturelles pour le streaming multi-sessions.
+Le sous-projet **`remote/tools/antigravity-client-main/antigravity-client-main`** constitue la **Source de Vérité canonique (Golden Reference)** pour l'ensemble de notre stack RPC :
 
-### 2.2 Protocole RPC : gRPC-Web natif (PAS Connect JSON)
-Validation terrain (voir [PROTOCOL.md](PROTOCOL.md)) :
-- Le serveur rÃ©pond **404** Ã  `application/connect+json` â€” il attend **`application/grpc-web+proto`**.
-- Header d'auth obligatoire : **`x-codeium-csrf-token`** (hÃ©ritage Codeium, PAS `X-CSRF-Token`).
-- Framing : `1 octet flags + 4 octets longueur BE + payload protobuf`.
-
-### 2.3 DÃ©couverte automatique du moteur
-1. PowerShell CIM : lister les processus `language_server*`.
-2. **PrÃ©fÃ©rer l'instance hub** (`--subclient_type hub`) â€” les instances IDE rÃ©pondent 404 au service RPC.
-3. Ports candidats : `extension_server_port+1..+20`, sinon `netstat -ano` sur le PID.
-4. **Probe Heartbeat** : seul critÃ¨re fiable = `POST /exa.language_server_pb.LanguageServerService/Heartbeat` â†’ HTTP 200.
-
-### 2.4 BibliothÃ¨ques utilisÃ©es
-| Librairie | RÃ´le |
-|:---|:---|
-| `github.com/gorilla/websocket` | Serveur WebSocket du gateway (seule dÃ©pendance externe) |
-| stdlib `net/http`, `encoding/binary`, `regexp` | Client gRPC-Web + parsing |
+1. **Définition intégrale des 188 méthodes RPC** : [`src/gen/exa/language_server_pb/language_server_pb.ts`](file:///C:/Users/amine/Downloads/antigravity-add-model-main/antigravity-add-model-main/remote/tools/antigravity-client-main/antigravity-client-main/src/gen/exa/language_server_pb/language_server_pb.ts).
+2. **Schémas Protobuf de sessions et planners** :
+   - `src/gen/exa/cortex_pb/` : `StartCascadeRequest`, `CascadeConfig`, `CascadePlannerConfig`.
+   - `src/gen/exa/codeium_common_pb/` : `TextOrScopeItem`, `Metadata`, `ModelOrAlias`.
+   - `src/gen/exa/jetski_cortex_pb/` : Trajectoires, étapes et résumés.
+3. **Parseur d'Événements Delta Typé** :
+   - [`src/core/cascade/event-parser.ts`](file:///C:/Users/amine/Downloads/antigravity-add-model-main/antigravity-add-model-main/remote/tools/antigravity-client-main/antigravity-client-main/src/core/cascade/event-parser.ts) : Modèle de référence pour le décodage des 130+ types d'événements de stream.
+4. **Harnais de Test Standalone** :
+   - Scripts `src/test-*.ts` pour valider chaque fonctionnalité (approbations, switch de modèle, injection de prompt, focus IDE) de façon unitaire en Node.js.
 
 ---
 
-## 3. Couche 2 â€” Transport rÃ©seau
+## 3. Couche 1 — PC : Daemon Bridge (Go)
 
-### 3.1 En LAN
-- `ws://<IP-PC>:8090/ws` â€” connexion directe WiFi local.
-- Le Daemon écoute sur toutes les interfaces (`:8090`), pas seulement loopback.
+### 3.1 Pourquoi Go
+- Le moteur cible (`language_server`) est **écrit en Go** → mêmes primitives de goroutines et de sockets.
+- **Binaire unique autonome** sans dépendance système externe (~10 MB compilé).
+- Performance maximale et empreinte mémoire négligeable (< 25 MB RAM).
 
-### 3.2 Ã€ distance (hors LAN)
-| Option | Avantage | InconvÃ©nient |
-|:---|:---|:---|
-| **Cloudflare Tunnel** (`cloudflared`) | Zero Trust, gratuit, pas de port ouvert | Latence ~50-150 ms selon rÃ©gion |
-| **Tailscale** | Mesh WireGuard, trÃ¨s faible latence, auth par identitÃ© | NÃ©cessite un compte, appareils enregistrÃ©s |
+### 3.2 Protocole RPC : gRPC-Web natif
+- Le serveur attend du **`application/grpc-web+proto`** (pas du Connect JSON).
+- Header d'auth obligatoire : **`x-codeium-csrf-token`** (héritage Codeium).
+- Framing standard : `1 octet flags + 4 octets longueur Big-Endian + charge Protobuf`.
 
-### 3.3 Protocole Daemon â†” Mobile (v1 = JSON)
-- Messages entrants : `{type, requestId, workspacePath?, cascadeId?, callId?, decision?, prompt?}`
-- Messages sortants : `{type, requestId, data?, error?}`
-- **v2 prÃ©vue** : passage en Protobuf binaire (`remote/proto/remote_service.proto`) pour les deltas de streaming.
-
----
-
-## 4. Couche 3 â€” Mobile : APK Android natif
-
-### 4.1 Stack applicative
-| Technologie | Usage |
-|:---|:---|
-| **Kotlin** (JVM 1.8) | Langage |
-| **Jetpack Compose** (Material 3, BOM 2024.02) | UI dÃ©clarative |
-| **OkHttp 4.12** | Client WebSocket |
-| **Room** (SQLite) | Persistance offline-first |
-| **Coroutines + Flow** | Concurrence & rÃ©activitÃ© |
-| **Hilt** | Injection de dÃ©pendances (Ã  ajouter) |
-| **FCM** | Notifications push systÃ¨me |
-
-### 4.2 Ã‰crans prÃ©vus (V1)
-1. **Tableau de bord** â€” liste des sessions (Cascades), statut, modÃ¨le actif
-2. **Chat/Stream** â€” envoi de prompt, affichage des deltas en temps rÃ©el
-3. **Approbation** â€” boutons Approuver / Refuser quand un agent bloque sur `ask_user`
-4. **Workspace browser** â€” arborescence + diffs de code (lecture seule)
-
-### 4.3 Gradle (dÃ©jÃ  initialisÃ©)
-- `minSdk 26` (Android 8.0+), `targetSdk 34`, `compileSdk 34`
-- Package : `com.antigravity.remote`
+### 3.3 Découverte automatique du moteur
+1. Scanner les processus `language_server*` via WMI / CIM.
+2. **Cibler l'instance hub** (`--subclient_type hub`) — les instances IDE retournent 404 sur les routes de session.
+3. Résoudre les ports TCP via `netstat -ano`.
+4. **Probe Heartbeat** : validation par `POST /exa.language_server_pb.LanguageServerService/Heartbeat` → HTTP 200.
 
 ---
 
-## 5. Contraintes & non-choix assumÃ©s
+## 4. Couche 2 — Transport Réseau & Résilience
 
-- âŒ **Pas de protobuf library** â€” encodage varint manuel (AGENTS.md, binaire 10 MB).
-- âŒ **Pas de framework web** (Express/Koa/Fastify) â€” `net/http` brut.
-- âŒ **Pas de CDP/DOM scraping** â€” c'est le cÅ“ur de la proposition de valeur.
-- âŒ **Pas d'iOS en V1** â€” Android uniquement, PWA de secours possible en V2.
-- âŒ **Pas d'auth Google cÃ´tÃ© mobile** â€” si la session expire sur le PC, message Â« reconnectez-vous sur le PC Â».
-- âŒ **Pas de gestion d'API keys** â€” tout le secret reste sur le PC.
+### 4.1 Sécurité des Communications
+- **Token d'authentification** vérifié en temps constant (`crypto/subtle.ConstantTimeCompare`).
+- **Anti-DNS Rebinding** strict dans `checkOrigin` (autorisant uniquement `127.0.0.1`, LAN privé et tunnels certifiés).
+- **Confinement Path Traversal** dans `resolvePath` et `saveUploadedImage`.
+
+### 4.2 StepRecovery & Buffer Circulaire
+- Buffer circulaire de **100 deltas** en mémoire vive par cascade.
+- Synchronisation delta immédiate via `sync_session(lastStepIndex)` lors des reconnexions Wi-Fi / 4G.
 
 ---
 
-## 6. Ã‰volution de la stack (V2+)
+## 5. Couche 3 — Mobile : Application Flutter
 
-| Besoin futur | Technologie candidate |
-|:---|:---|
-| Protobuf binaire sur WebSocket | GÃ©nÃ©ration depuis `remote/proto/remote_service.proto` |
-| Multi-PC / multi-instance | Table de routage dans le Daemon, ID d'instance |
-| Notifications d'approbation | FCM topic par instance |
-| Ã‰dition de code distante | Endpoint RPC `WriteFile` du language_server (validÃ© en CLI) |
+### 5.1 Architecture Applicative
+- **Dart / Flutter** pour une expérience multiplateforme unifiée (Android / iOS).
+- Rendu réactif 120 Hz, composants tactiles dédiés (`AskQuestionChoiceCard`, `UnifiedDiffViewer`, `ChatInputBar`).
+- File d'attente locale (Outbox) garantissant l'envoi dès le retour de la connexion réseau.
 
+---
 
+## 6. Références & Liens Documentaires
+
+- Documentation Protocole : [PROTOCOL.md](file:///C:/Users/amine/Downloads/antigravity-add-model-main/antigravity-add-model-main/remote/PROTOCOL.md)
+- Guide d'utilisation : [README.md](file:///C:/Users/amine/Downloads/antigravity-add-model-main/antigravity-add-model-main/remote/README.md)
+- Spécifications SDK & Schemas : [antigravity-client](file:///C:/Users/amine/Downloads/antigravity-add-model-main/antigravity-add-model-main/remote/tools/antigravity-client-main/antigravity-client-main/README.md)
