@@ -3,7 +3,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/protocol/daemon_api.dart';
-import '../../theme/app_colors.dart';
 import '../../widgets/custom_dropdown_overlay.dart';
 
 class WorkspaceScreen extends StatefulWidget {

@@ -6,7 +6,6 @@ import 'package:flutter/services.dart';
 import '../core/protocol/daemon_api.dart';
 import '../core/protocol/model_catalog.dart';
 import '../services/settings_store.dart';
-import '../theme/app_colors.dart';
 import '../features/chat_stream/models/mention_item.dart';
 import '../features/chat_stream/widgets/action_pills_bar.dart';
 import '../features/chat_stream/widgets/mention_autocomplete_overlay.dart';

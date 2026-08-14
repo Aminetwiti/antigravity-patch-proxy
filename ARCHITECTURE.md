@@ -70,3 +70,28 @@ src/
 
 5. **Slim Preload Scripts**
    - The root `preload.ts` is lightweight, delegating contextBridge registrations to `src/preload/api.ts`.
+
+---
+
+## Antigravity Remote 2.0 Architecture (`remote/`)
+
+Antigravity Remote introduces a 3-tier architecture extending the desktop IDE to mobile devices:
+
+```
+IDE Chat UI ↔ Language Server (Hub :55256) ◄── gRPC-Web ── Daemon Go (:8090 / Cloudflare Tunnel)
+                                                                 ▲
+                                                                 │ WebSocket (JSON RPC)
+                                                                 ▼
+                                                    Mobile Client (Flutter App)
+```
+
+1. **Go Daemon Bridge (`remote/daemon`)**:
+   - **Discovery & Watchdog**: Probes local processes to identify the active `language_server` Hub instance, port, and CSRF token. Runs a 10s watchdog to detect token rotations.
+   - **Protocol Translator**: Connects over gRPC-Web with manual Protobuf wire encoding to translate mobile WebSocket messages into `StartCascade`, `SendUserCascadeMessage`, `SubmitToolApproval`, `GetAvailableModels`, and file operations.
+   - **Tunnel Bridge**: Seamlessly spins up Cloudflare Quick Tunnels (`cloudflared.exe`) and prints paired terminal QR codes for zero-config remote access.
+   - **StepRecovery**: Retains in-memory ring buffers of trajectory events to replay lost messages after transient mobile network disconnections.
+
+2. **Flutter Mobile Companion (`remote/mobile`)**:
+   - **Antigravity 2.0 Design System**: Replicated design tokens directly from IDE computed stylesheets (`htmlcss.log`) — including `#101010` canvas, `#21252B` sidebars, `#528BFF` focus borders, `#D7BA7D` syntax highlights, and IDE-native diff editor coloration.
+   - **Typed Protocol Client (`DaemonApi`)**: Full WebSocket client handling request/response correlations, real-time token streams, tool approval queues, and outbox persistence.
+   - **Core Screens**: Quiet Console chat stream, session manager, file tree with syntax icons & code viewer, MCP server explorer, scheduled tasks dashboard, and diagnostic export.

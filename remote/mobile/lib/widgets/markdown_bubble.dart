@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/protocol/markdown_renderer.dart';
-import '../theme/app_colors.dart';
 import 'unified_diff_viewer.dart';
 
 /// Renders an assistant message with Markdown: fenced code blocks get a
@@ -226,11 +225,11 @@ class _DiffLineRow extends StatelessWidget {
     FontWeight fontWeight = FontWeight.normal;
 
     if (line.startsWith('+') && !line.startsWith('+++')) {
-      bgColor = AppColors.diffInsertedLine;
-      textColor = AppColors.positive;
+      bgColor = const Color(0x339BB955);
+      textColor = const Color(0xFF4ADE80);
     } else if (line.startsWith('-') && !line.startsWith('---')) {
-      bgColor = AppColors.diffRemovedLine;
-      textColor = AppColors.danger;
+      bgColor = const Color(0x33FF0000);
+      textColor = const Color(0xFFF87171);
     } else if (line.startsWith('@@')) {
       bgColor = scheme.primary.withValues(alpha: 0.12);
       textColor = scheme.primary;
@@ -293,12 +292,12 @@ class _ToolCallPill extends StatelessWidget {
   }
 
   Color get _badgeColor {
-    if (_isSubagent) return AppColors.accentBlue;
+    if (_isSubagent) return const Color(0xFF528BFF);
     if (_isBrowser) return const Color(0xFF00B4D8);
     final t = call.toolName.toLowerCase();
     if (t.contains('command') || t.contains('run')) return const Color(0xFFE07A5F);
     if (t.contains('file')) return const Color(0xFF81B29A);
-    return AppColors.inkMuted;
+    return const Color(0xFFA1A1AA);
   }
 
   @override
@@ -312,14 +311,14 @@ class _ToolCallPill extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: _isSubagent
-            ? AppColors.accentBlue.withValues(alpha: 0.1)
+            ? const Color(0xFF528BFF).withValues(alpha: 0.1)
             : _isBrowser
                 ? const Color(0xFF00B4D8).withValues(alpha: 0.08)
                 : scheme.secondaryContainer.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
           color: _isSubagent
-              ? AppColors.accentBlue.withValues(alpha: 0.3)
+              ? const Color(0xFF528BFF).withValues(alpha: 0.3)
               : _isBrowser
                   ? const Color(0xFF00B4D8).withValues(alpha: 0.25)
                   : scheme.secondary.withValues(alpha: 0.3),

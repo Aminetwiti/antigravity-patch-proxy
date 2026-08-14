@@ -14,7 +14,6 @@ import 'features/chat_stream/chat_stream_screen.dart';
 import 'features/discovery/discovery_screen.dart';
 import 'features/settings/settings_screen.dart';
 import 'features/workspace/workspace_screen.dart';
-import 'theme/app_colors.dart';
 import 'theme/app_theme.dart';
 import 'features/sessions/sessions_list.dart';
 import 'services/settings_store.dart';

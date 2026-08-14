@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../../config/env_config.dart';
-import '../../theme/app_colors.dart';
 import 'qr_scanner_screen.dart';
 
 class DiscoveryScreen extends StatefulWidget {

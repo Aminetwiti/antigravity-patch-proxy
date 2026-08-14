@@ -5,6 +5,28 @@ All notable changes to Antigravity will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - 2026-08-14
+
+### Added
+- **Antigravity Remote 2.0 Companion Suite** (`remote/`): Full mobile companion app (Flutter) and background daemon bridge (Go) allowing developers to control and monitor Antigravity IDE sessions, stream thinking LLMs, approve tool calls, and browse workspaces from their phone over secure local network or Cloudflare Quick Tunnels. Run with `cd remote/daemon && go run main.go --tunnel cloudflare`.
+- **Exact Antigravity 2.0 Design System in Mobile** (`remote/mobile`): Replicated the computed theme tokens from Antigravity 2.0 (`htmlcss.log`) into `AppColors` — including `#101010` canvas, `#21252B` sidebars, `#282C34` editor background, `#528BFF` focus ring, `#4D78CC` button accents, `#D7BA7D` syntax gold, and exact diff editor line addition/deletion tints (`rgba(155, 185, 85, 0.2)` / `rgba(255, 0, 0, 0.2)`).
+- **Interactive Tool Approval with Single & Session Scopes** (`remote/mobile`): Instant push notifications and responsive cards to review CLI commands, file edits, and tool runs. Allows approving once or trusting for the whole session with auto-rejection timer.
+- **Multimodal Prompting & Autocomplete Overlay**: Support for attaching camera/gallery images in chat, plus dynamic `@` mention auto-completion for files, folders, and workspace paths.
+- **MCP Server & Tool Explorer** (`mcp_explorer_screen.dart`): Browse active Model Context Protocol (MCP) servers and their registered tools directly from your mobile device.
+- **Workspace File Explorer & In-Line Code Viewer** (`workspace_screen.dart`): Tree view with search, find-in-page, syntax-aware language icons, and full code viewer with binary file handling.
+- **Scheduled Tasks & Background Monitor** (`scheduled_tasks_screen.dart`): Inspect running background commands, timers, and cron schedules remotely.
+- **Code Review Commenting** (`add_comment_dialog.dart`): Leave line-anchored comments on code diffs directly from mobile.
+
+### Changed
+- **Zero Token Loss Background Ingestion**: Stream subscriptions remain active on mobile when the app transitions to background or the device is locked, eliminating missed tokens upon return.
+- **Dynamic Workspace Resolution**: Automatically detects workspace URI from `metadata.json` or current working directory instead of hardcoded paths.
+- **Protobuf Alignment**: Aligned default `plan_model` to `GOOGLE_GEMINI_2_5_PRO` (varint `246`) to match Google Antigravity Language Server expectations.
+
+### Security
+- **DNS Rebinding & Origin Protection**: Daemon WebSocket server validates origins against localhost, private LANs, and authenticated Cloudflare/Pinggy tunnel domains.
+- **Path Traversal Confinement**: Strict validation ensures all file operations remain confined to the active workspace.
+- **Constant-Time Token Comparison**: Protects daemon authentication against timing side-channel attacks.
+
 ## [2.1.0] - 2026-07-07
 
 ### Added

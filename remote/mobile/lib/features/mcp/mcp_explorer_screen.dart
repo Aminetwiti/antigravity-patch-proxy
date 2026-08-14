@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'models/mcp_server_info.dart';
 import '../../core/protocol/daemon_api.dart';
-import '../../theme/app_colors.dart';
 
 class McpExplorerScreen extends StatefulWidget {
   final DaemonApi? api;

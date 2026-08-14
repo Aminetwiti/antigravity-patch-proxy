@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../core/protocol/daemon_api.dart';
 import '../core/protocol/markdown_renderer.dart';
 import '../features/artifacts/artifact_action_bar.dart';
-import '../theme/app_colors.dart';
 
 class ArtifactViewerModal extends StatefulWidget {
   final DaemonApi api;

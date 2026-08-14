@@ -9,7 +9,6 @@ import '../../core/notifications/approval_notifier.dart';
 import '../../core/protocol/daemon_api.dart';
 import '../../core/protocol/messages.dart';
 import '../../core/protocol/stream_parser.dart';
-import '../../theme/app_colors.dart';
 import '../../widgets/ask_question_choice_card.dart';
 import '../../widgets/chat_input_bar.dart';
 import '../../widgets/connection_banner.dart';

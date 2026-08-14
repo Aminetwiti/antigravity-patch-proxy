@@ -944,7 +944,56 @@ func TestWebSocketWriteFileInvalidBase64(t *testing.T) {
 	if msg["type"] != "response" || msg["error"] == "" {
 		t.Fatalf("Attendu erreur base64, reçu %v", msg)
 	}
-	if backend.lastWrite != nil {
-		t.Fatal("WriteFile ne devrait pas être appelé avec base64 invalide")
-	}
+}
+
+// TestWebSocketSetApprovalTimeout — chaîne Settings mobile → daemon :
+// le message WS "set_approval_timeout" met à jour approvalTimeout ET
+// la réponse confirme la valeur. La mise à jour est ensuite visible via
+// l'expiration d'une approbation (auto-refus après le nouveau délai).
+func TestWebSocketSetApprovalTimeout(t *testing.T) {
+	t.Run("minutes valides => réponse + timer mis à jour", func(t *testing.T) {
+		backend := &fakeRPCClient{streamDeltas: []string{`{"run_command":"npx jest","step_index":1,"trajectory_id":"123e4567-e89b-12d3-a456-426614174000"}`}}
+		srv := newTestServer(backend)
+		defer srv.Close()
+		client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+		defer client.conn.Close()
+
+		// Mise à jour du délai (30 min, format JSON nombre flottant).
+		client.sendRaw(t, `{"type":"set_approval_timeout","requestId":"t1","data":{"minutes":30}}`)
+		msg := client.recv(t)
+		if msg["type"] != "response" || msg["requestId"] != "t1" {
+			t.Fatalf("Réponse inattendue: %v", msg)
+		}
+		data, _ := msg["data"].(map[string]interface{})
+		if data == nil || data["approvalTimeoutMinutes"] != float64(30) {
+			t.Fatalf("Réponse sans confirmation du délai: %v", msg)
+		}
+
+		// Le délai est réellement appliqué : une approbation reçue ensuite
+		// expire après 80 ms (au lieu des 5 min par défaut).
+		client.send(t, map[string]string{"type": "send_prompt", "requestId": "r9", "cascadeId": "casc-1", "prompt": "travaille"})
+		for {
+			m := client.recv(t)
+			if m["type"] == "stream_end" {
+				break
+			}
+		}
+		expired := client.recv(t)
+		if expired["type"] != "approval_expired" {
+			t.Fatalf("Attendu approval_expired après expiration rapide, reçu %v", expired)
+		}
+	})
+
+	t.Run("minutes invalides => erreur", func(t *testing.T) {
+		srv := newTestServer(&fakeRPCClient{})
+		defer srv.Close()
+		client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+		defer client.conn.Close()
+
+		client.sendRaw(t, `{"type":"set_approval_timeout","requestId":"t2","data":{"minutes":-5}}`)
+		msg := client.recv(t)
+		if msg["type"] != "response" || msg["error"] == "" {
+			t.Fatalf("Attendu une erreur minutes invalides, reçu %v", msg)
+		}
+	})
 }

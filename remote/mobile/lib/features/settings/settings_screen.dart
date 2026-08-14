@@ -12,7 +12,6 @@ import '../../core/notifications/approval_notifier.dart';
 import '../../core/protocol/daemon_api.dart';
 import '../../core/protocol/model_catalog.dart';
 import '../../services/settings_store.dart';
-import '../../theme/app_colors.dart';
 import '../workspace/git_worktree_selector.dart';
 import 'appearance_settings_section.dart';
 import 'profile_settings_section.dart';

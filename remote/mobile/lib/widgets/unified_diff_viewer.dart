@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../features/code_review/models/code_comment.dart';
 import '../features/code_review/widgets/add_comment_dialog.dart';
-import '../theme/app_colors.dart';
 
 /// Unifié et interactif : affiche un diff de code et permet d'annoter
 /// des lignes spécifiques pour envoyer une revue de code groupée à l'agent.
@@ -132,7 +131,7 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: AppColors.surfaceRaised,
+                color: Theme.of(context).colorScheme.surfaceContainer,
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(
@@ -162,7 +161,7 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
                 setState(() => _annotations.remove(lineIndex));
                 Navigator.of(ctx).pop();
               },
-              child: const Text('Supprimer', style: TextStyle(color: AppColors.danger)),
+              child: Text('Supprimer', style: TextStyle(color: Theme.of(context).colorScheme.error)),
             ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
@@ -209,11 +208,12 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.surfaceBase,
+        color: scheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.borderSubtle),
+        border: Border.all(color: scheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -222,19 +222,19 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: AppColors.surfaceRaised,
+              color: scheme.surfaceContainer,
               borderRadius: const BorderRadius.vertical(top: Radius.circular(11)),
-              border: const Border(bottom: BorderSide(color: AppColors.borderSubtle)),
+              border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
             ),
             child: Row(
               children: [
-                const Icon(Icons.difference_outlined, size: 16, color: AppColors.inkSecondary),
+                Icon(Icons.difference_outlined, size: 16, color: scheme.onSurfaceVariant),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     widget.fileName ?? 'Code Changes',
-                    style: const TextStyle(
-                      color: AppColors.inkPrimary,
+                    style: TextStyle(
+                      color: scheme.onSurface,
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
                       fontFamily: 'monospace',
@@ -245,13 +245,13 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: AppColors.positive.withValues(alpha: 0.15),
+                    color: scheme.primary.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
                     '+$_additions',
-                    style: const TextStyle(
-                      color: AppColors.positive,
+                    style: TextStyle(
+                      color: scheme.primary,
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
                     ),
@@ -261,13 +261,13 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: AppColors.danger.withValues(alpha: 0.15),
+                    color: scheme.error.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
                     '-$_deletions',
-                    style: const TextStyle(
-                      color: AppColors.danger,
+                    style: TextStyle(
+                      color: scheme.error,
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
                     ),
@@ -275,7 +275,7 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
                 ),
                 const SizedBox(width: 8),
                 IconButton(
-                  icon: const Icon(Icons.copy_rounded, size: 16, color: AppColors.inkMuted),
+                  icon: Icon(Icons.copy_rounded, size: 16, color: scheme.outline),
                   onPressed: _copyDiff,
                   tooltip: 'Copy Diff',
                   padding: EdgeInsets.zero,
@@ -284,7 +284,7 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
                 if (widget.onClose != null) ...[
                   const SizedBox(width: 10),
                   IconButton(
-                    icon: const Icon(Icons.close_rounded, size: 16, color: AppColors.inkMuted),
+                    icon: Icon(Icons.close_rounded, size: 16, color: scheme.outline),
                     onPressed: widget.onClose,
                     tooltip: 'Close',
                     padding: EdgeInsets.zero,
@@ -330,25 +330,25 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          _buildLineRow(line, hasComment),
+                          _buildLineRow(line, hasComment, scheme),
                           if (hasComment)
                             Container(
                               margin: const EdgeInsets.only(left: 80, right: 16, bottom: 4),
                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                               decoration: BoxDecoration(
-                                color: AppColors.accentBlue.withValues(alpha: 0.15),
+                                color: scheme.primary.withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: AppColors.accentBlue.withValues(alpha: 0.3)),
+                                border: Border.all(color: scheme.primary.withValues(alpha: 0.3)),
                               ),
                               child: Row(
                                 children: [
-                                  const Icon(Icons.comment_outlined, size: 14, color: AppColors.accentBlue),
+                                  Icon(Icons.comment_outlined, size: 14, color: scheme.primary),
                                   const SizedBox(width: 6),
                                   Expanded(
                                     child: Text(
                                       _annotations[index]!,
-                                      style: const TextStyle(
-                                        color: AppColors.accentBlue,
+                                      style: TextStyle(
+                                        color: scheme.primary,
                                         fontSize: 12,
                                         fontWeight: FontWeight.w500,
                                       ),
@@ -371,18 +371,18 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
-                color: AppColors.surfaceRaised,
+                color: scheme.surfaceContainer,
                 borderRadius: const BorderRadius.vertical(bottom: Radius.circular(11)),
-                border: const Border(top: BorderSide(color: AppColors.borderSubtle)),
+                border: Border(top: BorderSide(color: scheme.outlineVariant)),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.rate_review_outlined, size: 16, color: AppColors.accentBlue),
+                  Icon(Icons.rate_review_outlined, size: 16, color: scheme.primary),
                   const SizedBox(width: 8),
                   Text(
                     '${_annotations.length} note(s) de revue',
-                    style: const TextStyle(
-                      color: AppColors.inkPrimary,
+                    style: TextStyle(
+                      color: scheme.onSurface,
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
                     ),
@@ -404,33 +404,33 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
     );
   }
 
-  Widget _buildLineRow(_DiffLine line, bool hasComment) {
+  Widget _buildLineRow(_DiffLine line, bool hasComment, ColorScheme scheme) {
     Color bg = Colors.transparent;
-    Color textColor = AppColors.inkPrimary;
+    Color textColor = scheme.onSurface;
     String prefix = ' ';
 
     switch (line.type) {
       case _DiffLineType.addition:
-        bg = AppColors.diffInsertedLine;
+        bg = const Color(0x339BB955);
         textColor = const Color(0xFF4ADE80);
         prefix = '+';
         break;
       case _DiffLineType.deletion:
-        bg = AppColors.diffRemovedLine;
+        bg = const Color(0x33FF0000);
         textColor = const Color(0xFFF87171);
         prefix = '-';
         break;
       case _DiffLineType.hunkHeader:
-        bg = AppColors.accentBlue.withValues(alpha: 0.08);
-        textColor = AppColors.accentBlue;
+        bg = scheme.primary.withValues(alpha: 0.08);
+        textColor = scheme.primary;
         prefix = ' ';
         break;
       case _DiffLineType.meta:
-        textColor = AppColors.inkMuted;
+        textColor = scheme.outline;
         prefix = ' ';
         break;
       case _DiffLineType.context:
-        textColor = AppColors.inkSecondary;
+        textColor = scheme.onSurfaceVariant;
         prefix = ' ';
         break;
     }
@@ -446,8 +446,8 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
             child: Text(
               line.oldLine?.toString() ?? '',
               textAlign: TextAlign.right,
-              style: const TextStyle(
-                color: AppColors.inkMuted,
+              style: TextStyle(
+                color: scheme.outline,
                 fontSize: 11,
                 fontFamily: 'monospace',
               ),
@@ -459,8 +459,8 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
             child: Text(
               line.newLine?.toString() ?? '',
               textAlign: TextAlign.right,
-              style: const TextStyle(
-                color: AppColors.inkMuted,
+              style: TextStyle(
+                color: scheme.outline,
                 fontSize: 11,
                 fontFamily: 'monospace',
               ),
@@ -489,9 +489,9 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
             ),
           ),
           if (hasComment)
-            const Padding(
-              padding: EdgeInsets.only(right: 8),
-              child: Icon(Icons.comment, size: 14, color: AppColors.accentBlue),
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Icon(Icons.comment, size: 14, color: scheme.primary),
             ),
         ],
       ),
