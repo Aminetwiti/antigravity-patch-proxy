@@ -134,7 +134,7 @@ void main() {
     final ctrl = StreamController<dynamic>();
     final api = DaemonApi(
       incoming: ctrl.stream,
-      send: (d) => out.add(d as Map<String, dynamic>),
+      send: (d) => out.add(d is String ? jsonDecode(d) as Map<String, dynamic> : Map<String, dynamic>.from(d as Map)),
       timeout: const Duration(seconds: 1), // rÃ©sout vite : aucun daemon dans le test
     );
     addTearDown(ctrl.close);
@@ -171,7 +171,7 @@ void main() {
     final ctrl = StreamController<dynamic>();
     final api = DaemonApi(
       incoming: ctrl.stream,
-      send: (d) => out.add(d as Map<String, dynamic>),
+      send: (d) => out.add(d is String ? jsonDecode(d) as Map<String, dynamic> : Map<String, dynamic>.from(d as Map)),
       timeout: const Duration(seconds: 1),
     );
     addTearDown(ctrl.close);
@@ -267,7 +267,27 @@ void main() {
     final ctrl = StreamController<dynamic>();
     final api = DaemonApi(
       incoming: ctrl.stream,
-      send: (d) => out.add(d as Map<String, dynamic>),
+      send: (d) {
+        final map = d is String ? jsonDecode(d) as Map<String, dynamic> : Map<String, dynamic>.from(d as Map);
+        out.add(map);
+        final reqId = map['requestId'] ?? map['id'];
+        if (map['type'] == 'list_git_branches') {
+          ctrl.add(jsonEncode({
+            'type': 'response',
+            'requestId': reqId,
+            'data': {
+              'branches': ['main', 'feature/remote-v2'],
+            }
+          }));
+        }
+        if (map['type'] == 'send_command') {
+          ctrl.add(jsonEncode({
+            'type': 'response',
+            'requestId': reqId,
+            'data': {'status': 'ok'},
+          }));
+        }
+      },
       timeout: const Duration(seconds: 1),
     );
     addTearDown(ctrl.close);
@@ -283,7 +303,10 @@ void main() {
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('settings.activeBranch'), 'feature/remote-v2');
     expect(
-      out.any((m) => m['type'] == 'send_command' && m['command'] == '/checkout feature/remote-v2'),
+      out.any((m) =>
+          m['type'] == 'send_command' &&
+          ((m['data'] as Map?)?['command'] == '/checkout feature/remote-v2' ||
+              m['command'] == '/checkout feature/remote-v2')),
       isTrue,
       reason: '/checkout doit être envoyé au daemon lors du changement de branche',
     );
@@ -295,7 +318,7 @@ void main() {
     final ctrl = StreamController<dynamic>();
     final api = DaemonApi(
       incoming: ctrl.stream,
-      send: (d) => out.add(d as Map<String, dynamic>),
+      send: (d) => out.add(d is String ? jsonDecode(d) as Map<String, dynamic> : Map<String, dynamic>.from(d as Map)),
       timeout: const Duration(seconds: 1),
     );
     addTearDown(ctrl.close);
@@ -314,7 +337,9 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
 
     expect(
-      out.any((m) => m['type'] == 'send_command' && m['command'] == '/clear'),
+      out.any((m) =>
+          m['type'] == 'send_command' &&
+          ((m['data'] as Map?)?['command'] == '/clear' || m['command'] == '/clear')),
       isTrue,
       reason: '/clear doit être envoyé au daemon lors de la réinitialisation du projet',
     );

@@ -160,6 +160,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
             _SidebarActionItem(
               icon: Icons.history_rounded,
               label: 'Conversation History',
+              isSelected: false,
               onTap: () {
                 Navigator.of(context).pop();
                 widget.onConversationHistory?.call();
@@ -168,6 +169,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
             _SidebarActionItem(
               icon: Icons.schedule_outlined,
               label: 'Scheduled Tasks',
+              isSelected: false,
               onTap: () {
                 Navigator.of(context).pop();
                 widget.onScheduledTasks?.call();

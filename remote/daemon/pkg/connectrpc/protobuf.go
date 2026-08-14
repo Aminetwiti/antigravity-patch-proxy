@@ -125,7 +125,7 @@ func BuildCascadeConfig(modelUID string, modelEnum uint64) []byte {
 	// plan_model (field 1) : même valeur que requested_model ci-dessous.
 	// Le LS l'exige explicitement (« neither PlanModel nor RequestedModel »).
 	if modelEnum == 0 {
-		modelEnum = 246 // GOOGLE_GEMINI_2_5_PRO (défaut Antigravity)
+		modelEnum = 312 // GOOGLE_GEMINI_3_7_FLASH (défaut Antigravity 2.0 / haute capacité)
 	}
 	planner.varintField(1, modelEnum)
 

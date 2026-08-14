@@ -13,6 +13,7 @@ import '../../core/protocol/daemon_api.dart';
 import '../../core/protocol/model_catalog.dart';
 import '../../services/settings_store.dart';
 import '../../widgets/app_toast.dart';
+import '../../widgets/conflict_dialog.dart';
 import '../workspace/git_worktree_selector.dart';
 import 'appearance_settings_section.dart';
 import 'profile_settings_section.dart';
@@ -47,6 +48,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _useSsl = EnvConfig.useSsl;
   bool _toolNotifications = true;
   bool _diagnosticsBusy = false;
+  List<String> _branches = [];
+  bool _isLoadingBranches = false;
   String _selectedDefaultModel = 'Gemini 3.7 Flash Medium';
   // Délai d'auto-refus des approbations d'outils (0 = désactivé). Valeur par
   // défaut alignée sur le daemon (5 min) ; persisté et poussé au daemon via
@@ -55,7 +58,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late TextEditingController _approvalTimeoutController;
   int _approvalTimeoutMinutes = _defaultApprovalTimeoutMinutes;
   bool _approvalTimeoutSaved = false;
-
+  bool _mcpAllowlistStrict = true;
+  bool _isGeminiEnterprise = true;
   final List<String> _models = [
     'Gemini 3.7 Flash Medium',
     'Gemini 3.6 Flash Medium',
@@ -69,12 +73,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     'DeepSeek R1',
   ];
 
-  // Feature Gemini Enterprise & Enterprise Admin Policies
-  bool _isGeminiEnterprise = true;
-  String _geTier = 'GE-Plus';
-  String _inferenceRegion = 'UE (Europe)';
-  bool _mcpAllowlistStrict = true;
-  String _executionPolicy = 'request-review';
   String _activeBranch = 'main';
 
   @override
@@ -98,11 +96,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _models.insert(0, _selectedDefaultModel);
     }
     _toolNotifications = (s['toolNotifications'] as bool?) ?? true;
-    _isGeminiEnterprise = (s['isGeminiEnterprise'] as bool?) ?? true;
-    _geTier = (s['geTier'] as String?) ?? 'GE-Plus';
-    _inferenceRegion = (s['inferenceRegion'] as String?) ?? 'UE (Europe)';
-    _mcpAllowlistStrict = (s['mcpAllowlistStrict'] as bool?) ?? true;
-    _executionPolicy = (s['executionPolicy'] as String?) ?? 'request-review';
     _approvalTimeoutMinutes =
         (s['approvalTimeoutMinutes'] as int?) ?? _defaultApprovalTimeoutMinutes;
     _approvalTimeoutController =
@@ -112,6 +105,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
     widget.notifier?.setEnabled(_toolNotifications);
     _fetchCustomModels();
     _applyApprovalTimeoutToDaemon();
+    _fetchBranches();
+  }
+
+  Future<void> _fetchBranches() async {
+    if (widget.api == null) return;
+    setState(() => _isLoadingBranches = true);
+    try {
+      final branches = await widget.api!.listGitBranches();
+      if (mounted) {
+        setState(() {
+          _branches = branches;
+          if (!_branches.contains(_activeBranch) && _branches.isNotEmpty) {
+            _activeBranch = _branches.first;
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to fetch branches: $e');
+    } finally {
+      if (mounted) setState(() => _isLoadingBranches = false);
+    }
   }
 
   Future<void> _fetchCustomModels() async {
@@ -273,8 +287,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 20),
 
-          // ── GEMINI ENTERPRISE & GOOGLE CLOUD
-          const _SectionTitle(title: 'GEMINI ENTERPRISE & COMPLIANCE'),
+          // ── WORKSPACE & BRANCH
+          const _SectionTitle(title: 'WORKSPACE & BRANCH'),
           const SizedBox(height: 8),
 
           Card(
@@ -283,165 +297,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SwitchListTile(
-                    title: Text(
-                      'Compte Gemini Enterprise',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface),
-                    ),
-                    subtitle: Text(
-                      'Contrôles administrateur d\'organisation & Conditions Google Cloud',
-                      style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                    ),
-                    value: _isGeminiEnterprise,
-                    activeColor: Theme.of(context).colorScheme.primary,
-                    contentPadding: EdgeInsets.zero,
-                    onChanged: (val) {
-                      setState(() => _isGeminiEnterprise = val);
-                      SettingsStore.save({'isGeminiEnterprise': val});
-                    },
-                  ),
-                  if (_isGeminiEnterprise) ...[
-                    const Divider(),
-                    const SizedBox(height: 8),
-                    _buildAdaptivePair(
-                      context,
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Niveau d\'abonnement',
-                              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                          const SizedBox(height: 6),
-                          DropdownButtonFormField<String>(
-                            value: _geTier,
-                            dropdownColor: Theme.of(context).colorScheme.surfaceContainer,
-                            style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
-                            items: ['GE-Standard', 'GE-Plus']
-                                .map((t) => DropdownMenuItem(value: t, child: Text(t)))
-                                .toList(),
-                            onChanged: (val) {
-                              if (val != null) {
-                                setState(() => _geTier = val);
-                                SettingsStore.save({'geTier': val});
-                              }
-                            },
-                          ),
-                        ],
-                      ),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Inférence Régionalisée',
-                              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                          const SizedBox(height: 6),
-                          DropdownButtonFormField<String>(
-                            value: _inferenceRegion,
-                            dropdownColor: Theme.of(context).colorScheme.surfaceContainer,
-                            style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
-                            items: ['États-Unis', 'UE (Europe)', 'Global']
-                                .map((r) => DropdownMenuItem(value: r, child: Text(r)))
-                                .toList(),
-                            onChanged: (val) {
-                              if (val != null) {
-                                setState(() => _inferenceRegion = val);
-                                SettingsStore.save({'inferenceRegion': val});
-                              }
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.3),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.verified_user_outlined, size: 16, color: Theme.of(context).colorScheme.primary),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Licence attribuée automatiquement sous les conditions Google Cloud (Région : $_inferenceRegion).',
-                              style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.primary),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 20),
-
-          // ── POLITIQUES D'ADMINISTRATION D'ENTREPRISE
-          const _SectionTitle(title: 'POLITIQUES D\'ADMINISTRATION D\'ENTREPRISE'),
-          const SizedBox(height: 8),
-
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SwitchListTile(
-                    title: Text(
-                      'Liste d\'autorisation MCP stricte',
-                      style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
-                    ),
-                    subtitle: Text(
-                      'Seuls les serveurs MCP approuvés par l\'organisation sont autorisés',
-                      style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                    ),
-                    value: _mcpAllowlistStrict,
-                    activeColor: Theme.of(context).colorScheme.primary,
-                    contentPadding: EdgeInsets.zero,
-                    onChanged: (val) {
-                      setState(() => _mcpAllowlistStrict = val);
-                      SettingsStore.save({'mcpAllowlistStrict': val});
-                    },
-                  ),
-                  const Divider(),
-                  Text('Politique d\'exécution des outils', style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface)),
-                  const SizedBox(height: 4),
-                  Text('Définit quand l\'agent peut exécuter des commandes sur le workspace', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    value: _executionPolicy,
-                    decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8)),
-                    items: const [
-                      DropdownMenuItem(value: 'strict', child: Text('Strict (Approbat. manuelle)')),
-                      DropdownMenuItem(value: 'request-review', child: Text('Révision (Si sensible)')),
-                      DropdownMenuItem(value: 'always-proceed', child: Text('Auto (Sans approbat.)')),
-                    ],
-                    onChanged: (val) {
-                      if (val != null) {
-                        setState(() => _executionPolicy = val);
-                        SettingsStore.save({'executionPolicy': val});
-                      }
-                    },
-                  ),
-                  const Divider(),
-                  GitWorktreeSelector(
+                  _isLoadingBranches
+                    ? const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()))
+                    : GitWorktreeSelector(
                     currentBranch: _activeBranch,
-                    branches: const ['main', 'feature/remote-v2', 'fix/websocket-reconnect'],
+                    branches: _branches.isEmpty ? ['main'] : _branches,
                     onBranchSelected: (b) async {
+                      final oldBranch = _activeBranch;
                       setState(() => _activeBranch = b);
-                      await SettingsStore.save({'activeBranch': b});
                       try {
                         await widget.api?.sendCommand('/checkout $b');
-                      } catch (_) {}
-                      if (context.mounted) {
-                        AppToast.show(
-                          context,
-                          message: 'Branche active : $b',
-                          icon: Icons.alt_route,
-                          type: ToastType.info,
-                        );
+                        await SettingsStore.save({'activeBranch': b});
+                        if (context.mounted) {
+                          AppToast.show(
+                            context,
+                            message: 'Branche active : $b',
+                            icon: Icons.alt_route,
+                            type: ToastType.success,
+                          );
+                        }
+                      } catch (e) {
+                        setState(() => _activeBranch = oldBranch);
+                        final errMsg = e.toString().toLowerCase();
+                        if (context.mounted) {
+                          if (errMsg.contains('conflict') || errMsg.contains('uncommitted') || errMsg.contains('merge') || errMsg.contains('please commit')) {
+                            final force = await ConflictDialog.show(
+                              context,
+                              title: 'Conflit Git détecté',
+                              message: 'Le changement vers la branche "$b" a échoué car vous avez des modifications non commitées qui seraient écrasées.',
+                              conflictDetails: e.toString(),
+                              primaryButtonText: 'Forcer (perte locale)',
+                            );
+                            if (force == true && widget.api != null) {
+                              try {
+                                await widget.api!.sendCommand('/checkout -f $b');
+                                setState(() => _activeBranch = b);
+                                await SettingsStore.save({'activeBranch': b});
+                                if (context.mounted) {
+                                  AppToast.show(context, message: 'Branche forcée : $b', type: ToastType.success);
+                                }
+                              } catch (e2) {
+                                if (context.mounted) {
+                                  AppToast.show(context, message: 'Échec du checkout forcé.', type: ToastType.error);
+                                }
+                              }
+                            }
+                          } else {
+                             AppToast.show(context, message: 'Erreur lors du checkout.', type: ToastType.error);
+                          }
+                        }
                       }
                     },
                   ),
@@ -699,6 +603,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
           ),
+
+          const SizedBox(height: 20),
+
+          // ── ENTERPRISE & ADMINISTRATION
+          const _SectionTitle(title: 'ENTERPRISE & ADMINISTRATION'),
+          const SizedBox(height: 8),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SwitchListTile(
+                    title: Text(
+                      'Gemini Enterprise Tier',
+                      style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                    ),
+                    subtitle: Text(
+                      'Activer les fonctionnalités d\'entreprise et quotas étendus',
+                      style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                    value: _isGeminiEnterprise,
+                    activeColor: Theme.of(context).colorScheme.primary,
+                    contentPadding: EdgeInsets.zero,
+                    onChanged: (val) {
+                      setState(() => _isGeminiEnterprise = val);
+                      SettingsStore.save({'isGeminiEnterprise': val});
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    title: Text(
+                      'Liste d\'autorisation MCP stricte',
+                      style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                    ),
+                    subtitle: Text(
+                      'Restreindre l\'accès aux serveurs MCP explicitement approuvés',
+                      style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                    value: _mcpAllowlistStrict,
+                    activeColor: Theme.of(context).colorScheme.primary,
+                    contentPadding: EdgeInsets.zero,
+                    onChanged: (val) {
+                      setState(() => _mcpAllowlistStrict = val);
+                      SettingsStore.save({'mcpAllowlistStrict': val});
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 20),
 
           // ── APPEARANCE
           const _SectionTitle(title: 'APPEARANCE'),

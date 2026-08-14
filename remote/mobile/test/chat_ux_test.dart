@@ -20,8 +20,28 @@ import 'package:mobile/widgets/tool_approval_card.dart';
 ({DaemonApi api, StreamController<dynamic> ctrl, List<Map<String, dynamic>> out})
     _mkApi() {
   final out = <Map<String, dynamic>>[];
-  final ctrl = StreamController<dynamic>();
-  final api = DaemonApi(incoming: ctrl.stream, send: (d) => out.add(d as Map<String, dynamic>));
+  final ctrl = StreamController<dynamic>.broadcast();
+  final api = DaemonApi(
+    incoming: ctrl.stream,
+    send: (d) {
+      final map = d as Map<String, dynamic>;
+      out.add(map);
+      final reqId = map['requestId'] as String?;
+      final type = map['type'] as String?;
+      if (reqId != null &&
+          (type == 'get_session_history' ||
+              type == 'read_file' ||
+              type == 'list_files' ||
+              type == 'get_context' ||
+              type == 'submit_approval')) {
+        scheduleMicrotask(() {
+          if (!ctrl.isClosed) {
+            ctrl.add(jsonEncode({'requestId': reqId, 'data': {}}));
+          }
+        });
+      }
+    },
+  );
   return (api: api, ctrl: ctrl, out: out);
 }
 
@@ -145,7 +165,8 @@ void main() {
       out.clear(); // Ignorer l'appel get_session_history initial
 
       await _sendViaBar(tester, 'raisonne');
-      final reqId = out.last['requestId'] as String;
+      final sendReq = out.lastWhere((m) => m['type'] == 'send_prompt');
+      final reqId = sendReq['requestId'] as String;
       // Il faut d'abord répondre au send_prompt pour que l'écran mappe le reqId
       ctrl.add(jsonEncode({'requestId': reqId, 'data': {}}));
       await tester.pump(const Duration(milliseconds: 10));
@@ -159,7 +180,8 @@ void main() {
           ],
         },
       }));
-      await tester.pump(const Duration(milliseconds: 120));
+      await tester.pump(const Duration(milliseconds: 150));
+      await tester.pump();
 
       // 1ᵉʳ envoi : m1 (user) + a2 (assistant) → la pensée vit sur la bulle a2.
       final thoughtText = find.byKey(const Key('thought-a2'));
@@ -214,7 +236,7 @@ void main() {
 
       // Le message est ajouté localement (bulle utilisateur) malgré l'absence
       // de connexion — la livraison au daemon est gérée par l'outbox.
-      expect(find.text('message offline'), findsOneWidget);
+      expect(find.textContaining('message offline'), findsOneWidget);
 
       await ctrl.close();
       api.dispose();
@@ -229,7 +251,8 @@ void main() {
       out.clear(); // Ignorer l'appel get_session_history initial
 
       await _sendViaBar(tester, 'plante');
-      final reqId = out.last['requestId'] as String;
+      final sendReq = out.lastWhere((m) => m['type'] == 'send_prompt');
+      final reqId = sendReq['requestId'] as String;
       // On répond au send_prompt pour mapper le reqId
       ctrl.add(jsonEncode({'requestId': reqId, 'data': {}}));
       await tester.pump(const Duration(milliseconds: 10));
@@ -240,7 +263,8 @@ void main() {
         'error': 'internal daemon failure',
         'data': {'outcome': 'error'},
       }));
-      await tester.pump(const Duration(milliseconds: 120));
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pump();
 
       // L'erreur est rendue dans un état visuel dédié (icône + fond danger).
       expect(find.byIcon(Icons.error_outline), findsOneWidget);

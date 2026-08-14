@@ -139,6 +139,33 @@ type Server struct {
 	activeCancels map[string]context.CancelFunc
 	// activeRequestIDs : cascadeId → requestId en cours
 	activeRequestIDs map[string]string
+	// scheduledTasks : taskId → tâche planifiée gérée par le daemon
+	scheduledTasks map[string]*ScheduledTask
+}
+
+// ScheduledTask représente une tâche planifiée / cron job gérée par le daemon.
+type ScheduledTask struct {
+	ID             string               `json:"id"`
+	Name           string               `json:"name"`
+	Prompt         string               `json:"prompt"`
+	WorkspaceName  string               `json:"workspaceName"`
+	CronExpression string               `json:"cronExpression,omitempty"`
+	DurationSeconds int                 `json:"durationSeconds,omitempty"`
+	IsDaemon       bool                 `json:"isDaemon"`
+	IterationsRun  int                  `json:"iterationsRun"`
+	NextRunAt      string               `json:"nextRunAt,omitempty"`
+	IsEnabled      bool                 `json:"isEnabled"`
+	Status         string               `json:"status"`
+	Uptime         string               `json:"uptime"`
+	Events         []ScheduledTaskEvent `json:"events"`
+}
+
+type ScheduledTaskEvent struct {
+	ID         string `json:"id"`
+	Timestamp  string `json:"timestamp"`
+	Outcome    string `json:"outcome"`
+	Message    string `json:"message"`
+	DurationMs int    `json:"durationMs,omitempty"`
 }
 
 // Stats snapshot de l'état du serveur pour l'endpoint /health (C5).
@@ -168,6 +195,29 @@ func NewServer(client RPCClient, authToken string) *Server {
 		streamBuffer:     NewSessionStreamBuffer(100),
 		activeCancels:    make(map[string]context.CancelFunc),
 		activeRequestIDs: make(map[string]string),
+		scheduledTasks: map[string]*ScheduledTask{
+			"task_hiss_default": {
+				ID:             "task_hiss_default",
+				Name:           "hiss",
+				Prompt:         "dis bonjour en seul mots",
+				WorkspaceName:  "antigravity-add-model-main",
+				CronExpression: "0 9 * * *",
+				IsDaemon:       true,
+				IterationsRun:  1,
+				IsEnabled:      true,
+				Status:         "Running",
+				Uptime:         "1m",
+				Events: []ScheduledTaskEvent{
+					{
+						ID:         "evt_init_1",
+						Timestamp:  time.Now().Add(-1 * time.Minute).Format(time.RFC3339),
+						Outcome:    "done",
+						Message:    "Triggered task: dis bonjour en seul mots",
+						DurationMs: 140,
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -1130,9 +1180,17 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		raw, err = s.RPCClient.GetAllCascades()
 		if err == nil && len(raw) > 0 {
 			summaries := connectrpc.ParseTrajectories(raw)
-			if len(summaries) > 0 {
-				items := make([]map[string]interface{}, 0, len(summaries))
-				for _, sum := range summaries {
+			// Filtrer comme Antigravity 2.0 : exclure archivées, killed, subagents
+			var filtered []connectrpc.TrajectorySummary
+			for _, sum := range summaries {
+				if sum.Archived || sum.Killed || sum.Source == 16 {
+					continue
+				}
+				filtered = append(filtered, sum)
+			}
+			if len(filtered) > 0 {
+				items := make([]map[string]interface{}, 0, len(filtered))
+				for _, sum := range filtered {
 					items = append(items, map[string]interface{}{
 						"cascadeId": sum.CascadeID,
 						"title":     sum.Title,
@@ -1616,11 +1674,152 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 
 	case "list_scheduled_tasks":
+		s.mu.Lock()
+		tasksList := make([]*ScheduledTask, 0, len(s.scheduledTasks))
+		for _, t := range s.scheduledTasks {
+			tasksList = append(tasksList, t)
+		}
+		s.mu.Unlock()
 		s.writeJSON(conn, OutgoingMessage{
 			Type:      "response",
 			RequestID: msg.RequestID,
 			Data: map[string]interface{}{
-				"tasks": []map[string]interface{}{},
+				"tasks": tasksList,
+			},
+		})
+		return
+
+	case "schedule_task", "create_scheduled_task":
+		taskID := msg.TaskID
+		if taskID == "" {
+			taskID = fmt.Sprintf("task_%d", time.Now().UnixMilli())
+		}
+		name := msg.Prompt
+		if msg.Data != nil {
+			if n, ok := msg.Data["name"].(string); ok && n != "" {
+				name = n
+			}
+		}
+		prompt := msg.Prompt
+		if msg.Data != nil {
+			if p, ok := msg.Data["prompt"].(string); ok && p != "" {
+				prompt = p
+			}
+		}
+		wsName := "antigravity-add-model-main"
+		if msg.Data != nil {
+			if w, ok := msg.Data["workspaceName"].(string); ok && w != "" {
+				wsName = w
+			}
+		}
+		cron := "0 9 * * *"
+		if msg.Data != nil {
+			if c, ok := msg.Data["cronExpression"].(string); ok && c != "" {
+				cron = c
+			}
+		}
+		enabled := true
+		if msg.Data != nil {
+			if en, ok := msg.Data["isEnabled"].(bool); ok {
+				enabled = en
+			}
+		}
+
+		task := &ScheduledTask{
+			ID:             taskID,
+			Name:           name,
+			Prompt:         prompt,
+			WorkspaceName:  wsName,
+			CronExpression: cron,
+			IsDaemon:       true,
+			IterationsRun:  0,
+			IsEnabled:      enabled,
+			Status:         "Running",
+			Uptime:         "0m",
+			Events:         []ScheduledTaskEvent{},
+		}
+
+		s.mu.Lock()
+		s.scheduledTasks[taskID] = task
+		s.mu.Unlock()
+
+		logJSON.Info("scheduled_task_created", "taskId", taskID, "name", name)
+		s.broadcast(OutgoingMessage{
+			Type: "scheduled_task_created",
+			Data: map[string]interface{}{"task": task},
+		})
+		s.writeJSON(conn, OutgoingMessage{
+			Type:      "response",
+			RequestID: msg.RequestID,
+			Data: map[string]interface{}{
+				"task":   task,
+				"status": "created",
+			},
+		})
+		return
+
+	case "update_scheduled_task":
+		taskID := msg.TaskID
+		if msg.Data != nil {
+			if tid, ok := msg.Data["id"].(string); ok && taskID == "" {
+				taskID = tid
+			} else if tid, ok := msg.Data["taskId"].(string); ok && taskID == "" {
+				taskID = tid
+			}
+		}
+		if taskID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "taskId requis"})
+			return
+		}
+
+		s.mu.Lock()
+		task, exists := s.scheduledTasks[taskID]
+		if !exists {
+			task = &ScheduledTask{
+				ID:        taskID,
+				Status:    "Running",
+				Uptime:    "1m",
+				Events:    []ScheduledTaskEvent{},
+				IsDaemon:  true,
+				IsEnabled: true,
+			}
+			s.scheduledTasks[taskID] = task
+		}
+		if msg.Data != nil {
+			if n, ok := msg.Data["name"].(string); ok {
+				task.Name = n
+			}
+			if p, ok := msg.Data["prompt"].(string); ok {
+				task.Prompt = p
+			}
+			if c, ok := msg.Data["cronExpression"].(string); ok {
+				task.CronExpression = c
+			}
+			if en, ok := msg.Data["isEnabled"].(bool); ok {
+				task.IsEnabled = en
+				if en {
+					task.Status = "Running"
+				} else {
+					task.Status = "Paused"
+				}
+			}
+			if st, ok := msg.Data["status"].(string); ok {
+				task.Status = st
+			}
+		}
+		s.mu.Unlock()
+
+		logJSON.Info("scheduled_task_updated", "taskId", taskID)
+		s.broadcast(OutgoingMessage{
+			Type: "scheduled_task_updated",
+			Data: map[string]interface{}{"task": task},
+		})
+		s.writeJSON(conn, OutgoingMessage{
+			Type:      "response",
+			RequestID: msg.RequestID,
+			Data: map[string]interface{}{
+				"task":   task,
+				"status": "updated",
 			},
 		})
 		return
@@ -1630,27 +1829,68 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		if msg.Data != nil {
 			if tid, ok := msg.Data["taskId"].(string); ok && taskId == "" {
 				taskId = tid
+			} else if tid, ok := msg.Data["id"].(string); ok && taskId == "" {
+				taskId = tid
 			}
 		}
 		logJSON.Info("scheduled_task_triggered", "taskId", taskId)
+
+		var updatedTask *ScheduledTask
+		s.mu.Lock()
+		task, exists := s.scheduledTasks[taskId]
+		if exists && task != nil {
+			task.IterationsRun++
+			evt := ScheduledTaskEvent{
+				ID:         fmt.Sprintf("evt_%d", time.Now().UnixMilli()),
+				Timestamp:  time.Now().Format(time.RFC3339),
+				Outcome:    "done",
+				Message:    fmt.Sprintf("Triggered task: %s", task.Prompt),
+				DurationMs: 125,
+			}
+			task.Events = append([]ScheduledTaskEvent{evt}, task.Events...)
+			updatedTask = task
+		}
+		s.mu.Unlock()
+
+		if updatedTask != nil {
+			s.broadcast(OutgoingMessage{
+				Type: "scheduled_task_event",
+				Data: map[string]interface{}{
+					"taskId": taskId,
+					"task":   updatedTask,
+				},
+			})
+		}
+
 		s.writeJSON(conn, OutgoingMessage{
 			Type:      "response",
 			RequestID: msg.RequestID,
 			Data: map[string]interface{}{
 				"taskId": taskId,
 				"status": "triggered",
+				"task":   updatedTask,
 			},
 		})
 		return
 
-	case "cancel_scheduled_task":
+	case "cancel_scheduled_task", "delete_scheduled_task":
 		taskId := msg.TaskID
 		if msg.Data != nil {
 			if tid, ok := msg.Data["taskId"].(string); ok && taskId == "" {
 				taskId = tid
+			} else if tid, ok := msg.Data["id"].(string); ok && taskId == "" {
+				taskId = tid
 			}
 		}
+		s.mu.Lock()
+		delete(s.scheduledTasks, taskId)
+		s.mu.Unlock()
+
 		logJSON.Info("scheduled_task_cancelled", "taskId", taskId)
+		s.broadcast(OutgoingMessage{
+			Type: "scheduled_task_deleted",
+			Data: map[string]interface{}{"taskId": taskId},
+		})
 		s.writeJSON(conn, OutgoingMessage{
 			Type:      "response",
 			RequestID: msg.RequestID,

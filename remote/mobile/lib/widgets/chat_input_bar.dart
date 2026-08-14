@@ -81,24 +81,33 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   Future<void> _loadModelsAndPreferences() async {
+    List<AntigravityModel> models = _availableModels;
+    if (widget.api != null) {
+      try {
+        final fetched = await ModelCatalog.getAllAvailableModels(widget.api);
+        if (fetched.isNotEmpty) {
+          models = fetched;
+          if (mounted) {
+            setState(() {
+              _availableModels = models;
+            });
+          }
+        }
+      } catch (_) {}
+    }
+
     try {
       final s = await SettingsStore.load();
       final savedModel = s['defaultModel'] as String?;
       if (savedModel != null && savedModel.isNotEmpty && mounted) {
+        final matched = ModelCatalog.findModel(savedModel, customModels: models);
         setState(() {
-          _selectedModel = savedModel.split(' ').take(3).join(' ');
+          _selectedModel = matched.shortName;
+          _selectedModelId = matched.id;
+          _selectedModelEnum = matched.modelEnum;
         });
       }
     } catch (_) {}
-
-    if (widget.api != null) {
-      final models = await ModelCatalog.getAllAvailableModels(widget.api);
-      if (mounted && models.isNotEmpty) {
-        setState(() {
-          _availableModels = models;
-        });
-      }
-    }
   }
 
   void _onTextChanged() {

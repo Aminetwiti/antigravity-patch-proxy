@@ -126,7 +126,13 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   // locale (qui vise l'écran verrouillé / l'app en arrière-plan).
   bool _appInForeground = true;
 
-  // ── Fenêtre paginée de conversation (Reverse scrolling / Chunked window) ──
+  // ── Fenêtre paginée de conversation (Reverse Chunked Pagination) ──
+  // Principe : tous les messages sont en mémoire dans _messages (chargés une
+  // seule fois depuis l'historique). On n'affiche que les N derniers
+  // (_visibleCount). Quand l'utilisateur scrolle vers le haut jusqu'au bord,
+  // on incrémente _visibleCount de _pageSize — ce qui révèle les N messages
+  // précédents sans aucun appel réseau supplémentaire.
+  // Temps de rendu initial = O(1) quel que soit le nombre total de messages.
   static const int _pageSize = 20;
   final Map<String, int> _visibleCounts = {};
   int get _visibleCount =>
@@ -193,22 +199,33 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         if (!mounted) return;
         final rawMessages = data['messages'] as List?;
         if (rawMessages != null && rawMessages.isNotEmpty) {
-          setState(() {
-            _messages.clear();
-            for (final m in rawMessages) {
-              if (m is Map) {
-                _messages.add(ChatMessage(
-                  id: m['id']?.toString() ?? '',
-                  sender: m['sender']?.toString() ?? 'assistant',
-                  text: m['text']?.toString() ?? '',
-                  thought: m['thought']?.toString(),
-                  timestamp: m['timestamp']?.toString() ?? '',
-                  isError: m['isError'] == true,
-                ));
-              }
+          final parsed = <ChatMessage>[];
+          for (final m in rawMessages) {
+            if (m is Map) {
+              parsed.add(ChatMessage(
+                id: m['id']?.toString() ?? '',
+                sender: m['sender']?.toString() ?? 'assistant',
+                text: m['text']?.toString() ?? '',
+                thought: m['thought']?.toString(),
+                timestamp: m['timestamp']?.toString() ?? '',
+                isError: m['isError'] == true,
+              ));
             }
+          }
+          // Stocker tous les messages en mémoire, n'afficher que les _pageSize
+          // derniers via _visibleMessages. Le scroll est positionné en bas
+          // instantanément (sans animation) pour un rendu 60 FPS immédiat.
+          setState(() {
+            _messages
+              ..clear()
+              ..addAll(parsed);
           });
-          Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted || !_scrollController.hasClients) return;
+            _scrollController.jumpTo(
+              _scrollController.position.maxScrollExtent,
+            );
+          });
         }
       }).catchError((_) {
         // Ignorer l'erreur
@@ -411,7 +428,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       } else if (_messageQueue.isNotEmpty) {
         final next = _messageQueue.removeAt(0);
         final text = next['text'] as String;
-        _sendPromptToDaemon(text);
+        final modelUID = next['modelUID'] as String?;
+        final modelEnum = next['modelEnum'] as int?;
+        _sendPromptToDaemon(text, modelUID: modelUID, modelEnum: modelEnum);
       }
     }
   }
@@ -568,6 +587,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       if (type == 'stream_start') {
         _onStreamStarted();
         setState(() {
+          _isLoadingHistory = false;
           _messages.add(ChatMessage(
             id: 'ext-$requestId',
             sender: 'assistant',
@@ -645,7 +665,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
   final List<Map<String, dynamic>> _messageQueue = [];
 
-  void _handleSendMessage(String text, {bool queued = false}) {
+  void _handleSendMessage(
+    String text, {
+    bool queued = false,
+    String? modelUID,
+    int? modelEnum,
+  }) {
     if (text.trim().startsWith('/btw ') || text.trim().startsWith('/btw')) {
       final sideQ = text.trim().replaceFirst(RegExp(r'^/btw\s*'), '');
       setState(() {
@@ -666,6 +691,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
     final api = widget.api;
     setState(() {
+      _isLoadingHistory = false;
       _messages.add(ChatMessage(
         id: 'm${++_messageCounter}',
         sender: 'user',
@@ -677,14 +703,19 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     if (api == null) return;
 
     if (queued && _activeStreamCount > 0) {
-      _messageQueue.add({'text': text, 'activeSessionId': widget.activeSessionId});
+      _messageQueue.add({
+        'text': text,
+        'activeSessionId': widget.activeSessionId,
+        'modelUID': modelUID,
+        'modelEnum': modelEnum,
+      });
       return;
     }
 
-    _sendPromptToDaemon(text);
+    _sendPromptToDaemon(text, modelUID: modelUID, modelEnum: modelEnum);
   }
 
-  void _sendPromptToDaemon(String text) {
+  void _sendPromptToDaemon(String text, {String? modelUID, int? modelEnum}) {
     final api = widget.api;
     if (api == null) return;
 
@@ -692,6 +723,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final assistantId = 'a${++_messageCounter}';
     _lastLocalStreamEnd = null;
     setState(() {
+      _isLoadingHistory = false;
       _messages.add(ChatMessage(
         id: assistantId,
         sender: 'assistant',
@@ -704,7 +736,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
     var thoughtBuffer = StringBuffer();
     _onStreamStarted();
-    api.sendPrompt(widget.activeSessionId, text).listen(
+    api.sendPrompt(
+      widget.activeSessionId,
+      text,
+      modelUID: modelUID,
+      modelEnum: modelEnum,
+    ).listen(
       (msg) {
         if (msg['type'] == 'stream_end') {
           _lastLocalStreamEnd = msg;
@@ -755,15 +792,16 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           if (idx >= 0) {
             // Audit UX P2-9 : un stream_end avec error/outcome error doit
             // afficher la bulle d'erreur dédiée (fond danger), pas une bulle
-            // vide ni du markdown brut.
-            final end = _lastLocalStreamEnd ?? const {};
-            final error =
-                end['error'] as String? ??
-                (end['data'] is Map
-                    ? (end['data'] as Map)['outcome'] == 'error'
-                        ? (end['data'] as Map)['message'] as String? ?? 'Erreur'
+            String? error =
+                _lastLocalStreamEnd?['error'] as String? ??
+                (_lastLocalStreamEnd?['data'] is Map
+                    ? (_lastLocalStreamEnd!['data'] as Map)['outcome'] == 'error'
+                        ? (_lastLocalStreamEnd!['data'] as Map)['message'] as String? ?? 'Erreur'
                         : null
                     : null);
+            if (error != null && (error.contains('MODEL_CAPACITY_EXHAUSTED') || error.contains('No capacity available') || error.contains('503'))) {
+              error = '⚠️ Capacité du modèle saturée sur les serveurs (HTTP 503 / MODEL_CAPACITY_EXHAUSTED).\nVeuillez basculer vers Gemini 3.7 Flash, Claude ou un modèle custom via le sélecteur ci-dessous.';
+            }
             _messages[idx] = _messages[idx].copyWith(
               isStreaming: false,
               isError: error != null,
@@ -855,6 +893,84 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         curve: Curves.easeOut,
       );
     }
+  }
+
+  Widget _buildHistorySkeleton() {
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      physics: const NeverScrollableScrollPhysics(),
+      children: [
+        // Skeleton user bubble
+        Align(
+          alignment: Alignment.centerRight,
+          child: Container(
+            width: 200,
+            height: 48,
+            decoration: BoxDecoration(
+              color: AppColors.surfaceRaised.withValues(alpha: 0.6),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.borderSubtle),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        // Skeleton assistant bubble
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Container(
+            width: 280,
+            height: 80,
+            decoration: BoxDecoration(
+              color: AppColors.surfaceInput.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.borderSubtle),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        // Skeleton user bubble 2
+        Align(
+          alignment: Alignment.centerRight,
+          child: Container(
+            width: 160,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.surfaceRaised.withValues(alpha: 0.6),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.borderSubtle),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        // Skeleton assistant thought + text
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 220,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceHover.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                width: 310,
+                height: 110,
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceInput.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.borderSubtle),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildReminderBanners() {

@@ -228,20 +228,28 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                   color: Theme.of(context).colorScheme.surfaceContainer,
                   child: Row(
                     children: [
-                      Icon(Icons.description_outlined, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      Icon(
+                        _selectedFilePath.isEmpty
+                            ? Icons.folder_open_outlined
+                            : Icons.description_outlined,
+                        size: 16,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: Row(
-                          children: [
-                            Text(
-                              _selectedFilePath,
-                              style: TextStyle(
-                                fontSize: 12.5,
-                                color: Theme.of(context).colorScheme.onSurface,
-                              ),
-                              overflow: TextOverflow.ellipsis,
+                        child: Tooltip(
+                          message: _selectedFilePath.isEmpty ? 'Sélectionnez un fichier' : _selectedFilePath,
+                          child: Text(
+                            _selectedFilePath.isEmpty ? 'Sélectionnez un fichier' : _selectedFilePath,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              color: _selectedFilePath.isEmpty
+                                  ? Theme.of(context).colorScheme.onSurfaceVariant
+                                  : Theme.of(context).colorScheme.onSurface,
                             ),
-                          ],
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                          ),
                         ),
                       ),
                       IconButton(
@@ -799,17 +807,21 @@ class _TreeFolder extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: EdgeInsets.only(left: 8.0 + depth * 14, top: 4, bottom: 4),
+      padding: EdgeInsets.only(left: 8.0 + depth * 14, top: 4, bottom: 4, right: 8),
       child: Row(
         children: [
           Icon(Icons.folder_rounded, size: 15, color: scheme.onSurfaceVariant),
           const SizedBox(width: 6),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w500,
-              color: scheme.onSurface,
+          Expanded(
+            child: Text(
+              title,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w500,
+                color: scheme.onSurface,
+              ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
             ),
           ),
         ],
@@ -887,6 +899,7 @@ class _TreeFile extends StatelessWidget {
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                 ),
                 overflow: TextOverflow.ellipsis,
+                maxLines: 1,
               ),
             ),
           ],

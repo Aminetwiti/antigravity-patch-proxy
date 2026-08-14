@@ -19,10 +19,12 @@ class SessionParser {
       for (final s in sessions) {
         if (s is Map<String, dynamic>) {
           final id = s['cascadeId'] ?? s['id'];
-          // Filtrer les entrées sans clé primaire : une session sans id est
-          // inutilisable (impossible de la reprendre / l'annuler).
+          // Filtrer les entrées sans clé primaire ou non disponibles (archivées, killed, supprimées)
           if (id is String && id.isNotEmpty) {
-            out.add(CascadeSession.fromJson(s));
+            final session = CascadeSession.fromJson(s);
+            if (session.isAvailable) {
+              out.add(session);
+            }
           }
         }
       }
@@ -67,13 +69,16 @@ class SessionParser {
       final title = _legacyTitleOf(f, text, blob);
       if (id.isEmpty) continue;
 
-      sessions.add(CascadeSession(
+      final session = CascadeSession(
         id: id,
         workspacePath: _workspaceOf(combined),
         title: title,
         status: 'CASCADE_STATUS_READY',
         time: 'Just now',
-      ));
+      );
+      if (session.isAvailable) {
+        sessions.add(session);
+      }
     }
     return sessions;
   }

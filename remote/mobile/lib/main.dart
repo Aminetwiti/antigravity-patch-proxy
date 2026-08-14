@@ -18,11 +18,38 @@ import 'theme/app_theme.dart';
 import 'features/sessions/sessions_list.dart';
 import 'features/sessions/conversation_history_screen.dart';
 import 'features/scheduled_tasks/scheduled_tasks_screen.dart';
-import 'features/scheduled_tasks/models/scheduled_task_item.dart';
 import 'services/settings_store.dart';
 import 'widgets/right_sidebar_drawer.dart';
 
 void main() {
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        color: const Color(0xFF1E1E24), // Fallback dark surface
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, color: Colors.redAccent, size: 48),
+            const SizedBox(height: 16),
+            const Text(
+              'Erreur de rendu UI',
+              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              details.exceptionAsString(),
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+              textAlign: TextAlign.center,
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      ),
+    );
+  };
   runApp(const AntigravityRemoteApp());
 }
 
@@ -115,6 +142,21 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     // (le tunnel Cloudflare change d'URL à chaque redémarrage du daemon).
     _wsClient.onSessionEstablished = (url, token) {
       SettingsStore.saveSession(wsUrl: url, token: token, sessionId: _activeSessionId);
+    };
+    // Token obsolète (daemon redémarré avec un nouveau --auth-token) :
+    // on efface la session persistée ET le csrf des réglages (le serveur
+    // vient de rejeter ce token : il est définitivement invalide), puis on
+    // retente immédiatement — sinon ~30 s de 401 en boucle.
+    _wsClient.onAuthRejected = () async {
+      final hadSession = (await SettingsStore.loadSession()).isNotEmpty;
+      SettingsStore.clearSession();
+      SettingsStore.save({'csrf': ''});
+      // Garde anti-boucle : si aucune session n'existait, on ne relance pas
+      // (le backoff de _handleDisconnect s'en charge) pour ne pas créer une
+      // boucle infinie de reconnexions 401.
+      if (hadSession) {
+        _connectWithSavedSettings();
+      }
     };
     ApprovalNotifier.instance.init();
     // Restaure la dernière session active (si encore valide) sans attendre
@@ -374,11 +416,12 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       MaterialPageRoute(
         builder: (context) => ScheduledTasksScreen(
           tasks: const [],
+          api: _api,
           workspaces: workspaces.isNotEmpty ? workspaces : ['antigravity-add-model-main'],
-          onTriggerNow: (id) {},
-          onCancelTask: (id) {},
+          onTriggerNow: (id) => _api?.triggerScheduledTask(id),
+          onCancelTask: (id) => _api?.cancelScheduledTask(id),
           onToggleTask: (id, enabled) {},
-          onAddTask: (task) {},
+          onAddTask: (task) => _api?.scheduleTask(task),
         ),
       ),
     );
@@ -806,63 +849,4 @@ class _SessionHistorySheetState extends State<_SessionHistorySheet> {
   }
 }
 
-/// Feuille « Tâches planifiées » : reflète l'état réel de la file d'attente
-/// hors-ligne (outbox). Le daemon n'expose pas encore de RPC
-/// `list_scheduled_tasks` — ce panneau est prêt à s'y brancher.
-class _ScheduledTasksSheet extends StatelessWidget {
-  final OutboxQueue outbox;
 
-  const _ScheduledTasksSheet({required this.outbox});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
-      ),
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 32,
-                height: 4,
-                decoration: BoxDecoration(color: scheme.outlineVariant, borderRadius: BorderRadius.circular(AppRadius.pill)),
-              ),
-              const SizedBox(height: 16),
-              Icon(Icons.schedule, size: 32, color: scheme.primary),
-              const SizedBox(height: 12),
-              Text('Tâches planifiées', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: scheme.onSurface)),
-              const SizedBox(height: 6),
-              if (outbox.hasPending)
-                ...outbox.snapshot().map((m) => Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Row(
-                        children: [
-                          Icon(Icons.hourglass_top, size: 14, color: scheme.tertiary),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              m['prompt']?.toString() ?? m['type']?.toString() ?? 'Message en attente',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ))
-              else
-                Text('Aucune tâche planifiée en arrière-plan.', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
-              const SizedBox(height: 16),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}

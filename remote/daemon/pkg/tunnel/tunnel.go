@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -212,7 +213,14 @@ func (m *Manager) Stop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.cmd != nil && m.cmd.Process != nil {
-		m.cmd.Process.Kill()
+		// Windows : taskkill /T /PID pour tuer cloudflared + ses enfants
+		// (groupe de processus créé dans startCloudflare). Sur les autres
+		// plateformes, le kill simple suffit.
+		if runtime.GOOS == "windows" {
+			exec.Command("taskkill", "/T", "/F", "/PID", fmt.Sprintf("%d", m.cmd.Process.Pid)).Run()
+		} else {
+			m.cmd.Process.Kill()
+		}
 	}
 }
 

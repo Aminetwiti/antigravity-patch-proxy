@@ -21,6 +21,7 @@ class DaemonWebSocketClient {
   String _targetUrl = EnvConfig.wsUrl;
   String? _authToken;
   bool _manualDisconnect = false;
+  bool _connecting = false;
   int _reconnectAttempts = 0;
 
   /// Backoff exponentiel : 2s → 4s → 8s → 16s → 30s (plafond).
@@ -72,6 +73,12 @@ class DaemonWebSocketClient {
   /// persister la session (URL + token) pour la reconnexion directe.
   void Function(String url, String token)? onSessionEstablished;
 
+  /// Callback appelé quand le serveur rejette notre token (HTTP 401) : le
+  /// consumer doit effacer la session persistée (token obsolète après un
+  /// redémarrage du daemon avec un nouveau --auth-token) et re-tenter sans
+  /// l'ancien token au lieu de marteler un 401 en boucle.
+  void Function()? onAuthRejected;
+
   /// URL complète actuellement ciblée (réutilisée pour re-sauvegarde).
   String get targetUrl => _targetUrl;
 
@@ -93,6 +100,13 @@ class DaemonWebSocketClient {
     }
 
     _manualDisconnect = false;
+    // Garde anti-boucle : si un connect() est déjà en vol (par ex. le
+    // onAuthRejected qui relance pendant que _handleDisconnect a déjà
+    // planifié un backoff), on ne lance pas un second connect() concurrent.
+    if (_connecting) {
+      return;
+    }
+    _connecting = true;
     statusNotifier.value = ConnectionStatus.connecting;
     _messageController ??= StreamController<dynamic>.broadcast();
 
@@ -129,6 +143,7 @@ class DaemonWebSocketClient {
       }
 
       _socket = socket;
+      _connecting = false;
       statusNotifier.value = ConnectionStatus.connected;
       _reconnectAttempts = 0;
       _stopRetryCountdown();
@@ -158,8 +173,24 @@ class DaemonWebSocketClient {
         },
       );
     } catch (e) {
+      _connecting = false;
       if (kDebugMode) {
         print('[DaemonWS] Connection failed: $e');
+      }
+      // Token obsolète (redémarrage du daemon avec un nouveau --auth-token) :
+      // le serveur répond 401 au handshake WS. On prévient le consumer pour
+      // qu'il efface la session persistée — sinon on martèle le 401 en boucle
+      // avec l'ancien token pendant ~30 s (backoff).
+      if (e.toString().contains('401')) {
+        // Statut `error` (≠ `disconnected`) : le retry timer planifié par
+        // _handleDisconnect ne relancera pas connect() — seul onAuthRejected
+        // (via le consumer) décide de la suite. Pas de boucle 401.
+        statusNotifier.value = ConnectionStatus.error;
+        onAuthRejected?.call();
+        _socket?.close();
+        _socket = null;
+        _stopKeepAlive();
+        return;
       }
       _handleDisconnect();
     }
@@ -250,6 +281,7 @@ class DaemonWebSocketClient {
   }
 
   void disconnect() {
+    _connecting = false;
     if (_disposed) {
       _socket?.close();
       _socket = null;

@@ -7,6 +7,7 @@ import '../../data/db/database_helper.dart';
 import '../network/outbox.dart';
 import 'messages.dart';
 import '../../features/mcp/models/mcp_server_info.dart';
+import '../../features/scheduled_tasks/models/scheduled_task_item.dart';
 
 class CallError implements Exception {
   final String message;
@@ -417,16 +418,6 @@ class DaemonApi {
     return list?.map((e) => (e as Map).cast<String, dynamic>()).toList() ?? [];
   }
 
-  /// Récupère la liste des tâches planifiées (cron & timers).
-  Future<Map<String, dynamic>> listScheduledTasks() => rpc('list_scheduled_tasks');
-
-  /// Déclenche immédiatement une tâche planifiée.
-  Future<Map<String, dynamic>> triggerScheduledTask(String taskId) =>
-      rpc('trigger_scheduled_task', {'taskId': taskId});
-
-  /// Annule une tâche planifiée ou un cron actif.
-  Future<Map<String, dynamic>> cancelScheduledTask(String taskId) =>
-      rpc('cancel_scheduled_task', {'taskId': taskId});
 
   /// Streaming call: emits each decoded message (`stream_start`,
   /// `stream_delta`, ...) until `stream_end` closes the stream.
@@ -545,6 +536,79 @@ class DaemonApi {
     return rpc('send_command', {'command': command});
   }
 
+  /// Récupère la liste des tâches planifiées gérées par le daemon.
+  Future<List<ScheduledTaskItem>> listScheduledTasks() async {
+    final res = await rpc('list_scheduled_tasks');
+    final list = res['tasks'] as List?;
+    if (list == null) return [];
+    return list
+        .whereType<Map>()
+        .map((e) => ScheduledTaskItem.fromJson(e.cast<String, dynamic>()))
+        .toList();
+  }
+
+  /// Crée ou planifie une nouvelle tâche via RPC / WebSocket.
+  Future<ScheduledTaskItem> scheduleTask(ScheduledTaskItem task) async {
+    final res = await rpc('schedule_task', {
+      'taskId': task.id,
+      'prompt': task.prompt,
+      'data': {
+        'name': task.displayName,
+        'prompt': task.prompt,
+        'workspaceName': task.workspaceName,
+        'cronExpression': task.cronExpression,
+        'durationSeconds': task.durationSeconds,
+        'isEnabled': task.isEnabled,
+      },
+    });
+    final rawTask = res['task'];
+    if (rawTask is Map) {
+      return ScheduledTaskItem.fromJson(rawTask.cast<String, dynamic>());
+    }
+    return task;
+  }
+
+  /// Met à jour une tâche planifiée existante.
+  Future<ScheduledTaskItem> updateScheduledTask(ScheduledTaskItem task) async {
+    final res = await rpc('update_scheduled_task', {
+      'taskId': task.id,
+      'data': {
+        'id': task.id,
+        'name': task.displayName,
+        'prompt': task.prompt,
+        'cronExpression': task.cronExpression,
+        'durationSeconds': task.durationSeconds,
+        'isEnabled': task.isEnabled,
+        'status': task.status,
+      },
+    });
+    final rawTask = res['task'];
+    if (rawTask is Map) {
+      return ScheduledTaskItem.fromJson(rawTask.cast<String, dynamic>());
+    }
+    return task;
+  }
+
+  /// Déclenche l'exécution immédiate d'une tâche planifiée.
+  Future<ScheduledTaskItem?> triggerScheduledTask(String taskId) async {
+    final res = await rpc('trigger_scheduled_task', {
+      'taskId': taskId,
+    });
+    final rawTask = res['task'];
+    if (rawTask is Map) {
+      return ScheduledTaskItem.fromJson(rawTask.cast<String, dynamic>());
+    }
+    return null;
+  }
+
+  /// Annule / supprime une tâche planifiée.
+  Future<bool> cancelScheduledTask(String taskId) async {
+    final res = await rpc('cancel_scheduled_task', {
+      'taskId': taskId,
+    });
+    return res['status'] == 'cancelled';
+  }
+
   void _onMessage(dynamic raw) {
     if (raw is! String) return; // daemon sends JSON text only
     Map<String, dynamic> msg;
@@ -555,15 +619,16 @@ class DaemonApi {
     }
 
     final type = msg['type'] as String? ?? '';
-    final requestId = msg['requestId'] as String? ?? '';
+    final requestId = (msg['requestId'] as String?) ??
+        (type == 'response' ? msg['id'] as String? : null) ??
+        '';
+    final hasDataKey = msg.containsKey('data');
     final rawData = msg['data'];
-    // Tolerant : certaines réponses poussées par le daemon portent un payload
-    // non-map (string, nombre…). On les neutralise plutôt que de planter —
-    // l'événement reste broadcasté avec data vide (A6).
-    final data =
-        rawData is Map
-            ? rawData.map((k, v) => MapEntry('$k', v))
-            : const <String, dynamic>{};
+    final data = rawData is Map
+        ? rawData.map((k, v) => MapEntry('$k', v))
+        : hasDataKey
+            ? const <String, dynamic>{}
+            : msg;
     final error = msg['error'] as String?;
 
     if (type == 'stream_start' || type == 'stream_delta') {

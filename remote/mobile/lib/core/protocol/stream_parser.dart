@@ -10,12 +10,12 @@ class StreamDeltaParser {
   /// Extracts plain text deltas from a stream_delta message.
   static String textOf(Map<String, dynamic> message) {
     final data = message['data'];
-    if (data is! Map<String, dynamic>) return '';
+    if (data is! Map) return '';
     final events = data['events'];
     if (events is! List) return '';
     final buffer = StringBuffer();
     for (final e in events) {
-      if (e is Map<String, dynamic> && e['kind'] == 'text') {
+      if (e is Map && e['kind'] == 'text') {
         buffer.write(e['delta'] ?? '');
       }
     }
@@ -25,12 +25,12 @@ class StreamDeltaParser {
   /// Extracts thinking deltas from a stream_delta message.
   static String thinkingOf(Map<String, dynamic> message) {
     final data = message['data'];
-    if (data is! Map<String, dynamic>) return '';
+    if (data is! Map) return '';
     final events = data['events'];
     if (events is! List) return '';
     final buffer = StringBuffer();
     for (final e in events) {
-      if (e is Map<String, dynamic> &&
+      if (e is Map &&
           (e['kind'] == 'thinking' || e['kind'] == 'status_change')) {
         buffer.write(e['delta'] ?? '');
       }
@@ -41,20 +41,20 @@ class StreamDeltaParser {
   /// Extracts a tool-approval request if the delta carries one.
   static ToolApproval? approvalOf(Map<String, dynamic> message) {
     final data = message['data'];
-    if (data is! Map<String, dynamic>) return null;
+    if (data is! Map) return null;
     final events = data['events'];
     if (events is! List) return null;
     for (final e in events) {
-      if (e is Map<String, dynamic> && e['kind'] == 'approval_required') {
-        final tool = e['tool'] ?? 'generic_tool';
+      if (e is Map && e['kind'] == 'approval_required') {
+        final tool = e['tool'] as String? ?? 'generic_tool';
         // Si c'est ask_question, ce n'est pas un tool standard d'approbation binaire
         if (tool == 'ask_question' || tool == 'ask_user') continue;
         return ToolApproval(
-          callId: e['callId'] ?? '',
+          callId: e['callId'] as String? ?? '',
           tool: tool,
-          detail: e['detail'] ?? '',
-          cascadeId: e['cascadeId'] ?? '',
-          trajectoryId: e['trajectoryId'] ?? '',
+          detail: e['detail'] as String? ?? '',
+          cascadeId: e['cascadeId'] as String? ?? '',
+          trajectoryId: e['trajectoryId'] as String? ?? '',
           stepIndex: e['stepIndex'] is num ? (e['stepIndex'] as num).toInt() : -1,
           approvalType: tool == 'run_command' ? 'run_command' : 'approval',
         );

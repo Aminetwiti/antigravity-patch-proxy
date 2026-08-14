@@ -117,3 +117,64 @@ func TestParseTrajectoriesRawBlob(t *testing.T) {
 		t.Errorf("workspace: %q", s.Workspace)
 	}
 }
+
+func TestParseTrajectoriesArchivedAndKilled(t *testing.T) {
+	// 1. Test Archived (annotations.archived: field 15 -> field 4 = 1)
+	annot := &writer{}
+	annot.varintField(4, 1)
+
+	sumArchived := &writer{}
+	sumArchived.stringField(1, "11111111-2222-3333-4444-555555555555")
+	sumArchived.stringField(2, "Archived Chat")
+	sumArchived.bytesField(15, annot.b)
+	sumArchived.varintField(22, 4) // READY status
+
+	// 2. Test Killed (field 23 = 1)
+	sumKilled := &writer{}
+	sumKilled.stringField(1, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+	sumKilled.stringField(2, "Killed Chat")
+	sumKilled.varintField(22, 1) // RUNNING status
+	sumKilled.varintField(23, 1) // killed = true
+
+	// 3. Test Subagent Source (field 20 = 16)
+	sumSubagent := &writer{}
+	sumSubagent.stringField(1, "99999999-8888-7777-6666-555555555555")
+	sumSubagent.stringField(2, "Subagent Research")
+	sumSubagent.varintField(20, 16)
+	sumSubagent.varintField(22, 4)
+
+	w := &writer{}
+	w.bytesField(1, sumArchived.b)
+	w.bytesField(1, sumKilled.b)
+	w.bytesField(1, sumSubagent.b)
+
+	summaries := ParseTrajectories(w.b)
+	if len(summaries) != 3 {
+		t.Fatalf("attendu 3 trajectoires, reçu %d", len(summaries))
+	}
+
+	// Verify Archived
+	s0 := summaries[0]
+	if !s0.Archived {
+		t.Errorf("expected s0.Archived == true")
+	}
+	if s0.Status != "CASCADE_STATUS_ARCHIVED" {
+		t.Errorf("expected s0.Status == CASCADE_STATUS_ARCHIVED, got %q", s0.Status)
+	}
+
+	// Verify Killed
+	s1 := summaries[1]
+	if !s1.Killed {
+		t.Errorf("expected s1.Killed == true")
+	}
+	if s1.Status != "CASCADE_STATUS_KILLED" {
+		t.Errorf("expected s1.Status == CASCADE_STATUS_KILLED, got %q", s1.Status)
+	}
+
+	// Verify Source
+	s2 := summaries[2]
+	if s2.Source != 16 {
+		t.Errorf("expected s2.Source == 16, got %d", s2.Source)
+	}
+}
+

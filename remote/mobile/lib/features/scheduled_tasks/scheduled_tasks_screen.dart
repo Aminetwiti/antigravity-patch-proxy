@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../core/protocol/daemon_api.dart';
 import 'models/scheduled_task_item.dart';
 import 'scheduled_task_detail_screen.dart';
 import 'package:mobile/theme/app_colors.dart';
@@ -7,8 +9,10 @@ import 'package:mobile/theme/app_colors.dart';
 /// Écran Scheduled Tasks (Antigravity 2.0)
 /// Affiche la liste des tâches récurrentes / timers avec recherche, toggle on/off,
 /// menu d'actions (Restart / Delete) et création via le modal "+ New".
+/// Synchronisé via RPC et WebSocket avec le daemon.
 class ScheduledTasksScreen extends StatefulWidget {
   final List<ScheduledTaskItem> tasks;
+  final DaemonApi? api;
   final ValueChanged<String>? onCancelTask;
   final ValueChanged<String>? onTriggerNow;
   final Function(String id, bool isEnabled)? onToggleTask;
@@ -19,6 +23,7 @@ class ScheduledTasksScreen extends StatefulWidget {
   const ScheduledTasksScreen({
     super.key,
     required this.tasks,
+    this.api,
     this.onCancelTask,
     this.onTriggerNow,
     this.onToggleTask,
@@ -35,6 +40,8 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   late List<ScheduledTaskItem> _localTasks;
+  StreamSubscription<Map<String, dynamic>>? _eventsSub;
+  bool _isLoading = false;
 
   @override
   void initState() {
@@ -45,6 +52,71 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
         _searchQuery = _searchController.text.trim().toLowerCase();
       });
     });
+
+    if (widget.api != null) {
+      _loadFromApi();
+      _eventsSub = widget.api!.events.listen(_handleWsEvent);
+    }
+  }
+
+  Future<void> _loadFromApi() async {
+    if (widget.api == null) return;
+    setState(() => _isLoading = true);
+    try {
+      final remoteTasks = await widget.api!.listScheduledTasks();
+      if (mounted) {
+        setState(() {
+          final merged = List<ScheduledTaskItem>.from(remoteTasks);
+          final existingIds = merged.map((t) => t.id).toSet();
+          for (final t in _localTasks) {
+            if (!existingIds.contains(t.id)) {
+              merged.add(t);
+            }
+          }
+          _localTasks = merged;
+          _isLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  void _handleWsEvent(Map<String, dynamic> event) {
+    final type = event['type'] as String? ?? '';
+    final rawData = event['data'];
+    final data = rawData is Map ? Map<String, dynamic>.from(rawData) : const <String, dynamic>{};
+
+    if (type == 'scheduled_task_created') {
+      final rawTask = data['task'];
+      if (rawTask is Map) {
+        final item = ScheduledTaskItem.fromJson(Map<String, dynamic>.from(rawTask));
+        setState(() {
+          _localTasks.removeWhere((t) => t.id == item.id);
+          _localTasks.insert(0, item);
+        });
+      }
+    } else if (type == 'scheduled_task_updated' || type == 'scheduled_task_event') {
+      final rawTask = data['task'];
+      if (rawTask is Map) {
+        final item = ScheduledTaskItem.fromJson(Map<String, dynamic>.from(rawTask));
+        setState(() {
+          final idx = _localTasks.indexWhere((t) => t.id == item.id);
+          if (idx >= 0) {
+            _localTasks[idx] = item;
+          } else {
+            _localTasks.insert(0, item);
+          }
+        });
+      }
+    } else if (type == 'scheduled_task_deleted') {
+      final taskId = data['taskId'] as String? ?? '';
+      if (taskId.isNotEmpty) {
+        setState(() {
+          _localTasks.removeWhere((t) => t.id == taskId);
+        });
+      }
+    }
   }
 
   @override
@@ -59,6 +131,7 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
 
   @override
   void dispose() {
+    _eventsSub?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -111,7 +184,18 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
           ),
         ),
         actions: [
-          if (widget.onRefresh != null)
+          if (_isLoading)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 8),
+                child: SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.inkSecondary),
+                ),
+              ),
+            )
+          else if (widget.onRefresh != null)
             IconButton(
               icon: const Icon(Icons.refresh_rounded, size: 20, color: AppColors.inkSecondary),
               onPressed: () {
@@ -189,6 +273,9 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
                 ),
               ),
             ),
+
+            if (_isLoading)
+              const LinearProgressIndicator(minHeight: 2, color: AppColors.accentBlue, backgroundColor: Colors.transparent),
 
             // ── Tasks List or Empty State ─────────────────────────────
             Expanded(

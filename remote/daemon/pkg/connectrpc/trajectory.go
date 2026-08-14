@@ -17,6 +17,9 @@ type TrajectorySummary struct {
 	Status    string    `json:"status"`
 	UpdatedAt time.Time `json:"updatedAt,omitempty"`
 	Size      int       `json:"size"`
+	Archived  bool      `json:"archived,omitempty"`  // annotations.archived (field 15→4)
+	Killed    bool      `json:"killed,omitempty"`    // field 23
+	Source    int       `json:"source,omitempty"`    // field 20 (1=CASCADE_CLIENT, 16=SUBAGENT)
 }
 
 var (
@@ -94,8 +97,22 @@ func trajectoryFromBlob(blob []byte) TrajectorySummary {
 				}
 			case 3: // timestamp
 				t.UpdatedAt = timestampFromMessage(f.Bytes)
+			case 15: // annotations submessage
+				if f.WireType == 2 {
+					for _, af := range DecodeFields(f.Bytes) {
+						if af.Num == 4 && af.WireType == 0 && af.Varint != 0 {
+							t.Archived = true
+						}
+					}
+				}
+			case 20: // source (1=CASCADE_CLIENT, 16=SUBAGENT, 17=CLI, ...)
+				t.Source = int(f.Varint)
 			case 22:
 				t.Status = statusName(int(f.Varint))
+			case 23: // killed
+				if f.Varint != 0 {
+					t.Killed = true
+				}
 			}
 			if f.WireType == 2 {
 				if t.Title == "" {
@@ -126,6 +143,14 @@ func trajectoryFromBlob(blob []byte) TrajectorySummary {
 	}
 	if t.Status == "" {
 		t.Status = "CASCADE_STATUS_READY"
+	}
+	// Archived / killed override le run status pour que les filtres aval
+	// (daemon + mobile) puissent les exclure uniformément.
+	if t.Archived {
+		t.Status = "CASCADE_STATUS_ARCHIVED"
+	}
+	if t.Killed {
+		t.Status = "CASCADE_STATUS_KILLED"
 	}
 	if t.Title == "" {
 		t.Title = "Cascade Session"

@@ -133,7 +133,7 @@ class ScheduledTaskItem {
       isEnabled: json['isEnabled'] as bool? ?? true,
       status: json['status'] as String? ?? 'Running',
       uptime: json['uptime'] as String? ?? '1m',
-      events: rawEvents.map((e) => ScheduledTaskEvent.fromJson(e is Map<String, dynamic> ? e : {})).toList(),
+      events: rawEvents.map((e) => ScheduledTaskEvent.fromJson(e is Map<String, dynamic> ? e : (e is Map ? Map<String, dynamic>.from(e) : <String, dynamic>{}))).toList(),
     );
   }
 

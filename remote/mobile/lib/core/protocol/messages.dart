@@ -41,8 +41,10 @@ class CascadeSession {
     if (st.contains('ARCHIV') ||
         st.contains('DELET') ||
         st.contains('TRASH') ||
+        st.contains('KILLED') ||
         st == 'CASCADE_STATUS_ARCHIVED' ||
-        st == 'CASCADE_STATUS_DELETED') {
+        st == 'CASCADE_STATUS_DELETED' ||
+        st == 'CASCADE_STATUS_KILLED') {
       return false;
     }
     return true;
