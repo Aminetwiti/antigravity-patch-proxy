@@ -518,7 +518,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                     AnimatedSwitcher(
                       duration: const Duration(milliseconds: 300),
                       child: Text(
-                        isConnected ? 'Connected' : 'Offline',
+                        isConnected ? '💻 PC Direct' : 'Offline',
                         key: ValueKey<bool>(isConnected),
                         style: TextStyle(
                           fontSize: 10.5,

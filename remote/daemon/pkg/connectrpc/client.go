@@ -118,8 +118,8 @@ func (c *Client) Call(method string, payload []byte) ([]byte, error) {
 		offset += length
 	}
 	if len(frames) == 0 {
-		// Réponse sans aucune frame de données (trailer seul, 0 octet utile).
-		return nil, fmt.Errorf("aucune frame gRPC-Web dans la réponse (%d octets)", len(raw))
+		// Réponse sans frame de données (ex: réponse vide DeleteCascade/Empty protobuf avec trailer seul).
+		return []byte{}, nil
 	}
 	return frames[0], nil
 }

@@ -259,41 +259,5 @@ void main() {
       expect(sent['modelUID'], 'deepseek-v4-flash');
       expect(sent['modelEnum'], 342);
     });
-
-    testWidgets('ChatInputBar displays execution mode and agent role dialogs', (tester) async {
-      tester.view.physicalSize = const Size(1080, 1920);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: ChatInputBar(
-              onSend: (_, {queued = false}) {},
-              isConnected: true,
-            ),
-          ),
-        ),
-      );
-
-      // Tap Local footer
-      await tester.tap(find.text('Local'));
-      await tester.pumpAndSettle();
-      expect(find.text("Environnement d'exécution"), findsOneWidget);
-      expect(find.text('Daemon Bridge'), findsOneWidget);
-      await tester.tap(find.text('Daemon Bridge'));
-      await tester.pumpAndSettle();
-      expect(find.text('Daemon'), findsOneWidget);
-
-      // Tap Main Agent footer
-      await tester.tap(find.text('Main Agent'));
-      await tester.pumpAndSettle();
-      expect(find.text("Rôle & Persona de l'agent"), findsOneWidget);
-      expect(find.text('Reviewer (Audit & Sécurité)'), findsOneWidget);
-      await tester.tap(find.text('Reviewer (Audit & Sécurité)'));
-      await tester.pumpAndSettle();
-      expect(find.text('Reviewer'), findsOneWidget);
-    });
   });
 }

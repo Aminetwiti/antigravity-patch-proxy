@@ -205,34 +205,37 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
           ),
           const SizedBox(height: 6),
 
-          // État expiré : le daemon a auto-refusé (timeout) — bandeau rouge.
+          // État expiré : le daemon a auto-refusé (timeout) — bandeau rouge avec feedback clair.
           if (widget.isExpired) ...[
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
                 color: scheme.error.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: scheme.error.withValues(alpha: 0.4)),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.timer_off_outlined, size: 14, color: scheme.error),
-                  const SizedBox(width: 6),
+                  Icon(Icons.timer_off_outlined, size: 16, color: scheme.error),
+                  const SizedBox(width: 8),
                   Expanded(
-                    // Bug #13 : fontWeight.w700 pour contraste suffisant sur fond danger 12%.
                     child: Text(
                       'Approbation expirée — auto-refusée par le daemon (5 min)',
-                      style: TextStyle(fontSize: 11.5, color: scheme.error, fontWeight: FontWeight.w700),
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: scheme.error,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
           ],
 
-          // Actions Buttons (Approuver / Refuser) — Adaptive Layout
+          // Actions Buttons (Approuver / Refuser) — Minimum 48dp touch targets
           LayoutBuilder(
             builder: (context, constraints) {
               final denyBtn = Semantics(
@@ -246,13 +249,14 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
                   icon: Icon(Icons.close, size: 16, color: scheme.error),
                   label: Text(
                     'Refuser',
-                    style: TextStyle(color: scheme.error, fontSize: 13),
+                    style: TextStyle(color: scheme.error, fontSize: 13, fontWeight: FontWeight.w600),
                   ),
                   style: OutlinedButton.styleFrom(
                     side: BorderSide(color: scheme.error),
-                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    minimumSize: const Size(0, 48),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(8),
                     ),
                   ),
                 ),
@@ -279,9 +283,10 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
                   ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: scheme.primary,
-                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    minimumSize: const Size(0, 48),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(8),
                     ),
                   ),
                 ),

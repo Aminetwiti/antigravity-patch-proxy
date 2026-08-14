@@ -981,6 +981,9 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if s.AuthToken != "" {
 		clientToken := r.URL.Query().Get("token")
 		if clientToken == "" {
+			clientToken = r.URL.Query().Get("auth_token")
+		}
+		if clientToken == "" {
 			clientToken = r.Header.Get("Authorization")
 			clientToken = strings.TrimPrefix(clientToken, "Bearer ")
 		}
@@ -1258,8 +1261,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		logJSON.Info("stream_start", "requestId", msg.RequestID, "cascadeId", msg.CascadeID)
 
 		// 1. Force l'IDE à afficher la conversation avant de lancer le prompt
+		// (best-effort : le LS 2.5+ répond 200 sans frame de données pour
+		// SetBrowserOpenConversation — l'échec est attendu et n'affecte pas
+		// le stream ; le mobile re-synchronise la session lui-même).
 		if _, errSet := s.RPCClient.SetBrowserOpenConversation(msg.CascadeID); errSet != nil {
-			logJSON.Warn("open_conversation_failed", "cascadeId", msg.CascadeID, "err", errSet)
+			logJSON.Debug("open_conversation_failed", "cascadeId", msg.CascadeID, "err", errSet)
 		}
 
 		promptText := msg.Prompt
@@ -1343,9 +1349,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 
 		err = s.RPCClient.SendMessageStreamModel(msg.CascadeID, promptText, msg.ModelUID, msg.ModelEnum, onFrameHandler)
 
-		// 3. Force l'IDE à ouvrir cette nouvelle session
+		// 3. Force l'IDE à ouvrir cette nouvelle session (best-effort, cf. ci-dessus).
 		if _, errSet := s.RPCClient.SetBrowserOpenConversation(msg.CascadeID); errSet != nil {
-			logJSON.Warn("open_conversation_failed", "cascadeId", msg.CascadeID, "err", errSet)
+			logJSON.Debug("open_conversation_failed", "cascadeId", msg.CascadeID, "err", errSet)
 		}
 
 		if ctx.Err() != nil {

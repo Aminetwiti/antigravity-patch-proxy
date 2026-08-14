@@ -40,10 +40,24 @@ func Discover() (*LocalHarnessInfo, error) {
 		return nil, fmt.Errorf("language_server introuvable — IDE Antigravity ouvert ?")
 	}
 
-	// Prioriser l'instance IDE active du workspace (--workspace_id ou --enable_lsp),
-	// puis les autres instances IDE, puis le hub standalone en dernier recours.
+	// Cibler l'instance hub standalone EN PRIORITÉ : c'est elle qui expose les
+	// RPC de session (GetAllCascadeTrajectories, SendUserCascadeMessage…).
+	// Les instances IDE (--subclient_type ide) répondent « 200 corps vide »
+	// sur ces méthodes → list_sessions renvoyait « aucune frame gRPC-Web
+	// dans la réponse (0 octets) » et send_prompt ne streamait rien.
+	// Voir PROTOCOL.md §3.2 : « Cibler l'instance hub ».
 	var sortedProcs []procEntry
 	for _, p := range procs {
+		if strings.Contains(p.commandLine, "--subclient_type hub") {
+			sortedProcs = append(sortedProcs, p)
+		}
+	}
+	// Ensuite l'instance IDE active du workspace (--workspace_id / --enable_lsp),
+	// puis les autres instances IDE — repli si aucun hub standalone ne tourne.
+	for _, p := range procs {
+		if strings.Contains(p.commandLine, "--subclient_type hub") {
+			continue
+		}
 		if strings.Contains(p.commandLine, "--workspace_id") || strings.Contains(p.commandLine, "--enable_lsp") {
 			sortedProcs = append([]procEntry{p}, sortedProcs...)
 		} else if strings.Contains(p.commandLine, "--subclient_type ide") {
@@ -51,9 +65,13 @@ func Discover() (*LocalHarnessInfo, error) {
 		}
 	}
 	for _, p := range procs {
-		if strings.Contains(p.commandLine, "--subclient_type hub") {
-			sortedProcs = append(sortedProcs, p)
+		if strings.Contains(p.commandLine, "--subclient_type hub") ||
+			strings.Contains(p.commandLine, "--subclient_type ide") ||
+			strings.Contains(p.commandLine, "--workspace_id") ||
+			strings.Contains(p.commandLine, "--enable_lsp") {
+			continue
 		}
+		sortedProcs = append(sortedProcs, p)
 	}
 	if len(sortedProcs) == 0 {
 		sortedProcs = procs

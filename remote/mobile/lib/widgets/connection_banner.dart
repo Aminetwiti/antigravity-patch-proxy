@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/network/websocket_client.dart';
 
@@ -41,6 +42,9 @@ class _ConnectionBannerState extends State<ConnectionBanner> {
     super.didUpdateWidget(oldWidget);
     // Réapparaît dès qu'on repasse en ligne (nouvelle session de panne).
     if (widget.status == ConnectionStatus.connected) {
+      if (oldWidget.status != ConnectionStatus.connected) {
+        HapticFeedback.mediumImpact();
+      }
       _dismissed = false;
     }
   }

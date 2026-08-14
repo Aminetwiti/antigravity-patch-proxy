@@ -54,6 +54,8 @@ class ChatMessage {
   // true quand le stream s'est terminé sur une erreur : la bulle affiche un
   // état « erreur » dédié (fond danger) au lieu d'un texte markdown mélangé.
   final bool isError;
+  // true quand le message est en attente d'envoi dans l'outbox hors-ligne.
+  final bool isQueued;
 
   const ChatMessage({
     required this.id,
@@ -63,6 +65,7 @@ class ChatMessage {
     required this.timestamp,
     this.isStreaming = false,
     this.isError = false,
+    this.isQueued = false,
   });
 
   ChatMessage copyWith({
@@ -70,6 +73,7 @@ class ChatMessage {
     String? thought,
     bool? isStreaming,
     bool? isError,
+    bool? isQueued,
   }) {
     return ChatMessage(
       id: id,
@@ -79,6 +83,7 @@ class ChatMessage {
       timestamp: timestamp,
       isStreaming: isStreaming ?? this.isStreaming,
       isError: isError ?? this.isError,
+      isQueued: isQueued ?? this.isQueued,
     );
   }
 }

@@ -62,6 +62,17 @@ func main() {
 		}
 	}()
 
+	// Lancement du Beacon de Découverte Automatique LAN (Zero-Config UDP)
+	beacon := discovery.NewLANBeacon(
+		listenPort,
+		authToken,
+		func() string { return tunnelMgr.PublicURL },
+		gateway.GetUniqueWorkspaces,
+	)
+	if err := beacon.Start(); err == nil {
+		fmt.Printf("📡 Beacon LAN UDP actif sur le port %d (Zero-Config Auto-Discovery)\n", discovery.DiscoveryPort)
+	}
+
 	// C4 : branche le logger structuré rotatif (AG_REMOTE_LOG_FILE) ou stdout
 	// (AG_REMOTE_LOG_LEVEL) — les logs du gateway partent en JSON exploitable.
 	gateway.SetLogJSON(gateway.NewLogger())

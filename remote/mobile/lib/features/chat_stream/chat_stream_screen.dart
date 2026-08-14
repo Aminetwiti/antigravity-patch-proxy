@@ -14,6 +14,10 @@ import '../../widgets/chat_input_bar.dart';
 import '../../widgets/connection_banner.dart';
 import '../../widgets/markdown_bubble.dart';
 import '../../widgets/tool_approval_card.dart';
+import '../../widgets/session_top_tabs.dart';
+import '../../widgets/artifact_cards.dart';
+import '../../widgets/app_toast.dart';
+import 'widgets/overview_panel_view.dart';
 import 'package:mobile/theme/app_colors.dart';
 
 class ChatStreamScreen extends StatefulWidget {
@@ -97,6 +101,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
   // Auto-scroll pendant le streaming (audit UX P1-6).
   final ScrollController _scrollController = ScrollController();
+
+  // ── Session Top Tabs & Artifact state ──────────────────────────────
+  SessionTabType _currentTab = SessionTabType.chat;
+  final Set<String> _modifiedFiles = {};
+  final List<String> _artifacts = [];
+  String? _latestPlanText;
 
   // ── État de connexion live (alimenté par wsClient) ─────────────────────
   ConnectionStatus _status = ConnectionStatus.disconnected;
@@ -888,6 +898,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     Widget connectivityBanner = AnimatedSize(
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeOutQuart,
@@ -947,42 +958,16 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     return Column(
       children: [
         connectivityBanner,
+        SessionTopTabs(
+          activeTab: _currentTab,
+          onTabChanged: (tab) => setState(() => _currentTab = tab),
+          filesChangedCount: _modifiedFiles.length,
+          hasPlan: _latestPlanText != null,
+          hasTasks: false,
+          runningTasksCount: _activeStreamCount,
+        ),
         Expanded(
-          child: ListView(
-            controller: _scrollController,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            children: [
-              _buildReminderBanners(),
-              ..._messages.map((msg) => TweenAnimationBuilder<double>(
-                    key: ValueKey(msg.id),
-                    duration: const Duration(milliseconds: 400),
-                    curve: Curves.easeOutQuart,
-                    tween: Tween(begin: 0.0, end: 1.0),
-                    builder: (context, value, child) {
-                      return Opacity(
-                        opacity: value,
-                        child: Transform.translate(
-                          offset: Offset(0, 10 * (1 - value)),
-                          child: child,
-                        ),
-                      );
-                    },
-                    child: _MessageBubble(
-                        message: msg,
-                        // Bug persistance pensées : state d'expansion géré
-                        // dans le parent pour survivre aux rebuilds.
-                        isThoughtExpanded: _expandedThoughts.contains(msg.id),
-                        onToggleThought: () => setState(() {
-                          if (_expandedThoughts.contains(msg.id)) {
-                            _expandedThoughts.remove(msg.id);
-                          } else {
-                            _expandedThoughts.add(msg.id);
-                          }
-                        }),
-                      ),
-                  )),
-            ],
-          ),
+          child: _buildActiveTabContent(scheme, isConnected),
         ),
         _buildApprovalArea(),
         ChatInputBar(
@@ -996,6 +981,198 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           cascadeId: widget.activeSessionId,
         ),
       ],
+    );
+  }
+
+  Widget _buildActiveTabContent(ColorScheme scheme, bool isConnected) {
+    switch (_currentTab) {
+      case SessionTabType.overview:
+        return OverviewPanelView(
+          sessionTitle: widget.activeProjectName,
+          workspacePath: widget.activeSessionId,
+          modifiedFiles: _modifiedFiles.toList(),
+          artifacts: _artifacts,
+          subagentsCount: 0,
+          onOpenReview: () => setState(() => _currentTab = SessionTabType.review),
+          onOpenPlan: () => setState(() => _currentTab = SessionTabType.plan),
+          onOpenSubagents: () {},
+        );
+      case SessionTabType.review:
+        return _buildReviewTabContent();
+      case SessionTabType.plan:
+        return _buildPlanTabContent();
+      case SessionTabType.tasks:
+        return _buildTasksTabContent();
+      case SessionTabType.chat:
+        return ListView(
+          controller: _scrollController,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          children: [
+            _buildReminderBanners(),
+            ..._messages.map((msg) => TweenAnimationBuilder<double>(
+                  key: ValueKey(msg.id),
+                  duration: const Duration(milliseconds: 400),
+                  curve: Curves.easeOutQuart,
+                  tween: Tween(begin: 0.0, end: 1.0),
+                  builder: (context, value, child) {
+                    return Opacity(
+                      opacity: value,
+                      child: Transform.translate(
+                        offset: Offset(0, 10 * (1 - value)),
+                        child: child,
+                      ),
+                    );
+                  },
+                  child: _MessageBubble(
+                    message: msg,
+                    isThoughtExpanded: _expandedThoughts.contains(msg.id),
+                    onToggleThought: () => setState(() {
+                      if (_expandedThoughts.contains(msg.id)) {
+                        _expandedThoughts.remove(msg.id);
+                      } else {
+                        _expandedThoughts.add(msg.id);
+                      }
+                    }),
+                    onProceedPlan: () => _handleSendMessage('Proceed', queued: false),
+                    onViewPlan: () => setState(() => _currentTab = SessionTabType.plan),
+                    onViewReview: () => setState(() => _currentTab = SessionTabType.review),
+                  ),
+                )),
+          ],
+        );
+    }
+  }
+
+  Widget _buildReviewTabContent() {
+    if (_modifiedFiles.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.rate_review_outlined, size: 36, color: AppColors.inkMuted),
+              const SizedBox(height: 12),
+              const Text(
+                'Aucune modification de fichier',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.inkPrimary),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Les fichiers modifiés par l\'agent apparaîtront ici avec leurs statistiques.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: AppColors.inkMuted),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      children: [
+        FilesChangedCard(
+          files: _modifiedFiles.toList(),
+          additions: 12,
+          deletions: 4,
+          onReview: () {},
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPlanTabContent() {
+    if (_latestPlanText == null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.description_outlined, size: 36, color: AppColors.inkMuted),
+              const SizedBox(height: 12),
+              const Text(
+                'Aucun plan d\'implémentation',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.inkPrimary),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Demandez à l\'agent de générer un plan (ex: "plan" ou "/plan") pour le visualiser ici.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: AppColors.inkMuted),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: AppColors.surfaceRaised,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            border: Border.all(color: AppColors.borderSubtle),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.description_outlined, size: 16, color: AppColors.accentBlue),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'Implementation Plan',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.inkPrimary),
+                ),
+              ),
+              GestureDetector(
+                onTap: () => _handleSendMessage('Proceed', queued: false),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: AppColors.accentBlue,
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                  ),
+                  child: const Text(
+                    'Proceed ⌘↵',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.onAccent),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        MarkdownBubble(text: _latestPlanText!),
+      ],
+    );
+  }
+
+  Widget _buildTasksTabContent() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.checklist_rtl_outlined, size: 36, color: AppColors.inkMuted),
+            const SizedBox(height: 12),
+            const Text(
+              'Suivi des tâches',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.inkPrimary),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Les tâches et sous-tâches de la session s\'afficheront ici.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: AppColors.inkMuted),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1036,11 +1213,17 @@ class _MessageBubble extends StatelessWidget {
   final ChatMessage message;
   final bool isThoughtExpanded;
   final VoidCallback? onToggleThought;
+  final VoidCallback? onProceedPlan;
+  final VoidCallback? onViewPlan;
+  final VoidCallback? onViewReview;
 
   const _MessageBubble({
     required this.message,
     this.isThoughtExpanded = false,
     this.onToggleThought,
+    this.onProceedPlan,
+    this.onViewPlan,
+    this.onViewReview,
   });
 
   @override
@@ -1149,11 +1332,21 @@ class _MessageBubble extends StatelessWidget {
                 ],
               ),
             )
-          else
+          else ...[
             MarkdownBubble(
               text: message.text,
               isStreaming: message.isStreaming,
             ),
+            if (!message.isStreaming &&
+                (message.text.contains('Implementation Plan') ||
+                    message.text.contains('implementation_plan.md') ||
+                    message.text.contains('# Plan')))
+              ImplementationPlanCard(
+                summary: 'Le plan d\'implémentation est prêt. Vous pouvez l\'examiner ou approuver directement.',
+                onProceed: onProceedPlan ?? () {},
+                onViewPlan: onViewPlan ?? () {},
+              ),
+          ],
           const SizedBox(height: 8),
           Row(
             children: [
@@ -1162,18 +1355,35 @@ class _MessageBubble extends StatelessWidget {
                 message.timestamp,
                 style: TextStyle(fontSize: 10.5, color: scheme.onSurfaceVariant),
               ),
+              if (message.sender == 'user') ...[
+                const SizedBox(width: 8),
+                if (message.isQueued) ...[
+                  Icon(Icons.schedule_outlined, size: 12, color: scheme.tertiary),
+                  const SizedBox(width: 3),
+                  Text(
+                    'En attente',
+                    style: TextStyle(fontSize: 10, color: scheme.tertiary, fontWeight: FontWeight.w600),
+                  ),
+                ] else ...[
+                  Icon(Icons.done_all, size: 12, color: scheme.primary),
+                  const SizedBox(width: 3),
+                  Text(
+                    'Envoyé',
+                    style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
+                  ),
+                ],
+              ],
               const Spacer(),
               Tooltip(
                 message: 'Copier le message',
                 child: InkWell(
                   onTap: () {
                     Clipboard.setData(ClipboardData(text: message.text));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Message copié dans le presse-papiers'),
-
-                        duration: Duration(seconds: 1),
-                      ),
+                    AppToast.show(
+                      context,
+                      message: 'Message copié dans le presse-papiers',
+                      icon: Icons.copy_outlined,
+                      type: ToastType.success,
                     );
                   },
                   borderRadius: BorderRadius.circular(4),
