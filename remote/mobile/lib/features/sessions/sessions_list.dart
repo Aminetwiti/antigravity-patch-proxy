@@ -45,20 +45,20 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final sessionsList = widget.sessions ?? [];
     final Map<String, List<CascadeSession>> groupedSessions = {};
     for (final s in sessionsList) {
       final folderName = s.workspacePath.isEmpty 
-          ? 'Other' 
+          ? 'Autres' 
           : s.workspacePath.split(RegExp(r'[\\/]')).last;
       groupedSessions.putIfAbsent(folderName, () => []).add(s);
     }
     
-    // Sort keys if needed, or leave as is
     final folderNames = groupedSessions.keys.toList()..sort();
 
     return Drawer(
-      backgroundColor: AppColors.surfaceBase,
+      backgroundColor: scheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.zero,
       ),
@@ -68,12 +68,12 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
           children: [
             const SizedBox(height: 12),
 
-            // 2. Top buttons (New Conv, History, Scheduled)
+            // 1. Bouton primaire "Nouvelle conversation"
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: _NavButton(
                 icon: Icons.add,
-                label: 'New Conversation',
+                label: 'Nouvelle conversation',
                 onTap: () {
                   Navigator.of(context).pop();
                   widget.onNewConversation();
@@ -84,7 +84,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
             const SizedBox(height: 8),
             _SidebarAction(
               icon: Icons.history,
-              label: 'Conversation History',
+              label: 'Historique des conversations',
               onTap: () {
                 Navigator.of(context).pop();
                 if (widget.onConversationHistory != null) widget.onConversationHistory!();
@@ -92,7 +92,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
             ),
             _SidebarAction(
               icon: Icons.schedule,
-              label: 'Scheduled Tasks',
+              label: 'Tâches planifiées',
               onTap: () {
                 Navigator.of(context).pop();
                 if (widget.onScheduledTasks != null) widget.onScheduledTasks!();
@@ -100,36 +100,37 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
             ),
             const SizedBox(height: 16),
             
-            // 4. Projects Header
+            // 2. En-tête Projets
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Row(
                 children: [
-                  const Text(
-                    'Projects',
+                  Text(
+                    'Projets',
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
-                      color: AppColors.inkMuted,
+                      color: scheme.onSurfaceVariant,
+                      letterSpacing: 0.5,
                     ),
                   ),
                   const Spacer(),
-                  const Icon(Icons.filter_list, size: 14, color: AppColors.inkMuted),
+                  Icon(Icons.filter_list, size: 14, color: scheme.onSurfaceVariant),
                   const SizedBox(width: 12),
-                  const Icon(Icons.create_new_folder_outlined, size: 14, color: AppColors.inkMuted),
-                  const SizedBox(width: 8), // For scrollbar alignment
+                  Icon(Icons.create_new_folder_outlined, size: 14, color: scheme.onSurfaceVariant),
+                  const SizedBox(width: 8),
                 ],
               ),
             ),
 
-            // 5. Scrollable session list
+            // 3. Liste scrollable des sessions
             Expanded(
               child: RawScrollbar(
                 controller: _scrollController,
                 thumbVisibility: true,
-                thickness: 6,
-                radius: const Radius.circular(3),
-                thumbColor: AppColors.borderStrong,
+                thickness: 4,
+                radius: const Radius.circular(2),
+                thumbColor: scheme.outlineVariant,
                 child: ListView(
                   controller: _scrollController,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -139,41 +140,32 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                         margin: const EdgeInsets.all(8),
                         padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
                         decoration: BoxDecoration(
-                          color: AppColors.surfaceInput.withValues(alpha: 0.25),
+                          color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
                           borderRadius: BorderRadius.circular(AppRadius.md),
-                          border: Border.all(color: AppColors.borderSubtle),
+                          border: Border.all(color: scheme.outlineVariant),
                         ),
                         child: Column(
                           children: [
                             Icon(
                               widget.isConnected ? Icons.chat_bubble_outline : Icons.cloud_off_outlined,
                               size: 28,
-                              color: AppColors.inkMuted,
+                              color: scheme.onSurfaceVariant,
                             ),
                             const SizedBox(height: 8),
                             Text(
                               widget.isConnected ? 'Aucune session active' : 'Aucun projet connecté',
-                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.inkSecondary),
+                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: scheme.onSurface),
                             ),
                             const SizedBox(height: 4),
                             Text(
                               widget.isConnected
-                                  ? 'Créez une nouvelle conversation ou choisissez une session ci-dessus.'
+                                  ? 'Démarrez une nouvelle conversation ci-dessus.'
                                   : 'Connectez le Daemon PC pour afficher vos sessions actives.',
                               textAlign: TextAlign.center,
-                              style: const TextStyle(fontSize: 11, color: AppColors.inkMuted),
+                              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
                             ),
-                            const SizedBox(height: 12),
-                            if (widget.isConnected)
-                              ElevatedButton.icon(
-                                onPressed: () {
-                                  Navigator.of(context).pop();
-                                  widget.onNewConversation();
-                                },
-                                icon: const Icon(Icons.add, size: 16),
-                                label: const Text('Nouvelle Conversation', style: TextStyle(fontSize: 12)),
-                              )
-                            else
+                            if (!widget.isConnected) ...[
+                              const SizedBox(height: 12),
                               OutlinedButton.icon(
                                 onPressed: () {
                                   Navigator.of(context).pop();
@@ -182,6 +174,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                                 icon: const Icon(Icons.qr_code_scanner, size: 16),
                                 label: const Text('Se connecter au Daemon', style: TextStyle(fontSize: 12)),
                               ),
+                            ],
                           ],
                         ),
                       )
@@ -206,12 +199,12 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
               ),
             ),
             
-            // 6. Settings and Connection at bottom
+            // 4. Paramètres et statut en bas
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
               child: _SidebarAction(
                 icon: Icons.settings_outlined,
-                label: 'Settings',
+                label: 'Paramètres',
                 onTap: () {
                   Navigator.of(context).pop();
                   if (widget.onOpenSettings != null) widget.onOpenSettings!();
@@ -222,7 +215,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
               padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
               child: _SidebarAction(
                 icon: widget.isConnected ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
-                label: widget.isConnected ? 'Connected' : 'Offline',
+                label: widget.isConnected ? 'Connecté' : 'Hors ligne',
                 textColor: widget.isConnected ? AppColors.positive : AppColors.danger,
                 onTap: () {
                   Navigator.of(context).pop();
@@ -252,31 +245,32 @@ class _NavButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(8),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
           decoration: BoxDecoration(
-            color: AppColors.surfaceRaised,
+            color: scheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: AppColors.borderStrong,
+              color: scheme.outlineVariant,
               width: 1,
             ),
           ),
           child: Row(
             children: [
-              Icon(icon, size: 16, color: AppColors.inkSecondary),
+              Icon(icon, size: 16, color: scheme.onSurface),
               const SizedBox(width: 10),
               Text(
                 label,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13,
-                  fontWeight: FontWeight.w400,
-                  color: AppColors.inkSecondary,
+                  fontWeight: FontWeight.w500,
+                  color: scheme.onSurface,
                 ),
               ),
             ],
@@ -297,6 +291,8 @@ class _SidebarAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final color = textColor ?? scheme.onSurfaceVariant;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -307,14 +303,14 @@ class _SidebarAction extends StatelessWidget {
           margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
           child: Row(
             children: [
-              Icon(icon, size: 16, color: textColor ?? AppColors.inkMuted),
+              Icon(icon, size: 16, color: color),
               const SizedBox(width: 12),
               Text(
                 label,
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w400,
-                  color: textColor ?? AppColors.inkMuted,
+                  color: color,
                 ),
               ),
             ],
@@ -340,6 +336,7 @@ class _ProjectFolderGroup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -347,15 +344,15 @@ class _ProjectFolderGroup extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           child: Row(
             children: [
-              const Icon(Icons.folder_outlined, size: 15, color: AppColors.inkMuted),
+              Icon(Icons.folder_outlined, size: 15, color: scheme.onSurfaceVariant),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   folderName,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w500,
-                    color: AppColors.inkMuted,
+                    color: scheme.onSurfaceVariant,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -364,13 +361,13 @@ class _ProjectFolderGroup extends StatelessWidget {
           ),
         ),
         if (sessions.isEmpty)
-          const Padding(
-            padding: EdgeInsets.only(left: 28, top: 4, bottom: 8),
+          Padding(
+            padding: const EdgeInsets.only(left: 28, top: 4, bottom: 8),
             child: Text(
-              'No conversations yet',
+              'Aucune conversation',
               style: TextStyle(
                 fontSize: 11,
-                color: AppColors.inkFaint,
+                color: scheme.onSurfaceVariant,
               ),
             ),
           )
@@ -386,7 +383,7 @@ class _ProjectFolderGroup extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                   decoration: BoxDecoration(
-                    color: isSelected ? AppColors.surfaceInput : Colors.transparent,
+                    color: isSelected ? scheme.surfaceContainerHighest : Colors.transparent,
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Row(
@@ -396,8 +393,8 @@ class _ProjectFolderGroup extends StatelessWidget {
                           s.title,
                           style: TextStyle(
                             fontSize: 12.5,
-                            color: isSelected ? AppColors.inkPrimary : AppColors.inkMuted,
-                            fontWeight: isSelected ? FontWeight.w500 : FontWeight.w400,
+                            color: isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
+                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -407,8 +404,8 @@ class _ProjectFolderGroup extends StatelessWidget {
                         Container(
                           width: 6,
                           height: 6,
-                          decoration: const BoxDecoration(
-                            color: AppColors.accentBlue,
+                          decoration: BoxDecoration(
+                            color: scheme.primary,
                             shape: BoxShape.circle,
                           ),
                         ),
@@ -417,9 +414,9 @@ class _ProjectFolderGroup extends StatelessWidget {
                           padding: const EdgeInsets.only(left: 8),
                           child: Text(
                             s.time,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 11,
-                              color: AppColors.inkFaint,
+                              color: scheme.onSurfaceVariant,
                             ),
                           ),
                         ),

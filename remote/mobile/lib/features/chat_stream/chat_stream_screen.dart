@@ -265,11 +265,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       case AppLifecycleState.detached:
         _appInForeground = false;
         break;
-    }
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
-      _streamSub?.pause();
-    } else if (state == AppLifecycleState.resumed) {
-      _streamSub?.resume();
+    // Garder le stream actif en arrière-plan pour ingérer les tokens et recevoir
+    // les approbations/notifications même écran éteint. Le throttle 100ms
+    // évite toute surconsommation CPU en fond.
+    if (state == AppLifecycleState.resumed && mounted) {
+      setState(() {});
+      _scrollToBottom();
     }
   }
 

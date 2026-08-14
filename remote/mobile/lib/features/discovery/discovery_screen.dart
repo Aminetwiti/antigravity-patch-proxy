@@ -76,7 +76,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
           if (mounted) Navigator.of(context).pop(true);
         });
       } else {
-        _errorMessage = 'Connexion refusée. Vérifiez le port et le token CSRF.';
+        _errorMessage = 'Connexion refusée. Vérifiez le port et le Token Auth.';
       }
     });
   }
@@ -94,11 +94,11 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.surface,
       appBar: AppBar(
-        title: Text('Discover Daemons', style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurface)),
+        title: Text('Découvrir les Daemons', style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurface)),
         backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
         children: [
           // ── Intro Card
           Card(

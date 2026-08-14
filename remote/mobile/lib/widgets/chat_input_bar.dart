@@ -233,23 +233,31 @@ class _ChatInputBarState extends State<ChatInputBar> {
     final result = await showDialog<Map<String, String>?>(
       context: context,
       builder: (ctx) {
+        final scheme = Theme.of(ctx).colorScheme;
         final nameCtrl = TextEditingController(text: 'data.json');
         final contentCtrl = TextEditingController();
         return AlertDialog(
-          backgroundColor: AppColors.surfaceRaised,
+          backgroundColor: scheme.surfaceContainer,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadius.lg),
-            side: const BorderSide(color: AppColors.borderSubtle),
+            side: BorderSide(color: scheme.outlineVariant),
           ),
-          title: const Text('Joindre un fichier (.txt, .json, .md, .csv)'),
+          title: Text(
+            'Joindre un fichier (.txt, .json, .md, .csv)',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: scheme.onSurface,
+            ),
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: nameCtrl,
+                style: TextStyle(fontSize: 13, color: scheme.onSurface),
                 decoration: const InputDecoration(
-                  labelText:
-                      'Nom du fichier (ex: data.json, doc.md, export.csv)',
+                  labelText: 'Nom du fichier (ex: data.json, doc.md)',
                   isDense: true,
                 ),
               ),
@@ -257,6 +265,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
               TextField(
                 controller: contentCtrl,
                 maxLines: 6,
+                style: TextStyle(fontSize: 13, color: scheme.onSurface),
                 decoration: const InputDecoration(
                   labelText: 'Contenu',
                   isDense: true,
@@ -295,21 +304,30 @@ class _ChatInputBarState extends State<ChatInputBar> {
     final result = await showDialog<Map<String, String>?>(
       context: context,
       builder: (ctx) {
+        final scheme = Theme.of(ctx).colorScheme;
         final nameCtrl = TextEditingController(text: 'screenshot.png');
         final mimeCtrl = TextEditingController(text: 'image/png');
         final base64Ctrl = TextEditingController();
         return AlertDialog(
-          backgroundColor: AppColors.surfaceRaised,
+          backgroundColor: scheme.surfaceContainer,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadius.lg),
-            side: const BorderSide(color: AppColors.borderSubtle),
+            side: BorderSide(color: scheme.outlineVariant),
           ),
-          title: const Text('Joindre une image / photo'),
+          title: Text(
+            'Joindre une image / photo',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: scheme.onSurface,
+            ),
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: nameCtrl,
+                style: TextStyle(fontSize: 13, color: scheme.onSurface),
                 decoration: const InputDecoration(
                   labelText: 'Nom du fichier (ex: photo.png, img.jpg)',
                   isDense: true,
@@ -318,6 +336,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
               const SizedBox(height: 12),
               TextField(
                 controller: mimeCtrl,
+                style: TextStyle(fontSize: 13, color: scheme.onSurface),
                 decoration: const InputDecoration(
                   labelText: 'Type MIME (ex: image/png, image/jpeg)',
                   isDense: true,
@@ -327,6 +346,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
               TextField(
                 controller: base64Ctrl,
                 maxLines: 4,
+                style: TextStyle(fontSize: 13, color: scheme.onSurface),
                 decoration: const InputDecoration(
                   labelText: 'Données Base64',
                   isDense: true,
@@ -374,9 +394,10 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   void _showAttachmentMenu() {
+    final scheme = Theme.of(context).colorScheme;
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppColors.surfaceRaised,
+      backgroundColor: scheme.surfaceContainer,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -387,18 +408,18 @@ class _ChatInputBarState extends State<ChatInputBar> {
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
-                leading: const Icon(Icons.image_outlined, color: AppColors.accentBlue),
-                title: const Text('Joindre une image / photo'),
-                subtitle: const Text('PNG, JPEG, WebP, GIF'),
+                leading: Icon(Icons.image_outlined, color: scheme.primary),
+                title: Text('Joindre une image / photo', style: TextStyle(color: scheme.onSurface)),
+                subtitle: Text('PNG, JPEG, WebP, GIF', style: TextStyle(color: scheme.onSurfaceVariant)),
                 onTap: () {
                   Navigator.of(ctx).pop();
                   _pickImage();
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.description_outlined, color: AppColors.inkPrimary),
-                title: const Text('Joindre un fichier'),
-                subtitle: const Text('.txt, .json, .md, .csv'),
+                leading: Icon(Icons.description_outlined, color: scheme.onSurface),
+                title: Text('Joindre un fichier', style: TextStyle(color: scheme.onSurface)),
+                subtitle: Text('.txt, .json, .md, .csv', style: TextStyle(color: scheme.onSurfaceVariant)),
                 onTap: () {
                   Navigator.of(ctx).pop();
                   _pickTextFile();
@@ -916,9 +937,10 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   void _showUsageLimitsDialog(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppColors.surfaceBase,
+      backgroundColor: scheme.surfaceContainer,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
       ),
@@ -1092,7 +1114,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                               widget.isConnected
                                   ? (isQueued
                                       ? "Message en file — sera exécuté après la tâche en cours"
-                                      : 'Ask anything, @ to mention, / for actions (Cmd+L pour citer)')
+                                      : 'Poser une question, @ mentionner, / actions…')
                                   : 'Hors ligne — le message sera envoyé à la reconnexion',
                           hintStyle: TextStyle(
                             color:
@@ -1120,7 +1142,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                         onTap: _showAttachmentMenu,
                         borderRadius: BorderRadius.circular(8),
                         child: Padding(
-                          padding: const EdgeInsets.all(10),
+                          padding: const EdgeInsets.all(8),
                           child: Icon(
                             Icons.add,
                             size: 20,
@@ -1128,7 +1150,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: 2),
 
                       // Model & Reasoning Effort Pill
                       Flexible(
@@ -1138,8 +1160,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
                           borderRadius: BorderRadius.circular(6),
                           child: Padding(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 8,
+                              horizontal: 6,
+                              vertical: 6,
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
@@ -1166,7 +1188,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
-                                const SizedBox(width: 4),
+                                const SizedBox(width: 2),
                                 Icon(
                                   Icons.keyboard_arrow_down,
                                   size: 16,
@@ -1457,6 +1479,7 @@ class _UsageLimitsModal extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
@@ -1469,53 +1492,57 @@ class _UsageLimitsModal extends StatelessWidget {
                 width: 36,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: AppColors.borderSubtle,
+                  color: scheme.outlineVariant,
                   borderRadius: BorderRadius.circular(AppRadius.pill),
                 ),
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
-              'Gemini Models',
+            Text(
+              'Modèles Gemini',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: AppColors.inkSecondary,
+                color: scheme.onSurface,
               ),
             ),
             const SizedBox(height: 12),
             _buildUsageTile(
-              title: 'Weekly Limit Remaining',
-              subtitle: 'You have used some of your weekly ...',
+              context: context,
+              title: 'Limite hebdomadaire restante',
+              subtitle: 'Quota hebdomadaire disponible',
               percent: 51,
             ),
             const SizedBox(height: 10),
             _buildUsageTile(
-              title: 'Five Hour Limit Remaining',
-              subtitle: 'You have used some of your 5-hour ...',
+              context: context,
+              title: 'Limite sur 5 heures',
+              subtitle: 'Quota sur fenêtre de 5 heures',
               percent: 95,
             ),
             const SizedBox(height: 20),
-            const Divider(color: AppColors.borderSubtle, height: 1),
+            Divider(color: scheme.outlineVariant, height: 1),
             const SizedBox(height: 16),
-            const Text(
-              'Claude and GPT models',
+            Text(
+              'Modèles Claude & GPT',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: AppColors.inkSecondary,
+                color: scheme.onSurface,
               ),
             ),
             const SizedBox(height: 12),
             _buildUsageTile(
-              title: 'Weekly Limit Remaining',
-              subtitle: 'You have used some of your weekly ...',
+              context: context,
+              title: 'Limite hebdomadaire restante',
+              subtitle: 'Quota hebdomadaire disponible',
               percent: 81,
             ),
             const SizedBox(height: 10),
             _buildUsageTile(
-              title: 'Five Hour Limit Remaining',
-              subtitle: 'Full 5-hour quota available',
+              context: context,
+              title: 'Limite sur 5 heures',
+              subtitle: 'Quota complet de 5 heures disponible',
               percent: 100,
             ),
           ],
@@ -1525,10 +1552,12 @@ class _UsageLimitsModal extends StatelessWidget {
   }
 
   Widget _buildUsageTile({
+    required BuildContext context,
     required String title,
     required String subtitle,
     required int percent,
   }) {
+    final scheme = Theme.of(context).colorScheme;
     Color progressColor = AppColors.positive;
     if (percent < 30) {
       progressColor = AppColors.danger;
@@ -1539,9 +1568,9 @@ class _UsageLimitsModal extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: AppColors.surfaceRaised,
+        color: scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(AppRadius.md),
-        border: Border.all(color: AppColors.borderSubtle),
+        border: Border.all(color: scheme.outlineVariant),
       ),
       child: Row(
         children: [
@@ -1551,18 +1580,18 @@ class _UsageLimitsModal extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color: AppColors.inkPrimary,
+                    color: scheme.onSurface,
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   subtitle,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
-                    color: AppColors.inkMuted,
+                    color: scheme.onSurfaceVariant,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1578,17 +1607,17 @@ class _UsageLimitsModal extends StatelessWidget {
                 height: 36,
                 child: CircularProgressIndicator(
                   value: percent / 100.0,
-                  backgroundColor: AppColors.surfaceInput,
+                  backgroundColor: scheme.surfaceContainer,
                   color: progressColor,
                   strokeWidth: 3,
                 ),
               ),
               Text(
                 '$percent%',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w700,
-                  color: AppColors.inkPrimary,
+                  color: scheme.onSurface,
                 ),
               ),
             ],

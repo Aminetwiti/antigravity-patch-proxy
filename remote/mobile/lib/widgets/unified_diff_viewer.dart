@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../features/code_review/models/code_comment.dart';
+import '../features/code_review/widgets/add_comment_dialog.dart';
 import '../theme/app_colors.dart';
 
 /// Unifié et interactif : affiche un diff de code et permet d'annoter
@@ -10,6 +12,7 @@ class UnifiedDiffViewer extends StatefulWidget {
   final String? fileName;
   final VoidCallback? onClose;
   final Function(String reviewComments)? onSendReview;
+  final ValueChanged<CodeComment>? onCommentAdded;
 
   const UnifiedDiffViewer({
     super.key,
@@ -17,6 +20,7 @@ class UnifiedDiffViewer extends StatefulWidget {
     this.fileName,
     this.onClose,
     this.onSendReview,
+    this.onCommentAdded,
   });
 
   @override
@@ -169,6 +173,12 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
               final text = ctrl.text.trim();
               if (text.isNotEmpty) {
                 setState(() => _annotations[lineIndex] = text);
+                widget.onCommentAdded?.call(CodeComment(
+                  id: 'comment_${DateTime.now().millisecondsSinceEpoch}_$lineIndex',
+                  filePath: widget.fileName ?? 'code',
+                  snippet: line.content.trim(),
+                  commentText: text,
+                ));
               } else {
                 setState(() => _annotations.remove(lineIndex));
               }
@@ -299,6 +309,24 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
                     final hasComment = _annotations.containsKey(index);
                     return InkWell(
                       onTap: () => _addAnnotation(index),
+                      onLongPress: () {
+                        showDialog(
+                          context: context,
+                          builder: (ctx) => AddCommentDialog(
+                            filePath: widget.fileName ?? 'code',
+                            selectedSnippet: line.content.trim(),
+                            lineNumber: line.newLine ?? line.oldLine ?? (index + 1),
+                            initialComment: _annotations[index],
+                            onDelete: () {
+                              setState(() => _annotations.remove(index));
+                            },
+                            onCommentAdded: (c) {
+                              setState(() => _annotations[index] = c.commentText);
+                              widget.onCommentAdded?.call(c);
+                            },
+                          ),
+                        );
+                      },
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [

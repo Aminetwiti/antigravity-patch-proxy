@@ -328,7 +328,7 @@ git commit -m "feat(remote): add interactive Proceed and feedback bar for artifa
 - Consumes: Selected code line/snippet + user annotation text.
 - Produces: Queued comment list formatted into next message prompt.
 
-- [ ] **Step 1: Write test for AddCommentDialog**
+- [x] **Step 1: Write test for AddCommentDialog**
 
 ```dart
 import 'package:flutter/material.dart';
@@ -364,12 +364,12 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `flutter test test/features/code_review/add_comment_dialog_test.dart`
 Expected: FAIL with missing classes.
 
-- [ ] **Step 3: Implement CodeComment model and AddCommentDialog**
+- [x] **Step 3: Implement CodeComment model and AddCommentDialog**
 
 ```dart
 // remote/mobile/lib/features/code_review/models/code_comment.dart
@@ -394,12 +394,12 @@ class CodeComment {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `flutter test test/features/code_review/add_comment_dialog_test.dart`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add remote/mobile/lib/features/code_review/models/code_comment.dart remote/mobile/lib/features/code_review/widgets/add_comment_dialog.dart remote/mobile/lib/widgets/unified_diff_viewer.dart remote/mobile/test/features/code_review/add_comment_dialog_test.dart

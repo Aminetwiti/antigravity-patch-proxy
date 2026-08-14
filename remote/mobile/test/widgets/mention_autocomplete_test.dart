@@ -37,13 +37,11 @@ void main() {
   });
 
   testWidgets('ChatInputBar displays MentionAutocompleteOverlay on @ and inserts tag', (tester) async {
-    String? sentMessage;
-
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: ChatInputBar(
-            onSend: (msg, {queued = false}) => sentMessage = msg,
+            onSend: (_, {queued = false}) {},
           ),
         ),
       ),

@@ -196,6 +196,82 @@ Le Daemon Go expose un serveur WebSocket (`ws://<ip>:<port>/ws?token=<auth_token
 }
 ```
 
+#### 7. `list_models` (Catalogue des modèles disponibles)
+Récupère la liste structurée des modèles via `GetAvailableModels` (réponse imbriquée `FetchAvailableModelsResponse` décodée côté Go — jamais un dump binaire).
+
+```json
+{
+  "type": "list_models",
+  "requestId": "req_108"
+}
+```
+
+**Réponse Daemon :**
+```json
+{
+  "type": "response",
+  "requestId": "req_108",
+  "data": {
+    "models": [
+      {
+        "modelId": "claude-3-7-sonnet",
+        "displayName": "Claude 3.7 Sonnet",
+        "recommended": true,
+        "disabled": false,
+        "beta": false,
+        "preview": false,
+        "supportsThinking": true,
+        "supportsImages": true,
+        "thinkingBudget": 20000,
+        "maxOutputTokens": 128000,
+        "description": "..."
+      }
+    ]
+  }
+}
+```
+*Note : décodage best-effort (`ParseModels`) — un schéma inconnu renvoie `models: []` + `warning` au lieu d'une erreur fatale.*
+
+#### 8. `delete_cascade` (Suppression définitive d'une session)
+Action **destructive et irréversible** — le champ `confirm: true` est obligatoire (le mobile DOIT afficher un dialog natif avant).
+
+```json
+{
+  "type": "delete_cascade",
+  "requestId": "req_109",
+  "cascadeId": "cas_abc123",
+  "confirm": true
+}
+```
+**Réponse Daemon :** `{"type":"response","requestId":"req_109","data":{...}}`
+*Après succès RPC, le daemon purge l'état local : buffer StepRecovery, approbations en attente, auto-approbations de session, marqueurs de stream actif — aucun fantôme sur `get_pending_approval`.*
+*Sans `confirm: true` → erreur `"confirmation requise (champ confirm=true)"`.*
+
+#### 9. `read_file` (Lecture de fichier via RPC officiel du LS)
+Utilise le RPC `ReadFile` du Language Server (gestion workspace/encodage native) — chemin Windows ou URI `file:///` acceptés.
+
+```json
+{
+  "type": "read_file",
+  "requestId": "req_110",
+  "filePath": "C:\\Users\\amine\\proj\\main.go"
+}
+```
+
+#### 10. `write_file` (Écriture de fichier via RPC officiel du LS)
+Le contenu est transmis en **base64** (JSON ne transporte pas de binaire proprement). `overwrite: false` → erreur si le fichier existe (pas d'écrasement silencieux).
+
+```json
+{
+  "type": "write_file",
+  "requestId": "req_111",
+  "filePath": "C:\\Users\\amine\\proj\\main.go",
+  "content": "cGFja2FnZSBtYWluCg==",
+  "overwrite": true
+}
+```
+*Note : le chemin est normalisé en URI `file:///` avant transmission au LS ; base64 invalide → erreur sans appel RPC.*
+
 ---
 
 ## 7. Sécurité & Résilience Réseau
@@ -204,6 +280,8 @@ Le Daemon Go expose un serveur WebSocket (`ws://<ip>:<port>/ws?token=<auth_token
 2. **Confinement Path Traversal** : `resolvePath` et `saveUploadedImage` valident strictement l'ancrage des chemins dans la racine du workspace ou du sous-dossier `scratch/`.
 3. **Protection des Secrets** : Vérification des tokens d'authentification en temps constant via `crypto/subtle.ConstantTimeCompare`.
 4. **Buffer Circulaire `StepRecovery`** : 100 trames conservées en mémoire vive par cascade pour un rattrapage immédiat post-reconnexion.
+5. **Actions destructives** : `delete_cascade` exige `confirm: true` (confirmation explicite au niveau applicatif, en plus du token).
+6. **Écriture confinée** : `write_file` passe par le RPC `WriteFile` du LS (pas de chemin direct du daemon) — l'URI est normalisée par `toWorkspaceURI`.
 
 ---
 

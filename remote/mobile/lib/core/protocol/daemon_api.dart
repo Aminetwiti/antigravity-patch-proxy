@@ -415,6 +415,17 @@ class DaemonApi {
     return list?.map((e) => (e as Map).cast<String, dynamic>()).toList() ?? [];
   }
 
+  /// Récupère la liste des tâches planifiées (cron & timers).
+  Future<Map<String, dynamic>> listScheduledTasks() => rpc('list_scheduled_tasks');
+
+  /// Déclenche immédiatement une tâche planifiée.
+  Future<Map<String, dynamic>> triggerScheduledTask(String taskId) =>
+      rpc('trigger_scheduled_task', {'taskId': taskId});
+
+  /// Annule une tâche planifiée ou un cron actif.
+  Future<Map<String, dynamic>> cancelScheduledTask(String taskId) =>
+      rpc('cancel_scheduled_task', {'taskId': taskId});
+
   /// Streaming call: emits each decoded message (`stream_start`,
   /// `stream_delta`, ...) until `stream_end` closes the stream.
   Stream<Map<String, dynamic>> sendPrompt(
