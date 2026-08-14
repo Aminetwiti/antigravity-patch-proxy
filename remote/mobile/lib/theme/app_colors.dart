@@ -30,6 +30,14 @@ abstract class AppColors {
   static const Color dangerDeep = Color(0xFFDC2626);     // #dc2626
   static const Color info = Color(0xFF3B82F6);           // #3b82f6 (informational)
 
+  // ── Neutrals (scrims, shadows, camera overlay — PC --scrim / --shadow)
+  static const Color overlayScrim = Color(0xFF000000);   // full-black scrim (camera, modal backdrop)
+  static const Color shadowNeutral = Color(0xFF000000);  // drop shadows, elevation
+
+  // ── On-fill ink (text/icons over accent & danger fills — PC --on-accent)
+  static const Color onAccent = Color(0xFFFAFAFA);       // #fafafa (Zinc-50 — labels on primary)
+  static const Color onDanger = Color(0xFFFAFAFA);       // #fafafa (Zinc-50 — labels on error)
+
   // ── Provider Accent Badges
   static const Color providerOpenAI = Color(0xFF10A37F);
   static const Color providerAnthropic = Color(0xFFD97757);

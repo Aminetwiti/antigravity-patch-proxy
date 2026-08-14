@@ -96,7 +96,7 @@ class DaemonWebSocketClient {
       final completer = Completer<WebSocket>();
       socketFuture.then(completer.complete, onError: completer.completeError);
       _connectTimeout?.cancel();
-      _connectTimeout = Timer(const Duration(seconds: 5), () {
+      _connectTimeout = Timer(const Duration(seconds: 15), () {
         socketFuture.then((s) => s.close());
         if (!completer.isCompleted) {
           completer.completeError(TimeoutException('WebSocket connect timeout'));

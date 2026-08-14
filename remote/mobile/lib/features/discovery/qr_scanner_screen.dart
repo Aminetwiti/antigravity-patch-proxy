@@ -33,7 +33,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: AppColors.overlayScrim,
       appBar: AppBar(
         title: const Text('Scanner le QR Code'),
         backgroundColor: Colors.transparent,
@@ -67,7 +67,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                   color: AppColors.inkPrimary,
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
-                  shadows: [Shadow(color: Colors.black, blurRadius: 4)],
+                  shadows: [Shadow(color: AppColors.shadowNeutral, blurRadius: 4)],
                 ),
               ),
             ),

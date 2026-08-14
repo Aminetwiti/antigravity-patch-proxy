@@ -145,27 +145,43 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                         ),
                         child: Column(
                           children: [
-                            const Icon(Icons.cloud_off_outlined, size: 28, color: AppColors.inkMuted),
+                            Icon(
+                              widget.isConnected ? Icons.chat_bubble_outline : Icons.cloud_off_outlined,
+                              size: 28,
+                              color: AppColors.inkMuted,
+                            ),
                             const SizedBox(height: 8),
-                            const Text(
-                              'Aucun projet connecté',
-                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.inkSecondary),
+                            Text(
+                              widget.isConnected ? 'Aucune session active' : 'Aucun projet connecté',
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.inkSecondary),
                             ),
                             const SizedBox(height: 4),
-                            const Text(
-                              'Connectez le Daemon PC pour afficher vos sessions actives.',
+                            Text(
+                              widget.isConnected
+                                  ? 'Créez une nouvelle conversation ou choisissez une session ci-dessus.'
+                                  : 'Connectez le Daemon PC pour afficher vos sessions actives.',
                               textAlign: TextAlign.center,
-                              style: TextStyle(fontSize: 11, color: AppColors.inkMuted),
+                              style: const TextStyle(fontSize: 11, color: AppColors.inkMuted),
                             ),
                             const SizedBox(height: 12),
-                            OutlinedButton.icon(
-                              onPressed: () {
-                                Navigator.of(context).pop();
-                                widget.onToggleConnection();
-                              },
-                              icon: const Icon(Icons.qr_code_scanner, size: 16),
-                              label: const Text('Se connecter au Daemon', style: TextStyle(fontSize: 12)),
-                            ),
+                            if (widget.isConnected)
+                              ElevatedButton.icon(
+                                onPressed: () {
+                                  Navigator.of(context).pop();
+                                  widget.onNewConversation();
+                                },
+                                icon: const Icon(Icons.add, size: 16),
+                                label: const Text('Nouvelle Conversation', style: TextStyle(fontSize: 12)),
+                              )
+                            else
+                              OutlinedButton.icon(
+                                onPressed: () {
+                                  Navigator.of(context).pop();
+                                  widget.onToggleConnection();
+                                },
+                                icon: const Icon(Icons.qr_code_scanner, size: 16),
+                                label: const Text('Se connecter au Daemon', style: TextStyle(fontSize: 12)),
+                              ),
                           ],
                         ),
                       )

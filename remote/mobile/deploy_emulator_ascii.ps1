@@ -1,4 +1,4 @@
-# One-shot deploy v2: keep adb daemon ALIVE across all steps (single process tree).
+﻿# One-shot deploy v2: keep adb daemon ALIVE across all steps (single process tree).
 $ErrorActionPreference = "Continue"
 $adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
 $apk = "C:\Users\amine\Downloads\antigravity-add-model-main\antigravity-add-model-main\remote\mobile\build\app\outputs\flutter-apk\app-debug.apk"
@@ -44,4 +44,5 @@ if ($LASTEXITCODE -ne 0) { Write-Output "PM INSTALL FAILED"; exit 1 }
 # 7. Launch
 & $adb -s emulator-5554 shell am start -n $pkg/.MainActivity
 Write-Output "DONE"
+
 

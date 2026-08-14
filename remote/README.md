@@ -1,4 +1,4 @@
-# Antigravity Remote Control OS 🚀
+﻿# Antigravity Remote Control OS 🚀
 
 > Contrôle total de vos agents Antigravity depuis votre smartphone — en dialoguant **directement avec le moteur Go** (`language_server`) via son protocole natif.
 
@@ -39,7 +39,7 @@ graph TD
 | Couche | Technologie | Justification |
 |:---|:---|:---|
 | **Daemon (Relais PC)** | **Go 1.22** | Performance, empreinte mémoire faible, idéal pour les serveurs et le réseau. |
-| **Tunnel Public** | **Pinggy SSH** / Cloudflare | Expose le port local (8080) sur Internet en 1 seconde sans configuration lourde. |
+| **Tunnel Public** | **Pinggy SSH** / Cloudflare | expose le port local (8090) sur Internet en 1 seconde sans configuration lourde. |
 | **Communication PC ↔ IDE** | **gRPC-Web + Protobuf** | Rétro-ingénierie du vrai protocole d'Antigravity (manuel, sans bibliothèque pour rester léger). |
 | **Communication Mobile ↔ PC**| **WebSockets (JSON)** | Flux bidirectionnel asynchrone parfait pour le streaming de texte (LLM). |
 | **Interface PC (Manager)** | **Electron (Doctor UI)** | S'intègre naturellement à l'écosystème existant de l'utilisateur pour gérer le Daemon et scanner le QR Code. |
@@ -73,7 +73,7 @@ graph TD
 ### 1. Côté PC (Doctor UI)
 1. Ouvrez **Doctor UI** (l'interface Electron).
 2. Allez dans l'onglet **Remote**.
-3. Définissez le port (ex: `8080`), choisissez le tunnel (`pinggy`) et définissez un Token de sécurité (ex: `516d5qyy`).
+3. Définissez le port (ex: `8090`), choisissez le tunnel (`pinggy`) et définissez un Token de sécurité (ex: `516d5qyy`).
 4. Cliquez sur **Start Remote Server**.
 5. Le Daemon Go se lance, le tunnel s'ouvre, et un **QR Code** apparaît à l'écran.
 
@@ -118,3 +118,4 @@ remote/
 - Toutes les communications passent par des tunnels sécurisés (WSS / HTTPS).
 - Le Daemon n'a pas besoin des privilèges Administrateur (scan LocalHarness basé sur WMI en espace utilisateur).
 - L'URL Pinggy SSH change à chaque démarrage (si on utilise la version gratuite), évitant toute attaque ciblée de long terme.
+

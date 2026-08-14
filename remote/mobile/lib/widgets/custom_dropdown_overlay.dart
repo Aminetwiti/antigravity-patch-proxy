@@ -62,7 +62,7 @@ class CustomDropdownOverlay {
                     border: Border.all(color: AppColors.borderSubtle),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.5),
+                        color: AppColors.shadowNeutral.withValues(alpha: 0.5),
                         blurRadius: 10,
                         offset: const Offset(0, 4),
                       ),

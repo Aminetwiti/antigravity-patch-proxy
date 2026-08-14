@@ -448,7 +448,11 @@ func toOutgoing(raw []byte) interface{} {
 func sessionsOut(raw []byte) interface{} {
 	summaries := connectrpc.ParseTrajectories(raw)
 	if len(summaries) == 0 {
-		return map[string]interface{}{"rawBytes": len(raw)}
+		local := ListLocalSessions()
+		if len(local) > 0 {
+			return map[string]interface{}{"sessions": local}
+		}
+		return map[string]interface{}{"sessions": []map[string]interface{}{}, "rawBytes": len(raw)}
 	}
 	items := make([]map[string]interface{}, 0, len(summaries))
 	for _, s := range summaries {

@@ -40,48 +40,49 @@ func Discover() (*LocalHarnessInfo, error) {
 		return nil, fmt.Errorf("language_server introuvable — IDE Antigravity ouvert ?")
 	}
 
-	// L'instance qui expose le service RPC est le hub standalone
-	// (--subclient_type hub, --api_server_url http://localhost:50999).
-	// Les instances IDE (--subclient_type ide) répondent 404 sur ce service.
-	var pick *procEntry
-	for i := range procs {
-		if strings.Contains(procs[i].commandLine, "--subclient_type hub") {
-			pick = &procs[i]
-			break
+	// Prioriser l'instance IDE active du workspace (--workspace_id ou --enable_lsp),
+	// puis les autres instances IDE, puis le hub standalone en dernier recours.
+	var sortedProcs []procEntry
+	for _, p := range procs {
+		if strings.Contains(p.commandLine, "--workspace_id") || strings.Contains(p.commandLine, "--enable_lsp") {
+			sortedProcs = append([]procEntry{p}, sortedProcs...)
+		} else if strings.Contains(p.commandLine, "--subclient_type ide") {
+			sortedProcs = append(sortedProcs, p)
 		}
 	}
-	if pick == nil {
-		pick = &procs[0]
-	}
-
-	info := &LocalHarnessInfo{
-		PID:           pick.pid,
-		ProcessName:   pick.name,
-		CSRFToken:     extractArg(pick.commandLine, "csrf_token"),
-		ExtensionCSRF: extractArg(pick.commandLine, "extension_server_csrf_token"),
-		ExtensionPort: atoi(extractArg(pick.commandLine, "extension_server_port")),
-		WorkspaceID:   extractArg(pick.commandLine, "workspace_id"),
-		SubclientType: extractArg(pick.commandLine, "subclient_type"),
-	}
-	if info.ExtensionCSRF == "" {
-		info.ExtensionCSRF = info.CSRFToken
-	}
-
-	// Trouver les ports à tester
-	candidates := candidatePorts(info, pick)
-	if len(candidates) == 0 {
-		return nil, fmt.Errorf("aucun port candidat pour PID %d", pick.pid)
-	}
-
-	// Prober chaque port avec Heartbeat (seul critère fiable)
-	token := info.ExtensionCSRF
-	for _, port := range candidates {
-		if probeService(port, token) {
-			info.ConnectRPCPort = port
-			return info, nil
+	for _, p := range procs {
+		if strings.Contains(p.commandLine, "--subclient_type hub") {
+			sortedProcs = append(sortedProcs, p)
 		}
 	}
-	return nil, fmt.Errorf("aucun port ne répond au service RPC (testé %d candidats)", len(candidates))
+	if len(sortedProcs) == 0 {
+		sortedProcs = procs
+	}
+
+	for _, pick := range sortedProcs {
+		info := &LocalHarnessInfo{
+			PID:           pick.pid,
+			ProcessName:   pick.name,
+			CSRFToken:     extractArg(pick.commandLine, "csrf_token"),
+			ExtensionCSRF: extractArg(pick.commandLine, "extension_server_csrf_token"),
+			ExtensionPort: atoi(extractArg(pick.commandLine, "extension_server_port")),
+			WorkspaceID:   extractArg(pick.commandLine, "workspace_id"),
+			SubclientType: extractArg(pick.commandLine, "subclient_type"),
+		}
+		if info.ExtensionCSRF == "" {
+			info.ExtensionCSRF = info.CSRFToken
+		}
+
+		candidates := candidatePorts(info, &pick)
+		token := info.ExtensionCSRF
+		for _, port := range candidates {
+			if probeService(port, token) {
+				info.ConnectRPCPort = port
+				return info, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("aucun port ne répond au service RPC parmi les %d processus testés", len(sortedProcs))
 }
 
 // candidatePorts : extension_server_port+1..+20 si présent, sinon netstat PID.

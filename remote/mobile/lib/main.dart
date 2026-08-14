@@ -144,6 +144,25 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     }
   }
 
+  static String _formatWsUrl(String host, int port) {
+    final cleanHost = host.trim();
+    if (cleanHost.startsWith('ws://') || cleanHost.startsWith('wss://')) {
+      return cleanHost.endsWith('/ws') ? cleanHost : '$cleanHost/ws';
+    }
+    if (cleanHost.startsWith('https://')) {
+      final bare = cleanHost.substring('https://'.length);
+      return 'wss://$bare/ws';
+    }
+    if (cleanHost.startsWith('http://')) {
+      final bare = cleanHost.substring('http://'.length);
+      return 'ws://$bare/ws';
+    }
+    if (port == 443 || cleanHost.contains('trycloudflare.com') || cleanHost.contains('pinggy')) {
+      return 'wss://$cleanHost/ws';
+    }
+    return 'ws://$cleanHost:$port/ws';
+  }
+
   /// Applique les réglages daemon sauvegardés depuis Settings : reconnexion
   /// immédiate sur la nouvelle cible.
   void _applyDaemonSettings(Map<String, dynamic> v) {
@@ -175,7 +194,8 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
 
     setState(() {});
     if (currentStatus == ConnectionStatus.connected) {
-      _api ??= DaemonApi(
+      _api?.dispose();
+      _api = DaemonApi(
         incoming: _wsClient.stream,
         send: _wsClient.send,
         outbox: _outbox,
@@ -320,7 +340,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
               MaterialPageRoute(
                 builder: (context) => DiscoveryScreen(
                   onConnect: (host, port, token) async {
-                    final url = host.startsWith('ws') ? host : (host.startsWith('wss') ? host : 'ws://$host:$port/ws');
+                    final url = _formatWsUrl(host, port);
                     _wsClient.disconnect();
                     await _wsClient.connect(customUrl: url, authToken: token);
                     return _wsClient.statusNotifier.value == ConnectionStatus.connected;
@@ -368,7 +388,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
             MaterialPageRoute(
               builder: (context) => DiscoveryScreen(
                 onConnect: (host, port, token) async {
-                  final url = host.startsWith('ws') ? host : 'ws://$host:$port/ws';
+                  final url = _formatWsUrl(host, port);
                   _wsClient.disconnect();
                   await _wsClient.connect(customUrl: url, authToken: token);
                   return _wsClient.statusNotifier.value == ConnectionStatus.connected;

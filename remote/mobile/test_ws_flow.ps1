@@ -1,4 +1,4 @@
-# Test complet du flux WebSocket daemon : list_sessions -> send_prompt -> stream_delta
+﻿# Test complet du flux WebSocket daemon : list_sessions -> send_prompt -> stream_delta
 # ZÃ©ro dÃ©pendance : .NET ClientWebSocket (stdlib).
 $ErrorActionPreference = 'Stop'
 $ws = [System.Net.WebSockets.ClientWebSocket]::new()
@@ -58,3 +58,4 @@ while ((Get-Date) - $start -lt [TimeSpan]::FromSeconds(90)) {
 }
 Write-Output "== Total messages reÃ§us: $count"
 $ws.Dispose()
+

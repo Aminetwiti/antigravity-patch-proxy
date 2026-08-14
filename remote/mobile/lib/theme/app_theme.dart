@@ -15,10 +15,10 @@ class AppTheme {
       outline: AppColors.borderStrong,
       outlineVariant: AppColors.borderSubtle,
       primary: AppColors.accentBlue,
-      onPrimary: Colors.white,
+      onPrimary: AppColors.onAccent,
       secondary: AppColors.inkSecondary,
       error: AppColors.danger,
-      onError: Colors.white,
+      onError: AppColors.onDanger,
     );
 
     return ThemeData(
@@ -148,10 +148,10 @@ class AppTheme {
       outline: Color(0xFFAFB8C1),      // PC --border-strong
       outlineVariant: Color(0xFFD0D7DE), // PC --border #d0d7de
       primary: Color(0xFF0969DA),      // PC --accent-blue #0969da
-      onPrimary: Colors.white,
+      onPrimary: AppColors.onAccent,
       secondary: Color(0xFF57606A),
       error: Color(0xFFCF222E),        // PC --err
-      onError: Colors.white,
+      onError: AppColors.onDanger,
     );
 
     return ThemeData(

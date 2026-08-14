@@ -553,7 +553,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
-  // Find-in-page : comptage des occurrences (insensible à la casse).\n  // ponytail: allMatches() d'une RegExp — stdlib, zéro allocation custom.
+  // Find-in-page : comptage des occurrences (insensible à la casse).
+  // ponytail: allMatches() d'une RegExp — stdlib, zéro allocation custom.
   int _countMatches(String content, String query) {
     if (query.isEmpty) return 0;
     return RegExp(RegExp.escape(query), caseSensitive: false)
