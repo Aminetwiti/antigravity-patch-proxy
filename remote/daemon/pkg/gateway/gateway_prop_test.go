@@ -194,6 +194,12 @@ func (l *loadRPCClient) ReadFile(uri string) ([]byte, error) {
 func (l *loadRPCClient) WriteFile(uri string, content []byte, overwrite bool) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("written")), nil
 }
+func (l *loadRPCClient) GetCascadeTrajectory(cascadeID string, verbosity uint64) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("traj")), nil
+}
+func (l *loadRPCClient) GetTurnDiff(conversationID string, stepIndex int64) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("diff")), nil
+}
 
 // TestWebSocketConcurrentClients — 20 clients en parallèle, 30 messages chacun :
 // aucun message ne doit être perdu ni mélangé (chaque réponse doit porter
@@ -349,6 +355,12 @@ func (f *failingStreamClient) ReadFile(uri string) ([]byte, error) {
 }
 func (f *failingStreamClient) WriteFile(uri string, content []byte, overwrite bool) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("written")), nil
+}
+func (f *failingStreamClient) GetCascadeTrajectory(cascadeID string, verbosity uint64) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("traj")), nil
+}
+func (f *failingStreamClient) GetTurnDiff(conversationID string, stepIndex int64) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("diff")), nil
 }
 
 func TestWebSocketStreamBackendError(t *testing.T) {

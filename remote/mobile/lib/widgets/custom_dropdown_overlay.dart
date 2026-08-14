@@ -54,25 +54,28 @@ class CustomDropdownOverlay {
               width: width ?? size.width,
               child: Material(
                 color: Colors.transparent,
-                child: Container(
-                  constraints: BoxConstraints(maxHeight: maxHeight ?? 300),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceRaised, // Using the design system token
-                    borderRadius: BorderRadius.circular(AppRadius.md),
-                    border: Border.all(color: AppColors.borderSubtle),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.shadowNeutral.withValues(alpha: 0.5),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(AppRadius.md),
-                    child: child,
-                  ),
-                ),
+                child: Builder(builder: (context) {
+                  final scheme = Theme.of(context).colorScheme;
+                  return Container(
+                    constraints: BoxConstraints(maxHeight: maxHeight ?? 300),
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainer,
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                      border: Border.all(color: scheme.outlineVariant),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.25),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                      child: child,
+                    ),
+                  );
+                }),
               ),
             ),
           ],

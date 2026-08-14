@@ -60,18 +60,19 @@ class MentionAutocompleteOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final filtered = _filteredItems;
+    final scheme = Theme.of(context).colorScheme;
 
     return Container(
       constraints: BoxConstraints(maxHeight: maxHeight),
       decoration: BoxDecoration(
-        color: AppColors.surfaceRaised,
+        color: scheme.surfaceContainer,
         borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: AppColors.borderSubtle),
-        boxShadow: const [
+        border: Border.all(color: scheme.outlineVariant),
+        boxShadow: [
           BoxShadow(
-            color: AppColors.shadowNeutral,
+            color: Colors.black.withValues(alpha: 0.25),
             blurRadius: 12,
-            offset: Offset(0, 4),
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -89,22 +90,22 @@ class MentionAutocompleteOverlay extends StatelessWidget {
                   const SizedBox(width: 6),
                   Text(
                     'Mentions (${filtered.length})',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
-                      color: AppColors.inkMuted,
+                      color: scheme.onSurfaceVariant,
                     ),
                   ),
                 ],
               ),
             ),
-            const Divider(color: AppColors.borderSubtle, height: 1),
+            Divider(color: scheme.outlineVariant, height: 1),
             if (filtered.isEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 child: Text(
                   'No matching mentions for "$query"',
-                  style: const TextStyle(fontSize: 12, color: AppColors.inkMuted),
+                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                 ),
               )
             else
@@ -113,8 +114,8 @@ class MentionAutocompleteOverlay extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(vertical: 4),
                   shrinkWrap: true,
                   itemCount: filtered.length,
-                  separatorBuilder: (context, index) => const Divider(
-                    color: AppColors.borderSubtle,
+                  separatorBuilder: (context, index) => Divider(
+                    color: scheme.outlineVariant,
                     height: 1,
                     indent: 40,
                   ),
@@ -148,10 +149,10 @@ class MentionAutocompleteOverlay extends StatelessWidget {
                                       Expanded(
                                         child: Text(
                                           item.label,
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             fontSize: 13,
                                             fontWeight: FontWeight.w500,
-                                            color: AppColors.inkPrimary,
+                                            color: scheme.onSurface,
                                           ),
                                           overflow: TextOverflow.ellipsis,
                                         ),
@@ -159,7 +160,7 @@ class MentionAutocompleteOverlay extends StatelessWidget {
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
                                         decoration: BoxDecoration(
-                                          color: AppColors.surfaceInput,
+                                          color: scheme.surfaceContainerHighest,
                                           borderRadius: BorderRadius.circular(AppRadius.sm),
                                         ),
                                         child: Text(
@@ -177,9 +178,9 @@ class MentionAutocompleteOverlay extends StatelessWidget {
                                     const SizedBox(height: 2),
                                     Text(
                                       item.detail,
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontSize: 11,
-                                        color: AppColors.inkMuted,
+                                        color: scheme.onSurfaceVariant,
                                       ),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,

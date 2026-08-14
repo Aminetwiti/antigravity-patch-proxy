@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -77,6 +79,25 @@ type fakeRPCClient struct {
 	modelsRaw []byte
 	// deleteErr : erreur simulée pour DeleteCascade (tests de refus).
 	deleteErr error
+	// trajectoryRaw / turnDiffRaw : réponses des RPC C9 (nil → défaut).
+	trajectoryRaw []byte
+	turnDiffRaw   []byte
+	// lastTrajectory / lastTurnDiff : derniers appels C9 reçus (vérifiés
+	// par zz_p1_trajectory_test.go).
+	lastTrajectory *trajectoryCall
+	lastTurnDiff   *turnDiffCall
+}
+
+// trajectoryCall capture les arguments du dernier GetCascadeTrajectory.
+type trajectoryCall struct {
+	cascadeID string
+	verbosity uint64
+}
+
+// turnDiffCall capture les arguments du dernier GetTurnDiff.
+type turnDiffCall struct {
+	conversationID string
+	stepIndex      int64
 }
 
 // writeFileCall capture les arguments du dernier WriteFile.
@@ -229,6 +250,22 @@ func (f *fakeRPCClient) ReadFile(uri string) ([]byte, error) {
 func (f *fakeRPCClient) WriteFile(uri string, content []byte, overwrite bool) ([]byte, error) {
 	f.lastWrite = &writeFileCall{uri: uri, content: content, overwrite: overwrite}
 	return connectrpc.Frame(pbTextFrame("written")), nil
+}
+
+func (f *fakeRPCClient) GetCascadeTrajectory(cascadeID string, verbosity uint64) ([]byte, error) {
+	f.lastTrajectory = &trajectoryCall{cascadeID: cascadeID, verbosity: verbosity}
+	if f.trajectoryRaw != nil {
+		return f.trajectoryRaw, nil
+	}
+	return connectrpc.Frame(pbTextFrame("traj")), nil
+}
+
+func (f *fakeRPCClient) GetTurnDiff(conversationID string, stepIndex int64) ([]byte, error) {
+	f.lastTurnDiff = &turnDiffCall{conversationID: conversationID, stepIndex: stepIndex}
+	if f.turnDiffRaw != nil {
+		return f.turnDiffRaw, nil
+	}
+	return connectrpc.Frame(pbTextFrame("diff")), nil
 }
 
 // --- Tests WebSocket ---
@@ -482,7 +519,31 @@ func trajectoryFrame(uuid string) []byte {
 // TestWebSocketGetContextReal — get_context compte les artefacts réels depuis
 // la réponse GetAllCascadeTrajectories (plus de mock en dur).
 func TestWebSocketGetContextReal(t *testing.T) {
-	srv := newTestServer(&fakeRPCClient{cascadesRaw: trajectoryFrame("123e4567-e89b-12d3-a456-426614174000")})
+	// Cascade de test isolée : un ID UUID (36 octets) est requis —
+	// trajectoryFrame encode cascade_id avec une longueur fixe de 36 et
+	// uuidRe conditionne le parsing structuré. Un ID unique évite aussi de
+	// collisionner avec une vraie session utilisateur.
+	n := time.Now().UnixNano()
+	cascadeID := fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", uint32(n), uint16(n>>32), uint16(n>>48), uint16(n>>16), uint64(n)&0xFFFFFFFFFFFF)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	transcriptDir := filepath.Join(home, ".gemini", "antigravity-ide", "brain", cascadeID, ".system_generated", "logs")
+	if err := os.MkdirAll(transcriptDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// filePathsIn n'extrait que les chemins C:/… ou file:///C:/… (slashs
+	// avant) — filepath.Join produit des backslashes sur Windows, donc on
+	// convertit explicitement.
+	artifactPath := "file:///" + filepath.ToSlash(filepath.Join(home, ".gemini", "antigravity-ide", "brain", cascadeID, "artifact_1.md"))
+	line := fmt.Sprintf(`{"type":"TOOL_CALL","content":"%s"}`, artifactPath)
+	if err := os.WriteFile(filepath.Join(transcriptDir, "transcript.jsonl"), []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(filepath.Join(home, ".gemini", "antigravity-ide", "brain", cascadeID))
+
+	srv := newTestServer(&fakeRPCClient{cascadesRaw: trajectoryFrame(cascadeID)})
 	defer srv.Close()
 
 	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")

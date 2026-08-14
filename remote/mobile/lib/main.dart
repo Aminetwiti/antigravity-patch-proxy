@@ -293,7 +293,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppColors.surfaceRaised,
+      backgroundColor: Colors.transparent,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
       ),
@@ -467,11 +467,11 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: isConnected
-                      ? AppColors.positive.withValues(alpha: 0.15)
+                      ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.15)
                       : Theme.of(context).colorScheme.error.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: isConnected ? AppColors.positive : Theme.of(context).colorScheme.error,
+                    color: isConnected ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.error,
                     width: 1,
                   ),
                 ),
@@ -484,7 +484,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                       width: 6,
                       height: 6,
                       decoration: BoxDecoration(
-                        color: isConnected ? AppColors.positive : Theme.of(context).colorScheme.error,
+                        color: isConnected ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.error,
                         shape: BoxShape.circle,
                       ),
                     ),
@@ -496,7 +496,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                         key: ValueKey<bool>(isConnected),
                         style: TextStyle(
                           fontSize: 10.5,
-                          color: isConnected ? AppColors.positive : Theme.of(context).colorScheme.error,
+                          color: isConnected ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.error,
                           fontWeight: FontWeight.w600,
                         ),
                       ),

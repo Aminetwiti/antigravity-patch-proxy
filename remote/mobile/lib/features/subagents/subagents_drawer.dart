@@ -16,20 +16,20 @@ class SubagentsDrawer extends StatelessWidget {
     this.onSelectAgent,
   });
 
-  Color _getStatusColor(String status) {
+  Color _getStatusColor(String status, ColorScheme scheme) {
     switch (status.toLowerCase()) {
       case 'running':
-        return AppColors.positive;
+        return scheme.primary;
       case 'waiting_for_input':
       case 'waiting_for_dependents':
       case 'waiting_for_message':
-        return AppColors.warning;
+        return scheme.tertiary;
       case 'errored':
       case 'canceling':
-        return AppColors.danger;
+        return scheme.error;
       case 'idle':
       default:
-        return AppColors.inkMuted;
+        return scheme.outline;
     }
   }
 
@@ -56,11 +56,10 @@ class SubagentsDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final bgSurface = isDark ? AppColors.surfaceBase : theme.colorScheme.surface;
-    final cardBg = isDark ? AppColors.surfaceRaised : theme.colorScheme.surfaceContainer;
-    final borderCol = isDark ? AppColors.borderSubtle : theme.colorScheme.outlineVariant;
+    final scheme = Theme.of(context).colorScheme;
+    final bgSurface = scheme.surface;
+    final cardBg = scheme.surfaceContainer;
+    final borderCol = scheme.outlineVariant;
 
     return Drawer(
       backgroundColor: bgSurface,
@@ -76,7 +75,7 @@ class SubagentsDrawer extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               child: Row(
                 children: [
-                  const Icon(Icons.smart_toy_outlined, size: 18, color: AppColors.accentBlue),
+                  Icon(Icons.smart_toy_outlined, size: 18, color: scheme.primary),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -94,7 +93,7 @@ class SubagentsDrawer extends StatelessWidget {
                     TextButton(
                       onPressed: onKillAll,
                       style: TextButton.styleFrom(
-                        foregroundColor: AppColors.danger,
+                        foregroundColor: scheme.error,
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         minimumSize: Size.zero,
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -220,7 +219,7 @@ class SubagentsDrawer extends StatelessWidget {
                                       if (onKillAgent != null) ...[
                                         const SizedBox(width: 4),
                                         IconButton(
-                                          icon: const Icon(Icons.cancel_outlined, size: 16, color: AppColors.danger),
+                                          icon: Icon(Icons.cancel_outlined, size: 16, color: scheme.error),
                                           tooltip: 'Terminer le sous-agent',
                                           onPressed: () => onKillAgent!(agent.id),
                                           padding: EdgeInsets.zero,
@@ -269,14 +268,14 @@ class SubagentsDrawer extends StatelessWidget {
                                       width: double.infinity,
                                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                                       decoration: BoxDecoration(
-                                        color: isDark ? AppColors.surfaceInput : theme.colorScheme.surfaceContainerHighest,
+                                        color: scheme.surfaceContainerHighest,
                                         borderRadius: BorderRadius.circular(AppRadius.sm),
                                       ),
                                       child: Text(
                                         agent.stateDetail!,
                                         style: TextStyle(
                                           fontSize: 11,
-                                          color: theme.colorScheme.onSurfaceVariant,
+                                          color: scheme.onSurfaceVariant,
                                           fontStyle: FontStyle.italic,
                                         ),
                                       ),

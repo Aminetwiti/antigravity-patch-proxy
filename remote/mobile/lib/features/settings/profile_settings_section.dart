@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../../services/settings_store.dart';
-import '../../theme/app_colors.dart';
 
 /// Éditeur de profil utilisateur : avatar, nom, rôle et statut de présence.
 /// Les champs sont persistés (SettingsStore) à chaque modification.
@@ -44,6 +43,7 @@ class _ProfileSettingsSectionState extends State<ProfileSettingsSection> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -57,15 +57,15 @@ class _ProfileSettingsSectionState extends State<ProfileSettingsSection> {
                   children: [
                     CircleAvatar(
                       radius: 26,
-                      backgroundColor: AppColors.accentBlue,
+                      backgroundColor: scheme.primary,
                       child: Text(
                         _nameController.text.isNotEmpty
                             ? _nameController.text[0].toUpperCase()
                             : 'A',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.bold,
-                          color: AppColors.inkPrimary,
+                          color: scheme.onPrimary,
                         ),
                       ),
                     ),
@@ -75,16 +75,16 @@ class _ProfileSettingsSectionState extends State<ProfileSettingsSection> {
                       child: Container(
                         padding: const EdgeInsets.all(3),
                         decoration: BoxDecoration(
-                          color: AppColors.surfaceRaised,
+                          color: scheme.surfaceContainer,
                           shape: BoxShape.circle,
                           border: Border.all(
-                            color: Theme.of(context).colorScheme.outlineVariant,
+                            color: scheme.outlineVariant,
                           ),
                         ),
-                        child: const Icon(
+                        child: Icon(
                           Icons.photo_camera_outlined,
                           size: 12,
-                          color: AppColors.inkSecondary,
+                          color: scheme.onSurfaceVariant,
                         ),
                       ),
                     ),
@@ -118,10 +118,10 @@ class _ProfileSettingsSectionState extends State<ProfileSettingsSection> {
                             height: 7,
                             decoration: BoxDecoration(
                               color: _status == 'Online'
-                                  ? AppColors.positive
+                                  ? scheme.primary
                                   : _status == 'Busy'
-                                      ? AppColors.warning
-                                      : AppColors.inkMuted,
+                                      ? scheme.tertiary
+                                      : scheme.outline,
                               shape: BoxShape.circle,
                             ),
                           ),
@@ -132,9 +132,7 @@ class _ProfileSettingsSectionState extends State<ProfileSettingsSection> {
                               isDense: true,
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurfaceVariant,
+                                color: scheme.onSurfaceVariant,
                               ),
                               items: _statuses
                                   .map((s) => DropdownMenuItem(
@@ -166,10 +164,10 @@ class _ProfileSettingsSectionState extends State<ProfileSettingsSection> {
                 fontSize: 13,
                 color: Theme.of(context).colorScheme.onSurface,
               ),
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Rôle / Description',
                 prefixIcon: Icon(Icons.badge_outlined,
-                    size: 18, color: AppColors.inkMuted),
+                    size: 18, color: scheme.onSurfaceVariant),
               ),
               onChanged: (v) => SettingsStore.save({'role': v}),
             ),

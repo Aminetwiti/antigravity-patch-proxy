@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/protocol/daemon_api.dart';
 import '../features/scheduled_tasks/scheduled_tasks_screen.dart';
 import '../features/subagents/subagents_drawer.dart';
+import '../features/mcp/mcp_explorer_screen.dart';
 import '../theme/app_colors.dart';
 import 'artifact_viewer_modal.dart';
 
@@ -215,21 +216,32 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
                     badgeCount: widget.uploadsCount,
                     onTap: () {},
                   ),
-                  _ContextItemRow(
-                    title: 'Scheduled Tasks',
-                    badgeCount: widget.scheduledTasksCount > 0 ? widget.scheduledTasksCount : widget.backgroundTasksCount,
-                    onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (ctx) => ScheduledTasksScreen(
-                            tasks: const [],
-                            onCancelTask: (id) => widget.api?.cancelScheduledTask(id),
-                            onTriggerNow: (id) => widget.api?.triggerScheduledTask(id),
+                    _ContextItemRow(
+                      title: 'Scheduled Tasks',
+                      badgeCount: widget.scheduledTasksCount > 0 ? widget.scheduledTasksCount : widget.backgroundTasksCount,
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (ctx) => ScheduledTasksScreen(
+                              tasks: const [],
+                              onCancelTask: (id) => widget.api?.cancelScheduledTask(id),
+                              onTriggerNow: (id) => widget.api?.triggerScheduledTask(id),
+                            ),
                           ),
-                        ),
-                      );
-                    },
-                  ),
+                        );
+                      },
+                    ),
+                    _ContextItemRow(
+                      title: 'MCP Servers',
+                      badgeCount: 0,
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (ctx) => McpExplorerScreen(api: widget.api),
+                          ),
+                        );
+                      },
+                    ),
                   _ContextItemRow(
                     title: 'Background Tasks',
                     badgeCount: widget.backgroundTasksCount,

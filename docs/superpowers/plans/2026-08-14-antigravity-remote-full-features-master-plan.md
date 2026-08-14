@@ -528,7 +528,7 @@ git commit -m "feat(remote): add scheduled tasks and cron management screen"
 - Consumes: MCP server registry status & tools list from Go Daemon.
 - Produces: Visual list of MCP servers (Coolify, Github, PostgreSQL, etc.) with tool signatures.
 
-- [ ] **Step 1: Write test for McpExplorerScreen**
+- [x] **Step 1: Write test for McpExplorerScreen**
 
 ```dart
 import 'package:flutter/material.dart';
@@ -560,12 +560,12 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `flutter test test/features/mcp/mcp_explorer_test.dart`
 Expected: FAIL with missing classes.
 
-- [ ] **Step 3: Implement McpServerInfo model and McpExplorerScreen**
+- [x] **Step 3: Implement McpServerInfo model and McpExplorerScreen**
 
 ```dart
 // remote/mobile/lib/features/mcp/models/mcp_server_info.dart
@@ -597,12 +597,12 @@ class McpServerInfo {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `flutter test test/features/mcp/mcp_explorer_test.dart`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit** — N/A (dépôt sans HEAD git ; vérifié par tests + analyse)
 
 ```bash
 git add remote/mobile/lib/features/mcp/models/mcp_server_info.dart remote/mobile/lib/features/mcp/mcp_explorer_screen.dart remote/mobile/test/features/mcp/mcp_explorer_test.dart
@@ -624,7 +624,7 @@ git commit -m "feat(remote): add MCP servers and tools registry explorer"
 - Consumes: Worktrees/branches list + Tool execution policy state (`strict`, `request-review`, `always-proceed`).
 - Produces: Switch active worktree or update sandbox security policy via Daemon API.
 
-- [ ] **Step 1: Write test for GitWorktreeSelector**
+- [x] **Step 1: Write test for GitWorktreeSelector**
 
 ```dart
 import 'package:flutter/material.dart';
@@ -659,12 +659,12 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `flutter test test/features/workspace/git_worktree_selector_test.dart`
 Expected: FAIL with missing classes.
 
-- [ ] **Step 3: Implement GitWorktreeSelector and policy selector in SettingsScreen**
+- [x] **Step 3: Implement GitWorktreeSelector and policy selector in SettingsScreen**
 
 ```dart
 // remote/mobile/lib/features/workspace/git_worktree_selector.dart
@@ -707,12 +707,12 @@ class GitWorktreeSelector extends StatelessWidget {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `flutter test test/features/workspace/git_worktree_selector_test.dart`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit** — N/A (dépôt sans HEAD git ; vérifié par tests + analyse)
 
 ```bash
 git add remote/mobile/lib/features/workspace/git_worktree_selector.dart remote/mobile/lib/features/settings/settings_screen.dart remote/mobile/test/features/workspace/git_worktree_selector_test.dart

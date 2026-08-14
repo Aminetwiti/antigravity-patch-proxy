@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../theme/app_colors.dart';
+import 'package:flutter/services.dart';
 import '../../services/settings_store.dart';
 
 /// Préférences d'apparence : mode clair/sombre + style de l'interface chat.
@@ -132,17 +132,29 @@ class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
   }
 
   Widget _buildToggleBtn(int index, IconData icon, String label) {
+    final scheme = Theme.of(context).colorScheme;
     final isSelected = _themeModeIndex == index;
     return InkWell(
-      onTap: () => _setThemeMode(index),
+      onTap: () {
+        HapticFeedback.selectionClick();
+        _setThemeMode(index);
+      },
       borderRadius: BorderRadius.circular(AppRadius.sm),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(
-          color: isSelected
-              ? Theme.of(context).colorScheme.surfaceContainerHighest
-              : Colors.transparent,
+          color: isSelected ? scheme.surface : Colors.transparent,
           borderRadius: BorderRadius.circular(AppRadius.sm),
+          border: isSelected ? Border.all(color: scheme.outlineVariant, width: 1) : null,
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: scheme.shadow.withValues(alpha: 0.2),
+                    blurRadius: 4,
+                    offset: const Offset(0, 1),
+                  ),
+                ]
+              : null,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -150,9 +162,7 @@ class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
             Icon(
               icon,
               size: 15,
-              color: isSelected
-                  ? Theme.of(context).colorScheme.onSurface
-                  : Theme.of(context).colorScheme.onSurfaceVariant,
+              color: isSelected ? scheme.primary : scheme.onSurfaceVariant,
             ),
             const SizedBox(width: 6),
             Text(
@@ -160,9 +170,7 @@ class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                color: isSelected
-                    ? Theme.of(context).colorScheme.onSurface
-                    : Theme.of(context).colorScheme.onSurfaceVariant,
+                color: isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
               ),
             ),
           ],

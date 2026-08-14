@@ -19,10 +19,10 @@ class ScheduledTasksScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final bgSurface = isDark ? AppColors.surfaceBase : theme.colorScheme.surface;
-    final cardBg = isDark ? AppColors.surfaceRaised : theme.colorScheme.surfaceContainer;
-    final borderCol = isDark ? AppColors.borderSubtle : theme.colorScheme.outlineVariant;
+    final scheme = theme.colorScheme;
+    final bgSurface = scheme.surface;
+    final cardBg = scheme.surfaceContainer;
+    final borderCol = scheme.outlineVariant;
 
     final content = tasks.isEmpty
         ? Center(
@@ -34,7 +34,7 @@ class ScheduledTasksScreen extends StatelessWidget {
                   Icon(
                     Icons.schedule_outlined,
                     size: 48,
-                    color: isDark ? AppColors.inkMuted : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                    color: scheme.onSurfaceVariant.withValues(alpha: 0.5),
                   ),
                   const SizedBox(height: 16),
                   Text(
@@ -42,7 +42,7 @@ class ScheduledTasksScreen extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
-                      color: isDark ? AppColors.inkPrimary : theme.colorScheme.onSurface,
+                      color: scheme.onSurface,
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -50,7 +50,7 @@ class ScheduledTasksScreen extends StatelessWidget {
                     'Les cron jobs récurrents et timers s\'afficheront ici.',
                     style: TextStyle(
                       fontSize: 12,
-                      color: isDark ? AppColors.inkMuted : theme.colorScheme.onSurfaceVariant,
+                      color: scheme.onSurfaceVariant,
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -83,13 +83,13 @@ class ScheduledTasksScreen extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
                             color: isCron
-                                ? AppColors.accentBlue.withValues(alpha: 0.15)
-                                : AppColors.positive.withValues(alpha: 0.15),
+                                ? scheme.primary.withValues(alpha: 0.15)
+                                : scheme.tertiary.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(AppRadius.pill),
                             border: Border.all(
                               color: isCron
-                                  ? AppColors.accentBlue.withValues(alpha: 0.3)
-                                  : AppColors.positive.withValues(alpha: 0.3),
+                                  ? scheme.primary.withValues(alpha: 0.3)
+                                  : scheme.tertiary.withValues(alpha: 0.3),
                               width: 0.8,
                             ),
                           ),
@@ -99,7 +99,7 @@ class ScheduledTasksScreen extends StatelessWidget {
                               Icon(
                                 isCron ? Icons.repeat : Icons.timer_outlined,
                                 size: 12,
-                                color: isCron ? AppColors.accentBlue : AppColors.positive,
+                                color: isCron ? scheme.primary : scheme.tertiary,
                               ),
                               const SizedBox(width: 4),
                               Text(
@@ -107,7 +107,7 @@ class ScheduledTasksScreen extends StatelessWidget {
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w600,
-                                  color: isCron ? AppColors.accentBlue : AppColors.positive,
+                                  color: isCron ? scheme.primary : scheme.tertiary,
                                 ),
                               ),
                             ],
@@ -118,15 +118,15 @@ class ScheduledTasksScreen extends StatelessWidget {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: AppColors.surfaceHover,
+                              color: scheme.surfaceContainerHighest,
                               borderRadius: BorderRadius.circular(AppRadius.sm),
                             ),
-                            child: const Text(
+                            child: Text(
                               'Daemon',
                               style: TextStyle(
                                 fontSize: 10,
                                 fontWeight: FontWeight.w500,
-                                color: AppColors.inkSecondary,
+                                color: scheme.onSurfaceVariant,
                               ),
                             ),
                           ),
@@ -134,7 +134,7 @@ class ScheduledTasksScreen extends StatelessWidget {
                         const Spacer(),
                         if (onCancelTask != null)
                           IconButton(
-                            icon: const Icon(Icons.close, size: 16, color: AppColors.danger),
+                            icon: Icon(Icons.close, size: 16, color: scheme.error),
                             tooltip: 'Annuler la tâche',
                             onPressed: () => onCancelTask!(task.id),
                             constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
@@ -151,7 +151,7 @@ class ScheduledTasksScreen extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
-                        color: isDark ? AppColors.inkPrimary : theme.colorScheme.onSurface,
+                        color: scheme.onSurface,
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -161,7 +161,7 @@ class ScheduledTasksScreen extends StatelessWidget {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color: isDark ? AppColors.surfaceInput : theme.colorScheme.surfaceContainerHighest,
+                          color: scheme.surfaceContainerHighest,
                           borderRadius: BorderRadius.circular(AppRadius.sm),
                         ),
                         child: Row(
@@ -170,16 +170,16 @@ class ScheduledTasksScreen extends StatelessWidget {
                             Icon(
                               Icons.code,
                               size: 13,
-                              color: isDark ? AppColors.inkFaint : theme.colorScheme.onSurfaceVariant,
+                              color: scheme.onSurfaceVariant,
                             ),
                             const SizedBox(width: 6),
                             Text(
                               task.cronExpression!,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 12,
                                 fontFamily: 'monospace',
                                 fontWeight: FontWeight.w600,
-                                color: AppColors.inkSecondary,
+                                color: scheme.onSurfaceVariant,
                               ),
                             ),
                           ],
@@ -190,7 +190,7 @@ class ScheduledTasksScreen extends StatelessWidget {
                         'Durée: ${task.durationSeconds}s',
                         style: TextStyle(
                           fontSize: 12,
-                          color: isDark ? AppColors.inkMuted : theme.colorScheme.onSurfaceVariant,
+                          color: scheme.onSurfaceVariant,
                         ),
                       ),
                     const SizedBox(height: 12),
@@ -201,14 +201,14 @@ class ScheduledTasksScreen extends StatelessWidget {
                         Icon(
                           Icons.insights,
                           size: 14,
-                          color: isDark ? AppColors.inkFaint : theme.colorScheme.onSurfaceVariant,
+                          color: scheme.onSurfaceVariant,
                         ),
                         const SizedBox(width: 4),
                         Text(
                           '${task.iterationsRun} itérations',
                           style: TextStyle(
                             fontSize: 11,
-                            color: isDark ? AppColors.inkMuted : theme.colorScheme.onSurfaceVariant,
+                            color: scheme.onSurfaceVariant,
                           ),
                         ),
                         const Spacer(),
@@ -218,8 +218,8 @@ class ScheduledTasksScreen extends StatelessWidget {
                             label: const Text('Trigger Now', style: TextStyle(fontSize: 12)),
                             onPressed: () => onTriggerNow!(task.id),
                             style: OutlinedButton.styleFrom(
-                              foregroundColor: AppColors.accentBlue,
-                              side: const BorderSide(color: AppColors.accentBlue, width: 0.9),
+                              foregroundColor: scheme.primary,
+                              side: BorderSide(color: scheme.primary, width: 0.9),
                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                               minimumSize: Size.zero,
                               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -238,7 +238,7 @@ class ScheduledTasksScreen extends StatelessWidget {
       backgroundColor: bgSurface,
       appBar: AppBar(
         title: Text('Scheduled Tasks (${tasks.length})'),
-        backgroundColor: isDark ? AppColors.surfaceRaised : theme.colorScheme.surfaceContainer,
+        backgroundColor: scheme.surfaceContainer,
         elevation: 0,
       ),
       body: onRefresh != null

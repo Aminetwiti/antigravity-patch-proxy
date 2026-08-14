@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../../data/db/database_helper.dart';
 import '../network/outbox.dart';
 import 'messages.dart';
+import '../../features/mcp/models/mcp_server_info.dart';
 
 class CallError implements Exception {
   final String message;
@@ -351,7 +352,6 @@ class DaemonApi {
     _send(clientMsg.toJson());
   }
 
-
   /// StepRecovery : synchronise les événements manqués lors d'une perte réseau.
   Future<Map<String, dynamic>> syncSession({
     required String cascadeId,
@@ -515,7 +515,6 @@ class DaemonApi {
     });
   }
 
-  /// Connexion à un serveur MCP avec timeout de 15s.
   Future<Map<String, dynamic>> connectMcpServer(String serverName) async {
     return rpc('connect_mcp_server', {'serverName': serverName}).timeout(
       mcpTimeout,

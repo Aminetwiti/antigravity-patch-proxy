@@ -11,7 +11,6 @@
 library;
 
 import 'package:flutter/material.dart';
-import '../../theme/app_colors.dart';
 
 class CodeBlock {
   final String language;
@@ -137,8 +136,9 @@ class MarkdownRenderer {
   /// Builds inline [TextSpan]s for a paragraph, resolving bold/italic/code.
   static List<InlineSpan> inlineSpans(
     String text,
-    TextStyle base,
-  ) {
+    TextStyle base, {
+    required ColorScheme scheme,
+  }) {
     final spans = <InlineSpan>[];
     final codeRe = RegExp(r'`([^`]+)`');
     final boldRe = RegExp(r'\*\*([^*]+)\*\*');
@@ -157,8 +157,8 @@ class MarkdownRenderer {
           style: base.copyWith(
             fontFamily: 'monospace',
             fontSize: base.fontSize! * 0.92,
-            color: AppColors.warning,
-            backgroundColor: AppColors.surfaceInput,
+            color: scheme.primary,
+            backgroundColor: scheme.surfaceContainerHighest,
           ),
         ));
         remaining = remaining.substring(codeMatch.end);
@@ -179,7 +179,7 @@ class MarkdownRenderer {
             child: Text(
               label,
               style: base.copyWith(
-                color: AppColors.accentBlue,
+                color: scheme.primary,
                 decoration: TextDecoration.underline,
               ),
             ),
@@ -224,42 +224,6 @@ class MarkdownRenderer {
       }
       spans.add(TextSpan(text: remaining.substring(0, nextIndex)));
       remaining = remaining.substring(nextIndex);
-    }
-    return spans;
-  }
-
-  /// Surlignage de syntaxe pour Dart, Swift et Objective-C dans les blocs de code.
-  static List<TextSpan> highlightCode(String code, String language, TextStyle baseStyle) {
-    final lang = language.toLowerCase();
-    final isLangSupported = lang == 'dart' || lang == 'swift' || lang == 'objc' || lang == 'objective-c';
-
-    if (!isLangSupported) {
-      return [TextSpan(text: code, style: baseStyle)];
-    }
-
-    final keywords = switch (lang) {
-      'swift' => RegExp(r'\b(func|let|var|struct|class|enum|guard|if|else|import|return|self|switch)\b'),
-      'objc' || 'objective-c' => RegExp(r'(@interface|@implementation|@property|@end|@synthesize|NSString|NSInteger|BOOL|id|void|return)\b'),
-      _ => RegExp(r'\b(class|final|void|async|await|Widget|setState|return|import|override|const|required)\b'),
-    };
-
-    final spans = <TextSpan>[];
-    int cursor = 0;
-    for (final match in keywords.allMatches(code)) {
-      if (match.start > cursor) {
-        spans.add(TextSpan(text: code.substring(cursor, match.start), style: baseStyle));
-      }
-      spans.add(TextSpan(
-        text: code.substring(match.start, match.end),
-        style: baseStyle.copyWith(
-          color: AppColors.info,
-          fontWeight: FontWeight.bold,
-        ),
-      ));
-      cursor = match.end;
-    }
-    if (cursor < code.length) {
-      spans.add(TextSpan(text: code.substring(cursor), style: baseStyle));
     }
     return spans;
   }

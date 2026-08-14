@@ -1125,20 +1125,20 @@ class _MessageBubble extends StatelessWidget {
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppColors.danger.withValues(alpha: 0.10),
+                color: scheme.error.withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.danger.withValues(alpha: 0.4)),
+                border: Border.all(color: scheme.error.withValues(alpha: 0.4)),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.error_outline, size: 16, color: AppColors.danger),
+                  Icon(Icons.error_outline, size: 16, color: scheme.error),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       message.text,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
-                        color: AppColors.danger,
+                        color: scheme.error,
                         height: 1.4,
                       ),
                     ),
@@ -1230,85 +1230,73 @@ class _WelcomeEmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        TweenAnimationBuilder<double>(
-          duration: const Duration(milliseconds: 800),
-          curve: Curves.easeOutBack,
-          tween: Tween(begin: 0.0, end: 1.0),
-          builder: (context, value, child) {
-            return Transform.scale(
-              scale: value,
-              child: Opacity(
-                opacity: value.clamp(0.0, 1.0).toDouble(),
-                child: child,
-              ),
-            );
-          },
-          child: Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                colors: [
-                  Theme.of(context).colorScheme.primary.withValues(alpha: 0.2),
-                  Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.2),
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              border: Border.all(
-                color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
-                width: 1,
-              ),
+        Container(
+          width: 56,
+          height: 56,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+            border: Border.all(
+              color: scheme.outlineVariant,
+              width: 1,
             ),
+          ),
+          child: Center(
             child: Icon(
-              Icons.auto_awesome,
-              size: 32,
-              color: Theme.of(context).colorScheme.primary,
+              Icons.terminal_rounded,
+              size: 26,
+              color: scheme.primary,
             ),
           ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 18),
         Text(
-          'Bienvenue sur',
+          'Antigravity 2.0',
           style: TextStyle(
             fontSize: 16,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w600,
+            color: scheme.onSurface,
+            letterSpacing: 0.2,
           ),
         ),
         const SizedBox(height: 4),
         Text(
           projectName,
           style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-            color: Theme.of(context).colorScheme.onSurface,
+            fontSize: 13,
+            color: scheme.onSurfaceVariant,
           ),
           textAlign: TextAlign.center,
         ),
-        const SizedBox(height: 32),
+        const SizedBox(height: 24),
         Wrap(
           spacing: 8,
           runSpacing: 8,
           alignment: WrapAlignment.center,
           children: [
             _SuggestionChip(
+              icon: Icons.edit_note_rounded,
+              label: '/plan Concevoir une fonctionnalité',
+              onTap: () => onSuggestionTap('/plan '),
+            ),
+            _SuggestionChip(
+              icon: Icons.rate_review_outlined,
+              label: '/review Auditer le code',
+              onTap: () => onSuggestionTap('/review '),
+            ),
+            _SuggestionChip(
+              icon: Icons.quiz_outlined,
+              label: '/grill-me Cadrer l\'architecture',
+              onTap: () => onSuggestionTap('/grill-me '),
+            ),
+            _SuggestionChip(
               icon: Icons.search,
-              label: 'Rechercher dans le code',
+              label: 'Rechercher dans le codebase',
               onTap: () => onSuggestionTap('Recherche dans le codebase : '),
-            ),
-            _SuggestionChip(
-              icon: Icons.bug_report_outlined,
-              label: 'Trouver des bugs',
-              onTap: () => onSuggestionTap('Peux-tu analyser ce projet et trouver d\'éventuels bugs ?'),
-            ),
-            _SuggestionChip(
-              icon: Icons.add_circle_outline,
-              label: 'Ajouter une fonctionnalité',
-              onTap: () => onSuggestionTap('Je souhaite ajouter une fonctionnalité : '),
             ),
           ],
         ),
@@ -1330,17 +1318,39 @@ class _SuggestionChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ActionChip(
-      avatar: Icon(icon, size: 16, color: Theme.of(context).colorScheme.primary),
-      label: Text(label, style: const TextStyle(fontSize: 12.5)),
-      onPressed: () {
-        HapticFeedback.lightImpact();
-        onTap();
-      },
-      backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.lightImpact();
+          onTap();
+        },
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            border: Border.all(color: scheme.outlineVariant),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: scheme.primary),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: scheme.onSurface,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
-

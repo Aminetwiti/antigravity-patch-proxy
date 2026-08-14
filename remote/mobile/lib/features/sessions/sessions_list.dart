@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../core/protocol/messages.dart';
 import '../../theme/app_colors.dart';
 
@@ -216,7 +217,9 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
               child: _SidebarAction(
                 icon: widget.isConnected ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
                 label: widget.isConnected ? 'Connecté' : 'Hors ligne',
-                textColor: widget.isConnected ? AppColors.positive : AppColors.danger,
+                textColor: widget.isConnected
+                    ? Theme.of(context).colorScheme.primary
+                    : Theme.of(context).colorScheme.error,
                 onTap: () {
                   Navigator.of(context).pop();
                   widget.onToggleConnection();
@@ -376,18 +379,28 @@ class _ProjectFolderGroup extends StatelessWidget {
             final isSelected = s.id == activeSessionId;
 
             return Padding(
-              padding: const EdgeInsets.only(left: 14, top: 1, bottom: 1, right: 4),
+              padding: const EdgeInsets.only(left: 14, top: 2, bottom: 2, right: 4),
               child: InkWell(
-                onTap: () => onSessionTap(s.id),
-                borderRadius: BorderRadius.circular(6),
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  onSessionTap(s.id);
+                },
+                borderRadius: BorderRadius.circular(AppRadius.md),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   decoration: BoxDecoration(
                     color: isSelected ? scheme.surfaceContainerHighest : Colors.transparent,
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                    border: isSelected ? Border.all(color: scheme.outlineVariant, width: 1) : null,
                   ),
                   child: Row(
                     children: [
+                      Icon(
+                        isSelected ? Icons.chat_bubble_rounded : Icons.chat_bubble_outline_rounded,
+                        size: 13,
+                        color: isSelected ? scheme.primary : scheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           s.title,
@@ -415,7 +428,7 @@ class _ProjectFolderGroup extends StatelessWidget {
                           child: Text(
                             s.time,
                             style: TextStyle(
-                              fontSize: 11,
+                              fontSize: 10.5,
                               color: scheme.onSurfaceVariant,
                             ),
                           ),

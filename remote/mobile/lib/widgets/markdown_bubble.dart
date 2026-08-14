@@ -46,12 +46,13 @@ class _ParagraphView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final base = TextStyle(
       fontSize: 14,
       height: 1.45,
-      color: Theme.of(context).colorScheme.onSurface,
+      color: scheme.onSurface,
     );
-    final spans = MarkdownRenderer.inlineSpans(block.paragraph ?? '', base);
+    final spans = MarkdownRenderer.inlineSpans(block.paragraph ?? '', base, scheme: scheme);
 
     if (block.isListItem) {
       return Row(
@@ -63,8 +64,8 @@ class _ParagraphView extends StatelessWidget {
               width: 5,
               height: 5,
               margin: const EdgeInsets.only(top: 6),
-              decoration: const BoxDecoration(
-                color: AppColors.inkMuted,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
                 shape: BoxShape.circle,
               ),
             ),
@@ -89,6 +90,7 @@ class _CodeBlockView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final isDiff = _isDiff;
     final lines = code.code.split('\n');
 
@@ -96,9 +98,9 @@ class _CodeBlockView extends StatelessWidget {
       width: double.infinity,
       margin: const EdgeInsets.symmetric(vertical: 4),
       decoration: BoxDecoration(
-        color: AppColors.surfaceInput,
+        color: scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        border: Border.all(color: scheme.outlineVariant),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -107,13 +109,13 @@ class _CodeBlockView extends StatelessWidget {
           // Header row: language badge + review trigger + copy button
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            color: AppColors.surfaceRaised,
+            color: scheme.surfaceContainer,
             child: Row(
               children: [
                 Icon(
                   isDiff ? Icons.difference_outlined : Icons.code,
                   size: 13,
-                  color: isDiff ? AppColors.accentBlue : AppColors.inkMuted,
+                  color: isDiff ? scheme.primary : scheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: 6),
                 Text(
@@ -122,7 +124,7 @@ class _CodeBlockView extends StatelessWidget {
                     fontSize: 11,
                     fontFamily: 'monospace',
                     fontWeight: isDiff ? FontWeight.w600 : FontWeight.normal,
-                    color: isDiff ? AppColors.accentBlue : AppColors.inkSecondary,
+                    color: isDiff ? scheme.primary : scheme.onSurfaceVariant,
                   ),
                 ),
                 const Spacer(),
@@ -148,10 +150,10 @@ class _CodeBlockView extends StatelessWidget {
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       child: Row(
-                        children: const [
-                          Icon(Icons.rate_review_outlined, size: 13, color: AppColors.accentBlue),
-                          SizedBox(width: 4),
-                          Text('Review', style: TextStyle(fontSize: 11, color: AppColors.accentBlue, fontWeight: FontWeight.w600)),
+                        children: [
+                          Icon(Icons.rate_review_outlined, size: 13, color: scheme.primary),
+                          const SizedBox(width: 4),
+                          Text('Review', style: TextStyle(fontSize: 11, color: scheme.primary, fontWeight: FontWeight.w600)),
                         ],
                       ),
                     ),
@@ -170,9 +172,9 @@ class _CodeBlockView extends StatelessWidget {
                     );
                   },
                   borderRadius: BorderRadius.circular(4),
-                  child: const Padding(
-                    padding: EdgeInsets.all(4),
-                    child: Icon(Icons.copy_outlined, size: 14, color: AppColors.inkMuted),
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: Icon(Icons.copy_outlined, size: 14, color: scheme.onSurfaceVariant),
                   ),
                 ),
               ],
@@ -197,11 +199,11 @@ class _CodeBlockView extends StatelessWidget {
               padding: const EdgeInsets.all(12),
               child: Text(
                 code.code,
-                style: const TextStyle(
+                style: TextStyle(
                   fontFamily: 'monospace',
                   fontSize: 12,
                   height: 1.5,
-                  color: AppColors.inkPrimary,
+                  color: scheme.onSurface,
                 ),
               ),
             ),
@@ -218,19 +220,20 @@ class _DiffLineRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     Color? bgColor;
-    Color textColor = AppColors.inkPrimary;
+    Color textColor = scheme.onSurface;
     FontWeight fontWeight = FontWeight.normal;
 
     if (line.startsWith('+') && !line.startsWith('+++')) {
-      bgColor = AppColors.positive.withValues(alpha: 0.15);
+      bgColor = AppColors.diffInsertedLine;
       textColor = AppColors.positive;
     } else if (line.startsWith('-') && !line.startsWith('---')) {
-      bgColor = AppColors.danger.withValues(alpha: 0.15);
+      bgColor = AppColors.diffRemovedLine;
       textColor = AppColors.danger;
     } else if (line.startsWith('@@')) {
-      bgColor = AppColors.accentBlue.withValues(alpha: 0.12);
-      textColor = AppColors.accentBlue;
+      bgColor = scheme.primary.withValues(alpha: 0.12);
+      textColor = scheme.primary;
       fontWeight = FontWeight.w600;
     }
 

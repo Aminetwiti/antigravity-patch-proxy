@@ -167,16 +167,16 @@ class _MarkdownBody extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: blocks.map((block) {
         if (block.paragraph != null) {
-          final spans = MarkdownRenderer.inlineSpans(block.paragraph!, textStyle);
+          final spans = MarkdownRenderer.inlineSpans(block.paragraph!, textStyle, scheme: scheme);
           return Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (block.isListItem)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 6, right: 8),
-                    child: Icon(Icons.circle, size: 6, color: AppColors.inkMuted),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6, right: 8),
+                    child: Icon(Icons.circle, size: 6, color: scheme.onSurfaceVariant),
                   ),
                 Expanded(
                   child: Text.rich(TextSpan(children: spans), style: textStyle),
@@ -188,9 +188,9 @@ class _MarkdownBody extends StatelessWidget {
           return Container(
             margin: const EdgeInsets.only(bottom: 16),
             decoration: BoxDecoration(
-              color: AppColors.surfaceInput,
+              color: scheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(AppRadius.md),
-              border: Border.all(color: AppColors.borderSubtle),
+              border: Border.all(color: scheme.outlineVariant),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -198,16 +198,16 @@ class _MarkdownBody extends StatelessWidget {
                 if (block.code!.language.isNotEmpty)
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: const BoxDecoration(
-                      color: AppColors.surfaceHover,
-                      borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.md)),
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainer,
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.md)),
                     ),
                     child: Text(
                       block.code!.language,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w600,
-                        color: AppColors.inkFaint,
+                        color: scheme.onSurfaceVariant,
                         letterSpacing: 0.5,
                       ),
                     ),
@@ -217,11 +217,11 @@ class _MarkdownBody extends StatelessWidget {
                   padding: const EdgeInsets.all(12),
                   child: Text(
                     block.code!.code,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontFamily: 'monospace',
                       fontSize: 12,
                       height: 1.5,
-                      color: AppColors.inkPrimary,
+                      color: scheme.onSurface,
                     ),
                   ),
                 ),

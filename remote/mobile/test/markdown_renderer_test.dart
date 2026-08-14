@@ -1,5 +1,5 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter/painting.dart';
 import 'package:mobile/core/protocol/markdown_renderer.dart';
 
 void main() {
@@ -33,11 +33,13 @@ void main() {
   });
 
   group('MarkdownRenderer.inlineSpans', () {
+    final scheme = const ColorScheme.light();
     test('resolves bold, italic and inline code', () {
       const base = TextStyle(fontSize: 14, color: Color(0xFFF4F4F5));
       final spans = MarkdownRenderer.inlineSpans(
         '**bold** and *italic* and `code` and plain',
         base,
+        scheme: scheme,
       );
       final texts = spans.map((s) => (s as TextSpan).text).join();
       expect(texts, 'bold and italic and code and plain');
@@ -52,7 +54,7 @@ void main() {
 
     test('ignores lone asterisks (no emphasis)', () {
       const base = TextStyle(fontSize: 14);
-      final spans = MarkdownRenderer.inlineSpans('a * b * c', base);
+      final spans = MarkdownRenderer.inlineSpans('a * b * c', base, scheme: scheme);
       expect(spans.length, 1);
       expect((spans[0] as TextSpan).text, 'a * b * c');
     });

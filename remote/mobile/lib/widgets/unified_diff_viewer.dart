@@ -411,12 +411,12 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
 
     switch (line.type) {
       case _DiffLineType.addition:
-        bg = AppColors.positive.withValues(alpha: 0.12);
+        bg = AppColors.diffInsertedLine;
         textColor = const Color(0xFF4ADE80);
         prefix = '+';
         break;
       case _DiffLineType.deletion:
-        bg = AppColors.danger.withValues(alpha: 0.12);
+        bg = AppColors.diffRemovedLine;
         textColor = const Color(0xFFF87171);
         prefix = '-';
         break;

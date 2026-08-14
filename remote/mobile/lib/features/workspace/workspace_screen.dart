@@ -796,13 +796,21 @@ class _TreeFolder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: EdgeInsets.only(left: 8.0 + depth * 14, top: 4, bottom: 4),
       child: Row(
         children: [
-          const Icon(Icons.folder_outlined, size: 16, color: AppColors.warning),
+          Icon(Icons.folder_rounded, size: 15, color: scheme.onSurfaceVariant),
           const SizedBox(width: 6),
-          Text(title, style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurface)),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w500,
+              color: scheme.onSurface,
+            ),
+          ),
         ],
       ),
     );
@@ -815,8 +823,6 @@ class _TreeFile extends StatelessWidget {
   final bool isSelected;
   final VoidCallback onTap;
 
-  // Bug #3 : isSelected en param → le widget peut rester const dans les cas
-  // non-sélectionnés, évite les rebuilds inutiles sur le reste de la liste.
   const _TreeFile({
     required this.title,
     required this.depth,
@@ -824,20 +830,51 @@ class _TreeFile extends StatelessWidget {
     this.isSelected = false,
   });
 
+  IconData _iconForName(String name) {
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.dart')) return Icons.flutter_dash_outlined;
+    if (lower.endsWith('.go')) return Icons.code_rounded;
+    if (lower.endsWith('.json') || lower.endsWith('.yaml') || lower.endsWith('.yml') || lower.endsWith('.toml')) return Icons.settings_suggest_outlined;
+    if (lower.endsWith('.md') || lower.endsWith('.txt')) return Icons.article_outlined;
+    if (lower.endsWith('.sh') || lower.endsWith('.bat') || lower.endsWith('.ps1')) return Icons.terminal_rounded;
+    if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.svg') || lower.endsWith('.webp')) return Icons.image_outlined;
+    return Icons.insert_drive_file_outlined;
+  }
+
+  Color _colorForName(String name, ColorScheme scheme) {
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.dart')) return const Color(0xFF29B6F6);
+    if (lower.endsWith('.go')) return const Color(0xFF00ADD8);
+    if (lower.endsWith('.json') || lower.endsWith('.yaml') || lower.endsWith('.yml')) return const Color(0xFFEAB308);
+    if (lower.endsWith('.md')) return const Color(0xFFA855F7);
+    if (lower.endsWith('.sh') || lower.endsWith('.bat')) return const Color(0xFF22C55E);
+    if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.svg')) return const Color(0xFFEC4899);
+    return isSelected ? scheme.primary : scheme.onSurfaceVariant;
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return InkWell(
-      onTap: onTap,
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      borderRadius: BorderRadius.circular(4),
       child: Container(
-        color: isSelected ? scheme.primary.withValues(alpha: 0.12) : null,
-        padding: EdgeInsets.only(left: 8.0 + depth * 14, top: 2, bottom: 2),
+        margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+        padding: EdgeInsets.only(left: 8.0 + depth * 14, top: 4, bottom: 4, right: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? scheme.surfaceContainerHighest : Colors.transparent,
+          borderRadius: BorderRadius.circular(4),
+          border: isSelected ? Border.all(color: scheme.outlineVariant, width: 1) : null,
+        ),
         child: Row(
           children: [
             Icon(
-              Icons.insert_drive_file_outlined,
-              size: 15,
-              color: isSelected ? scheme.primary : scheme.onSurfaceVariant,
+              _iconForName(title),
+              size: 14,
+              color: _colorForName(title, scheme),
             ),
             const SizedBox(width: 6),
             Expanded(

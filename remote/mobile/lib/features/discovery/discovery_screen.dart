@@ -111,10 +111,10 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
-                      color: AppColors.accentBlue.withValues(alpha: 0.12),
+                      color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(AppRadius.lg),
                     ),
-                    child: const Icon(Icons.podcasts, color: AppColors.accentBlue, size: 24),
+                    child: Icon(Icons.podcasts, size: 24, color: Theme.of(context).colorScheme.primary),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -151,7 +151,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                 style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
               ),
               style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: AppColors.accentBlue),
+                side: BorderSide(color: Theme.of(context).colorScheme.primary),
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
             ),
@@ -163,10 +163,10 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Text(
                 'RÉSEAU LOCAL (mDNS)',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.inkFaint,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                   letterSpacing: 1.2,
                 ),
               ),
@@ -176,7 +176,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                 children: _discoveredHosts.map((host) {
                   return ListTile(
                     dense: true,
-                    leading: const Icon(Icons.computer, size: 18, color: AppColors.positive),
+                    leading: Icon(Icons.computer, size: 18, color: Theme.of(context).colorScheme.primary),
                     title: Text(host, style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface)),
                     subtitle: Text('Daemon Bridge détecté', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                     trailing: Icon(Icons.chevron_right, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
@@ -196,10 +196,10 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
           // ── Manual Entry Section
           Text(
             'CONNEXION MANUELLE',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 10,
               fontWeight: FontWeight.w600,
-              color: AppColors.inkFaint,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
               letterSpacing: 0.8,
             ),
           ),
@@ -302,15 +302,15 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: AppColors.positive.withValues(alpha: 0.1),
+                        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.check_circle_outline, size: 16, color: AppColors.positive),
+                          Icon(Icons.check_circle_outline, size: 16, color: Theme.of(context).colorScheme.primary),
                           const SizedBox(width: 8),
                           Expanded(
-                            child: Text(_successMessage!, style: const TextStyle(fontSize: 12, color: AppColors.positive)),
+                            child: Text(_successMessage!, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.primary)),
                           ),
                         ],
                       ),
@@ -325,15 +325,20 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                       icon: AnimatedSwitcher(
                         duration: const Duration(milliseconds: 300),
                         child: _isConnecting
-                            ? const SizedBox(key: ValueKey('loading'), width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.inkPrimary))
-                            : const Icon(Icons.link, key: ValueKey('link'), size: 16, color: AppColors.inkPrimary),
+                            ? SizedBox(
+                                key: const ValueKey('loading'),
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Theme.of(context).colorScheme.onPrimary),
+                              )
+                            : Icon(Icons.link, key: const ValueKey('link'), size: 16, color: Theme.of(context).colorScheme.onPrimary),
                       ),
                       label: AnimatedSwitcher(
                         duration: const Duration(milliseconds: 300),
                         child: Text(
                           _isConnecting ? 'Connexion…' : 'Appairer & Connecter',
                           key: ValueKey<bool>(_isConnecting),
-                          style: const TextStyle(color: AppColors.inkPrimary),
+                          style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
                         ),
                       ),
                     ),

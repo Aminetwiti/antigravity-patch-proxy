@@ -452,7 +452,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                     width: 36,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: AppColors.borderSubtle,
+                      color: Theme.of(ctx).colorScheme.outlineVariant,
                       borderRadius: BorderRadius.circular(AppRadius.pill),
                     ),
                   ),
@@ -610,7 +610,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.inkMuted,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
             ),
@@ -707,13 +707,14 @@ class _ChatInputBarState extends State<ChatInputBar> {
     String subtitle,
     VoidCallback onTap,
   ) {
+    final scheme = Theme.of(context).colorScheme;
     return InkWell(
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(
           children: [
-            Icon(icon, size: 16, color: AppColors.inkMuted),
+            Icon(icon, size: 16, color: scheme.onSurfaceVariant),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -723,13 +724,13 @@ class _ChatInputBarState extends State<ChatInputBar> {
                     title,
                     style: TextStyle(
                       fontSize: 13,
-                      color: AppColors.inkPrimary,
+                      color: scheme.onSurface,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
                   Text(
                     subtitle,
-                    style: TextStyle(fontSize: 11, color: AppColors.inkMuted),
+                    style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
                   ),
                 ],
               ),
@@ -744,6 +745,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
     _mentionOrActionOpen = false;
     _loadModelsAndPreferences();
 
+    final scheme = Theme.of(context).colorScheme;
     final standard = _availableModels.where((m) => !m.isCustom).toList();
     final custom = _availableModels.where((m) => m.isCustom).toList();
 
@@ -758,23 +760,23 @@ class _ChatInputBarState extends State<ChatInputBar> {
           padding: const EdgeInsets.symmetric(vertical: 4),
           shrinkWrap: true,
           children: [
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Text(
                 'Model',
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.inkMuted,
+                  color: scheme.onSurfaceVariant,
                 ),
               ),
             ),
             ...standard.map((m) => _buildModelRow(m)),
             if (custom.isNotEmpty) ...[
-              const Divider(color: AppColors.borderSubtle, height: 1),
+              Divider(color: scheme.outlineVariant, height: 1),
               ...custom.map((m) => _buildCustomModelRow(m)),
             ],
-            const Divider(color: AppColors.borderSubtle, height: 1),
+            Divider(color: scheme.outlineVariant, height: 1),
             _buildViewUsageRow(context),
           ],
         ),
@@ -783,6 +785,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   Widget _buildModelRow(AntigravityModel model) {
+    final scheme = Theme.of(context).colorScheme;
     final isSelected = _selectedModel.toLowerCase().contains(model.shortName.toLowerCase()) ||
         _selectedModel.toLowerCase() == model.displayName.toLowerCase();
 
@@ -792,7 +795,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
         margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected ? AppColors.surfaceInput : Colors.transparent,
+          color: isSelected ? scheme.surfaceContainerHighest : Colors.transparent,
           borderRadius: BorderRadius.circular(AppRadius.md),
         ),
         child: Row(
@@ -802,7 +805,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                 model.displayName,
                 style: TextStyle(
                   fontSize: 13,
-                  color: isSelected ? AppColors.inkPrimary : AppColors.inkSecondary,
+                  color: isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
                 ),
                 overflow: TextOverflow.ellipsis,
@@ -812,7 +815,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: AppColors.surfaceInput,
+                  color: scheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(AppRadius.sm),
                 ),
                 child: Row(
@@ -820,19 +823,19 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   children: [
                     Text(
                       model.tag!,
-                      style: const TextStyle(fontSize: 10, color: AppColors.inkMuted),
+                      style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
                     ),
                     const SizedBox(width: 4),
-                    const Icon(Icons.info_outline, size: 10, color: AppColors.inkMuted),
+                    Icon(Icons.info_outline, size: 10, color: scheme.onSurfaceVariant),
                   ],
                 ),
               ),
             ],
             const SizedBox(width: 8),
             if (isSelected)
-              const Icon(Icons.check, size: 16, color: AppColors.accentBlue)
+              Icon(Icons.check, size: 16, color: scheme.primary)
             else
-              const Icon(Icons.chevron_right, size: 14, color: AppColors.inkFaint),
+              Icon(Icons.chevron_right, size: 14, color: scheme.outline),
           ],
         ),
       ),
@@ -840,6 +843,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   Widget _buildCustomModelRow(AntigravityModel model) {
+    final scheme = Theme.of(context).colorScheme;
     final isSelected = _selectedModel.toLowerCase().contains(model.id.toLowerCase()) ||
         _selectedModel.toLowerCase().contains(model.displayName.toLowerCase());
 
@@ -856,7 +860,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
         margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected ? AppColors.surfaceInput : Colors.transparent,
+          color: isSelected ? scheme.surfaceContainerHighest : Colors.transparent,
           borderRadius: BorderRadius.circular(AppRadius.md),
         ),
         child: Row(
@@ -875,14 +879,14 @@ class _ChatInputBarState extends State<ChatInputBar> {
                 model.customLabel,
                 style: TextStyle(
                   fontSize: 12.5,
-                  color: isSelected ? AppColors.inkPrimary : AppColors.inkSecondary,
+                  color: isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
             if (isSelected)
-              const Icon(Icons.check, size: 16, color: AppColors.accentBlue),
+              Icon(Icons.check, size: 16, color: scheme.primary),
           ],
         ),
       ),
@@ -890,6 +894,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   Widget _buildViewUsageRow(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return InkWell(
       onTap: () {
         CustomDropdownOverlay.hide();
@@ -898,21 +903,21 @@ class _ChatInputBarState extends State<ChatInputBar> {
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: const Row(
+        child: Row(
           children: [
-            Icon(Icons.query_stats_outlined, size: 15, color: AppColors.inkSecondary),
-            SizedBox(width: 10),
+            Icon(Icons.query_stats_outlined, size: 15, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 10),
             Expanded(
               child: Text(
                 'View Usage',
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w500,
-                  color: AppColors.inkPrimary,
+                  color: scheme.onSurface,
                 ),
               ),
             ),
-            Icon(Icons.chevron_right, size: 14, color: AppColors.inkFaint),
+            Icon(Icons.chevron_right, size: 14, color: scheme.outline),
           ],
         ),
       ),
@@ -1118,7 +1123,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                                   : 'Hors ligne — le message sera envoyé à la reconnexion',
                           hintStyle: TextStyle(
                             color:
-                                widget.isConnected ? AppColors.inkMuted : scheme.error,
+                                widget.isConnected ? scheme.onSurfaceVariant : scheme.error,
                             fontSize: 14,
                           ),
                           border: InputBorder.none,
@@ -1178,14 +1183,16 @@ class _ChatInputBarState extends State<ChatInputBar> {
                                 ),
                                 const SizedBox(width: 4),
                                 Flexible(
-                                  child: Text(
-                                    '$_selectedModel ($_reasoningEffort)',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: scheme.onSurface,
-                                      fontWeight: FontWeight.w500,
+                                  child: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      '$_selectedModel ($_reasoningEffort)',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: scheme.onSurface,
+                                        fontWeight: FontWeight.w500,
+                                      ),
                                     ),
-                                    overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
                                 const SizedBox(width: 2),
@@ -1270,11 +1277,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
                             child: GestureDetector(
                               onLongPress: () => _showQueueSettings(context),
                               child: Container(
-                                padding: const EdgeInsets.all(6),
+                                padding: const EdgeInsets.all(7),
                                 decoration: BoxDecoration(
                                   color:
                                       widget.isConnected
-                                          ? scheme.surfaceContainer
+                                          ? scheme.primary
                                           : scheme.surfaceContainerHighest,
                                   shape: BoxShape.circle,
                                 ),
@@ -1285,7 +1292,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                                   size: 16,
                                   color:
                                       widget.isConnected
-                                          ? scheme.onSurface
+                                          ? scheme.onPrimary
                                           : scheme.onSurfaceVariant.withValues(
                                             alpha: 0.5,
                                           ),

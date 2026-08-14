@@ -13,6 +13,7 @@ import '../../core/protocol/daemon_api.dart';
 import '../../core/protocol/model_catalog.dart';
 import '../../services/settings_store.dart';
 import '../../theme/app_colors.dart';
+import '../workspace/git_worktree_selector.dart';
 import 'appearance_settings_section.dart';
 import 'profile_settings_section.dart';
 
@@ -46,6 +47,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _toolNotifications = true;
   bool _diagnosticsBusy = false;
   String _selectedDefaultModel = 'Gemini 3.7 Flash Medium';
+  // Délai d'auto-refus des approbations d'outils (0 = désactivé). Valeur par
+  // défaut alignée sur le daemon (5 min) ; persisté et poussé au daemon via
+  // le message WS set_approval_timeout (minutes).
+  static const int _defaultApprovalTimeoutMinutes = 5;
+  late TextEditingController _approvalTimeoutController;
+  int _approvalTimeoutMinutes = _defaultApprovalTimeoutMinutes;
+  bool _approvalTimeoutSaved = false;
 
   final List<String> _models = [
     'Gemini 3.7 Flash Medium',
@@ -65,7 +73,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _geTier = 'GE-Plus';
   String _inferenceRegion = 'UE (Europe)';
   bool _mcpAllowlistStrict = true;
-  bool _browserFeaturesEnabled = true;
+  String _executionPolicy = 'request-review';
 
   @override
   void initState() {
@@ -91,11 +99,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _geTier = (s['geTier'] as String?) ?? 'GE-Plus';
     _inferenceRegion = (s['inferenceRegion'] as String?) ?? 'UE (Europe)';
     _mcpAllowlistStrict = (s['mcpAllowlistStrict'] as bool?) ?? true;
-    _browserFeaturesEnabled = (s['browserFeaturesEnabled'] as bool?) ?? true;
+    _executionPolicy = (s['executionPolicy'] as String?) ?? 'request-review';
+    _approvalTimeoutMinutes =
+        (s['approvalTimeoutMinutes'] as int?) ?? _defaultApprovalTimeoutMinutes;
+    _approvalTimeoutController =
+        TextEditingController(text: '$_approvalTimeoutMinutes');
     // Applique le réglage persisté dès l'ouverture (le notifier est un
     // singleton : il faut re-synchroniser son état global).
     widget.notifier?.setEnabled(_toolNotifications);
     _fetchCustomModels();
+    _applyApprovalTimeoutToDaemon();
   }
 
   Future<void> _fetchCustomModels() async {
@@ -118,7 +131,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _hostController.dispose();
     _portController.dispose();
     _csrfController.dispose();
+    _approvalTimeoutController.dispose();
     super.dispose();
+  }
+
+  /// Persiste le délai d'auto-refus et l'applique au daemon (set_approval_timeout).
+  Future<void> _applyApprovalTimeoutToDaemon() async {
+    final minutes = int.tryParse(_approvalTimeoutController.text.trim());
+    if (minutes == null || minutes < 0) return;
+    setState(() {
+      _approvalTimeoutMinutes = minutes;
+      _approvalTimeoutSaved = true;
+    });
+    await SettingsStore.save({'approvalTimeoutMinutes': minutes});
+    // Envoi non bloquant : sans daemon connecté, le RPC expire silencieusement.
+    try {
+      await widget.api?.sendWithResult('set_approval_timeout', {
+        'data': {'minutes': minutes},
+      });
+    } catch (_) {}
   }
 
   /// URL ws(s)://host:port du daemon — source unique pour l'export de
@@ -365,21 +396,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     },
                   ),
                   const Divider(),
-                  SwitchListTile(
-                    title: Text(
-                      'Fonctionnalités du navigateur web',
-                      style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
-                    ),
-                    subtitle: Text(
-                      'Autoriser le sous-agent navigateur pour les tâches d\'exploration',
-                      style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                    ),
-                    value: _browserFeaturesEnabled,
-                    activeColor: Theme.of(context).colorScheme.primary,
-                    contentPadding: EdgeInsets.zero,
+                  Text('Politique d\'exécution des outils', style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface)),
+                  const SizedBox(height: 4),
+                  Text('Définit quand l\'agent peut exécuter des commandes sur le workspace', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    value: _executionPolicy,
+                    decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8)),
+                    items: const [
+                      DropdownMenuItem(value: 'strict', child: Text('Strict (Approbat. manuelle)')),
+                      DropdownMenuItem(value: 'request-review', child: Text('Révision (Si sensible)')),
+                      DropdownMenuItem(value: 'always-proceed', child: Text('Auto (Sans approbat.)')),
+                    ],
                     onChanged: (val) {
-                      setState(() => _browserFeaturesEnabled = val);
-                      SettingsStore.save({'browserFeaturesEnabled': val});
+                      if (val != null) {
+                        setState(() => _executionPolicy = val);
+                        SettingsStore.save({'executionPolicy': val});
+                      }
+                    },
+                  ),
+                  const Divider(),
+                  // ponytail: liste statique des branches/worktrees en attendant l'intégration daemon
+                  GitWorktreeSelector(
+                    currentBranch: 'main',
+                    branches: const ['main', 'feature/remote-v2', 'fix/websocket-reconnect'],
+                    onBranchSelected: (b) {
+                      setState(() {});
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Branche active : $b')));
                     },
                   ),
                 ],
@@ -414,10 +457,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       showDialog(
                         context: context,
                         builder: (ctx) => AlertDialog(
-                          backgroundColor: AppColors.surfaceRaised,
+                          backgroundColor: Theme.of(ctx).colorScheme.surfaceContainer,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(AppRadius.lg),
-                            side: const BorderSide(color: AppColors.borderSubtle),
+                            side: BorderSide(color: Theme.of(ctx).colorScheme.outlineVariant),
                           ),
                           title: const Text('Supprimer définitivement le projet ?'),
                           content: const Text(
@@ -570,6 +613,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onChanged: (val) {
                       if (val != null) _setDefaultModel(val);
                     },
+                  ),
+                  const SizedBox(height: 12),
+
+                  Text('Délai d\'auto-refus des approbations (minutes)',
+                      style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          key: const Key('settings-approval-timeout-field'),
+                          controller: _approvalTimeoutController,
+                          keyboardType: TextInputType.number,
+                          style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                          decoration: InputDecoration(
+                            hintText: '$_defaultApprovalTimeoutMinutes',
+                            suffixIcon: Icon(Icons.timer_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        tooltip: 'Appliquer le délai au daemon',
+                        icon: Icon(
+                          _approvalTimeoutSaved ? Icons.check_circle_outline : Icons.check,
+                          size: 20,
+                          color: _approvalTimeoutSaved
+                              ? Theme.of(context).colorScheme.primary
+                              : Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                        onPressed: _applyApprovalTimeoutToDaemon,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '0 = désactiver l\'auto-refus (le daemon attendra indéfiniment). Défaut : 5 min.',
+                    style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                   const SizedBox(height: 12),
 

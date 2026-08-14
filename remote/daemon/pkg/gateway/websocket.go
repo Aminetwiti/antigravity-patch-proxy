@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -57,6 +58,12 @@ type RPCClient interface {
 	ReadFile(uri string) ([]byte, error)
 	// WriteFile écrit un fichier via le RPC officiel du LS (WriteFile).
 	WriteFile(uri string, content []byte, overwrite bool) ([]byte, error)
+	// GetCascadeTrajectory récupère l'historique structuré d'une session
+	// (GetCascadeTrajectory) — verbosity 0 = défaut du LS.
+	GetCascadeTrajectory(cascadeID string, verbosity uint64) ([]byte, error)
+	// GetTurnDiff récupère le diff officiel d'un tour (GetTurnDiff).
+	// stepIndex < 0 → le LS résout le dernier tour.
+	GetTurnDiff(conversationID string, stepIndex int64) ([]byte, error)
 }
 
 // checkOrigin rejette les navigateurs web arbitraires (CSWSH) tout en
@@ -624,6 +631,241 @@ func toWorkspaceURI(path string) string {
 		return path
 	}
 	return "file:///" + strings.ReplaceAll(path, "\\", "/")
+}
+
+// TrajectoryVerbosityFull est la verbosité par défaut de get_trajectory
+// (enum ClientTrajectoryVerbosity, language_server_pb.ts ligne 257) :
+// 3 = FULL → vue structurée complète (steps + métadonnées).
+const TrajectoryVerbosityFull uint64 = 3
+
+// trajectoryOut convertit une réponse GetCascadeTrajectoryResponse brute en
+// JSON stable pour le mobile. Schéma vérifié dans antigravity-client
+// (language_server_pb.ts ligne 8760) :
+//
+//	GetCascadeTrajectoryResponse {1: Trajectory, 2: status, 3: num_total_steps}
+//	Trajectory {1: trajectory_id, 6: cascade_id, 2: repeated Step}
+//
+// Le détail des steps (oneof variants) n'est pas décodé ici : le mobile
+// reçoit le nombre + les champs d'en-tête, et peut demander le diff d'un
+// tour précis via get_turn_diff. Best-effort : un schéma inconnu renvoie
+// le dump champs (toOutgoing) plutôt qu'une erreur.
+func trajectoryOut(raw []byte) interface{} {
+	if len(raw) == 0 {
+		return map[string]interface{}{"steps": []interface{}{}, "numTotalSteps": 0}
+	}
+	// Dé-framming gRPC-Web : flags(1) + longueur BE(4) + payload.
+	payload := raw
+	for len(payload) >= 5 {
+		length := int(binary.BigEndian.Uint32(payload[1:5]))
+		if length <= 0 || 5+length > len(payload) {
+			break
+		}
+		if payload[0]&0x80 == 0 { // frame de données
+			payload = payload[5 : 5+length]
+			break
+		}
+		payload = payload[5+length:]
+	}
+
+	fields := connectrpc.DecodeFields(payload)
+	out := map[string]interface{}{
+		"steps":         []interface{}{},
+		"numTotalSteps": 0,
+		"status":        0,
+	}
+	for _, f := range fields {
+		switch f.Num {
+		case 1: // Trajectory
+			if f.WireType == 2 {
+				for _, tf := range connectrpc.DecodeFields(f.Bytes) {
+					switch tf.Num {
+					case 1:
+						if tf.WireType == 2 {
+							out["trajectoryId"] = string(tf.Bytes)
+						}
+					case 6:
+						if tf.WireType == 2 {
+							out["cascadeId"] = string(tf.Bytes)
+						}
+					case 2: // repeated Step
+						if tf.WireType == 2 {
+							steps, _ := out["steps"].([]interface{})
+							steps = append(steps, stepSummary(tf.Bytes))
+							out["steps"] = steps
+						}
+					}
+				}
+			}
+		case 2:
+			if f.WireType == 0 {
+				out["status"] = f.Varint
+			}
+		case 3:
+			if f.WireType == 0 {
+				out["numTotalSteps"] = f.Varint
+			}
+		}
+	}
+	return out
+}
+
+// stepSummary extrait d'un Step gemini_coder (trajectory_pb.ts ligne 302)
+// les champs stables : type, status, et un best-effort du texte visible
+// (description de l'action exécutée par l'agent).
+func stepSummary(blob []byte) map[string]interface{} {
+	s := map[string]interface{}{"type": 0, "status": 0}
+	for _, f := range connectrpc.DecodeFields(blob) {
+		switch f.Num {
+		case 1:
+			if f.WireType == 0 {
+				s["type"] = f.Varint
+			}
+		case 4:
+			if f.WireType == 0 {
+				s["status"] = f.Varint
+			}
+		case 5, 28, 140, 12: // metadata, run_command, generic, finish
+			if f.WireType == 2 {
+				if text := firstReadable(f.Bytes); text != "" && s["text"] == nil {
+					s["text"] = text
+				}
+			}
+		}
+	}
+	return s
+}
+
+// firstReadable cherche la première chaîne UTF-8 lisible (≤300 octets) dans
+// un blob de sous-message protobuf — best-effort, jamais fatal.
+func firstReadable(b []byte) string {
+	if s := strings.TrimSpace(string(b)); s != "" && connectrpc.IsPrintable(s) && len(s) < 300 {
+		return s
+	}
+	for _, f := range connectrpc.DecodeFields(b) {
+		if f.WireType != 2 || len(f.Bytes) == 0 {
+			continue
+		}
+		if s := strings.TrimSpace(string(f.Bytes)); s != "" && connectrpc.IsPrintable(s) && len(s) < 300 {
+			return s
+		}
+	}
+	return ""
+}
+
+// turnDiffOut convertit une réponse GetTurnDiffResponse brute en JSON stable
+// pour le mobile. Schéma vérifié (language_server_pb.ts ligne 7883) :
+//
+//	GetTurnDiffResponse {
+//	  1: repeated FileDiffsEntry {1: key(path), 2: FileDiffData}
+//	  2: total_additions   3: total_deletions
+//	  4: user_input (CortexStepUserInput)   5: turn_start_index
+//	  6: turn_end_index_exclusive
+//	}
+//	FileDiffData {1: additions, 2: deletions, 3: original_contents,
+//	              4: modified_contents, 5: is_artifact_file}
+func turnDiffOut(raw []byte) interface{} {
+	if len(raw) == 0 {
+		return map[string]interface{}{"fileDiffs": []interface{}{}, "totalAdditions": 0, "totalDeletions": 0}
+	}
+	payload := raw
+	for len(payload) >= 5 {
+		length := int(binary.BigEndian.Uint32(payload[1:5]))
+		if length <= 0 || 5+length > len(payload) {
+			break
+		}
+		if payload[0]&0x80 == 0 {
+			payload = payload[5 : 5+length]
+			break
+		}
+		payload = payload[5+length:]
+	}
+
+	fields := connectrpc.DecodeFields(payload)
+	out := map[string]interface{}{
+		"fileDiffs":     []interface{}{},
+		"totalAdditions": 0,
+		"totalDeletions": 0,
+	}
+	for _, f := range fields {
+		switch f.Num {
+		case 1: // FileDiffsEntry {1: key, 2: FileDiffData}
+			if f.WireType == 2 {
+				var path string
+				var diff map[string]interface{}
+				for _, ef := range connectrpc.DecodeFields(f.Bytes) {
+					switch ef.Num {
+					case 1:
+						if ef.WireType == 2 {
+							path = string(ef.Bytes)
+						}
+					case 2:
+						if ef.WireType == 2 {
+							diff = fileDiffData(ef.Bytes)
+						}
+					}
+				}
+				if path != "" {
+					entry := map[string]interface{}{"path": path}
+					if diff != nil {
+						entry["diff"] = diff
+					}
+					diffs, _ := out["fileDiffs"].([]interface{})
+					out["fileDiffs"] = append(diffs, entry)
+				}
+			}
+		case 2:
+			if f.WireType == 0 {
+				out["totalAdditions"] = int64(f.Varint)
+			}
+		case 3:
+			if f.WireType == 0 {
+				out["totalDeletions"] = int64(f.Varint)
+			}
+		case 5:
+			if f.WireType == 0 {
+				out["turnStartIndex"] = int64(f.Varint)
+			}
+		case 6:
+			if f.WireType == 0 {
+				out["turnEndIndexExclusive"] = int64(f.Varint)
+			}
+		}
+	}
+	return out
+}
+
+// fileDiffData extrait un FileDiffData {1: additions, 2: deletions,
+// 3: original_contents, 4: modified_contents, 5: is_artifact_file}.
+func fileDiffData(blob []byte) map[string]interface{} {
+	d := map[string]interface{}{
+		"additions": 0, "deletions": 0,
+		"originalContents": "", "modifiedContents": "", "isArtifactFile": false,
+	}
+	for _, f := range connectrpc.DecodeFields(blob) {
+		switch f.Num {
+		case 1:
+			if f.WireType == 0 {
+				d["additions"] = int64(f.Varint)
+			}
+		case 2:
+			if f.WireType == 0 {
+				d["deletions"] = int64(f.Varint)
+			}
+		case 3:
+			if f.WireType == 2 {
+				d["originalContents"] = string(f.Bytes)
+			}
+		case 4:
+			if f.WireType == 2 {
+				d["modifiedContents"] = string(f.Bytes)
+			}
+		case 5:
+			if f.WireType == 0 {
+				d["isArtifactFile"] = f.Varint == 1
+			}
+		}
+	}
+	return d
 }
 
 // saveUploadedImage décode une image base64 et la sauvegarde dans le dossier scratch de la cascade.
@@ -1199,12 +1441,24 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 		summaries := connectrpc.ParseTrajectories(raw)
+		// Agrège les statistiques réelles depuis les transcripts locaux de
+		// chaque cascade (la réponse gRPC ne fournit que la liste des
+		// sessions) — plus de mocks en dur. Les champs JSON restent stables
+		// pour le RightSidebarDrawer mobile.
 		stats := map[string]int{
 			"subagentsCount":       0,
 			"filesChangedCount":    0,
-			"artifactsCount":       len(summaries),
+			"artifactsCount":       0,
 			"uploadsCount":         0,
 			"backgroundTasksCount": 0,
+		}
+		for _, s := range summaries {
+			counts := countTranscriptActivity(s.CascadeID)
+			stats["subagentsCount"] += counts["subagents"]
+			stats["filesChangedCount"] += counts["files"]
+			stats["artifactsCount"] += counts["artifacts"]
+			stats["uploadsCount"] += counts["uploads"]
+			stats["backgroundTasksCount"] += counts["tasks"]
 		}
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: stats})
 		return
@@ -1375,6 +1629,56 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.SetApprovalTimeout(time.Duration(minutes) * time.Minute)
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"approvalTimeoutMinutes": minutes}})
 		return
+
+	case "get_trajectory":
+		// C9 — historique structuré d'une session : le mobile demande le
+		// détail d'une cascade (turns, steps) via le RPC officiel
+		// GetCascadeTrajectory. Réponse unary — le JSON structuré est fourni
+		// par trajectoryOut (pas le dump binaire).
+		if msg.CascadeID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
+			return
+		}
+		verbosity := TrajectoryVerbosityFull
+		if msg.Data != nil {
+			if v, ok := msg.Data["verbosity"].(float64); ok && v >= 0 {
+				verbosity = uint64(v)
+			}
+		}
+		raw, err = s.RPCClient.GetCascadeTrajectory(msg.CascadeID, verbosity)
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: trajectoryOut(raw)})
+			return
+		}
+
+	case "get_turn_diff":
+		// C9 — diff officiel d'un tour : {conversationId, stepIndex} → diff
+		// des fichiers modifiés par ce tour (GetTurnDiff). stepIndex absent
+		// ou négatif → le LS résout le dernier tour.
+		conversationID := msg.CascadeID
+		if msg.Data != nil {
+			if cid, ok := msg.Data["conversationId"].(string); ok && cid != "" {
+				conversationID = cid
+			}
+		}
+		if conversationID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "conversationId requis"})
+			return
+		}
+		stepIndex := int64(-1) // absent → le LS résout le dernier tour
+		if msg.StepIndex != 0 {
+			stepIndex = msg.StepIndex
+		}
+		if msg.Data != nil {
+			if si, ok := msg.Data["stepIndex"].(float64); ok {
+				stepIndex = int64(si)
+			}
+		}
+		raw, err = s.RPCClient.GetTurnDiff(conversationID, stepIndex)
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: turnDiffOut(raw)})
+			return
+		}
 
 	case "call_mcp_tool", "connect_mcp_server", "refresh_mcp_oauth_token":
 		// Route les actions MCP vers le proxy Antigravity desktop

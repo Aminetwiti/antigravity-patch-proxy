@@ -164,4 +164,51 @@ void main() {
       reason: 'le choix du modèle doit être appliqué au daemon via /model',
     );
   });
+
+  testWidgets('approval timeout: persisté et set_approval_timeout envoyé au daemon',
+      (tester) async {
+    final out = <Map<String, dynamic>>[];
+    final ctrl = StreamController<dynamic>();
+    final api = DaemonApi(
+      incoming: ctrl.stream,
+      send: (d) => out.add(d as Map<String, dynamic>),
+      timeout: const Duration(seconds: 1),
+    );
+    addTearDown(ctrl.close);
+    addTearDown(api.dispose);
+
+    await _pumpScreen(tester, api: api);
+
+    // initState pousse le réglage par défaut (5 min) au daemon.
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(
+      out.any((m) =>
+          m['type'] == 'set_approval_timeout' &&
+          (m['data'] as Map<String, dynamic>)['minutes'] == 5),
+      isTrue,
+      reason: 'le délai persisté doit être appliqué au daemon à l\'ouverture',
+    );
+
+    final timeoutField = find.byKey(const Key('settings-approval-timeout-field'));
+    await tester.ensureVisible(timeoutField);
+    await tester.pumpAndSettle();
+    await tester.enterText(timeoutField, '12');
+
+    final timeoutButton = find.byTooltip('Appliquer le délai au daemon');
+    await tester.ensureVisible(timeoutButton);
+    await tester.pumpAndSettle();
+    await tester.tap(timeoutButton);
+    await tester.pumpAndSettle();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getInt('settings.approvalTimeoutMinutes'), 12);
+    expect(
+      out.any((m) =>
+          m['type'] == 'set_approval_timeout' &&
+          (m['data'] as Map<String, dynamic>)['minutes'] == 12),
+      isTrue,
+      reason: 'le nouveau délai doit être poussé au daemon',
+    );
+    await tester.pump(const Duration(seconds: 2));
+  });
 }

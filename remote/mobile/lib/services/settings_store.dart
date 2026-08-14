@@ -17,6 +17,7 @@ class SettingsStore {
   static const _kRole = 'settings.role';
   static const _kStatus = 'settings.status';
   static const _kToolNotifications = 'settings.toolNotifications';
+  static const _kApprovalTimeout = 'settings.approvalTimeoutMinutes';
 
   SettingsStore._();
 
@@ -34,6 +35,7 @@ class SettingsStore {
       'role': prefs.getString(_kRole) ?? 'Remote Host Controller',
       'status': prefs.getString(_kStatus) ?? 'Online',
       'toolNotifications': prefs.getBool(_kToolNotifications) ?? true,
+      'approvalTimeoutMinutes': prefs.getInt(_kApprovalTimeout) ?? 5,
     };
   }
 
@@ -62,6 +64,8 @@ class SettingsStore {
           await prefs.setString(_kStatus, entry.value as String);
         case 'toolNotifications':
           await prefs.setBool(_kToolNotifications, entry.value as bool);
+        case 'approvalTimeoutMinutes':
+          await prefs.setInt(_kApprovalTimeout, entry.value as int);
       }
     }
   }

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../core/network/websocket_client.dart';
-import '../theme/app_colors.dart';
 
 /// Bannière premium de perte/reprise de connexion.
 ///
@@ -96,8 +95,8 @@ class _ConnectionBannerState extends State<ConnectionBanner> {
     final (icon, color, bg) = switch (widget.status) {
       ConnectionStatus.connected => (
           Icons.cloud_done_outlined,
-          AppColors.positive,
-          AppColors.positive.withValues(alpha: 0.12),
+          scheme.primary,
+          scheme.primary.withValues(alpha: 0.12),
         ),
       ConnectionStatus.connecting => (
           Icons.sync_outlined,
