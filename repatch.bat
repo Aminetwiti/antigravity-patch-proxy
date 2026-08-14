@@ -84,7 +84,7 @@ if exist "%STAGING_DIR%" rmdir /S /Q "%STAGING_DIR%"
 REM -- 5. Binary patch (language_server URL -> localhost:50999)
 echo [5/7] Applying binary patch to language_server...
 if exist "%AG_BIN_LS%" (
-  echo y | node "%SCRIPT_DIR%ag-doctor\bin\ag-doctor.js" patch apply
+  node "%SCRIPT_DIR%ag-doctor\bin\ag-doctor.js" patch apply --yes
 ) else (
   echo   [WARN] language_server.exe not found, skipping binary patch
 )

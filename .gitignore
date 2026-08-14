@@ -50,3 +50,4 @@ remote/tools/*
 remote/mobile/.gradle/*
 remote/daemon/*
 remote/daemon/daemon.exe
+remote/insperer/*

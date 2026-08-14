@@ -301,15 +301,13 @@ export function inspectOverlayPatchFingerprint(installDir?: string): OverlayFing
   }
 }
 
-/**
- * Detect range-specific binary signatures when available.
- *
- * Today the supported families share the same URL marker, so this typically
- * returns an empty array. The generic binary evidence is exposed separately via
- * `binarySignatureDetected` and `binarySignatureState`.
- */
-export function detectAvailablePatches(_binaryPath: string): PatchDefinition[] {
-  return [];
+export function detectAvailablePatches(binaryPath: string): PatchDefinition[] {
+  if (!fs.existsSync(binaryPath)) {
+    return [];
+  }
+  const buf = fs.readFileSync(binaryPath);
+  const haystack = buf.toString('binary');
+  return PATCH_REGISTRY.filter((patch) => haystack.includes(patch.originalUrl) || haystack.includes(patch.patchedUrl));
 }
 
 /**
