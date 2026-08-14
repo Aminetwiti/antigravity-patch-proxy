@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'models/subagent_item.dart';
-import '../theme/app_colors.dart';
+import 'package:mobile/theme/app_colors.dart';
 
 class SubagentsDrawer extends StatelessWidget {
   final List<SubagentItem> subagents;

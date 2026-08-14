@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/code_comment.dart';
-import '../../theme/app_colors.dart';
+import 'package:mobile/theme/app_colors.dart';
 
 class AddCommentDialog extends StatefulWidget {
   final String filePath;

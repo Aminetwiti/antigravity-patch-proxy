@@ -14,7 +14,7 @@ import '../../widgets/chat_input_bar.dart';
 import '../../widgets/connection_banner.dart';
 import '../../widgets/markdown_bubble.dart';
 import '../../widgets/tool_approval_card.dart';
-import '../theme/app_colors.dart';
+import 'package:mobile/theme/app_colors.dart';
 
 class ChatStreamScreen extends StatefulWidget {
   final DaemonApi? api;

@@ -18,7 +18,6 @@ import 'theme/app_theme.dart';
 import 'features/sessions/sessions_list.dart';
 import 'services/settings_store.dart';
 import 'widgets/right_sidebar_drawer.dart';
-import 'theme/app_colors.dart';
 
 void main() {
   runApp(const AntigravityRemoteApp());

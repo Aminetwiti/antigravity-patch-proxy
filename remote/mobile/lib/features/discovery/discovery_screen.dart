@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../config/env_config.dart';
 import 'qr_scanner_screen.dart';
-import '../theme/app_colors.dart';
+import 'package:mobile/theme/app_colors.dart';
 
 class DiscoveryScreen extends StatefulWidget {
   final Future<bool> Function(String host, int port, String csrfToken)? onConnect;

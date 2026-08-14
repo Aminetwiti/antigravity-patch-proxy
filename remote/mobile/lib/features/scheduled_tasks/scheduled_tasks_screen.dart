@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'models/scheduled_task_item.dart';
-import '../theme/app_colors.dart';
+import 'package:mobile/theme/app_colors.dart';
 
 class ScheduledTasksScreen extends StatelessWidget {
   final List<ScheduledTaskItem> tasks;

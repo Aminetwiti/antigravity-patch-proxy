@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../theme/app_colors.dart';
+import 'package:mobile/theme/app_colors.dart';
 
 class ArtifactActionBar extends StatelessWidget {
   final bool requestFeedback;
