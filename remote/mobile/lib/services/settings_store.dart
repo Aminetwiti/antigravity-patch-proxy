@@ -18,6 +18,22 @@ class SettingsStore {
   static const _kStatus = 'settings.status';
   static const _kToolNotifications = 'settings.toolNotifications';
   static const _kApprovalTimeout = 'settings.approvalTimeoutMinutes';
+  static const _kCompactBubbles = 'settings.compactBubbles';
+  static const _kMonospaceCode = 'settings.monospaceCode';
+  static const _kIsGeminiEnterprise = 'settings.isGeminiEnterprise';
+  static const _kGeTier = 'settings.geTier';
+  static const _kInferenceRegion = 'settings.inferenceRegion';
+  static const _kMcpAllowlistStrict = 'settings.mcpAllowlistStrict';
+  static const _kExecutionPolicy = 'settings.executionPolicy';
+  static const _kActiveBranch = 'settings.activeBranch';
+
+  // Session persistée : URL ws complète + token + sessionId actif. Sauvegardée
+  // à chaque connexion réussie (le tunnel Cloudflare change d'URL à chaque
+  // redémarrage du daemon → on re-sauvegarde systématiquement).
+  static const _kLastWsUrl = 'session.lastWsUrl';
+  static const _kLastWsToken = 'session.lastWsToken';
+  static const _kLastSessionId = 'session.lastSessionId';
+  static const _kSessionSavedAt = 'session.savedAt';
 
   SettingsStore._();
 
@@ -36,6 +52,14 @@ class SettingsStore {
       'status': prefs.getString(_kStatus) ?? 'Online',
       'toolNotifications': prefs.getBool(_kToolNotifications) ?? true,
       'approvalTimeoutMinutes': prefs.getInt(_kApprovalTimeout) ?? 5,
+      'compactBubbles': prefs.getBool(_kCompactBubbles) ?? false,
+      'monospaceCode': prefs.getBool(_kMonospaceCode) ?? true,
+      'isGeminiEnterprise': prefs.getBool(_kIsGeminiEnterprise) ?? true,
+      'geTier': prefs.getString(_kGeTier) ?? 'GE-Plus',
+      'inferenceRegion': prefs.getString(_kInferenceRegion) ?? 'UE (Europe)',
+      'mcpAllowlistStrict': prefs.getBool(_kMcpAllowlistStrict) ?? true,
+      'executionPolicy': prefs.getString(_kExecutionPolicy) ?? 'request-review',
+      'activeBranch': prefs.getString(_kActiveBranch) ?? 'main',
     };
   }
 
@@ -66,6 +90,22 @@ class SettingsStore {
           await prefs.setBool(_kToolNotifications, entry.value as bool);
         case 'approvalTimeoutMinutes':
           await prefs.setInt(_kApprovalTimeout, entry.value as int);
+        case 'compactBubbles':
+          await prefs.setBool(_kCompactBubbles, entry.value as bool);
+        case 'monospaceCode':
+          await prefs.setBool(_kMonospaceCode, entry.value as bool);
+        case 'isGeminiEnterprise':
+          await prefs.setBool(_kIsGeminiEnterprise, entry.value as bool);
+        case 'geTier':
+          await prefs.setString(_kGeTier, entry.value as String);
+        case 'inferenceRegion':
+          await prefs.setString(_kInferenceRegion, entry.value as String);
+        case 'mcpAllowlistStrict':
+          await prefs.setBool(_kMcpAllowlistStrict, entry.value as bool);
+        case 'executionPolicy':
+          await prefs.setString(_kExecutionPolicy, entry.value as String);
+        case 'activeBranch':
+          await prefs.setString(_kActiveBranch, entry.value as String);
       }
     }
   }
@@ -73,5 +113,45 @@ class SettingsStore {
   static Future<void> clear() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
+  }
+
+  /// Dernière session connectée : `{wsUrl, token, sessionId, savedAt}`.
+  /// Retourne une carte vide si absente ou expirée (24 h).
+  static Future<Map<String, dynamic>> loadSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    final url = prefs.getString(_kLastWsUrl) ?? '';
+    final savedAt = DateTime.tryParse(prefs.getString(_kSessionSavedAt) ?? '');
+    final fresh = url.isNotEmpty &&
+        savedAt != null &&
+        DateTime.now().difference(savedAt) < const Duration(hours: 24);
+    if (!fresh) return const {};
+    return {
+      'wsUrl': url,
+      'token': prefs.getString(_kLastWsToken) ?? '',
+      'sessionId': prefs.getString(_kLastSessionId) ?? '',
+      'savedAt': savedAt,
+    };
+  }
+
+  /// Persiste la session courante (appelée à chaque connexion réussie).
+  static Future<void> saveSession({
+    required String wsUrl,
+    String token = '',
+    String sessionId = '',
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kLastWsUrl, wsUrl);
+    await prefs.setString(_kLastWsToken, token);
+    await prefs.setString(_kLastSessionId, sessionId);
+    await prefs.setString(_kSessionSavedAt, DateTime.now().toIso8601String());
+  }
+
+  /// Efface la session persistée (déconnexion manuelle explicite).
+  static Future<void> clearSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kLastWsUrl);
+    await prefs.remove(_kLastWsToken);
+    await prefs.remove(_kLastSessionId);
+    await prefs.remove(_kSessionSavedAt);
   }
 }

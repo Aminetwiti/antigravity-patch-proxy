@@ -211,4 +211,113 @@ void main() {
     );
     await tester.pump(const Duration(seconds: 2));
   });
+
+  testWidgets('profil: modification du nom met à jour l\'avatar et persiste',
+      (tester) async {
+    await _pumpScreen(tester);
+
+    final nameField = find.widgetWithText(TextField, 'Amine Developer');
+    await tester.ensureVisible(nameField);
+    await tester.enterText(nameField, 'Sami Developer');
+    await tester.pumpAndSettle();
+
+    expect(find.text('S'), findsOneWidget,
+        reason: 'l\'initiale de l\'avatar doit devenir S');
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('settings.displayName'), 'Sami Developer');
+  });
+
+  testWidgets('apparence: compactBubbles et monospaceCode persistent dans SettingsStore',
+      (tester) async {
+    await _pumpScreen(tester);
+
+    final compactSwitch = find.text('Bulles compactes');
+    await tester.ensureVisible(compactSwitch);
+    await tester.tap(compactSwitch);
+    await tester.pumpAndSettle();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool('settings.compactBubbles'), isTrue);
+
+    final monoSwitch = find.text('Code monospace');
+    await tester.ensureVisible(monoSwitch);
+    await tester.tap(monoSwitch);
+    await tester.pumpAndSettle();
+
+    expect(prefs.getBool('settings.monospaceCode'), isFalse);
+  });
+
+  testWidgets('enterprise & administration: toggles et politiques persistent',
+      (tester) async {
+    await _pumpScreen(tester);
+
+    final mcpSwitch = find.text('Liste d\'autorisation MCP stricte');
+    await tester.ensureVisible(mcpSwitch);
+    await tester.tap(mcpSwitch);
+    await tester.pumpAndSettle();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool('settings.mcpAllowlistStrict'), isFalse);
+  });
+
+  testWidgets('git worktree: sélection d\'une branche envoie /checkout au daemon et persiste',
+      (tester) async {
+    final out = <Map<String, dynamic>>[];
+    final ctrl = StreamController<dynamic>();
+    final api = DaemonApi(
+      incoming: ctrl.stream,
+      send: (d) => out.add(d as Map<String, dynamic>),
+      timeout: const Duration(seconds: 1),
+    );
+    addTearDown(ctrl.close);
+    addTearDown(api.dispose);
+
+    await _pumpScreen(tester, api: api);
+
+    final branchTile = find.text('feature/remote-v2');
+    await tester.ensureVisible(branchTile);
+    await tester.tap(branchTile);
+    await tester.pump(const Duration(seconds: 2));
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('settings.activeBranch'), 'feature/remote-v2');
+    expect(
+      out.any((m) => m['type'] == 'send_command' && m['command'] == '/checkout feature/remote-v2'),
+      isTrue,
+      reason: '/checkout doit être envoyé au daemon lors du changement de branche',
+    );
+  });
+
+  testWidgets('projet: suppression demande confirmation et envoie /clear au daemon',
+      (tester) async {
+    final out = <Map<String, dynamic>>[];
+    final ctrl = StreamController<dynamic>();
+    final api = DaemonApi(
+      incoming: ctrl.stream,
+      send: (d) => out.add(d as Map<String, dynamic>),
+      timeout: const Duration(seconds: 1),
+    );
+    addTearDown(ctrl.close);
+    addTearDown(api.dispose);
+
+    await _pumpScreen(tester, api: api);
+
+    final deleteButton = find.text('Supprimer le projet');
+    await tester.ensureVisible(deleteButton);
+    await tester.tap(deleteButton);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Supprimer définitivement le projet ?'), findsOneWidget);
+
+    await tester.tap(find.text('Supprimer définitivement'));
+    await tester.pump(const Duration(seconds: 2));
+
+    expect(
+      out.any((m) => m['type'] == 'send_command' && m['command'] == '/clear'),
+      isTrue,
+      reason: '/clear doit être envoyé au daemon lors de la réinitialisation du projet',
+    );
+  });
 }
+

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../config/env_config.dart';
+import '../../core/discovery/lan_discovery.dart';
+import '../../services/settings_store.dart';
 import 'qr_scanner_screen.dart';
 import 'package:mobile/theme/app_colors.dart';
 
@@ -19,11 +21,51 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
       TextEditingController(text: EnvConfig.daemonPort.toString());
   final TextEditingController _csrfController = TextEditingController();
 
+  final LanDiscoveryService _lanDiscovery = LanDiscoveryService();
+  List<DiscoveredDaemon> _discoveredDaemons = [];
+
   bool _isConnecting = false;
   String? _errorMessage;
   String? _successMessage;
 
-  final List<String> _discoveredHosts = [];
+  @override
+  void initState() {
+    super.initState();
+    _startLanDiscovery();
+    _prefillFromSession();
+  }
+
+  /// Pré-remplit hôte/port/token depuis la session sauvegardée (< 24 h) et
+  /// tente une connexion directe : l'utilisateur qui revient dans l'app n'a
+  /// pas besoin de re-scanner le QR (l'URL Cloudflare a pu changer).
+  Future<void> _prefillFromSession() async {
+    final s = await SettingsStore.loadSession();
+    if (!mounted || s.isEmpty) return;
+    final url = s['wsUrl'] as String? ?? '';
+    if (url.isEmpty) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    final token = (s['token'] as String? ?? '').isNotEmpty
+        ? s['token'] as String
+        : _csrfController.text;
+    setState(() {
+      _hostController.text = uri.host;
+      _portController.text = uri.port.toString();
+      if (token.isNotEmpty) _csrfController.text = token;
+    });
+    await _connect();
+  }
+
+  void _startLanDiscovery() {
+    _lanDiscovery.startDiscovery();
+    _lanDiscovery.daemonsStream.listen((daemons) {
+      if (mounted) {
+        setState(() {
+          _discoveredDaemons = daemons;
+        });
+      }
+    });
+  }
 
   // Lancement du scanner QR
   Future<void> _startScan() async {
@@ -32,7 +74,6 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
     );
 
     if (scannedCode != null && scannedCode.isNotEmpty) {
-      // Ex: wss://abcd.trycloudflare.com/ws?token=mysecret
       final uri = Uri.tryParse(scannedCode);
       if (uri != null) {
         final host = '${uri.scheme}://${uri.host}${uri.path}';
@@ -51,6 +92,17 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
     }
   }
 
+  Future<void> _connectWithDaemon(DiscoveredDaemon d) async {
+    setState(() {
+      _hostController.text = d.host;
+      _portController.text = d.port.toString();
+      if (d.authToken.isNotEmpty) {
+        _csrfController.text = d.authToken;
+      }
+    });
+    await _connect();
+  }
+
   Future<void> _connect() async {
     final host = _hostController.text.trim();
     final port = int.tryParse(_portController.text.trim());
@@ -63,7 +115,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
       _errorMessage = null;
       _successMessage = null;
     });
-    await Future.delayed(const Duration(milliseconds: 800));
+    await Future.delayed(const Duration(milliseconds: 600));
     if (!mounted) return;
 
     final ok = widget.onConnect == null || await widget.onConnect!(host, port, _csrfController.text.trim());
@@ -72,7 +124,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
       _isConnecting = false;
       if (ok) {
         _successMessage = 'Appairé avec succès : $host:$port';
-        Future.delayed(const Duration(seconds: 1), () {
+        Future.delayed(const Duration(milliseconds: 800), () {
           if (mounted) Navigator.of(context).pop(true);
         });
       } else {
@@ -83,6 +135,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
 
   @override
   void dispose() {
+    _lanDiscovery.dispose();
     _hostController.dispose();
     _portController.dispose();
     _csrfController.dispose();
@@ -96,6 +149,18 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
       appBar: AppBar(
         title: Text('Découvrir les Daemons', style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurface)),
         backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, size: 20),
+            tooltip: 'Relancer la recherche réseau',
+            onPressed: () {
+              _startLanDiscovery();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Recherche réseau relancée…'), duration: Duration(seconds: 1)),
+              );
+            },
+          ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
@@ -122,12 +187,12 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Découvrir le Daemon Bridge',
+                          'Détection Automatique LAN & Scan',
                           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface),
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Scannez votre réseau local ou saisissez manuellement l\'adresse du PC hôte.',
+                          'Connectez-vous instantanément à votre PC Antigravity sur le même Wi-Fi.',
                           style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                         ),
                       ],
@@ -140,6 +205,135 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
 
           const SizedBox(height: 16),
 
+          // ── SECTION DÉCOUVERTE ZERO-CONFIG UDP
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+            child: Row(
+              children: [
+                Icon(Icons.wifi_tethering, size: 14, color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 6),
+                Text(
+                  'PC DÉTECTÉS SUR LE RÉSEAU (ZERO-CONFIG)',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    color: Theme.of(context).colorScheme.primary,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+
+          if (_discoveredDaemons.isEmpty)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Text(
+                        'Recherche active de votre PC Antigravity sur le Wi-Fi local…',
+                        style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            Column(
+              children: _discoveredDaemons.map((d) {
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.laptop_chromebook, size: 20, color: Color(0xFF10B981)),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    d.displayName,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: Theme.of(context).colorScheme.onSurface,
+                                    ),
+                                  ),
+                                  Text(
+                                    'IP: ${d.formattedAddress}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            ElevatedButton(
+                              onPressed: _isConnecting ? null : () => _connectWithDaemon(d),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Theme.of(context).colorScheme.primary,
+                                foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                              ),
+                              child: const Text('1-Tap Connect', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                            ),
+                          ],
+                        ),
+                        if (d.workspaces.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            children: d.workspaces.map((ws) {
+                              return Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  '📁 $ws',
+                                  style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+
+          const SizedBox(height: 16),
+
           // ── Scan QR Code Button
           SizedBox(
             width: double.infinity,
@@ -147,47 +341,15 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
               onPressed: _startScan,
               icon: Icon(Icons.qr_code_scanner, size: 16, color: Theme.of(context).colorScheme.primary),
               label: Text(
-                'Scanner le QR Code',
+                'Scanner le QR Code (Tunnel Distant)',
                 style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
               ),
               style: OutlinedButton.styleFrom(
-                side: BorderSide(color: Theme.of(context).colorScheme.primary),
-                padding: const EdgeInsets.symmetric(vertical: 14),
+                side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                padding: const EdgeInsets.symmetric(vertical: 12),
               ),
             ),
           ),
-
-          if (_discoveredHosts.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Text(
-                'RÉSEAU LOCAL (mDNS)',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  letterSpacing: 1.2,
-                ),
-              ),
-            ),
-            Card(
-              child: Column(
-                children: _discoveredHosts.map((host) {
-                  return ListTile(
-                    dense: true,
-                    leading: Icon(Icons.computer, size: 18, color: Theme.of(context).colorScheme.primary),
-                    title: Text(host, style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface)),
-                    subtitle: Text('Daemon Bridge détecté', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                    trailing: Icon(Icons.chevron_right, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                    onTap: () {
-                      _hostController.text = host;
-                    },
-                  );
-                }).toList(),
-              ),
-            ),
-          ],
 
           const SizedBox(height: 20),
           const Divider(),

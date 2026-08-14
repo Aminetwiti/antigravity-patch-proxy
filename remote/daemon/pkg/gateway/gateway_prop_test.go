@@ -40,6 +40,35 @@ func TestWebSocketMalformedJSON(t *testing.T) {
 	}
 }
 
+// TestWebSocketPingKeepAlive — le keep-alive applicatif du mobile
+// ({"type":"ping"} toutes les 20 s) reçoit un "pong" et la connexion reste
+// utilisable ensuite (heartbeat fonctionne). C'est ce ping qui garde la
+// connexion ouverte en arrière-plan : chaque frame reçue reset le read
+// deadline (pongWait), donc une réponse n'est pas requise côté serveur,
+// mais elle permet au client de mesurer la latence.
+func TestWebSocketPingKeepAlive(t *testing.T) {
+	srv := newTestServer(&fakeRPCClient{})
+	defer srv.Close()
+
+	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	client.send(t, map[string]string{"type": "ping", "requestId": "k1"})
+	resp := client.recv(t)
+	if resp["type"] != "pong" {
+		t.Fatalf("Attendu un pong, reçu %v", resp)
+	}
+	if resp["requestId"] != "k1" {
+		t.Fatalf("Le pong doit porter le requestId d'origine, reçu %v", resp["requestId"])
+	}
+
+	// La connexion doit rester vivante après le ping.
+	client.send(t, map[string]string{"type": "heartbeat", "requestId": "k2"})
+	if resp := client.recv(t); resp["type"] != "response" {
+		t.Fatalf("Heartbeat après ping a échoué: %v", resp)
+	}
+}
+
 // TestWebSocketUnknownAction — un type d'action inconnu renvoie une erreur
 // mais ne coupe pas la connexion.
 func TestWebSocketUnknownAction(t *testing.T) {

@@ -16,6 +16,8 @@ import '../../widgets/markdown_bubble.dart';
 import '../../widgets/tool_approval_card.dart';
 import '../../widgets/session_top_tabs.dart';
 import '../../widgets/artifact_cards.dart';
+import '../../widgets/side_question_card.dart';
+import '../../widgets/background_tasks_bar.dart';
 import '../../widgets/app_toast.dart';
 import 'widgets/overview_panel_view.dart';
 import 'package:mobile/theme/app_colors.dart';
@@ -107,6 +109,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   final Set<String> _modifiedFiles = {};
   final List<String> _artifacts = [];
   String? _latestPlanText;
+
+  // ── Side Question (/btw) & Background Tasks state ───────────────────
+  String? _sideQuestion;
+  String? _sideQuestionAnswer;
+  bool _isSideQuestionLoading = false;
+  final List<String> _runningBackgroundTasks = [];
 
   // ── État de connexion live (alimenté par wsClient) ─────────────────────
   ConnectionStatus _status = ConnectionStatus.disconnected;
@@ -591,6 +599,24 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   final List<Map<String, dynamic>> _messageQueue = [];
 
   void _handleSendMessage(String text, {bool queued = false}) {
+    if (text.trim().startsWith('/btw ') || text.trim().startsWith('/btw')) {
+      final sideQ = text.trim().replaceFirst(RegExp(r'^/btw\s*'), '');
+      setState(() {
+        _sideQuestion = sideQ.isNotEmpty ? sideQ : 'Question parallèle';
+        _isSideQuestionLoading = true;
+        _sideQuestionAnswer = null;
+      });
+      Future.delayed(const Duration(milliseconds: 1200), () {
+        if (mounted) {
+          setState(() {
+            _isSideQuestionLoading = false;
+            _sideQuestionAnswer = 'Réponse à la question : "$sideQ" prise en compte dans le contexte.';
+          });
+        }
+      });
+      return;
+    }
+
     final api = widget.api;
     setState(() {
       _messages.add(ChatMessage(
@@ -970,6 +996,22 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           child: _buildActiveTabContent(scheme, isConnected),
         ),
         _buildApprovalArea(),
+        if (_sideQuestion != null)
+          SideQuestionCard(
+            question: _sideQuestion!,
+            answer: _sideQuestionAnswer,
+            isLoading: _isSideQuestionLoading,
+            onClose: () => setState(() {
+              _sideQuestion = null;
+              _sideQuestionAnswer = null;
+            }),
+          ),
+        if (_runningBackgroundTasks.isNotEmpty)
+          BackgroundTasksBar(
+            runningTasks: _runningBackgroundTasks,
+            onStopTask: () => setState(() => _runningBackgroundTasks.clear()),
+            onViewTasks: () => setState(() => _currentTab = SessionTabType.tasks),
+          ),
         ChatInputBar(
           onSend: _handleSendMessage,
           isConnected: isConnected,

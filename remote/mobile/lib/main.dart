@@ -108,12 +108,27 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     super.initState();
     _prevStatus = _wsClient.statusNotifier.value;
     _wsClient.statusNotifier.addListener(_onStatusChanged);
+    // Sauvegarde la session à chaque connexion réussie : URL ws complète + token
+    // (le tunnel Cloudflare change d'URL à chaque redémarrage du daemon).
+    _wsClient.onSessionEstablished = (url, token) {
+      SettingsStore.saveSession(wsUrl: url, token: token, sessionId: _activeSessionId);
+    };
     ApprovalNotifier.instance.init();
-    // Auto-connexion : réglages persistés (host/port/ssl/token) si présents,
-    // sinon repli sur la config d'environnement. `adb reverse tcp:8090` + jeton
-    // par défaut restent le chemin dev.
-    // ponytail: plafond connu — pas de persistance de l'appairage; le QR /
-    // discovery reste le chemin production.
+    // Restaure la dernière session active (si encore valide) sans attendre
+    // la liste distante — l'UI affiche immédiatement le bon contexte.
+    SettingsStore.loadSession().then((s) {
+      if (!mounted || s.isEmpty) return;
+      final sid = s['sessionId'] as String? ?? '';
+      if (sid.isNotEmpty) {
+        setState(() => _activeSessionId = sid);
+      }
+    });
+    // Auto-connexion : session persistée < 24 h en priorité (reconnexion
+    // directe au tunnel), sinon réglages host/port/ssl/token, sinon repli sur
+    // la config d'environnement. `adb reverse tcp:8090` + jeton par défaut
+    // restent le chemin dev.
+    // ponytail: plafond connu — la session expire après 24 h; le QR /
+    // discovery reste le chemin de re-appairage.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _connectWithSavedSettings();
     });
@@ -121,6 +136,21 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
 
   Future<void> _connectWithSavedSettings() async {
     try {
+      // Priorité 1 : session < 24 h → reconnexion directe au tunnel
+      // sauvegardé (URL Cloudflare complète + token), sans re-scan QR.
+      final session = await SettingsStore.loadSession();
+      if (mounted && session.isNotEmpty) {
+        final url = session['wsUrl'] as String? ?? '';
+        final token = session['token'] as String? ?? '';
+        if (url.isNotEmpty) {
+          _wsClient.connect(
+            customUrl: url,
+            authToken: token.isNotEmpty ? token : EnvConfig.authToken,
+          );
+          return;
+        }
+      }
+      // Priorité 2 : réglages persistés (host/port/ssl/token).
       final s = await SettingsStore.load();
       if (!mounted) return;
       _savedSettings = s;
@@ -193,6 +223,14 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
 
     setState(() {});
     if (currentStatus == ConnectionStatus.connected) {
+      // Persiste la session (URL tunnel + token + sessionId) : le tunnel
+      // Cloudflare change d'URL à chaque redémarrage du daemon, on re-sauvegarde
+      // donc à chaque connexion réussie, y compris les reconnexions.
+      SettingsStore.saveSession(
+        wsUrl: _wsClient.targetUrl,
+        token: _wsClient.authToken ?? '',
+        sessionId: _activeSessionId,
+      );
       _api?.dispose();
       _api = DaemonApi(
         incoming: _wsClient.stream,
@@ -244,6 +282,13 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
               _activeSessionTitle = cur.title;
             }
           });
+          // Re-persiste la session restaurée (le sessionId peut avoir changé
+          // si l'ancien n'existait plus côté daemon).
+          SettingsStore.saveSession(
+            wsUrl: _wsClient.targetUrl,
+            token: _wsClient.authToken ?? '',
+            sessionId: _activeSessionId,
+          );
         }
       }
     } catch (_) {
@@ -417,7 +462,17 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                   final url = _formatWsUrl(host, port);
                   _wsClient.disconnect();
                   await _wsClient.connect(customUrl: url, authToken: token);
-                  return _wsClient.statusNotifier.value == ConnectionStatus.connected;
+                  final ok = _wsClient.statusNotifier.value == ConnectionStatus.connected;
+                  if (ok) {
+                    // Persiste l'appairage : le tunnel Cloudflare peut avoir
+                    // changé d'URL depuis la dernière sauvegarde.
+                    SettingsStore.saveSession(
+                      wsUrl: url,
+                      token: token,
+                      sessionId: _activeSessionId,
+                    );
+                  }
+                  return ok;
                 },
               ),
             ),
@@ -482,6 +537,9 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
               onTap: () {
                 if (isConnected) {
                   _wsClient.disconnect();
+                  // Déconnexion manuelle explicite : la session persistée est
+                  // oubliée pour ne pas se reconnecter toute seule au tunnel.
+                  SettingsStore.clearSession();
                 } else {
                   _wsClient.connect();
                 }

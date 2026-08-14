@@ -62,6 +62,25 @@ class DaemonWebSocketClient {
   /// destruction (tests « A Timer is still pending »).
   Timer? _connectTimeout;
 
+  /// Keep-alive applicatif : le daemon ferme les connexions sans frame après
+  /// pongWait (60 s). En arrière-plan, l'OS Android gèle le réseau → le ping
+  /// WS natif 30 s du serveur est perdu. On envoie donc un ping JSON toutes
+  /// les 20 s quand connecté : toute frame reçue reset le read deadline du
+  /// daemon → la connexion survit. ponytail: intervalle fixe 20 s, pas de
+  /// jitter — suffisant pour traverser Cloudflare/4G.
+  static const keepAliveInterval = Duration(seconds: 20);
+  Timer? _keepAliveTimer;
+
+  /// Callback appelé après chaque connexion réussie : permet au consumer de
+  /// persister la session (URL + token) pour la reconnexion directe.
+  void Function(String url, String token)? onSessionEstablished;
+
+  /// URL complète actuellement ciblée (réutilisée pour re-sauvegarde).
+  String get targetUrl => _targetUrl;
+
+  /// Token d'auth en vigueur (peut être vide).
+  String? get authToken => _authToken;
+
   Future<void> connect({String? customUrl, String? authToken}) async {
     if (customUrl != null && customUrl.isNotEmpty) {
       _targetUrl = customUrl;
@@ -119,10 +138,12 @@ class DaemonWebSocketClient {
       _reconnectAttempts = 0;
       _stopRetryCountdown();
       retryInfo.value = const RetryInfo();
+      _startKeepAlive();
       reconnectVersion.value++; // Étape 5 : signaler la (re)connexion
       if (kDebugMode) {
         print('[DaemonWS] Connected to $_targetUrl');
       }
+      onSessionEstablished?.call(_targetUrl, _authToken ?? '');
 
       _socket!.listen(
         (data) {
@@ -168,9 +189,34 @@ class DaemonWebSocketClient {
     statusNotifier.value = ConnectionStatus.disconnected;
     _socket?.close();
     _socket = null;
+    _stopKeepAlive();
     _reconnectAttempts++;
     retryInfo.value = retryInfo.value.copyWith(attempt: _reconnectAttempts);
     _scheduleReconnect();
+  }
+
+  /// Ping JSON toutes les 20 s : le daemon lit la frame → reset du read
+  /// deadline (pongWait) → connexion maintenue même en arrière-plan.
+  void _startKeepAlive() {
+    _keepAliveTimer?.cancel();
+    _keepAliveTimer = Timer.periodic(keepAliveInterval, (_) {
+      final sock = _socket;
+      if (sock == null ||
+          statusNotifier.value != ConnectionStatus.connected) {
+        _stopKeepAlive();
+        return;
+      }
+      try {
+        sock.add('{"type":"ping"}');
+      } catch (_) {
+        _stopKeepAlive();
+      }
+    });
+  }
+
+  void _stopKeepAlive() {
+    _keepAliveTimer?.cancel();
+    _keepAliveTimer = null;
   }
 
   void _scheduleReconnect() {
@@ -222,6 +268,7 @@ class DaemonWebSocketClient {
     _connectToken?.complete();
     _connectToken = null;
     _stopRetryCountdown();
+    _stopKeepAlive();
     _socket?.close();
     _socket = null;
     statusNotifier.value = ConnectionStatus.disconnected;
@@ -249,6 +296,7 @@ class DaemonWebSocketClient {
     _connectToken?.complete();
     _connectToken = null;
     _stopRetryCountdown();
+    _stopKeepAlive();
     disconnect();
     _messageController?.close();
     _messageController = null;

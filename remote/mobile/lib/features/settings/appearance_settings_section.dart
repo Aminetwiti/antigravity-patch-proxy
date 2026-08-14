@@ -10,10 +10,14 @@ class AppearanceSettingsSection extends StatefulWidget {
   const AppearanceSettingsSection({
     super.key,
     required this.initialIndex,
+    this.initialCompactBubbles = false,
+    this.initialMonospaceCode = true,
     required this.onThemeModeChanged,
   });
 
   final int initialIndex;
+  final bool initialCompactBubbles;
+  final bool initialMonospaceCode;
   final ValueChanged<int> onThemeModeChanged;
 
   @override
@@ -22,8 +26,16 @@ class AppearanceSettingsSection extends StatefulWidget {
 
 class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
   late int _themeModeIndex = widget.initialIndex;
-  bool _compactBubbles = false;
-  bool _monospaceCode = true;
+  late bool _compactBubbles = widget.initialCompactBubbles;
+  late bool _monospaceCode = widget.initialMonospaceCode;
+
+  @override
+  void initState() {
+    super.initState();
+    _themeModeIndex = widget.initialIndex;
+    _compactBubbles = widget.initialCompactBubbles;
+    _monospaceCode = widget.initialMonospaceCode;
+  }
 
   void _setThemeMode(int index) {
     setState(() => _themeModeIndex = index);
@@ -107,7 +119,10 @@ class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
                 ),
                 value: _compactBubbles,
                 activeColor: Theme.of(context).colorScheme.primary,
-                onChanged: (v) => setState(() => _compactBubbles = v),
+                onChanged: (v) {
+                  setState(() => _compactBubbles = v);
+                  SettingsStore.save({'compactBubbles': v});
+                },
               ),
               const Divider(height: 1),
               SwitchListTile(
@@ -123,7 +138,10 @@ class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
                 ),
                 value: _monospaceCode,
                 activeColor: Theme.of(context).colorScheme.primary,
-                onChanged: (v) => setState(() => _monospaceCode = v),
+                onChanged: (v) {
+                  setState(() => _monospaceCode = v);
+                  SettingsStore.save({'monospaceCode': v});
+                },
               ),
             ],
           ),

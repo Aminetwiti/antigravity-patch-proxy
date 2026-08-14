@@ -230,7 +230,9 @@ class _AskQuestionChoiceCardState extends State<AskQuestionChoiceCard> {
 
           // Liste des options sous forme de cartes/chips cliquables
           if (_options.isNotEmpty) ...[
-            ..._options.map((option) {
+            ..._options.asMap().entries.map((entry) {
+              final index = entry.key + 1;
+              final option = entry.value;
               final isSelected = _selectedOptions.contains(option);
               return Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -254,18 +256,24 @@ class _AskQuestionChoiceCardState extends State<AskQuestionChoiceCard> {
                     ),
                     child: Row(
                       children: [
-                        Icon(
-                          _isMultiSelect
-                              ? (isSelected
-                                  ? Icons.check_box_rounded
-                                  : Icons.check_box_outline_blank_rounded)
-                              : (isSelected
-                                  ? Icons.radio_button_checked_rounded
-                                  : Icons.radio_button_off_rounded),
-                          color: isSelected
-                              ? scheme.primary
-                              : scheme.outline,
-                          size: 18,
+                        Container(
+                          width: 20,
+                          height: 20,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? scheme.primary
+                                : scheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            '$index',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: isSelected ? scheme.onPrimary : scheme.onSurfaceVariant,
+                            ),
+                          ),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -282,6 +290,16 @@ class _AskQuestionChoiceCardState extends State<AskQuestionChoiceCard> {
                             ),
                           ),
                         ),
+                        if (_isMultiSelect)
+                          Icon(
+                            isSelected
+                                ? Icons.check_box_rounded
+                                : Icons.check_box_outline_blank_rounded,
+                            color: isSelected
+                                ? scheme.primary
+                                : scheme.outline,
+                            size: 18,
+                          ),
                       ],
                     ),
                   ),
@@ -298,7 +316,7 @@ class _AskQuestionChoiceCardState extends State<AskQuestionChoiceCard> {
               onChanged: (_) => setState(() {}),
               style: TextStyle(color: scheme.onSurface, fontSize: 13),
               decoration: InputDecoration(
-                hintText: 'Or enter custom response...',
+                hintText: 'Autre (écrire votre réponse)...',
                 hintStyle: TextStyle(color: scheme.outline, fontSize: 12),
                 contentPadding: const EdgeInsets.symmetric(
                     horizontal: 12, vertical: 10),
@@ -321,40 +339,60 @@ class _AskQuestionChoiceCardState extends State<AskQuestionChoiceCard> {
             const SizedBox(height: 12),
           ],
 
-          // Bouton de validation
-          Align(
-            alignment: Alignment.centerRight,
-            child: ElevatedButton.icon(
-              onPressed:
-                  _canSubmit && !_isSubmitting ? _handleSubmit : null,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: scheme.primary,
-                foregroundColor: scheme.onPrimary,
-                disabledBackgroundColor: scheme.surfaceContainerHighest,
-                disabledForegroundColor: scheme.outline,
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 10),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+          // Boutons d'action (Skip & Submit)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: !_isSubmitting
+                    ? () {
+                        HapticFeedback.selectionClick();
+                        _customController.text = 'skip';
+                        _handleSubmit();
+                      }
+                    : null,
+                style: TextButton.styleFrom(
+                  foregroundColor: scheme.outline,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 ),
-                elevation: 0,
+                child: const Text(
+                  'Skip',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                ),
               ),
-              icon: _isSubmitting
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.send_rounded, size: 14),
-              label: Text(
-                _submitLabel,
-                style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.bold),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed:
+                    _canSubmit && !_isSubmitting ? _handleSubmit : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: scheme.primary,
+                  foregroundColor: scheme.onPrimary,
+                  disabledBackgroundColor: scheme.surfaceContainerHighest,
+                  disabledForegroundColor: scheme.outline,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  elevation: 0,
+                ),
+                icon: _isSubmitting
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.send_rounded, size: 14),
+                label: Text(
+                  _submitLabel,
+                  style: const TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.bold),
+                ),
               ),
-            ),
+            ],
           ),
         ],
       ),

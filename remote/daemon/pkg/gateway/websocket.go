@@ -1075,6 +1075,15 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 	var err error
 
 	switch msg.Type {
+	// Keep-alive applicatif : le mobile envoie {"type":"ping"} toutes les
+	// 20 s quand il est en arrière-plan. Même sans réponse, toute frame
+	// reçue reset le read deadline (pongWait) — le ping seul suffit à
+	// garder la connexion ouverte côté serveur. On répond quand même
+	// pour que le client puisse mesurer la latence (round-trip).
+	case "ping":
+		s.writeJSON(conn, OutgoingMessage{Type: "pong", RequestID: msg.RequestID, Data: map[string]interface{}{"ts": time.Now().UnixMilli()}})
+		return
+
 	case "heartbeat":
 		raw, err = s.RPCClient.Heartbeat()
 

@@ -12,6 +12,7 @@ import '../../core/notifications/approval_notifier.dart';
 import '../../core/protocol/daemon_api.dart';
 import '../../core/protocol/model_catalog.dart';
 import '../../services/settings_store.dart';
+import '../../widgets/app_toast.dart';
 import '../workspace/git_worktree_selector.dart';
 import 'appearance_settings_section.dart';
 import 'profile_settings_section.dart';
@@ -74,11 +75,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _inferenceRegion = 'UE (Europe)';
   bool _mcpAllowlistStrict = true;
   String _executionPolicy = 'request-review';
+  String _activeBranch = 'main';
 
   @override
   void initState() {
     super.initState();
     final s = widget.initialSettings;
+    _activeBranch = (s['activeBranch'] as String?) ?? 'main';
     _hostController = TextEditingController(
       text: (s['host'] as String?)?.trim().isNotEmpty == true
           ? (s['host'] as String).trim()
@@ -175,8 +178,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await SettingsStore.save(config);
     widget.onDaemonSaved?.call(config);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Connexion Daemon enregistrée !')),
+    AppToast.show(
+      context,
+      message: 'Connexion Daemon enregistrée !',
+      icon: Icons.check_circle_outline,
+      type: ToastType.success,
     );
   }
 
@@ -206,18 +212,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
       await Share.shareXFiles([XFile(file.path)]);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Paquet de diagnostic exporté avec succès (logs + state) !',
-          ),
-          duration: Duration(seconds: 2),
-        ),
+      AppToast.show(
+        context,
+        message: 'Paquet de diagnostic exporté avec succès !',
+        icon: Icons.file_download_done,
+        type: ToastType.success,
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Export impossible : $e')),
+      AppToast.show(
+        context,
+        message: 'Export impossible : $e',
+        icon: Icons.error_outline,
+        type: ToastType.error,
       );
     } finally {
       if (mounted) setState(() => _diagnosticsBusy = false);
@@ -258,8 +265,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [
           // ── USER PROFILE (éditable)
           const _SectionTitle(title: 'PROFILE'),
-          const SizedBox(height: 8),
-          const ProfileSettingsSection(),
+          ProfileSettingsSection(
+            initialName: (widget.initialSettings['displayName'] as String?) ?? 'Amine Developer',
+            initialRole: (widget.initialSettings['role'] as String?) ?? 'Remote Host Controller',
+            initialStatus: (widget.initialSettings['status'] as String?) ?? 'Online',
+          ),
 
           const SizedBox(height: 20),
 
@@ -416,13 +426,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     },
                   ),
                   const Divider(),
-                  // ponytail: liste statique des branches/worktrees en attendant l'intégration daemon
                   GitWorktreeSelector(
-                    currentBranch: 'main',
+                    currentBranch: _activeBranch,
                     branches: const ['main', 'feature/remote-v2', 'fix/websocket-reconnect'],
-                    onBranchSelected: (b) {
-                      setState(() {});
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Branche active : $b')));
+                    onBranchSelected: (b) async {
+                      setState(() => _activeBranch = b);
+                      await SettingsStore.save({'activeBranch': b});
+                      try {
+                        await widget.api?.sendCommand('/checkout $b');
+                      } catch (_) {}
+                      if (context.mounted) {
+                        AppToast.show(
+                          context,
+                          message: 'Branche active : $b',
+                          icon: Icons.alt_route,
+                          type: ToastType.info,
+                        );
+                      }
                     },
                   ),
                 ],
@@ -481,8 +501,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   } catch (_) {}
                                 }
                                 if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Projet et conversations réinitialisés avec succès.')),
+                                  AppToast.show(
+                                    context,
+                                    message: 'Projet et conversations réinitialisés avec succès.',
+                                    icon: Icons.delete_sweep_outlined,
+                                    type: ToastType.warning,
                                   );
                                 }
                               },
@@ -683,6 +706,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           AppearanceSettingsSection(
             initialIndex: ((widget.initialSettings['themeMode'] as int?) ?? 0)
                 .clamp(0, 2),
+            initialCompactBubbles: (widget.initialSettings['compactBubbles'] as bool?) ?? false,
+            initialMonospaceCode: (widget.initialSettings['monospaceCode'] as bool?) ?? true,
             onThemeModeChanged: widget.onThemeModeChanged ?? (_) {},
           ),
 

@@ -72,19 +72,42 @@ class _ProfileSettingsSectionState extends State<ProfileSettingsSection> {
                     Positioned(
                       right: 0,
                       bottom: 0,
-                      child: Container(
-                        padding: const EdgeInsets.all(3),
-                        decoration: BoxDecoration(
-                          color: scheme.surfaceContainer,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: scheme.outlineVariant,
+                      child: InkWell(
+                        onTap: () {
+                          showDialog(
+                            context: context,
+                            builder: (ctx) => SimpleDialog(
+                              title: const Text('Statut de présence'),
+                              children: _statuses
+                                  .map(
+                                    (s) => SimpleDialogOption(
+                                      onPressed: () {
+                                        setState(() => _status = s);
+                                        SettingsStore.save({'status': s});
+                                        Navigator.pop(ctx);
+                                      },
+                                      child: Text(s),
+                                    ),
+                                  )
+                                  .toList(),
+                            ),
+                          );
+                        },
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.all(3),
+                          decoration: BoxDecoration(
+                            color: scheme.surfaceContainer,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: scheme.outlineVariant,
+                            ),
                           ),
-                        ),
-                        child: Icon(
-                          Icons.photo_camera_outlined,
-                          size: 12,
-                          color: scheme.onSurfaceVariant,
+                          child: Icon(
+                            Icons.photo_camera_outlined,
+                            size: 12,
+                            color: scheme.onSurfaceVariant,
+                          ),
                         ),
                       ),
                     ),
@@ -108,7 +131,10 @@ class _ProfileSettingsSectionState extends State<ProfileSettingsSection> {
                           hintText: 'Nom d\'affichage',
                           contentPadding: EdgeInsets.zero,
                         ),
-                        onChanged: (v) => SettingsStore.save({'displayName': v}),
+                        onChanged: (v) {
+                          setState(() {});
+                          SettingsStore.save({'displayName': v});
+                        },
                       ),
                       const SizedBox(height: 4),
                       Row(
