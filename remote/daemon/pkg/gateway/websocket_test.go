@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -67,6 +68,22 @@ type fakeRPCClient struct {
 	// lastCascade : dernier CreateCascade reçu (vérifié par le test de
 	// propagation du modèle mobile).
 	lastCascade *createCascadeCall
+	// lastDelete : dernier DeleteCascade reçu (vérifié par le test P0).
+	lastDelete string
+	// lastRead / lastWrite : derniers ReadFile / WriteFile reçus (tests P0).
+	lastRead  string
+	lastWrite *writeFileCall
+	// modelsRaw : réponse ListModels (nil → défaut "ok").
+	modelsRaw []byte
+	// deleteErr : erreur simulée pour DeleteCascade (tests de refus).
+	deleteErr error
+}
+
+// writeFileCall capture les arguments du dernier WriteFile.
+type writeFileCall struct {
+	uri       string
+	content   []byte
+	overwrite bool
 }
 
 // createCascadeCall capture les arguments du dernier CreateCascade pour
@@ -177,6 +194,31 @@ func (f *fakeRPCClient) SetBrowserOpenConversation(cascadeID string) ([]byte, er
 func (f *fakeRPCClient) SendCommand(commandText string) ([]byte, error) {
 	f.lastCommand = commandText
 	return connectrpc.Frame(pbTextFrame("cmd-ok")), nil
+}
+
+func (f *fakeRPCClient) ListModels() ([]byte, error) {
+	if f.modelsRaw != nil {
+		return f.modelsRaw, nil
+	}
+	return connectrpc.Frame(pbTextFrame("ok")), nil
+}
+
+func (f *fakeRPCClient) DeleteCascade(cascadeID string) ([]byte, error) {
+	f.lastDelete = cascadeID
+	if f.deleteErr != nil {
+		return nil, f.deleteErr
+	}
+	return connectrpc.Frame(pbTextFrame("deleted")), nil
+}
+
+func (f *fakeRPCClient) ReadFile(uri string) ([]byte, error) {
+	f.lastRead = uri
+	return connectrpc.Frame(pbTextFrame("file-content")), nil
+}
+
+func (f *fakeRPCClient) WriteFile(uri string, content []byte, overwrite bool) ([]byte, error) {
+	f.lastWrite = &writeFileCall{uri: uri, content: content, overwrite: overwrite}
+	return connectrpc.Frame(pbTextFrame("written")), nil
 }
 
 // --- Tests WebSocket ---
@@ -636,5 +678,202 @@ func TestWebSocketSendCommandMissingArg(t *testing.T) {
 	msg := client.recv(t)
 	if msg["type"] != "response" || msg["error"] == "" {
 		t.Fatalf("Attendu une erreur command manquante, reçu %v", msg)
+	}
+}
+
+// ─── Tests P0 : list_models / delete_cascade / read_file / write_file ───
+
+// TestWebSocketListModels — list_models parse GetAvailableModelsResponse et
+// renvoie une liste structurée (pas un dump binaire).
+func TestWebSocketListModels(t *testing.T) {
+	// Réponse réaliste construite avec le writer de test.
+	details := &protoWriter{}
+	details.string(1, "Claude 3.7 Sonnet")
+	details.varint(2, 1) // supports_images
+	details.varint(3, 1) // supports_thinking
+	details.varint(6, 1) // recommended
+	entry := &protoWriter{}
+	entry.string(1, "claude-3-7-sonnet")
+	entry.bytes(2, details.buf)
+	fetch := &protoWriter{}
+	fetch.bytes(1, entry.buf)
+	outer := &protoWriter{}
+	outer.bytes(1, fetch.buf)
+
+	backend := &fakeRPCClient{modelsRaw: connectrpc.Frame(outer.buf)}
+	srv := newTestServer(backend)
+	defer srv.Close()
+	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	client.send(t, map[string]string{"type": "list_models", "requestId": "rM"})
+	msg := client.recv(t)
+	if msg["type"] != "response" || msg["requestId"] != "rM" {
+		t.Fatalf("Réponse inattendue: %v", msg)
+	}
+	data, ok := msg["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("data manquant: %v", msg)
+	}
+	models, ok := data["models"].([]interface{})
+	if !ok || len(models) != 1 {
+		t.Fatalf("attendu 1 modèle, reçu %v", data)
+	}
+	first, ok := models[0].(map[string]interface{})
+	if !ok || first["modelId"] != "claude-3-7-sonnet" || first["displayName"] != "Claude 3.7 Sonnet" {
+		t.Fatalf("modèle mal décodé: %v", models[0])
+	}
+	if first["supportsThinking"] != true || first["recommended"] != true {
+		t.Fatalf("flags mal décodés: %v", first)
+	}
+}
+
+// TestWebSocketDeleteCascade — confirmation requise, purge d'état après succès.
+func TestWebSocketDeleteCascade(t *testing.T) {
+	backend := &fakeRPCClient{}
+	srv := newTestServer(backend)
+	defer srv.Close()
+	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	// 1. Sans confirm → refus (aucun appel RPC).
+	client.send(t, map[string]string{"type": "delete_cascade", "requestId": "rD1", "cascadeId": "casc-9"})
+	msg := client.recv(t)
+	if msg["type"] != "response" || msg["error"] == "" {
+		t.Fatalf("Attendu refus confirmation, reçu %v", msg)
+	}
+	if backend.lastDelete != "" {
+		t.Fatalf("DeleteCascade ne devrait pas être appelé sans confirmation")
+	}
+
+	// 2. Avec confirm → RPC appelé + réponse OK.
+	client.send(t, map[string]string{"type": "delete_cascade", "requestId": "rD2", "cascadeId": "casc-9", "confirm": "true"})
+	msg = client.recv(t)
+	if msg["type"] != "response" || msg["requestId"] != "rD2" || msg["error"] != "" {
+		t.Fatalf("Réponse inattendue: %v", msg)
+	}
+	if backend.lastDelete != "casc-9" {
+		t.Fatalf("DeleteCascade appelé avec %q, attendu casc-9", backend.lastDelete)
+	}
+}
+
+// TestWebSocketDeleteCascadePurgesState — après succès, le buffer StepRecovery
+// et l'approbation en attente sont purgés (pas de fantôme sur get_pending_approval).
+func TestWebSocketDeleteCascadePurgesState(t *testing.T) {
+	backend := &fakeRPCClient{}
+	srv := NewServer(backend, "")
+
+	// Simule un stream en cours + approbation posée.
+	srv.MarkCascadeActive("casc-9")
+	srv.streamBuffer.RecordEvent("casc-9", OutgoingMessage{Type: "delta", Data: "old"})
+	srv.MarkApprovalPending("casc-9", connectrpc.StreamEvent{CallID: "c1", TrajectoryID: "t1", StepIndex: 1, Tool: "run_command"})
+	srv.markSessionApproval("casc-9", "run_command")
+
+	srv.purgeCascadeState("casc-9")
+
+	// GetEventsSince sur cascade purgée → (nil, 0) : aucun événement résiduel.
+	evts, seq := srv.streamBuffer.GetEventsSince("casc-9", 0)
+	if len(evts) != 0 || seq != 0 {
+		t.Fatalf("buffer non purgé: %d événements, seq=%d", len(evts), seq)
+	}
+	if srv.hasPendingApproval("casc-9") {
+		t.Fatal("approbation devrait être purgée")
+	}
+	if srv.hasSessionApproval("casc-9", "run_command") {
+		t.Fatal("sessionApproval devrait être purgée")
+	}
+	srv.mu.Lock()
+	active := srv.activeCascades["casc-9"]
+	srv.mu.Unlock()
+	if active {
+		t.Fatal("activeCascades devrait être purgé")
+	}
+}
+
+// TestWebSocketReadFile — read_file route vers ReadFile avec URI normalisée.
+func TestWebSocketReadFile(t *testing.T) {
+	backend := &fakeRPCClient{}
+	srv := newTestServer(backend)
+	defer srv.Close()
+	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	client.send(t, map[string]string{"type": "read_file", "requestId": "rR", "filePath": `C:\Users\test\proj\main.go`})
+	msg := client.recv(t)
+	if msg["type"] != "response" || msg["error"] != "" {
+		t.Fatalf("Réponse inattendue: %v", msg)
+	}
+	if backend.lastRead != "file:///C:/Users/test/proj/main.go" {
+		t.Fatalf("ReadFile appelé avec %q", backend.lastRead)
+	}
+}
+
+// TestWebSocketReadFileMissingPath — read_file sans filePath → erreur.
+func TestWebSocketReadFileMissingPath(t *testing.T) {
+	srv := newTestServer(&fakeRPCClient{})
+	defer srv.Close()
+	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	client.send(t, map[string]string{"type": "read_file", "requestId": "rR2"})
+	msg := client.recv(t)
+	if msg["type"] != "response" || msg["error"] == "" {
+		t.Fatalf("Attendu erreur filePath manquant, reçu %v", msg)
+	}
+}
+
+// TestWebSocketWriteFile — write_file décode base64 et route vers WriteFile.
+func TestWebSocketWriteFile(t *testing.T) {
+	backend := &fakeRPCClient{}
+	srv := newTestServer(backend)
+	defer srv.Close()
+	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	content := base64.StdEncoding.EncodeToString([]byte("package main\n"))
+	payload := map[string]interface{}{
+		"type":      "write_file",
+		"requestId": "rW",
+		"filePath":  `C:\Users\test\proj\main.go`,
+		"content":   content,
+		"overwrite": true,
+	}
+	b, _ := json.Marshal(payload)
+	if err := client.conn.WriteMessage(websocket.TextMessage, b); err != nil {
+		t.Fatalf("envoi write_file: %v", err)
+	}
+	msg := client.recv(t)
+	if msg["type"] != "response" || msg["error"] != "" {
+		t.Fatalf("Réponse inattendue: %v", msg)
+	}
+	if backend.lastWrite == nil {
+		t.Fatal("WriteFile non appelé")
+	}
+	if backend.lastWrite.uri != "file:///C:/Users/test/proj/main.go" {
+		t.Fatalf("WriteFile uri = %q", backend.lastWrite.uri)
+	}
+	if string(backend.lastWrite.content) != "package main\n" {
+		t.Fatalf("WriteFile content = %q", backend.lastWrite.content)
+	}
+	if !backend.lastWrite.overwrite {
+		t.Fatal("WriteFile overwrite devrait être true")
+	}
+}
+
+// TestWebSocketWriteFileInvalidBase64 — content non-base64 → erreur, pas d'appel RPC.
+func TestWebSocketWriteFileInvalidBase64(t *testing.T) {
+	backend := &fakeRPCClient{}
+	srv := newTestServer(backend)
+	defer srv.Close()
+	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	client.send(t, map[string]string{"type": "write_file", "requestId": "rW2", "filePath": "C:/x/y.go", "content": "%%%not-base64%%%"})
+	msg := client.recv(t)
+	if msg["type"] != "response" || msg["error"] == "" {
+		t.Fatalf("Attendu erreur base64, reçu %v", msg)
+	}
+	if backend.lastWrite != nil {
+		t.Fatal("WriteFile ne devrait pas être appelé avec base64 invalide")
 	}
 }

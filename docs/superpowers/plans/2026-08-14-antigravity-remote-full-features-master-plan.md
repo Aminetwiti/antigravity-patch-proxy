@@ -129,7 +129,7 @@ git commit -m "feat(remote): add @ mentions autocomplete system"
 - Consumes: Mobile image bytes (Base64 JPEG/PNG).
 - Produces: `upload_media` frame saved in workspace scratch folder and referenced in message context.
 
-- [ ] **Step 1: Write test for DaemonApi.uploadMedia**
+- [x] **Step 1: Write test for DaemonApi.uploadMedia**
 
 ```dart
 import 'package:flutter_test/flutter_test.dart';
@@ -155,12 +155,12 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `flutter test test/protocol/daemon_api_upload_test.dart`
 Expected: FAIL with "uploadMedia is not a member of DaemonApi".
 
-- [ ] **Step 3: Implement uploadMedia in DaemonApi and Gateway**
+- [x] **Step 3: Implement uploadMedia in DaemonApi and Gateway**
 
 ```dart
 // In remote/mobile/lib/core/protocol/daemon_api.dart
@@ -183,12 +183,12 @@ void uploadMedia({
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `flutter test test/protocol/daemon_api_upload_test.dart`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add remote/mobile/lib/core/protocol/daemon_api.dart remote/daemon/pkg/gateway/websocket.go remote/mobile/test/protocol/daemon_api_upload_test.dart
@@ -210,7 +210,7 @@ git commit -m "feat(remote): add multimodal image upload pipeline"
 - Consumes: Artifact metadata (`requestFeedback: bool`, `summary: String`).
 - Produces: Action bar with "Proceed" and "Request Changes" buttons triggering prompt execution.
 
-- [ ] **Step 1: Write test for ArtifactActionBar**
+- [x] **Step 1: Write test for ArtifactActionBar**
 
 ```dart
 import 'package:flutter/material.dart';
@@ -242,12 +242,12 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `flutter test test/widgets/artifact_action_bar_test.dart`
 Expected: FAIL with "ArtifactActionBar not defined".
 
-- [ ] **Step 3: Implement ArtifactActionBar and integrate with ArtifactViewerModal**
+- [x] **Step 3: Implement ArtifactActionBar and integrate with ArtifactViewerModal**
 
 ```dart
 // remote/mobile/lib/features/artifacts/artifact_action_bar.dart
@@ -300,12 +300,12 @@ class ArtifactActionBar extends StatelessWidget {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `flutter test test/widgets/artifact_action_bar_test.dart`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add remote/mobile/lib/features/artifacts/artifact_action_bar.dart remote/mobile/lib/widgets/artifact_viewer_modal.dart remote/mobile/test/widgets/artifact_action_bar_test.dart

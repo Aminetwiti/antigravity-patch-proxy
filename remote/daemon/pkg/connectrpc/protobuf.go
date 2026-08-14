@@ -101,30 +101,45 @@ func BuildSendMessage(cascadeID, text, apiKey, sessionID, modelUID string, model
 	return w.b
 }
 
-// BuildCascadeConfig construit le sous-message cascade_config (champs
-// validés par décodage du payload réel émis par l'IDE) :
+// BuildCascadeConfig construit le sous-message cascade_config.
 //
-//	1  conversational_planner_config (CascadeConversationalPlannerConfig)
-//	10 memory_config
+// Format validé contre le vrai Language Server 2.8.0 (probe gRPC-Web le
+// 2026-08-14) : l'ancien layout « planner {5: requested_model_id,
+// 6: requested_model_uid} » est rejeté par le LS avec
+// « neither PlanModel nor RequestedModel specified » (grpc-status 2).
+// Le layout accepté (grpc-status 0) est :
 //
-// CascadeConversationalPlannerConfig :
+//	CascadeConfig {
+//	  1: planner_config (CascadePlannerConfig) {
+//	    1: plan_model (enum, ex: 246 = GOOGLE_GEMINI_2_5_PRO)
+//	    2: conversational_config {1: planner_mode}
+//	    15: requested_model (ModelOrAlias {1: model})
+//	  }
+//	}
 //
-//	1  system_prompt          2  user_instructions       3  tool_config
-//	4  planner_mode           5  requested_model_id      6  requested_model_uid
-//	7  model_tool_config      8  model_context_config    9  memory_config
-//	10 thinking_config        11 reinforcement          12 additional_instructions_section
-//
-// Le planner_mode 3 = NO_TOOL (pas de boucle d'outils — le mobile ne voit
-// que le texte). requested_model_uid (6) est la clé qui débloque le LS.
+// planner_mode 3 = NO_TOOL (pas de boucle d'outils — le mobile ne voit
+// que le texte). requested_model (15) est la clé qui débloque le LS.
 func BuildCascadeConfig(modelUID string, modelEnum uint64) []byte {
 	planner := &writer{}
-	planner.stringField(1, "You are a helpful coding assistant.")
-	planner.varintField(4, 3) // planner_mode = NO_TOOL
+
+	// plan_model (field 1) : même valeur que requested_model ci-dessous.
+	// Le LS l'exige explicitement (« neither PlanModel nor RequestedModel »).
+	planner.varintField(1, modelEnum)
+
+	// conversational_config (field 2) {1: planner_mode} — planner_mode 3 = NO_TOOL.
+	conv := &writer{}
+	conv.varintField(1, 3)
+	planner.bytesField(2, conv.b)
+
+	// requested_model (field 15) = ModelOrAlias {1: model}.
+	reqModel := &writer{}
 	if modelUID != "" {
-		planner.stringField(6, modelUID)
+		// ModelOrAlias.alias = CASCADE_BASE (1) : hérite du modèle de la cascade.
+		reqModel.varintField(2, 1)
 	} else if modelEnum != 0 {
-		planner.varintField(5, modelEnum)
+		reqModel.varintField(1, modelEnum)
 	}
+	planner.bytesField(15, reqModel.b)
 
 	w := &writer{}
 	w.bytesField(1, planner.b)
@@ -287,5 +302,43 @@ func readVarint(buf []byte, offset int) (uint64, int) {
 func BuildSetBrowserOpenConversation(cascadeID string) []byte {
 	w := &writer{}
 	w.stringField(1, cascadeID)
+	return w.b
+}
+
+// BuildDeleteCascadeTrajectory construit un DeleteCascadeTrajectoryRequest :
+// {1: cascade_id} — schéma vérifié dans antigravity-client
+// (src/gen/exa/language_server_pb/language_server_pb.ts, ligne 11572).
+func BuildDeleteCascadeTrajectory(cascadeID string) []byte {
+	w := &writer{}
+	w.stringField(1, cascadeID)
+	return w.b
+}
+
+// BuildReadFileRequest construit un ReadFileRequest : {1: uri} — schéma
+// vérifié dans antigravity-client (ligne 15483).
+func BuildReadFileRequest(uri string) []byte {
+	w := &writer{}
+	w.stringField(1, uri)
+	return w.b
+}
+
+// BuildWriteFileRequest construit un WriteFileRequest :
+// {1: uri, 2: content (bytes), 3: overwrite (bool)} — schéma vérifié dans
+// antigravity-client (ligne 15631).
+func BuildWriteFileRequest(uri string, content []byte, overwrite bool) []byte {
+	w := &writer{}
+	w.stringField(1, uri)
+	w.bytesField(2, content)
+	if overwrite {
+		w.varintField(3, 1)
+	}
+	return w.b
+}
+
+// BuildStatUriRequest construit un StatUriRequest : {1: uri} — schéma vérifié
+// dans antigravity-client (ligne 15397).
+func BuildStatUriRequest(uri string) []byte {
+	w := &writer{}
+	w.stringField(1, uri)
 	return w.b
 }

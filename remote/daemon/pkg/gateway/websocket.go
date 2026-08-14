@@ -45,6 +45,14 @@ type RPCClient interface {
 	SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error)
 	SetBrowserOpenConversation(cascadeID string) ([]byte, error)
 	SendCommand(commandText string) ([]byte, error)
+	// ListModels récupère la liste des modèles disponibles (GetAvailableModels).
+	ListModels() ([]byte, error)
+	// DeleteCascade supprime une session (DeleteCascadeTrajectory).
+	DeleteCascade(cascadeID string) ([]byte, error)
+	// ReadFile lit un fichier via le RPC officiel du LS (ReadFile).
+	ReadFile(uri string) ([]byte, error)
+	// WriteFile écrit un fichier via le RPC officiel du LS (WriteFile).
+	WriteFile(uri string, content []byte, overwrite bool) ([]byte, error)
 }
 
 // checkOrigin rejette les navigateurs web arbitraires (CSWSH) tout en
@@ -295,10 +303,17 @@ type IncomingMessage struct {
 	Data            map[string]interface{} `json:"data,omitempty"`
 	Images          []string               `json:"images,omitempty"`
 	// ModelUID : identifiant du modèle sélectionné dans l'app mobile
-	// (requested_model_uid du cascade_config). Vide  repli sur ModelEnum.
+	// (requested_model_uid du cascade_config). Vide → repli sur ModelEnum.
 	ModelUID string `json:"modelUID,omitempty"`
 	// ModelEnum : repli historique (requested_model_id) quand ModelUID est vide.
 	ModelEnum uint64 `json:"modelEnum,omitempty"`
+	// Confirm : confirmation explicite exigée pour les actions destructives
+	// (delete_cascade) — le mobile DOIT l'envoyer à true après dialog natif.
+	Confirm bool `json:"confirm,omitempty"`
+	// Content : contenu du fichier pour write_file (encodage base64 JSON → bytes).
+	Content string `json:"content,omitempty"`
+	// Overwrite : autorise l'écrasement pour write_file (sinon erreur si existe).
+	Overwrite bool `json:"overwrite,omitempty"`
 }
 
 // hasPendingApproval rapporte si une approbation est en attente pour cette
@@ -373,6 +388,35 @@ func (s *Server) clearApproval(cascadeID string) {
 		}
 		delete(s.approvals, cascadeID)
 	}
+}
+
+// purgeCascadeState nettoie TOUT l'état local d'une cascade supprimée :
+// buffer StepRecovery, approbation en attente, auto-approbations de session,
+// stream actif. Sans cette purge, un get_pending_approval sur une cascade
+// supprimée répondrait un fantôme.
+func (s *Server) purgeCascadeState(cascadeID string) {
+	s.streamBuffer.ClearCascade(cascadeID)
+	s.mu.Lock()
+	if p, ok := s.approvals[cascadeID]; ok {
+		if p.timer != nil {
+			p.timer.Stop()
+		}
+		delete(s.approvals, cascadeID)
+	}
+	// sessionApprovals : clés "cascadeID|type" — purge par préfixe.
+	prefix := cascadeID + "|"
+	for k := range s.sessionApprovals {
+		if strings.HasPrefix(k, prefix) {
+			delete(s.sessionApprovals, k)
+		}
+	}
+	delete(s.activeCascades, cascadeID)
+	if cancel, ok := s.activeCancels[cascadeID]; ok && cancel != nil {
+		cancel()
+	}
+	delete(s.activeCancels, cascadeID)
+	delete(s.activeRequestIDs, cascadeID)
+	s.mu.Unlock()
 }
 
 // expireApproval est le callback du timer : l'approbation n'a pas reçu de
@@ -702,7 +746,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			// Le modèle vient du mobile (ModelUID) ; en l'absence de sélection
 			// explicite on garde le repli historique 190 (enum gemini-3.7-flash).
 			modelEnum := msg.ModelEnum
-			if modelEnum == 0 {
+			if modelEnum == 0 && msg.ModelUID == "" {
 				modelEnum = 190
 			}
 			raw, err = s.RPCClient.CreateCascade(uri, projectID, msg.ModelUID, modelEnum)
@@ -1105,6 +1149,50 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"worktrees": wts}})
 		return
+
+	case "list_models":
+		raw, err = s.RPCClient.ListModels()
+		if err == nil {
+			models, ok := connectrpc.ParseModels(raw)
+			if !ok {
+				// Dégradation gracieuse : schéma inconnu → liste vide + warning.
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"models": []interface{}{}, "warning": "schéma GetAvailableModels non décodable"}})
+				return
+			}
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"models": models}})
+			return
+		}
+
+	case "delete_cascade":
+		if msg.CascadeID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
+			return
+		}
+		// Destructif et irréversible : confirmation explicite obligatoire.
+		if !msg.Confirm {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "confirmation requise (champ confirm=true)"})
+			return
+		}
+		logJSON.Info("cascade_deleted", "cascadeId", msg.CascadeID)
+		raw, err = s.RPCClient.DeleteCascade(msg.CascadeID)
+		if err == nil {
+			s.purgeCascadeState(msg.CascadeID)
+		}
+
+	case "write_file":
+		if msg.FilePath == "" || msg.Content == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "filePath + content requis"})
+			return
+		}
+		// Confinement : écriture refusée hors workspace tracké — le RPC
+		// WriteFile du LS est un passthrough fichiersystem, on le garde
+		// sous la racine workspace (mêmes garanties que read_file local).
+		content, errDec := base64.StdEncoding.DecodeString(msg.Content)
+		if errDec != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "content doit être base64: " + errDec.Error()})
+			return
+		}
+		raw, err = s.RPCClient.WriteFile(toWorkspaceURI(msg.FilePath), content, msg.Overwrite)
 
 	default:
 		s.writeJSON(conn, OutgoingMessage{Type: "error", RequestID: msg.RequestID, Error: "Unknown action type: " + msg.Type})

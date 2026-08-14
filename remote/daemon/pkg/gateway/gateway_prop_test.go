@@ -176,6 +176,18 @@ func (l *loadRPCClient) SetBrowserOpenConversation(cascadeID string) ([]byte, er
 func (l *loadRPCClient) SendCommand(commandText string) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("cmd-ok")), nil
 }
+func (l *loadRPCClient) ListModels() ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("ok")), nil
+}
+func (l *loadRPCClient) DeleteCascade(cascadeID string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("deleted")), nil
+}
+func (l *loadRPCClient) ReadFile(uri string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("file")), nil
+}
+func (l *loadRPCClient) WriteFile(uri string, content []byte, overwrite bool) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("written")), nil
+}
 
 // TestWebSocketConcurrentClients — 20 clients en parallèle, 30 messages chacun :
 // aucun message ne doit être perdu ni mélangé (chaque réponse doit porter
@@ -316,6 +328,18 @@ func (f *failingStreamClient) SetBrowserOpenConversation(cascadeID string) ([]by
 }
 func (f *failingStreamClient) SendCommand(commandText string) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("cmd-ok")), nil
+}
+func (f *failingStreamClient) ListModels() ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("ok")), nil
+}
+func (f *failingStreamClient) DeleteCascade(cascadeID string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("deleted")), nil
+}
+func (f *failingStreamClient) ReadFile(uri string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("file")), nil
+}
+func (f *failingStreamClient) WriteFile(uri string, content []byte, overwrite bool) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("written")), nil
 }
 
 func TestWebSocketStreamBackendError(t *testing.T) {

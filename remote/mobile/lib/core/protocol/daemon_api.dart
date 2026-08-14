@@ -347,9 +347,7 @@ class DaemonApi {
       requestId: _newRequestId(),
       cascadeId: cascadeId,
     );
-    if (_sendRaw != null) {
-      _sendRaw!(clientMsg);
-    }
+    _sendRaw?.call(clientMsg);
     _send(clientMsg.toJson());
   }
 
@@ -395,9 +393,7 @@ class DaemonApi {
         'base64Data': base64Data,
       },
     );
-    if (_sendRaw != null) {
-      _sendRaw!(clientMsg);
-    }
+    _sendRaw?.call(clientMsg);
     _send(clientMsg.toJson());
   }
 

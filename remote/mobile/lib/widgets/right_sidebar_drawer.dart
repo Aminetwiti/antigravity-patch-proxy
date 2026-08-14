@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../core/protocol/daemon_api.dart';
-import '../features/subagents/models/subagent_item.dart';
 import '../features/subagents/subagents_drawer.dart';
 import '../theme/app_colors.dart';
 import 'artifact_viewer_modal.dart';

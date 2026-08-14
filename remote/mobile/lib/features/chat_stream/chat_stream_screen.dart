@@ -929,6 +929,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                           widget.api?.stopGeneration(cascadeId: widget.activeSessionId);
                         },
                         api: widget.api,
+                        cascadeId: widget.activeSessionId,
                       ),
                       const SizedBox(height: 48),
                     ],
@@ -990,6 +991,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             widget.api?.stopGeneration(cascadeId: widget.activeSessionId);
           },
           api: widget.api,
+          cascadeId: widget.activeSessionId,
         ),
       ],
     );

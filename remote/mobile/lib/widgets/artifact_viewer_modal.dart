@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../core/protocol/daemon_api.dart';
 import '../core/protocol/markdown_renderer.dart';
+import '../features/artifacts/artifact_action_bar.dart';
 import '../theme/app_colors.dart';
 
 class ArtifactViewerModal extends StatefulWidget {
@@ -8,6 +9,9 @@ class ArtifactViewerModal extends StatefulWidget {
   final String artifactPath;
   final String artifactName;
   final String? workspacePath;
+  final bool requestFeedback;
+  final VoidCallback? onProceed;
+  final VoidCallback? onRequestFeedback;
 
   const ArtifactViewerModal({
     super.key,
@@ -15,6 +19,9 @@ class ArtifactViewerModal extends StatefulWidget {
     required this.artifactPath,
     required this.artifactName,
     this.workspacePath,
+    this.requestFeedback = false,
+    this.onProceed,
+    this.onRequestFeedback,
   });
 
   @override
@@ -127,6 +134,12 @@ class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
                           child: _MarkdownBody(content: _content),
                         ),
             ),
+            if (widget.requestFeedback)
+              ArtifactActionBar(
+                requestFeedback: widget.requestFeedback,
+                onProceed: () => widget.onProceed?.call(),
+                onRequestFeedback: () => widget.onRequestFeedback?.call(),
+              ),
           ],
         ),
       ),

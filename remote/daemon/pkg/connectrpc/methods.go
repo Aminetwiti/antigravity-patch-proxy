@@ -47,3 +47,28 @@ func (c *Client) SendCommand(commandText string) ([]byte, error) {
 func (c *Client) SetBrowserOpenConversation(cascadeID string) ([]byte, error) {
 	return c.Call("SetBrowserOpenConversation", BuildSetBrowserOpenConversation(cascadeID))
 }
+
+// ListModels récupère la liste des modèles disponibles via GetAvailableModels
+// (réponse imbriquée FetchAvailableModelsResponse — décodée best-effort par
+// ParseModels, jamais fatale en cas de schéma inconnu).
+func (c *Client) ListModels() ([]byte, error) {
+	return c.Call("GetAvailableModels", nil)
+}
+
+// DeleteCascade supprime une session via DeleteCascadeTrajectory
+// (irréversible — l'appelant DOIT avoir confirmé côté client).
+func (c *Client) DeleteCascade(cascadeID string) ([]byte, error) {
+	return c.Call("DeleteCascadeTrajectory", BuildDeleteCascadeTrajectory(cascadeID))
+}
+
+// ReadFile lit un fichier via le RPC officiel ReadFile du Language Server
+// (URI file:/// — gère l'encodage et le workspace tracking du LS).
+func (c *Client) ReadFile(uri string) ([]byte, error) {
+	return c.Call("ReadFile", BuildReadFileRequest(uri))
+}
+
+// WriteFile écrit un fichier via le RPC officiel WriteFile du Language Server.
+// overwrite=false → erreur si le fichier existe déjà (pas d'écrasement silencieux).
+func (c *Client) WriteFile(uri string, content []byte, overwrite bool) ([]byte, error) {
+	return c.Call("WriteFile", BuildWriteFileRequest(uri, content, overwrite))
+}

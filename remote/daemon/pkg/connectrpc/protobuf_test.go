@@ -8,7 +8,7 @@ func TestBuildStartCascadeAndDecode(t *testing.T) {
 	workspaceURI := "file:///C:/test_project"
 	requestedModel := uint64(190)
 
-	buf := BuildStartCascade(workspaceURI, "", requestedModel)
+	buf := BuildStartCascade(workspaceURI, "", "", requestedModel)
 	if len(buf) == 0 {
 		t.Fatalf("BuildStartCascade ne devrait pas renvoyer un buffer vide")
 	}
@@ -38,6 +38,44 @@ func TestBuildStartCascadeAndDecode(t *testing.T) {
 	}
 }
 
+// TestBuildStartCascadeModelUID - quand le mobile fournit un modelUID, le
+// champ 15 (requested_model_uid) est encodé à la place de l'enum (14), et
+// l'inverse quand l'UID est vide.
+func TestBuildStartCascadeModelUID(t *testing.T) {
+	t.Run("UID prioritaire", func(t *testing.T) {
+		buf := BuildStartCascade("file:///C:/x", "", "gemini-3.1-pro-low", 190)
+		fields := DecodeFields(buf)
+		foundUID, foundEnum := false, false
+		for _, f := range fields {
+			if f.Num == 15 && string(f.Bytes) == "gemini-3.1-pro-low" {
+				foundUID = true
+			}
+			if f.Num == 14 {
+				foundEnum = true
+			}
+		}
+		if !foundUID {
+			t.Error("Attendu requested_model_uid (champ 15) encodé avec le modelUID")
+		}
+		if foundEnum {
+			t.Error("Ne devrait PAS encoder requested_model (14) quand le UID est fourni")
+		}
+	})
+
+	t.Run("repli enum", func(t *testing.T) {
+		buf := BuildStartCascade("file:///C:/x", "", "", 190)
+		foundEnum := false
+		for _, f := range DecodeFields(buf) {
+			if f.Num == 14 && f.Varint == 190 {
+				foundEnum = true
+			}
+		}
+		if !foundEnum {
+			t.Error("Attendu requested_model (14)=190 en repli sans UID")
+		}
+	})
+}
+
 func TestBuildSendMessage(t *testing.T) {
 	cascadeID := "casc-1234-abcd"
 	promptText := "Hello Antigravity!"
@@ -56,24 +94,37 @@ func TestBuildSendMessage(t *testing.T) {
 		t.Errorf("Attendu cascadeID=%s dans champ #1, reçu=%s", cascadeID, string(fields[0].Bytes))
 	}
 
-	// Le LS 2.5.0 exige cascade_config (champ 5) avec un modèle demandé :
-	// sans lui l'exécuteur plante « neither PlanModel nor RequestedModel specified ».
+	// Le LS 2.8.0 exige cascade_config (champ 5) avec un modèle demandé :
+	// format validé 1/15 (plan_model + requested_model ModelOrAlias) —
+	// l'ancien layout 5/6 est rejeté (« neither PlanModel nor RequestedModel »).
 	foundConfig := false
 	for _, f := range fields {
 		if f.Num == 5 && len(f.Bytes) > 0 {
 			foundConfig = true
 			inner := DecodeFields(f.Bytes)
 			for _, sub := range inner {
-				if sub.Num == 1 { // conversational_planner_config
+				if sub.Num == 1 { // planner_config (CascadePlannerConfig)
 					planner := DecodeFields(sub.Bytes)
-					foundUID := false
+					foundPlan := false
+					foundReq := false
 					for _, p := range planner {
-						if p.Num == 6 && string(p.Bytes) == modelUID {
-							foundUID = true
+						if p.Num == 1 && p.Varint != 0 {
+							foundPlan = true // plan_model
+						}
+						if p.Num == 15 { // requested_model (ModelOrAlias)
+							reqModel := DecodeFields(p.Bytes)
+							for _, rm := range reqModel {
+								if rm.Num == 2 && rm.Varint == 1 {
+									foundReq = true // alias = CASCADE_BASE
+								}
+							}
 						}
 					}
-					if !foundUID {
-						t.Errorf("cascade_config: requested_model_uid=%s introuvable dans le planner", modelUID)
+					if !foundPlan {
+						t.Errorf("cascade_config: plan_model (planner field 1) manquant")
+					}
+					if !foundReq {
+						t.Errorf("cascade_config: requested_model alias CASCADE_BASE (planner field 15) manquant")
 					}
 				}
 			}

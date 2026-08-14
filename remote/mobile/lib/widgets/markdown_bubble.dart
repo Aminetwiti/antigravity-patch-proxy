@@ -256,32 +256,75 @@ class _ToolCallPill extends StatelessWidget {
 
   const _ToolCallPill({required this.call});
 
+  bool get _isSubagent {
+    final t = call.toolName.toLowerCase();
+    return t.contains('subagent') || t == 'manage_task';
+  }
+
+  bool get _isBrowser {
+    final t = call.toolName.toLowerCase();
+    return t.contains('browser') || t.contains('read_url');
+  }
+
   IconData _iconFor(String tool) {
     final t = tool.toLowerCase();
+    if (t.contains('subagent')) return Icons.smart_toy_outlined;
+    if (t.contains('browser')) return Icons.travel_explore_outlined;
     if (t.contains('bash') || t.contains('command') || t.contains('run')) {
       return Icons.terminal;
     } else if (t.contains('file') || t.contains('read') || t.contains('write')) {
       return Icons.folder_outlined;
-    } else if (t.contains('browser') || t.contains('web') || t.contains('search') || t.contains('grep')) {
-      return Icons.language;
+    } else if (t.contains('search') || t.contains('grep')) {
+      return Icons.search;
     }
     return Icons.build_outlined;
+  }
+
+  String get _badgeText {
+    if (_isSubagent) return 'SUBAGENT';
+    if (_isBrowser) return 'BROWSER';
+    final t = call.toolName.toLowerCase();
+    if (t.contains('command') || t.contains('run')) return 'COMMAND';
+    if (t.contains('file')) return 'FILE';
+    return 'TOOL';
+  }
+
+  Color get _badgeColor {
+    if (_isSubagent) return AppColors.accentBlue;
+    if (_isBrowser) return const Color(0xFF00B4D8);
+    final t = call.toolName.toLowerCase();
+    if (t.contains('command') || t.contains('run')) return const Color(0xFFE07A5F);
+    if (t.contains('file')) return const Color(0xFF81B29A);
+    return AppColors.inkMuted;
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final badgeColor = _badgeColor;
+
     return Container(
       width: double.infinity,
+      margin: const EdgeInsets.symmetric(vertical: 2),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: scheme.secondaryContainer.withValues(alpha: 0.35),
+        color: _isSubagent
+            ? AppColors.accentBlue.withValues(alpha: 0.1)
+            : _isBrowser
+                ? const Color(0xFF00B4D8).withValues(alpha: 0.08)
+                : scheme.secondaryContainer.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: scheme.secondary.withValues(alpha: 0.4)),
+        border: Border.all(
+          color: _isSubagent
+              ? AppColors.accentBlue.withValues(alpha: 0.3)
+              : _isBrowser
+                  ? const Color(0xFF00B4D8).withValues(alpha: 0.25)
+                  : scheme.secondary.withValues(alpha: 0.3),
+        ),
       ),
       child: Row(
         children: [
-          Icon(_iconFor(call.toolName), size: 15, color: scheme.secondary),
+          Icon(_iconFor(call.toolName), size: 15, color: badgeColor),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -292,18 +335,26 @@ class _ToolCallPill extends StatelessWidget {
                 fontSize: 12,
                 fontFamily: 'monospace',
                 color: scheme.onSecondaryContainer,
+                fontWeight: _isSubagent || _isBrowser ? FontWeight.w500 : FontWeight.normal,
               ),
             ),
           ),
+          const SizedBox(width: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: scheme.secondary.withValues(alpha: 0.15),
+              color: badgeColor.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: badgeColor.withValues(alpha: 0.4), width: 0.8),
             ),
-            child: const Text(
-              'TOOL',
-              style: TextStyle(fontSize: 9, letterSpacing: 0.8, fontWeight: FontWeight.w700),
+            child: Text(
+              _badgeText,
+              style: TextStyle(
+                fontSize: 9,
+                letterSpacing: 0.8,
+                fontWeight: FontWeight.w700,
+                color: badgeColor,
+              ),
             ),
           ),
         ],
