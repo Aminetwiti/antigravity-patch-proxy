@@ -98,18 +98,27 @@ func (c *Client) Call(method string, payload []byte) ([]byte, error) {
 	}
 
 	// Découper les frames gRPC-Web : flags(1) + longueur BE(4) + message
+	// Le Hub répond parfois « frame de données vide (0 octet) + frame trailer »
+	// (ex: GetAllCascadeTrajectories d'une instance sans session) — on ne garde
+	// que les frames de DONNÉES non vides (flags 0x00), sinon la première frame
+	// retournée serait le trailer et le parseur protobuf recevrait du vide
+	// (« aucune frame gRPC-Web »).
 	var frames [][]byte
 	offset := 0
 	for offset+5 <= len(raw) {
+		flags := raw[offset]
 		length := int(binary.BigEndian.Uint32(raw[offset+1 : offset+5]))
 		offset += 5
 		if offset+length > len(raw) {
 			break // trailer tronqué
 		}
-		frames = append(frames, raw[offset:offset+length])
+		if length > 0 && flags&0x80 == 0 { // frame de données non vide seulement
+			frames = append(frames, raw[offset:offset+length])
+		}
 		offset += length
 	}
 	if len(frames) == 0 {
+		// Réponse sans aucune frame de données (trailer seul, 0 octet utile).
 		return nil, fmt.Errorf("aucune frame gRPC-Web dans la réponse (%d octets)", len(raw))
 	}
 	return frames[0], nil

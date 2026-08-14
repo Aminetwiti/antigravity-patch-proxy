@@ -45,6 +45,10 @@ class ChatInputBar extends StatefulWidget {
 class _ChatInputBarState extends State<ChatInputBar> {
   final TextEditingController _controller = TextEditingController();
   String _selectedModel = 'Gemini 3.7 Flash';
+  String? _selectedModelId = 'gemini-3.7-flash';
+  int? _selectedModelEnum = 312;
+  String _executionMode = 'Local';
+  String _agentRole = 'Main Agent';
   List<AntigravityModel> _availableModels = ModelCatalog.standardModels;
 
   bool _isSendPressed = false;
@@ -162,7 +166,20 @@ class _ChatInputBarState extends State<ChatInputBar> {
                 .trim()
             : finalPayload;
 
-    widget.onSend(fullMessage, queued: _sendMode == SendMode.queued);
+    try {
+      (widget.onSend as dynamic)(
+        fullMessage,
+        queued: _sendMode == SendMode.queued,
+        modelUID: _selectedModelId,
+        modelEnum: _selectedModelEnum,
+      );
+    } catch (_) {
+      try {
+        (widget.onSend as dynamic)(fullMessage, queued: _sendMode == SendMode.queued);
+      } catch (_) {
+        (widget.onSend as dynamic)(fullMessage);
+      }
+    }
     _controller.clear();
     FocusScope.of(
       context,
@@ -708,34 +725,44 @@ class _ChatInputBarState extends State<ChatInputBar> {
     VoidCallback onTap,
   ) {
     final scheme = Theme.of(context).colorScheme;
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          children: [
-            Icon(icon, size: 16, color: scheme.onSurfaceVariant),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: scheme.onSurface,
-                      fontWeight: FontWeight.w500,
-                    ),
+    final textTheme = Theme.of(context).textTheme;
+    return Semantics(
+      button: true,
+      label: '$title: $subtitle',
+      child: InkWell(
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                Icon(icon, size: 16, color: scheme.onSurfaceVariant),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        title,
+                        style: (textTheme.bodyMedium ?? const TextStyle(fontSize: 13)).copyWith(
+                          color: scheme.onSurface,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      Text(
+                        subtitle,
+                        style: (textTheme.bodySmall ?? const TextStyle(fontSize: 11)).copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                   ),
-                  Text(
-                    subtitle,
-                    style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -746,6 +773,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
     _loadModelsAndPreferences();
 
     final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     final standard = _availableModels.where((m) => !m.isCustom).toList();
     final custom = _availableModels.where((m) => m.isCustom).toList();
 
@@ -764,8 +792,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Text(
                 'Model',
-                style: TextStyle(
-                  fontSize: 12,
+                style: (textTheme.labelSmall ?? const TextStyle(fontSize: 12)).copyWith(
                   fontWeight: FontWeight.w600,
                   color: scheme.onSurfaceVariant,
                 ),
@@ -786,57 +813,67 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
   Widget _buildModelRow(AntigravityModel model) {
     final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     final isSelected = _selectedModel.toLowerCase().contains(model.shortName.toLowerCase()) ||
         _selectedModel.toLowerCase() == model.displayName.toLowerCase();
 
-    return InkWell(
-      onTap: () => _selectModel(model),
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected ? scheme.surfaceContainerHighest : Colors.transparent,
-          borderRadius: BorderRadius.circular(AppRadius.md),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                model.displayName,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
+    return Semantics(
+      button: true,
+      selected: isSelected,
+      label: model.displayName,
+      child: InkWell(
+        onTap: () => _selectModel(model),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: isSelected ? scheme.surfaceContainerHighest : Colors.transparent,
+              borderRadius: BorderRadius.circular(AppRadius.md),
             ),
-            if (model.tag != null) ...[
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: scheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(AppRadius.sm),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      model.tag!,
-                      style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    model.displayName,
+                    style: (textTheme.bodyMedium ?? const TextStyle(fontSize: 13)).copyWith(
+                      color: isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
+                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
                     ),
-                    const SizedBox(width: 4),
-                    Icon(Icons.info_outline, size: 10, color: scheme.onSurfaceVariant),
-                  ],
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-              ),
-            ],
-            const SizedBox(width: 8),
-            if (isSelected)
-              Icon(Icons.check, size: 16, color: scheme.primary)
-            else
-              Icon(Icons.chevron_right, size: 14, color: scheme.outline),
-          ],
+                if (model.tag != null) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(AppRadius.sm),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          model.tag!,
+                          style: (textTheme.labelSmall ?? const TextStyle(fontSize: 10)).copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(Icons.info_outline, size: 10, color: scheme.onSurfaceVariant),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(width: 8),
+                if (isSelected)
+                  Icon(Icons.check, size: 16, color: scheme.primary)
+                else
+                  Icon(Icons.chevron_right, size: 14, color: scheme.outline),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -844,6 +881,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
   Widget _buildCustomModelRow(AntigravityModel model) {
     final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     final isSelected = _selectedModel.toLowerCase().contains(model.id.toLowerCase()) ||
         _selectedModel.toLowerCase().contains(model.displayName.toLowerCase());
 
@@ -854,40 +892,47 @@ class _ChatInputBarState extends State<ChatInputBar> {
       statusColor = scheme.error;
     }
 
-    return InkWell(
-      onTap: () => _selectModel(model),
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected ? scheme.surfaceContainerHighest : Colors.transparent,
-          borderRadius: BorderRadius.circular(AppRadius.md),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(
-                color: statusColor,
-                shape: BoxShape.circle,
-              ),
+    return Semantics(
+      button: true,
+      selected: isSelected,
+      label: model.customLabel,
+      child: InkWell(
+        onTap: () => _selectModel(model),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: isSelected ? scheme.surfaceContainerHighest : Colors.transparent,
+              borderRadius: BorderRadius.circular(AppRadius.md),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                model.customLabel,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  color: isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+            child: Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: statusColor,
+                    shape: BoxShape.circle,
+                  ),
                 ),
-                overflow: TextOverflow.ellipsis,
-              ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    model.customLabel,
+                    style: (textTheme.bodyMedium ?? const TextStyle(fontSize: 12.5)).copyWith(
+                      color: isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
+                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (isSelected)
+                  Icon(Icons.check, size: 16, color: scheme.primary),
+              ],
             ),
-            if (isSelected)
-              Icon(Icons.check, size: 16, color: scheme.primary),
-          ],
+          ),
         ),
       ),
     );
@@ -895,30 +940,37 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
   Widget _buildViewUsageRow(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return InkWell(
-      onTap: () {
-        CustomDropdownOverlay.hide();
-        _showUsageLimitsDialog(context);
-      },
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Row(
-          children: [
-            Icon(Icons.query_stats_outlined, size: 15, color: scheme.onSurfaceVariant),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'View Usage',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: scheme.onSurface,
+    final textTheme = Theme.of(context).textTheme;
+    return Semantics(
+      button: true,
+      label: 'View Usage',
+      child: InkWell(
+        onTap: () {
+          CustomDropdownOverlay.hide();
+          _showUsageLimitsDialog(context);
+        },
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                Icon(Icons.query_stats_outlined, size: 15, color: scheme.onSurfaceVariant),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'View Usage',
+                    style: (textTheme.bodyMedium ?? const TextStyle(fontSize: 13)).copyWith(
+                      fontWeight: FontWeight.w500,
+                      color: scheme.onSurface,
+                    ),
+                  ),
                 ),
-              ),
+                Icon(Icons.chevron_right, size: 14, color: scheme.outline),
+              ],
             ),
-            Icon(Icons.chevron_right, size: 14, color: scheme.outline),
-          ],
+          ),
         ),
       ),
     );
@@ -927,7 +979,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
   Future<void> _selectModel(AntigravityModel model) async {
     HapticFeedback.selectionClick();
     final short = model.shortName;
-    setState(() => _selectedModel = short);
+    setState(() {
+      _selectedModel = short;
+      _selectedModelId = model.id;
+      _selectedModelEnum = model.modelEnum;
+    });
     CustomDropdownOverlay.hide();
 
     widget.onModelChanged?.call(model.displayName);
@@ -945,6 +1001,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
     final scheme = Theme.of(context).colorScheme;
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: scheme.surfaceContainer,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
@@ -1281,26 +1339,30 @@ class _ChatInputBarState extends State<ChatInputBar> {
                             padding: const EdgeInsets.all(6),
                             child: GestureDetector(
                               onLongPress: () => _showQueueSettings(context),
-                              child: Container(
-                                padding: const EdgeInsets.all(7),
+                                child: Container(
+                                width: 28,
+                                height: 28,
                                 decoration: BoxDecoration(
-                                  color:
-                                      widget.isConnected
-                                          ? scheme.primary
-                                          : scheme.surfaceContainerHighest,
+                                  color: widget.hasActiveStream
+                                      ? const Color(0xFFEF4444)
+                                      : (_controller.text.trim().isNotEmpty &&
+                                              widget.isConnected
+                                          ? const Color(0xFF3B82F6)
+                                          : const Color(0xFF27272A)),
                                   shape: BoxShape.circle,
                                 ),
                                 child: Icon(
                                   isQueued
                                       ? Icons.playlist_add_check
-                                      : Icons.arrow_forward,
-                                  size: 16,
-                                  color:
-                                      widget.isConnected
-                                          ? scheme.onPrimary
-                                          : scheme.onSurfaceVariant.withValues(
-                                            alpha: 0.5,
-                                          ),
+                                      : (widget.hasActiveStream
+                                          ? Icons.stop_rounded
+                                          : Icons.arrow_forward),
+                                  size: 15,
+                                  color: (_controller.text.trim().isNotEmpty &&
+                                              widget.isConnected) ||
+                                          widget.hasActiveStream
+                                      ? Colors.white
+                                      : const Color(0xFF71717A),
                                 ),
                               ),
                             ),
@@ -1324,10 +1386,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
               child: Row(
                 children: [
                   Tooltip(
-                    message:
-                        'Exécution locale (statique — bientôt configurable)',
+                    message: "Environnement d'exécution : $_executionMode",
                     child: InkWell(
-                      onTap: () {},
+                      onTap: () => _showExecutionModeDialog(context),
                       borderRadius: BorderRadius.circular(8),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
@@ -1344,7 +1405,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                             ),
                             const SizedBox(width: 6),
                             Text(
-                              'Local',
+                              _executionMode,
                               style: TextStyle(
                                 fontSize: 11,
                                 color: scheme.onSurfaceVariant,
@@ -1364,10 +1425,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   ),
                   const Spacer(),
                   Tooltip(
-                    message:
-                        'Agent principal (statique — bientôt configurable)',
+                    message: "Persona d'agent : $_agentRole",
                     child: InkWell(
-                      onTap: () {},
+                      onTap: () => _showAgentRoleDialog(context),
                       borderRadius: BorderRadius.circular(8),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
@@ -1384,7 +1444,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                             ),
                             const SizedBox(width: 6),
                             Text(
-                              'Main Agent',
+                              _agentRole,
                               style: TextStyle(
                                 fontSize: 11,
                                 color: scheme.onSurfaceVariant,
@@ -1410,7 +1470,174 @@ class _ChatInputBarState extends State<ChatInputBar> {
       ),
     );
   }
+
+  void _showExecutionModeDialog(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: scheme.surfaceContainer,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: scheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(AppRadius.pill),
+                  ),
+                ),
+              ),
+              Text(
+                "Environnement d'exécution",
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: scheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                "Sélectionner la machine où exécuter les commandes et outils.",
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 16),
+              _QueueTile(
+                title: 'Local (PC hôte)',
+                subtitle: 'Exécute les commandes sur le terminal de votre poste de travail.',
+                icon: Icons.monitor_outlined,
+                selected: _executionMode == 'Local',
+                onTap: () {
+                  setState(() => _executionMode = 'Local');
+                  Navigator.of(ctx).pop();
+                },
+              ),
+              const SizedBox(height: 8),
+              _QueueTile(
+                title: 'Daemon Bridge',
+                subtitle: 'Exécute via le pont daemon distant.',
+                icon: Icons.hub_outlined,
+                selected: _executionMode == 'Daemon',
+                onTap: () {
+                  setState(() => _executionMode = 'Daemon');
+                  Navigator.of(ctx).pop();
+                },
+              ),
+              const SizedBox(height: 8),
+              _QueueTile(
+                title: 'Sandbox Isolée (Conteneur)',
+                subtitle: 'Exécution sécurisée dans un conteneur éphémère.',
+                icon: Icons.shield_outlined,
+                selected: _executionMode == 'Sandbox',
+                onTap: () {
+                  setState(() => _executionMode = 'Sandbox');
+                  Navigator.of(ctx).pop();
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showAgentRoleDialog(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: scheme.surfaceContainer,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: scheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(AppRadius.pill),
+                  ),
+                ),
+              ),
+              Text(
+                "Rôle & Persona de l'agent",
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: scheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                "Définir la stratégie d'intervention de l'assistant.",
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 16),
+              _QueueTile(
+                title: 'Main Agent (Principal)',
+                subtitle: 'Agent complet avec accès aux outils, édition et analyse.',
+                icon: Icons.smart_toy_outlined,
+                selected: _agentRole == 'Main Agent',
+                onTap: () {
+                  setState(() => _agentRole = 'Main Agent');
+                  Navigator.of(ctx).pop();
+                },
+              ),
+              const SizedBox(height: 8),
+              _QueueTile(
+                title: 'Reviewer (Audit & Sécurité)',
+                subtitle: 'Focalisé sur la relecture de code, les tests et la détection de bugs.',
+                icon: Icons.rate_review_outlined,
+                selected: _agentRole == 'Reviewer',
+                onTap: () {
+                  setState(() => _agentRole = 'Reviewer');
+                  Navigator.of(ctx).pop();
+                },
+              ),
+              const SizedBox(height: 8),
+              _QueueTile(
+                title: 'Researcher (Exploration & Doc)',
+                subtitle: 'Lecture seule et synthèse documentaire sans modification de fichiers.',
+                icon: Icons.manage_search_outlined,
+                selected: _agentRole == 'Researcher',
+                onTap: () {
+                  setState(() => _agentRole = 'Researcher');
+                  Navigator.of(ctx).pop();
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
+
 
 /// Tile de sélection du mode d'envoi dans le bottom sheet.
 class _QueueTile extends StatelessWidget {
@@ -1493,7 +1720,7 @@ class _UsageLimitsModal extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return SafeArea(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1611,28 +1838,31 @@ class _UsageLimitsModal extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          Stack(
-            alignment: Alignment.center,
-            children: [
-              SizedBox(
-                width: 36,
-                height: 36,
-                child: CircularProgressIndicator(
-                  value: percent / 100.0,
-                  backgroundColor: scheme.surfaceContainer,
-                  color: progressColor,
-                  strokeWidth: 3,
+          Semantics(
+            label: '$title: $percent%',
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  width: 36,
+                  height: 36,
+                  child: CircularProgressIndicator(
+                    value: percent / 100.0,
+                    backgroundColor: scheme.surfaceContainer,
+                    color: progressColor,
+                    strokeWidth: 3,
+                  ),
                 ),
-              ),
-              Text(
-                '$percent%',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  color: scheme.onSurface,
+                Text(
+                  '$percent%',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onSurface,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),

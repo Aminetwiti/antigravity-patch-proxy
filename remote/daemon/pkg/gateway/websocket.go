@@ -1116,12 +1116,28 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 
 	case "list_sessions":
 		raw, err = s.RPCClient.GetAllCascades()
-		if err != nil {
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
-			return
+		if err == nil && len(raw) > 0 {
+			summaries := connectrpc.ParseTrajectories(raw)
+			if len(summaries) > 0 {
+				items := make([]map[string]interface{}, 0, len(summaries))
+				for _, sum := range summaries {
+					items = append(items, map[string]interface{}{
+						"cascadeId": sum.CascadeID,
+						"title":     sum.Title,
+						"workspace": sum.Workspace,
+						"projectId": sum.ProjectID,
+						"status":    sum.Status,
+						"updatedAt": sum.UpdatedAt,
+					})
+				}
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"sessions": items}})
+				return
+			}
 		}
-		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: sessionsOut(raw)})
+		local := ListLocalSessions()
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"sessions": local}})
 		return
+
 
 	case "get_session_history":
 		if msg.CascadeID == "" {
@@ -1394,7 +1410,6 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			Data:      s.pendingApprovalInfo(msg.CascadeID),
 		})
 		return
-
 	case "list_files":
 		if msg.WorkspacePath == "" {
 			err = fmt.Errorf("workspacePath requis")
@@ -1435,16 +1450,19 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 
 	case "get_context":
-		raw, err = s.RPCClient.GetAllCascades()
-		if err != nil {
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
-			return
+		var cascadeIDs []string
+		if raw, errList := s.RPCClient.GetAllCascades(); errList == nil && len(raw) > 0 {
+			for _, sum := range connectrpc.ParseTrajectories(raw) {
+				cascadeIDs = append(cascadeIDs, sum.CascadeID)
+			}
 		}
-		summaries := connectrpc.ParseTrajectories(raw)
-		// Agrège les statistiques réelles depuis les transcripts locaux de
-		// chaque cascade (la réponse gRPC ne fournit que la liste des
-		// sessions) — plus de mocks en dur. Les champs JSON restent stables
-		// pour le RightSidebarDrawer mobile.
+		if len(cascadeIDs) == 0 {
+			for _, loc := range ListLocalSessions() {
+				if cid, ok := loc["cascadeId"].(string); ok && cid != "" {
+					cascadeIDs = append(cascadeIDs, cid)
+				}
+			}
+		}
 		stats := map[string]int{
 			"subagentsCount":       0,
 			"filesChangedCount":    0,
@@ -1452,8 +1470,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			"uploadsCount":         0,
 			"backgroundTasksCount": 0,
 		}
-		for _, s := range summaries {
-			counts := countTranscriptActivity(s.CascadeID)
+		for _, cid := range cascadeIDs {
+			counts := countTranscriptActivity(cid)
 			stats["subagentsCount"] += counts["subagents"]
 			stats["filesChangedCount"] += counts["files"]
 			stats["artifactsCount"] += counts["artifacts"]
@@ -1462,6 +1480,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: stats})
 		return
+
 
 	case "upload_media", "upload_image":
 		cascadeID := msg.CascadeID
@@ -1619,15 +1638,32 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		return
 
 	case "set_approval_timeout":
-		// Règle approvalTimeout depuis les Settings mobile (0 = désactive
-		// l'auto-refus ; durée en minutes).
-		minutes, ok := msg.Data["minutes"].(float64)
-		if !ok || minutes < 0 {
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "minutes (nombre ≥ 0) requis"})
+		var minutes float64
+		if msg.Data != nil {
+			if m, ok := msg.Data["minutes"].(float64); ok {
+				minutes = m
+			} else if m, ok := msg.Data["minutes"].(int); ok {
+				minutes = float64(m)
+			}
+		} else {
+			minutes = -1
+		}
+		if minutes < 0 {
+			s.writeJSON(conn, OutgoingMessage{
+				Type:      "response",
+				RequestID: msg.RequestID,
+				Error:     "minutes (nombre ≥ 0) requis",
+			})
 			return
 		}
-		s.SetApprovalTimeout(time.Duration(minutes) * time.Minute)
-		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"approvalTimeoutMinutes": minutes}})
+		s.SetApprovalTimeout(time.Duration(minutes * float64(time.Minute)))
+		s.writeJSON(conn, OutgoingMessage{
+			Type:      "response",
+			RequestID: msg.RequestID,
+			Data: map[string]interface{}{
+				"approvalTimeoutMinutes": minutes,
+			},
+		})
 		return
 
 	case "get_trajectory":

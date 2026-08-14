@@ -1055,13 +1055,16 @@ class _MessageBubble extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
-            color: scheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: scheme.outlineVariant),
+            color: const Color(0xFF1B1D23),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: const Color(0xFF3F3F46), width: 0.5),
           ),
           child: SelectableText(
             message.text,
-            style: TextStyle(fontSize: 13.5, color: scheme.onSurface),
+            style: const TextStyle(
+              fontSize: 13.5,
+              color: Color(0xFFD4D4D8),
+            ),
           ),
         ),
       );

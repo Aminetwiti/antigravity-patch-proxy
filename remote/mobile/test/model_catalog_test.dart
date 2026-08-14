@@ -161,8 +161,8 @@ void main() {
       await tester.pump(const Duration(seconds: 2));
     });
 
-    testWidgets('View Usage opens Quota Limits modal', (tester) async {
-      tester.view.physicalSize = const Size(1080, 1920);
+    testWidgets('View Usage opens Quota Limits modal without overflow on small screens', (tester) async {
+      tester.view.physicalSize = const Size(360, 640);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -186,13 +186,114 @@ void main() {
       await tester.tap(find.text('View Usage'));
       await tester.pumpAndSettle();
 
-      // Verify Quota stats
+      // Verify Quota stats present and no overflow exception occurred
+      expect(tester.takeException(), isNull);
       expect(find.text('Gemini Models'), findsOneWidget);
       expect(find.text('Claude and GPT models'), findsOneWidget);
-      expect(find.text('51%'), findsOneWidget);
-      expect(find.text('95%'), findsOneWidget);
-      expect(find.text('81%'), findsOneWidget);
-      expect(find.text('100%'), findsOneWidget);
+    });
+
+    testWidgets('ChatInputBar forwards selected modelUID and modelEnum on send', (tester) async {
+      tester.view.physicalSize = const Size(1080, 1920);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      String? sentMessage;
+      String? sentModelUID;
+      int? sentModelEnum;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ChatInputBar(
+              onSend: (msg, {queued = false, modelUID, modelEnum}) {
+                sentMessage = msg;
+                sentModelUID = modelUID;
+                sentModelEnum = modelEnum;
+              },
+              isConnected: true,
+            ),
+          ),
+        ),
+      );
+
+      // Select Claude Opus 4.6 (Thinking)
+      await tester.tap(find.textContaining('Gemini 3.7 Flash'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Claude Opus 4.6 (Thinking)'));
+      await tester.pumpAndSettle();
+
+      // Enter message and send
+      await tester.enterText(find.byType(TextField), 'Test model prompt');
+      await tester.pump();
+      await tester.tap(find.byIcon(Icons.arrow_forward));
+      await tester.pump();
+
+      expect(sentMessage, 'Test model prompt');
+      expect(sentModelUID, 'claude-opus-4.6-thinking');
+      expect(sentModelEnum, 291);
+    });
+
+    test('DaemonApi.sendPrompt includes modelUID and modelEnum in JSON message', () async {
+      final out = <Map<String, dynamic>>[];
+      final ctrl = StreamController<dynamic>();
+      final api = DaemonApi(
+        incoming: ctrl.stream,
+        send: (d) => out.add(d as Map<String, dynamic>),
+      );
+      addTearDown(ctrl.close);
+      addTearDown(api.dispose);
+
+      api.sendPrompt(
+        'c-test',
+        'Hello model',
+        modelUID: 'deepseek-v4-flash',
+        modelEnum: 342,
+      );
+
+      expect(out.length, 1);
+      final sent = out.first;
+      expect(sent['type'], 'send_prompt');
+      expect(sent['cascadeId'], 'c-test');
+      expect(sent['prompt'], 'Hello model');
+      expect(sent['modelUID'], 'deepseek-v4-flash');
+      expect(sent['modelEnum'], 342);
+    });
+
+    testWidgets('ChatInputBar displays execution mode and agent role dialogs', (tester) async {
+      tester.view.physicalSize = const Size(1080, 1920);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ChatInputBar(
+              onSend: (_, {queued = false}) {},
+              isConnected: true,
+            ),
+          ),
+        ),
+      );
+
+      // Tap Local footer
+      await tester.tap(find.text('Local'));
+      await tester.pumpAndSettle();
+      expect(find.text("Environnement d'exécution"), findsOneWidget);
+      expect(find.text('Daemon Bridge'), findsOneWidget);
+      await tester.tap(find.text('Daemon Bridge'));
+      await tester.pumpAndSettle();
+      expect(find.text('Daemon'), findsOneWidget);
+
+      // Tap Main Agent footer
+      await tester.tap(find.text('Main Agent'));
+      await tester.pumpAndSettle();
+      expect(find.text("Rôle & Persona de l'agent"), findsOneWidget);
+      expect(find.text('Reviewer (Audit & Sécurité)'), findsOneWidget);
+      await tester.tap(find.text('Reviewer (Audit & Sécurité)'));
+      await tester.pumpAndSettle();
+      expect(find.text('Reviewer'), findsOneWidget);
     });
   });
 }

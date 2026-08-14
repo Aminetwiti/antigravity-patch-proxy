@@ -46,20 +46,18 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     final sessionsList = widget.sessions ?? [];
     final Map<String, List<CascadeSession>> groupedSessions = {};
     for (final s in sessionsList) {
-      final folderName = s.workspacePath.isEmpty 
-          ? 'Autres' 
+      final folderName = s.workspacePath.isEmpty
+          ? 'Autres'
           : s.workspacePath.split(RegExp(r'[\\/]')).last;
       groupedSessions.putIfAbsent(folderName, () => []).add(s);
     }
-    
     final folderNames = groupedSessions.keys.toList()..sort();
 
     return Drawer(
-      backgroundColor: scheme.surface,
+      backgroundColor: AppColors.sidebarBackground,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.zero,
       ),
@@ -67,123 +65,124 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
 
-            // 1. Bouton primaire "Nouvelle conversation"
+            // ── Header: logo + title
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: _NavButton(
-                icon: Icons.add,
-                label: 'Nouvelle conversation',
-                onTap: () {
-                  Navigator.of(context).pop();
-                  widget.onNewConversation();
-                },
-                isPrimary: true,
-              ),
-            ),
-            const SizedBox(height: 8),
-            _SidebarAction(
-              icon: Icons.history,
-              label: 'Historique des conversations',
-              onTap: () {
-                Navigator.of(context).pop();
-                if (widget.onConversationHistory != null) widget.onConversationHistory!();
-              },
-            ),
-            _SidebarAction(
-              icon: Icons.schedule,
-              label: 'Tâches planifiées',
-              onTap: () {
-                Navigator.of(context).pop();
-                if (widget.onScheduledTasks != null) widget.onScheduledTasks!();
-              },
-            ),
-            const SizedBox(height: 16),
-            
-            // 2. En-tête Projets
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
               child: Row(
                 children: [
-                  Text(
-                    'Projets',
+                  Container(
+                    width: 22,
+                    height: 22,
+                    decoration: BoxDecoration(
+                      color: AppColors.accentBlue,
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                    child: const Icon(Icons.bolt, size: 13, color: AppColors.onAccent),
+                  ),
+                  const SizedBox(width: 9),
+                  const Text(
+                    'Antigravity',
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: scheme.onSurfaceVariant,
-                      letterSpacing: 0.5,
+                      color: AppColors.inkPrimary,
+                      letterSpacing: -0.2,
                     ),
                   ),
                   const Spacer(),
-                  Icon(Icons.filter_list, size: 14, color: scheme.onSurfaceVariant),
-                  const SizedBox(width: 12),
-                  Icon(Icons.create_new_folder_outlined, size: 14, color: scheme.onSurfaceVariant),
-                  const SizedBox(width: 8),
+                  _IconBtn(
+                    icon: Icons.edit_outlined,
+                    tooltip: 'Nouvelle conversation',
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      widget.onNewConversation();
+                    },
+                  ),
                 ],
               ),
             ),
 
-            // 3. Liste scrollable des sessions
+            const _Divider(),
+
+            // ── Quick-nav actions
+            _SidebarAction(
+              icon: Icons.access_time_outlined,
+              label: 'Historique',
+              onTap: () {
+                Navigator.of(context).pop();
+                widget.onConversationHistory?.call();
+              },
+            ),
+            _SidebarAction(
+              icon: Icons.schedule_outlined,
+              label: 'Tâches planifiées',
+              onTap: () {
+                Navigator.of(context).pop();
+                widget.onScheduledTasks?.call();
+              },
+            ),
+            _SidebarAction(
+              icon: Icons.folder_open_outlined,
+              label: 'Espace de travail',
+              onTap: () {
+                Navigator.of(context).pop();
+                widget.onOpenWorkspace?.call();
+              },
+            ),
+
+            const SizedBox(height: 4),
+            const _Divider(),
+            const SizedBox(height: 4),
+
+            // ── Section label
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 4, 14, 6),
+              child: Row(
+                children: [
+                  const Text(
+                    'SESSIONS',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.inkFaint,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                  const Spacer(),
+                  _IconBtn(
+                    icon: Icons.add,
+                    tooltip: 'Nouvelle session',
+                    size: 13,
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      widget.onNewConversation();
+                    },
+                  ),
+                ],
+              ),
+            ),
+
+            // ── Session list
             Expanded(
               child: RawScrollbar(
                 controller: _scrollController,
                 thumbVisibility: true,
-                thickness: 4,
+                thickness: 3,
                 radius: const Radius.circular(2),
-                thumbColor: scheme.outlineVariant,
+                thumbColor: AppColors.borderStrong.withValues(alpha: 0.6),
                 child: ListView(
                   controller: _scrollController,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
                   children: [
                     if (folderNames.isEmpty)
-                      Container(
-                        margin: const EdgeInsets.all(8),
-                        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
-                        decoration: BoxDecoration(
-                          color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
-                          borderRadius: BorderRadius.circular(AppRadius.md),
-                          border: Border.all(color: scheme.outlineVariant),
-                        ),
-                        child: Column(
-                          children: [
-                            Icon(
-                              widget.isConnected ? Icons.chat_bubble_outline : Icons.cloud_off_outlined,
-                              size: 28,
-                              color: scheme.onSurfaceVariant,
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              widget.isConnected ? 'Aucune session active' : 'Aucun projet connecté',
-                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: scheme.onSurface),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              widget.isConnected
-                                  ? 'Démarrez une nouvelle conversation ci-dessus.'
-                                  : 'Connectez le Daemon PC pour afficher vos sessions actives.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
-                            ),
-                            if (!widget.isConnected) ...[
-                              const SizedBox(height: 12),
-                              OutlinedButton.icon(
-                                onPressed: () {
-                                  Navigator.of(context).pop();
-                                  widget.onToggleConnection();
-                                },
-                                icon: const Icon(Icons.qr_code_scanner, size: 16),
-                                label: const Text('Se connecter au Daemon', style: TextStyle(fontSize: 12)),
-                              ),
-                            ],
-                          ],
-                        ),
-                      )
+                      _EmptyState(isConnected: widget.isConnected, onConnect: () {
+                        Navigator.of(context).pop();
+                        widget.onToggleConnection();
+                      })
                     else
-                      ...folderNames.map((folder) {
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: _ProjectFolderGroup(
+                      ...folderNames.map((folder) => _ProjectFolderGroup(
                             folderName: folder,
                             sessions: groupedSessions[folder]!,
                             activeSessionId: widget.activeSessionId,
@@ -191,41 +190,39 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                               Navigator.of(context).pop();
                               widget.onSessionSelected(id);
                             },
-                          ),
-                        );
-                      }),
-                    const SizedBox(height: 16),
+                          )),
+                    const SizedBox(height: 12),
                   ],
                 ),
               ),
             ),
-            
-            // 4. Paramètres et statut en bas
+
+            const _Divider(),
+
+            // ── Bottom: settings + connection status
             Padding(
-              padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
-              child: _SidebarAction(
-                icon: Icons.settings_outlined,
-                label: 'Paramètres',
-                onTap: () {
-                  Navigator.of(context).pop();
-                  if (widget.onOpenSettings != null) widget.onOpenSettings!();
-                },
+              padding: const EdgeInsets.fromLTRB(6, 4, 6, 4),
+              child: Column(
+                children: [
+                  _SidebarAction(
+                    icon: Icons.settings_outlined,
+                    label: 'Paramètres',
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      widget.onOpenSettings?.call();
+                    },
+                  ),
+                  _ConnectionRow(
+                    isConnected: widget.isConnected,
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      widget.onToggleConnection();
+                    },
+                  ),
+                ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
-              child: _SidebarAction(
-                icon: widget.isConnected ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
-                label: widget.isConnected ? 'Connecté' : 'Hors ligne',
-                textColor: widget.isConnected
-                    ? Theme.of(context).colorScheme.primary
-                    : Theme.of(context).colorScheme.error,
-                onTap: () {
-                  Navigator.of(context).pop();
-                  widget.onToggleConnection();
-                },
-              ),
-            ),
+            const SizedBox(height: 4),
           ],
         ),
       ),
@@ -233,83 +230,95 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
   }
 }
 
-class _NavButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  final bool isPrimary;
+// ── Divider
+class _Divider extends StatelessWidget {
+  const _Divider();
+  @override
+  Widget build(BuildContext context) => Container(
+        height: 1,
+        margin: const EdgeInsets.symmetric(horizontal: 0),
+        color: AppColors.borderSubtle,
+      );
+}
 
-  const _NavButton({
+// ── Small icon button (header actions)
+class _IconBtn extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  final double size;
+
+  const _IconBtn({
     required this.icon,
-    required this.label,
+    required this.tooltip,
     required this.onTap,
-    this.isPrimary = false,
+    this.size = 14,
   });
 
   @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-          decoration: BoxDecoration(
-            color: scheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: scheme.outlineVariant,
-              width: 1,
+  Widget build(BuildContext context) => Tooltip(
+        message: tooltip,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(5),
+            child: Padding(
+              padding: const EdgeInsets.all(5),
+              child: Icon(icon, size: size, color: AppColors.inkMuted),
             ),
           ),
-          child: Row(
-            children: [
-              Icon(icon, size: 16, color: scheme.onSurface),
-              const SizedBox(width: 10),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: scheme.onSurface,
-                ),
-              ),
-            ],
-          ),
         ),
-      ),
-    );
-  }
+      );
 }
 
-class _SidebarAction extends StatelessWidget {
+// ── Sidebar action row (history, scheduled, settings…)
+class _SidebarAction extends StatefulWidget {
   final IconData icon;
   final String label;
   final VoidCallback? onTap;
-  final Color? textColor;
 
-  const _SidebarAction({required this.icon, required this.label, this.onTap, this.textColor});
+  const _SidebarAction({
+    required this.icon,
+    required this.label,
+    this.onTap,
+  });
+
+  @override
+  State<_SidebarAction> createState() => _SidebarActionState();
+}
+
+class _SidebarActionState extends State<_SidebarAction> {
+  bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final color = textColor ?? scheme.onSurfaceVariant;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+    const color = AppColors.inkSecondary;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          widget.onTap?.call();
+        },
+        child: AnimatedContainer(
+          duration: AppMotion.fast,
+          curve: AppMotion.easeOut,
+          margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+            color: _hovered
+                ? AppColors.listSelectionBg.withValues(alpha: 0.6)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+          ),
           child: Row(
             children: [
-              Icon(icon, size: 16, color: color),
-              const SizedBox(width: 12),
+              Icon(widget.icon, size: 15, color: color),
+              const SizedBox(width: 10),
               Text(
-                label,
+                widget.label,
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w400,
@@ -324,6 +333,7 @@ class _SidebarAction extends StatelessWidget {
   }
 }
 
+// ── Project folder group
 class _ProjectFolderGroup extends StatelessWidget {
   final String folderName;
   final List<CascadeSession> sessions;
@@ -338,98 +348,141 @@ class _ProjectFolderGroup extends StatelessWidget {
   });
 
   @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Folder header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 3),
+            child: Row(
+              children: [
+                const Icon(Icons.folder_outlined,
+                    size: 13, color: AppColors.inkFaint),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    folderName,
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.inkMuted,
+                      letterSpacing: 0.1,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          if (sessions.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 26, top: 3, bottom: 8),
+              child: Text(
+                'Aucune conversation',
+                style: TextStyle(
+                    fontSize: 11,
+                    color: AppColors.inkFaint.withValues(alpha: 0.7)),
+              ),
+            )
+          else
+            ...sessions.map((s) => _SessionRow(
+                  session: s,
+                  isSelected: s.id == activeSessionId,
+                  onTap: () => onSessionTap(s.id),
+                )),
+        ],
+      );
+}
+
+// ── Individual session row
+class _SessionRow extends StatefulWidget {
+  final CascadeSession session;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _SessionRow({
+    required this.session,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  State<_SessionRow> createState() => _SessionRowState();
+}
+
+class _SessionRowState extends State<_SessionRow> {
+  bool _hovered = false;
+
+  @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    final isSelected = widget.isSelected;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          widget.onTap();
+        },
+        child: AnimatedContainer(
+          duration: AppMotion.fast,
+          curve: AppMotion.easeOut,
+          margin: const EdgeInsets.fromLTRB(6, 1, 6, 1),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? AppColors.listSelectionBg
+                : _hovered
+                    ? AppColors.listSelectionBg.withValues(alpha: 0.5)
+                    : Colors.transparent,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+          ),
           child: Row(
             children: [
-              Icon(Icons.folder_outlined, size: 15, color: scheme.onSurfaceVariant),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  folderName,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                    color: scheme.onSurfaceVariant,
+              // Left accent bar for active session
+              AnimatedContainer(
+                duration: AppMotion.fast,
+                width: 2,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: isSelected ? AppColors.accentBlue : Colors.transparent,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(AppRadius.md),
+                    bottomLeft: Radius.circular(AppRadius.md),
                   ),
-                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-            ],
-          ),
-        ),
-        if (sessions.isEmpty)
-          Padding(
-            padding: const EdgeInsets.only(left: 28, top: 4, bottom: 8),
-            child: Text(
-              'Aucune conversation',
-              style: TextStyle(
-                fontSize: 11,
-                color: scheme.onSurfaceVariant,
-              ),
-            ),
-          )
-        else
-          ...sessions.map((s) {
-            final isSelected = s.id == activeSessionId;
-
-            return Padding(
-              padding: const EdgeInsets.only(left: 14, top: 2, bottom: 2, right: 4),
-              child: InkWell(
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  onSessionTap(s.id);
-                },
-                borderRadius: BorderRadius.circular(AppRadius.md),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: isSelected ? scheme.surfaceContainerHighest : Colors.transparent,
-                    borderRadius: BorderRadius.circular(AppRadius.md),
-                    border: isSelected ? Border.all(color: scheme.outlineVariant, width: 1) : null,
-                  ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
                   child: Row(
                     children: [
-                      Icon(
-                        isSelected ? Icons.chat_bubble_rounded : Icons.chat_bubble_outline_rounded,
-                        size: 13,
-                        color: isSelected ? scheme.primary : scheme.onSurfaceVariant,
-                      ),
-                      const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          s.title,
+                          widget.session.title,
                           style: TextStyle(
                             fontSize: 12.5,
-                            color: isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
-                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                            color: isSelected
+                                ? AppColors.inkPrimary
+                                : AppColors.inkSecondary,
+                            fontWeight: isSelected
+                                ? FontWeight.w500
+                                : FontWeight.w400,
                           ),
                           overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
                         ),
                       ),
-                      if (isSelected) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          width: 6,
-                          height: 6,
-                          decoration: BoxDecoration(
-                            color: scheme.primary,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                      ] else if (s.time.isNotEmpty)
+                      if (!isSelected && widget.session.time.isNotEmpty)
                         Padding(
-                          padding: const EdgeInsets.only(left: 8),
+                          padding: const EdgeInsets.only(left: 6),
                           child: Text(
-                            s.time,
-                            style: TextStyle(
-                              fontSize: 10.5,
-                              color: scheme.onSurfaceVariant,
+                            widget.session.time,
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: AppColors.inkFaint,
                             ),
                           ),
                         ),
@@ -437,9 +490,164 @@ class _ProjectFolderGroup extends StatelessWidget {
                   ),
                 ),
               ),
-            );
-          }),
-      ],
+              const SizedBox(width: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Empty state
+class _EmptyState extends StatelessWidget {
+  final bool isConnected;
+  final VoidCallback onConnect;
+
+  const _EmptyState({required this.isConnected, required this.onConnect});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        margin: const EdgeInsets.all(10),
+        padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 16),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceRaised,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+          border: Border.all(color: AppColors.borderSubtle, width: 1),
+        ),
+        child: Column(
+          children: [
+            Icon(
+              isConnected
+                  ? Icons.chat_bubble_outline
+                  : Icons.cloud_off_outlined,
+              size: 26,
+              color: AppColors.inkMuted,
+            ),
+            const SizedBox(height: 10),
+            Text(
+              isConnected ? 'Aucune session active' : 'Non connecté',
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.inkPrimary,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              isConnected
+                  ? 'Démarrez une nouvelle conversation.'
+                  : 'Connectez le Daemon pour voir vos sessions.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 11.5,
+                color: AppColors.inkMuted,
+                height: 1.4,
+              ),
+            ),
+            if (!isConnected) ...[
+              const SizedBox(height: 14),
+              GestureDetector(
+                onTap: onConnect,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppColors.accentBlue,
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.qr_code_scanner, size: 13, color: AppColors.onAccent),
+                      SizedBox(width: 7),
+                      Text(
+                        'Se connecter',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: AppColors.onAccent,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+}
+
+// ── Connection status row (bottom)
+class _ConnectionRow extends StatefulWidget {
+  final bool isConnected;
+  final VoidCallback onTap;
+
+  const _ConnectionRow({required this.isConnected, required this.onTap});
+
+  @override
+  State<_ConnectionRow> createState() => _ConnectionRowState();
+}
+
+class _ConnectionRowState extends State<_ConnectionRow> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = widget.isConnected ? AppColors.positive : AppColors.inkMuted;
+    final label = widget.isConnected ? 'Connecté' : 'Hors ligne';
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: AppMotion.fast,
+          curve: AppMotion.easeOut,
+          margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+            color: _hovered
+                ? AppColors.listSelectionBg.withValues(alpha: 0.6)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+          ),
+          child: Row(
+            children: [
+              // Status dot
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  color: widget.isConnected
+                      ? AppColors.positive
+                      : AppColors.inkFaint,
+                  shape: BoxShape.circle,
+                  boxShadow: widget.isConnected
+                      ? [
+                          BoxShadow(
+                            color: AppColors.positive.withValues(alpha: 0.5),
+                            blurRadius: 4,
+                            spreadRadius: 1,
+                          )
+                        ]
+                      : null,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w400,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

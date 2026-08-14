@@ -232,19 +232,19 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       final data = await api.listSessions();
       final sessions = SessionParser.parseListSessions(data);
       if (sessions.isNotEmpty) {
-        setState(() {
-          // Préserve la session active si elle existe toujours (rafraîchissement
-          // en arrière-plan : ne pas faire sauter l'utilisateur vers la première).
-          final stillActive = sessions.any((s) => s.id == _activeSessionId);
-          _sessions = sessions;
-          if (!stillActive) {
-            _activeSessionId = sessions.first.id;
-            _activeSessionTitle = sessions.first.title;
-          } else {
-            final cur = sessions.firstWhere((s) => s.id == _activeSessionId);
-            _activeSessionTitle = cur.title;
-          }
-        });
+        if (mounted) {
+          setState(() {
+            final stillActive = sessions.any((s) => s.id == _activeSessionId);
+            _sessions = sessions;
+            if (!stillActive || _activeSessionId == 's3') {
+              _activeSessionId = sessions.first.id;
+              _activeSessionTitle = sessions.first.title;
+            } else {
+              final cur = sessions.firstWhere((s) => s.id == _activeSessionId);
+              _activeSessionTitle = cur.title;
+            }
+          });
+        }
       }
     } catch (_) {
     } finally {
@@ -358,10 +358,37 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           // Bug #2 : rafraîchir le contexte pour la nouvelle session.
           _refreshContext();
         },
-        onNewConversation: () {
-          setState(() {
-            _activeSessionTitle = 'New Conversation';
-          });
+        onNewConversation: () async {
+          final api = _api;
+          if (api == null) return;
+          try {
+            var ws = _sessions.isNotEmpty ? _sessions.first.workspacePath : '';
+            if (ws.isEmpty) {
+              final cur = _sessions.where((s) => s.id == _activeSessionId);
+              if (cur.isNotEmpty) ws = cur.first.workspacePath;
+            }
+            final res = await api.createCascade(ws);
+            String newId = '';
+            if (res['cascadeId'] is String) {
+              newId = res['cascadeId'] as String;
+            } else if (res['id'] is String) {
+              newId = res['id'] as String;
+            } else if (res['fields'] is List) {
+              for (final f in res['fields']) {
+                if (f is Map && f['text'] is String && (f['text'] as String).isNotEmpty) {
+                  newId = f['text'] as String;
+                  break;
+                }
+              }
+            }
+            if (newId.isNotEmpty && mounted) {
+              setState(() {
+                _activeSessionId = newId;
+                _activeSessionTitle = 'Nouvelle conversation';
+              });
+              await _refreshSessions();
+            }
+          } catch (_) {}
         },
         onConversationHistory: () {
           _showSessionHistory();

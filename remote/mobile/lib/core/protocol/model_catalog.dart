@@ -13,6 +13,8 @@ class AntigravityModel {
   final int? latencyMs;
   final String? status; // 'online', 'degraded', 'offline'
 
+  final int? modelEnum;
+
   const AntigravityModel({
     required this.id,
     required this.displayName,
@@ -22,6 +24,7 @@ class AntigravityModel {
     this.isCustom = false,
     this.latencyMs,
     this.status,
+    this.modelEnum,
   });
 
   /// Short display title for the compact button in the input bar.
@@ -70,40 +73,47 @@ class ModelCatalog {
       displayName: 'Gemini 3.7 Flash Medium',
       tag: 'Fast',
       effort: 'Medium',
+      modelEnum: 312,
     ),
     AntigravityModel(
       id: 'gemini-3.6-flash',
       displayName: 'Gemini 3.6 Flash Medium',
       tag: 'Fast',
       effort: 'Medium',
+      modelEnum: 312,
     ),
     AntigravityModel(
       id: 'gemini-3.5-flash',
       displayName: 'Gemini 3.5 Flash Medium',
       tag: 'Fast',
       effort: 'Medium',
+      modelEnum: 312,
     ),
     AntigravityModel(
       id: 'gemini-3.1-pro',
       displayName: 'Gemini 3.1 Pro Low',
       effort: 'Low',
+      modelEnum: 246,
     ),
     AntigravityModel(
       id: 'claude-sonnet-4.6-thinking',
       displayName: 'Claude Sonnet 4.6 (Thinking)',
       isThinking: true,
       effort: 'Thinking',
+      modelEnum: 334,
     ),
     AntigravityModel(
       id: 'claude-opus-4.6-thinking',
       displayName: 'Claude Opus 4.6 (Thinking)',
       isThinking: true,
       effort: 'Thinking',
+      modelEnum: 291,
     ),
     AntigravityModel(
       id: 'gpt-oss-120b',
       displayName: 'GPT-OSS 120B (Medium)',
       effort: 'Medium',
+      modelEnum: 342,
     ),
   ];
 
@@ -113,7 +123,24 @@ class ModelCatalog {
     displayName: 'Gemini 3.7 Flash Medium',
     tag: 'Fast',
     effort: 'Medium',
+    modelEnum: 312,
   );
+
+  /// Helper to find a model by its id, displayName or shortName.
+  static AntigravityModel findModel(String query, {List<AntigravityModel>? customModels}) {
+    final lower = query.toLowerCase().trim();
+    final all = [...standardModels, ...(customModels ?? const [])];
+    for (final m in all) {
+      if (m.id.toLowerCase() == lower ||
+          m.displayName.toLowerCase() == lower ||
+          m.shortName.toLowerCase() == lower ||
+          lower.contains(m.id.toLowerCase()) ||
+          lower.contains(m.shortName.toLowerCase())) {
+        return m;
+      }
+    }
+    return defaultModel;
+  }
 
   /// Fetches custom models dynamically from custom_models.json via the daemon.
   static Future<List<AntigravityModel>> fetchCustomModels(DaemonApi? api) async {

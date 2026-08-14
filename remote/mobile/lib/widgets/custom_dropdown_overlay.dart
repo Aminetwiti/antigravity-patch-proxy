@@ -20,17 +20,24 @@ class CustomDropdownOverlay {
 
     _currentOverlay = OverlayEntry(
       builder: (context) {
-        final screenHeight = MediaQuery.sizeOf(context).height;
-        final screenWidth = MediaQuery.sizeOf(context).width;
+        final media = MediaQuery.of(context);
+        final screenHeight = media.size.height;
+        final screenWidth = media.size.width;
+        final paddingTop = media.padding.top;
+        final paddingBottom = media.padding.bottom;
         
-        double top = offset.dy + size.height + 8;
-        double bottom = 0.0;
-        bool showAbove = top + (maxHeight ?? 300) > screenHeight;
+        final spaceBelow = screenHeight - (offset.dy + size.height + 8) - paddingBottom;
+        final spaceAbove = offset.dy - paddingTop - 8;
         
-        if (showAbove) {
-          top = -1; // disabled
-          bottom = screenHeight - offset.dy + 8;
-        }
+        double targetMaxHeight = maxHeight ?? 300;
+        bool showAbove = spaceBelow < targetMaxHeight && spaceAbove > spaceBelow;
+        
+        double effectiveMaxHeight = showAbove 
+            ? spaceAbove.clamp(120.0, targetMaxHeight) 
+            : spaceBelow.clamp(120.0, targetMaxHeight);
+
+        double top = showAbove ? -1 : offset.dy + size.height + 8;
+        double bottom = showAbove ? (screenHeight - offset.dy + 8) : 0.0;
 
         double left = alignRight ? -1 : offset.dx;
         double right = alignRight ? (screenWidth - offset.dx - size.width) : -1;
@@ -57,7 +64,7 @@ class CustomDropdownOverlay {
                 child: Builder(builder: (context) {
                   final scheme = Theme.of(context).colorScheme;
                   return Container(
-                    constraints: BoxConstraints(maxHeight: maxHeight ?? 300),
+                    constraints: BoxConstraints(maxHeight: effectiveMaxHeight),
                     decoration: BoxDecoration(
                       color: scheme.surfaceContainer,
                       borderRadius: BorderRadius.circular(AppRadius.md),

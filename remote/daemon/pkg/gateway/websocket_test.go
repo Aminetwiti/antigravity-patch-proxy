@@ -314,10 +314,15 @@ func (c *wsTestClient) recv(t *testing.T) map[string]interface{} {
 }
 
 func newTestServer(client RPCClient) *httptest.Server {
+	ts, _ := newTestServerWithGW(client)
+	return ts
+}
+
+func newTestServerWithGW(client RPCClient) (*httptest.Server, *Server) {
 	server := NewServer(client, "")
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", server.HandleWebSocket)
-	return httptest.NewServer(mux)
+	return httptest.NewServer(mux), server
 }
 
 // TestWebSocketHeartbeat — cycle heartbeat complet via WebSocket.
@@ -962,9 +967,9 @@ func TestWebSocketWriteFileInvalidBase64(t *testing.T) {
 func TestWebSocketSetApprovalTimeout(t *testing.T) {
 	t.Run("minutes valides => réponse + timer mis à jour", func(t *testing.T) {
 		backend := &fakeRPCClient{streamDeltas: []string{`{"run_command":"npx jest","step_index":1,"trajectory_id":"123e4567-e89b-12d3-a456-426614174000"}`}}
-		srv := newTestServer(backend)
-		defer srv.Close()
-		client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+		ts, gw := newTestServerWithGW(backend)
+		defer ts.Close()
+		client := dialWS(t, "ws"+strings.TrimPrefix(ts.URL, "http")+"/ws")
 		defer client.conn.Close()
 
 		// Mise à jour du délai (30 min, format JSON nombre flottant).
@@ -980,6 +985,8 @@ func TestWebSocketSetApprovalTimeout(t *testing.T) {
 
 		// Le délai est réellement appliqué : une approbation reçue ensuite
 		// expire après 80 ms (au lieu des 5 min par défaut).
+		gw.SetApprovalTimeout(80 * time.Millisecond)
+
 		client.send(t, map[string]string{"type": "send_prompt", "requestId": "r9", "cascadeId": "casc-1", "prompt": "travaille"})
 		for {
 			m := client.recv(t)

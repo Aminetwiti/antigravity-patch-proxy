@@ -130,6 +130,7 @@ class DaemonApi {
   /// d'une rafale part immédiatement, les suivants dans la fenêtre de 100 ms
   /// sont regroupés. Un événement isolé ne subit donc AUCUNE latence.
   void _emitBatched(Map<String, dynamic> msg) {
+    if (_events.isClosed) return;
     if (_batchTimer == null || !_batchTimer!.isActive) {
       // Cas nominal : émission immédiate, sans latence.
       _events.add(msg);
@@ -150,6 +151,7 @@ class DaemonApi {
     if (_batch.isEmpty) return;
     final pending = List<Map<String, dynamic>>.from(_batch);
     _batch.clear();
+    if (_events.isClosed) return;
     for (final m in pending) {
       _events.add(m);
     }
@@ -434,6 +436,8 @@ class DaemonApi {
     String? base64Data,
     String? fileName,
     List<String>? images,
+    String? modelUID,
+    int? modelEnum,
   }) {
     final id = _newRequestId();
     final controller = StreamController<Map<String, dynamic>>();
@@ -446,6 +450,8 @@ class DaemonApi {
       if (base64Data != null) 'base64Data': base64Data,
       if (fileName != null) 'fileName': fileName,
       if (images != null) 'images': images,
+      if (modelUID != null && modelUID.isNotEmpty) 'modelUID': modelUID,
+      if (modelEnum != null && modelEnum > 0) 'modelEnum': modelEnum,
     };
     final outbox = _outbox;
     if (outbox != null) {
