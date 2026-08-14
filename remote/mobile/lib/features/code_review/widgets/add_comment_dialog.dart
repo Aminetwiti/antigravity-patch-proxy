@@ -81,7 +81,7 @@ class _AddCommentDialogState extends State<AddCommentDialog> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Ajouter un commentaire',
+                  'Add Comment',
                   style: TextStyle(
                     color: scheme.onSurface,
                     fontSize: 16,
@@ -120,21 +120,20 @@ class _AddCommentDialogState extends State<AddCommentDialog> {
           ),
           const SizedBox(height: 12),
 
-          // Code snippet preview
+          // Code Snippet Preview
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: scheme.surfaceContainerHighest,
+              color: scheme.surface,
               borderRadius: BorderRadius.circular(AppRadius.md),
               border: Border.all(color: scheme.outlineVariant),
             ),
             child: Text(
-              widget.selectedSnippet.trim(),
+              widget.selectedSnippet,
               style: TextStyle(
-                color: scheme.onSurface,
                 fontFamily: 'monospace',
                 fontSize: 12,
-                height: 1.4,
+                color: scheme.onSurfaceVariant,
               ),
               maxLines: 4,
               overflow: TextOverflow.ellipsis,
@@ -142,11 +141,12 @@ class _AddCommentDialogState extends State<AddCommentDialog> {
           ),
           const SizedBox(height: 12),
 
-          // Input field
+          // Comment Input
           TextField(
             controller: _controller,
             autofocus: true,
             maxLines: 3,
+            minLines: 2,
             style: TextStyle(color: scheme.onSurface, fontSize: 13),
             decoration: InputDecoration(
               hintText: 'Ajouter une instruction ou remarque...',
@@ -198,7 +198,7 @@ class _AddCommentDialogState extends State<AddCommentDialog> {
                     borderRadius: BorderRadius.circular(AppRadius.md),
                   ),
                 ),
-                child: const Text('Enregistrer le commentaire'),
+                child: const Text('Queue Comment'),
               ),
             ],
           ),

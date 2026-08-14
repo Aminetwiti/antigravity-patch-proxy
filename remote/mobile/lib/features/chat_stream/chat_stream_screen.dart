@@ -265,6 +265,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       case AppLifecycleState.detached:
         _appInForeground = false;
         break;
+    }
     // Garder le stream actif en arrière-plan pour ingérer les tokens et recevoir
     // les approbations/notifications même écran éteint. Le throttle 100ms
     // évite toute surconsommation CPU en fond.
@@ -1232,7 +1233,6 @@ class _WelcomeEmptyState extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Animated Logo/Icon
         TweenAnimationBuilder<double>(
           duration: const Duration(milliseconds: 800),
           curve: Curves.easeOutBack,
@@ -1272,7 +1272,6 @@ class _WelcomeEmptyState extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 24),
-        // Greetings
         Text(
           'Bienvenue sur',
           style: TextStyle(
@@ -1291,7 +1290,6 @@ class _WelcomeEmptyState extends StatelessWidget {
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 32),
-        // Suggestion Chips
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -1325,7 +1323,6 @@ class _SuggestionChip extends StatelessWidget {
   final VoidCallback onTap;
 
   const _SuggestionChip({
-    super.key,
     required this.icon,
     required this.label,
     required this.onTap,
@@ -1346,3 +1343,4 @@ class _SuggestionChip extends StatelessWidget {
     );
   }
 }
+

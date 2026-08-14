@@ -20,10 +20,10 @@ import (
 // SystemParametersInfo(SPI_GETSCREENSAVERRUNNING) ici.
 
 var (
-	user32             = syscall.NewLazyDLL("user32.dll")
-	kernel32           = syscall.NewLazyDLL("kernel32.dll")
-	procGetLastInput   = user32.NewProc("GetLastInputInfo")
-	procGetTickCount   = kernel32.NewProc("GetTickCount")
+	user32           = syscall.NewLazyDLL("user32.dll")
+	kernel32         = syscall.NewLazyDLL("kernel32.dll")
+	procGetLastInput = user32.NewProc("GetLastInputInfo")
+	procGetTickCount = kernel32.NewProc("GetTickCount")
 )
 
 type lastInputInfo struct {

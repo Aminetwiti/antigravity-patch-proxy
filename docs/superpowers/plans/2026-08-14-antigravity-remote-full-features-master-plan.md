@@ -422,7 +422,7 @@ git commit -m "feat(remote): add code review commenting and annotation queue"
 - Consumes: Daemon list of active cron expressions & one-shot timers.
 - Produces: UI to view next execution, trigger now, pause, or cancel schedules.
 
-- [ ] **Step 1: Write test for ScheduledTasksScreen**
+- [x] **Step 1: Write test for ScheduledTasksScreen**
 
 ```dart
 import 'package:flutter/material.dart';
@@ -459,12 +459,12 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `flutter test test/features/scheduled_tasks/scheduled_tasks_test.dart`
 Expected: FAIL with missing classes.
 
-- [ ] **Step 3: Implement ScheduledTaskItem model and ScheduledTasksScreen**
+- [x] **Step 3: Implement ScheduledTaskItem model and ScheduledTasksScreen**
 
 ```dart
 // remote/mobile/lib/features/scheduled_tasks/models/scheduled_task_item.dart
@@ -500,12 +500,12 @@ class ScheduledTaskItem {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `flutter test test/features/scheduled_tasks/scheduled_tasks_test.dart`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add remote/mobile/lib/features/scheduled_tasks/models/scheduled_task_item.dart remote/mobile/lib/features/scheduled_tasks/scheduled_tasks_screen.dart remote/mobile/test/features/scheduled_tasks/scheduled_tasks_test.dart

@@ -124,6 +124,9 @@ func BuildCascadeConfig(modelUID string, modelEnum uint64) []byte {
 
 	// plan_model (field 1) : même valeur que requested_model ci-dessous.
 	// Le LS l'exige explicitement (« neither PlanModel nor RequestedModel »).
+	if modelEnum == 0 {
+		modelEnum = 246 // GOOGLE_GEMINI_2_5_PRO (défaut Antigravity)
+	}
 	planner.varintField(1, modelEnum)
 
 	// conversational_config (field 2) {1: planner_mode} — planner_mode 3 = NO_TOOL.
@@ -340,5 +343,42 @@ func BuildWriteFileRequest(uri string, content []byte, overwrite bool) []byte {
 func BuildStatUriRequest(uri string) []byte {
 	w := &writer{}
 	w.stringField(1, uri)
+	return w.b
+}
+
+// Verbosités ClientTrajectoryVerbosity (enum exa.language_server_pb,
+// language_server_pb.ts ligne 257) — 0 = UNSPECIFIED, 1 = DEBUG,
+// 2 = PROD_UI, 3 = FULL. 3 est demandé par défaut (vue structurée complète).
+const (
+	TrajectoryVerbosityUnspecified = 0
+	TrajectoryVerbosityDebug       = 1
+	TrajectoryVerbosityProdUI      = 2
+	TrajectoryVerbosityFull        = 3
+)
+
+// BuildGetCascadeTrajectory construit un GetCascadeTrajectoryRequest :
+// {1: cascade_id, 2: verbosity, 3: trajectory_verbosity} — schéma vérifié
+// dans antigravity-client (language_server_pb.ts ligne 8711).
+// verbosity=0 (UNSPECIFIED) → champ omis (le LS applique son défaut).
+func BuildGetCascadeTrajectory(cascadeID string, verbosity uint64) []byte {
+	w := &writer{}
+	w.stringField(1, cascadeID)
+	if verbosity != 0 {
+		w.varintField(2, verbosity)
+		w.varintField(3, verbosity)
+	}
+	return w.b
+}
+
+// BuildGetTurnDiff construit un GetTurnDiffRequest :
+// {1: conversation_id, 2: step_index} — schéma vérifié dans
+// antigravity-client (language_server_pb.ts ligne 7779).
+// step_index < 0 → champ omis (le LS résout le dernier tour).
+func BuildGetTurnDiff(conversationID string, stepIndex int64) []byte {
+	w := &writer{}
+	w.stringField(1, conversationID)
+	if stepIndex >= 0 {
+		w.varintField(2, uint64(stepIndex))
+	}
 	return w.b
 }

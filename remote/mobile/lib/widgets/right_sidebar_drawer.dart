@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../core/protocol/daemon_api.dart';
-import '../features/scheduled_tasks/models/scheduled_task_item.dart';
 import '../features/scheduled_tasks/scheduled_tasks_screen.dart';
 import '../features/subagents/subagents_drawer.dart';
 import '../theme/app_colors.dart';

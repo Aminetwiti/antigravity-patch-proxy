@@ -111,4 +111,3 @@ func IsPrintable(s string) bool {
 	}
 	return true
 }
-

@@ -151,6 +151,12 @@ func (l *loadRPCClient) GetAllCascades() ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("sess")), nil
 }
 func (l *loadRPCClient) SendMessageStream(cascadeID, text string, onFrame func([]byte) error) error {
+	return l.streamLoop(onFrame)
+}
+func (l *loadRPCClient) SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error) error {
+	return l.streamLoop(onFrame)
+}
+func (l *loadRPCClient) streamLoop(onFrame func([]byte) error) error {
 	if len(l.streamDeltas) == 0 {
 		return onFrame(connectrpc.Frame(pbTextFrame("ok")))
 	}
@@ -319,6 +325,9 @@ func (f *failingStreamClient) GetAllCascades() ([]byte, error) {
 func (f *failingStreamClient) SendMessageStream(cascadeID, text string, onFrame func([]byte) error) error {
 	_ = onFrame(connectrpc.Frame(pbTextFrame("hello")))
 	return fmt.Errorf("stream interrompu par le backend")
+}
+func (f *failingStreamClient) SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error) error {
+	return f.SendMessageStream(cascadeID, text, onFrame)
 }
 func (f *failingStreamClient) SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("ok")), nil

@@ -1499,7 +1499,7 @@ class _UsageLimitsModal extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              'Modèles Gemini',
+              'Gemini Models',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
@@ -1524,7 +1524,7 @@ class _UsageLimitsModal extends StatelessWidget {
             Divider(color: scheme.outlineVariant, height: 1),
             const SizedBox(height: 16),
             Text(
-              'Modèles Claude & GPT',
+              'Claude and GPT models',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,

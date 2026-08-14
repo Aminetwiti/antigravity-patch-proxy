@@ -1,12 +1,13 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -43,7 +44,7 @@ type RPCClient interface {
 	GetAllCascades() ([]byte, error)
 	SendMessageStream(cascadeID, text string, onFrame func([]byte) error) error
 	// SendMessageStreamModel : variante avec modèle explicite (sélection
-	// mobile par message) - le daemon laisse le téléphone choisir le modèle.
+	// mobile par message) — le daemon laisse le téléphone choisir le modèle.
 	SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error) error
 	SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error)
 	SetBrowserOpenConversation(cascadeID string) ([]byte, error)
@@ -136,13 +137,13 @@ type Server struct {
 // Stats snapshot de l'état du serveur pour l'endpoint /health (C5).
 // Champs JSON stables — le mobile (ou un script) peut les afficher tels quels.
 type Stats struct {
-	Status       string   `json:"status"`
-	Sessions     int      `json:"sessions"`
-	Streams      int      `json:"streams"`
-	Clients      int      `json:"clients"`
-	Uptime       string   `json:"uptime"`
+	Status         string   `json:"status"`
+	Sessions       int      `json:"sessions"`
+	Streams        int      `json:"streams"`
+	Clients        int      `json:"clients"`
+	Uptime         string   `json:"uptime"`
 	ActiveCascades []string `json:"activeCascades"`
-	LastError    string   `json:"lastError,omitempty"`
+	LastError      string   `json:"lastError,omitempty"`
 }
 
 func NewServer(client RPCClient, authToken string) *Server {
@@ -162,6 +163,20 @@ func NewServer(client RPCClient, authToken string) *Server {
 		activeRequestIDs: make(map[string]string),
 	}
 }
+
+// SetApprovalTimeout expose le délai d'auto-refus des approbations (5 min par
+// défaut) aux Settings mobile via le message WS "set_approval_timeout".
+func (s *Server) SetApprovalTimeout(d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.approvalTimeout = d
+}
+
+// mcpProxyBase est le point d'entrée HTTP du proxy MCP Antigravity desktop
+// (antigravity-patch-proxy, écoute sur 127.0.0.1:50999). Le daemon y route
+// les appels d'outils MCP venus du mobile — la session du PC fait foi pour
+// l'authentification et l'allowlist des serveurs MCP.
+const mcpProxyBase = "http://127.0.0.1:50999"
 
 // CancelGeneration interrompt une cascade active et diffuse stream_end(cancelled).
 func (s *Server) CancelGeneration(cascadeID string) {
@@ -227,14 +242,6 @@ func (s *Server) Stats() Stats {
 	return st
 }
 
-// SetApprovalTimeout configure le délai avant auto-refus d'une approbation
-// (0 = désactivé). Appelable avant l'acceptation de connexions.
-func (s *Server) SetApprovalTimeout(d time.Duration) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.approvalTimeout = d
-}
-
 // maxWSMessageSize borne la taille des messages WebSocket entrants (1 Mo)
 // pour empêcher un client de faire un DoS mémoire.
 const maxWSMessageSize = 1 << 20
@@ -266,6 +273,69 @@ func (s *Server) writeJSON(conn *websocket.Conn, msg OutgoingMessage) {
 	}
 }
 
+// mcpTimeout borne l'appel HTTP vers le proxy MCP desktop (30 s) — aligné sur
+// le timeout 15 s côté mobile + la marge de traversée tunnel/4G.
+const mcpTimeout = 30 * time.Second
+
+// handleMcpAction relaie call_mcp_tool / connect_mcp_server /
+// refresh_mcp_oauth_token vers le proxy MCP Antigravity desktop
+// (127.0.0.1:50999). Le mobile n'a ni les identifiants ni l'allowlist MCP :
+// la session du PC est le seul détenteur légitime — le daemon n'est qu'un
+// tunnel. La réponse JSON du proxy est relayée telle quelle dans Data.
+func (s *Server) handleMcpAction(conn *websocket.Conn, msg IncomingMessage) {
+	if msg.ServerName == "" {
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "serverName requis"})
+		return
+	}
+
+	payload := map[string]interface{}{
+		"serverName": msg.ServerName,
+	}
+	if msg.ToolName != "" {
+		payload["toolName"] = msg.ToolName
+	}
+	if msg.Arguments != nil {
+		payload["arguments"] = msg.Arguments
+	}
+	if msg.Endpoint != "" {
+		payload["endpoint"] = msg.Endpoint
+	}
+	if msg.GrantType != "" {
+		payload["grantType"] = msg.GrantType
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "erreur d'encodage: " + err.Error()})
+		return
+	}
+
+	client := &http.Client{Timeout: mcpTimeout}
+	resp, err := client.Post(mcpProxyBase+"/"+msg.Type, "application/json", bytes.NewReader(body))
+	if err != nil {
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "proxy MCP injoignable: " + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "lecture de la réponse proxy: " + err.Error()})
+		return
+	}
+	if resp.StatusCode >= 400 {
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "proxy MCP " + itoa(resp.StatusCode) + ": " + strings.TrimSpace(string(respBody))})
+		return
+	}
+
+	var proxyResp map[string]interface{}
+	if err := json.Unmarshal(respBody, &proxyResp); err != nil {
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"raw": string(respBody)}})
+		return
+	}
+	s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: proxyResp})
+}
+
 // broadcast envoie le même message à TOUS les clients connectés : c'est ce qui
 // permet la synchronisation multi-surface (un téléphone voit le stream déclenché
 // par le PC ou par un autre téléphone).
@@ -282,25 +352,25 @@ func (s *Server) broadcast(msg OutgoingMessage) {
 }
 
 type IncomingMessage struct {
-	Type            string   `json:"type"`
-	RequestID       string   `json:"requestId"`
-	WorkspaceURI    string   `json:"workspaceUri"`
-	WorkspacePath   string   `json:"workspacePath,omitempty"`
-	CascadeID       string   `json:"cascadeId,omitempty"`
-	CallID          string   `json:"callId,omitempty"`
-	TrajectoryID    string   `json:"trajectoryID,omitempty"`
-	StepIndex       int64    `json:"stepIndex,omitempty"`
-	ApprovalType    string   `json:"approvalType,omitempty"`
-	Decision        string   `json:"decision,omitempty"`
-	Scope           string   `json:"scope,omitempty"`
-	Prompt          string   `json:"prompt,omitempty"`
-	FilePath        string   `json:"filePath,omitempty"`
-	StreamCount     int      `json:"streamCount,omitempty"`
-	Command         string   `json:"command,omitempty"`
-	LastStepIndex   int64    `json:"lastStepIndex,omitempty"`
-	SelectedAnswers []string `json:"selectedAnswers,omitempty"`
-	CustomAnswer    string   `json:"customAnswer,omitempty"`
-	TaskID          string   `json:"taskId,omitempty"`
+	Type            string                 `json:"type"`
+	RequestID       string                 `json:"requestId"`
+	WorkspaceURI    string                 `json:"workspaceUri"`
+	WorkspacePath   string                 `json:"workspacePath,omitempty"`
+	CascadeID       string                 `json:"cascadeId,omitempty"`
+	CallID          string                 `json:"callId,omitempty"`
+	TrajectoryID    string                 `json:"trajectoryID,omitempty"`
+	StepIndex       int64                  `json:"stepIndex,omitempty"`
+	ApprovalType    string                 `json:"approvalType,omitempty"`
+	Decision        string                 `json:"decision,omitempty"`
+	Scope           string                 `json:"scope,omitempty"`
+	Prompt          string                 `json:"prompt,omitempty"`
+	FilePath        string                 `json:"filePath,omitempty"`
+	StreamCount     int                    `json:"streamCount,omitempty"`
+	Command         string                 `json:"command,omitempty"`
+	LastStepIndex   int64                  `json:"lastStepIndex,omitempty"`
+	SelectedAnswers []string               `json:"selectedAnswers,omitempty"`
+	CustomAnswer    string                 `json:"customAnswer,omitempty"`
+	TaskID          string                 `json:"taskId,omitempty"`
 	Base64Data      string                 `json:"base64Data,omitempty"`
 	FileName        string                 `json:"fileName,omitempty"`
 	MimeType        string                 `json:"mimeType,omitempty"`
@@ -318,6 +388,43 @@ type IncomingMessage struct {
 	Content string `json:"content,omitempty"`
 	// Overwrite : autorise l'écrasement pour write_file (sinon erreur si existe).
 	Overwrite bool `json:"overwrite,omitempty"`
+	// Champs MCP (call_mcp_tool / connect_mcp_server / refresh_mcp_oauth_token) :
+	// relayés au proxy Antigravity desktop (127.0.0.1:50999).
+	ServerName string                 `json:"serverName,omitempty"`
+	ToolName   string                 `json:"toolName,omitempty"`
+	Arguments  map[string]interface{} `json:"arguments,omitempty"`
+	Endpoint   string                 `json:"endpoint,omitempty"`
+	GrantType  string                 `json:"grantType,omitempty"`
+}
+
+func (m *IncomingMessage) UnmarshalJSON(data []byte) error {
+	type Alias IncomingMessage
+	var raw struct {
+		Alias
+		ConfirmRaw   interface{} `json:"confirm"`
+		OverwriteRaw interface{} `json:"overwrite"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*m = IncomingMessage(raw.Alias)
+	if raw.ConfirmRaw != nil {
+		switch v := raw.ConfirmRaw.(type) {
+		case bool:
+			m.Confirm = v
+		case string:
+			m.Confirm = strings.EqualFold(v, "true") || v == "1"
+		}
+	}
+	if raw.OverwriteRaw != nil {
+		switch v := raw.OverwriteRaw.(type) {
+		case bool:
+			m.Overwrite = v
+		case string:
+			m.Overwrite = strings.EqualFold(v, "true") || v == "1"
+		}
+	}
+	return nil
 }
 
 // hasPendingApproval rapporte si une approbation est en attente pour cette
@@ -440,7 +547,7 @@ func (s *Server) expireApproval(cascadeID string) {
 	if p.trajectoryID != "" {
 		oneofField, oneofPayload := buildApprovalPayload(p.approvalType, false, p.command, p.filePath)
 		if _, err := s.RPCClient.SubmitToolApproval(cascadeID, p.trajectoryID, p.stepIndex, oneofField, oneofPayload); err != nil {
-		logJSON.Error("auto_deny_failed", "cascadeId", cascadeID, "err", err)
+			logJSON.Error("auto_deny_failed", "cascadeId", cascadeID, "err", err)
 		}
 	}
 	s.broadcast(OutgoingMessage{
@@ -883,11 +990,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		defer func() {
 			s.ClearCascadeActive(msg.CascadeID)
 			s.mu.Lock()
+			cancel()
 			delete(s.activeCancels, msg.CascadeID)
 			delete(s.activeRequestIDs, msg.CascadeID)
 			s.clientInFlight[conn]--
 			s.mu.Unlock()
-			cancel()
 		}()
 		s.broadcast(OutgoingMessage{Type: "stream_start", RequestID: msg.RequestID, Data: map[string]string{"cascadeId": msg.CascadeID}})
 		logJSON.Info("stream_start", "requestId", msg.RequestID, "cascadeId", msg.CascadeID)
@@ -910,7 +1017,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 
 		frameIndex := 0
-		err = s.RPCClient.SendMessageStreamModel(msg.CascadeID, promptText, msg.ModelUID, msg.ModelEnum, func(frame []byte) error {
+		onFrameHandler := func(frame []byte) error {
 			select {
 			case <-ctx.Done():
 				return fmt.Errorf("generation cancelled")
@@ -974,20 +1081,23 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			data["stepIndex"] = stepIdx
 			s.broadcast(deltaMsg)
 			return nil
-		})
+		}
+
+		err = s.RPCClient.SendMessageStreamModel(msg.CascadeID, promptText, msg.ModelUID, msg.ModelEnum, onFrameHandler)
 
 		// 3. Force l'IDE à ouvrir cette nouvelle session
 		if _, errSet := s.RPCClient.SetBrowserOpenConversation(msg.CascadeID); errSet != nil {
 			logJSON.Warn("open_conversation_failed", "cascadeId", msg.CascadeID, "err", errSet)
 		}
 
+		if ctx.Err() != nil {
+			return
+		}
+
 		endData := map[string]interface{}{"cascadeId": msg.CascadeID}
-		// C7-B : le mobile n'affiche pas de notification « tâche terminée »
-		// quand l'utilisateur est actif sur le PC (le résultat est sous ses
-		// yeux). hostActive est absent → false côté mobile.
 		endData["hostActive"] = hostActiveSince(hostActiveWindow)
 		switch {
-		case errors.Is(ctx.Err(), context.Canceled) || (err != nil && strings.Contains(err.Error(), "cancelled")):
+		case err != nil && strings.Contains(err.Error(), "cancelled"):
 			endData["outcome"] = "cancelled"
 			endData["message"] = "Generation stopped by user"
 			s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, Data: endData})
@@ -1077,6 +1187,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 		raw, err = s.RPCClient.ReadFile(toWorkspaceURI(msg.FilePath))
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"content": string(raw)}})
+			return
+		}
 
 	case "get_context":
 		raw, err = s.RPCClient.GetAllCascades()
@@ -1181,9 +1295,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 		logJSON.Info("cascade_deleted", "cascadeId", msg.CascadeID)
-		raw, err = s.RPCClient.DeleteCascade(msg.CascadeID)
+		_, err = s.RPCClient.DeleteCascade(msg.CascadeID)
 		if err == nil {
 			s.purgeCascadeState(msg.CascadeID)
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "deleted"}})
+			return
 		}
 
 	case "write_file":
@@ -1191,15 +1307,16 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "filePath + content requis"})
 			return
 		}
-		// Confinement : écriture refusée hors workspace tracké — le RPC
-		// WriteFile du LS est un passthrough fichiersystem, on le garde
-		// sous la racine workspace (mêmes garanties que read_file local).
 		content, errDec := base64.StdEncoding.DecodeString(msg.Content)
 		if errDec != nil {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "content doit être base64: " + errDec.Error()})
 			return
 		}
-		raw, err = s.RPCClient.WriteFile(toWorkspaceURI(msg.FilePath), content, msg.Overwrite)
+		_, err = s.RPCClient.WriteFile(toWorkspaceURI(msg.FilePath), content, msg.Overwrite)
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "written"}})
+			return
+		}
 
 	case "list_scheduled_tasks":
 		s.writeJSON(conn, OutgoingMessage{
@@ -1245,6 +1362,26 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				"status": "cancelled",
 			},
 		})
+		return
+
+	case "set_approval_timeout":
+		// Règle approvalTimeout depuis les Settings mobile (0 = désactive
+		// l'auto-refus ; durée en minutes).
+		minutes, ok := msg.Data["minutes"].(float64)
+		if !ok || minutes < 0 {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "minutes (nombre ≥ 0) requis"})
+			return
+		}
+		s.SetApprovalTimeout(time.Duration(minutes) * time.Minute)
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"approvalTimeoutMinutes": minutes}})
+		return
+
+	case "call_mcp_tool", "connect_mcp_server", "refresh_mcp_oauth_token":
+		// Route les actions MCP vers le proxy Antigravity desktop
+		// (127.0.0.1:50999). Le mobile n'a pas les identifiants MCP :
+		// la session du PC est le seul détenteur des jetons OAuth et de
+		// l'allowlist stricte. Réponse unary relayée telle quelle.
+		s.handleMcpAction(conn, msg)
 		return
 
 	default:

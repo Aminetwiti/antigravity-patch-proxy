@@ -18,11 +18,13 @@ func main() {
 	var host string
 	var tunnelFlag string
 	var authToken string
+	var approvalTimeoutMin int
 
 	flag.IntVar(&listenPort, "port", 8090, "Port for the WebSocket server")
 	flag.StringVar(&host, "host", "0.0.0.0", "Host for the WebSocket server")
 	flag.StringVar(&tunnelFlag, "tunnel", "", "Tunnel provider (ngrok, cloudflare, pinggy)")
 	flag.StringVar(&authToken, "auth-token", "", "Authentication token for Mobile App")
+	flag.IntVar(&approvalTimeoutMin, "approval-timeout", 5, "Auto-deny timeout for pending approvals in minutes (0 = disabled)")
 	flag.Parse()
 
 	fmt.Printf("🚀 Starting Antigravity Remote Daemon Bridge on %s:%d...\n", host, listenPort)
@@ -65,6 +67,7 @@ func main() {
 	gateway.SetLogJSON(gateway.NewLogger())
 
 	server := gateway.NewServer(rpcClient, authToken)
+	server.SetApprovalTimeout(time.Duration(approvalTimeoutMin) * time.Minute)
 
 	http.HandleFunc("/ws", server.HandleWebSocket)
 	http.HandleFunc("/health", server.HTTPHandler)

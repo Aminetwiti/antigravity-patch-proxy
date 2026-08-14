@@ -79,3 +79,15 @@ func (c *Client) ReadFile(uri string) ([]byte, error) {
 func (c *Client) WriteFile(uri string, content []byte, overwrite bool) ([]byte, error) {
 	return c.Call("WriteFile", BuildWriteFileRequest(uri, content, overwrite))
 }
+
+// GetCascadeTrajectory récupère l'historique structuré d'une session
+// (GetCascadeTrajectory). verbosity=0 → défaut du LS.
+func (c *Client) GetCascadeTrajectory(cascadeID string, verbosity uint64) ([]byte, error) {
+	return c.Call("GetCascadeTrajectory", BuildGetCascadeTrajectory(cascadeID, verbosity))
+}
+
+// GetTurnDiff récupère le diff officiel d'un tour (GetTurnDiff).
+// stepIndex < 0 → le LS résout le dernier tour.
+func (c *Client) GetTurnDiff(conversationID string, stepIndex int64) ([]byte, error) {
+	return c.Call("GetTurnDiff", BuildGetTurnDiff(conversationID, stepIndex))
+}

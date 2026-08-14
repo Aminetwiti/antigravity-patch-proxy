@@ -759,7 +759,7 @@ func TestWebSocketDeleteCascade(t *testing.T) {
 	// 2. Avec confirm → RPC appelé + réponse OK.
 	client.send(t, map[string]string{"type": "delete_cascade", "requestId": "rD2", "cascadeId": "casc-9", "confirm": "true"})
 	msg = client.recv(t)
-	if msg["type"] != "response" || msg["requestId"] != "rD2" || msg["error"] != "" {
+	if msg["type"] != "response" || msg["requestId"] != "rD2" || msg["error"] != nil {
 		t.Fatalf("Réponse inattendue: %v", msg)
 	}
 	if backend.lastDelete != "casc-9" {
@@ -810,7 +810,7 @@ func TestWebSocketReadFile(t *testing.T) {
 
 	client.send(t, map[string]string{"type": "read_file", "requestId": "rR", "filePath": `C:\Users\test\proj\main.go`})
 	msg := client.recv(t)
-	if msg["type"] != "response" || msg["error"] != "" {
+	if msg["type"] != "response" || msg["error"] != nil {
 		t.Fatalf("Réponse inattendue: %v", msg)
 	}
 	if backend.lastRead != "file:///C:/Users/test/proj/main.go" {
@@ -827,7 +827,7 @@ func TestWebSocketReadFileMissingPath(t *testing.T) {
 
 	client.send(t, map[string]string{"type": "read_file", "requestId": "rR2"})
 	msg := client.recv(t)
-	if msg["type"] != "response" || msg["error"] == "" {
+	if msg["type"] != "response" || msg["error"] == nil {
 		t.Fatalf("Attendu erreur filePath manquant, reçu %v", msg)
 	}
 }
@@ -853,7 +853,7 @@ func TestWebSocketWriteFile(t *testing.T) {
 		t.Fatalf("envoi write_file: %v", err)
 	}
 	msg := client.recv(t)
-	if msg["type"] != "response" || msg["error"] != "" {
+	if msg["type"] != "response" || msg["error"] != nil {
 		t.Fatalf("Réponse inattendue: %v", msg)
 	}
 	if backend.lastWrite == nil {

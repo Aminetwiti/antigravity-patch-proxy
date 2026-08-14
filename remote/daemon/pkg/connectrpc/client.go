@@ -11,10 +11,11 @@ import (
 )
 
 // Client parle le protocole gRPC-Web validé (voir remote/PROTOCOL.md) :
-//   POST /exa.language_server_pb.LanguageServerService/<Method>
-//   Content-Type: application/grpc-web+proto
-//   x-codeium-csrf-token: <token>   (et non X-CSRF-Token)
-//   Framing: 1 octet flags + 4 octets BE longueur + payload protobuf
+//
+//	POST /exa.language_server_pb.LanguageServerService/<Method>
+//	Content-Type: application/grpc-web+proto
+//	x-codeium-csrf-token: <token>   (et non X-CSRF-Token)
+//	Framing: 1 octet flags + 4 octets BE longueur + payload protobuf
 type Client struct {
 	mu        sync.RWMutex
 	port      int
@@ -192,4 +193,3 @@ func truncate(s string, n int) string {
 	}
 	return s[:n] + "..."
 }
-
