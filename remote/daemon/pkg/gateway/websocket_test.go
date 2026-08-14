@@ -116,6 +116,16 @@ func (f *fakeRPCClient) SendMessage(cascadeID, text string) ([]byte, error) {
 }
 
 func (f *fakeRPCClient) SendMessageStream(cascadeID, text string, onFrame func([]byte) error) error {
+	return f.streamLoop(onFrame)
+}
+
+// SendMessageStreamModel : la sélection modèle du mobile est ignorée par le
+// fake (le contrat testé est le streaming) - mêmes deltas que la variante.
+func (f *fakeRPCClient) SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error) error {
+	return f.streamLoop(onFrame)
+}
+
+func (f *fakeRPCClient) streamLoop(onFrame func([]byte) error) error {
 	for _, delta := range f.streamDeltas {
 		if err := onFrame(f.approvalFrame(delta)); err != nil {
 			return err

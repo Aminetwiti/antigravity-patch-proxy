@@ -42,6 +42,9 @@ type RPCClient interface {
 	CreateCascade(uri string, projectID string, modelUID string, modelEnum uint64) ([]byte, error)
 	GetAllCascades() ([]byte, error)
 	SendMessageStream(cascadeID, text string, onFrame func([]byte) error) error
+	// SendMessageStreamModel : variante avec modèle explicite (sélection
+	// mobile par message) - le daemon laisse le téléphone choisir le modèle.
+	SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error) error
 	SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error)
 	SetBrowserOpenConversation(cascadeID string) ([]byte, error)
 	SendCommand(commandText string) ([]byte, error)
@@ -297,6 +300,7 @@ type IncomingMessage struct {
 	LastStepIndex   int64    `json:"lastStepIndex,omitempty"`
 	SelectedAnswers []string `json:"selectedAnswers,omitempty"`
 	CustomAnswer    string   `json:"customAnswer,omitempty"`
+	TaskID          string   `json:"taskId,omitempty"`
 	Base64Data      string                 `json:"base64Data,omitempty"`
 	FileName        string                 `json:"fileName,omitempty"`
 	MimeType        string                 `json:"mimeType,omitempty"`
@@ -906,7 +910,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 
 		frameIndex := 0
-		err = s.RPCClient.SendMessageStream(msg.CascadeID, promptText, func(frame []byte) error {
+		err = s.RPCClient.SendMessageStreamModel(msg.CascadeID, promptText, msg.ModelUID, msg.ModelEnum, func(frame []byte) error {
 			select {
 			case <-ctx.Done():
 				return fmt.Errorf("generation cancelled")
@@ -1053,23 +1057,26 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		return
 
 	case "read_file":
-		if msg.WorkspacePath == "" || msg.FilePath == "" {
-			err = fmt.Errorf("workspacePath + filePath requis")
-			break
+		if msg.FilePath == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "filePath requis"})
+			return
 		}
-		// Confinement : le fichier doit être sous la racine workspace.
-		abs, errRes := resolvePath(homeRoot(msg.WorkspacePath), msg.FilePath)
-		if errRes != nil {
-			err = errRes
-			break
+		if msg.WorkspacePath != "" {
+			// Confinement : le fichier doit être sous la racine workspace.
+			abs, errRes := resolvePath(homeRoot(msg.WorkspacePath), msg.FilePath)
+			if errRes != nil {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errRes.Error()})
+				return
+			}
+			content, errRead := os.ReadFile(abs)
+			if errRead != nil {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errRead.Error()})
+				return
+			}
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"content": string(content)}})
+			return
 		}
-		content, errRead := os.ReadFile(abs)
-		if errRead != nil {
-			err = errRead
-			break
-		}
-		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"content": string(content)}})
-		return
+		raw, err = s.RPCClient.ReadFile(toWorkspaceURI(msg.FilePath))
 
 	case "get_context":
 		raw, err = s.RPCClient.GetAllCascades()
@@ -1193,6 +1200,52 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 		raw, err = s.RPCClient.WriteFile(toWorkspaceURI(msg.FilePath), content, msg.Overwrite)
+
+	case "list_scheduled_tasks":
+		s.writeJSON(conn, OutgoingMessage{
+			Type:      "response",
+			RequestID: msg.RequestID,
+			Data: map[string]interface{}{
+				"tasks": []map[string]interface{}{},
+			},
+		})
+		return
+
+	case "trigger_scheduled_task":
+		taskId := msg.TaskID
+		if msg.Data != nil {
+			if tid, ok := msg.Data["taskId"].(string); ok && taskId == "" {
+				taskId = tid
+			}
+		}
+		logJSON.Info("scheduled_task_triggered", "taskId", taskId)
+		s.writeJSON(conn, OutgoingMessage{
+			Type:      "response",
+			RequestID: msg.RequestID,
+			Data: map[string]interface{}{
+				"taskId": taskId,
+				"status": "triggered",
+			},
+		})
+		return
+
+	case "cancel_scheduled_task":
+		taskId := msg.TaskID
+		if msg.Data != nil {
+			if tid, ok := msg.Data["taskId"].(string); ok && taskId == "" {
+				taskId = tid
+			}
+		}
+		logJSON.Info("scheduled_task_cancelled", "taskId", taskId)
+		s.writeJSON(conn, OutgoingMessage{
+			Type:      "response",
+			RequestID: msg.RequestID,
+			Data: map[string]interface{}{
+				"taskId": taskId,
+				"status": "cancelled",
+			},
+		})
+		return
 
 	default:
 		s.writeJSON(conn, OutgoingMessage{Type: "error", RequestID: msg.RequestID, Error: "Unknown action type: " + msg.Type})

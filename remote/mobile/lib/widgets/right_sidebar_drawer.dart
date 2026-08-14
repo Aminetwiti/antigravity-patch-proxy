@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../core/protocol/daemon_api.dart';
+import '../features/scheduled_tasks/models/scheduled_task_item.dart';
+import '../features/scheduled_tasks/scheduled_tasks_screen.dart';
 import '../features/subagents/subagents_drawer.dart';
 import '../theme/app_colors.dart';
 import 'artifact_viewer_modal.dart';
@@ -13,6 +15,7 @@ class RightSidebarDrawer extends StatefulWidget {
   final int artifactsCount;
   final int uploadsCount;
   final int backgroundTasksCount;
+  final int scheduledTasksCount;
 
   const RightSidebarDrawer({
     super.key,
@@ -23,6 +26,7 @@ class RightSidebarDrawer extends StatefulWidget {
     this.artifactsCount = 0,
     this.uploadsCount = 0,
     this.backgroundTasksCount = 0,
+    this.scheduledTasksCount = 0,
   });
 
   @override
@@ -80,36 +84,36 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Drawer(
-      // Rail PC : canvas Zinc-950 + bordure gauche
-      backgroundColor: AppColors.surfaceBase,
-      shape: const RoundedRectangleBorder(
+      backgroundColor: scheme.surface,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.zero,
-        side: BorderSide(color: AppColors.borderSubtle, width: 1),
+        side: BorderSide(color: scheme.outlineVariant, width: 1),
       ),
       child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Drawer Header — PC .nav-group-label : 10px uppercase espacé
+            // Drawer Header
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Row(
                 children: [
-                  Icon(Icons.vertical_split_outlined, size: 16, color: AppColors.inkFaint),
+                  Icon(Icons.vertical_split_outlined, size: 16, color: scheme.onSurfaceVariant),
                   const SizedBox(width: 8),
-                  const Text(
-                    'CONTEXT',
+                  Text(
+                    'CONTEXTE',
                     style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 1.2,
-                      color: AppColors.inkFaint,
+                      color: scheme.onSurfaceVariant,
                     ),
                   ),
                   const Spacer(),
                   IconButton(
-                    icon: Icon(Icons.close, size: 18, color: AppColors.inkSecondary),
+                    icon: Icon(Icons.close, size: 18, color: scheme.onSurfaceVariant),
                     onPressed: () => Navigator.of(context).pop(),
                     tooltip: 'Fermer le panneau',
                     padding: EdgeInsets.zero,
@@ -213,9 +217,34 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
                     onTap: () {},
                   ),
                   _ContextItemRow(
+                    title: 'Scheduled Tasks',
+                    badgeCount: widget.scheduledTasksCount > 0 ? widget.scheduledTasksCount : widget.backgroundTasksCount,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (ctx) => ScheduledTasksScreen(
+                            tasks: const [],
+                            onCancelTask: (id) => widget.api?.cancelScheduledTask(id),
+                            onTriggerNow: (id) => widget.api?.triggerScheduledTask(id),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  _ContextItemRow(
                     title: 'Background Tasks',
                     badgeCount: widget.backgroundTasksCount,
-                    onTap: () {},
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (ctx) => ScheduledTasksScreen(
+                            tasks: const [],
+                            onCancelTask: (id) => widget.api?.cancelScheduledTask(id),
+                            onTriggerNow: (id) => widget.api?.triggerScheduledTask(id),
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ],
               ),
@@ -242,6 +271,7 @@ class _ContextItemRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -250,10 +280,9 @@ class _ContextItemRow extends StatelessWidget {
         child: AnimatedContainer(
           duration: AppMotion.fast,
           curve: AppMotion.easeOut,
-          // PC .nav-item : hover surfaceHover
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            color: isExpanded ? AppColors.surfaceInput.withValues(alpha: 0.5) : Colors.transparent,
+            color: isExpanded ? scheme.surfaceContainerHighest : Colors.transparent,
             borderRadius: BorderRadius.circular(AppRadius.md),
           ),
           child: Row(
@@ -261,26 +290,26 @@ class _ContextItemRow extends StatelessWidget {
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w400,
-                    color: AppColors.inkPrimary,
+                    color: scheme.onSurface,
                   ),
                 ),
               ),
               const SizedBox(width: 8),
-              // Badge pill — PC --r-pill
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
-                  color: AppColors.surfaceHover,
+                  color: scheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(AppRadius.pill),
+                  border: Border.all(color: scheme.outlineVariant, width: 0.5),
                 ),
                 child: Text(
                   '$badgeCount',
                   style: TextStyle(
                     fontSize: 11,
-                    color: badgeCount > 0 ? AppColors.accentBlue : AppColors.inkSecondary,
+                    color: badgeCount > 0 ? scheme.primary : scheme.onSurfaceVariant,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -289,10 +318,10 @@ class _ContextItemRow extends StatelessWidget {
               AnimatedRotation(
                 turns: isExpanded ? 0.25 : 0,
                 duration: AppMotion.fast,
-                child: const Icon(
+                child: Icon(
                   Icons.chevron_right,
                   size: 16,
-                  color: AppColors.inkMuted,
+                  color: scheme.onSurfaceVariant,
                 ),
               ),
             ],

@@ -26,6 +26,13 @@ func (c *Client) SendMessageStream(cascadeID, text string, onFrame func([]byte) 
 	return c.CallStream("SendUserCascadeMessage", BuildSendMessage(cascadeID, text, c.APIKey, c.SessionID, c.ModelUID, c.ModelEnum), 120*time.Second, onFrame)
 }
 
+// SendMessageStreamModel comme SendMessageStream mais avec un modèle
+// explicite (venant du message send_prompt du mobile) : le daemon doit
+// respecter la sélection du téléphone, pas le repli global du client.
+func (c *Client) SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error) error {
+	return c.CallStream("SendUserCascadeMessage", BuildSendMessage(cascadeID, text, c.APIKey, c.SessionID, modelUID, modelEnum), 120*time.Second, onFrame)
+}
+
 // SubmitToolApproval approuve/refuse une interaction d'outil via le RPC officiel
 // HandleCascadeUserInteraction (trajectory_id + step_index + oneof décision).
 func (c *Client) SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error) {

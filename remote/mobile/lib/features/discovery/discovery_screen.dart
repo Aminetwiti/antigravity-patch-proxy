@@ -408,6 +408,7 @@ class _CustomAgentManagerState extends State<_CustomAgentManager> {
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     onChanged: (val) => setState(() => _customAgents[i]['active'] = val),
                   ),
+                  const SizedBox(width: 8),
                   IconButton(
                     icon: const Icon(Icons.delete_outline, size: 16),
                     tooltip: 'Supprimer l\'agent',

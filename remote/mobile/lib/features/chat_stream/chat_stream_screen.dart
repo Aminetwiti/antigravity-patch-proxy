@@ -1274,7 +1274,7 @@ class _WelcomeEmptyState extends StatelessWidget {
         const SizedBox(height: 24),
         // Greetings
         Text(
-          'Welcome to',
+          'Bienvenue sur',
           style: TextStyle(
             fontSize: 16,
             color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -1299,18 +1299,18 @@ class _WelcomeEmptyState extends StatelessWidget {
           children: [
             _SuggestionChip(
               icon: Icons.search,
-              label: 'Search codebase',
-              onTap: () => onSuggestionTap('Search codebase for '),
+              label: 'Rechercher dans le code',
+              onTap: () => onSuggestionTap('Recherche dans le codebase : '),
             ),
             _SuggestionChip(
               icon: Icons.bug_report_outlined,
-              label: 'Find bugs',
-              onTap: () => onSuggestionTap('Can you find any bugs in this project?'),
+              label: 'Trouver des bugs',
+              onTap: () => onSuggestionTap('Peux-tu analyser ce projet et trouver d\'éventuels bugs ?'),
             ),
             _SuggestionChip(
               icon: Icons.add_circle_outline,
-              label: 'Add feature',
-              onTap: () => onSuggestionTap('I want to add a new feature: '),
+              label: 'Ajouter une fonctionnalité',
+              onTap: () => onSuggestionTap('Je souhaite ajouter une fonctionnalité : '),
             ),
           ],
         ),
@@ -1325,6 +1325,7 @@ class _SuggestionChip extends StatelessWidget {
   final VoidCallback onTap;
 
   const _SuggestionChip({
+    super.key,
     required this.icon,
     required this.label,
     required this.onTap,

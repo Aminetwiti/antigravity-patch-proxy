@@ -58,6 +58,7 @@ class _AddCommentDialogState extends State<AddCommentDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final isDialog = ModalRoute.of(context) is DialogRoute || ModalRoute.of(context) is PopupRoute;
 
     final content = Container(
@@ -65,9 +66,9 @@ class _AddCommentDialogState extends State<AddCommentDialog> {
       constraints: const BoxConstraints(maxWidth: 480),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.surfaceRaised,
+        color: scheme.surfaceContainer,
         borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: AppColors.borderSubtle),
+        border: Border.all(color: scheme.outlineVariant),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -76,13 +77,13 @@ class _AddCommentDialogState extends State<AddCommentDialog> {
           // Header
           Row(
             children: [
-              const Icon(Icons.mode_comment_outlined, size: 18, color: AppColors.accentBlue),
+              Icon(Icons.mode_comment_outlined, size: 18, color: scheme.primary),
               const SizedBox(width: 8),
-              const Expanded(
+              Expanded(
                 child: Text(
-                  'Add Comment',
+                  'Ajouter un commentaire',
                   style: TextStyle(
-                    color: AppColors.inkPrimary,
+                    color: scheme.onSurface,
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
                   ),
@@ -92,13 +93,13 @@ class _AddCommentDialogState extends State<AddCommentDialog> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: AppColors.surfaceInput,
+                    color: scheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(AppRadius.sm),
                   ),
                   child: Text(
-                    'Line ${widget.lineNumber}',
-                    style: const TextStyle(
-                      color: AppColors.inkSecondary,
+                    'Ligne ${widget.lineNumber}',
+                    style: TextStyle(
+                      color: scheme.onSurfaceVariant,
                       fontSize: 11,
                       fontFamily: 'monospace',
                     ),
@@ -109,8 +110,8 @@ class _AddCommentDialogState extends State<AddCommentDialog> {
           const SizedBox(height: 6),
           Text(
             widget.filePath,
-            style: const TextStyle(
-              color: AppColors.inkMuted,
+            style: TextStyle(
+              color: scheme.onSurfaceVariant,
               fontSize: 12,
               fontFamily: 'monospace',
             ),
@@ -123,14 +124,14 @@ class _AddCommentDialogState extends State<AddCommentDialog> {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: AppColors.surfaceInput,
+              color: scheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(AppRadius.md),
-              border: Border.all(color: AppColors.borderSubtle),
+              border: Border.all(color: scheme.outlineVariant),
             ),
             child: Text(
               widget.selectedSnippet.trim(),
-              style: const TextStyle(
-                color: AppColors.inkPrimary,
+              style: TextStyle(
+                color: scheme.onSurface,
                 fontFamily: 'monospace',
                 fontSize: 12,
                 height: 1.4,
@@ -146,19 +147,19 @@ class _AddCommentDialogState extends State<AddCommentDialog> {
             controller: _controller,
             autofocus: true,
             maxLines: 3,
-            style: const TextStyle(color: AppColors.inkPrimary, fontSize: 13),
+            style: TextStyle(color: scheme.onSurface, fontSize: 13),
             decoration: InputDecoration(
-              hintText: 'Add instruction or feedback for this line...',
-              hintStyle: const TextStyle(color: AppColors.inkMuted, fontSize: 13),
+              hintText: 'Ajouter une instruction ou remarque...',
+              hintStyle: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
               filled: true,
-              fillColor: AppColors.surfaceBase,
+              fillColor: scheme.surface,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(AppRadius.md),
-                borderSide: const BorderSide(color: AppColors.borderSubtle),
+                borderSide: BorderSide(color: scheme.outlineVariant),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(AppRadius.md),
-                borderSide: const BorderSide(color: AppColors.accentBlue),
+                borderSide: BorderSide(color: scheme.primary),
               ),
               contentPadding: const EdgeInsets.all(12),
             ),
@@ -177,7 +178,7 @@ class _AddCommentDialogState extends State<AddCommentDialog> {
                       Navigator.of(context).pop();
                     }
                   },
-                  child: const Text('Delete', style: TextStyle(color: AppColors.danger)),
+                  child: Text('Supprimer', style: TextStyle(color: scheme.error)),
                 ),
               if (isDialog || Navigator.of(context).canPop())
                 TextButton(
@@ -186,18 +187,18 @@ class _AddCommentDialogState extends State<AddCommentDialog> {
                       Navigator.of(context).pop();
                     }
                   },
-                  child: const Text('Cancel', style: TextStyle(color: AppColors.inkMuted)),
+                  child: Text('Annuler', style: TextStyle(color: scheme.onSurfaceVariant)),
                 ),
               const SizedBox(width: 8),
               FilledButton(
                 onPressed: _submit,
                 style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.accentBlue,
+                  backgroundColor: scheme.primary,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(AppRadius.md),
                   ),
                 ),
-                child: const Text('Queue Comment'),
+                child: const Text('Enregistrer le commentaire'),
               ),
             ],
           ),

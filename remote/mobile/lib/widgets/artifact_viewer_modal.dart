@@ -63,11 +63,12 @@ class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       height: MediaQuery.of(context).size.height * 0.85,
-      decoration: const BoxDecoration(
-        color: AppColors.surfaceBase,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
       ),
       child: SafeArea(
         child: Column(
@@ -80,7 +81,7 @@ class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
                 width: 36,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: AppColors.borderSubtle,
+                  color: scheme.outlineVariant,
                   borderRadius: BorderRadius.circular(AppRadius.pill),
                 ),
               ),
@@ -88,26 +89,26 @@ class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
             // Header
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: const BoxDecoration(
-                border: Border(bottom: BorderSide(color: AppColors.borderSubtle)),
+              decoration: BoxDecoration(
+                border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.article_outlined, size: 20, color: AppColors.accentBlue),
+                  Icon(Icons.article_outlined, size: 20, color: scheme.primary),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
                       widget.artifactName,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
-                        color: AppColors.inkPrimary,
+                        color: scheme.onSurface,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.close, size: 20, color: AppColors.inkSecondary),
+                    icon: Icon(Icons.close, size: 20, color: scheme.onSurfaceVariant),
                     onPressed: () => Navigator.of(context).pop(),
                   ),
                 ],
@@ -117,14 +118,14 @@ class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
             // Content
             Expanded(
               child: _isLoading
-                  ? const Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(AppColors.accentBlue)))
+                  ? Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(scheme.primary)))
                   : _error != null
                       ? Center(
                           child: Padding(
                             padding: const EdgeInsets.all(16.0),
                             child: Text(
                               _error!,
-                              style: const TextStyle(color: AppColors.danger),
+                              style: TextStyle(color: scheme.error),
                               textAlign: TextAlign.center,
                             ),
                           ),
@@ -154,11 +155,12 @@ class _MarkdownBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final blocks = MarkdownRenderer.blocksOf(content);
     final textStyle = TextStyle(
       fontSize: 13.5,
       height: 1.5,
-      color: AppColors.inkSecondary,
+      color: scheme.onSurface,
     );
 
     return Column(

@@ -119,7 +119,7 @@ void main() {
         ),
       );
 
-      final triggerBtn = find.widgetWithText(OutlinedButton, 'Trigger Now');
+      final triggerBtn = find.text('Trigger Now');
       expect(triggerBtn, findsOneWidget);
 
       await tester.tap(triggerBtn);

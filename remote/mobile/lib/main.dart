@@ -586,11 +586,12 @@ class _SessionHistorySheetState extends State<_SessionHistorySheet> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       height: MediaQuery.of(context).size.height * 0.75,
-      decoration: const BoxDecoration(
-        color: AppColors.surfaceBase,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
       ),
       child: SafeArea(
         child: Column(
@@ -603,7 +604,7 @@ class _SessionHistorySheetState extends State<_SessionHistorySheet> {
                 width: 36,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: AppColors.borderSubtle,
+                  color: scheme.outlineVariant,
                   borderRadius: BorderRadius.circular(AppRadius.pill),
                 ),
               ),
@@ -612,15 +613,15 @@ class _SessionHistorySheetState extends State<_SessionHistorySheet> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Row(
                 children: [
-                  const Icon(Icons.history, size: 18, color: AppColors.accentBlue),
+                  Icon(Icons.history, size: 18, color: scheme.primary),
                   const SizedBox(width: 10),
-                  const Text(
-                    'Conversation History',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.inkPrimary),
+                  Text(
+                    'Historique des conversations',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: scheme.onSurface),
                   ),
                   const Spacer(),
                   IconButton(
-                    icon: const Icon(Icons.close, size: 18, color: AppColors.inkSecondary),
+                    icon: Icon(Icons.close, size: 18, color: scheme.onSurfaceVariant),
                     onPressed: () => Navigator.of(context).pop(),
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -628,13 +629,13 @@ class _SessionHistorySheetState extends State<_SessionHistorySheet> {
                 ],
               ),
             ),
-            const Divider(height: 1, color: AppColors.borderSubtle),
+            Divider(height: 1, color: scheme.outlineVariant),
             Expanded(
               child: _isLoading
-                  ? const Center(
+                  ? Center(
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation(AppColors.accentBlue),
+                        valueColor: AlwaysStoppedAnimation(scheme.primary),
                       ),
                     )
                   : _error != null
@@ -644,15 +645,15 @@ class _SessionHistorySheetState extends State<_SessionHistorySheet> {
                             child: Text(
                               'Impossible de charger l\'historique:\n$_error',
                               textAlign: TextAlign.center,
-                              style: const TextStyle(fontSize: 12, color: AppColors.danger),
+                              style: TextStyle(fontSize: 12, color: scheme.error),
                             ),
                           ),
                         )
                       : _messages.isEmpty
-                          ? const Center(
+                          ? Center(
                               child: Text(
                                 'Aucun message dans cette session.',
-                                style: TextStyle(fontSize: 12, color: AppColors.inkMuted),
+                                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                               ),
                             )
                           : ListView.builder(
@@ -669,7 +670,7 @@ class _SessionHistorySheetState extends State<_SessionHistorySheet> {
                                       constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
                                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                       decoration: BoxDecoration(
-                                        color: isUser ? AppColors.accentBlue.withValues(alpha: 0.18) : AppColors.surfaceInput,
+                                        color: isUser ? scheme.primary.withValues(alpha: 0.18) : scheme.surfaceContainerHighest,
                                         borderRadius: BorderRadius.circular(AppRadius.lg),
                                       ),
                                       child: Text(
@@ -677,7 +678,7 @@ class _SessionHistorySheetState extends State<_SessionHistorySheet> {
                                         style: TextStyle(
                                           fontSize: 12.5,
                                           height: 1.4,
-                                          color: AppColors.inkPrimary,
+                                          color: scheme.onSurface,
                                         ),
                                       ),
                                     ),
@@ -703,10 +704,11 @@ class _ScheduledTasksSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.surfaceBase,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
       ),
       child: SafeArea(
         child: Padding(
@@ -717,12 +719,12 @@ class _ScheduledTasksSheet extends StatelessWidget {
               Container(
                 width: 32,
                 height: 4,
-                decoration: BoxDecoration(color: AppColors.borderSubtle, borderRadius: BorderRadius.circular(AppRadius.pill)),
+                decoration: BoxDecoration(color: scheme.outlineVariant, borderRadius: BorderRadius.circular(AppRadius.pill)),
               ),
               const SizedBox(height: 16),
-              const Icon(Icons.schedule, size: 32, color: AppColors.accentBlue),
+              Icon(Icons.schedule, size: 32, color: scheme.primary),
               const SizedBox(height: 12),
-              const Text('Tâches planifiées', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.inkPrimary)),
+              Text('Tâches planifiées', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: scheme.onSurface)),
               const SizedBox(height: 6),
               if (outbox.hasPending)
                 ...outbox.snapshot().map((m) => Padding(
@@ -736,14 +738,14 @@ class _ScheduledTasksSheet extends StatelessWidget {
                               m['prompt']?.toString() ?? m['type']?.toString() ?? 'Message en attente',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 12, color: AppColors.inkSecondary),
+                              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                             ),
                           ),
                         ],
                       ),
                     ))
               else
-                const Text('Aucune tâche planifiée en arrière-plan.', style: TextStyle(fontSize: 12, color: AppColors.inkMuted)),
+                Text('Aucune tâche planifiée en arrière-plan.', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
               const SizedBox(height: 16),
             ],
           ),
