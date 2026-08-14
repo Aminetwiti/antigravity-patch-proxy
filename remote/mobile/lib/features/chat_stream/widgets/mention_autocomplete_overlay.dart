@@ -42,18 +42,18 @@ class MentionAutocompleteOverlay extends StatelessWidget {
     }
   }
 
-  Color _badgeColorForType(MentionType type) {
+  Color _badgeColorForType(MentionType type, ColorScheme scheme) {
     switch (type) {
       case MentionType.file:
-        return AppColors.accentBlue;
+        return scheme.primary;
       case MentionType.rule:
-        return AppColors.warning;
+        return scheme.tertiary;
       case MentionType.mcp:
-        return AppColors.positive;
+        return scheme.secondary;
       case MentionType.conversation:
-        return AppColors.providerCustom;
+        return scheme.tertiary;
       case MentionType.terminal:
-        return AppColors.inkMuted;
+        return scheme.outline;
     }
   }
 
@@ -86,7 +86,7 @@ class MentionAutocompleteOverlay extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               child: Row(
                 children: [
-                  const Icon(Icons.alternate_email, size: 14, color: AppColors.accentBlue),
+                  Icon(Icons.alternate_email, size: 14, color: scheme.primary),
                   const SizedBox(width: 6),
                   Text(
                     'Mentions (${filtered.length})',
@@ -130,13 +130,13 @@ class MentionAutocompleteOverlay extends StatelessWidget {
                             Container(
                               padding: const EdgeInsets.all(6),
                               decoration: BoxDecoration(
-                                color: _badgeColorForType(item.type).withValues(alpha: 0.15),
+                                color: _badgeColorForType(item.type, scheme).withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(AppRadius.sm),
                               ),
                               child: Icon(
                                 _iconForType(item.type),
                                 size: 16,
-                                color: _badgeColorForType(item.type),
+                                color: _badgeColorForType(item.type, scheme),
                               ),
                             ),
                             const SizedBox(width: 10),
@@ -168,7 +168,7 @@ class MentionAutocompleteOverlay extends StatelessWidget {
                                           style: TextStyle(
                                             fontSize: 10,
                                             fontWeight: FontWeight.w600,
-                                            color: _badgeColorForType(item.type),
+                                            color: _badgeColorForType(item.type, scheme),
                                           ),
                                         ),
                                       ),

@@ -731,7 +731,7 @@ class _ScheduledTasksSheet extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       child: Row(
                         children: [
-                          const Icon(Icons.hourglass_top, size: 14, color: AppColors.warning),
+                          Icon(Icons.hourglass_top, size: 14, color: scheme.tertiary),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(

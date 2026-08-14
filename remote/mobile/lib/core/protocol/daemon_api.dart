@@ -515,6 +515,16 @@ class DaemonApi {
     });
   }
 
+  /// Liste les serveurs MCP disponibles côté daemon.
+  Future<List<McpServerInfo>> getMcpServers() async {
+    final res = await rpc('list_mcp_servers');
+    final list = res['servers'] as List?;
+    return (list ?? [])
+        .whereType<Map>()
+        .map((e) => McpServerInfo.fromJson(e.cast<String, dynamic>()))
+        .toList();
+  }
+
   Future<Map<String, dynamic>> connectMcpServer(String serverName) async {
     return rpc('connect_mcp_server', {'serverName': serverName}).timeout(
       mcpTimeout,

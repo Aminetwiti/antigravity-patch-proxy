@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/protocol/messages.dart';
 import '../features/chat_stream/models/question_choice.dart';
-import '../theme/app_colors.dart';
 
 /// Carte interactive permettant de répondre aux questions posées par l'agent (AskQuestion).
 /// Inspiré des fonctionnalités de choix interactifs d'AG2R.
@@ -160,14 +159,15 @@ class _AskQuestionChoiceCardState extends State<AskQuestionChoiceCard> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.surfaceRaised,
+        color: scheme.surfaceContainer,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: AppColors.accentBlue.withValues(alpha: 0.4),
+          color: scheme.primary.withValues(alpha: 0.4),
           width: 1.2,
         ),
         boxShadow: [
@@ -188,12 +188,12 @@ class _AskQuestionChoiceCardState extends State<AskQuestionChoiceCard> {
               Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: AppColors.accentBlue.withValues(alpha: 0.15),
+                  color: scheme.primary.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.help_outline_rounded,
-                  color: AppColors.accentBlue,
+                  color: scheme.primary,
                   size: 20,
                 ),
               ),
@@ -205,7 +205,7 @@ class _AskQuestionChoiceCardState extends State<AskQuestionChoiceCard> {
                     Text(
                       'AGENT CLARIFICATION',
                       style: TextStyle(
-                        color: AppColors.accentBlue,
+                        color: scheme.primary,
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
                         letterSpacing: 0.8,
@@ -214,8 +214,8 @@ class _AskQuestionChoiceCardState extends State<AskQuestionChoiceCard> {
                     const SizedBox(height: 4),
                     Text(
                       _question,
-                      style: const TextStyle(
-                        color: AppColors.inkPrimary,
+                      style: TextStyle(
+                        color: scheme.onSurface,
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
                         height: 1.3,
@@ -242,13 +242,13 @@ class _AskQuestionChoiceCardState extends State<AskQuestionChoiceCard> {
                         horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
                       color: isSelected
-                          ? AppColors.accentBlue.withValues(alpha: 0.15)
-                          : AppColors.surfaceBase,
+                          ? scheme.primary.withValues(alpha: 0.15)
+                          : scheme.surface,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
                         color: isSelected
-                            ? AppColors.accentBlue
-                            : AppColors.borderSubtle,
+                            ? scheme.primary
+                            : scheme.outlineVariant,
                         width: isSelected ? 1.4 : 1.0,
                       ),
                     ),
@@ -263,8 +263,8 @@ class _AskQuestionChoiceCardState extends State<AskQuestionChoiceCard> {
                                   ? Icons.radio_button_checked_rounded
                                   : Icons.radio_button_off_rounded),
                           color: isSelected
-                              ? AppColors.accentBlue
-                              : AppColors.inkMuted,
+                              ? scheme.primary
+                              : scheme.outline,
                           size: 18,
                         ),
                         const SizedBox(width: 10),
@@ -273,8 +273,8 @@ class _AskQuestionChoiceCardState extends State<AskQuestionChoiceCard> {
                             option,
                             style: TextStyle(
                               color: isSelected
-                                  ? AppColors.inkPrimary
-                                  : AppColors.inkSecondary,
+                                  ? scheme.onSurface
+                                  : scheme.onSurfaceVariant,
                               fontSize: 13,
                               fontWeight: isSelected
                                   ? FontWeight.w600
@@ -296,30 +296,25 @@ class _AskQuestionChoiceCardState extends State<AskQuestionChoiceCard> {
             TextField(
               controller: _customController,
               onChanged: (_) => setState(() {}),
-              style:
-                  const TextStyle(color: AppColors.inkPrimary, fontSize: 13),
+              style: TextStyle(color: scheme.onSurface, fontSize: 13),
               decoration: InputDecoration(
                 hintText: 'Or enter custom response...',
-                hintStyle:
-                    const TextStyle(color: AppColors.inkMuted, fontSize: 12),
+                hintStyle: TextStyle(color: scheme.outline, fontSize: 12),
                 contentPadding: const EdgeInsets.symmetric(
                     horizontal: 12, vertical: 10),
                 filled: true,
-                fillColor: AppColors.surfaceBase,
+                fillColor: scheme.surface,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide:
-                      const BorderSide(color: AppColors.borderSubtle),
+                  borderSide: BorderSide(color: scheme.outlineVariant),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide:
-                      const BorderSide(color: AppColors.borderSubtle),
+                  borderSide: BorderSide(color: scheme.outlineVariant),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide:
-                      const BorderSide(color: AppColors.accentBlue),
+                  borderSide: BorderSide(color: scheme.primary),
                 ),
               ),
             ),
@@ -333,10 +328,10 @@ class _AskQuestionChoiceCardState extends State<AskQuestionChoiceCard> {
               onPressed:
                   _canSubmit && !_isSubmitting ? _handleSubmit : null,
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.accentBlue,
-                foregroundColor: Colors.white,
-                disabledBackgroundColor: AppColors.surfaceInput,
-                disabledForegroundColor: AppColors.inkMuted,
+                backgroundColor: scheme.primary,
+                foregroundColor: scheme.onPrimary,
+                disabledBackgroundColor: scheme.surfaceContainerHighest,
+                disabledForegroundColor: scheme.outline,
                 padding: const EdgeInsets.symmetric(
                     horizontal: 16, vertical: 10),
                 shape: RoundedRectangleBorder(

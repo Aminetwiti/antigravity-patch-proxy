@@ -537,7 +537,7 @@ func TestWebSocketGetContextReal(t *testing.T) {
 	// avant) — filepath.Join produit des backslashes sur Windows, donc on
 	// convertit explicitement.
 	artifactPath := "file:///" + filepath.ToSlash(filepath.Join(home, ".gemini", "antigravity-ide", "brain", cascadeID, "artifact_1.md"))
-	line := fmt.Sprintf(`{"type":"TOOL_CALL","content":"%s"}`, artifactPath)
+	line := fmt.Sprintf(`{"type":"CODE_ACTION","content":"Created file %s with requested content."}`, artifactPath)
 	if err := os.WriteFile(filepath.Join(transcriptDir, "transcript.jsonl"), []byte(line+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

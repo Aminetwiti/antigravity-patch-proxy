@@ -176,14 +176,14 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
                           duration: AppMotion.fast,
                           padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
                           child: _isLoadingArtifacts
-                              ? const Padding(
-                                  padding: EdgeInsets.all(8.0),
-                                  child: Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(AppColors.accentBlue)))),
+                              ? Padding(
+                                  padding: const EdgeInsets.all(8.0),
+                                  child: Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(scheme.primary)))),
                                 )
                               : _artifacts.isEmpty
-                                  ? const Padding(
-                                      padding: EdgeInsets.all(8.0),
-                                      child: Text('Aucun artefact', style: TextStyle(color: AppColors.inkMuted, fontSize: 12)),
+                                  ? Padding(
+                                      padding: const EdgeInsets.all(8.0),
+                                      child: Text('Aucun artefact', style: TextStyle(color: scheme.outline, fontSize: 12)),
                                     )
                                   : Column(
                                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -194,12 +194,12 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
                                           padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
                                           child: Row(
                                             children: [
-                                              Icon(Icons.article_outlined, size: 14, color: AppColors.accentBlue),
+                                              Icon(Icons.article_outlined, size: 14, color: scheme.primary),
                                               const SizedBox(width: 8),
                                               Expanded(
                                                 child: Text(
                                                   art['name'] ?? 'Document',
-                                                  style: const TextStyle(fontSize: 12, color: AppColors.inkPrimary),
+                                                  style: TextStyle(fontSize: 12, color: scheme.onSurface),
                                                   overflow: TextOverflow.ellipsis,
                                                 ),
                                               ),

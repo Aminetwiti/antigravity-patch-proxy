@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import '../../theme/app_colors.dart';
 
 class QrScannerScreen extends StatefulWidget {
   const QrScannerScreen({super.key});
@@ -32,8 +31,9 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: AppColors.overlayScrim,
+      backgroundColor: Colors.black54,
       appBar: AppBar(
         title: const Text('Scanner le QR Code'),
         backgroundColor: Colors.transparent,
@@ -51,7 +51,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
               width: 250,
               height: 250,
               decoration: BoxDecoration(
-                border: Border.all(color: AppColors.accentBlue, width: 3),
+                border: Border.all(color: scheme.primary, width: 3),
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
@@ -60,14 +60,14 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
             bottom: 40,
             left: 0,
             right: 0,
-            child: const Center(
+            child: Center(
               child: Text(
                 'Pointez vers le QR Code du Daemon',
                 style: TextStyle(
-                  color: AppColors.inkPrimary,
+                  color: scheme.onSurface,
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
-                  shadows: [Shadow(color: AppColors.shadowNeutral, blurRadius: 4)],
+                  shadows: [Shadow(color: Colors.black, blurRadius: 4)],
                 ),
               ),
             ),

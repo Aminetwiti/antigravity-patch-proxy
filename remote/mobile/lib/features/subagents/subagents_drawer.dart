@@ -56,7 +56,8 @@ class SubagentsDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final bgSurface = scheme.surface;
     final cardBg = scheme.surfaceContainer;
     final borderCol = scheme.outlineVariant;
@@ -156,7 +157,7 @@ class SubagentsDrawer extends StatelessWidget {
                       separatorBuilder: (_, __) => const SizedBox(height: 8),
                       itemBuilder: (context, index) {
                         final agent = subagents[index];
-                        final statusColor = _getStatusColor(agent.status);
+                        final statusColor = _getStatusColor(agent.status, scheme);
                         final statusText = _formatStatusLabel(agent.status);
 
                         return Material(

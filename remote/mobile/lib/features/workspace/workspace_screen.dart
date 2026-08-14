@@ -2,8 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../../theme/app_colors.dart';
 import '../../core/protocol/daemon_api.dart';
+import '../../theme/app_colors.dart';
 import '../../widgets/custom_dropdown_overlay.dart';
 
 class WorkspaceScreen extends StatefulWidget {
@@ -355,6 +355,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   }
 
   void _showWorkspaceDropdown(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     CustomDropdownOverlay.show(
       context: context,
       targetKey: _workspaceButtonKey,
@@ -365,35 +366,35 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           shrinkWrap: true,
           padding: EdgeInsets.zero,
           children: [
-            _buildWorkspaceItem('antigravity-add-model-main', true),
-            _buildWorkspaceItem('www - Copie', false),
-            _buildWorkspaceItem('sols-pro-vision', false),
-            _buildWorkspaceItem(r'c:\Users\amine\Desktop\ooredoo\posweb', false),
-            _buildWorkspaceItem(r'c:\Users\amine\OmniRoute', false),
-            _buildWorkspaceItem('mo7i', false),
-            Divider(color: AppColors.borderSubtle, height: 1),
-            _buildWorkspaceActionItem(Icons.create_new_folder_outlined, 'New Project'),
-            _buildWorkspaceActionItem(Icons.bolt_outlined, 'Quick Start'),
-            Divider(color: AppColors.borderSubtle, height: 1),
-            _buildWorkspaceActionItem(Icons.do_disturb_alt_outlined, 'No Project'),
+            _buildWorkspaceItem('antigravity-add-model-main', true, scheme),
+            _buildWorkspaceItem('www - Copie', false, scheme),
+            _buildWorkspaceItem('sols-pro-vision', false, scheme),
+            _buildWorkspaceItem(r'c:\Users\amine\Desktop\ooredoo\posweb', false, scheme),
+            _buildWorkspaceItem(r'c:\Users\amine\OmniRoute', false, scheme),
+            _buildWorkspaceItem('mo7i', false, scheme),
+            Divider(color: scheme.outlineVariant, height: 1),
+            _buildWorkspaceActionItem(Icons.create_new_folder_outlined, 'New Project', scheme),
+            _buildWorkspaceActionItem(Icons.bolt_outlined, 'Quick Start', scheme),
+            Divider(color: scheme.outlineVariant, height: 1),
+            _buildWorkspaceActionItem(Icons.do_disturb_alt_outlined, 'No Project', scheme),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildWorkspaceItem(String title, bool isSelected) {
+  Widget _buildWorkspaceItem(String title, bool isSelected, ColorScheme scheme) {
     return InkWell(
       onTap: () {
         CustomDropdownOverlay.hide();
         // Here we would actually change the workspace
       },
       child: Container(
-        color: isSelected ? AppColors.surfaceInput : Colors.transparent,
+        color: isSelected ? scheme.surfaceContainerHighest : Colors.transparent,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: [
-            Icon(Icons.folder_outlined, size: 16, color: AppColors.inkMuted),
+            Icon(Icons.folder_outlined, size: 16, color: scheme.onSurfaceVariant),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
@@ -401,7 +402,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                  color: AppColors.inkPrimary,
+                  color: scheme.onSurface,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -412,7 +413,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
-  Widget _buildWorkspaceActionItem(IconData icon, String title) {
+  Widget _buildWorkspaceActionItem(IconData icon, String title, ColorScheme scheme) {
     return InkWell(
       onTap: () {
         CustomDropdownOverlay.hide();
@@ -421,14 +422,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: [
-            Icon(icon, size: 16, color: AppColors.inkMuted),
+            Icon(icon, size: 16, color: scheme.onSurfaceVariant),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
                 title,
                 style: TextStyle(
                   fontSize: 13,
-                  color: AppColors.inkPrimary,
+                  color: scheme.onSurface,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),

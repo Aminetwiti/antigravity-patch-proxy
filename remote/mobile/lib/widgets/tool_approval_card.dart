@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/protocol/messages.dart';
-import '../theme/app_colors.dart';
 
 class ToolApprovalCard extends StatefulWidget {
   final ToolApprovalRequest request;
@@ -92,24 +91,25 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
   @override
   Widget build(BuildContext context) {
     final request = widget.request;
+    final scheme = Theme.of(context).colorScheme;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeOutExpo,
       margin: const EdgeInsets.symmetric(vertical: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainer,
+        color: scheme.surfaceContainer,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
           color: widget.isExpired
-              ? AppColors.danger.withValues(alpha: 0.7)
+              ? scheme.error.withValues(alpha: 0.7)
               : _isSubmitting
-                  ? AppColors.positive.withValues(alpha: 0.5)
-                  : AppColors.warning,
+                  ? scheme.primary.withValues(alpha: 0.5)
+                  : scheme.tertiary,
           width: 1.5,
         ),
         boxShadow: _isSubmitting
-            ? [BoxShadow(color: AppColors.positive.withValues(alpha: 0.2), blurRadius: 10, spreadRadius: 1)]
+            ? [BoxShadow(color: scheme.primary.withValues(alpha: 0.2), blurRadius: 10, spreadRadius: 1)]
             : [],
       ),
       child: Column(
@@ -121,20 +121,20 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: AppColors.warning.withValues(alpha: 0.15),
+                  color: scheme.tertiary.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(_iconForTool(request.toolName), size: 14, color: AppColors.warning),
+                    Icon(_iconForTool(request.toolName), size: 14, color: scheme.tertiary),
                     const SizedBox(width: 6),
                     Text(
                       'APPROVAL REQUIRED (${request.toolName})',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
-                        color: AppColors.warning,
+                        color: scheme.tertiary,
                         letterSpacing: 0.5,
                       ),
                     ),
@@ -175,14 +175,14 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
           // "Always allow for this session" — Bug #13 : tooltip explicatif.
           Row(
             children: [
-              const Icon(Icons.autorenew, size: 14, color: AppColors.warning),
+              Icon(Icons.autorenew, size: 14, color: scheme.tertiary),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
                   'Toujours autoriser ${request.toolName} pour cette session',
                   style: TextStyle(
                     fontSize: 11.5,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    color: scheme.onSurfaceVariant,
                   ),
                 ),
               ),
@@ -197,7 +197,7 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
                     HapticFeedback.lightImpact();
                     setState(() => _alwaysAllow = v);
                   },
-                  activeColor: AppColors.warning,
+                  activeColor: scheme.tertiary,
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
               ),
@@ -211,19 +211,19 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               decoration: BoxDecoration(
-                color: AppColors.danger.withValues(alpha: 0.12),
+                color: scheme.error.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: AppColors.danger.withValues(alpha: 0.4)),
+                border: Border.all(color: scheme.error.withValues(alpha: 0.4)),
               ),
-              child: const Row(
+              child: Row(
                 children: [
-                  Icon(Icons.timer_off_outlined, size: 14, color: AppColors.danger),
-                  SizedBox(width: 6),
+                  Icon(Icons.timer_off_outlined, size: 14, color: scheme.error),
+                  const SizedBox(width: 6),
                   Expanded(
                     // Bug #13 : fontWeight.w700 pour contraste suffisant sur fond danger 12%.
                     child: Text(
                       'Approbation expirée — auto-refusée par le daemon (5 min)',
-                      style: TextStyle(fontSize: 11.5, color: AppColors.danger, fontWeight: FontWeight.w700),
+                      style: TextStyle(fontSize: 11.5, color: scheme.error, fontWeight: FontWeight.w700),
                     ),
                   ),
                 ],
@@ -243,13 +243,13 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
                   onPressed: _isSubmitting || widget.isExpired
                       ? null
                       : () => _handleDecision(ToolDecision.deny),
-                  icon: const Icon(Icons.close, size: 16, color: AppColors.danger),
-                  label: const Text(
+                  icon: Icon(Icons.close, size: 16, color: scheme.error),
+                  label: Text(
                     'Refuser',
-                    style: TextStyle(color: AppColors.danger, fontSize: 13),
+                    style: TextStyle(color: scheme.error, fontSize: 13),
                   ),
                   style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: AppColors.danger),
+                    side: BorderSide(color: scheme.error),
                     padding: const EdgeInsets.symmetric(vertical: 10),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(6),
@@ -267,18 +267,18 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
                       ? null
                       : () => _handleDecision(ToolDecision.allow),
                   icon: _isSubmitting
-                      ? const SizedBox(
+                      ? SizedBox(
                           width: 16,
                           height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.inkPrimary),
+                          child: CircularProgressIndicator(strokeWidth: 2, color: scheme.onPrimary),
                         )
-                      : const Icon(Icons.check, size: 16, color: AppColors.inkPrimary),
+                      : Icon(Icons.check, size: 16, color: scheme.onPrimary),
                   label: Text(
                     _isSubmitting ? 'En cours...' : 'Approuver',
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.inkPrimary),
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: scheme.onPrimary),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.positive,
+                    backgroundColor: scheme.primary,
                     padding: const EdgeInsets.symmetric(vertical: 10),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(6),

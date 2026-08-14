@@ -196,20 +196,20 @@ class _ChatInputBarState extends State<ChatInputBar> {
     _controller.text = newText;
   }
 
-  Color _badgeColorForExtension(String name) {
+  Color _badgeColorForExtension(String name, ColorScheme scheme) {
     if (name.endsWith('/') || !name.contains('.')) {
-      return AppColors.providerCustom;
+      return scheme.tertiary;
     }
     final ext = name.split('.').last.toLowerCase();
     switch (ext) {
       case 'json':
-        return AppColors.warning;
+        return scheme.tertiary;
       case 'md':
-        return AppColors.accentBlue;
+        return scheme.primary;
       case 'csv':
-        return AppColors.positive;
+        return scheme.secondary;
       default:
-        return AppColors.providerCustom;
+        return scheme.tertiary;
     }
   }
 
@@ -847,11 +847,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
     final isSelected = _selectedModel.toLowerCase().contains(model.id.toLowerCase()) ||
         _selectedModel.toLowerCase().contains(model.displayName.toLowerCase());
 
-    Color statusColor = AppColors.positive;
+    Color statusColor = scheme.primary;
     if (model.status == 'degraded') {
-      statusColor = AppColors.warning;
+      statusColor = scheme.tertiary;
     } else if (model.status == 'offline') {
-      statusColor = AppColors.danger;
+      statusColor = scheme.error;
     }
 
     return InkWell(
@@ -1000,11 +1000,13 @@ class _ChatInputBarState extends State<ChatInputBar> {
                       decoration: BoxDecoration(
                         color: _badgeColorForExtension(
                           _attachedFileName!,
+                          scheme,
                         ).withValues(alpha: 0.2),
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
                           color: _badgeColorForExtension(
                             _attachedFileName!,
+                            scheme,
                           ).withValues(alpha: 0.5),
                         ),
                       ),
@@ -1013,7 +1015,10 @@ class _ChatInputBarState extends State<ChatInputBar> {
                           Icon(
                             _iconForExtension(_attachedFileName!),
                             size: 14,
-                            color: _badgeColorForExtension(_attachedFileName!),
+                            color: _badgeColorForExtension(
+                              _attachedFileName!,
+                              scheme,
+                            ),
                           ),
                           const SizedBox(width: 6),
                           Expanded(
@@ -1234,21 +1239,21 @@ class _ChatInputBarState extends State<ChatInputBar> {
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                               decoration: BoxDecoration(
-                                color: AppColors.danger.withValues(alpha: 0.15),
+                                color: scheme.error.withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(AppRadius.pill),
-                                border: Border.all(color: AppColors.danger.withValues(alpha: 0.4)),
+                                border: Border.all(color: scheme.error.withValues(alpha: 0.4)),
                               ),
-                              child: const Row(
+                              child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(Icons.stop_circle_outlined, size: 16, color: AppColors.danger),
-                                  SizedBox(width: 4),
+                                  Icon(Icons.stop_circle_outlined, size: 16, color: scheme.error),
+                                  const SizedBox(width: 4),
                                   Text(
                                     'Arrêter',
                                     style: TextStyle(
                                       fontSize: 11.5,
                                       fontWeight: FontWeight.w600,
-                                      color: AppColors.danger,
+                                      color: scheme.error,
                                     ),
                                   ),
                                 ],
@@ -1565,11 +1570,11 @@ class _UsageLimitsModal extends StatelessWidget {
     required int percent,
   }) {
     final scheme = Theme.of(context).colorScheme;
-    Color progressColor = AppColors.positive;
+    Color progressColor = scheme.primary;
     if (percent < 30) {
-      progressColor = AppColors.danger;
+      progressColor = scheme.error;
     } else if (percent < 60) {
-      progressColor = AppColors.warning;
+      progressColor = scheme.tertiary;
     }
 
     return Container(

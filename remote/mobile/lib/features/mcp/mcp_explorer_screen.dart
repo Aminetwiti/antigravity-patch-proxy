@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'models/mcp_server_info.dart';
 import '../../core/protocol/daemon_api.dart';
+import '../../theme/app_colors.dart';
 
 class McpExplorerScreen extends StatefulWidget {
   final DaemonApi? api;
@@ -30,7 +31,7 @@ class _McpExplorerScreenState extends State<McpExplorerScreen> {
   Future<void> _loadServers() async {
     setState(() { _loading = true; _error = null; });
     try {
-      final servers = await widget.api!.refreshMcpServers();
+      final servers = await widget.api!.getMcpServers();
       setState(() { _servers = servers; _loading = false; });
     } catch (e) {
       setState(() { _error = 'Erreur lors du chargement des serveurs'; _loading = false; });
