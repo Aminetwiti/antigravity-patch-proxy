@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/mention_item.dart';
+import '../../theme/app_colors.dart';
 
 class MentionAutocompleteOverlay extends StatelessWidget {
   final String query;

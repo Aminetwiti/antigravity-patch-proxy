@@ -10,6 +10,7 @@ import '../features/chat_stream/models/mention_item.dart';
 import '../features/chat_stream/widgets/action_pills_bar.dart';
 import '../features/chat_stream/widgets/mention_autocomplete_overlay.dart';
 import 'custom_dropdown_overlay.dart';
+import 'theme/app_colors.dart';
 
 /// Modes d'envoi : immédiat ou mis en file pour exécution séquentielle.
 enum SendMode { immediate, queued }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/protocol/daemon_api.dart';
 import '../../widgets/custom_dropdown_overlay.dart';
+import '../theme/app_colors.dart';
 
 class WorkspaceScreen extends StatefulWidget {
   final DaemonApi? api;

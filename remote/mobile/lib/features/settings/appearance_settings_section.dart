@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../services/settings_store.dart';
+import '../theme/app_colors.dart';
 
 /// Préférences d'apparence : mode clair/sombre + style de l'interface chat.
 /// Le theme mode est persisté (SettingsStore) et remonté à l'app (changement

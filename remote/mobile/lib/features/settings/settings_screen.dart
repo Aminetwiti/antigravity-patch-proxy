@@ -15,6 +15,7 @@ import '../../services/settings_store.dart';
 import '../workspace/git_worktree_selector.dart';
 import 'appearance_settings_section.dart';
 import 'profile_settings_section.dart';
+import '../theme/app_colors.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({

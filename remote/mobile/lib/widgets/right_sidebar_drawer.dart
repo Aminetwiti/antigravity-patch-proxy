@@ -5,6 +5,7 @@ import '../features/scheduled_tasks/scheduled_tasks_screen.dart';
 import '../features/subagents/subagents_drawer.dart';
 import '../features/mcp/mcp_explorer_screen.dart';
 import 'artifact_viewer_modal.dart';
+import '../theme/app_colors.dart';
 
 class RightSidebarDrawer extends StatefulWidget {
   final DaemonApi? api;
