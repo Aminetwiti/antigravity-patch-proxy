@@ -16,6 +16,9 @@ import 'features/settings/settings_screen.dart';
 import 'features/workspace/workspace_screen.dart';
 import 'theme/app_theme.dart';
 import 'features/sessions/sessions_list.dart';
+import 'features/sessions/conversation_history_screen.dart';
+import 'features/scheduled_tasks/scheduled_tasks_screen.dart';
+import 'features/scheduled_tasks/models/scheduled_task_item.dart';
 import 'services/settings_store.dart';
 import 'widgets/right_sidebar_drawer.dart';
 
@@ -327,32 +330,57 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
   }
 
   void _showSessionHistory() {
-    final api = _api;
-    if (api == null || _activeSessionId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Connectez le Daemon pour voir l\'historique')),
-      );
-      return;
-    }
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
-      ),
-      builder: (context) => _SessionHistorySheet(
-        api: api,
-        sessionId: _activeSessionId,
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => ConversationHistoryScreen(
+          sessions: _sessions,
+          activeSessionId: _activeSessionId,
+          onRefresh: _refreshSessions,
+          onSessionSelected: (id) {
+            setState(() {
+              _activeSessionId = id;
+              final s = _sessions.firstWhere(
+                (s) => s.id == id,
+                orElse: () => const CascadeSession(
+                  id: '',
+                  workspacePath: '',
+                  title: 'Session',
+                  status: '',
+                  time: '',
+                ),
+              );
+              _activeSessionTitle = s.title;
+            });
+            _refreshContext();
+          },
+        ),
       ),
     );
   }
 
   void _showScheduledTasks() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => _ScheduledTasksSheet(outbox: _outbox),
+    final workspaces = _sessions
+        .map((s) {
+          var clean = s.workspacePath.replaceAll('\\', '/');
+          if (clean.startsWith('file:///')) clean = clean.substring(8);
+          if (clean.startsWith('file://')) clean = clean.substring(7);
+          final segs = clean.split('/').where((p) => p.isNotEmpty).toList();
+          return segs.isNotEmpty ? segs.last : 'Outside of Project';
+        })
+        .toSet()
+        .toList();
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => ScheduledTasksScreen(
+          tasks: const [],
+          workspaces: workspaces.isNotEmpty ? workspaces : ['antigravity-add-model-main'],
+          onTriggerNow: (id) {},
+          onCancelTask: (id) {},
+          onToggleTask: (id, enabled) {},
+          onAddTask: (task) {},
+        ),
+      ),
     );
   }
 

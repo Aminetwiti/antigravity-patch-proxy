@@ -330,11 +330,13 @@ class _SidebarActionItem extends StatefulWidget {
   final IconData icon;
   final String label;
   final VoidCallback? onTap;
+  final bool isSelected;
 
   const _SidebarActionItem({
     required this.icon,
     required this.label,
     this.onTap,
+    this.isSelected = false,
   });
 
   @override
@@ -346,6 +348,7 @@ class _SidebarActionItemState extends State<_SidebarActionItem> {
 
   @override
   Widget build(BuildContext context) {
+    final isSelected = widget.isSelected;
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
@@ -357,22 +360,28 @@ class _SidebarActionItemState extends State<_SidebarActionItem> {
         child: AnimatedContainer(
           duration: AppMotion.fast,
           curve: AppMotion.easeOut,
-          margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1.5),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
           decoration: BoxDecoration(
-            color: _hovered ? const Color(0xFF1E2025) : Colors.transparent,
+            color: isSelected
+                ? const Color(0xFF26282E)
+                : (_hovered ? const Color(0xFF1E2025) : Colors.transparent),
             borderRadius: BorderRadius.circular(AppRadius.md),
           ),
           child: Row(
             children: [
-              Icon(widget.icon, size: 16, color: const Color(0xFF9E9FA9)),
+              Icon(
+                widget.icon,
+                size: 16,
+                color: isSelected ? const Color(0xFFFFFFFF) : const Color(0xFF9E9FA9),
+              ),
               const SizedBox(width: 10),
               Text(
                 widget.label,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13,
-                  fontWeight: FontWeight.w400,
-                  color: Color(0xFFD4D4D8),
+                  fontWeight: isSelected ? FontWeight.w500 : FontWeight.w400,
+                  color: isSelected ? const Color(0xFFFFFFFF) : const Color(0xFFD4D4D8),
                 ),
               ),
             ],

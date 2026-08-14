@@ -1,252 +1,766 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'models/scheduled_task_item.dart';
+import 'scheduled_task_detail_screen.dart';
 import 'package:mobile/theme/app_colors.dart';
 
-class ScheduledTasksScreen extends StatelessWidget {
+/// Écran Scheduled Tasks (Antigravity 2.0)
+/// Affiche la liste des tâches récurrentes / timers avec recherche, toggle on/off,
+/// menu d'actions (Restart / Delete) et création via le modal "+ New".
+class ScheduledTasksScreen extends StatefulWidget {
   final List<ScheduledTaskItem> tasks;
   final ValueChanged<String>? onCancelTask;
   final ValueChanged<String>? onTriggerNow;
+  final Function(String id, bool isEnabled)? onToggleTask;
+  final Function(ScheduledTaskItem item)? onAddTask;
   final Future<void> Function()? onRefresh;
+  final List<String>? workspaces;
 
   const ScheduledTasksScreen({
     super.key,
     required this.tasks,
     this.onCancelTask,
     this.onTriggerNow,
+    this.onToggleTask,
+    this.onAddTask,
     this.onRefresh,
+    this.workspaces,
+  });
+
+  @override
+  State<ScheduledTasksScreen> createState() => _ScheduledTasksScreenState();
+}
+
+class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  late List<ScheduledTaskItem> _localTasks;
+
+  @override
+  void initState() {
+    super.initState();
+    _localTasks = List.from(widget.tasks);
+    _searchController.addListener(() {
+      setState(() {
+        _searchQuery = _searchController.text.trim().toLowerCase();
+      });
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant ScheduledTasksScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.tasks != widget.tasks) {
+      setState(() {
+        _localTasks = List.from(widget.tasks);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _openNewTaskModal() {
+    HapticFeedback.selectionClick();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _NewScheduledTaskModal(
+        workspaces: widget.workspaces ?? ['antigravity-add-model-main'],
+        onAdd: (newTask) {
+          setState(() {
+            _localTasks.insert(0, newTask);
+          });
+          widget.onAddTask?.call(newTask);
+        },
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = _localTasks.where((task) {
+      if (_searchQuery.isEmpty) return true;
+      final name = task.displayName.toLowerCase();
+      final prompt = task.prompt.toLowerCase();
+      final cron = (task.cronExpression ?? '').toLowerCase();
+      return name.contains(_searchQuery) || prompt.contains(_searchQuery) || cron.contains(_searchQuery);
+    }).toList();
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0F1012),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF0F1012),
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: AppColors.inkPrimary),
+          onPressed: () => Navigator.of(context).pop(),
+          tooltip: 'Retour',
+        ),
+        title: Text(
+          'Scheduled Tasks (${_localTasks.length})',
+          style: const TextStyle(
+            fontSize: 17,
+            fontWeight: FontWeight.w600,
+            color: AppColors.inkPrimary,
+            letterSpacing: -0.2,
+          ),
+        ),
+        actions: [
+          if (widget.onRefresh != null)
+            IconButton(
+              icon: const Icon(Icons.refresh_rounded, size: 20, color: AppColors.inkSecondary),
+              onPressed: () {
+                HapticFeedback.selectionClick();
+                widget.onRefresh!();
+              },
+              tooltip: 'Actualiser',
+            ),
+          // Bouton "+ New" (Style Antigravity 2.0)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: _openNewTaskModal,
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E2025),
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                    border: Border.all(color: const Color(0xFF2C2F36), width: 1),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.add, size: 14, color: AppColors.inkPrimary),
+                      SizedBox(width: 4),
+                      Text(
+                        '+ New',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w500,
+                          color: AppColors.inkPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // ── Search Bar ──────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+              child: Container(
+                height: 40,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1B1D22),
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                  border: Border.all(color: const Color(0xFF2C2F36), width: 1),
+                ),
+                child: TextField(
+                  controller: _searchController,
+                  style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
+                  cursorColor: AppColors.accentBlue,
+                  decoration: InputDecoration(
+                    hintText: 'Search tasks...',
+                    hintStyle: const TextStyle(fontSize: 13, color: Color(0xFF636D83)),
+                    prefixIcon: const Icon(Icons.search_rounded, size: 18, color: Color(0xFF636D83)),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.close_rounded, size: 16, color: Color(0xFF636D83)),
+                            onPressed: () => _searchController.clear(),
+                          )
+                        : null,
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                ),
+              ),
+            ),
+
+            // ── Tasks List or Empty State ─────────────────────────────
+            Expanded(
+              child: filtered.isEmpty
+                  ? _buildEmptyState()
+                  : ListView.separated(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                      itemCount: filtered.length,
+                      separatorBuilder: (context, index) => const Divider(
+                        height: 1,
+                        color: Color(0xFF1B1D22),
+                        indent: 12,
+                        endIndent: 12,
+                      ),
+                      itemBuilder: (context, index) {
+                        final task = filtered[index];
+                        return _ScheduledTaskRow(
+                          task: task,
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (context) => ScheduledTaskDetailScreen(
+                                  task: task,
+                                  onUpdateTask: (updated) {
+                                    setState(() {
+                                      final idx = _localTasks.indexWhere((t) => t.id == updated.id);
+                                      if (idx >= 0) {
+                                        _localTasks[idx] = updated;
+                                      }
+                                    });
+                                  },
+                                  onTriggerNow: widget.onTriggerNow,
+                                  onDeleteTask: (id) {
+                                    setState(() {
+                                      _localTasks.removeWhere((t) => t.id == id);
+                                    });
+                                    widget.onCancelTask?.call(id);
+                                  },
+                                ),
+                              ),
+                            );
+                          },
+                          onToggle: (enabled) {
+                            setState(() {
+                              final idx = _localTasks.indexWhere((t) => t.id == task.id);
+                              if (idx >= 0) {
+                                _localTasks[idx] = _localTasks[idx].copyWith(isEnabled: enabled);
+                              }
+                            });
+                            widget.onToggleTask?.call(task.id, enabled);
+                          },
+                          onRestart: () {
+                            widget.onTriggerNow?.call(task.id);
+                          },
+                          onDelete: () {
+                            setState(() {
+                              _localTasks.removeWhere((t) => t.id == task.id);
+                            });
+                            widget.onCancelTask?.call(task.id);
+                          },
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.schedule_outlined, size: 42, color: AppColors.inkMuted),
+            const SizedBox(height: 14),
+            Text(
+              _searchQuery.isNotEmpty
+                  ? 'Aucune tâche pour "$_searchQuery"'
+                  : 'Aucune tâche planifiée',
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppColors.inkPrimary,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'No scheduled tasks configured.\nCliquez sur "+ New" pour programmer un cron job ou un timer.',
+              style: TextStyle(
+                fontSize: 12,
+                color: Color(0xFF6B7280),
+                height: 1.4,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: _openNewTaskModal,
+              icon: const Icon(Icons.add, size: 16),
+              label: const Text('Add Scheduled Task'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.accentBlue,
+                foregroundColor: AppColors.onAccent,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ScheduledTaskRow extends StatelessWidget {
+  final ScheduledTaskItem task;
+  final VoidCallback onTap;
+  final ValueChanged<bool> onToggle;
+  final VoidCallback onRestart;
+  final VoidCallback onDelete;
+
+  const _ScheduledTaskRow({
+    required this.task,
+    required this.onTap,
+    required this.onToggle,
+    required this.onRestart,
+    required this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final bgSurface = scheme.surface;
-    final cardBg = scheme.surfaceContainer;
-    final borderCol = scheme.outlineVariant;
+    final title = task.displayName;
+    final schedule = task.formattedSchedule;
 
-    final content = tasks.isEmpty
-        ? Center(
-            child: Padding(
-              padding: const EdgeInsets.all(32.0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.schedule_outlined,
-                    size: 48,
-                    color: scheme.onSurfaceVariant.withValues(alpha: 0.5),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Aucune tâche planifiée',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: scheme.onSurface,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Les cron jobs récurrents et timers s\'afficheront ici.',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-          )
-        : ListView.separated(
-            padding: const EdgeInsets.all(16),
-            itemCount: tasks.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
-            itemBuilder: (context, index) {
-              final task = tasks[index];
-              final isCron = task.cronExpression != null && task.cronExpression!.isNotEmpty;
-
-              return Container(
-                decoration: BoxDecoration(
-                  color: cardBg,
-                  borderRadius: BorderRadius.circular(AppRadius.lg),
-                  border: Border.all(color: borderCol, width: 1),
-                ),
-                padding: const EdgeInsets.all(14),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: Row(
+        children: [
+          // Titre et Subtitle (Daily around 9:00 AM) - Tappable pour ouvrir les détails
+          Expanded(
+            child: InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Header Row: Schedule Type badge + Task ID + Cancel Action
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: isCron
-                                ? scheme.primary.withValues(alpha: 0.15)
-                                : scheme.tertiary.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(AppRadius.pill),
-                            border: Border.all(
-                              color: isCron
-                                  ? scheme.primary.withValues(alpha: 0.3)
-                                  : scheme.tertiary.withValues(alpha: 0.3),
-                              width: 0.8,
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                isCron ? Icons.repeat : Icons.timer_outlined,
-                                size: 12,
-                                color: isCron ? scheme.primary : scheme.tertiary,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                isCron ? 'Cron Job' : 'Timer',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  color: isCron ? scheme.primary : scheme.tertiary,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (task.isDaemon) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: scheme.surfaceContainerHighest,
-                              borderRadius: BorderRadius.circular(AppRadius.sm),
-                            ),
-                            child: Text(
-                              'Daemon',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w500,
-                                color: scheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ),
-                        ],
-                        const Spacer(),
-                        if (onCancelTask != null)
-                          IconButton(
-                            icon: Icon(Icons.close, size: 16, color: scheme.error),
-                            tooltip: 'Annuler la tâche',
-                            onPressed: () => onCancelTask!(task.id),
-                            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                            padding: EdgeInsets.zero,
-                            visualDensity: VisualDensity.compact,
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Prompt Title
                     Text(
-                      task.prompt,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: scheme.onSurface,
+                      title,
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.inkPrimary,
+                        letterSpacing: -0.1,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 8),
-
-                    // Details: Cron Expression or Duration
-                    if (isCron)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: scheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(AppRadius.sm),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.code,
-                              size: 13,
-                              color: scheme.onSurfaceVariant,
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              task.cronExpression!,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontFamily: 'monospace',
-                                fontWeight: FontWeight.w600,
-                                color: scheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    else if (task.durationSeconds != null)
+                    const SizedBox(height: 3),
+                    Text(
+                      schedule,
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        color: Color(0xFF8F909A),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (task.cronExpression != null && task.cronExpression!.isNotEmpty) ...[
+                      const SizedBox(height: 2),
                       Text(
-                        'Durée: ${task.durationSeconds}s',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: scheme.onSurfaceVariant,
+                        task.cronExpression!,
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Color(0xFF5E606A),
+                          fontFamily: 'monospace',
                         ),
                       ),
-                    const SizedBox(height: 12),
-
-                    // Bottom info: Iterations & Trigger Button
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.insights,
-                          size: 14,
-                          color: scheme.onSurfaceVariant,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${task.iterationsRun} itérations',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const Spacer(),
-                        if (onTriggerNow != null)
-                          OutlinedButton.icon(
-                            icon: const Icon(Icons.play_arrow, size: 14),
-                            label: const Text('Trigger Now', style: TextStyle(fontSize: 12)),
-                            onPressed: () => onTriggerNow!(task.id),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: scheme.primary,
-                              side: BorderSide(color: scheme.primary, width: 0.9),
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              visualDensity: VisualDensity.compact,
-                            ),
-                          ),
-                      ],
-                    ),
+                    ],
                   ],
                 ),
-              );
-            },
-          );
+              ),
+            ),
+          ),
 
-    return Scaffold(
-      backgroundColor: bgSurface,
-      appBar: AppBar(
-        title: Text('Scheduled Tasks (${tasks.length})'),
-        backgroundColor: scheme.surfaceContainer,
-        elevation: 0,
+          const SizedBox(width: 8),
+
+          // Bouton Trigger Now (pour tests et accès direct)
+          TextButton(
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              onRestart();
+            },
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              minimumSize: const Size(0, 0),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text(
+              'Trigger Now',
+              style: TextStyle(
+                fontSize: 11,
+                color: AppColors.accentBlue,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+
+          // Bouton Annuler / Supprimer
+          IconButton(
+            icon: const Icon(Icons.close_rounded, size: 16, color: Color(0xFF8F909A)),
+            tooltip: 'Annuler la tâche',
+            onPressed: () {
+              HapticFeedback.mediumImpact();
+              onDelete();
+            },
+            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            padding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+          ),
+
+          const SizedBox(width: 4),
+
+          // Switch Toggle (Bleu Antigravity 2.0 / Switch)
+          Transform.scale(
+            scale: 0.8,
+            child: Switch(
+              value: task.isEnabled,
+              activeColor: const Color(0xFF1D64B4),
+              activeTrackColor: const Color(0xFF1D64B4).withValues(alpha: 0.5),
+              inactiveThumbColor: const Color(0xFF8F909A),
+              inactiveTrackColor: const Color(0xFF2C2F36),
+              onChanged: (val) {
+                HapticFeedback.selectionClick();
+                onToggle(val);
+              },
+            ),
+          ),
+        ],
       ),
-      body: onRefresh != null
-          ? RefreshIndicator(
-              onRefresh: onRefresh!,
-              child: content,
-            )
-          : content,
+    );
+  }
+}
+
+/// Modal Bottom Sheet "New Scheduled Task" (Exact Antigravity 2.0 UI)
+class _NewScheduledTaskModal extends StatefulWidget {
+  final List<String> workspaces;
+  final ValueChanged<ScheduledTaskItem> onAdd;
+
+  const _NewScheduledTaskModal({
+    required this.workspaces,
+    required this.onAdd,
+  });
+
+  @override
+  State<_NewScheduledTaskModal> createState() => _NewScheduledTaskModalState();
+}
+
+class _NewScheduledTaskModalState extends State<_NewScheduledTaskModal> {
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _promptController = TextEditingController();
+
+  late String _selectedProject;
+  String _selectedFrequency = 'Daily';
+  String _selectedTime = '9:00 AM';
+
+  final List<String> _frequencies = ['Daily', 'Hourly', 'Weekly', 'Every 15 min', 'Custom Cron'];
+  final List<String> _times = ['9:00 AM', '12:00 PM', '6:00 PM', '12:00 AM', '3:00 PM', '6:00 AM'];
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedProject = widget.workspaces.isNotEmpty ? widget.workspaces.first : 'antigravity-add-model-main';
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _promptController.dispose();
+    super.dispose();
+  }
+
+  String _computeCronExpression() {
+    if (_selectedFrequency == 'Daily') {
+      if (_selectedTime == '9:00 AM') return '0 9 * * *';
+      if (_selectedTime == '12:00 PM') return '0 12 * * *';
+      if (_selectedTime == '6:00 PM') return '0 18 * * *';
+      if (_selectedTime == '12:00 AM') return '0 0 * * *';
+      return '0 9 * * *';
+    } else if (_selectedFrequency == 'Hourly') {
+      return '0 * * * *';
+    } else if (_selectedFrequency == 'Every 15 min') {
+      return '*/15 * * * *';
+    } else if (_selectedFrequency == 'Weekly') {
+      return '0 9 * * 1';
+    }
+    return '0 9 * * *';
+  }
+
+  void _submit() {
+    final name = _nameController.text.trim();
+    final prompt = _promptController.text.trim();
+    if (name.isEmpty && prompt.isEmpty) return;
+
+    final cron = _computeCronExpression();
+    final item = ScheduledTaskItem(
+      id: 'task_${DateTime.now().millisecondsSinceEpoch}',
+      name: name.isNotEmpty ? name : prompt,
+      prompt: prompt.isNotEmpty ? prompt : name,
+      workspaceName: _selectedProject,
+      cronExpression: cron,
+      isDaemon: true,
+      isEnabled: true,
+    );
+
+    widget.onAdd(item);
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF131416),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        border: Border(top: BorderSide(color: Color(0xFF2C2F36), width: 1)),
+      ),
+      padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header: Title + Close Icon
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'New Scheduled Task',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.inkPrimary,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded, size: 18, color: Color(0xFF8F909A)),
+                  onPressed: () => Navigator.of(context).pop(),
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                  padding: EdgeInsets.zero,
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 16),
+
+            // ── Name Field ──
+            const Text(
+              'Name',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w500,
+                color: Color(0xFFD4D4D8),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF1B1D22),
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                border: Border.all(color: const Color(0xFF2C2F36)),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: TextField(
+                controller: _nameController,
+                style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
+                decoration: const InputDecoration(
+                  hintText: 'Enter scheduled task name...',
+                  hintStyle: TextStyle(fontSize: 13, color: Color(0xFF5E606A)),
+                  border: InputBorder.none,
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 14),
+
+            // ── Project Field ──
+            const Text(
+              'Project',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w500,
+                color: Color(0xFFD4D4D8),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF1B1D22),
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                border: Border.all(color: const Color(0xFF2C2F36)),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _selectedProject,
+                  dropdownColor: const Color(0xFF1B1D22),
+                  icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF8F909A), size: 18),
+                  isExpanded: true,
+                  items: widget.workspaces
+                      .map((ws) => DropdownMenuItem(
+                            value: ws,
+                            child: Row(
+                              children: [
+                                const Icon(Icons.folder_outlined, size: 14, color: Color(0xFF8F909A)),
+                                const SizedBox(width: 8),
+                                Text(
+                                  ws,
+                                  style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
+                                ),
+                              ],
+                            ),
+                          ))
+                      .toList(),
+                  onChanged: (val) {
+                    if (val != null) setState(() => _selectedProject = val);
+                  },
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 14),
+
+            // ── Schedule Field (Frequency + around + Time) ──
+            const Text(
+              'Schedule',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w500,
+                color: Color(0xFFD4D4D8),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                // Frequency Dropdown (Daily ⌄)
+                Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1B1D22),
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                    border: Border.all(color: const Color(0xFF2C2F36)),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: _selectedFrequency,
+                      dropdownColor: const Color(0xFF1B1D22),
+                      icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF8F909A), size: 16),
+                      items: _frequencies
+                          .map((f) => DropdownMenuItem(
+                                value: f,
+                                child: Text(f, style: const TextStyle(fontSize: 12.5, color: AppColors.inkPrimary)),
+                              ))
+                          .toList(),
+                      onChanged: (val) {
+                        if (val != null) setState(() => _selectedFrequency = val);
+                      },
+                    ),
+                  ),
+                ),
+
+                const SizedBox(width: 8),
+                const Text(
+                  'around',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF8F909A)),
+                ),
+                const SizedBox(width: 8),
+
+                // Time Dropdown (9:00 AM ⌄)
+                Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1B1D22),
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                    border: Border.all(color: const Color(0xFF2C2F36)),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: _selectedTime,
+                      dropdownColor: const Color(0xFF1B1D22),
+                      icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF8F909A), size: 16),
+                      items: _times
+                          .map((t) => DropdownMenuItem(
+                                value: t,
+                                child: Text(t, style: const TextStyle(fontSize: 12.5, color: AppColors.inkPrimary)),
+                              ))
+                          .toList(),
+                      onChanged: (val) {
+                        if (val != null) setState(() => _selectedTime = val);
+                      },
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 14),
+
+            // ── Prompt Field ──
+            const Text(
+              'Prompt',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w500,
+                color: Color(0xFFD4D4D8),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF1B1D22),
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                border: Border.all(color: const Color(0xFF2C2F36)),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: TextField(
+                controller: _promptController,
+                maxLines: 3,
+                style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
+                decoration: const InputDecoration(
+                  hintText: 'Enter a prompt for the agent to run...',
+                  hintStyle: TextStyle(fontSize: 13, color: Color(0xFF5E606A)),
+                  border: InputBorder.none,
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 6),
+            const Text(
+              'All scheduled tasks run as Flash.',
+              style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+            ),
+
+            const SizedBox(height: 20),
+
+            // ── Add Scheduled Task Action Button ──
+            Align(
+              alignment: Alignment.centerRight,
+              child: ElevatedButton(
+                onPressed: _submit,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1D64B4),
+                  foregroundColor: AppColors.onAccent,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
+                ),
+                child: const Text(
+                  'Add Scheduled Task',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

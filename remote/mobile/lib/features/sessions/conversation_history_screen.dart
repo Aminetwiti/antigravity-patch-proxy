@@ -1,0 +1,544 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:mobile/core/protocol/messages.dart';
+import 'package:mobile/theme/app_colors.dart';
+
+/// Écran Conversation History (Antigravity 2.0)
+/// Affiche la liste complète de toutes les conversations avec recherche en temps réel,
+/// filtrage par workspace/projet, indicateurs de sessions actives/en cours et sélection rapide.
+class ConversationHistoryScreen extends StatefulWidget {
+  final List<CascadeSession> sessions;
+  final String activeSessionId;
+  final Function(String sessionId) onSessionSelected;
+  final VoidCallback? onRefresh;
+
+  const ConversationHistoryScreen({
+    super.key,
+    required this.sessions,
+    required this.activeSessionId,
+    required this.onSessionSelected,
+    this.onRefresh,
+  });
+
+  @override
+  State<ConversationHistoryScreen> createState() => _ConversationHistoryScreenState();
+}
+
+class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  String? _selectedWorkspaceFilter; // null = all workspaces
+  bool _sortByRecent = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(() {
+      setState(() {
+        _searchQuery = _searchController.text.trim().toLowerCase();
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  String _cleanWorkspaceName(String rawPath) {
+    if (rawPath.isEmpty || rawPath == '.') return 'Outside of Project';
+    var clean = rawPath.replaceAll('\\', '/');
+    if (clean.startsWith('file:///')) clean = clean.substring(8);
+    if (clean.startsWith('file://')) clean = clean.substring(7);
+    final segments = clean.split('/').where((s) => s.isNotEmpty).toList();
+    if (segments.isNotEmpty) {
+      return segments.last;
+    }
+    return 'Outside of Project';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Filtrer STRICTEMENT les sessions disponibles (non archivées et non supprimées)
+    final available = widget.sessions.where((s) => s.isAvailable && s.id.isNotEmpty).toList();
+
+    // Extraire tous les workspaces distincts pour le filtre
+    final workspaces = available
+        .map((s) => _cleanWorkspaceName(s.workspacePath))
+        .toSet()
+        .toList()
+      ..sort();
+
+    // Appliquer le filtre par workspace
+    var filtered = available;
+    if (_selectedWorkspaceFilter != null) {
+      filtered = filtered.where((s) => _cleanWorkspaceName(s.workspacePath) == _selectedWorkspaceFilter).toList();
+    }
+
+    // Appliquer la recherche textuelle
+    if (_searchQuery.isNotEmpty) {
+      filtered = filtered.where((s) {
+        final title = s.title.toLowerCase();
+        final ws = _cleanWorkspaceName(s.workspacePath).toLowerCase();
+        return title.contains(_searchQuery) || ws.contains(_searchQuery);
+      }).toList();
+    }
+
+    // Tri
+    if (!_sortByRecent) {
+      filtered.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+    }
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0F1012),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF0F1012),
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: AppColors.inkPrimary),
+          onPressed: () => Navigator.of(context).pop(),
+          tooltip: 'Retour',
+        ),
+        title: const Text(
+          'Conversation History',
+          style: TextStyle(
+            fontSize: 17,
+            fontWeight: FontWeight.w600,
+            color: AppColors.inkPrimary,
+            letterSpacing: -0.2,
+          ),
+        ),
+        actions: [
+          if (widget.onRefresh != null)
+            IconButton(
+              icon: const Icon(Icons.refresh_rounded, size: 20, color: AppColors.inkSecondary),
+              onPressed: () {
+                HapticFeedback.selectionClick();
+                widget.onRefresh!();
+              },
+              tooltip: 'Actualiser',
+            ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert_rounded, size: 20, color: AppColors.inkSecondary),
+            color: AppColors.surfaceRaised,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              side: const BorderSide(color: AppColors.borderStrong),
+            ),
+            onSelected: (val) {
+              setState(() {
+                if (val == 'toggle_sort') {
+                  _sortByRecent = !_sortByRecent;
+                } else if (val == 'clear_filter') {
+                  _selectedWorkspaceFilter = null;
+                }
+              });
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'toggle_sort',
+                child: Row(
+                  children: [
+                    Icon(
+                      _sortByRecent ? Icons.sort_by_alpha_rounded : Icons.access_time_rounded,
+                      size: 16,
+                      color: AppColors.inkPrimary,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      _sortByRecent ? 'Trier par nom (A-Z)' : 'Trier par date (récent)',
+                      style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
+                    ),
+                  ],
+                ),
+              ),
+              if (_selectedWorkspaceFilter != null)
+                const PopupMenuItem(
+                  value: 'clear_filter',
+                  child: Row(
+                    children: [
+                      Icon(Icons.clear_all_rounded, size: 16, color: AppColors.accentBlue),
+                      SizedBox(width: 10),
+                      Text(
+                        'Réinitialiser les filtres',
+                        style: TextStyle(fontSize: 13, color: AppColors.accentBlue),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(width: 6),
+        ],
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // ── Search & Filter Bar ──────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Container(
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1B1D22),
+                        borderRadius: BorderRadius.circular(AppRadius.lg),
+                        border: Border.all(color: const Color(0xFF2C2F36), width: 1),
+                      ),
+                      child: TextField(
+                        controller: _searchController,
+                        style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
+                        cursorColor: AppColors.accentBlue,
+                        decoration: InputDecoration(
+                          hintText: 'Search conversations...',
+                          hintStyle: const TextStyle(fontSize: 13, color: Color(0xFF636D83)),
+                          prefixIcon: const Icon(Icons.search_rounded, size: 18, color: Color(0xFF636D83)),
+                          suffixIcon: _searchQuery.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.close_rounded, size: 16, color: Color(0xFF636D83)),
+                                  onPressed: () {
+                                    _searchController.clear();
+                                  },
+                                )
+                              : null,
+                          border: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+
+                  // Bouton Filtre par projet
+                  PopupMenuButton<String>(
+                    tooltip: 'Filtrer par projet',
+                    color: AppColors.surfaceRaised,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                      side: const BorderSide(color: AppColors.borderStrong),
+                    ),
+                    icon: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: _selectedWorkspaceFilter != null
+                            ? AppColors.accentBlue.withValues(alpha: 0.15)
+                            : const Color(0xFF1B1D22),
+                        borderRadius: BorderRadius.circular(AppRadius.lg),
+                        border: Border.all(
+                          color: _selectedWorkspaceFilter != null
+                              ? AppColors.accentBlue
+                              : const Color(0xFF2C2F36),
+                          width: 1,
+                        ),
+                      ),
+                      child: Icon(
+                        Icons.filter_list_rounded,
+                        size: 18,
+                        color: _selectedWorkspaceFilter != null
+                            ? AppColors.accentBlue
+                            : AppColors.inkSecondary,
+                      ),
+                    ),
+                    onSelected: (ws) {
+                      setState(() {
+                        _selectedWorkspaceFilter = ws.isEmpty ? null : ws;
+                      });
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem<String>(
+                        value: '',
+                        child: Text(
+                          'Tous les projets',
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.inkPrimary),
+                        ),
+                      ),
+                      const PopupMenuDivider(),
+                      ...workspaces.map(
+                        (ws) => PopupMenuItem<String>(
+                          value: ws,
+                          child: Row(
+                            children: [
+                              const Icon(Icons.folder_outlined, size: 14, color: AppColors.inkMuted),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  ws,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: _selectedWorkspaceFilter == ws
+                                        ? AppColors.accentBlue
+                                        : AppColors.inkPrimary,
+                                    fontWeight: _selectedWorkspaceFilter == ws
+                                        ? FontWeight.w600
+                                        : FontWeight.w400,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (_selectedWorkspaceFilter == ws)
+                                const Icon(Icons.check_rounded, size: 16, color: AppColors.accentBlue),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            // Badge de filtre actif (si présent)
+            if (_selectedWorkspaceFilter != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppColors.accentBlue.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(AppRadius.sm),
+                        border: Border.all(color: AppColors.accentBlue.withValues(alpha: 0.3)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.folder_open_rounded, size: 13, color: AppColors.accentBlue),
+                          const SizedBox(width: 6),
+                          Text(
+                            _selectedWorkspaceFilter!,
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w500,
+                              color: AppColors.accentBlue,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          InkWell(
+                            onTap: () => setState(() => _selectedWorkspaceFilter = null),
+                            child: const Icon(Icons.close_rounded, size: 13, color: AppColors.accentBlue),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            // ── Session List ────────────────────────────────────────────────
+            Expanded(
+              child: filtered.isEmpty
+                  ? _buildEmptyState()
+                  : ListView.separated(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                      itemCount: filtered.length,
+                      separatorBuilder: (context, index) => const Divider(
+                        height: 1,
+                        color: Color(0xFF1B1D22),
+                        indent: 12,
+                        endIndent: 12,
+                      ),
+                      itemBuilder: (context, index) {
+                        final session = filtered[index];
+                        final isActive = session.id == widget.activeSessionId;
+                        final isRunning = session.isRunning;
+                        final wsName = _cleanWorkspaceName(session.workspacePath);
+
+                        return _ConversationHistoryRow(
+                          session: session,
+                          workspaceName: wsName,
+                          isActive: isActive,
+                          isRunning: isRunning,
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            widget.onSessionSelected(session.id);
+                            Navigator.of(context).pop();
+                          },
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.search_off_rounded, size: 42, color: AppColors.inkMuted),
+            const SizedBox(height: 14),
+            Text(
+              _searchQuery.isNotEmpty
+                  ? 'Aucune conversation pour "$_searchQuery"'
+                  : 'Aucune conversation disponible',
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppColors.inkPrimary,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Les sessions archivées ou supprimées sont automatiquement filtrées.',
+              style: TextStyle(
+                fontSize: 12,
+                color: AppColors.inkMuted,
+                height: 1.4,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            if (_searchQuery.isNotEmpty || _selectedWorkspaceFilter != null) ...[
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _searchController.clear();
+                    _selectedWorkspaceFilter = null;
+                  });
+                },
+                icon: const Icon(Icons.refresh_rounded, size: 14, color: AppColors.accentBlue),
+                label: const Text('Effacer les filtres', style: TextStyle(fontSize: 12, color: AppColors.accentBlue)),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: AppColors.accentBlue),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ConversationHistoryRow extends StatelessWidget {
+  final CascadeSession session;
+  final String workspaceName;
+  final bool isActive;
+  final bool isRunning;
+  final VoidCallback onTap;
+
+  const _ConversationHistoryRow({
+    required this.session,
+    required this.workspaceName,
+    required this.isActive,
+    required this.isRunning,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        hoverColor: const Color(0xFF1E2127),
+        splashColor: AppColors.accentBlue.withValues(alpha: 0.1),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              // Colonne Titre + Workspace
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      session.title.isEmpty ? 'Untitled Conversation' : session.title,
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+                        color: isActive ? AppColors.inkPrimary : const Color(0xFFE4E4E7),
+                        letterSpacing: -0.1,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 3),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.folder_outlined,
+                          size: 12,
+                          color: Color(0xFF6B7280),
+                        ),
+                        const SizedBox(width: 5),
+                        Expanded(
+                          child: Text(
+                            workspaceName,
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              color: Color(0xFF8F909A),
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(width: 12),
+
+              // Trailing Status: Active blue dot, Spinner, or relative time
+              if (isRunning)
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.5,
+                    color: AppColors.accentBlue,
+                  ),
+                )
+              else if (isActive)
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: const BoxDecoration(
+                    color: AppColors.accentBlue,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.accentBlue,
+                        blurRadius: 4,
+                        spreadRadius: 1,
+                      ),
+                    ],
+                  ),
+                )
+              else if (session.time.isNotEmpty)
+                Text(
+                  session.time,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFF6B7280),
+                    fontWeight: FontWeight.w400,
+                  ),
+                )
+              else
+                const Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  size: 11,
+                  color: Color(0xFF3F424E),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
