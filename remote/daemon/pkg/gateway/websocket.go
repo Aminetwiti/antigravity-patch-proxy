@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -64,6 +65,16 @@ type RPCClient interface {
 	// GetTurnDiff récupère le diff officiel d'un tour (GetTurnDiff).
 	// stepIndex < 0 → le LS résout le dernier tour.
 	GetTurnDiff(conversationID string, stepIndex int64) ([]byte, error)
+	// GetRevertPreview demande la prévisualisation du rollback d'une cascade.
+	GetRevertPreview(cascadeID string, stepIndex int64) ([]byte, error)
+	// RevertToCascadeStep applique le rollback de la cascade à une étape donnée.
+	RevertToCascadeStep(cascadeID string, stepIndex int64) error
+	// SendStepsToBackground bascule des étapes en tâche d'arrière-plan.
+	SendStepsToBackground(conversationID string, stepIndices []int64) error
+	// SkipBrowserSubagent saute une étape de sous-agent de navigation.
+	SkipBrowserSubagent(cascadeID string, stepIndex int64) error
+	// RetrieveUserQuotaSummary récupère le résumé des quotas utilisateur du Language Server.
+	RetrieveUserQuotaSummary() ([]byte, error)
 }
 
 // checkOrigin rejette les navigateurs web arbitraires (CSWSH) tout en
@@ -78,9 +89,20 @@ func checkOrigin(r *http.Request) bool {
 		return false
 	}
 	h := strings.ToLower(u.Hostname())
-	return h == "localhost" || h == "127.0.0.1" || h == "::1" ||
-		strings.HasPrefix(h, "192.168.") || strings.HasPrefix(h, "10.") || strings.HasPrefix(h, "172.") ||
-		strings.HasSuffix(h, ".trycloudflare.com") || strings.HasSuffix(h, ".pinggy.link") ||
+	if h == "localhost" || h == "127.0.0.1" || h == "::1" {
+		return true
+	}
+	// Plages LAN privées strictes (CIDR) — un préfixe naïf "172." accepterait
+	// 172.evil.com ; le parse CIDR le rejette.
+	ip := net.ParseIP(h)
+	if ip != nil {
+		for _, cidr := range []string{"192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"} {
+			if _, n, err := net.ParseCIDR(cidr); err == nil && n.Contains(ip) {
+				return true
+			}
+		}
+	}
+	return strings.HasSuffix(h, ".trycloudflare.com") || strings.HasSuffix(h, ".pinggy.link") ||
 		strings.HasSuffix(h, ".ngrok.io") || strings.HasSuffix(h, ".ngrok-free.app")
 }
 
@@ -195,29 +217,7 @@ func NewServer(client RPCClient, authToken string) *Server {
 		streamBuffer:     NewSessionStreamBuffer(100),
 		activeCancels:    make(map[string]context.CancelFunc),
 		activeRequestIDs: make(map[string]string),
-		scheduledTasks: map[string]*ScheduledTask{
-			"task_hiss_default": {
-				ID:             "task_hiss_default",
-				Name:           "hiss",
-				Prompt:         "dis bonjour en seul mots",
-				WorkspaceName:  "antigravity-add-model-main",
-				CronExpression: "0 9 * * *",
-				IsDaemon:       true,
-				IterationsRun:  1,
-				IsEnabled:      true,
-				Status:         "Running",
-				Uptime:         "1m",
-				Events: []ScheduledTaskEvent{
-					{
-						ID:         "evt_init_1",
-						Timestamp:  time.Now().Add(-1 * time.Minute).Format(time.RFC3339),
-						Outcome:    "done",
-						Message:    "Triggered task: dis bonjour en seul mots",
-						DurationMs: 140,
-					},
-				},
-			},
-		},
+		scheduledTasks:   make(map[string]*ScheduledTask),
 	}
 }
 
@@ -444,7 +444,9 @@ type IncomingMessage struct {
 	// Content : contenu du fichier pour write_file (encodage base64 JSON → bytes).
 	Content string `json:"content,omitempty"`
 	// Overwrite : autorise l'écrasement pour write_file (sinon erreur si existe).
-	Overwrite bool `json:"overwrite,omitempty"`
+	Overwrite       bool                   `json:"overwrite,omitempty"`
+	ConversationID  string                 `json:"conversationId,omitempty"`
+	StepIndices     []int64                `json:"stepIndices,omitempty"`
 	// Champs MCP (call_mcp_tool / connect_mcp_server / refresh_mcp_oauth_token) :
 	// relayés au proxy Antigravity desktop (127.0.0.1:50999).
 	ServerName string                 `json:"serverName,omitempty"`
@@ -918,10 +920,19 @@ func fileDiffData(blob []byte) map[string]interface{} {
 	return d
 }
 
+// uuidRe : les cascadeId sont des UUID v4 (36 chars, hex + tirets) émis par
+// le language server. Validation stricte = pas de traversal via "../".
+var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
 // saveUploadedImage décode une image base64 et la sauvegarde dans le dossier scratch de la cascade.
 func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, error) {
 	if cascadeID == "" {
 		return "", "", fmt.Errorf("cascadeId requis")
+	}
+	// Frontière de confiance : cascadeID vient du mobile (send_prompt/upload_media).
+	// Un ID non-UUID (ex. "../../x") écrirait hors du répertoire brain.
+	if !uuidRe.MatchString(cascadeID) {
+		return "", "", fmt.Errorf("cascadeId invalide: %q", cascadeID)
 	}
 	if base64Data == "" {
 		return "", "", fmt.Errorf("base64Data requis")
@@ -1082,8 +1093,10 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		for {
 			select {
 			case <-ticker.C:
-				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second)); err != nil {
-					conn.Close()
+				s.writeMu.Lock()
+				err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second))
+				s.writeMu.Unlock()
+				if err != nil {
 					return
 				}
 			}
@@ -1096,6 +1109,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			logJSON.Debug("read_error", "err", err)
 			break
 		}
+		conn.SetReadDeadline(time.Now().Add(pongWait))
 
 		var msg IncomingMessage
 		if err := json.Unmarshal(message, &msg); err != nil {
@@ -1834,43 +1848,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 		}
 		logJSON.Info("scheduled_task_triggered", "taskId", taskId)
-
-		var updatedTask *ScheduledTask
-		s.mu.Lock()
-		task, exists := s.scheduledTasks[taskId]
-		if exists && task != nil {
-			task.IterationsRun++
-			evt := ScheduledTaskEvent{
-				ID:         fmt.Sprintf("evt_%d", time.Now().UnixMilli()),
-				Timestamp:  time.Now().Format(time.RFC3339),
-				Outcome:    "done",
-				Message:    fmt.Sprintf("Triggered task: %s", task.Prompt),
-				DurationMs: 125,
-			}
-			task.Events = append([]ScheduledTaskEvent{evt}, task.Events...)
-			updatedTask = task
-		}
-		s.mu.Unlock()
-
-		if updatedTask != nil {
-			s.broadcast(OutgoingMessage{
-				Type: "scheduled_task_event",
-				Data: map[string]interface{}{
-					"taskId": taskId,
-					"task":   updatedTask,
-				},
-			})
-		}
-
-		s.writeJSON(conn, OutgoingMessage{
-			Type:      "response",
-			RequestID: msg.RequestID,
-			Data: map[string]interface{}{
-				"taskId": taskId,
-				"status": "triggered",
-				"task":   updatedTask,
-			},
-		})
+		// ponytail: aucun moteur cron réel dans le daemon — refuser explicitement
+		// plutôt que de fabriquer un événement "done" (mock prod interdit).
+		// Upgrade path : brancher un scheduler (robfig/cron) et exécuter le prompt.
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID,
+			Error: "scheduled tasks not implemented: no cron engine in daemon"})
 		return
 
 	case "cancel_scheduled_task", "delete_scheduled_task":
@@ -1977,6 +1959,72 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		raw, err = s.RPCClient.GetTurnDiff(conversationID, stepIndex)
 		if err == nil {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: turnDiffOut(raw)})
+			return
+		}
+
+	case "get_revert_preview", "cascade.get_revert_preview":
+		if msg.CascadeID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
+			return
+		}
+		raw, err = s.RPCClient.GetRevertPreview(msg.CascadeID, msg.StepIndex)
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+			return
+		}
+
+	case "revert_to_step", "cascade.revert_to_step":
+		if msg.CascadeID == "" || msg.StepIndex < 0 {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId + stepIndex requis"})
+			return
+		}
+		err = s.RPCClient.RevertToCascadeStep(msg.CascadeID, msg.StepIndex)
+		if err == nil {
+			s.broadcast(OutgoingMessage{
+				Type: "cascade_reverted",
+				Data: map[string]interface{}{
+					"cascadeId": msg.CascadeID,
+					"stepIndex": msg.StepIndex,
+				},
+			})
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "reverted", "cascadeId": msg.CascadeID, "stepIndex": msg.StepIndex}})
+			return
+		}
+
+	case "send_steps_to_background", "cascade.send_to_background":
+		convID := msg.ConversationID
+		if convID == "" {
+			convID = msg.CascadeID
+		}
+		if convID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "conversationId ou cascadeId requis"})
+			return
+		}
+		indices := msg.StepIndices
+		if len(indices) == 0 && msg.StepIndex >= 0 {
+			indices = []int64{msg.StepIndex}
+		}
+		err = s.RPCClient.SendStepsToBackground(convID, indices)
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "sent_to_background", "conversationId": convID, "stepIndices": indices}})
+			return
+		}
+
+	case "skip_browser_subagent", "cascade.skip_subagent":
+		if msg.CascadeID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
+			return
+		}
+		err = s.RPCClient.SkipBrowserSubagent(msg.CascadeID, msg.StepIndex)
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "skipped", "cascadeId": msg.CascadeID, "stepIndex": msg.StepIndex}})
+			return
+		}
+
+	case "get_quota_summary", "system.get_quota_summary":
+		raw, err = s.RPCClient.RetrieveUserQuotaSummary()
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
 			return
 		}
 

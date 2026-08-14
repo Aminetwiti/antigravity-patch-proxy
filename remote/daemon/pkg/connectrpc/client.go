@@ -202,3 +202,53 @@ func truncate(s string, n int) string {
 	}
 	return s[:n] + "..."
 }
+
+// GetRevertPreview demande la prévisualisation du rollback d'une cascade.
+func (c *Client) GetRevertPreview(cascadeID string, stepIndex int64) ([]byte, error) {
+	c.mu.RLock()
+	apiKey := c.APIKey
+	sessionID := c.SessionID
+	modelUID := c.ModelUID
+	modelEnum := c.ModelEnum
+	c.mu.RUnlock()
+	payload := BuildGetRevertPreview(cascadeID, stepIndex, apiKey, sessionID, modelUID, modelEnum)
+	return c.Call("GetRevertPreview", payload)
+}
+
+// RevertToCascadeStep applique le rollback de la cascade à une étape donnée.
+func (c *Client) RevertToCascadeStep(cascadeID string, stepIndex int64) error {
+	c.mu.RLock()
+	apiKey := c.APIKey
+	sessionID := c.SessionID
+	modelUID := c.ModelUID
+	modelEnum := c.ModelEnum
+	c.mu.RUnlock()
+	payload := BuildRevertToCascadeStep(cascadeID, stepIndex, apiKey, sessionID, modelUID, modelEnum)
+	_, err := c.Call("RevertToCascadeStep", payload)
+	return err
+}
+
+// SendStepsToBackground bascule des étapes en tâche d'arrière-plan.
+func (c *Client) SendStepsToBackground(conversationID string, stepIndices []int64) error {
+	payload := BuildSendStepsToBackground(conversationID, stepIndices)
+	_, err := c.Call("SendStepsToBackground", payload)
+	return err
+}
+
+// SkipBrowserSubagent saute une étape de sous-agent de navigation.
+func (c *Client) SkipBrowserSubagent(cascadeID string, stepIndex int64) error {
+	payload := BuildSkipBrowserSubagent(cascadeID, stepIndex)
+	_, err := c.Call("SkipBrowserSubagent", payload)
+	return err
+}
+
+// RetrieveUserQuotaSummary récupère le résumé des quotas utilisateur du Language Server.
+func (c *Client) RetrieveUserQuotaSummary() ([]byte, error) {
+	c.mu.RLock()
+	apiKey := c.APIKey
+	sessionID := c.SessionID
+	c.mu.RUnlock()
+	payload := BuildRetrieveUserQuotaSummary(apiKey, sessionID)
+	return c.Call("RetrieveUserQuotaSummary", payload)
+}
+

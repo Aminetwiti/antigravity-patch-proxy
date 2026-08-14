@@ -273,6 +273,27 @@ func (f *fakeRPCClient) GetTurnDiff(conversationID string, stepIndex int64) ([]b
 	return connectrpc.Frame(pbTextFrame("diff")), nil
 }
 
+func (f *fakeRPCClient) GetRevertPreview(cascadeID string, stepIndex int64) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("revert-preview")), nil
+}
+
+func (f *fakeRPCClient) RevertToCascadeStep(cascadeID string, stepIndex int64) error {
+	return nil
+}
+
+func (f *fakeRPCClient) SendStepsToBackground(conversationID string, stepIndices []int64) error {
+	return nil
+}
+
+func (f *fakeRPCClient) SkipBrowserSubagent(cascadeID string, stepIndex int64) error {
+	return nil
+}
+
+func (f *fakeRPCClient) RetrieveUserQuotaSummary() ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("quota-summary")), nil
+}
+
+
 // --- Tests WebSocket ---
 
 type wsTestClient struct {

@@ -229,6 +229,21 @@ func (l *loadRPCClient) GetCascadeTrajectory(cascadeID string, verbosity uint64)
 func (l *loadRPCClient) GetTurnDiff(conversationID string, stepIndex int64) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("diff")), nil
 }
+func (l *loadRPCClient) GetRevertPreview(cascadeID string, stepIndex int64) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("preview")), nil
+}
+func (l *loadRPCClient) RevertToCascadeStep(cascadeID string, stepIndex int64) error {
+	return nil
+}
+func (l *loadRPCClient) SendStepsToBackground(conversationID string, stepIndices []int64) error {
+	return nil
+}
+func (l *loadRPCClient) SkipBrowserSubagent(cascadeID string, stepIndex int64) error {
+	return nil
+}
+func (l *loadRPCClient) RetrieveUserQuotaSummary() ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("quota")), nil
+}
 
 // TestWebSocketConcurrentClients — 20 clients en parallèle, 30 messages chacun :
 // aucun message ne doit être perdu ni mélangé (chaque réponse doit porter
@@ -346,50 +361,16 @@ func BenchmarkGatewayHeartbeat(b *testing.B) {
 
 // TestWebSocketStreamBackpressure — quand onFrame renvoie une erreur,
 // le gateway doit propager stream_end avec erreur et terminer proprement.
-type failingStreamClient struct{}
+type failingStreamClient struct {
+	fakeRPCClient
+}
 
-func (f *failingStreamClient) Heartbeat() ([]byte, error) {
-	return connectrpc.Frame(pbTextFrame("ok")), nil
-}
-func (f *failingStreamClient) CreateCascade(uri, projectID, modelUID string, modelEnum uint64) ([]byte, error) {
-	return connectrpc.Frame(pbTextFrame("casc")), nil
-}
-func (f *failingStreamClient) GetAllCascades() ([]byte, error) {
-	return connectrpc.Frame(pbTextFrame("s")), nil
-}
 func (f *failingStreamClient) SendMessageStream(cascadeID, text string, onFrame func([]byte) error) error {
 	_ = onFrame(connectrpc.Frame(pbTextFrame("hello")))
 	return fmt.Errorf("stream interrompu par le backend")
 }
 func (f *failingStreamClient) SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error) error {
 	return f.SendMessageStream(cascadeID, text, onFrame)
-}
-func (f *failingStreamClient) SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error) {
-	return connectrpc.Frame(pbTextFrame("ok")), nil
-}
-func (f *failingStreamClient) SetBrowserOpenConversation(cascadeID string) ([]byte, error) {
-	return connectrpc.Frame(pbTextFrame("ok")), nil
-}
-func (f *failingStreamClient) SendCommand(commandText string) ([]byte, error) {
-	return connectrpc.Frame(pbTextFrame("cmd-ok")), nil
-}
-func (f *failingStreamClient) ListModels() ([]byte, error) {
-	return connectrpc.Frame(pbTextFrame("ok")), nil
-}
-func (f *failingStreamClient) DeleteCascade(cascadeID string) ([]byte, error) {
-	return connectrpc.Frame(pbTextFrame("deleted")), nil
-}
-func (f *failingStreamClient) ReadFile(uri string) ([]byte, error) {
-	return connectrpc.Frame(pbTextFrame("file")), nil
-}
-func (f *failingStreamClient) WriteFile(uri string, content []byte, overwrite bool) ([]byte, error) {
-	return connectrpc.Frame(pbTextFrame("written")), nil
-}
-func (f *failingStreamClient) GetCascadeTrajectory(cascadeID string, verbosity uint64) ([]byte, error) {
-	return connectrpc.Frame(pbTextFrame("traj")), nil
-}
-func (f *failingStreamClient) GetTurnDiff(conversationID string, stepIndex int64) ([]byte, error) {
-	return connectrpc.Frame(pbTextFrame("diff")), nil
 }
 
 func TestWebSocketStreamBackendError(t *testing.T) {

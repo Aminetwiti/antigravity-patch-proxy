@@ -382,3 +382,72 @@ func BuildGetTurnDiff(conversationID string, stepIndex int64) []byte {
 	}
 	return w.b
 }
+
+// BuildGetRevertPreview construit un GetRevertPreviewRequest :
+// {1: cascade_id, 2: step_index, 3: metadata, 4: override_config}
+func BuildGetRevertPreview(cascadeID string, stepIndex int64, apiKey, sessionID string, modelUID string, modelEnum uint64) []byte {
+	w := &writer{}
+	w.stringField(1, cascadeID)
+	if stepIndex >= 0 {
+		w.varintField(2, uint64(stepIndex))
+	}
+	if apiKey != "" {
+		w.bytesField(3, buildMetadata(apiKey, sessionID))
+	}
+	if modelUID != "" || modelEnum != 0 {
+		w.bytesField(4, BuildCascadeConfig(modelUID, modelEnum))
+	}
+	return w.b
+}
+
+// BuildRevertToCascadeStep construit un RevertToCascadeStepRequest :
+// {1: metadata, 2: cascade_id, 3: step_index, 5: override_config}
+func BuildRevertToCascadeStep(cascadeID string, stepIndex int64, apiKey, sessionID string, modelUID string, modelEnum uint64) []byte {
+	w := &writer{}
+	if apiKey != "" {
+		w.bytesField(1, buildMetadata(apiKey, sessionID))
+	}
+	w.stringField(2, cascadeID)
+	if stepIndex >= 0 {
+		w.varintField(3, uint64(stepIndex))
+	}
+	if modelUID != "" || modelEnum != 0 {
+		w.bytesField(5, BuildCascadeConfig(modelUID, modelEnum))
+	}
+	return w.b
+}
+
+// BuildSendStepsToBackground construit un SendStepsToBackgroundRequest :
+// {1: conversation_id, 2: repeated step_indices}
+func BuildSendStepsToBackground(conversationID string, stepIndices []int64) []byte {
+	w := &writer{}
+	w.stringField(1, conversationID)
+	for _, idx := range stepIndices {
+		if idx >= 0 {
+			w.varintField(2, uint64(idx))
+		}
+	}
+	return w.b
+}
+
+// BuildSkipBrowserSubagent construit un SkipBrowserSubagentRequest :
+// {1: cascade_id, 2: step_index}
+func BuildSkipBrowserSubagent(cascadeID string, stepIndex int64) []byte {
+	w := &writer{}
+	w.stringField(1, cascadeID)
+	if stepIndex >= 0 {
+		w.varintField(2, uint64(stepIndex))
+	}
+	return w.b
+}
+
+// BuildRetrieveUserQuotaSummary construit un RetrieveUserQuotaSummaryRequest :
+// {1: metadata}
+func BuildRetrieveUserQuotaSummary(apiKey, sessionID string) []byte {
+	w := &writer{}
+	if apiKey != "" {
+		w.bytesField(1, buildMetadata(apiKey, sessionID))
+	}
+	return w.b
+}
+

@@ -38,6 +38,9 @@ class LeftSidebarDrawer extends StatefulWidget {
 class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
   final ScrollController _scrollController = ScrollController();
   final Set<String> _collapsedFolders = {};
+  bool _isFilterOpen = false;
+  final TextEditingController _filterController = TextEditingController();
+  String _filterQuery = '';
 
   String _cleanWorkspaceName(String rawPath) {
     if (rawPath.isEmpty || rawPath == '.') return 'antigravity-workspace';
@@ -54,6 +57,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _filterController.dispose();
     super.dispose();
   }
 
@@ -63,6 +67,12 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
     final allSessions = widget.sessions ?? [];
     final availableSessions = allSessions
         .where((s) => s.isAvailable && s.id.isNotEmpty)
+        .where((s) {
+          if (_filterQuery.isEmpty) return true;
+          final q = _filterQuery.toLowerCase();
+          return s.title.toLowerCase().contains(q) ||
+              s.workspacePath.toLowerCase().contains(q);
+        })
         .toList();
 
     // Organiser les sessions par workspace
@@ -193,9 +203,18 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                   ),
                   const Spacer(),
                   _HeaderIconBtn(
-                    icon: Icons.filter_list_rounded,
-                    tooltip: 'Filtrer',
-                    onTap: () {},
+                    icon: _isFilterOpen ? Icons.filter_list_off_rounded : Icons.filter_list_rounded,
+                    tooltip: _isFilterOpen ? 'Fermer le filtre' : 'Filtrer',
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      setState(() {
+                        _isFilterOpen = !_isFilterOpen;
+                        if (!_isFilterOpen) {
+                          _filterController.clear();
+                          _filterQuery = '';
+                        }
+                      });
+                    },
                     size: 15,
                   ),
                   const SizedBox(width: 6),
@@ -211,6 +230,54 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                 ],
               ),
             ),
+
+            if (_isFilterOpen)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                child: SizedBox(
+                  height: 32,
+                  child: TextField(
+                    controller: _filterController,
+                    autofocus: true,
+                    style: const TextStyle(fontSize: 12, color: AppColors.inkPrimary),
+                    decoration: InputDecoration(
+                      hintText: 'Filtrer les sessions...',
+                      hintStyle: const TextStyle(fontSize: 12, color: AppColors.inkMuted),
+                      prefixIcon: const Icon(Icons.search, size: 14, color: AppColors.inkMuted),
+                      prefixIconConstraints: const BoxConstraints(minWidth: 26),
+                      suffixIcon: _filterQuery.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.close, size: 12, color: AppColors.inkMuted),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 20),
+                              onPressed: () {
+                                _filterController.clear();
+                                setState(() => _filterQuery = '');
+                              },
+                            )
+                          : null,
+                      filled: true,
+                      fillColor: const Color(0xFF1B1D22),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide: const BorderSide(color: Color(0xFF2C2F36), width: 1),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide: const BorderSide(color: Color(0xFF2C2F36), width: 1),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide: const BorderSide(color: AppColors.accentBlueBright, width: 1),
+                      ),
+                    ),
+                    onChanged: (val) {
+                      setState(() => _filterQuery = val.trim());
+                    },
+                  ),
+                ),
+              ),
 
             const SizedBox(height: 4),
 

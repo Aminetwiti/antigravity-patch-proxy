@@ -1,10 +1,16 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"os"
+	"os/signal"
+	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/antigravity/remote-daemon/pkg/connectrpc"
@@ -12,6 +18,14 @@ import (
 	"github.com/antigravity/remote-daemon/pkg/gateway"
 	"github.com/antigravity/remote-daemon/pkg/tunnel"
 )
+
+// maskToken affiche un préfixe du jeton sans paniquer sur les jetons courts.
+func maskToken(token string) string {
+	if len(token) > 10 {
+		return token[:10]
+	}
+	return token
+}
 
 func main() {
 	var listenPort int
@@ -43,7 +57,7 @@ func main() {
 	if token == "" {
 		token = info.CSRFToken
 	}
-	fmt.Printf("   CSRF Token: %s...\n", token[:10])
+	fmt.Printf("   CSRF Token: %s...\n", maskToken(token))
 
 	rpcClient := connectrpc.NewClient(info.ConnectRPCPort, token)
 
@@ -97,8 +111,19 @@ func main() {
 		fmt.Fprintf(w, `{"status":"%s","rpcPort":%d,"pid":%d,"heartbeatOk":%t,"tunnelProvider":"%s","publicUrl":"%s","error":"%s"}`, status, port, info.PID, hbErr == "", tunnelMgr.Provider, tunnelMgr.PublicURL, hbErr)
 	})
 
-	fmt.Printf("🌐 Daemon listening on ws://localhost:%d/ws\n", listenPort)
-	if err := http.ListenAndServe(fmt.Sprintf(":%d", listenPort), nil); err != nil {
+	// Arrêt propre sur Ctrl+C / SIGTERM : ferme le tunnel (cloudflared/ssh) et le beacon.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		<-ctx.Done()
+		log.Println("🛑 Arrêt du daemon, fermeture du tunnel…")
+		tunnelMgr.Stop()
+		beacon.Stop()
+		watchdog.Stop()
+	}()
+
+	fmt.Printf("🌐 Daemon listening on ws://%s:%d/ws\n", host, listenPort)
+	if err := http.ListenAndServe(net.JoinHostPort(host, strconv.Itoa(listenPort)), nil); err != nil {
 		log.Fatalf("❌ Server error: %v", err)
 	}
 }

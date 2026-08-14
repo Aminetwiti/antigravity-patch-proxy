@@ -79,6 +79,17 @@ class DaemonWebSocketClient {
   /// l'ancien token au lieu de marteler un 401 en boucle.
   void Function()? onAuthRejected;
 
+  /// Callback appelé quand l'URL persistée est définitivement morte (HTTP
+  /// 530/502 de Cloudflare = le tunnel a été remplacé par un redémarrage du
+  /// daemon) : le consumer doit effacer la session et retomber sur le
+  /// fallback LAN (réglages host/port) — sinon on martèle une URL morte en
+  /// boucle pendant que le daemon tourne sur une nouvelle URL.
+  void Function()? onEndpointDead;
+
+  /// Échecs 530/502 consécutifs sur l'endpoint courant. Réarmé à 0 dès qu'une
+  /// connexion aboutit ou qu'un autre type d'erreur survient.
+  int _endpointDeadCount = 0;
+
   /// URL complète actuellement ciblée (réutilisée pour re-sauvegarde).
   String get targetUrl => _targetUrl;
 
@@ -122,7 +133,11 @@ class DaemonWebSocketClient {
 
       _connectTimeout?.cancel();
       _connectTimeout = Timer(const Duration(seconds: 15), () {
-        connectFuture.then((s) => s.close());
+        // onError: (_) {} — consomme le rejet du connectFuture pour ne pas
+        // créer un Future dérivé non géré (sinon : Unhandled Exception
+        // SocketException errno=103 quand le daemon meurt pendant le
+        // handshake — crash du phone en pleine boucle de reconnexion).
+        connectFuture.then((s) => s.close(), onError: (_) {});
       });
 
       try {
@@ -144,6 +159,7 @@ class DaemonWebSocketClient {
 
       _socket = socket;
       _connecting = false;
+      _endpointDeadCount = 0;
       statusNotifier.value = ConnectionStatus.connected;
       _reconnectAttempts = 0;
       _stopRetryCountdown();
@@ -191,6 +207,25 @@ class DaemonWebSocketClient {
         _socket = null;
         _stopKeepAlive();
         return;
+      }
+      // URL de tunnel morte : Cloudflare répond 530/502 quand le daemon a
+      // redémarré avec un nouveau tunnel. 3 échecs consécutifs → statut
+      // `error` + onEndpointDead (clear session → repli LAN). Les 2 premiers
+      // passent par _handleDisconnect pour laisser une chance à un 530
+      // transitoire (cold start Cloudflare ~30 s).
+      if (e.toString().contains('530') || e.toString().contains('502')) {
+        _endpointDeadCount++;
+        if (_endpointDeadCount >= 3) {
+          _endpointDeadCount = 0;
+          statusNotifier.value = ConnectionStatus.error;
+          onEndpointDead?.call();
+          _socket?.close();
+          _socket = null;
+          _stopKeepAlive();
+          return;
+        }
+      } else {
+        _endpointDeadCount = 0;
       }
       _handleDisconnect();
     }

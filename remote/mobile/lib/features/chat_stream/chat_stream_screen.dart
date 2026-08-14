@@ -587,7 +587,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       if (type == 'stream_start') {
         _onStreamStarted();
         setState(() {
-          _isLoadingHistory = false;
           _messages.add(ChatMessage(
             id: 'ext-$requestId',
             sender: 'assistant',
@@ -691,7 +690,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
     final api = widget.api;
     setState(() {
-      _isLoadingHistory = false;
       _messages.add(ChatMessage(
         id: 'm${++_messageCounter}',
         sender: 'user',
@@ -723,7 +721,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final assistantId = 'a${++_messageCounter}';
     _lastLocalStreamEnd = null;
     setState(() {
-      _isLoadingHistory = false;
       _messages.add(ChatMessage(
         id: assistantId,
         sender: 'assistant',
@@ -893,84 +890,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         curve: Curves.easeOut,
       );
     }
-  }
-
-  Widget _buildHistorySkeleton() {
-    return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      physics: const NeverScrollableScrollPhysics(),
-      children: [
-        // Skeleton user bubble
-        Align(
-          alignment: Alignment.centerRight,
-          child: Container(
-            width: 200,
-            height: 48,
-            decoration: BoxDecoration(
-              color: AppColors.surfaceRaised.withValues(alpha: 0.6),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.borderSubtle),
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        // Skeleton assistant bubble
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Container(
-            width: 280,
-            height: 80,
-            decoration: BoxDecoration(
-              color: AppColors.surfaceInput.withValues(alpha: 0.5),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.borderSubtle),
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        // Skeleton user bubble 2
-        Align(
-          alignment: Alignment.centerRight,
-          child: Container(
-            width: 160,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppColors.surfaceRaised.withValues(alpha: 0.6),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.borderSubtle),
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        // Skeleton assistant thought + text
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 220,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceHover.withValues(alpha: 0.3),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                width: 310,
-                height: 110,
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceInput.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppColors.borderSubtle),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
   }
 
   Widget _buildReminderBanners() {

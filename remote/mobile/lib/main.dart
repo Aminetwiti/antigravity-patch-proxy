@@ -158,6 +158,16 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         _connectWithSavedSettings();
       }
     };
+    // URL de tunnel morte (530/502 Cloudflare, daemon redémarré avec un
+    // nouveau tunnel) : on efface la session obsolète et on retente sur le
+    // fallback LAN (réglages host/port) — le daemon répond toujours en local.
+    _wsClient.onEndpointDead = () async {
+      final hadSession = (await SettingsStore.loadSession()).isNotEmpty;
+      SettingsStore.clearSession();
+      if (hadSession) {
+        _connectWithSavedSettings();
+      }
+    };
     ApprovalNotifier.instance.init();
     // Restaure la dernière session active (si encore valide) sans attendre
     // la liste distante — l'UI affiche immédiatement le bon contexte.
