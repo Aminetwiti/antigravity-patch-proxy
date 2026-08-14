@@ -20,6 +20,15 @@ type fakeApprovalRPC struct {
 
 func (f *fakeApprovalRPC) SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error) {
 	f.submitted++
+	// Miroir de fakeRPCClient.SubmitToolApproval : les tests de workflow
+	// vérifient aussi la décision transmise (confirm, cible), pas seulement
+	// le compteur d'appels.
+	f.lastApproval = &submitApprovalCall{
+		cascadeID:    cascadeID,
+		trajectoryID: trajectoryID,
+		stepIndex:    stepIndex,
+		confirm:      connectrpc.DecodeFields(oneofPayload)[0].Varint == 1,
+	}
 	return connectrpc.Frame(pbTextFrame("ok")), nil
 }
 

@@ -53,13 +53,10 @@ class DaemonWebSocketClient {
   /// au lieu de notifier des ValueNotifier déjà disposés.
   bool _disposed = false;
 
-  /// Jeton de connexion : COMPLÉTÉ par [dispose]. Le `connect` en vol fait la
-  /// course avec ce jeton ; si dispose gagne, on renonce sans notifier.
-  Completer<void>? _connectToken;
-
-  /// Timer de timeout 5 s pour `WebSocket.connect` en vol : annulé dans
+  /// Timer de timeout 15 s pour `WebSocket.connect` en vol : annulé dans
   /// dispose/disconnect pour ne pas laisser de timer pendant après la
-  /// destruction (tests « A Timer is still pending »).
+  /// destruction (tests « A Timer is still pending »). Le dispose ferme
+  /// directement le socket via le garde `_disposed` dans connect().
   Timer? _connectTimeout;
 
   /// Keep-alive applicatif : le daemon ferme les connexions sans frame après
@@ -105,35 +102,33 @@ class DaemonWebSocketClient {
         finalUrl += '${finalUrl.contains('?') ? '&' : '?'}token=$_authToken';
       }
       final uri = Uri.parse(finalUrl);
-      final token = Completer<void>();
-      _connectToken = token;
-      // Course à trois : socket | timeout 5 s | abandon (dispose).
-      // Un `.timeout()` standard créerait un timer interne non annulable qui
-      // laisserait le test sur « A Timer is still pending » ; ce Timer
-      // explicite est annulé dans dispose/disconnect.
-      final socketFuture = WebSocket.connect(uri.toString());
-      final completer = Completer<WebSocket>();
-      socketFuture.then(completer.complete, onError: completer.completeError);
+
+      WebSocket? socket;
+      final connectFuture = WebSocket.connect(uri.toString());
+
       _connectTimeout?.cancel();
       _connectTimeout = Timer(const Duration(seconds: 15), () {
-        socketFuture.then((s) => s.close());
-        if (!completer.isCompleted) {
-          completer.completeError(TimeoutException('WebSocket connect timeout'));
-        }
+        connectFuture.then((s) => s.close());
       });
+
       try {
-        _socket = await completer.future;
+        socket = await connectFuture;
       } finally {
         _connectTimeout?.cancel();
         _connectTimeout = null;
       }
-      if (_disposed || token.isCompleted) {
-        _socket?.close();
-        _socket = null;
+
+      if (_disposed) {
+        socket.close();
         return;
       }
-      _connectToken = null;
 
+      // Si le socket a été fermé par le timeout (qui s'est déclenché pendant l'await)
+      if (socket.readyState == WebSocket.closed) {
+        throw TimeoutException('WebSocket connection timed out');
+      }
+
+      _socket = socket;
       statusNotifier.value = ConnectionStatus.connected;
       _reconnectAttempts = 0;
       _stopRetryCountdown();
@@ -258,15 +253,12 @@ class DaemonWebSocketClient {
     if (_disposed) {
       _socket?.close();
       _socket = null;
-      _connectToken?.complete();
       _connectTimeout?.cancel();
       _connectTimeout = null;
       return;
     }
     _manualDisconnect = true;
     _reconnectTimer?.cancel();
-    _connectToken?.complete();
-    _connectToken = null;
     _stopRetryCountdown();
     _stopKeepAlive();
     _socket?.close();
@@ -293,8 +285,6 @@ class DaemonWebSocketClient {
   void dispose() {
     _disposed = true;
     _reconnectTimer?.cancel();
-    _connectToken?.complete();
-    _connectToken = null;
     _stopRetryCountdown();
     _stopKeepAlive();
     disconnect();

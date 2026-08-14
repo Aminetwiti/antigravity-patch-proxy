@@ -126,10 +126,55 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   // locale (qui vise l'écran verrouillé / l'app en arrière-plan).
   bool _appInForeground = true;
 
+  // ── Fenêtre paginée de conversation (Reverse scrolling / Chunked window) ──
+  static const int _pageSize = 20;
+  final Map<String, int> _visibleCounts = {};
+  int get _visibleCount =>
+      _visibleCounts.putIfAbsent(widget.activeSessionId, () => _pageSize);
+  bool _isLoadingMoreOlder = false;
+
+  List<ChatMessage> get _visibleMessages {
+    final all = _messages;
+    final count = _visibleCount;
+    if (all.length <= count) return all;
+    return all.sublist(all.length - count);
+  }
+
+  int get _hiddenOlderCount {
+    final all = _messages;
+    final count = _visibleCount;
+    if (all.length <= count) return 0;
+    return all.length - count;
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients || _isLoadingMoreOlder) return;
+    if (_scrollController.position.pixels <= 80 && _hiddenOlderCount > 0) {
+      _loadMoreOlderMessages();
+    }
+  }
+
+  void _loadMoreOlderMessages() {
+    if (_isLoadingMoreOlder || _hiddenOlderCount <= 0) return;
+    setState(() {
+      _isLoadingMoreOlder = true;
+      final current = _visibleCounts[widget.activeSessionId] ?? _pageSize;
+      _visibleCounts[widget.activeSessionId] = current + _pageSize;
+    });
+    Future.delayed(const Duration(milliseconds: 250), () {
+      if (mounted) {
+        setState(() {
+          _isLoadingMoreOlder = false;
+        });
+      }
+    });
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _scrollController.addListener(_onScroll);
     _watchBroadcastStreams();
     _setupConnectionListeners();
     _watchNotificationTaps();
@@ -304,6 +349,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         _approvalIndex = -1;
         _expiredCallIds.clear();
         _pendingApprovalCallIds.clear();
+        _visibleCounts[widget.activeSessionId] = _pageSize;
       }
       _loadHistoryIfEmpty();
     }
@@ -321,6 +367,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _scrollController.removeListener(_onScroll);
     _throttleTimer?.cancel();
     _streamSub?.cancel();
     _tapSub?.cancel();
@@ -1046,12 +1093,62 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       case SessionTabType.tasks:
         return _buildTasksTabContent();
       case SessionTabType.chat:
+        final visibleList = _visibleMessages;
+        final hiddenCount = _hiddenOlderCount;
         return ListView(
           controller: _scrollController,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           children: [
+            if (hiddenCount > 0)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Center(
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: _loadMoreOlderMessages,
+                      borderRadius: BorderRadius.circular(20),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceRaised,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: AppColors.borderSubtle),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (_isLoadingMoreOlder)
+                              const SizedBox(
+                                width: 12,
+                                height: 12,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 1.5,
+                                  color: AppColors.accentBlue,
+                                ),
+                              )
+                            else
+                              const Icon(Icons.arrow_upward_rounded, size: 13, color: AppColors.accentBlue),
+                            const SizedBox(width: 6),
+                            Text(
+                              _isLoadingMoreOlder
+                                  ? 'Chargement des messages précédents...'
+                                  : '↑ Afficher les messages précédents ($hiddenCount restants)',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w500,
+                                color: AppColors.inkSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             _buildReminderBanners(),
-            ..._messages.map((msg) => TweenAnimationBuilder<double>(
+            ...visibleList.map((msg) => TweenAnimationBuilder<double>(
                   key: ValueKey(msg.id),
                   duration: const Duration(milliseconds: 400),
                   curve: Curves.easeOutQuart,

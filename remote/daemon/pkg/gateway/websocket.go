@@ -1206,13 +1206,22 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.clearApproval(msg.CascadeID)
 			oneofField, oneofPayload := buildApprovalPayload("ask_question", true, responseText, "")
 			raw, err = s.RPCClient.SubmitToolApproval(msg.CascadeID, msg.TrajectoryID, uint32(msg.StepIndex), oneofField, oneofPayload)
-		} else {
-			go func() {
-				_ = s.RPCClient.SendMessageStream(msg.CascadeID, responseText, func([]byte) error { return nil })
-			}()
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "submitted"}})
+			// Réponse unary au client demandeur (même contrat que
+			// submit_approval) — sinon le fallthrough écrirait un dump protobuf
+			// vide, et une écriture sans lecture préalable créerait une course
+			// avec le stream_end diffusé en parallèle.
+			if err == nil {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "submitted"}})
+			}
 			return
 		}
+		// Réponse libre : fire-and-forget vers le LS (le flux arrive par
+		// SendMessageStream) — le mobile n'attend pas de réponse unary ici,
+		// c'est le prochain stream_delta qui fait foi.
+		go func() {
+			_ = s.RPCClient.SendMessageStream(msg.CascadeID, responseText, func([]byte) error { return nil })
+		}()
+		return
 
 	case "cancel_generation", "stop_generation":
 		if msg.CascadeID == "" {

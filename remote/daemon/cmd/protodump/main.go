@@ -1,136 +1,154 @@
-// protodump affiche l'arbre protobuf d'un fichier binaire gRPC-Web.
-// Usage: go run ./cmd/protodump <fichier.bin> [profondeur_max]
 package main
 
 import (
-	"encoding/binary"
+	"encoding/hex"
+	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
-
-	"github.com/antigravity/remote-daemon/pkg/connectrpc"
 )
 
-func main() {
-	if len(os.Args) < 2 {
-		fmt.Println("usage: protodump <file.bin> [depth]")
-		os.Exit(1)
-	}
-	raw, err := os.ReadFile(os.Args[1])
-	if err != nil {
-		fmt.Println("read:", err)
-		os.Exit(1)
-	}
-	depth := 3
-	if len(os.Args) > 2 {
-		fmt.Sscanf(os.Args[2], "%d", &depth)
-	}
+// protodump — dump one step_payload blob (or raw bytes file) as a protobuf
+// tree, hex-dumping opaque leaves so we can identify EXACTLY which bytes the
+// IDE's step decoder expects to be able to parse.
 
-	// Dé-framing gRPC-Web : flags(1) + longueur BE(4) + payload
-	payload := raw
-	for len(payload) >= 5 {
-		length := int(binary.BigEndian.Uint32(payload[1:5]))
-		if length <= 0 || 5+length > len(payload) {
+func main() {
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "usage: protodump [-start N] <file|hex> [<file|hex>...]\n")
+	}
+	flag.Parse()
+	for _, arg := range flag.Args() {
+		dumpFile(arg)
+	}
+}
+
+func dumpFile(arg string) {
+	var b []byte
+	if data, err := os.ReadFile(arg); err == nil {
+		b = data
+	} else if hexStr, err := hex.DecodeString(strings.TrimSpace(arg)); err == nil {
+		b = hexStr
+	} else {
+		fmt.Fprintf(os.Stderr, "cannot read %s: %v\n", arg, err)
+		os.Exit(1)
+	}
+	fmt.Printf("===== %s (%d bytes) =====\n", arg, len(b))
+	walk(b, 0, 8, 1<<20)
+}
+
+func readVarint(b []byte, i int) (uint64, int, bool) {
+	var val uint64
+	var shift uint
+	for {
+		if i >= len(b) {
+			return 0, i, false
+		}
+		x := b[i]
+		i++
+		val |= uint64(x&0x7f) << shift
+		if x&0x80 == 0 {
+			return val, i, true
+		}
+		shift += 7
+		if shift > 63 {
+			return 0, i, false
+		}
+	}
+}
+
+func walk(b []byte, indent, maxdepth, limit int) {
+	j := 0
+	n := 0
+	for j < len(b) && n < 200 {
+		tag, j2, ok := readVarint(b, j)
+		if !ok {
 			break
 		}
-		fmt.Printf("=== grpc-web frame flags=0x%02x len=%d ===\n", payload[0], length)
-		dump(payload[5:5+length], 0, depth)
-		payload = payload[5+length:]
-	}
-	if len(payload) > 0 {
-		fmt.Printf("=== restant %d octets (trailers?) ===\n", len(payload))
-		dump(payload, 0, depth)
-	}
-}
-
-func dump(buf []byte, level, depth int) {
-	if level > depth {
-		fmt.Printf("%s... (profondeur max atteinte, %d octets)\n", strings.Repeat("  ", level), len(buf))
-		return
-	}
-	fields := connectrpc.DecodeFields(buf)
-	indent := strings.Repeat("  ", level)
-	for _, f := range fields {
-		if f.WireType == 0 {
-			fmt.Printf("%s#%d varint=%d\n", indent, f.Num, f.Varint)
-			continue
-		}
-		if f.WireType == 2 {
-			if len(f.Bytes) == 0 {
-				fmt.Printf("%s#%d bytes[0]\n", indent, f.Num)
-				continue
+		j = j2
+		fnum := tag >> 3
+		wt := tag & 7
+		n++
+		switch wt {
+		case 0:
+			v, j3, ok := readVarint(b, j)
+			if !ok {
+				return
 			}
-			if isLeaf(f.Bytes) {
-				fmt.Printf("%s#%d str[%d] %q\n", indent, f.Num, len(f.Bytes), truncate(printable(f.Bytes), 80))
-				continue
+			j = j3
+			fmt.Printf("%s f%d varint=%d\n", strings.Repeat("  ", indent), fnum, v)
+		case 1:
+			if j+8 > len(b) {
+				return
 			}
-			fmt.Printf("%s#%d msg[%d]\n", indent, f.Num, len(f.Bytes))
-			dump(f.Bytes, level+1, depth)
-			continue
+			fmt.Printf("%s f%d fixed64=0x%x\n", strings.Repeat("  ", indent), fnum, b[j:j+8])
+			j += 8
+		case 2:
+			l2, j3, ok := readVarint(b, j)
+			if !ok {
+				return
+			}
+			j = j3
+			if uint64(j)+l2 > uint64(len(b)) {
+				return
+			}
+			chunk := b[j : j+int(l2)]
+			printable := len(chunk) > 2 && isPrintable(chunk)
+			if printable && len(chunk) < 600 {
+				fmt.Printf("%s f%d str len=%d: %q\n", strings.Repeat("  ", indent), fnum, l2, string(chunk))
+			} else if indent < maxdepth && len(chunk) < limit && !printable && looksProtobuf(chunk) {
+				fmt.Printf("%s f%d msg len=%d\n", strings.Repeat("  ", indent), fnum, l2)
+				walk(chunk, indent+1, maxdepth, limit)
+			} else {
+				fmt.Printf("%s f%d bytes len=%d hex=%s\n", strings.Repeat("  ", indent), fnum, l2, hex.EncodeToString(chunk[:min(len(chunk), 48)]))
+			}
+			j += int(l2)
+		case 5:
+			if j+4 > len(b) {
+				return
+			}
+			fmt.Printf("%s f%d fixed32=0x%x\n", strings.Repeat("  ", indent), fnum, b[j:j+4])
+			j += 4
+		default:
+			fmt.Printf("%s f%d wt=%d at %d\n", strings.Repeat("  ", indent), fnum, wt, j)
+			return
 		}
-		fmt.Printf("%s#%d wire=%d len=%d\n", indent, f.Num, f.WireType, len(f.Bytes))
 	}
+	// trailing bytes
+	if j < len(b) {
+		fmt.Printf("%s [trailing %d bytes] hex=%s\n", strings.Repeat("  ", indent), len(b)-j, hex.EncodeToString(b[j:min(len(b), j+32)]))
+	}
+	_ = sort.Ints
 }
 
-// isLeaf : un blob est une feuille (chaîne) si le contenu est imprimable ou
-// si l'entête ne ressemble pas à un message protobuf imbriqué.
-func isLeaf(b []byte) bool {
-	if len(b) == 0 {
-		return true
-	}
-	// Heuristique chaîne : >85% imprimable
-	printableRatio := 0.0
-	n := 0
+func isPrintable(b []byte) bool {
 	for _, c := range b {
-		if (c >= 0x20 && c < 0x7f) || c == '\n' || c == '\t' || c == '\r' {
-			n++
+		if c < 32 && c != 9 && c != 10 && c != 13 {
+			return false
 		}
 	}
-	printableRatio = float64(n) / float64(len(b))
-	if printableRatio > 0.85 {
-		return true
-	}
-
-	// Sinon : doit ressembler à un message (clé protobuf valide)
-	key := b[0]
-	fieldNum := int(key >> 3)
-	wireType := int(key & 7)
-	if fieldNum < 1 || fieldNum > 29 || (wireType != 0 && wireType != 2) {
-		return true // pas une clé valide → feuille binaire
-	}
-	// wireType 2 : longueur doit tenir dans le buffer
-	if wireType == 2 {
-		if len(b) < 2 {
-			return true
-		}
-		if b[1]&0x80 != 0 {
-			return true
-		}
-		l := int(b[1])
-		if 2+l > len(b) {
-			return true
-		}
-	}
-	return false
+	return true
 }
 
-func printable(b []byte) string {
-	var sb strings.Builder
-	for _, c := range b {
-		if c >= 0x20 && c < 0x7f {
-			sb.WriteByte(c)
-		} else if c == '\n' || c == '\t' || c == '\r' {
-			sb.WriteByte(' ')
-		} else {
-			sb.WriteByte('·')
-		}
+// looksProtobuf: first byte is a plausible field tag (field 1..15, wt 0 or 2)
+// and the length prefix is consistent with the buffer.
+func looksProtobuf(b []byte) bool {
+	if len(b) < 2 {
+		return false
 	}
-	return sb.String()
+	tag := b[0]
+	fnum := tag >> 3
+	wt := tag & 7
+	if fnum == 0 || fnum > 15 || (wt != 0 && wt != 2) {
+		return false
+	}
+	_, _, ok := readVarint(b, 1)
+	return ok
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
+func min(a, b int) int {
+	if a < b {
+		return a
 	}
-	return s[:n] + "…"
+	return b
 }

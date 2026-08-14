@@ -67,6 +67,9 @@ type fakeRPCClient struct {
 	// lastCommand : dernière slash commande routée (vérifié par le test
 	// de routing send_command).
 	lastCommand string
+	// lastPrompt : dernier prompt envoyé au LS via SendMessageStream(…)
+	// (vérifié par le test submit_question_response fire-and-forget).
+	lastPrompt string
 	// lastCascade : dernier CreateCascade reçu (vérifié par le test de
 	// propagation du modèle mobile).
 	lastCascade *createCascadeCall
@@ -137,12 +140,14 @@ func (f *fakeRPCClient) SendMessage(cascadeID, text string) ([]byte, error) {
 }
 
 func (f *fakeRPCClient) SendMessageStream(cascadeID, text string, onFrame func([]byte) error) error {
+	f.lastPrompt = text
 	return f.streamLoop(onFrame)
 }
 
 // SendMessageStreamModel : la sélection modèle du mobile est ignorée par le
 // fake (le contrat testé est le streaming) - mêmes deltas que la variante.
 func (f *fakeRPCClient) SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error) error {
+	f.lastPrompt = text
 	return f.streamLoop(onFrame)
 }
 

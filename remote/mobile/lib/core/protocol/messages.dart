@@ -35,6 +35,24 @@ class CascadeSession {
     return '${diff.inDays}d';
   }
 
+  bool get isAvailable {
+    if (id.isEmpty) return false;
+    final st = status.toUpperCase();
+    if (st.contains('ARCHIV') ||
+        st.contains('DELET') ||
+        st.contains('TRASH') ||
+        st == 'CASCADE_STATUS_ARCHIVED' ||
+        st == 'CASCADE_STATUS_DELETED') {
+      return false;
+    }
+    return true;
+  }
+
+  bool get isRunning {
+    final st = status.toUpperCase();
+    return st.contains('RUNNING');
+  }
+
   Map<String, dynamic> toJson() => {
         'cascadeId': id,
         'workspacePath': workspacePath,

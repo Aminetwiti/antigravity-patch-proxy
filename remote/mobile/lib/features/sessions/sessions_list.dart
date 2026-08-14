@@ -37,6 +37,19 @@ class LeftSidebarDrawer extends StatefulWidget {
 
 class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
   final ScrollController _scrollController = ScrollController();
+  final Set<String> _collapsedFolders = {};
+
+  String _cleanWorkspaceName(String rawPath) {
+    if (rawPath.isEmpty || rawPath == '.') return 'antigravity-workspace';
+    var clean = rawPath.replaceFirst(RegExp(r'^file:\/\/\/'), '');
+    clean = clean.replaceAll('\\', '/');
+    if (clean.endsWith('/')) clean = clean.substring(0, clean.length - 1);
+    final parts = clean.split('/');
+    if (parts.isNotEmpty && parts.last.isNotEmpty) {
+      return parts.last;
+    }
+    return clean;
+  }
 
   @override
   void dispose() {
@@ -46,18 +59,23 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
 
   @override
   Widget build(BuildContext context) {
-    final sessionsList = widget.sessions ?? [];
+    // Ne conserver STRICTEMENT que les sessions disponibles (non archivées et non supprimées)
+    final allSessions = widget.sessions ?? [];
+    final availableSessions = allSessions
+        .where((s) => s.isAvailable && s.id.isNotEmpty)
+        .toList();
+
+    // Organiser les sessions par workspace
     final Map<String, List<CascadeSession>> groupedSessions = {};
-    for (final s in sessionsList) {
-      final folderName = s.workspacePath.isEmpty
-          ? 'Autres'
-          : s.workspacePath.split(RegExp(r'[\\/]')).last;
+    for (final s in availableSessions) {
+      final folderName = _cleanWorkspaceName(s.workspacePath);
       groupedSessions.putIfAbsent(folderName, () => []).add(s);
     }
+
     final folderNames = groupedSessions.keys.toList()..sort();
 
     return Drawer(
-      backgroundColor: AppColors.sidebarBackground,
+      backgroundColor: const Color(0xFF131416),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.zero,
       ),
@@ -65,133 +83,180 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const SizedBox(height: 10),
+            const SizedBox(height: 6),
 
-            // ── Header: logo + title
+            // ── Top Navigation Bar: Icons [◫ Sidebar toggle] [← Back] [→ Forward]
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
               child: Row(
                 children: [
-                  Container(
-                    width: 22,
-                    height: 22,
-                    decoration: BoxDecoration(
-                      color: AppColors.accentBlue,
-                      borderRadius: BorderRadius.circular(5),
-                    ),
-                    child: const Icon(Icons.bolt, size: 13, color: AppColors.onAccent),
+                  _HeaderIconBtn(
+                    icon: Icons.dock_outlined,
+                    tooltip: 'Masquer la barre',
+                    onTap: () => Navigator.of(context).pop(),
                   ),
-                  const SizedBox(width: 9),
-                  const Text(
-                    'Antigravity',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.inkPrimary,
-                      letterSpacing: -0.2,
-                    ),
+                  const SizedBox(width: 8),
+                  _HeaderIconBtn(
+                    icon: Icons.arrow_back,
+                    tooltip: 'Retour',
+                    onTap: () => Navigator.of(context).pop(),
                   ),
-                  const Spacer(),
-                  _IconBtn(
-                    icon: Icons.edit_outlined,
-                    tooltip: 'Nouvelle conversation',
-                    onTap: () {
-                      Navigator.of(context).pop();
-                      widget.onNewConversation();
-                    },
+                  const SizedBox(width: 8),
+                  _HeaderIconBtn(
+                    icon: Icons.arrow_forward,
+                    tooltip: 'Suivant',
+                    onTap: () {},
                   ),
                 ],
               ),
             ),
 
-            const _Divider(),
+            const SizedBox(height: 8),
 
-            // ── Quick-nav actions
-            _SidebarAction(
-              icon: Icons.access_time_outlined,
-              label: 'Historique',
+            // ── "+ New Conversation" Button
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    Navigator.of(context).pop();
+                    widget.onNewConversation();
+                  },
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1B1D22),
+                      borderRadius: BorderRadius.circular(AppRadius.lg),
+                      border: Border.all(
+                        color: const Color(0xFF2C2F36),
+                        width: 1,
+                      ),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.add, size: 16, color: AppColors.inkSecondary),
+                        SizedBox(width: 10),
+                        Text(
+                          'New Conversation',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.inkPrimary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // ── Quick-nav actions (History, Scheduled Tasks)
+            _SidebarActionItem(
+              icon: Icons.history_rounded,
+              label: 'Conversation History',
               onTap: () {
                 Navigator.of(context).pop();
                 widget.onConversationHistory?.call();
               },
             ),
-            _SidebarAction(
+            _SidebarActionItem(
               icon: Icons.schedule_outlined,
-              label: 'Tâches planifiées',
+              label: 'Scheduled Tasks',
               onTap: () {
                 Navigator.of(context).pop();
                 widget.onScheduledTasks?.call();
               },
             ),
-            _SidebarAction(
-              icon: Icons.folder_open_outlined,
-              label: 'Espace de travail',
-              onTap: () {
-                Navigator.of(context).pop();
-                widget.onOpenWorkspace?.call();
-              },
-            ),
 
-            const SizedBox(height: 4),
-            const _Divider(),
-            const SizedBox(height: 4),
+            const SizedBox(height: 14),
 
-            // ── Section label
+            // ── Section Header: Projects [filter] [new folder]
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 4, 14, 6),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
               child: Row(
                 children: [
                   const Text(
-                    'SESSIONS',
+                    'Projects',
                     style: TextStyle(
-                      fontSize: 10,
+                      fontSize: 12.5,
                       fontWeight: FontWeight.w600,
-                      color: AppColors.inkFaint,
-                      letterSpacing: 0.8,
+                      color: Color(0xFF8F909A),
                     ),
                   ),
                   const Spacer(),
-                  _IconBtn(
-                    icon: Icons.add,
-                    tooltip: 'Nouvelle session',
-                    size: 13,
+                  _HeaderIconBtn(
+                    icon: Icons.filter_list_rounded,
+                    tooltip: 'Filtrer',
+                    onTap: () {},
+                    size: 15,
+                  ),
+                  const SizedBox(width: 6),
+                  _HeaderIconBtn(
+                    icon: Icons.create_new_folder_outlined,
+                    tooltip: 'Ouvrir workspace',
                     onTap: () {
                       Navigator.of(context).pop();
-                      widget.onNewConversation();
+                      widget.onOpenWorkspace?.call();
                     },
+                    size: 15,
                   ),
                 ],
               ),
             ),
 
-            // ── Session list
+            const SizedBox(height: 4),
+
+            // ── Workspaces & Sessions Tree
             Expanded(
               child: RawScrollbar(
                 controller: _scrollController,
-                thumbVisibility: true,
+                thumbVisibility: false,
                 thickness: 3,
                 radius: const Radius.circular(2),
                 thumbColor: AppColors.borderStrong.withValues(alpha: 0.6),
                 child: ListView(
                   controller: _scrollController,
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                   children: [
                     if (folderNames.isEmpty)
-                      _EmptyState(isConnected: widget.isConnected, onConnect: () {
-                        Navigator.of(context).pop();
-                        widget.onToggleConnection();
-                      })
+                      _EmptyState(
+                        isConnected: widget.isConnected,
+                        onConnect: () {
+                          Navigator.of(context).pop();
+                          widget.onToggleConnection();
+                        },
+                      )
                     else
-                      ...folderNames.map((folder) => _ProjectFolderGroup(
-                            folderName: folder,
-                            sessions: groupedSessions[folder]!,
-                            activeSessionId: widget.activeSessionId,
-                            onSessionTap: (id) {
-                              Navigator.of(context).pop();
-                              widget.onSessionSelected(id);
-                            },
-                          )),
-                    const SizedBox(height: 12),
+                      ...folderNames.map((folder) {
+                        final sessions = groupedSessions[folder] ?? [];
+                        final isCollapsed = _collapsedFolders.contains(folder);
+                        return _WorkspaceFolderSection(
+                          folderName: folder,
+                          sessions: sessions,
+                          isCollapsed: isCollapsed,
+                          activeSessionId: widget.activeSessionId,
+                          onToggleCollapse: () {
+                            setState(() {
+                              if (isCollapsed) {
+                                _collapsedFolders.remove(folder);
+                              } else {
+                                _collapsedFolders.add(folder);
+                              }
+                            });
+                          },
+                          onSessionTap: (id) {
+                            Navigator.of(context).pop();
+                            widget.onSessionSelected(id);
+                          },
+                        );
+                      }),
+                    const SizedBox(height: 16),
                   ],
                 ),
               ),
@@ -199,14 +264,14 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
 
             const _Divider(),
 
-            // ── Bottom: settings + connection status
+            // ── Bottom: Settings + Connection status
             Padding(
-              padding: const EdgeInsets.fromLTRB(6, 4, 6, 4),
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
               child: Column(
                 children: [
-                  _SidebarAction(
+                  _SidebarActionItem(
                     icon: Icons.settings_outlined,
-                    label: 'Paramètres',
+                    label: 'Settings',
                     onTap: () {
                       Navigator.of(context).pop();
                       widget.onOpenSettings?.call();
@@ -222,7 +287,6 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                 ],
               ),
             ),
-            const SizedBox(height: 4),
           ],
         ),
       ),
@@ -230,29 +294,18 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
   }
 }
 
-// ── Divider
-class _Divider extends StatelessWidget {
-  const _Divider();
-  @override
-  Widget build(BuildContext context) => Container(
-        height: 1,
-        margin: const EdgeInsets.symmetric(horizontal: 0),
-        color: AppColors.borderSubtle,
-      );
-}
-
-// ── Small icon button (header actions)
-class _IconBtn extends StatelessWidget {
+// ── Header Icon Button
+class _HeaderIconBtn extends StatelessWidget {
   final IconData icon;
   final String tooltip;
   final VoidCallback onTap;
   final double size;
 
-  const _IconBtn({
+  const _HeaderIconBtn({
     required this.icon,
     required this.tooltip,
     required this.onTap,
-    this.size = 14,
+    this.size = 17,
   });
 
   @override
@@ -265,35 +318,34 @@ class _IconBtn extends StatelessWidget {
             borderRadius: BorderRadius.circular(5),
             child: Padding(
               padding: const EdgeInsets.all(5),
-              child: Icon(icon, size: size, color: AppColors.inkMuted),
+              child: Icon(icon, size: size, color: const Color(0xFF8F909A)),
             ),
           ),
         ),
       );
 }
 
-// ── Sidebar action row (history, scheduled, settings…)
-class _SidebarAction extends StatefulWidget {
+// ── Sidebar Action Item (History, Scheduled Tasks, Settings)
+class _SidebarActionItem extends StatefulWidget {
   final IconData icon;
   final String label;
   final VoidCallback? onTap;
 
-  const _SidebarAction({
+  const _SidebarActionItem({
     required this.icon,
     required this.label,
     this.onTap,
   });
 
   @override
-  State<_SidebarAction> createState() => _SidebarActionState();
+  State<_SidebarActionItem> createState() => _SidebarActionItemState();
 }
 
-class _SidebarActionState extends State<_SidebarAction> {
+class _SidebarActionItemState extends State<_SidebarActionItem> {
   bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
-    const color = AppColors.inkSecondary;
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
@@ -306,23 +358,21 @@ class _SidebarActionState extends State<_SidebarAction> {
           duration: AppMotion.fast,
           curve: AppMotion.easeOut,
           margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           decoration: BoxDecoration(
-            color: _hovered
-                ? AppColors.listSelectionBg.withValues(alpha: 0.6)
-                : Colors.transparent,
+            color: _hovered ? const Color(0xFF1E2025) : Colors.transparent,
             borderRadius: BorderRadius.circular(AppRadius.md),
           ),
           child: Row(
             children: [
-              Icon(widget.icon, size: 15, color: color),
+              Icon(widget.icon, size: 16, color: const Color(0xFF9E9FA9)),
               const SizedBox(width: 10),
               Text(
                 widget.label,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w400,
-                  color: color,
+                  color: Color(0xFFD4D4D8),
                 ),
               ),
             ],
@@ -333,40 +383,50 @@ class _SidebarActionState extends State<_SidebarAction> {
   }
 }
 
-// ── Project folder group
-class _ProjectFolderGroup extends StatelessWidget {
+// ── Workspace Folder Section (Grouping by folder)
+class _WorkspaceFolderSection extends StatelessWidget {
   final String folderName;
   final List<CascadeSession> sessions;
+  final bool isCollapsed;
   final String activeSessionId;
+  final VoidCallback onToggleCollapse;
   final Function(String id) onSessionTap;
 
-  const _ProjectFolderGroup({
+  const _WorkspaceFolderSection({
     required this.folderName,
     required this.sessions,
+    required this.isCollapsed,
     required this.activeSessionId,
+    required this.onToggleCollapse,
     required this.onSessionTap,
   });
 
   @override
-  Widget build(BuildContext context) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Folder header
-          Padding(
-            padding: const EdgeInsets.fromLTRB(10, 8, 10, 3),
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Workspace Folder Header
+        InkWell(
+          onTap: onToggleCollapse,
+          borderRadius: BorderRadius.circular(4),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
             child: Row(
               children: [
-                const Icon(Icons.folder_outlined,
-                    size: 13, color: AppColors.inkFaint),
-                const SizedBox(width: 7),
+                const Icon(
+                  Icons.folder_outlined,
+                  size: 15,
+                  color: Color(0xFF8F909A),
+                ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     folderName,
                     style: const TextStyle(
-                      fontSize: 11.5,
+                      fontSize: 12.5,
                       fontWeight: FontWeight.w500,
-                      color: AppColors.inkMuted,
-                      letterSpacing: 0.1,
+                      color: Color(0xFFA1A1AA),
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -374,49 +434,58 @@ class _ProjectFolderGroup extends StatelessWidget {
               ],
             ),
           ),
+        ),
 
+        // Session list under this workspace
+        if (!isCollapsed) ...[
           if (sessions.isEmpty)
-            Padding(
-              padding: const EdgeInsets.only(left: 26, top: 3, bottom: 8),
+            const Padding(
+              padding: EdgeInsets.only(left: 28, top: 4, bottom: 8),
               child: Text(
-                'Aucune conversation',
+                'No conversations yet',
                 style: TextStyle(
-                    fontSize: 11,
-                    color: AppColors.inkFaint.withValues(alpha: 0.7)),
+                  fontSize: 12,
+                  fontStyle: FontStyle.italic,
+                  color: Color(0xFF5E606A),
+                ),
               ),
             )
           else
-            ...sessions.map((s) => _SessionRow(
+            ...sessions.map((s) => _SessionRowItem(
                   session: s,
                   isSelected: s.id == activeSessionId,
                   onTap: () => onSessionTap(s.id),
                 )),
         ],
-      );
+        const SizedBox(height: 4),
+      ],
+    );
+  }
 }
 
-// ── Individual session row
-class _SessionRow extends StatefulWidget {
+// ── Individual Session Row Item
+class _SessionRowItem extends StatefulWidget {
   final CascadeSession session;
   final bool isSelected;
   final VoidCallback onTap;
 
-  const _SessionRow({
+  const _SessionRowItem({
     required this.session,
     required this.isSelected,
     required this.onTap,
   });
 
   @override
-  State<_SessionRow> createState() => _SessionRowState();
+  State<_SessionRowItem> createState() => _SessionRowItemState();
 }
 
-class _SessionRowState extends State<_SessionRow> {
+class _SessionRowItemState extends State<_SessionRowItem> {
   bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
     final isSelected = widget.isSelected;
+    final isRunning = widget.session.isRunning;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
@@ -429,68 +498,53 @@ class _SessionRowState extends State<_SessionRow> {
         child: AnimatedContainer(
           duration: AppMotion.fast,
           curve: AppMotion.easeOut,
-          margin: const EdgeInsets.fromLTRB(6, 1, 6, 1),
+          margin: const EdgeInsets.only(left: 14, right: 6, top: 1, bottom: 1),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
           decoration: BoxDecoration(
             color: isSelected
-                ? AppColors.listSelectionBg
+                ? const Color(0xFF26282E)
                 : _hovered
-                    ? AppColors.listSelectionBg.withValues(alpha: 0.5)
+                    ? const Color(0xFF1E2025)
                     : Colors.transparent,
             borderRadius: BorderRadius.circular(AppRadius.md),
           ),
           child: Row(
             children: [
-              // Left accent bar for active session
-              AnimatedContainer(
-                duration: AppMotion.fast,
-                width: 2,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: isSelected ? AppColors.accentBlue : Colors.transparent,
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(AppRadius.md),
-                    bottomLeft: Radius.circular(AppRadius.md),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
               Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          widget.session.title,
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            color: isSelected
-                                ? AppColors.inkPrimary
-                                : AppColors.inkSecondary,
-                            fontWeight: isSelected
-                                ? FontWeight.w500
-                                : FontWeight.w400,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 1,
-                        ),
-                      ),
-                      if (!isSelected && widget.session.time.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(left: 6),
-                          child: Text(
-                            widget.session.time,
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: AppColors.inkFaint,
-                            ),
-                          ),
-                        ),
-                    ],
+                child: Text(
+                  widget.session.title,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: isSelected
+                        ? const Color(0xFFFFFFFF)
+                        : const Color(0xFFB0B0BA),
+                    fontWeight: isSelected ? FontWeight.w500 : FontWeight.w400,
                   ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
                 ),
               ),
               const SizedBox(width: 8),
+              if (isRunning)
+                const SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.5,
+                    color: AppColors.accentBlue,
+                  ),
+                )
+              else if (widget.session.time.isNotEmpty)
+                Text(
+                  widget.session.time,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isSelected
+                        ? const Color(0xFF9E9FA9)
+                        : const Color(0xFF5E606A),
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
             ],
           ),
         ),
@@ -499,7 +553,7 @@ class _SessionRowState extends State<_SessionRow> {
   }
 }
 
-// ── Empty state
+// ── Empty State Widget
 class _EmptyState extends StatelessWidget {
   final bool isConnected;
   final VoidCallback onConnect;
@@ -511,9 +565,9 @@ class _EmptyState extends StatelessWidget {
         margin: const EdgeInsets.all(10),
         padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 16),
         decoration: BoxDecoration(
-          color: AppColors.surfaceRaised,
+          color: const Color(0xFF181A1F),
           borderRadius: BorderRadius.circular(AppRadius.lg),
-          border: Border.all(color: AppColors.borderSubtle, width: 1),
+          border: Border.all(color: const Color(0xFF272A30), width: 1),
         ),
         child: Column(
           children: [
@@ -526,7 +580,7 @@ class _EmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             Text(
-              isConnected ? 'Aucune session active' : 'Non connecté',
+              isConnected ? 'No active sessions' : 'Disconnected',
               style: const TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
@@ -536,8 +590,8 @@ class _EmptyState extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               isConnected
-                  ? 'Démarrez une nouvelle conversation.'
-                  : 'Connectez le Daemon pour voir vos sessions.',
+                  ? 'Start a new conversation in a project.'
+                  : 'Connect to Daemon to view workspace sessions.',
               textAlign: TextAlign.center,
               style: const TextStyle(
                 fontSize: 11.5,
@@ -561,7 +615,7 @@ class _EmptyState extends StatelessWidget {
                       Icon(Icons.qr_code_scanner, size: 13, color: AppColors.onAccent),
                       SizedBox(width: 7),
                       Text(
-                        'Se connecter',
+                        'Connect',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
@@ -575,6 +629,16 @@ class _EmptyState extends StatelessWidget {
             ],
           ],
         ),
+      );
+}
+
+// ── Divider
+class _Divider extends StatelessWidget {
+  const _Divider();
+  @override
+  Widget build(BuildContext context) => Container(
+        height: 1,
+        color: const Color(0xFF1F2127),
       );
 }
 
@@ -595,7 +659,7 @@ class _ConnectionRowState extends State<_ConnectionRow> {
   @override
   Widget build(BuildContext context) {
     final color = widget.isConnected ? AppColors.positive : AppColors.inkMuted;
-    final label = widget.isConnected ? 'Connecté' : 'Hors ligne';
+    final label = widget.isConnected ? 'Connected' : 'Offline';
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
@@ -606,16 +670,13 @@ class _ConnectionRowState extends State<_ConnectionRow> {
           duration: AppMotion.fast,
           curve: AppMotion.easeOut,
           margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           decoration: BoxDecoration(
-            color: _hovered
-                ? AppColors.listSelectionBg.withValues(alpha: 0.6)
-                : Colors.transparent,
+            color: _hovered ? const Color(0xFF1E2025) : Colors.transparent,
             borderRadius: BorderRadius.circular(AppRadius.md),
           ),
           child: Row(
             children: [
-              // Status dot
               Container(
                 width: 7,
                 height: 7,
