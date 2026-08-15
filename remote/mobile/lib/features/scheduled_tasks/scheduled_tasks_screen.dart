@@ -177,40 +177,43 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
       return name.contains(_searchQuery) || prompt.contains(_searchQuery) || cron.contains(_searchQuery);
     }).toList();
 
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
-      backgroundColor: const Color(0xFF0F1012),
+      backgroundColor: scheme.surface,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0F1012),
+        backgroundColor: scheme.surface,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: AppColors.inkPrimary),
+          icon: Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: scheme.onSurface),
           onPressed: () => Navigator.of(context).pop(),
           tooltip: 'Retour',
         ),
         title: Text(
           'Scheduled Tasks (${_localTasks.length})',
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 17,
             fontWeight: FontWeight.w600,
-            color: AppColors.inkPrimary,
+            color: scheme.onSurface,
             letterSpacing: -0.2,
           ),
         ),
         actions: [
           if (_isLoading)
-            const Center(
+            Center(
               child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
                 child: SizedBox(
                   width: 16,
                   height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.inkSecondary),
+                  child: CircularProgressIndicator(strokeWidth: 2, color: scheme.onSurfaceVariant),
                 ),
               ),
             )
           else if (widget.onRefresh != null)
             IconButton(
-              icon: const Icon(Icons.refresh_rounded, size: 20, color: AppColors.inkSecondary),
+              icon: Icon(Icons.refresh_rounded, size: 20, color: scheme.onSurfaceVariant),
               onPressed: () {
                 HapticFeedback.selectionClick();
                 widget.onRefresh!();
@@ -228,21 +231,21 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF1E2025),
+                    color: isDark ? const Color(0xFF1E2025) : scheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(AppRadius.md),
-                    border: Border.all(color: const Color(0xFF2C2F36), width: 1),
+                    border: Border.all(color: scheme.outlineVariant, width: 1),
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.add, size: 14, color: AppColors.inkPrimary),
-                      SizedBox(width: 4),
+                      Icon(Icons.add, size: 14, color: scheme.onSurface),
+                      const SizedBox(width: 4),
                       Text(
                         '+ New',
                         style: TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w500,
-                          color: AppColors.inkPrimary,
+                          color: scheme.onSurface,
                         ),
                       ),
                     ],
@@ -262,21 +265,21 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
               child: Container(
                 height: 40,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF1B1D22),
+                  color: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(AppRadius.lg),
-                  border: Border.all(color: const Color(0xFF2C2F36), width: 1),
+                  border: Border.all(color: scheme.outlineVariant, width: 1),
                 ),
                 child: TextField(
                   controller: _searchController,
-                  style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
-                  cursorColor: AppColors.accentBlue,
+                  style: TextStyle(fontSize: 13, color: scheme.onSurface),
+                  cursorColor: scheme.primary,
                   decoration: InputDecoration(
                     hintText: 'Search tasks...',
-                    hintStyle: const TextStyle(fontSize: 13, color: Color(0xFF636D83)),
-                    prefixIcon: const Icon(Icons.search_rounded, size: 18, color: Color(0xFF636D83)),
+                    hintStyle: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant.withValues(alpha: 0.7)),
+                    prefixIcon: Icon(Icons.search_rounded, size: 18, color: scheme.onSurfaceVariant),
                     suffixIcon: _searchQuery.isNotEmpty
                         ? IconButton(
-                            icon: const Icon(Icons.close_rounded, size: 16, color: Color(0xFF636D83)),
+                            icon: Icon(Icons.close_rounded, size: 16, color: scheme.onSurfaceVariant),
                             tooltip: 'Effacer la recherche',
                             onPressed: () => _searchController.clear(),
                           )
@@ -289,18 +292,18 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
             ),
 
             if (_isLoading)
-              const LinearProgressIndicator(minHeight: 2, color: AppColors.accentBlue, backgroundColor: Colors.transparent),
+              LinearProgressIndicator(minHeight: 2, color: scheme.primary, backgroundColor: Colors.transparent),
 
             // ── Tasks List or Empty State ─────────────────────────────
             Expanded(
               child: filtered.isEmpty
-                  ? _buildEmptyState()
+                  ? _buildEmptyState(scheme)
                   : ListView.separated(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                       itemCount: filtered.length,
-                      separatorBuilder: (context, index) => const Divider(
+                      separatorBuilder: (context, index) => Divider(
                         height: 1,
-                        color: Color(0xFF1B1D22),
+                        color: scheme.outlineVariant,
                         indent: 12,
                         endIndent: 12,
                       ),
@@ -361,32 +364,32 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
     );
   }
 
-  Widget _buildEmptyState() {
+  Widget _buildEmptyState(ColorScheme scheme) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.schedule_outlined, size: 42, color: AppColors.inkMuted),
+            Icon(Icons.schedule_outlined, size: 42, color: scheme.onSurfaceVariant),
             const SizedBox(height: 14),
             Text(
               _searchQuery.isNotEmpty
                   ? 'Aucune tâche pour "$_searchQuery"'
                   : 'Aucune tâche planifiée',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
-                color: AppColors.inkPrimary,
+                color: scheme.onSurface,
               ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 6),
-            const Text(
+            Text(
               'No scheduled tasks configured.\nCliquez sur "+ New" pour programmer un cron job ou un timer.',
               style: TextStyle(
                 fontSize: 12,
-                color: Color(0xFF6B7280),
+                color: scheme.onSurfaceVariant,
                 height: 1.4,
               ),
               textAlign: TextAlign.center,
@@ -397,7 +400,7 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
               icon: const Icon(Icons.add, size: 16),
               label: const Text('Add Scheduled Task'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.accentBlue,
+                backgroundColor: scheme.primary,
                 foregroundColor: AppColors.onAccent,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
               ),
@@ -426,6 +429,8 @@ class _ScheduledTaskRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final title = task.displayName;
     final schedule = task.formattedSchedule;
 
@@ -445,10 +450,10 @@ class _ScheduledTaskRow extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13.5,
                         fontWeight: FontWeight.w500,
-                        color: AppColors.inkPrimary,
+                        color: scheme.onSurface,
                         letterSpacing: -0.1,
                       ),
                       maxLines: 1,
@@ -457,9 +462,9 @@ class _ScheduledTaskRow extends StatelessWidget {
                     const SizedBox(height: 3),
                     Text(
                       schedule,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 11.5,
-                        color: Color(0xFF8F909A),
+                        color: scheme.onSurfaceVariant,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -468,9 +473,9 @@ class _ScheduledTaskRow extends StatelessWidget {
                       const SizedBox(height: 2),
                       Text(
                         task.cronExpression!,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 10,
-                          color: Color(0xFF5E606A),
+                          color: scheme.outline,
                           fontFamily: 'monospace',
                         ),
                       ),
@@ -494,11 +499,11 @@ class _ScheduledTaskRow extends StatelessWidget {
               minimumSize: const Size(0, 0),
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
-            child: const Text(
+            child: Text(
               'Trigger Now',
               style: TextStyle(
                 fontSize: 11,
-                color: AppColors.accentBlue,
+                color: scheme.primary,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -506,7 +511,7 @@ class _ScheduledTaskRow extends StatelessWidget {
 
           // Bouton Annuler / Supprimer
           IconButton(
-            icon: const Icon(Icons.close_rounded, size: 16, color: Color(0xFF8F909A)),
+            icon: Icon(Icons.close_rounded, size: 16, color: scheme.onSurfaceVariant),
             tooltip: 'Annuler la tâche',
             onPressed: () {
               HapticFeedback.mediumImpact();
@@ -524,10 +529,10 @@ class _ScheduledTaskRow extends StatelessWidget {
             scale: 0.8,
             child: Switch(
               value: task.isEnabled,
-              activeColor: const Color(0xFF1D64B4),
-              activeTrackColor: const Color(0xFF1D64B4).withValues(alpha: 0.5),
-              inactiveThumbColor: const Color(0xFF8F909A),
-              inactiveTrackColor: const Color(0xFF2C2F36),
+              activeColor: scheme.primary,
+              activeTrackColor: scheme.primary.withValues(alpha: 0.5),
+              inactiveThumbColor: scheme.onSurfaceVariant,
+              inactiveTrackColor: isDark ? const Color(0xFF2C2F36) : scheme.surfaceContainerHighest,
               onChanged: (val) {
                 HapticFeedback.selectionClick();
                 onToggle(val);
@@ -617,11 +622,14 @@ class _NewScheduledTaskModalState extends State<_NewScheduledTaskModal> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFF131416),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-        border: Border(top: BorderSide(color: Color(0xFF2C2F36), width: 1)),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF131416) : scheme.surfaceContainer,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+        border: Border(top: BorderSide(color: scheme.outlineVariant, width: 1)),
       ),
       padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(context).viewInsets.bottom + 20),
       child: SingleChildScrollView(
@@ -632,18 +640,18 @@ class _NewScheduledTaskModalState extends State<_NewScheduledTaskModal> {
             // Header: Title + Close Icon
             Row(
               children: [
-                const Expanded(
+                Expanded(
                   child: Text(
                     'New Scheduled Task',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
-                      color: AppColors.inkPrimary,
+                      color: scheme.onSurface,
                     ),
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.close_rounded, size: 18, color: Color(0xFF8F909A)),
+                  icon: Icon(Icons.close_rounded, size: 18, color: scheme.onSurfaceVariant),
                   tooltip: 'Fermer',
                   onPressed: () => Navigator.of(context).pop(),
                   constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
@@ -655,28 +663,28 @@ class _NewScheduledTaskModalState extends State<_NewScheduledTaskModal> {
             const SizedBox(height: 16),
 
             // ── Name Field ──
-            const Text(
+            Text(
               'Name',
               style: TextStyle(
                 fontSize: 12.5,
                 fontWeight: FontWeight.w500,
-                color: Color(0xFFD4D4D8),
+                color: scheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 6),
             Container(
               decoration: BoxDecoration(
-                color: const Color(0xFF1B1D22),
+                color: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(AppRadius.md),
-                border: Border.all(color: const Color(0xFF2C2F36)),
+                border: Border.all(color: scheme.outlineVariant),
               ),
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: TextField(
                 controller: _nameController,
-                style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
-                decoration: const InputDecoration(
+                style: TextStyle(fontSize: 13, color: scheme.onSurface),
+                decoration: InputDecoration(
                   hintText: 'Enter scheduled task name...',
-                  hintStyle: TextStyle(fontSize: 13, color: Color(0xFF5E606A)),
+                  hintStyle: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant.withValues(alpha: 0.7)),
                   border: InputBorder.none,
                 ),
               ),
@@ -685,38 +693,38 @@ class _NewScheduledTaskModalState extends State<_NewScheduledTaskModal> {
             const SizedBox(height: 14),
 
             // ── Project Field ──
-            const Text(
+            Text(
               'Project',
               style: TextStyle(
                 fontSize: 12.5,
                 fontWeight: FontWeight.w500,
-                color: Color(0xFFD4D4D8),
+                color: scheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 6),
             Container(
               decoration: BoxDecoration(
-                color: const Color(0xFF1B1D22),
+                color: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(AppRadius.md),
-                border: Border.all(color: const Color(0xFF2C2F36)),
+                border: Border.all(color: scheme.outlineVariant),
               ),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
                   value: _selectedProject,
-                  dropdownColor: const Color(0xFF1B1D22),
-                  icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF8F909A), size: 18),
+                  dropdownColor: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest,
+                  icon: Icon(Icons.keyboard_arrow_down_rounded, color: scheme.onSurfaceVariant, size: 18),
                   isExpanded: true,
                   items: widget.workspaces
                       .map((ws) => DropdownMenuItem(
                             value: ws,
                             child: Row(
                               children: [
-                                const Icon(Icons.folder_outlined, size: 14, color: Color(0xFF8F909A)),
+                                Icon(Icons.folder_outlined, size: 14, color: scheme.onSurfaceVariant),
                                 const SizedBox(width: 8),
                                 Text(
                                   ws,
-                                  style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
+                                  style: TextStyle(fontSize: 13, color: scheme.onSurface),
                                 ),
                               ],
                             ),
@@ -732,12 +740,12 @@ class _NewScheduledTaskModalState extends State<_NewScheduledTaskModal> {
             const SizedBox(height: 14),
 
             // ── Schedule Field (Frequency + around + Time) ──
-            const Text(
+            Text(
               'Schedule',
               style: TextStyle(
                 fontSize: 12.5,
                 fontWeight: FontWeight.w500,
-                color: Color(0xFFD4D4D8),
+                color: scheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 6),
@@ -746,20 +754,20 @@ class _NewScheduledTaskModalState extends State<_NewScheduledTaskModal> {
                 // Frequency Dropdown (Daily ⌄)
                 Container(
                   decoration: BoxDecoration(
-                    color: const Color(0xFF1B1D22),
+                    color: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(AppRadius.md),
-                    border: Border.all(color: const Color(0xFF2C2F36)),
+                    border: Border.all(color: scheme.outlineVariant),
                   ),
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<String>(
                       value: _selectedFrequency,
-                      dropdownColor: const Color(0xFF1B1D22),
-                      icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF8F909A), size: 16),
+                      dropdownColor: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest,
+                      icon: Icon(Icons.keyboard_arrow_down_rounded, color: scheme.onSurfaceVariant, size: 16),
                       items: _frequencies
                           .map((f) => DropdownMenuItem(
                                 value: f,
-                                child: Text(f, style: const TextStyle(fontSize: 12.5, color: AppColors.inkPrimary)),
+                                child: Text(f, style: TextStyle(fontSize: 12.5, color: scheme.onSurface)),
                               ))
                           .toList(),
                       onChanged: (val) {
@@ -770,29 +778,29 @@ class _NewScheduledTaskModalState extends State<_NewScheduledTaskModal> {
                 ),
 
                 const SizedBox(width: 8),
-                const Text(
+                Text(
                   'around',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF8F909A)),
+                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                 ),
                 const SizedBox(width: 8),
 
                 // Time Dropdown (9:00 AM ⌄)
                 Container(
                   decoration: BoxDecoration(
-                    color: const Color(0xFF1B1D22),
+                    color: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(AppRadius.md),
-                    border: Border.all(color: const Color(0xFF2C2F36)),
+                    border: Border.all(color: scheme.outlineVariant),
                   ),
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<String>(
                       value: _selectedTime,
-                      dropdownColor: const Color(0xFF1B1D22),
-                      icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF8F909A), size: 16),
+                      dropdownColor: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest,
+                      icon: Icon(Icons.keyboard_arrow_down_rounded, color: scheme.onSurfaceVariant, size: 16),
                       items: _times
                           .map((t) => DropdownMenuItem(
                                 value: t,
-                                child: Text(t, style: const TextStyle(fontSize: 12.5, color: AppColors.inkPrimary)),
+                                child: Text(t, style: TextStyle(fontSize: 12.5, color: scheme.onSurface)),
                               ))
                           .toList(),
                       onChanged: (val) {
@@ -807,18 +815,22 @@ class _NewScheduledTaskModalState extends State<_NewScheduledTaskModal> {
               margin: const EdgeInsets.only(top: 8),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
-                color: const Color(0xFF1B1D22),
+                color: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(AppRadius.sm),
-                border: Border.all(color: const Color(0xFF2C2F36)),
+                border: Border.all(color: scheme.outlineVariant),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.schedule_rounded, size: 13, color: Color(0xFF22C55E)),
+                  Icon(Icons.schedule_rounded, size: 13, color: isDark ? const Color(0xFF22C55E) : const Color(0xFF1A7F37)),
                   const SizedBox(width: 6),
                   Text(
                     'Cron : ${_computeCronExpression()}',
-                    style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Color(0xFF22C55E)),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                      color: isDark ? const Color(0xFF22C55E) : const Color(0xFF1A7F37),
+                    ),
                   ),
                 ],
               ),
@@ -827,38 +839,38 @@ class _NewScheduledTaskModalState extends State<_NewScheduledTaskModal> {
             const SizedBox(height: 14),
 
             // ── Prompt Field ──
-            const Text(
+            Text(
               'Prompt',
               style: TextStyle(
                 fontSize: 12.5,
                 fontWeight: FontWeight.w500,
-                color: Color(0xFFD4D4D8),
+                color: scheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 6),
             Container(
               decoration: BoxDecoration(
-                color: const Color(0xFF1B1D22),
+                color: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(AppRadius.md),
-                border: Border.all(color: const Color(0xFF2C2F36)),
+                border: Border.all(color: scheme.outlineVariant),
               ),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: TextField(
                 controller: _promptController,
                 maxLines: 3,
-                style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
-                decoration: const InputDecoration(
+                style: TextStyle(fontSize: 13, color: scheme.onSurface),
+                decoration: InputDecoration(
                   hintText: 'Enter a prompt for the agent to run...',
-                  hintStyle: TextStyle(fontSize: 13, color: Color(0xFF5E606A)),
+                  hintStyle: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant.withValues(alpha: 0.7)),
                   border: InputBorder.none,
                 ),
               ),
             ),
 
             const SizedBox(height: 6),
-            const Text(
+            Text(
               'All scheduled tasks run as Flash.',
-              style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
             ),
 
             const SizedBox(height: 20),
@@ -869,7 +881,7 @@ class _NewScheduledTaskModalState extends State<_NewScheduledTaskModal> {
               child: ElevatedButton(
                 onPressed: _submit,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1D64B4),
+                  backgroundColor: scheme.primary,
                   foregroundColor: AppColors.onAccent,
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),

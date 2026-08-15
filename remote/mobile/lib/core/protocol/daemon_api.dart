@@ -180,6 +180,35 @@ class DaemonApi {
     _lastStepIndices[cascadeId] = index;
   }
 
+  // Prompts non confirmés côté daemon (sync_catchup.pendingMessages) : le
+  // mobile les ré-affiche et peut les retransmettre (dédupliqués par requestId).
+  final List<Map<String, dynamic>> _pendingMessages = [];
+  final ValueNotifier<List<Map<String, dynamic>>> _pendingMessagesNotifier =
+      ValueNotifier<List<Map<String, dynamic>>>(const []);
+
+  /// Prompts non confirmés signalés par le daemon au dernier sync_catchup.
+  ValueListenable<List<Map<String, dynamic>>> get pendingMessages =>
+      _pendingMessagesNotifier;
+
+  /// Retransmet un prompt non confirmé avec le MÊME requestId (le daemon
+  /// déduplique). Marque [requestId] comme re-soumis pour ne pas le re-proposer
+  /// à l'UI au prochain sync_catchup.
+  void resendPending(Map<String, dynamic> pending) {
+    final requestId = pending['requestId'] as String?;
+    final message = {
+      'type': 'send_prompt',
+      'requestId': requestId ?? _newRequestId(),
+      'cascadeId': pending['cascadeId'],
+      'prompt': pending['prompt'],
+    };
+    _send(message);
+    if (requestId != null) {
+      _pendingMessages.removeWhere((m) => m['requestId'] == requestId);
+      _pendingMessagesNotifier.value =
+          List<Map<String, dynamic>>.from(_pendingMessages);
+    }
+  }
+
   void attachReconnect(
     ValueListenable<int> version,
     Future<Map<String, dynamic>> Function() resync, {
@@ -425,6 +454,19 @@ class DaemonApi {
     'cascadeId': cascadeId,
     'lastStepIndex': lastStepIndex,
   });
+
+  /// Synchronise la session active (StepRecovery) et renvoie la liste des
+  /// prompts non confirmés signalés par le daemon (sync_catchup).
+  Future<List<Map<String, dynamic>>> sync({
+    required String cascadeId,
+    required int lastStepIndex,
+  }) async {
+    await syncSession(cascadeId: cascadeId, lastStepIndex: lastStepIndex);
+    // le sync_catchup broadcast arrive via _onMessage et alimente
+    // pendingMessages ; on le laisse se propager avant de lire.
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    return List<Map<String, dynamic>>.from(_pendingMessages);
+  }
 
   /// Upload d'une image vers le dossier scratch de la cascade.
   Future<Map<String, dynamic>> uploadImage({
@@ -831,6 +873,18 @@ class DaemonApi {
       final cascadeId = (data['cascadeId'] ?? (msg['data'] is Map ? (msg['data'] as Map)['cascadeId'] : null)) as String?;
       if (curIdx != null && cascadeId != null && cascadeId.isNotEmpty) {
         _lastStepIndices[cascadeId] = curIdx.toInt();
+      }
+      final pending = (msg['data'] is Map
+          ? (msg['data'] as Map)['pendingMessages']
+          : null);
+      if (pending is List) {
+        final clean = pending
+            .whereType<Map>()
+            .map((e) => e.cast<String, dynamic>())
+            .toList();
+        _pendingMessages.addAll(clean);
+        _pendingMessagesNotifier.value =
+            List<Map<String, dynamic>>.from(_pendingMessages);
       }
     }
 

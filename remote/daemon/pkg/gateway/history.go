@@ -557,12 +557,11 @@ func findFieldBytes(buf []byte, fieldNum int) []byte {
 			i = n
 		} else if w == 2 {
 			ln, n := readUvarint(buf, i)
-			if n == 0 || i+n+int(ln) > len(buf) {
+			if n == 0 || n+int(ln) > len(buf) {
 				break
 			}
-			i += n
-			sub := buf[i : i+int(ln)]
-			i += int(ln)
+			sub := buf[n : n+int(ln)]
+			i = n + int(ln)
 			if f == fieldNum {
 				return sub
 			}
@@ -624,12 +623,11 @@ func collectSubFields(buf []byte, fieldNum int) [][]byte {
 			i = n
 		} else if w == 2 {
 			ln, n := readUvarint(buf, i)
-			if n == 0 || i+n+int(ln) > len(buf) {
+			if n == 0 || n+int(ln) > len(buf) {
 				break
 			}
-			i += n
-			sub := buf[i : i+int(ln)]
-			i += int(ln)
+			sub := buf[n : n+int(ln)]
+			i = n + int(ln)
 			if f == fieldNum {
 				out = append(out, sub)
 			}
@@ -692,15 +690,29 @@ func userTextFromPayload(sp []byte) string {
 }
 
 // assistantTextFromPayload extrait le texte (f1/f8) et le raisonnement (f3)
-// d'un step_payload de type 15. f20 porte la r├®ponse ; les anciens formats
-// stockaient le texte ailleurs ÔÇö on garde le premier texte lisible en repli.
+// d'un step_payload de type 15. Layout valid├® sur la base moderne (763
+// enregistrements) :
+//   - f20 { f1/f8: texte, f3: raisonnement, f6: botId, f7: toolCalls }
+//   - certaines ├®tapes ne portent que f6+f7 (appels d'outils, pas de texte)
+//   - anciens formats : f20 { f1: texte } ou texte ailleurs ÔåÆ repli
 func assistantTextFromPayload(sp []byte) (text, thought string) {
-	if f20 := findFieldBytes(sp, 20); f20 != nil {
-		text = printableString(findFieldBytes(f20, 1))
-		if text == "" {
-			text = printableString(findFieldBytes(f20, 8))
+	for _, f20 := range collectSubFields(sp, 20) {
+		f1 := printableString(findFieldBytes(f20, 1))
+		f8 := printableString(findFieldBytes(f20, 8))
+		f3 := printableString(findFieldBytes(f20, 3))
+		// f8 porte le texte complet dans le layout moderne ; f1 est l'├®quivalent
+		// historique. On garde le plus long (f8 gagne en cas d'├®galit├®).
+		if len(f8) >= len(f1) {
+			text = f8
+		} else {
+			text = f1
 		}
-		thought = printableString(findFieldBytes(f20, 3))
+		if text != "" {
+			if f3 != "" && f3 != text {
+				thought = f3
+			}
+			return text, thought
+		}
 	}
 	if text == "" {
 		text = firstPrintable(sp)
@@ -744,12 +756,11 @@ func firstPrintable(buf []byte) string {
 			i = n
 		} else if w == 2 {
 			ln, n := readUvarint(buf, i)
-			if n == 0 || i+n+int(ln) > len(buf) {
+			if n == 0 || n+int(ln) > len(buf) {
 				break
 			}
-			i += n
-			sub := buf[i : i+int(ln)]
-			i += int(ln)
+			sub := buf[n : n+int(ln)]
+			i = n + int(ln)
 			if t := printableString(sub); t != "" {
 				return t
 			}
@@ -784,10 +795,10 @@ func tsFromMetadata(meta []byte) string {
 			}
 			if key&7 == 2 {
 				ln, n := readUvarint(f1, i)
-				if n == 0 || i+n+int(ln) > len(f1) {
+				if n == 0 || n+int(ln) > len(f1) {
 					break
 				}
-				i += n + int(ln)
+				i = n + int(ln)
 			} else {
 				break
 			}

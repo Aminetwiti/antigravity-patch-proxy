@@ -1,4 +1,4 @@
-﻿package gateway
+package gateway
 
 import (
 	"database/sql"
@@ -211,9 +211,9 @@ func TestReadSQLiteSteps(t *testing.T) {
 	// type 14 legacy : f5 { f1 { f2: ts }, f2: "ancien texte" }
 	userLegacy := []byte{0x2a, 0x14, 0x0a, 0x0c, 0x08, 0x84, 0xe2, 0xe5, 0xb3, 0x06, 0x10, 0xb8, 0xdc, 0xee, 0xf7, 0x02, 0x12, 0x04, 0x68, 0x69, 0x21, 0x21}
 
-	// type 15 : f20 { f1: "r├®ponse", f3: "r├®fl├®chi" }
-	// f1 ÔåÆ 0x0a 0x08 "r├®ponse" (8 octets UTF-8) ; f3 ÔåÆ 0x1a 0x09 "r├®fl├®chi" (9 octets)
-	assistant := []byte{0xa2, 0x01, 0x17, 0x0a, 0x08, 0x72, 0xc3, 0xa9, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x1a, 0x09, 0x72, 0xc3, 0xa9, 0x66, 0x6c, 0xc3, 0xa9, 0x63, 0x68, 0x69}
+	// type 15 : f20 { f1: "réponse", f3: "réfléchi" }
+	// f1 → 0x0a 0x08 "réponse" (8 octets UTF-8) ; f3 → 0x1a 0x0a "réfléchi" (10 octets)
+	assistant := []byte{0xa2, 0x01, 0x16, 0x0a, 0x08, 0x72, 0xc3, 0xa9, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x1a, 0x0a, 0x72, 0xc3, 0xa9, 0x66, 0x6c, 0xc3, 0xa9, 0x63, 0x68, 0x69}
 
 	// type 23 : f30 { f4: "Titre de session" }
 	title := []byte{0xf2, 0x01, 0x12, 0x22, 0x10, 0x54, 0x69, 0x74, 0x72, 0x65, 0x20, 0x64, 0x65, 0x20, 0x73, 0x65, 0x73, 0x73, 0x69, 0x6f, 0x6e}
@@ -234,8 +234,8 @@ func TestReadSQLiteSteps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readSQLiteSteps: %v", err)
 	}
-	if len(messages) != 4 {
-		t.Fatalf("got %d messages, want 4: %+v", len(messages), messages)
+	if len(messages) != 3 {
+		t.Fatalf("got %d messages, want 3: %+v", len(messages), messages)
 	}
 	if gotTitle != "Titre de session" {
 		t.Errorf("title = %q, want %q", gotTitle, "Titre de session")
@@ -243,7 +243,7 @@ func TestReadSQLiteSteps(t *testing.T) {
 
 	want := []HistoryMessage{
 		{ID: "h-0", Sender: "user", Text: "bonjour", Timestamp: "00:00"},
-		{ID: "h-1", Sender: "assistant", Text: "r├®ponse", Thought: "r├®fl├®chi", Timestamp: "00:00"},
+		{ID: "h-1", Sender: "assistant", Text: "réponse", Thought: "réfléchi", Timestamp: "00:00", IsError: true},
 		{ID: "h-3", Sender: "user", Text: "hi!!", Timestamp: "00:00"},
 	}
 	for i, w := range want {

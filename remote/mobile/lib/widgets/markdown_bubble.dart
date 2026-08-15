@@ -322,16 +322,17 @@ class _DiffLineRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     Color? bgColor;
     Color textColor = scheme.onSurface;
     FontWeight fontWeight = FontWeight.normal;
 
     if (line.startsWith('+') && !line.startsWith('+++')) {
-      bgColor = const Color(0x339BB955);
-      textColor = const Color(0xFF4ADE80);
+      bgColor = isDark ? const Color(0x339BB955) : const Color(0x221A7F37);
+      textColor = isDark ? const Color(0xFF4ADE80) : const Color(0xFF1A7F37);
     } else if (line.startsWith('-') && !line.startsWith('---')) {
-      bgColor = const Color(0x33FF0000);
-      textColor = const Color(0xFFF87171);
+      bgColor = isDark ? const Color(0x33FF0000) : const Color(0x22CF222E);
+      textColor = isDark ? const Color(0xFFF87171) : const Color(0xFFCF222E);
     } else if (line.startsWith('@@')) {
       bgColor = scheme.primary.withValues(alpha: 0.12);
       textColor = scheme.primary;

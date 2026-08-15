@@ -19,12 +19,15 @@ class ImplementationPlanCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 6),
       decoration: BoxDecoration(
-        color: AppColors.surfaceRaised,
+        color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
         borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: AppColors.borderStrong, width: 1),
+        border: Border.all(color: isDark ? AppColors.borderStrong : scheme.outlineVariant, width: 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -37,20 +40,20 @@ class ImplementationPlanCard extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
               child: Row(
                 children: [
-                  const Icon(Icons.description_outlined, size: 16, color: AppColors.accentBlue),
+                  Icon(Icons.description_outlined, size: 16, color: scheme.primary),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       title,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
-                        color: AppColors.inkPrimary,
+                        color: scheme.onSurface,
                         letterSpacing: -0.1,
                       ),
                     ),
                   ),
-                  const Icon(Icons.chevron_right, size: 16, color: AppColors.inkMuted),
+                  Icon(Icons.chevron_right, size: 16, color: scheme.onSurfaceVariant),
                 ],
               ),
             ),
@@ -61,9 +64,9 @@ class ImplementationPlanCard extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
             child: Text(
               summary,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
-                color: AppColors.inkSecondary,
+                color: scheme.onSurfaceVariant,
                 height: 1.4,
               ),
               maxLines: 3,
@@ -84,7 +87,7 @@ class ImplementationPlanCard extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
-                      color: AppColors.accentBlue,
+                      color: scheme.primary,
                       borderRadius: BorderRadius.circular(AppRadius.sm),
                     ),
                     child: const Row(
@@ -108,15 +111,15 @@ class ImplementationPlanCard extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
-                      color: AppColors.surfaceInput,
+                      color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(AppRadius.sm),
-                      border: Border.all(color: AppColors.borderSubtle, width: 1),
+                      border: Border.all(color: isDark ? AppColors.borderSubtle : scheme.outlineVariant, width: 1),
                     ),
-                    child: const Text(
+                    child: Text(
                       'Lire le plan',
                       style: TextStyle(
                         fontSize: 11.5,
-                        color: AppColors.inkSecondary,
+                        color: scheme.onSurface,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -146,12 +149,15 @@ class WalkthroughCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 6),
       decoration: BoxDecoration(
-        color: AppColors.surfaceRaised,
+        color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
         borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: AppColors.borderStrong, width: 1),
+        border: Border.all(color: isDark ? AppColors.borderStrong : scheme.outlineVariant, width: 1),
       ),
       child: InkWell(
         onTap: onViewWalkthrough,
@@ -168,22 +174,22 @@ class WalkthroughCard extends StatelessWidget {
                   Expanded(
                     child: Text(
                       title,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
-                        color: AppColors.inkPrimary,
+                        color: scheme.onSurface,
                       ),
                     ),
                   ),
-                  const Icon(Icons.chevron_right, size: 16, color: AppColors.inkMuted),
+                  Icon(Icons.chevron_right, size: 16, color: scheme.onSurfaceVariant),
                 ],
               ),
               const SizedBox(height: 6),
               Text(
                 summary,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
-                  color: AppColors.inkSecondary,
+                  color: scheme.onSurfaceVariant,
                   height: 1.4,
                 ),
                 maxLines: 3,
@@ -221,15 +227,17 @@ class _FilesChangedCardState extends State<FilesChangedCard> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final count = widget.files.length;
     final title = '$count ${count > 1 ? 'files changed' : 'file changed'}';
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 6),
       decoration: BoxDecoration(
-        color: AppColors.surfaceRaised,
+        color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
         borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: AppColors.borderStrong, width: 1),
+        border: Border.all(color: isDark ? AppColors.borderStrong : scheme.outlineVariant, width: 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -246,26 +254,26 @@ class _FilesChangedCardState extends State<FilesChangedCard> {
                     children: [
                       Text(
                         title,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w500,
-                          color: AppColors.inkPrimary,
+                          color: scheme.onSurface,
                         ),
                       ),
                       const SizedBox(width: 8),
                       Text(
                         '+${widget.additions} -${widget.deletions}',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w600,
-                          color: AppColors.positive,
+                          color: isDark ? AppColors.positive : const Color(0xFF1A7F37),
                         ),
                       ),
                       const SizedBox(width: 4),
                       Icon(
                         _expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
                         size: 16,
-                        color: AppColors.inkMuted,
+                        color: scheme.onSurfaceVariant,
                       ),
                     ],
                   ),
@@ -279,21 +287,21 @@ class _FilesChangedCardState extends State<FilesChangedCard> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: AppColors.surfaceInput,
+                      color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(AppRadius.sm),
-                      border: Border.all(color: AppColors.borderSubtle, width: 1),
+                      border: Border.all(color: isDark ? AppColors.borderSubtle : scheme.outlineVariant, width: 1),
                     ),
-                    child: const Row(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.rate_review_outlined, size: 12, color: AppColors.accentBlueBright),
-                        SizedBox(width: 5),
+                        Icon(Icons.rate_review_outlined, size: 12, color: scheme.primary),
+                        const SizedBox(width: 5),
                         Text(
                           'Review',
                           style: TextStyle(
                             fontSize: 11.5,
                             fontWeight: FontWeight.w600,
-                            color: AppColors.inkPrimary,
+                            color: scheme.onSurface,
                           ),
                         ),
                       ],
@@ -306,7 +314,7 @@ class _FilesChangedCardState extends State<FilesChangedCard> {
 
           // File list (if expanded)
           if (_expanded && widget.files.isNotEmpty) ...[
-            const Divider(height: 1, color: AppColors.borderSubtle),
+            Divider(height: 1, color: scheme.outlineVariant),
             ...widget.files.map((file) {
               final fileName = file.split(RegExp(r'[\\/]')).last;
               final path = file.length > fileName.length ? file : '';
@@ -314,14 +322,14 @@ class _FilesChangedCardState extends State<FilesChangedCard> {
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 child: Row(
                   children: [
-                    const Icon(Icons.insert_drive_file_outlined, size: 13, color: AppColors.inkMuted),
+                    Icon(Icons.insert_drive_file_outlined, size: 13, color: scheme.onSurfaceVariant),
                     const SizedBox(width: 8),
                     Text(
                       fileName,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
-                        color: AppColors.inkPrimary,
+                        color: scheme.onSurface,
                       ),
                     ),
                     if (path.isNotEmpty) ...[
@@ -329,9 +337,9 @@ class _FilesChangedCardState extends State<FilesChangedCard> {
                       Expanded(
                         child: Text(
                           path,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 10.5,
-                            color: AppColors.inkFaint,
+                            color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -366,12 +374,15 @@ class TaskTrackerCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 6),
       decoration: BoxDecoration(
-        color: AppColors.surfaceRaised,
+        color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
         borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: AppColors.borderStrong, width: 1),
+        border: Border.all(color: isDark ? AppColors.borderStrong : scheme.outlineVariant, width: 1),
       ),
       child: InkWell(
         onTap: onTap,
@@ -386,16 +397,18 @@ class TaskTrackerCard extends StatelessWidget {
                   Icon(
                     isComplete ? Icons.task_alt : Icons.checklist_rtl_outlined,
                     size: 16,
-                    color: isComplete ? AppColors.positive : AppColors.warning,
+                    color: isComplete
+                        ? (isDark ? AppColors.positive : const Color(0xFF1A7F37))
+                        : (isDark ? AppColors.warning : const Color(0xFF9A6700)),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       title,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
-                        color: AppColors.inkPrimary,
+                        color: scheme.onSurface,
                       ),
                     ),
                   ),
@@ -403,15 +416,15 @@ class TaskTrackerCard extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: AppColors.positive.withValues(alpha: 0.15),
+                        color: (isDark ? AppColors.positive : const Color(0xFF1A7F37)).withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(4),
                       ),
-                      child: const Text(
+                      child: Text(
                         'Complete',
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w600,
-                          color: AppColors.positive,
+                          color: isDark ? AppColors.positive : const Color(0xFF1A7F37),
                         ),
                       ),
                     ),
@@ -420,9 +433,9 @@ class TaskTrackerCard extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 summary,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
-                  color: AppColors.inkSecondary,
+                  color: scheme.onSurfaceVariant,
                   height: 1.4,
                 ),
                 maxLines: 3,

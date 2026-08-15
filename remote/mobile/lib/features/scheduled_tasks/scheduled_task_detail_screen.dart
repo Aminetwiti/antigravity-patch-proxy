@@ -127,30 +127,33 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
   }
 
   Future<void> _confirmDelete() async {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surfaceRaised,
+        backgroundColor: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.md),
-          side: const BorderSide(color: AppColors.borderStrong),
+          side: BorderSide(color: scheme.outlineVariant),
         ),
-        title: const Text(
+        title: Text(
           'Supprimer la tâche planifiée ?',
-          style: TextStyle(fontSize: 16, color: AppColors.inkPrimary, fontWeight: FontWeight.w600),
+          style: TextStyle(fontSize: 16, color: scheme.onSurface, fontWeight: FontWeight.w600),
         ),
-        content: const Text(
+        content: Text(
           'Cette action est irréversible et supprimera la planification récurrente.',
-          style: TextStyle(fontSize: 13, color: AppColors.inkSecondary),
+          style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Annuler', style: TextStyle(color: AppColors.inkMuted)),
+            child: Text('Annuler', style: TextStyle(color: scheme.onSurfaceVariant)),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Supprimer', style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.w600)),
+            child: Text('Supprimer', style: TextStyle(color: scheme.error, fontWeight: FontWeight.w600)),
           ),
         ],
       ),
@@ -188,39 +191,41 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final wsName = _task.workspaceName ?? 'antigravity-add-model-main';
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F1012),
+      backgroundColor: scheme.surface,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0F1012),
+        backgroundColor: scheme.surface,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, size: 20, color: Color(0xFF8F909A)),
+          icon: Icon(Icons.arrow_back_rounded, size: 20, color: scheme.onSurfaceVariant),
           onPressed: () => Navigator.of(context).pop(),
           tooltip: 'Retour',
         ),
         title: Text(
           'Scheduled Tasks / ${_task.displayName}',
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 13.5,
-            color: Color(0xFF8F909A),
+            color: scheme.onSurfaceVariant,
             fontWeight: FontWeight.w400,
           ),
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.play_arrow_rounded, size: 22, color: Color(0xFF22C55E)),
+            icon: Icon(Icons.play_arrow_rounded, size: 22, color: isDark ? const Color(0xFF22C55E) : const Color(0xFF1A7F37)),
             onPressed: _triggerExecution,
             tooltip: 'Trigger Now',
           ),
           PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert_rounded, size: 20, color: Color(0xFF8F909A)),
-            color: AppColors.surfaceRaised,
+            icon: Icon(Icons.more_vert_rounded, size: 20, color: scheme.onSurfaceVariant),
+            color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(AppRadius.md),
-              side: const BorderSide(color: AppColors.borderStrong),
+              side: BorderSide(color: scheme.outlineVariant),
             ),
             onSelected: (val) {
               if (val == 'restart') {
@@ -230,23 +235,23 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
               }
             },
             itemBuilder: (context) => [
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'restart',
                 child: Row(
                   children: [
-                    Icon(Icons.refresh_rounded, size: 16, color: AppColors.inkPrimary),
-                    SizedBox(width: 10),
-                    Text('Restart', style: TextStyle(fontSize: 13, color: AppColors.inkPrimary)),
+                    Icon(Icons.refresh_rounded, size: 16, color: scheme.onSurface),
+                    const SizedBox(width: 10),
+                    Text('Restart', style: TextStyle(fontSize: 13, color: scheme.onSurface)),
                   ],
                 ),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'delete',
                 child: Row(
                   children: [
-                    Icon(Icons.delete_outline_rounded, size: 16, color: AppColors.danger),
-                    SizedBox(width: 10),
-                    Text('Delete', style: TextStyle(fontSize: 13, color: AppColors.danger)),
+                    Icon(Icons.delete_outline_rounded, size: 16, color: scheme.error),
+                    const SizedBox(width: 10),
+                    Text('Delete', style: TextStyle(fontSize: 13, color: scheme.error)),
                   ],
                 ),
               ),
@@ -268,13 +273,13 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
                     Expanded(
                       child: TextField(
                         controller: _nameController,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.w600,
-                          color: AppColors.inkPrimary,
+                          color: scheme.onSurface,
                         ),
-                        decoration: const InputDecoration(
-                          border: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.accentBlue)),
+                        decoration: InputDecoration(
+                          border: UnderlineInputBorder(borderSide: BorderSide(color: scheme.primary)),
                         ),
                         onSubmitted: (_) => setState(() => _isEditingName = false),
                       ),
@@ -283,10 +288,10 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
                     Expanded(
                       child: Text(
                         _nameController.text.isEmpty ? _task.displayName : _nameController.text,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.w600,
-                          color: AppColors.inkPrimary,
+                          color: scheme.onSurface,
                           letterSpacing: -0.3,
                         ),
                       ),
@@ -295,7 +300,7 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
                     icon: Icon(
                       _isEditingName ? Icons.check_rounded : Icons.edit_outlined,
                       size: 17,
-                      color: const Color(0xFF8F909A),
+                      color: scheme.onSurfaceVariant,
                     ),
                     tooltip: _isEditingName ? 'Valider le nom' : 'Modifier le nom',
                     onPressed: () => setState(() => _isEditingName = !_isEditingName),
@@ -308,11 +313,11 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
               // Project folder badge
               Row(
                 children: [
-                  const Icon(Icons.folder_outlined, size: 13, color: Color(0xFF6B7280)),
+                  Icon(Icons.folder_outlined, size: 13, color: scheme.onSurfaceVariant),
                   const SizedBox(width: 6),
                   Text(
                     wsName,
-                    style: const TextStyle(fontSize: 12.5, color: Color(0xFF8F909A)),
+                    style: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant),
                   ),
                 ],
               ),
@@ -324,14 +329,15 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF141518),
+                  color: isDark ? const Color(0xFF141518) : scheme.surfaceContainer,
                   borderRadius: BorderRadius.circular(AppRadius.lg),
-                  border: Border.all(color: const Color(0xFF23252B)),
+                  border: Border.all(color: scheme.outlineVariant),
                 ),
                 child: Column(
                   children: [
                     _buildStatusRow(
                       label: 'Status',
+                      scheme: scheme,
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -339,12 +345,14 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
                             width: 7,
                             height: 7,
                             decoration: BoxDecoration(
-                              color: _task.isEnabled ? const Color(0xFF22C55E) : const Color(0xFF8F909A),
+                              color: _task.isEnabled
+                                  ? (isDark ? const Color(0xFF22C55E) : const Color(0xFF1A7F37))
+                                  : scheme.onSurfaceVariant,
                               shape: BoxShape.circle,
                               boxShadow: _task.isEnabled
                                   ? [
                                       BoxShadow(
-                                        color: const Color(0xFF22C55E).withValues(alpha: 0.5),
+                                        color: (isDark ? const Color(0xFF22C55E) : const Color(0xFF1A7F37)).withValues(alpha: 0.5),
                                         blurRadius: 4,
                                         spreadRadius: 1,
                                       ),
@@ -358,26 +366,30 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w500,
-                              color: _task.isEnabled ? const Color(0xFF22C55E) : const Color(0xFF8F909A),
+                              color: _task.isEnabled
+                                  ? (isDark ? const Color(0xFF22C55E) : const Color(0xFF1A7F37))
+                                  : scheme.onSurfaceVariant,
                             ),
                           ),
                         ],
                       ),
                     ),
-                    const Divider(height: 20, color: Color(0xFF23252B)),
+                    Divider(height: 20, color: scheme.outlineVariant),
                     _buildStatusRow(
                       label: 'Type',
+                      scheme: scheme,
                       child: Text(
                         _task.isDaemon ? 'Scheduled' : 'One-shot',
-                        style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
+                        style: TextStyle(fontSize: 13, color: scheme.onSurface),
                       ),
                     ),
-                    const Divider(height: 20, color: Color(0xFF23252B)),
+                    Divider(height: 20, color: scheme.outlineVariant),
                     _buildStatusRow(
                       label: 'Uptime',
+                      scheme: scheme,
                       child: Text(
                         _task.uptime,
-                        style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
+                        style: TextStyle(fontSize: 13, color: scheme.onSurface),
                       ),
                     ),
                   ],
@@ -387,26 +399,26 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
               const SizedBox(height: 20),
 
               // ── 2. Prompt Section ──────────────────────────────────────────
-              const Text(
+              Text(
                 'Prompt',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Color(0xFFD4D4D8)),
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: scheme.onSurfaceVariant),
               ),
               const SizedBox(height: 8),
               Container(
                 decoration: BoxDecoration(
-                  color: const Color(0xFF141518),
+                  color: isDark ? const Color(0xFF141518) : scheme.surfaceContainer,
                   borderRadius: BorderRadius.circular(AppRadius.lg),
-                  border: Border.all(color: const Color(0xFF23252B)),
+                  border: Border.all(color: scheme.outlineVariant),
                 ),
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 child: TextField(
                   controller: _promptController,
                   maxLines: 4,
-                  style: const TextStyle(fontSize: 13.5, color: AppColors.inkPrimary, height: 1.4),
-                  decoration: const InputDecoration(
+                  style: TextStyle(fontSize: 13.5, color: scheme.onSurface, height: 1.4),
+                  decoration: InputDecoration(
                     border: InputBorder.none,
                     hintText: 'Enter a prompt for the agent to run...',
-                    hintStyle: TextStyle(fontSize: 13, color: Color(0xFF5E606A)),
+                    hintStyle: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant.withValues(alpha: 0.7)),
                   ),
                 ),
               ),
@@ -414,18 +426,18 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
               const SizedBox(height: 20),
 
               // ── 3. Schedule Section ────────────────────────────────────────
-              const Text(
+              Text(
                 'Schedule',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Color(0xFFD4D4D8)),
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: scheme.onSurfaceVariant),
               ),
               const SizedBox(height: 8),
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF141518),
+                  color: isDark ? const Color(0xFF141518) : scheme.surfaceContainer,
                   borderRadius: BorderRadius.circular(AppRadius.lg),
-                  border: Border.all(color: const Color(0xFF23252B)),
+                  border: Border.all(color: scheme.outlineVariant),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -435,20 +447,20 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
                         // Frequency dropdown (Daily ⌄)
                         Container(
                           decoration: BoxDecoration(
-                            color: const Color(0xFF1B1D22),
+                            color: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest,
                             borderRadius: BorderRadius.circular(AppRadius.md),
-                            border: Border.all(color: const Color(0xFF2C2F36)),
+                            border: Border.all(color: scheme.outlineVariant),
                           ),
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
                           child: DropdownButtonHideUnderline(
                             child: DropdownButton<String>(
                               value: _selectedFrequency,
-                              dropdownColor: const Color(0xFF1B1D22),
-                              icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF8F909A), size: 16),
+                              dropdownColor: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest,
+                              icon: Icon(Icons.keyboard_arrow_down_rounded, color: scheme.onSurfaceVariant, size: 16),
                               items: _frequencies
                                   .map((f) => DropdownMenuItem(
                                         value: f,
-                                        child: Text(f, style: const TextStyle(fontSize: 12.5, color: AppColors.inkPrimary)),
+                                        child: Text(f, style: TextStyle(fontSize: 12.5, color: scheme.onSurface)),
                                       ))
                                   .toList(),
                               onChanged: (val) {
@@ -459,29 +471,29 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
                         ),
 
                         const SizedBox(width: 8),
-                        const Text(
+                        Text(
                           'around',
-                          style: TextStyle(fontSize: 12, color: Color(0xFF8F909A)),
+                          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                         ),
                         const SizedBox(width: 8),
 
                         // Time dropdown (9:00 AM ⌄)
                         Container(
                           decoration: BoxDecoration(
-                            color: const Color(0xFF1B1D22),
+                            color: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest,
                             borderRadius: BorderRadius.circular(AppRadius.md),
-                            border: Border.all(color: const Color(0xFF2C2F36)),
+                            border: Border.all(color: scheme.outlineVariant),
                           ),
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
                           child: DropdownButtonHideUnderline(
                             child: DropdownButton<String>(
                               value: _selectedTime,
-                              dropdownColor: const Color(0xFF1B1D22),
-                              icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF8F909A), size: 16),
+                              dropdownColor: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest,
+                              icon: Icon(Icons.keyboard_arrow_down_rounded, color: scheme.onSurfaceVariant, size: 16),
                               items: _times
                                   .map((t) => DropdownMenuItem(
                                         value: t,
-                                        child: Text(t, style: const TextStyle(fontSize: 12.5, color: AppColors.inkPrimary)),
+                                        child: Text(t, style: TextStyle(fontSize: 12.5, color: scheme.onSurface)),
                                       ))
                                   .toList(),
                               onChanged: (val) {
@@ -499,7 +511,7 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
                     ElevatedButton(
                       onPressed: _isSaving ? null : _saveChanges,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF1D64B4),
+                        backgroundColor: scheme.primary,
                         foregroundColor: AppColors.onAccent,
                         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
@@ -525,38 +537,40 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
+                  Text(
                     'Events',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.inkPrimary),
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: scheme.onSurface),
                   ),
                   if (_task.events.isNotEmpty)
                     Text(
                       '${_task.events.length} run${_task.events.length > 1 ? 's' : ''}',
-                      style: const TextStyle(fontSize: 12, color: Color(0xFF8F909A)),
+                      style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                     ),
                 ],
               ),
               const SizedBox(height: 10),
               if (_task.events.isEmpty)
-                const Text(
+                Text(
                   'No events recorded.',
-                  style: TextStyle(fontSize: 12.5, color: Color(0xFF5E606A)),
+                  style: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant),
                 )
               else
                 ..._task.events.map((evt) => Container(
                       margin: const EdgeInsets.only(bottom: 8),
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF141518),
+                        color: isDark ? const Color(0xFF141518) : scheme.surfaceContainer,
                         borderRadius: BorderRadius.circular(AppRadius.md),
-                        border: Border.all(color: const Color(0xFF23252B)),
+                        border: Border.all(color: scheme.outlineVariant),
                       ),
                       child: Row(
                         children: [
                           Icon(
                             evt.outcome == 'done' ? Icons.check_circle_outline : Icons.error_outline,
                             size: 15,
-                            color: evt.outcome == 'done' ? AppColors.positive : AppColors.danger,
+                            color: evt.outcome == 'done'
+                                ? (isDark ? AppColors.positive : const Color(0xFF1A7F37))
+                                : scheme.error,
                           ),
                           const SizedBox(width: 8),
                           Expanded(
@@ -565,13 +579,13 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
                               children: [
                                 Text(
                                   evt.message.isNotEmpty ? evt.message : 'Execution completed',
-                                  style: const TextStyle(fontSize: 12.5, color: AppColors.inkPrimary),
+                                  style: TextStyle(fontSize: 12.5, color: scheme.onSurface),
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
                                   '${evt.timestamp.hour.toString().padLeft(2, '0')}:${evt.timestamp.minute.toString().padLeft(2, '0')}:${evt.timestamp.second.toString().padLeft(2, '0')}'
                                   '${evt.durationMs != null ? ' (${evt.durationMs}ms)' : ''}',
-                                  style: const TextStyle(fontSize: 10.5, color: Color(0xFF6B7280)),
+                                  style: TextStyle(fontSize: 10.5, color: scheme.onSurfaceVariant.withValues(alpha: 0.7)),
                                 ),
                               ],
                             ),
@@ -587,13 +601,13 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
     );
   }
 
-  Widget _buildStatusRow({required String label, required Widget child}) {
+  Widget _buildStatusRow({required String label, required Widget child, required ColorScheme scheme}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(
           label,
-          style: const TextStyle(fontSize: 13, color: Color(0xFF8F909A)),
+          style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
         ),
         child,
       ],

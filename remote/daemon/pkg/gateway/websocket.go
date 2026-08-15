@@ -1718,7 +1718,14 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if !authValid {
-			logJSON.Warn("auth_rejected", "remote", r.RemoteAddr)
+			// Raison dans le log : missing_token (rien fourni) vs bad_token
+			// (token présent mais invalide — token obsolète côté mobile après
+			// redémarrage du daemon). Le token lui-même n'est JAMAIS loggé.
+			reason := "bad_token"
+			if clientToken == "" {
+				reason = "missing_token"
+			}
+			logJSON.Warn("auth_rejected", "remote", r.RemoteAddr, "reason", reason)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -1804,12 +1811,26 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		// lent g├¿lerait heartbeat, submit_approval et les autres messages
 		// de la m├¬me connexion (C3). Les r├®ponses portent leur requestId,
 		// donc le client les corr├¿le sans ordre garanti.
-		if msg.Type == "send_prompt" {
+		if msg.Type == "send_prompt" || msg.Type == "send_command" {
 			go s.handleAction(conn, msg)
 			continue
 		}
 		s.handleAction(conn, msg)
 	}
+}
+
+// unaryNoTimeout : types de messages qui échappent à la garde anti-blocage de
+// 15 s. Longs streams (send_prompt, send_command, terminal_*), keep-alives
+// (ping/heartbeat), opérations dont la deadline est déjà gérée par le backend
+// (cancel_generation) et handlers purement locaux sans RPC. Les actions MCP
+// (call_mcp_tool, …) et tous les autres appels RPC restent bornés.
+var unaryNoTimeout = map[string]bool{
+	"send_prompt": true, "send_command": true, "cancel_generation": true,
+	"heartbeat": true, "ping": true, "create_cascade": true,
+	"get_pending_approval": true, "list_files": true, "read_file": true,
+	"sync_session": true, "get_quota_summary": true, "system.get_quota_summary": true,
+	"get_user_status": true, "get_model_statuses": true,
+	"generate_commit_message": true, "export_markdown": true, "create_worktree": true,
 }
 
 func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
@@ -1827,16 +1848,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 	// mobile (timeout 10 s) consid├¿re le daemon mort et boucle reconnexion.
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if msg.Type != "send_prompt" && msg.Type != "cancel_generation" &&
-		msg.Type != "heartbeat" && msg.Type != "ping" &&
-		msg.Type != "create_cascade" &&
-		msg.Type != "get_pending_approval" && msg.Type != "list_files" &&
-		msg.Type != "read_file" && msg.Type != "sync_session" &&
-		msg.Type != "get_quota_summary" && msg.Type != "system.get_quota_summary" &&
-		msg.Type != "get_user_status" && msg.Type != "get_model_statuses" &&
-		msg.Type != "generate_commit_message" && msg.Type != "export_markdown" &&
-		msg.Type != "create_worktree" &&
-		!strings.HasPrefix(msg.Type, "terminal_") {
+	if !unaryNoTimeout[msg.Type] && !strings.HasPrefix(msg.Type, "terminal_") {
 		c := make(chan struct{})
 		go func() {
 			select {

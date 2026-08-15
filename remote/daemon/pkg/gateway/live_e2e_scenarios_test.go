@@ -496,53 +496,65 @@ func cascadeIDFromCreateResp(t *testing.T, conn *websocket.Conn, resp map[string
 		}
 	}
 
-	// Réponse vide (orpheline) → interroger list_sessions.
-	t.Logf("ℹ️ cascadeID absent de la réponse create_cascade (%s) — fallback list_sessions", label)
-	lsReq, _ := json.Marshal(map[string]interface{}{
-		"type":      "list_sessions",
-		"requestId": "req-ls-fallback-" + label,
-	})
-	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-	if err := conn.WriteMessage(websocket.TextMessage, lsReq); err != nil {
-		t.Fatalf("Envoi list_sessions échoué: %v", err)
-	}
-	_, rawLS, err := conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("Réception list_sessions échouée: %v", err)
-	}
-	var lsResp map[string]interface{}
-	if err := json.Unmarshal(rawLS, &lsResp); err != nil {
-		t.Fatalf("Décodage list_sessions échoué: %v", err)
-	}
-	if lsResp["type"] != "response" || lsResp["error"] != nil {
-		t.Fatalf("list_sessions en erreur: %v", lsResp)
-	}
+	// Réponse vide (orpheline) → interroger list_sessions. Le LS indexe les
+	// cascades de façon asynchrone : une seule requête peut arriver AVANT que
+	// la cascade fraîche apparaisse (flakiness TestLiveE2E_MultiModelCascadeLifecycle).
+	// On re-poll toutes les 500 ms jusqu'à 30 s, et on matche la session du
+	// workspace de test par son UUID.
+	t.Logf("ℹ️ cascadeID absent de la réponse create_cascade (%s) — fallback list_sessions (polling)", label)
 	uuidRe := regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
+	deadline := time.Now().Add(30 * time.Second)
 	var found string
-	if data, ok := lsResp["data"].(map[string]interface{}); ok {
-		if sessions, ok := data["sessions"].([]interface{}); ok {
-			for _, s := range sessions {
-				sm, _ := s.(map[string]interface{})
-				if sm == nil {
-					continue
-				}
-				id, _ := sm["cascadeId"].(string)
-				ws, _ := sm["workspace"].(string)
-				if id != "" && (ws == "" || strings.Contains(ws, "antigravity-add-model-main")) {
-					found = id
-					break
+	var lastLS map[string]interface{}
+	for time.Now().Before(deadline) && found == "" {
+		lsReq, _ := json.Marshal(map[string]interface{}{
+			"type":      "list_sessions",
+			"requestId": "req-ls-fallback-" + label,
+		})
+		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		if err := conn.WriteMessage(websocket.TextMessage, lsReq); err != nil {
+			t.Fatalf("Envoi list_sessions échoué: %v", err)
+		}
+		_, rawLS, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("Réception list_sessions échouée: %v", err)
+		}
+		var lsResp map[string]interface{}
+		if err := json.Unmarshal(rawLS, &lsResp); err != nil {
+			t.Fatalf("Décodage list_sessions échoué: %v", err)
+		}
+		if lsResp["type"] != "response" || lsResp["error"] != nil {
+			t.Fatalf("list_sessions en erreur: %v", lsResp)
+		}
+		lastLS = lsResp
+		if data, ok := lsResp["data"].(map[string]interface{}); ok {
+			if sessions, ok := data["sessions"].([]interface{}); ok {
+				for _, s := range sessions {
+					sm, _ := s.(map[string]interface{})
+					if sm == nil {
+						continue
+					}
+					id, _ := sm["cascadeId"].(string)
+					ws, _ := sm["workspace"].(string)
+					if id != "" && (ws == "" || strings.Contains(ws, "antigravity-add-model-main")) {
+						found = id
+						break
+					}
 				}
 			}
 		}
-	}
-	if found == "" {
-		// Dernier recours : n'importe quel UUID frais dans la réponse.
-		if m := uuidRe.FindString(string(rawLS)); m != "" {
-			found = m
+		if found == "" {
+			// Dernier recours : n'importe quel UUID frais dans la réponse.
+			if m := uuidRe.FindString(string(rawLS)); m != "" {
+				found = m
+			}
+		}
+		if found == "" {
+			time.Sleep(500 * time.Millisecond)
 		}
 	}
 	if found == "" {
-		t.Fatalf("Cascade ID introuvable dans create_cascade (%v) ni list_sessions (%v)", resp, lsResp)
+		t.Fatalf("Cascade ID introuvable dans create_cascade (%v) ni list_sessions (%v)", resp, lastLS)
 	}
 	t.Logf("✅ Cascade %s résolue via list_sessions: %s", label, found)
 	return found

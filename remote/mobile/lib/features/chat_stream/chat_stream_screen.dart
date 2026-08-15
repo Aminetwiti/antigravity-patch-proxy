@@ -781,13 +781,19 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         // haut → le badge « ↓ N » s'incrémente.
         if (_showJumpToBottom) _hiddenNewCount++;
         setState(() {
-          _messages.add(ChatMessage(
-            id: 'ext-$requestId',
-            sender: 'assistant',
-            text: '',
-            timestamp: _timestamp(),
-            isStreaming: true,
-          ));
+          // Bug #N : cr�er le placeholder d�s stream_start (m�me logique
+          // que la session secondaire ci-dessus) : sans lui, les stream_delta
+          // broadcast pour la session active (prompt lanc� depuis le PC h�te
+          // ou une autre surface) n'ont aucune cible et sont perdus.
+          if (!_messages.any((m) => m.id == 'ext-$requestId')) {
+            _messages.add(ChatMessage(
+              id: 'ext-$requestId',
+              sender: 'assistant',
+              text: '',
+              timestamp: _timestamp(),
+              isStreaming: true,
+            ));
+          }
         });
       } else if (type == 'sync_catchup') {
         setState(() => _isSyncing = true);
@@ -821,6 +827,30 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             }
           }
           _scheduleThrottledUpdate();
+        }
+        // Offline buffering (3.2) : prompts non confirmés côté daemon
+        // (sync_catchup.pendingMessages). On les ré-affiche en file avec un
+        // bouton de retransmission (dédupliqués par requestId côté hub).
+        final pending = (data['pendingMessages'] as List<dynamic>? ?? const [])
+            .whereType<Map>()
+            .map((e) => e.cast<String, dynamic>())
+            .toList();
+        if (pending.isNotEmpty) {
+          setState(() {
+            for (final p in pending) {
+              final reqId = p['requestId'] as String? ?? '';
+              if (reqId.isEmpty) continue;
+              final id = 'pending-$reqId';
+              if (_messages.any((m) => m.id == id)) continue;
+              _messages.add(ChatMessage(
+                id: id,
+                sender: 'user',
+                text: p['prompt']?.toString() ?? '',
+                timestamp: _timestamp(),
+                isQueued: true,
+              ));
+            }
+          });
         }
       } else if (type == 'quota_update') {
         // Push scheduler daemon (60 s) : remplace le polling mobile. La map
@@ -1639,6 +1669,22 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                       onProceedPlan: () => _handleSendMessage('Proceed', queued: false),
                       onViewPlan: () => setState(() => _currentTab = SessionTabType.plan),
                       onViewReview: () => setState(() => _currentTab = SessionTabType.review),
+                      onResend: (msg) {
+                        final reqId = msg.id.startsWith('pending-')
+                            ? msg.id.substring('pending-'.length)
+                            : '';
+                        if (reqId.isEmpty) return;
+                        widget.api?.resendPending({'requestId': reqId});
+                        setState(() {
+                          _messages.removeWhere((m) => m.id == msg.id);
+                        });
+                        AppToast.show(
+                          context,
+                          message: 'Prompt retransmis au daemon',
+                          icon: Icons.send_outlined,
+                          type: ToastType.success,
+                        );
+                      },
                     ),
                   ),
                 )),
@@ -1962,6 +2008,7 @@ class _MessageBubble extends StatelessWidget {
   final VoidCallback? onProceedPlan;
   final VoidCallback? onViewPlan;
   final VoidCallback? onViewReview;
+  final ValueChanged<ChatMessage>? onResend;
 
   const _MessageBubble({
     required this.message,
@@ -1972,6 +2019,7 @@ class _MessageBubble extends StatelessWidget {
     this.onProceedPlan,
     this.onViewPlan,
     this.onViewReview,
+    this.onResend,
   });
 
   @override
@@ -2210,6 +2258,30 @@ class _MessageBubble extends StatelessWidget {
                 ],
               ],
               const Spacer(),
+              if (message.isQueued && onResend != null) ...[
+                InkWell(
+                  onTap: () => onResend?.call(message),
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.send_outlined, size: 13, color: scheme.primary),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Retransmettre',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            color: scheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
               if (hasContent) ...[
                 Tooltip(
                   message: 'Copier le message',

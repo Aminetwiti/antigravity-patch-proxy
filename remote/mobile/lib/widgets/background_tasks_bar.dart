@@ -19,6 +19,8 @@ class BackgroundTasksBar extends StatelessWidget {
   Widget build(BuildContext context) {
     if (runningTasks.isEmpty) return const SizedBox.shrink();
 
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final count = runningTasks.length;
     final firstTask = runningTasks.first;
 
@@ -26,18 +28,18 @@ class BackgroundTasksBar extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: AppColors.surfaceRaised,
+        color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
         borderRadius: BorderRadius.circular(AppRadius.md),
-        border: Border.all(color: AppColors.borderStrong),
+        border: Border.all(color: isDark ? AppColors.borderStrong : scheme.outlineVariant),
       ),
       child: Row(
         children: [
-          const SizedBox(
+          SizedBox(
             width: 12,
             height: 12,
             child: CircularProgressIndicator(
               strokeWidth: 1.5,
-              color: AppColors.accentBlue,
+              color: scheme.primary,
             ),
           ),
           const SizedBox(width: 8),
@@ -46,10 +48,10 @@ class BackgroundTasksBar extends StatelessWidget {
               onTap: onViewTasks,
               child: Text(
                 '$count running • $firstTask',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w500,
-                  color: AppColors.inkPrimary,
+                  color: scheme.onSurface,
                   fontFamily: 'monospace',
                 ),
                 maxLines: 1,
@@ -67,11 +69,11 @@ class BackgroundTasksBar extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
-                  color: AppColors.surfaceInput,
+                  color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(4),
-                  border: Border.all(color: AppColors.borderSubtle),
+                  border: Border.all(color: isDark ? AppColors.borderSubtle : scheme.outlineVariant),
                 ),
-                child: const Icon(Icons.stop_rounded, size: 14, color: AppColors.danger),
+                child: Icon(Icons.stop_rounded, size: 14, color: scheme.error),
               ),
             ),
           ],

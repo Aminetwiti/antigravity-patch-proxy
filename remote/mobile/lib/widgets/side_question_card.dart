@@ -26,18 +26,22 @@ class _SideQuestionCardState extends State<SideQuestionCard> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
-        color: AppColors.surfaceRaised,
+        color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
         borderRadius: BorderRadius.circular(AppRadius.lg),
         border: Border.all(
-          color: AppColors.accentBlue.withValues(alpha: 0.5),
+          color: scheme.primary.withValues(alpha: isDark ? 0.5 : 0.4),
           width: 1,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.3),
+            color: isDark
+                ? Colors.black.withValues(alpha: 0.3)
+                : Colors.black.withValues(alpha: 0.06),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -58,37 +62,37 @@ class _SideQuestionCardState extends State<SideQuestionCard> {
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Row(
                 children: [
-                  const Icon(Icons.help_outline, size: 14, color: AppColors.accentBlueBright),
+                  Icon(Icons.help_outline, size: 14, color: scheme.primary),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Side Question: ${widget.question}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: AppColors.inkPrimary,
+                        color: scheme.onSurface,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   if (widget.isLoading) ...[
-                    const SizedBox(
+                    SizedBox(
                       width: 10,
                       height: 10,
-                      child: CircularProgressIndicator(strokeWidth: 1.5, color: AppColors.accentBlue),
+                      child: CircularProgressIndicator(strokeWidth: 1.5, color: scheme.primary),
                     ),
                     const SizedBox(width: 8),
                   ],
                   Icon(
                     _isExpanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up,
                     size: 16,
-                    color: AppColors.inkMuted,
+                    color: scheme.onSurfaceVariant,
                   ),
                   const SizedBox(width: 4),
                   GestureDetector(
                     onTap: widget.onClose,
-                    child: const Icon(Icons.close, size: 14, color: AppColors.inkFaint),
+                    child: Icon(Icons.close, size: 14, color: scheme.onSurfaceVariant.withValues(alpha: 0.7)),
                   ),
                 ],
               ),
@@ -97,23 +101,23 @@ class _SideQuestionCardState extends State<SideQuestionCard> {
 
           // Answer section (when expanded)
           if (_isExpanded) ...[
-            const Divider(height: 1, color: AppColors.borderSubtle),
+            Divider(height: 1, color: scheme.outlineVariant),
             Padding(
               padding: const EdgeInsets.all(12),
               child: widget.answer != null && widget.answer!.isNotEmpty
                   ? Text(
                       widget.answer!,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12.5,
-                        color: AppColors.inkSecondary,
+                        color: scheme.onSurface,
                         height: 1.4,
                       ),
                     )
-                  : const Text(
+                  : Text(
                       'En attente de la réponse à la question parallèle...',
                       style: TextStyle(
                         fontSize: 12,
-                        color: AppColors.inkMuted,
+                        color: scheme.onSurfaceVariant,
                         fontStyle: FontStyle.italic,
                       ),
                     ),
