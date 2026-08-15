@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../core/protocol/daemon_api.dart';
 import '../features/scheduled_tasks/scheduled_tasks_screen.dart';
-import '../features/subagents/subagents_drawer.dart';
 import '../features/subagents/subagents_tree_sheet.dart';
 import '../features/mcp/mcp_explorer_screen.dart';
 import 'artifact_viewer_modal.dart';

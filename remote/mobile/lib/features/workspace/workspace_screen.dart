@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/protocol/daemon_api.dart';
 import '../../widgets/custom_dropdown_overlay.dart';
+import 'git_commit_dialog.dart';
 import 'package:mobile/theme/app_colors.dart';
 
 class WorkspaceScreen extends StatefulWidget {
@@ -42,6 +43,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   bool _showGrep = false;
   bool _isGrepLoading = false;
   List<Map<String, dynamic>> _grepResults = [];
+  // Filtre d'extension rapide (Axe 2)
+  String? _selectedExtensionFilter;
+  // Branches Git du workspace (Axe 2)
+  List<String> _gitBranches = [];
+  String? _currentGitBranch;
 
   /// Normalise le workspace en chemin absolu exploitable par le daemon.
   static String resolveWorkspace(String raw) {
@@ -59,6 +65,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     // départ : '.', 'workspace/', 'file:///...' → path réel côté PC.
     _workspaceResolved = resolveWorkspace(widget.workspacePath);
     _loadFiles();
+    _loadGitBranches();
     _searchController.addListener(() {
       setState(() => _searchQuery = _searchController.text.toLowerCase());
     });
@@ -109,6 +116,40 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         setState(() {
           _isLoadingTree = false;
           _loadError = e.toString();
+        });
+      }
+    }
+  }
+
+  /// Charge les branches Git du workspace (Axe 2). La branche courante est
+  /// déduite de la présence d'un '*' en tête (git branch -a).
+  Future<void> _loadGitBranches() async {
+    if (widget.api == null) return;
+    try {
+      final branches = await widget.api!.listGitBranches(
+        workspacePath: _workspaceResolved,
+      );
+      String? current;
+      for (final b in branches) {
+        if (b.startsWith('*')) {
+          current = b.substring(1).trim();
+          break;
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _gitBranches = branches
+              .map((b) => b.replaceFirst(RegExp(r'^\*\s*'), '').trim())
+              .where((b) => b.isNotEmpty)
+              .toList();
+          _currentGitBranch = current ?? (_gitBranches.isNotEmpty ? _gitBranches.first : null);
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _gitBranches = [];
+          _currentGitBranch = null;
         });
       }
     }
@@ -245,6 +286,44 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      if (_currentGitBranch != null) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.secondaryContainer,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.alt_route,
+                                size: 10,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSecondaryContainer,
+                              ),
+                              const SizedBox(width: 3),
+                              Text(
+                                _currentGitBranch!,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSecondaryContainer,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                       Icon(
                         Icons.keyboard_arrow_down,
                         size: 16,
@@ -319,6 +398,33 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                   ),
                 ),
               ),
+              // Filtres rapides par extension (Axe 2)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    _buildFilterChip(null, 'Tout', Icons.all_inclusive_outlined),
+                    _buildFilterChip('.dart', 'Dart'),
+                    _buildFilterChip('.go', 'Go'),
+                    _buildFilterChip('.ts', 'TS'),
+                    _buildFilterChip('.json', 'JSON'),
+                    _buildFilterChip('.md', 'MD'),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  _buildFileStats(),
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
               const Divider(height: 1),
               Expanded(
                 child:
@@ -338,6 +444,26 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             title: const Text('Explorateur de Fichiers'),
             backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
             actions: [
+              IconButton(
+                icon: const Icon(Icons.commit_outlined, size: 20),
+                tooltip: 'Créer un commit Git (IA)',
+                onPressed: () async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  final msg = await GitCommitDialog.show(
+                    context,
+                    api: widget.api,
+                    workspacePath: _workspaceResolved,
+                  );
+                  if (msg != null && mounted) {
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Text('Message de commit prêt :\n$msg'),
+                        duration: const Duration(seconds: 3),
+                      ),
+                    );
+                  }
+                },
+              ),
               IconButton(
                 icon: Icon(
                   Icons.manage_search_rounded,
@@ -736,6 +862,53 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   }
 
   // Bug #3 : perf — construit la liste une seule fois, filtrée par _searchQuery.
+  /// Puce de filtre d'extension rapide (Axe 2).
+  Widget _buildFilterChip(String? ext, String label, [IconData? icon]) {
+    final scheme = Theme.of(context).colorScheme;
+    final selected = _selectedExtensionFilter == ext;
+    return FilterChip(
+      label: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 12, color: selected ? scheme.onPrimary : scheme.onSurfaceVariant),
+            const SizedBox(width: 4),
+          ],
+          Text(label, style: TextStyle(fontSize: 10.5)),
+        ],
+      ),
+      selected: selected,
+      showCheckmark: false,
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      backgroundColor: scheme.surfaceContainerHighest,
+      selectedColor: scheme.primary,
+      labelStyle: TextStyle(
+        fontSize: 10.5,
+        color: selected ? scheme.onPrimary : scheme.onSurfaceVariant,
+      ),
+      side: BorderSide(color: selected ? scheme.primary : scheme.outlineVariant),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      onSelected: (_) => setState(() {
+        _selectedExtensionFilter = selected ? null : ext;
+      }),
+    );
+  }
+
+  /// Compteur fichiers/dossiers affichés (Axe 2).
+  String _buildFileStats() {
+    final files = _files.where((f) => f['isDir'] != true).length;
+    final dirs = _files.length - files;
+    final active = _selectedExtensionFilter;
+    final base = '$files fichiers · $dirs dossiers';
+    if (active == null) return base;
+    final count = _files.where((f) {
+      if (f['isDir'] == true) return false;
+      return (f['name'] as String).toLowerCase().endsWith(active);
+    }).length;
+    return '$count · $active · $base';
+  }
+
   Widget _buildFileList() {
     if (_files.isEmpty) {
       return Center(
@@ -768,13 +941,20 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         ),
       );
     }
-    final filtered =
+    var filtered =
         _searchQuery.isEmpty
             ? _files
             : _files.where((f) {
               final name = (f['name'] as String).toLowerCase();
               return name.contains(_searchQuery);
             }).toList();
+    if (_selectedExtensionFilter != null) {
+      filtered = filtered.where((f) {
+        if (f['isDir'] == true) return false;
+        final name = (f['name'] as String).toLowerCase();
+        return name.endsWith(_selectedExtensionFilter!);
+      }).toList();
+    }
 
     if (filtered.isEmpty) {
       return Center(
