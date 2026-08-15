@@ -1015,7 +1015,7 @@ func TestWebSocketDeleteCascade(t *testing.T) {
 		t.Fatalf("DeleteCascade ne devrait pas être appelé sans confirmation")
 	}
 
-	// 2. Avec confirm → RPC appelé + réponse OK.
+	// 2. Avec confirm → RPC appelé + réponse OK + broadcast sessions_updated.
 	client.send(t, map[string]string{"type": "delete_cascade", "requestId": "rD2", "cascadeId": "casc-9", "confirm": "true"})
 	msg = client.recv(t)
 	if msg["type"] != "response" || msg["requestId"] != "rD2" || msg["error"] != nil {
@@ -1023,6 +1023,13 @@ func TestWebSocketDeleteCascade(t *testing.T) {
 	}
 	if backend.lastDelete != "casc-9" {
 		t.Fatalf("DeleteCascade appelé avec %q, attendu casc-9", backend.lastDelete)
+	}
+
+	// 3. Le broadcast sessions_updated arrive APRÈS la réponse unary : les autres
+	//    surfaces (téléphones, PC) voient la suppression immédiatement.
+	broadcast := client.recv(t)
+	if broadcast["type"] != "sessions_updated" {
+		t.Fatalf("Attendu broadcast sessions_updated après suppression, reçu %v", broadcast)
 	}
 }
 

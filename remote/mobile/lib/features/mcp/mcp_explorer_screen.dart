@@ -18,6 +18,8 @@ class _McpExplorerScreenState extends State<McpExplorerScreen> {
   bool _loading = false;
   String? _error;
   int? _expandedIndex;
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
 
   @override
   void initState() {
@@ -26,6 +28,12 @@ class _McpExplorerScreenState extends State<McpExplorerScreen> {
     if (widget.api != null) {
       _loadServers();
     }
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadServers() async {
@@ -38,9 +46,21 @@ class _McpExplorerScreenState extends State<McpExplorerScreen> {
     }
   }
 
+  List<McpServerInfo> get _filteredServers {
+    if (_searchQuery.isEmpty) return _servers;
+    final q = _searchQuery.toLowerCase();
+    return _servers.where((s) {
+      if (s.name.toLowerCase().contains(q)) return true;
+      if (s.description?.toLowerCase().contains(q) == true) return true;
+      return s.tools.any((t) => t.toLowerCase().contains(q));
+    }).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final displayedServers = _filteredServers;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Serveurs MCP')),
       body: _loading
@@ -65,6 +85,41 @@ class _McpExplorerScreenState extends State<McpExplorerScreen> {
                         ],
                       ),
                     ),
+                  if (_servers.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                      child: TextField(
+                        controller: _searchController,
+                        style: const TextStyle(fontSize: 13),
+                        onChanged: (val) => setState(() => _searchQuery = val.trim()),
+                        decoration: InputDecoration(
+                          hintText: 'Rechercher un serveur ou un outil...',
+                          hintStyle: TextStyle(fontSize: 12.5, color: scheme.outline),
+                          prefixIcon: const Icon(Icons.search, size: 18),
+                          suffixIcon: _searchQuery.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear, size: 16),
+                                  onPressed: () {
+                                    _searchController.clear();
+                                    setState(() => _searchQuery = '');
+                                  },
+                                )
+                              : null,
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                          filled: true,
+                          fillColor: scheme.surfaceContainerHighest,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(AppRadius.md),
+                            borderSide: BorderSide(color: scheme.outlineVariant),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(AppRadius.md),
+                            borderSide: BorderSide(color: scheme.outlineVariant),
+                          ),
+                        ),
+                      ),
+                    ),
                   Padding(
                     padding: const EdgeInsets.all(16.0),
                     child: Text(
@@ -83,12 +138,39 @@ class _McpExplorerScreenState extends State<McpExplorerScreen> {
                               ),
                             ],
                           )
-                        : ListView.builder(
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            itemCount: _servers.length,
-                            itemBuilder: (context, index) {
-                              final server = _servers[index];
-                              final isExpanded = _expandedIndex == index;
+                        : displayedServers.isEmpty
+                            ? ListView(
+                                physics: const AlwaysScrollableScrollPhysics(),
+                                children: [
+                                  const SizedBox(height: 80),
+                                  Center(
+                                    child: Column(
+                                      children: [
+                                        Icon(Icons.search_off, size: 36, color: scheme.outline),
+                                        const SizedBox(height: 10),
+                                        Text(
+                                          'Aucun serveur ou outil pour « $_searchQuery »',
+                                          style: TextStyle(fontSize: 12.5, color: scheme.outline),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        TextButton(
+                                          onPressed: () {
+                                            _searchController.clear();
+                                            setState(() => _searchQuery = '');
+                                          },
+                                          child: const Text('Effacer la recherche', style: TextStyle(fontSize: 12)),
+                                        )
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : ListView.builder(
+                                physics: const AlwaysScrollableScrollPhysics(),
+                                itemCount: displayedServers.length,
+                                itemBuilder: (context, index) {
+                                  final server = displayedServers[index];
+                                  final isExpanded = _expandedIndex == index;
                               return Card(
                                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                                 shape: RoundedRectangleBorder(

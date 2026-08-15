@@ -187,7 +187,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   /// Persiste la config bridge + prévient le main screen (reconnexion).
   Future<void> _saveDaemonConfig() async {
-    final port = int.tryParse(_portController.text.trim());
+    final portText = _portController.text.trim();
+    final port = int.tryParse(portText);
+    if (portText.isNotEmpty && (port == null || port < 1 || port > 65535)) {
+      if (mounted) {
+        AppToast.show(
+          context,
+          message: 'Le port doit être un nombre valide entre 1 et 65535.',
+          icon: Icons.error_outline,
+          type: ToastType.error,
+        );
+      }
+      return;
+    }
+
     final config = {
       'host': _hostController.text.trim(),
       if (port != null) 'port': port,

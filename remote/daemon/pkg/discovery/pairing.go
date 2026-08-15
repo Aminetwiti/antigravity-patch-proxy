@@ -23,9 +23,11 @@ var (
 )
 
 type SessionInfo struct {
-	DeviceID  string    `json:"deviceId"`
-	CreatedAt time.Time `json:"createdAt"`
-	ExpiresAt time.Time `json:"expiresAt"`
+	DeviceID        string    `json:"deviceId"`
+	Name            string    `json:"name,omitempty"`
+	AllowedProjects []string  `json:"allowedProjects,omitempty"`
+	CreatedAt       time.Time `json:"createdAt"`
+	ExpiresAt       time.Time `json:"expiresAt"`
 }
 
 type attemptRecord struct {
@@ -97,11 +99,17 @@ func (pm *PairingManager) CurrentPIN() (string, time.Duration) {
 
 // VerifyPIN valide le PIN soumis par un client (identifié par ip / deviceId).
 // En cas de succès, génère un jeton de session cryptographique et reset les tentatives.
-func (pm *PairingManager) VerifyPIN(remoteAddr, pin, deviceID string) (string, time.Time, error) {
+// allowedProjects (optionnel) restreint le device aux projets donnés (scope 3.3).
+func (pm *PairingManager) VerifyPIN(remoteAddr, pin, deviceID string, allowedProjects ...[]string) (string, time.Time, error) {
 	ip := extractIP(remoteAddr)
 
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
+
+	var allowed []string
+	if len(allowedProjects) > 0 {
+		allowed = allowedProjects[0]
+	}
 
 	now := time.Now()
 
@@ -150,9 +158,11 @@ func (pm *PairingManager) VerifyPIN(remoteAddr, pin, deviceID string) (string, t
 	expiresAt := now.Add(pm.sessionTTL)
 
 	pm.sessions[token] = SessionInfo{
-		DeviceID:  deviceID,
-		CreatedAt: now,
-		ExpiresAt: expiresAt,
+		DeviceID:        deviceID,
+		Name:            "",
+		AllowedProjects: allowed,
+		CreatedAt:       now,
+		ExpiresAt:       expiresAt,
 	}
 
 	// Régénérer un nouveau PIN immédiatement après un appairage réussi
@@ -161,6 +171,57 @@ func (pm *PairingManager) VerifyPIN(remoteAddr, pin, deviceID string) (string, t
 	pm.pinExpiresAt = now.Add(pm.pinTTL)
 
 	return token, expiresAt, nil
+}
+
+// ValidateSession retourne les infos de session si le jeton est valide et non
+// expiré. Retourne (SessionInfo{}, false) sinon. C'est l'équivalent enrichi de
+// ValidateToken : le gateway en a besoin pour filtrer par projet (3.3).
+func (pm *PairingManager) ValidateSession(token string) (SessionInfo, bool) {
+	if token == "" {
+		return SessionInfo{}, false
+	}
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+
+	sess, ok := pm.sessions[token]
+	if !ok {
+		return SessionInfo{}, false
+	}
+	if !time.Now().Before(sess.ExpiresAt) {
+		return SessionInfo{}, false
+	}
+	return sess, true
+}
+
+// RevokeDevice invalide tous les jetons de session d'un device donné (équivalent
+// removeDevice du backend Node). Retourne false si aucun jeton n'a été révoqué.
+func (pm *PairingManager) RevokeDevice(deviceID string) bool {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	revoked := false
+	for token, sess := range pm.sessions {
+		if sess.DeviceID == deviceID {
+			delete(pm.sessions, token)
+			revoked = true
+		}
+	}
+	return revoked
+}
+
+// ListSessions retourne la liste des sessions actives (pour un futur /admin/devices).
+func (pm *PairingManager) ListSessions() []SessionInfo {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+
+	now := time.Now()
+	out := make([]SessionInfo, 0, len(pm.sessions))
+	for _, sess := range pm.sessions {
+		if now.Before(sess.ExpiresAt) {
+			out = append(out, sess)
+		}
+	}
+	return out
 }
 
 // ValidateToken vérifie si un jeton de session est valide et non expiré.
@@ -193,14 +254,31 @@ func (pm *PairingManager) HTTPHandler() http.HandlerFunc {
 			return
 		}
 
+		if r.Method == http.MethodDelete {
+			// Revocation d'un device : DELETE /pair?deviceId=xxx (admin hôte).
+			deviceID := r.URL.Query().Get("deviceId")
+			if deviceID == "" {
+				http.Error(w, `{"error":"deviceId requis"}`, http.StatusBadRequest)
+				return
+			}
+			if pm.RevokeDevice(deviceID) {
+				json.NewEncoder(w).Encode(map[string]interface{}{"status": "revoked", "deviceId": deviceID})
+			} else {
+				json.NewEncoder(w).Encode(map[string]interface{}{"status": "not_found", "deviceId": deviceID})
+			}
+			return
+		}
+
 		if r.Method != http.MethodPost {
 			http.Error(w, `{"error":"Méthode non autorisée"}`, http.StatusMethodNotAllowed)
 			return
 		}
 
 		var req struct {
-			PIN      string `json:"pin"`
-			DeviceID string `json:"deviceId"`
+			PIN             string   `json:"pin"`
+			DeviceID        string   `json:"deviceId"`
+			Name            string   `json:"name,omitempty"`
+			AllowedProjects []string `json:"allowedProjects,omitempty"`
 		}
 		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -208,7 +286,7 @@ func (pm *PairingManager) HTTPHandler() http.HandlerFunc {
 			return
 		}
 
-		token, expiresAt, err := pm.VerifyPIN(r.RemoteAddr, req.PIN, req.DeviceID)
+		token, expiresAt, err := pm.VerifyPIN(r.RemoteAddr, req.PIN, req.DeviceID, req.AllowedProjects)
 		if err != nil {
 			status := http.StatusUnauthorized
 			if errors.Is(err, ErrLockedOut) || strings.Contains(err.Error(), ErrLockedOut.Error()) {
@@ -218,6 +296,14 @@ func (pm *PairingManager) HTTPHandler() http.HandlerFunc {
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
+
+		// On stocke aussi le nom du device (utile pour le futur /admin/devices).
+		pm.mu.Lock()
+		if sess, ok := pm.sessions[token]; ok {
+			sess.Name = req.Name
+			pm.sessions[token] = sess
+		}
+		pm.mu.Unlock()
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{

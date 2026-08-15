@@ -722,6 +722,20 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       final requestId = msg['requestId'] as String? ?? '';
       final sessionId = msg['data']?['cascadeId'] as String?;
 
+      // P1 : notification « Tâche démarrée » — uniquement quand l'app est en
+      // arrière-plan/verrouillée ET que personne n'est actif sur le PC hôte
+      // (le daemon fournit hostActive sur stream_start, idle detection Go).
+      // Couvre les prompts envoyés depuis le PC, les autres surfaces et les
+      // envois locaux si l'utilisateur a verrouillé juste après.
+      if (type == 'stream_start' &&
+          !_appInForeground &&
+          msg['data']?['hostActive'] != true) {
+        ApprovalNotifier.instance.notifyTaskStarted(
+          cascadeId: sessionId ?? widget.activeSessionId,
+          prompt: 'Une tâche a démarré sur le PC hôte',
+        );
+      }
+
       // Bug tâches arrière-plan : si l'évènement concerne une autre session,
       // on le bufferise dans _sessionMessages[sessionId] au lieu de le jeter.
       // L'utilisateur verra les messages à jour quand il reviendra sur la session.
@@ -1793,7 +1807,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           // locales). On l'ajoute aussi au fil de chat pour que l'agent reçoive
           // la remarque immédiatement, sans attendre « Envoyer à l'Agent ».
           _handleSendMessage(
-            '${c.formatPromptQuote()}',
+            c.formatPromptQuote(),
             queued: false,
           );
         },

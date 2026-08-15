@@ -803,6 +803,26 @@ class _NewScheduledTaskModalState extends State<_NewScheduledTaskModal> {
                 ),
               ],
             ),
+            Container(
+              margin: const EdgeInsets.only(top: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1B1D22),
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+                border: Border.all(color: const Color(0xFF2C2F36)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.schedule_rounded, size: 13, color: Color(0xFF22C55E)),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Cron : ${_computeCronExpression()}',
+                    style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Color(0xFF22C55E)),
+                  ),
+                ],
+              ),
+            ),
 
             const SizedBox(height: 14),
 

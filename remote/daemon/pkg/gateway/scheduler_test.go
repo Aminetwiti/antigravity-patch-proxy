@@ -203,6 +203,9 @@ func TestTriggerScheduledTaskEndToEnd(t *testing.T) {
 			if data["task"] == nil {
 				t.Fatal("scheduled_task_event sans tâche")
 			}
+			if data["taskStarted"] != true {
+				t.Fatal("scheduled_task_event sans taskStarted=true (P1)")
+			}
 			gotEvt = true
 		}
 	}

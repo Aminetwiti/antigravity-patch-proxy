@@ -239,6 +239,14 @@ type Server struct {
 	terminals *terminalPtyManager
 	// tokenValidator : validateur dynamique de jetons de session (P4 pairing PIN).
 	tokenValidator func(token string) bool
+	// sessionValidator : variante enrichie qui retourne les infos de session
+	// (deviceId, allowedProjects). Branché par main.go quand le PairingManager
+	// expose ValidateSession. Si nil, aucun filtrage par projet (comportement
+	// historique).
+	sessionValidator func(token string) (discovery.SessionInfo, bool)
+	// clientSessions : connexion → infos de session (scope projet 3.3). Rempli
+	// au handshake, lu à chaque message pour filtrer send_prompt/list_sessions.
+	clientSessions map[*websocket.Conn]discovery.SessionInfo
 }
 
 // ScheduledTask représente une tâche planifiée / cron job gérée par le daemon.
@@ -297,6 +305,7 @@ func NewServer(client RPCClient, authToken string) *Server {
 		activeRequestIDs: make(map[string]string),
 		scheduledTasks:   make(map[string]*ScheduledTask),
 		terminals:        newTerminalPtyManager(),
+		clientSessions:   make(map[*websocket.Conn]discovery.SessionInfo),
 	}
 	s.terminals.onBroadcast = s.broadcast
 	// Recharge les tâches planifiées persistées au redémarrage (non-fatal :
@@ -642,6 +651,42 @@ func (s *Server) SetTokenValidator(v func(token string) bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.tokenValidator = v
+}
+
+// SetSessionValidator configure le validateur enrichi (SessionInfo + allowedProjects).
+// Si présent, il est utilisé au handshake pour stocker le scope projet de chaque
+// connexion (3.3). Sans lui, aucun filtrage par projet (comportement historique).
+func (s *Server) SetSessionValidator(v func(token string) (discovery.SessionInfo, bool)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessionValidator = v
+}
+
+// sessionFor retourne les infos de session de la connexion (vide si aucune).
+func (s *Server) sessionFor(conn *websocket.Conn) discovery.SessionInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.clientSessions[conn]
+}
+
+// allowProject détermine si une connexion a le droit d'agir sur un projet.
+// Sans session (client non pairé / ancien token) ou sans allowedProjects,
+// aucun filtrage (comportement historique : tout est permis).
+func (s *Server) allowProject(conn *websocket.Conn, uri string) bool {
+	sess := s.sessionFor(conn)
+	if len(sess.AllowedProjects) == 0 {
+		return true
+	}
+	// Le scope stocke des URIs (file:///...) ; on compare aussi le chemin nu
+	// pour tolérer workspacePath côté mobile.
+	plain := strings.TrimPrefix(strings.TrimPrefix(uri, "file://"), "/")
+	plain = strings.ReplaceAll(plain, `\`, "/")
+	for _, p := range sess.AllowedProjects {
+		if p == uri || strings.TrimPrefix(strings.TrimPrefix(p, "file://"), "/") == plain {
+			return true
+		}
+	}
+	return false
 }
 
 // maxWSMessageSize borne la taille des messages WebSocket entrants (1 Mo)
@@ -1581,34 +1626,48 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	validator := s.tokenValidator
 	s.mu.Unlock()
 
-	if s.AuthToken != "" || validator != nil {
-		clientToken := r.URL.Query().Get("token")
-		if clientToken == "" {
-			clientToken = r.URL.Query().Get("auth_token")
-		}
-		if clientToken == "" {
-			clientToken = r.Header.Get("Authorization")
-			clientToken = strings.TrimPrefix(clientToken, "Bearer ")
-		}
+	clientToken := r.URL.Query().Get("token")
+	if clientToken == "" {
+		clientToken = r.URL.Query().Get("auth_token")
+	}
+	if clientToken == "" {
+		clientToken = r.Header.Get("Authorization")
+		clientToken = strings.TrimPrefix(clientToken, "Bearer ")
+	}
 
-		authValid := false
-		if s.AuthToken != "" && subtle.ConstantTimeCompare([]byte(clientToken), []byte(s.AuthToken)) == 1 {
+	authValid := false
+	sessInfo, hasSession := discovery.SessionInfo{}, false
+	if s.AuthToken != "" && subtle.ConstantTimeCompare([]byte(clientToken), []byte(s.AuthToken)) == 1 {
+		authValid = true
+	} else if validator != nil && validator(clientToken) {
+		authValid = true
+	}
+	// Variante enrichie : si le validateur session est branché (main.go), on
+	// récupère deviceId + allowedProjects pour le filtrage par projet (3.3).
+	if s.sessionValidator != nil {
+		if si, ok := s.sessionValidator(clientToken); ok {
 			authValid = true
-		} else if validator != nil && validator(clientToken) {
-			authValid = true
+			sessInfo = si
+			hasSession = true
 		}
+	}
 
-		if !authValid {
-			logJSON.Warn("auth_rejected", "remote", r.RemoteAddr)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
+	if !authValid {
+		logJSON.Warn("auth_rejected", "remote", r.RemoteAddr)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
 	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		logJSON.Error("upgrade_error", "err", err)
 		return
+	}
+	// Scope projet de cette connexion : stocké AVANT la boucle de lecture.
+	if hasSession {
+		s.mu.Lock()
+		s.clientSessions[conn] = sessInfo
+		s.mu.Unlock()
 	}
 
 	// Bornes anti-DoS : 1 Mo max par message + deadline globale de lecture.
@@ -1622,6 +1681,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		delete(s.clients, conn)
 		delete(s.clientInFlight, conn)
+		delete(s.clientSessions, conn)
 		clients := len(s.clients)
 		s.mu.Unlock()
 		s.releaseWriteLock(conn)
@@ -2429,7 +2489,23 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		_, err = s.RPCClient.DeleteCascade(msg.CascadeID)
 		if err == nil {
 			s.purgeCascadeState(msg.CascadeID)
+			// Purge la cascade de la carte Jetbox (si chaude) et invalide le
+			// cache cold-path pour que list_sessions ne renvoie plus la session
+			// supprimée avant le prochain tick Jetbox.
+			s.mu.Lock()
+			if s.jetboxSummaries != nil {
+				delete(s.jetboxSummaries, msg.CascadeID)
+			}
+			s.sessionsCache = nil
+			s.mu.Unlock()
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "deleted"}})
+			// Broadcast : toutes les surfaces (autres téléphones, même téléphone
+			// après reconnexion) rafraîchissent immédiatement — sans attendre le
+			// prochain tick Jetbox ni la fin du TTL cache (5 s).
+			s.broadcast(OutgoingMessage{
+				Type: "sessions_updated",
+				Data: sessionsFromSummaries(s.snapshotSummaries()),
+			})
 			return
 		}
 
