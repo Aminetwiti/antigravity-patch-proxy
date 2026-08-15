@@ -101,6 +101,13 @@ type RPCClient interface {
 	GetCodeValidationStates(uri string) ([]byte, error)
 }
 
+// JetboxStreamer est la portion minimale du client LS nécessaire au flux
+// temps réel des résumés de sessions (JetboxSubscribeToSummaries). Interface
+// étroite : les tests injectent un faux sans réimplémenter RPCClient.
+type JetboxStreamer interface {
+	RunJetboxSubscription(onSummary func(updates map[string]connectrpc.JetboxSummary, deletes []string)) error
+}
+
 // checkOrigin rejette les navigateurs web arbitraires (CSWSH) tout en
 // acceptant les apps natives (Origin absent) et le localhost.
 func checkOrigin(r *http.Request) bool {
@@ -220,6 +227,14 @@ type Server struct {
 	sessionsCache    []byte
 	sessionsCachedAt time.Time
 	fetchDone        chan struct{}
+	// jetboxSummaries : cache temps réel alimenté par le stream
+	// JetboxSubscribeToSummaries (démarre au boot, cf. RunJetboxSubscription).
+	// Quand il est chaud (non nil), list_sessions est servi depuis cette carte
+	// SANS appeler GetAllCascades (~9,5 s) : le stream pousse l'état courant
+	// complet en snapshot initial, puis des updates/deletes incrémentaux.
+	// Invalidation : si le stream échoue durablement, une liste vide remplace
+	// la carte pour retomber sur le chemin GetAllCascades + fallback local.
+	jetboxSummaries map[string]connectrpc.JetboxSummary
 	// terminals : sessions shell interactives (P3), nettoyées à la déconnexion.
 	terminals *terminalPtyManager
 	// tokenValidator : validateur dynamique de jetons de session (P4 pairing PIN).
@@ -307,10 +322,92 @@ func (s *Server) cachedSessions() ([]byte, bool) {
 }
 
 func (s *Server) cachedSessionsLocked() ([]byte, bool) {
+	// Jetbox chaud (stream actif) : la carte est la source de vérité temps
+	// réel — toujours servie, jamais de GetAllCascades (~9,5 s).
+	if s.jetboxSummaries != nil {
+		return s.jetboxSessionsLocked(), true
+	}
 	if len(s.sessionsCache) > 0 && time.Since(s.sessionsCachedAt) < sessionsCacheTTL {
 		return s.sessionsCache, true
 	}
 	return nil, false
+}
+
+// jetboxSessionsLocked sérialise la carte Jetbox au format historique
+// list_sessions (mêmes clés que sessionsOut, filtres Antigravity 2.0 inclus).
+func (s *Server) jetboxSessionsLocked() []byte {
+	out := sessionsFromSummaries(s.jetboxSummaries)
+	raw, _ := json.Marshal(out)
+	return raw
+}
+
+// jetboxSyncUpdates applique une frame Jetbox (updates/deletes) à la carte et
+// diffuse sessions_updated à tous les clients. Appelée par la goroutine du
+// stream — le lock protège la carte contre list_sessions concurrent.
+func (s *Server) jetboxSyncUpdates(updates map[string]connectrpc.JetboxSummary, deletes []string) {
+	s.mu.Lock()
+	if s.jetboxSummaries == nil {
+		s.jetboxSummaries = make(map[string]connectrpc.JetboxSummary)
+	}
+	for id, sum := range updates {
+		s.jetboxSummaries[id] = sum
+	}
+	for _, id := range deletes {
+		delete(s.jetboxSummaries, id)
+	}
+	s.mu.Unlock()
+	// Notifie les clients connectés : le mobile rafraîchit sa sidebar
+	// (message réactif, contrat inchangé côté Flutter : mêmes clés sessions).
+	s.broadcast(OutgoingMessage{
+		Type: "sessions_updated",
+		Data: sessionsFromSummaries(s.snapshotSummaries()),
+	})
+}
+
+// snapshotSummaries retourne une copie de la carte sous lock (pour broadcast).
+func (s *Server) snapshotSummaries() map[string]connectrpc.JetboxSummary {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.jetboxSummaries == nil {
+		return nil
+	}
+	cp := make(map[string]connectrpc.JetboxSummary, len(s.jetboxSummaries))
+	for k, v := range s.jetboxSummaries {
+		cp[k] = v
+	}
+	return cp
+}
+
+// sessionsFromSummaries applique le filtre Antigravity 2.0 (archivées, killed,
+// subagents) et produit la payload list_sessions partagée par sessionsOut et
+// le broadcast sessions_updated. Les sessions locales servent de fallback si
+// la carte est vide (hub fraîchement démarré, stream pas encore chaud).
+func sessionsFromSummaries(jetbox map[string]connectrpc.JetboxSummary) map[string]interface{} {
+	projects := ListOfficialProjects()
+	items := make([]map[string]interface{}, 0, len(jetbox))
+	for _, s := range jetbox {
+		if s.Archived || s.Killed || s.Source == 16 {
+			continue
+		}
+		items = append(items, map[string]interface{}{
+			"cascadeId": s.CascadeID,
+			"title":     s.Title,
+			"workspace": s.Workspace,
+			"projectId": s.ProjectID,
+			"status":    s.Status,
+			"updatedAt": s.UpdatedAt,
+		})
+	}
+	if len(items) == 0 {
+		return map[string]interface{}{
+			"projects": projects,
+			"sessions": ListLocalSessions(),
+		}
+	}
+	return map[string]interface{}{
+		"projects": projects,
+		"sessions": items,
+	}
 }
 
 // cachedProjectID resolve le projectID d'un workspace à partir du cache
@@ -321,6 +418,14 @@ func (s *Server) cachedSessionsLocked() ([]byte, bool) {
 func (s *Server) cachedProjectID(uri string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.jetboxSummaries != nil {
+		for _, sum := range s.jetboxSummaries {
+			if sum.ProjectID != "" && strings.EqualFold(sum.Workspace, uri) {
+				return sum.ProjectID, true
+			}
+		}
+		return "", false
+	}
 	if len(s.sessionsCache) == 0 {
 		return "", false
 	}
@@ -335,6 +440,9 @@ func (s *Server) cachedProjectID(uri string) (string, bool) {
 // fetchSessionsSingleFlight : un seul appel GetAllCascades à la fois, quel que
 // soit le nombre de clients qui demandent la liste. Les appelants concurrents
 // attendent le même résultat au lieu de marteler le hub LS.
+//
+// Si la carte Jetbox est chaude, elle est servie directement (chemin rapide,
+// aucun appel LS) — le single-flight ne sert que de repli.
 func (s *Server) fetchSessionsSingleFlight() []byte {
 	s.mu.Lock()
 	if raw, ok := s.cachedSessionsLocked(); ok {
@@ -402,6 +510,39 @@ func (s *Server) SetNoTools(enabled bool) {
 	s.noToolsEnabled = enabled
 }
 
+// jetboxBackoff plafonne le délai de reconnexion après un échec du stream
+// Jetbox (le LS peut être en cours de redémarrage).
+const jetboxBackoff = 30 * time.Second
+
+// RunJetboxSubscription démarre la boucle long-vivante du stream
+// JetboxSubscribeToSummaries (source de vérité temps réel de la sidebar).
+// Le snapshot initial remplit la carte jetboxSummaries, les frames suivantes
+// l'actualisent ; chaque mise à jour est broadcastée (sessions_updated).
+// Reconnecte en boucle avec backoff — goroutine autonome, ne bloque jamais
+// le démarrage du serveur. La carte est invalidée (nil) quand le stream n'a
+// jamais produit de frame pour retomber sur GetAllCascades + fallback local.
+func (s *Server) RunJetboxSubscription(rpc JetboxStreamer) {
+	go func() {
+		backoff := 2 * time.Second
+		for {
+			err := rpc.RunJetboxSubscription(s.jetboxSyncUpdates)
+			if err == nil {
+				// Stream fermé proprement par le LS (restart) : on invalide
+				// la carte pour ne pas servir un état périmé pendant la
+				// reconnexion, puis on retente.
+				s.mu.Lock()
+				s.jetboxSummaries = nil
+				s.mu.Unlock()
+			}
+			logJSON.Warn("jetbox_stream_end", "err", err, "retry_in", backoff)
+			time.Sleep(backoff)
+			if backoff < jetboxBackoff {
+				backoff *= 2
+			}
+		}
+	}()
+}
+
 // noTools rapporte si le mode global sans-outils est actif.
 func (s *Server) noTools() bool {
 	s.mu.Lock()
@@ -420,9 +561,18 @@ func (s *Server) CancelGeneration(cascadeID string) {
 	s.mu.Lock()
 	cancel, hasCancel := s.activeCancels[cascadeID]
 	reqID := s.activeRequestIDs[cascadeID]
+	// Un stream_end(cancelled) déjà émis (par la goroutine du send_prompt)
+	// puis retransmis ici créerait une course de déduplication : si le
+	// requestId actif a déjà été confirmé à l'outbox, ce cancel tardif est un
+	// no-op. Sinon on diffuse un stream_end(cancelled) avec un requestId de
+	// repli (le mobile n'a pas besoin de corréler une annulation).
+	if hasCancel {
+		delete(s.activeCancels, cascadeID)
+		delete(s.activeRequestIDs, cascadeID)
+	}
 	s.mu.Unlock()
 
-	if hasCancel && cancel != nil {
+	if cancel != nil {
 		cancel()
 	}
 	s.clearApproval(cascadeID)
@@ -438,6 +588,14 @@ func (s *Server) CancelGeneration(cascadeID string) {
 			"hostActive": false,
 		},
 	})
+	// Le stream_end(cancelled) est broadcasté → même confirmation outbox que
+	// le send_prompt (le prompt n'est plus « non confirmé »). La goroutine du
+	// send_prompt sort sur ctx.Err() SANS confirmer : c'est ici que le
+	// prompt annulé est retiré de la file, sinon sync_session le re-proposerait
+	// au mobile alors que l'utilisateur l'a explicitement annulé.
+	if errOut := s.outbox.Confirm(cascadeID, reqID); errOut != nil {
+		logJSON.Warn("outbox_confirm_failed", "cascadeId", cascadeID, "err", errOut.Error())
+	}
 }
 
 // MarkCascadeActive marque une cascade comme « en cours de stream » (posé à
@@ -1853,7 +2011,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.clientInFlight[conn]--
 			s.mu.Unlock()
 		}()
-		s.broadcast(OutgoingMessage{Type: "stream_start", RequestID: msg.RequestID, Data: map[string]string{"cascadeId": msg.CascadeID}})
+		startData := map[string]interface{}{"cascadeId": msg.CascadeID}
+		// P1 : le mobile notifie « Tâche démarrée » quand personne n'est actif
+		// sur le PC (idle detection) — même champ que stream_delta/stream_end.
+		startData["hostActive"] = hostActiveSince(hostActiveWindow)
+		s.broadcast(OutgoingMessage{Type: "stream_start", RequestID: msg.RequestID, Data: startData})
 		logJSON.Info("stream_start", "requestId", msg.RequestID, "cascadeId", msg.CascadeID)
 
 		// 1. Force l'IDE à afficher la conversation avant de lancer le prompt

@@ -227,6 +227,74 @@ func splitFrames(buf []byte) ([][]byte, []byte) {
 	return frames, buf
 }
 
+// CallStreamJSON exécute une méthode RPC en server-streaming Connect JSON
+// (Content-Type: application/connect+json, requête et frames en JSON brut,
+// pas de protobuf). Utilisé par les flux Jetbox (JetboxSubscribeToSummaries,
+// ProjectUpdatesStream) — même framing gRPC-Web (1 octet flags + 4 octets BE
+// longueur + payload JSON), cf. jetbox.js du projet Deck.
+//
+// Le body de la requête est déjà une frame encodée (encodeEnvelope côté
+// vendor) : {flags=0}{len BE}{json}. timeout = durée maximale de la requête
+// HTTP ; un flux long doit passer par une valeur généreuse (le LS pousse des
+// frames au fil de l'eau, la connexion reste ouverte).
+func (c *Client) CallStreamJSON(method string, body []byte, timeout time.Duration, onFrame func([]byte) error) error {
+	port, csrfToken := c.Endpoint()
+	url := fmt.Sprintf("http://%s:%d/exa.language_server_pb.LanguageServerService/%s", c.Host, port, method)
+
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/connect+json")
+	req.Header.Set("Connect-Protocol-Version", "1")
+	req.Header.Set("x-codeium-csrf-token", csrfToken)
+
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(string(raw), 200))
+	}
+
+	buf := make([]byte, 32768)
+	var accumulated []byte
+	for {
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			accumulated = append(accumulated, buf[:n]...)
+			frames, rest := splitFrames(accumulated)
+			accumulated = rest
+			for _, frameData := range frames {
+				if err := onFrame(frameData); err != nil {
+					return err
+				}
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			return readErr
+		}
+	}
+	return nil
+}
+
+// JetboxEnvelope encadre un body JSON pour les flux Connect JSON (même
+// format que encodeEnvelope de jetbox.js : flags 0 + longueur BE + payload).
+func JetboxEnvelope(jsonBody []byte) []byte {
+	buf := make([]byte, 5+len(jsonBody))
+	buf[0] = 0
+	binary.BigEndian.PutUint32(buf[1:5], uint32(len(jsonBody)))
+	copy(buf[5:], jsonBody)
+	return buf
+}
+
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
@@ -283,3 +351,18 @@ func (c *Client) RetrieveUserQuotaSummary() ([]byte, error) {
 	return c.Call("RetrieveUserQuotaSummary", payload)
 }
 
+// RunJetboxSubscription ouvre le stream server-streaming
+// JetboxSubscribeToSummaries (application/connect+json, cf. jetbox.js du Deck)
+// et appelle onSummary à chaque frame : {updates: {id: summary}, deletes: [ids]}.
+// Le stream est long-vivant : la connexion HTTP reste ouverte et le LS pousse
+// le snapshot initial puis les mises à jour incrémentales. Retourne une erreur
+// uniquement si la connexion échoue — l'appelant décide de la reconnexion.
+func (c *Client) RunJetboxSubscription(onSummary func(updates map[string]JetboxSummary, deletes []string)) error {
+	return c.CallStreamJSON("JetboxSubscribeToSummaries", JetboxEnvelope([]byte("{}")), 0, func(frame []byte) error {
+		updates, deletes := ParseJetboxFrame(frame)
+		if len(updates) > 0 || len(deletes) > 0 {
+			onSummary(updates, deletes)
+		}
+		return nil
+	})
+}

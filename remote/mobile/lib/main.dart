@@ -478,26 +478,31 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         return;
       }
 
-      // stream_delta à haute fréquence → pas de rechargement réseau complet,
-      // mais s'assurer que la session est bien marquée RUNNING si ce n'est pas déjà le cas
-      if (type == 'stream_delta') {
-        if (cascadeId.isNotEmpty) {
-          final target = _sessions.firstWhere(
-            (s) => s.id == cascadeId,
-            orElse: () => const CascadeSession(id: '', workspacePath: '', title: '', status: '', time: ''),
+      // sessions_updated : push réactif du daemon (flux Jetbox) — payload
+      // complet au format list_sessions. Évite le rechargement réseau complet
+      // (et la latence GetAllCascades) ; met à jour la sidebar en place.
+      if (type == 'sessions_updated') {
+        final data = msg['data'];
+        if (data is Map) {
+          final parsed = SessionParser.parseListSessions(
+            Map<String, dynamic>.from(data),
           );
-          if (target.id.isNotEmpty && !target.isRunning) {
+          if (parsed.isNotEmpty) {
             setState(() {
-              _sessions = _sessions.map((s) {
-                if (s.id == cascadeId) {
-                  return s.copyWith(status: 'CASCADE_STATUS_RUNNING');
-                }
-                return s;
-              }).toList();
+              _sessions = parsed;
+              // Si la session active a disparu (supprimée depuis le PC),
+              // bascule proprement sur la plus récente.
+              if (_activeSessionId.isNotEmpty &&
+                  !parsed.any((s) => s.id == _activeSessionId)) {
+                _activeSessionId = parsed.first.id;
+                _activeSessionTitle = parsed.first.title;
+                _refreshContext();
+              }
             });
+            return;
           }
         }
-        return;
+        // Payload vide (hub vide) : on laisse le chemin de repli recharger.
       }
 
       _refreshSessions();

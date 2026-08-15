@@ -41,6 +41,11 @@ class ApprovalNotifier {
   String? _lastCallId;
   DateTime? _lastShownAt;
 
+  /// Notification « tâche démarrée » déjà montrée pour cette cascade — évite
+  /// de re-sonner quand le broadcast stream_start arrive sur plusieurs surfaces.
+  String? _lastTaskStartedCascade;
+  DateTime? _lastTaskStartedAt;
+
   /// Notification « tâche terminée » déjà montrée pour cette cascade — évite
   /// de re-sonner quand le broadcast stream_end arrive sur plusieurs surfaces.
   String? _lastTaskDoneCascade;
@@ -229,6 +234,60 @@ class ApprovalNotifier {
       payload: payloadForApproval(cascadeId),
     );
     debugPrint('[Notifier] approval notification -> $callId ($toolName)');
+  }
+
+  /// Notifie le démarrage d'une tâche (stream_start / scheduled_task_event).
+  /// Discrète : canal d'importance par défaut, auto-annulée après 5 s.
+  /// Dédupliquée par cascade sur 30 s (même pattern que [notifyTaskEnded]).
+  Future<void> notifyTaskStarted({
+    required String cascadeId,
+    required String prompt,
+  }) async {
+    if (!_initialized || !_enabled) return;
+    final now = DateTime.now();
+    if (cascadeId == _lastTaskStartedCascade &&
+        _lastTaskStartedAt != null &&
+        now.difference(_lastTaskStartedAt!) < const Duration(seconds: 30)) {
+      return;
+    }
+    _lastTaskStartedCascade = cascadeId;
+    _lastTaskStartedAt = now;
+
+    const androidDetails = AndroidNotificationDetails(
+      'task_done',
+      'Tâches distantes',
+      channelDescription: 'Démarrage des tâches exécutées sur le PC hôte',
+      importance: Importance.defaultImportance,
+      priority: Priority.defaultPriority,
+      visibility: NotificationVisibility.public,
+      playSound: true,
+      enableVibration: true,
+    );
+    const iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+    );
+    final details = NotificationDetails(android: androidDetails, iOS: iosDetails);
+
+    final plugin = _plugin;
+    if (plugin == null) return;
+
+    await plugin.show(
+      cascadeId.hashCode,
+      '🚀 Tâche démarrée',
+      prompt.length > 120 ? '${prompt.substring(0, 120)}…' : prompt,
+      details,
+      payload: payloadForTask(cascadeId),
+    );
+    debugPrint('[Notifier] task started notification -> $cascadeId');
+
+    // Auto-annulation différée (5 s) : c'est un démarrage, pas un événement
+    // critique — la notification ne doit pas s'accumuler dans le tiroir.
+    _autoCancelTimer?.cancel();
+    _autoCancelTimer = Timer(const Duration(seconds: 5), () {
+      plugin.cancel(cascadeId.hashCode);
+    });
   }
 
   /// Notifie la fin d'une tâche (stream_end) : terminée, erreur ou action

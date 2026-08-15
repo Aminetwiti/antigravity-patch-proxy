@@ -213,7 +213,7 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
           IconButton(
             icon: const Icon(Icons.play_arrow_rounded, size: 22, color: Color(0xFF22C55E)),
             onPressed: _triggerExecution,
-            tooltip: 'Run Once',
+            tooltip: 'Trigger Now',
           ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert_rounded, size: 20, color: Color(0xFF8F909A)),

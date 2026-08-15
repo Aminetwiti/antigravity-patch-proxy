@@ -100,12 +100,33 @@ func TestConcurrentStreamLimitPerClient(t *testing.T) {
 			}
 		}
 	}
+	// Le stream_end est broadcasté AVANT la libération du slot (defer) : un
+	// r4 envoyé juste après peut arriver avant le slot-- et être refusé
+	// (transitoire). On réessaie r4 jusqu'au stream_start (le requestId n'est
+	// marqué qu'après le contrôle de capacité, donc une retransmission est
+	// sûre).
 
 	client.send(t, map[string]string{
 		"type": "send_prompt", "requestId": "r4",
 		"cascadeId": "casc-1", "prompt": "après libération",
 	})
-	if msg := client.recv(t); msg["type"] != "stream_start" {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		msg := client.recv(t)
+		if msg["type"] == "stream_start" {
+			break
+		}
+		if msg["type"] == "response" && msg["error"] != nil {
+			if time.Now().After(deadline) {
+				t.Fatalf("attendu stream_start après libération, reçu %v", msg)
+			}
+			time.Sleep(25 * time.Millisecond)
+			client.send(t, map[string]string{
+				"type": "send_prompt", "requestId": "r4",
+				"cascadeId": "casc-1", "prompt": "après libération",
+			})
+			continue
+		}
 		t.Fatalf("attendu stream_start après libération, reçu %v", msg)
 	}
 	backend.release <- struct{}{}

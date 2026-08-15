@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // C5 — /health expose un snapshot JSON de l'état du serveur : le mobile (ou un
@@ -57,16 +58,28 @@ func TestStatsHealth(t *testing.T) {
 			break
 		}
 	}
-	resp2, err := http.Get(srv.URL + "/health")
-	if err != nil {
-		t.Fatalf("GET /health (2): %v", err)
-	}
-	defer resp2.Body.Close()
-	if err := json.NewDecoder(resp2.Body).Decode(&st); err != nil {
-		t.Fatalf("decode /health (2): %v", err)
-	}
-	if st.Status != "ok" || len(st.ActiveCascades) != 0 {
-		t.Fatalf("snapshot après stream attendu vide, reçu %+v", st)
+	// Le stream est terminé : /health doit redevenir vide. La libération du
+	// slot (ClearCascadeActive) se fait dans le defer de la goroutine de
+	// send_prompt, légèrement APRÈS le broadcast stream_end : on sonde.
+	var emptySnap Stats
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		resp2, err := http.Get(srv.URL + "/health")
+		if err != nil {
+			t.Fatalf("GET /health (2): %v", err)
+		}
+		decErr := json.NewDecoder(resp2.Body).Decode(&emptySnap)
+		resp2.Body.Close()
+		if decErr != nil {
+			t.Fatalf("decode /health (2): %v", decErr)
+		}
+		if emptySnap.Status == "ok" && len(emptySnap.ActiveCascades) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("snapshot après stream attendu vide, reçu %+v", emptySnap)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	// lastError : le stream suivant échoue (erreur RPC simulée) → /health

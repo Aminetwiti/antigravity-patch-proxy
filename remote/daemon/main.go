@@ -100,6 +100,10 @@ func main() {
 	server := gateway.NewServer(rpcClient, authToken)
 	server.SetTokenValidator(pairingMgr.ValidateToken)
 	server.SetApprovalTimeout(time.Duration(approvalTimeoutMin) * time.Minute)
+	// Flux temps réel Jetbox : la sidebar mobile est alimentée par le stream
+	// JetboxSubscribeToSummaries (snapshot initial + updates incrémentaux) au
+	// lieu de GetAllCascades (~9,5 s). Reconnecte automatiquement en boucle.
+	server.RunJetboxSubscription(rpcClient)
 	sched := gateway.NewScheduler(server)
 	sched.Start()
 

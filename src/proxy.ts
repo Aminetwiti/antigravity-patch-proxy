@@ -1999,6 +1999,21 @@ export function startProxy(): Promise<number> {
     try {
       server = http.createServer(handleRequest);
 
+      // The Antigravity language server multiplexes many requests over a few
+      // keep-alive sockets and pipelines them aggressively (state page updates
+      // every ~200ms, back-to-back streamGenerateContent). Node's default
+      // keepAliveTimeout (5s) destroys idle sockets under the LS's next write;
+      // Windows then aborts that write with WSAECONNABORTED, the Go client
+      // retries, and we get a retry flood + CPU burn. Disable all three
+      // reaping timeouts: the proxy binds 127.0.0.1 only, and the idle guard
+      // on upstream streams handles stuck providers.
+      // ponytail: 0 disables reaping → a broken local client could hold
+      // sockets open forever. Acceptable on loopback; re-enable with
+      // keepAliveTimeout=60_000 if the proxy is ever exposed beyond localhost.
+      server.keepAliveTimeout = 0;
+      server.headersTimeout = 0;
+      server.requestTimeout = 0;
+
       // P2: Make port/host configurable via env vars so the proxy can be
       // tuned per-machine without recompiling. Defaults preserve legacy behavior.
       const envPort = parseInt(process.env.AG_PROXY_PORT || '', 10);

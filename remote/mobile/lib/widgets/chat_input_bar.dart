@@ -103,6 +103,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   // modèle (ouvert au tap, pas au clavier).
   bool _mentionOrActionOpen = false;
   bool _isSending = false;
+  Timer? _sendDebounceTimer;
 
   @override
   void initState() {
@@ -192,6 +193,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
   @override
   void dispose() {
+    _sendDebounceTimer?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -247,7 +249,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
       _attachedFileContent = null;
     });
 
-    Future.delayed(const Duration(milliseconds: 300), () {
+    _sendDebounceTimer?.cancel();
+    _sendDebounceTimer = Timer(const Duration(milliseconds: 300), () {
       if (mounted) _isSending = false;
     });
   }

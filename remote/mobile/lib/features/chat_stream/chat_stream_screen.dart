@@ -1788,6 +1788,15 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           Navigator.of(ctx).pop();
           _handleSendMessage('Revue de code sur ${fileName ?? "les modifications"} :\n$comments', queued: false);
         },
+        onCommentAdded: (c) {
+          // Le commentaire est déjà affiché inline dans le viewer (annotations
+          // locales). On l'ajoute aussi au fil de chat pour que l'agent reçoive
+          // la remarque immédiatement, sans attendre « Envoyer à l'Agent ».
+          _handleSendMessage(
+            '${c.formatPromptQuote()}',
+            queued: false,
+          );
+        },
       ),
     );
   }

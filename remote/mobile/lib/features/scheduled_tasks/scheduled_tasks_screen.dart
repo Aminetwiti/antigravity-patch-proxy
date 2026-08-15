@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/protocol/daemon_api.dart';
+import '../../core/notifications/approval_notifier.dart';
 import 'models/scheduled_task_item.dart';
 import 'scheduled_task_detail_screen.dart';
 import 'package:mobile/theme/app_colors.dart';
@@ -108,6 +109,18 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
             _localTasks.insert(0, item);
           }
         });
+      }
+      // P1 : une tâche planifiée vient de démarrer (cron ou déclenchement
+      // manuel) — notification discrète, auto-annulée 5 s, dédupliquée 30 s.
+      if (type == 'scheduled_task_event' && data['taskStarted'] == true) {
+        final rawTask2 = data['task'];
+        if (rawTask2 is Map) {
+          final item = ScheduledTaskItem.fromJson(Map<String, dynamic>.from(rawTask2));
+          ApprovalNotifier.instance.notifyTaskStarted(
+            cascadeId: item.id,
+            prompt: item.prompt,
+          );
+        }
       }
     } else if (type == 'scheduled_task_deleted') {
       final taskId = data['taskId'] as String? ?? '';

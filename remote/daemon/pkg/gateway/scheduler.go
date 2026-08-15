@@ -209,9 +209,14 @@ func (s *Server) runScheduledTask(taskID string) {
 	taskRef := s.scheduledTasks[taskID]
 	s.mu.Unlock()
 	if taskRef != nil {
+		data := map[string]interface{}{"task": taskRef, "event": event}
+		// P1 : le mobile notifie « Tâche démarrée » pour les exécutions
+		// planifiées — le taskStarted=true permet au mobile de ne notifier que
+		// les événements réellement déclenchés par le cron/trigger.
+		data["taskStarted"] = true
 		s.broadcast(OutgoingMessage{
 			Type: "scheduled_task_event",
-			Data: map[string]interface{}{"task": taskRef, "event": event},
+			Data: data,
 		})
 	}
 }
