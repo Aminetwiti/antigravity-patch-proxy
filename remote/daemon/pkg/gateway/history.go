@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bufio"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 // HistoryMessage represents a parsed message to be sent to the mobile app
@@ -31,6 +34,15 @@ var (
 	rawWsToolArgRe = regexp.MustCompile(`(?i)"(?:Cwd|cwd|DirectoryPath|SearchPath|AbsolutePath|TargetFile)":\s*"([a-zA-Z]:(?:\\\\|[\\/])[^"\r\n]+?)"`)
 )
 
+// stepTypeUser/stepTypeAssistant/stepTypeTitle sont les step_type observ├®s
+// dans les conversations Antigravity 2.0 stock├®es en SQLite (~/.gemini/
+// antigravity/conversations/<cascadeID>.db, table `steps`).
+const (
+	stepTypeUser      = 14 // message utilisateur
+	stepTypeAssistant = 15 // r├®ponse du mod├¿le
+	stepTypeTitle     = 23 // mise ├á jour du titre de conversation
+)
+
 // findTranscriptPath searches for transcript.jsonl in antigravity and antigravity-ide brain paths.
 func isSessionArchived(home, cascadeID string) bool {
 	annoPath := filepath.Join(home, ".gemini", "antigravity", "annotations", cascadeID+".pbtxt")
@@ -48,14 +60,14 @@ func findTranscriptPath(cascadeID string) string {
 		return ""
 	}
 	candidates := []string{
-		// 1. transcript.jsonl — layout principal (antigravity + IDE)
+		// 1. transcript.jsonl ÔÇö layout principal (antigravity + IDE)
 		filepath.Join(home, ".gemini", "antigravity", "brain", cascadeID, ".system_generated", "logs", "transcript.jsonl"),
 		filepath.Join(home, ".gemini", "antigravity-ide", "brain", cascadeID, ".system_generated", "logs", "transcript.jsonl"),
-		// 2. transcript_full.jsonl — repli quand seul le transcript complet existe
+		// 2. transcript_full.jsonl ÔÇö repli quand seul le transcript complet existe
 		filepath.Join(home, ".gemini", "antigravity", "brain", cascadeID, ".system_generated", "logs", "transcript_full.jsonl"),
 		filepath.Join(home, ".gemini", "antigravity-ide", "brain", cascadeID, ".system_generated", "logs", "transcript_full.jsonl"),
-		// 3. chunks/transcript — layout observé sur cette machine (IDE brain /
-		//    AGY brain avec transcript découpé en chunks numérotés)
+		// 3. chunks/transcript ÔÇö layout observ├® sur cette machine (IDE brain /
+		//    AGY brain avec transcript d├®coup├® en chunks num├®rot├®s)
 		filepath.Join(home, ".gemini", "antigravity", "brain", cascadeID, ".system_generated", "logs", "chunks", "transcript", "00000000.jsonl"),
 		filepath.Join(home, ".gemini", "antigravity-ide", "brain", cascadeID, ".system_generated", "logs", "chunks", "transcript", "00000000.jsonl"),
 	}
@@ -113,7 +125,7 @@ func ListLocalSessions() []map[string]interface{} {
 				continue
 			}
 
-			// Antigravity 2.0 : vérifier si la session est archivée dans ~/.gemini/antigravity/annotations/
+			// Antigravity 2.0 : v├®rifier si la session est archiv├®e dans ~/.gemini/antigravity/annotations/
 			if isSessionArchived(home, cascadeID) {
 				continue
 			}
@@ -126,7 +138,7 @@ func ListLocalSessions() []map[string]interface{} {
 			seen[cascadeID] = true
 			title, workspacePath, modTime := extractSessionMetadata(transcriptPath, cascadeID)
 
-			// Exclure les subagents et prompts systèmes
+			// Exclure les subagents et prompts syst├¿mes
 			lowerTitle := strings.ToLower(strings.TrimSpace(title))
 			if strings.HasPrefix(lowerTitle, "you are") ||
 				strings.HasPrefix(lowerTitle, "en tant qu'") ||
@@ -149,7 +161,7 @@ func ListLocalSessions() []map[string]interface{} {
 			lowerWs := strings.ToLower(cleanWs)
 
 			// Si nous avons des projets officiels Antigravity 2.0, ne garder QUE les sessions
-			// rattachées à un projet officiel
+			// rattach├®es ├á un projet officiel
 			matchedProjectName := ""
 			matchedProjectPath := workspacePath
 			if len(officialProjs) > 0 {
@@ -201,12 +213,12 @@ func ListLocalSessions() []map[string]interface{} {
 		}
 	}
 
-	// Tri décroissant par date de mise à jour (plus récentes d'abord)
+	// Tri d├®croissant par date de mise ├á jour (plus r├®centes d'abord)
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].updatedAt.After(items[j].updatedAt)
 	})
 
-	// Limite à 6 sessions récentes par projet pour correspondre exactement à l'affichage IDE 2.0
+	// Limite ├á 6 sessions r├®centes par projet pour correspondre exactement ├á l'affichage IDE 2.0
 	projectCounts := make(map[string]int)
 	sessions := make([]map[string]interface{}, 0, len(items))
 	for _, it := range items {
@@ -430,7 +442,7 @@ func parseWorkspaceFromTranscript(content string) string {
 // transcriptEntry mirrors the JSONL shape written by the Antigravity brain.
 // PLANNER_RESPONSE entries store the assistant's visible answer in `content`
 // (final messages) OR in `thinking` (intermediate reasoning when the model
-// continued with tool calls — `content` is then absent).
+// continued with tool calls ÔÇö `content` is then absent).
 type transcriptEntry struct {
 	StepIndex int    `json:"step_index"`
 	Source    string `json:"source"`
@@ -469,11 +481,11 @@ func parseTranscriptLine(line []byte) *HistoryMessage {
 		return nil // events d'outils : invisibles dans le chat mobile
 	}
 
-	// Réponse visible du modèle : PLANNER_RESPONSE place la réponse finale
-	// dans `content`, et le raisonnement intermédiaire (quand le modèle a
-	// enchaîné des appels d'outils) dans `thinking` — `content` est alors
-	// absent. Les lignes vides (modèle n'a produit ni texte ni raisonnement,
-	// ex. enchaînement d'outils purs) sont ignorées pour ne pas polluer le chat.
+	// R├®ponse visible du mod├¿le : PLANNER_RESPONSE place la r├®ponse finale
+	// dans `content`, et le raisonnement interm├®diaire (quand le mod├¿le a
+	// encha├«n├® des appels d'outils) dans `thinking` ÔÇö `content` est alors
+	// absent. Les lignes vides (mod├¿le n'a produit ni texte ni raisonnement,
+	// ex. encha├«nement d'outils purs) sont ignor├®es pour ne pas polluer le chat.
 	if entry.Type == "PLANNER_RESPONSE" {
 		text := entry.Content
 		thought := entry.Thinking
@@ -499,8 +511,383 @@ func parseTranscriptLine(line []byte) *HistoryMessage {
 	return nil
 }
 
-// GetSessionHistory reads transcript.jsonl for the cascadeID and converts it to messages.
+// findHistoryDB locate la base SQLite des conversations (source de v├®rit├®
+// Antigravity 2.0) pour une cascade donn├®e.
+func findHistoryDB(cascadeID string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	candidates := []string{
+		filepath.Join(home, ".gemini", "antigravity", "conversations", cascadeID+".db"),
+		filepath.Join(home, ".gemini", "antigravity-ide", "conversations", cascadeID+".db"),
+	}
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+// findFieldBytes retourne le sous-message (wire type 2) du champ fieldNum,
+// ou nil s'il est absent. Impl├®mentation manuelle du protobuf (pas de
+// biblioth├¿que ÔÇö r├¿gle AGENTS.md).
+func findFieldBytes(buf []byte, fieldNum int) []byte {
+	if len(buf) == 0 {
+		return nil
+	}
+	i := 0
+	for i < len(buf) {
+		key, n := readUvarint(buf, i)
+		if n == 0 {
+			break
+		}
+		i = n
+		f := int(key >> 3)
+		w := int(key & 7)
+		if f == 0 {
+			break
+		}
+		if w == 0 {
+			_, n = readUvarint(buf, i)
+			if n == 0 {
+				break
+			}
+			i = n
+		} else if w == 2 {
+			ln, n := readUvarint(buf, i)
+			if n == 0 || i+n+int(ln) > len(buf) {
+				break
+			}
+			i += n
+			sub := buf[i : i+int(ln)]
+			i += int(ln)
+			if f == fieldNum {
+				return sub
+			}
+		} else if w == 1 {
+			i += 8
+		} else if w == 5 {
+			i += 4
+		} else {
+			break
+		}
+	}
+	return nil
+}
+
+// readUvarint d├®code un varint protobuf. Retourne (valeur, newOffset) ou
+// (0, 0) si le buffer est tronqu├®.
+func readUvarint(buf []byte, offset int) (uint64, int) {
+	var result uint64
+	var shift uint
+	for offset < len(buf) {
+		b := buf[offset]
+		offset++
+		result |= uint64(b&0x7f) << shift
+		if b&0x80 == 0 {
+			return result, offset
+		}
+		shift += 7
+		if shift > 63 {
+			return 0, 0
+		}
+	}
+	return 0, 0
+}
+
+// collectSubFields r├®cup├¿re toutes les occurrences d'un champ r├®p├®t├® (wire
+// type 2) dans un message ÔÇö ex. les pi├¿ces de texte d'un message utilisateur.
+func collectSubFields(buf []byte, fieldNum int) [][]byte {
+	var out [][]byte
+	if len(buf) == 0 {
+		return out
+	}
+	i := 0
+	for i < len(buf) {
+		key, n := readUvarint(buf, i)
+		if n == 0 {
+			break
+		}
+		i = n
+		f := int(key >> 3)
+		w := int(key & 7)
+		if f == 0 {
+			break
+		}
+		if w == 0 {
+			_, n = readUvarint(buf, i)
+			if n == 0 {
+				break
+			}
+			i = n
+		} else if w == 2 {
+			ln, n := readUvarint(buf, i)
+			if n == 0 || i+n+int(ln) > len(buf) {
+				break
+			}
+			i += n
+			sub := buf[i : i+int(ln)]
+			i += int(ln)
+			if f == fieldNum {
+				out = append(out, sub)
+			}
+		} else if w == 1 {
+			i += 8
+		} else if w == 5 {
+			i += 4
+		} else {
+			break
+		}
+	}
+	return out
+}
+
+// printableString convertit des octets protobuf en cha├«ne UTF-8 si le contenu
+// est lisible (texte visible), sinon renvoie "".
+func printableString(b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
+	s := string(b)
+	for _, r := range s {
+		if r < 0x20 && r != '\n' && r != '\t' && r != '\r' {
+			return ""
+		}
+	}
+	return s
+}
+
+// userTextFromPayload extrait le texte d'un step_payload de type 14
+// (message utilisateur). Layout valid├® sur 500+ conversations :
+//   - f19.f3[] : liste de pi├¿ces (chaque pi├¿ce porte le texte dans f3.f1)
+//   - f19.f2   : texte brut (avec ├®ventuels attributs @[fichier])
+//   - f5       : ancien format (f5.f1.f2 = timestamp, texte dans f5.f2)
+//   - repli    : premier sous-message avec du texte lisible
+func userTextFromPayload(sp []byte) string {
+	if f19 := findFieldBytes(sp, 19); f19 != nil {
+		parts := collectSubFields(f19, 3)
+		var sb strings.Builder
+		for _, p := range parts {
+			if t := printableString(findFieldBytes(p, 1)); t != "" {
+				sb.WriteString(t)
+			}
+		}
+		if sb.Len() > 0 {
+			return sb.String()
+		}
+		if t := printableString(findFieldBytes(f19, 2)); t != "" {
+			return t
+		}
+	}
+	if f5 := findFieldBytes(sp, 5); f5 != nil {
+		if t := printableString(findFieldBytes(f5, 2)); t != "" {
+			return t
+		}
+	}
+	// Repli : premier champ de type cha├«ne lisible (garde le texte des
+	// anciennes versions du sch├®ma).
+	return firstPrintable(sp)
+}
+
+// assistantTextFromPayload extrait le texte (f1/f8) et le raisonnement (f3)
+// d'un step_payload de type 15. f20 porte la r├®ponse ; les anciens formats
+// stockaient le texte ailleurs ÔÇö on garde le premier texte lisible en repli.
+func assistantTextFromPayload(sp []byte) (text, thought string) {
+	if f20 := findFieldBytes(sp, 20); f20 != nil {
+		text = printableString(findFieldBytes(f20, 1))
+		if text == "" {
+			text = printableString(findFieldBytes(f20, 8))
+		}
+		thought = printableString(findFieldBytes(f20, 3))
+	}
+	if text == "" {
+		text = firstPrintable(sp)
+	}
+	return text, thought
+}
+
+// titleFromPayload extrait le titre d'un step_payload de type 23 (f30.f4).
+func titleFromPayload(sp []byte) string {
+	if f30 := findFieldBytes(sp, 30); f30 != nil {
+		if t := printableString(findFieldBytes(f30, 4)); t != "" {
+			return t
+		}
+	}
+	return ""
+}
+
+// firstPrintable retourne le premier sous-message de niveau 1 lisible
+// (heuristique de repli pour les formats inconnus).
+func firstPrintable(buf []byte) string {
+	if len(buf) == 0 {
+		return ""
+	}
+	i := 0
+	for i < len(buf) {
+		key, n := readUvarint(buf, i)
+		if n == 0 {
+			break
+		}
+		i = n
+		f := int(key >> 3)
+		w := int(key & 7)
+		if f == 0 {
+			break
+		}
+		if w == 0 {
+			_, n = readUvarint(buf, i)
+			if n == 0 {
+				break
+			}
+			i = n
+		} else if w == 2 {
+			ln, n := readUvarint(buf, i)
+			if n == 0 || i+n+int(ln) > len(buf) {
+				break
+			}
+			i += n
+			sub := buf[i : i+int(ln)]
+			i += int(ln)
+			if t := printableString(sub); t != "" {
+				return t
+			}
+		} else if w == 1 {
+			i += 8
+		} else if w == 5 {
+			i += 4
+		} else {
+			break
+		}
+	}
+	return ""
+}
+
+// tsFromMetadata convertit le timestamp protobuf (metadata.f1 : {1: secondes,
+// 2: nanos}) en horaire HH:MM local. Repli : heure actuelle.
+func tsFromMetadata(meta []byte) string {
+	var sec int64
+	if f1 := findFieldBytes(meta, 1); f1 != nil {
+		i := 0
+		for i < len(f1) {
+			key, n := readUvarint(f1, i)
+			if n == 0 {
+				break
+			}
+			i = n
+			if f := int(key >> 3); f == 1 && key&7 == 0 {
+				if v, n := readUvarint(f1, i); n != 0 {
+					sec = int64(v)
+				}
+				break
+			}
+			if key&7 == 2 {
+				ln, n := readUvarint(f1, i)
+				if n == 0 || i+n+int(ln) > len(f1) {
+					break
+				}
+				i += n + int(ln)
+			} else {
+				break
+			}
+		}
+	}
+	t := time.Unix(sec, 0).Local()
+	return fmt.Sprintf("%02d:%02d", t.Hour(), t.Minute())
+}
+
+// readSQLiteSteps lit l'historique depuis la table `steps` de la base de
+// conversations. Retourne les messages tri├®s par idx, et les titres trouv├®s
+// dans les ├®tapes de type 23.
+func readSQLiteSteps(dbPath, cascadeID string) ([]HistoryMessage, string, error) {
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return nil, "", err
+	}
+	defer db.Close()
+
+	rows, err := db.Query("SELECT idx, step_type, status, metadata, step_payload FROM steps ORDER BY idx")
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+
+	var messages []HistoryMessage
+	title := ""
+	for rows.Next() {
+		var (
+			idx       int
+			stepType  int
+			status    int
+			metadata  []byte
+			payload   []byte
+		)
+		if err := rows.Scan(&idx, &stepType, &status, &metadata, &payload); err != nil {
+			continue
+		}
+
+		ts := tsFromMetadata(metadata)
+		msgID := fmt.Sprintf("h-%d", idx)
+
+		switch stepType {
+		case stepTypeUser:
+			text := userTextFromPayload(payload)
+			if text == "" {
+				continue
+			}
+			messages = append(messages, HistoryMessage{
+				ID:        msgID,
+				Sender:    "user",
+				Text:      text,
+				Timestamp: ts,
+			})
+		case stepTypeAssistant:
+			text, thought := assistantTextFromPayload(payload)
+			if text == "" && thought == "" {
+				continue
+			}
+			msg := HistoryMessage{
+				ID:        msgID,
+				Sender:    "assistant",
+				Text:      text,
+				Thought:   thought,
+				Timestamp: ts,
+			}
+			if status != 0 {
+				msg.IsError = true
+				if msg.Text == "" {
+					msg.Text = "Erreur pendant la g├®n├®ration"
+				}
+			}
+			messages = append(messages, msg)
+		case stepTypeTitle:
+			if title == "" {
+				title = titleFromPayload(payload)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return messages, title, err
+	}
+	if messages == nil {
+		messages = []HistoryMessage{}
+	}
+	return messages, title, nil
+}
+
+// GetSessionHistory lit l'historique d'une cascade : SQLite d'abord (source
+// de v├®rit├® Antigravity 2.0, `conversations/<id>.db`), puis repli sur
+// transcript.jsonl pour les anciennes sessions. Les deux sources peuvent
+// coexister (migration) ÔÇö on garde celle qui contient le plus de messages.
 func GetSessionHistory(cascadeID string) ([]HistoryMessage, error) {
+	if dbPath := findHistoryDB(cascadeID); dbPath != "" {
+		if messages, _, err := readSQLiteSteps(dbPath, cascadeID); err == nil && len(messages) > 0 {
+			logJSON.Debug("history_from_sqlite", "cascade", cascadeID, "messages", len(messages))
+			return messages, nil
+		}
+	}
+
 	transcriptPath := findTranscriptPath(cascadeID)
 	if transcriptPath == "" {
 		return []HistoryMessage{}, nil
@@ -536,7 +923,7 @@ func GetSessionHistory(cascadeID string) ([]HistoryMessage, error) {
 	return messages, nil
 }
 
-// transcriptCounts regroupe les compteurs d'activité extraits d'un transcript.
+// transcriptCounts regroupe les compteurs d'activit├® extraits d'un transcript.
 type transcriptCounts struct {
 	subagents int
 	files     int
@@ -546,10 +933,10 @@ type transcriptCounts struct {
 }
 
 // countTranscriptActivity parcourt le transcript.jsonl d'une cascade et
-// compte les événements réels (subagents, fichiers modifiés, artefacts,
-// uploads, tâches de fond). Chaque type d'événement est dédupliqué par ID
-// (les appels d'outils produisent plusieurs lignes pour le même fichier).
-// Source unique de vérité pour get_context.
+// compte les ├®v├®nements r├®els (subagents, fichiers modifi├®s, artefacts,
+// uploads, t├óches de fond). Chaque type d'├®v├®nement est d├®dupliqu├® par ID
+// (les appels d'outils produisent plusieurs lignes pour le m├¬me fichier).
+// Source unique de v├®rit├® pour get_context.
 func countTranscriptActivity(cascadeID string) map[string]int {
 	out := map[string]int{
 		"subagents": 0,
@@ -601,8 +988,8 @@ func countTranscriptActivity(cascadeID string) map[string]int {
 			continue
 		}
 
-		// Artefacts / uploads / fichiers : identifiés par les chemins
-		// absolus présents dans le contenu de la ligne.
+		// Artefacts / uploads / fichiers : identifi├®s par les chemins
+		// absolus pr├®sents dans le contenu de la ligne.
 		for _, p := range filePathsIn(entry.Content) {
 			switch {
 			case isUploadPath(p):
@@ -633,7 +1020,7 @@ func countTranscriptActivity(cascadeID string) map[string]int {
 	return out
 }
 
-// SubagentSummary représente un sous-agent découvert dans l'arbre d'exécution (DAG).
+// SubagentSummary repr├®sente un sous-agent d├®couvert dans l'arbre d'ex├®cution (DAG).
 type SubagentSummary struct {
 	ID          string `json:"id"`
 	ParentID    string `json:"parentId"`
@@ -646,7 +1033,7 @@ type SubagentSummary struct {
 }
 
 // ExtractSubagents parcourt le transcript d'une cascade et extrait la liste
-// ordonnée des sous-agents invoqués (DAG / arborescence).
+// ordonn├®e des sous-agents invoqu├®s (DAG / arborescence).
 func ExtractSubagents(cascadeID string) []SubagentSummary {
 	var results []SubagentSummary
 	transcriptPath := findTranscriptPath(cascadeID)
@@ -679,7 +1066,7 @@ func ExtractSubagents(cascadeID string) []SubagentSummary {
 			continue
 		}
 
-		// Détection dans tool_calls JSON array
+		// D├®tection dans tool_calls JSON array
 		if len(entry.ToolCalls) > 0 {
 			var calls []struct {
 				Name      string                 `json:"name"`
@@ -720,7 +1107,7 @@ func ExtractSubagents(cascadeID string) []SubagentSummary {
 			}
 		}
 
-		// Détection dans Content texte si stringifié
+		// D├®tection dans Content texte si stringifi├®
 		if strings.Contains(entry.Content, "invoke_subagent") || strings.Contains(entry.Content, "manage_subagents") {
 			var tc struct {
 				Name      string                 `json:"name"`
@@ -760,10 +1147,10 @@ func ExtractSubagents(cascadeID string) []SubagentSummary {
 
 
 // filePathsIn extrait les chemins absolus (Windows, POSIX et file:///) d'un
-// texte — ils identifient fichiers, artefacts et uploads dans les transcripts.
+// texte ÔÇö ils identifient fichiers, artefacts et uploads dans les transcripts.
 func filePathsIn(s string) []string {
 	var out []string
-	// Regex POSIX (/c:/…, /home/…, /Users/…) et Windows (C:\…, C:/…).
+	// Regex POSIX (/c:/ÔÇª, /home/ÔÇª, /Users/ÔÇª) et Windows (C:\ÔÇª, C:/ÔÇª).
 	re := regexp.MustCompile(`(?:file:///|/)?[A-Za-z]:/(?:[^"\s\\]|\\)+`)
 	for _, m := range re.FindAllString(s, -1) {
 		clean := strings.TrimRight(m, "\"',.;)")
@@ -774,7 +1161,7 @@ func filePathsIn(s string) []string {
 	return out
 }
 
-// isUploadPath détecte un fichier téléversé par le mobile dans scratch/.
+// isUploadPath d├®tecte un fichier t├®l├®vers├® par le mobile dans scratch/.
 func isUploadPath(p string) bool {
 	return strings.Contains(p, "scratch") && strings.Contains(p, "upload_")
 }
@@ -878,12 +1265,27 @@ func ListOfficialProjects() []ProjectSummary {
 		})
 	}
 
-	// Tri par date de mise à jour décroissante
+	// Tri par date de mise ├á jour d├®croissante
 	sort.Slice(list, func(i, j int) bool {
 		return list[i].UpdatedAt.After(list[j].UpdatedAt)
 	})
 
 	return list
+}
+
+// projectIDFromRegistry résout le projectID d'un workspace à partir du
+// registre local ~/.gemini/config/projects/*.json, sans aucun appel LS
+// (O(1), utilisé par create_cascade quand le cache sessions est froid).
+func projectIDFromRegistry(uri string) string {
+	if uri == "" {
+		return ""
+	}
+	for _, p := range ListOfficialProjects() {
+		if strings.EqualFold(p.FolderURI, uri) || strings.EqualFold(p.Path, strings.TrimPrefix(uri, "file:///")) {
+			return p.ID
+		}
+	}
+	return ""
 }
 
 // GetUniqueWorkspaces returns the list of unique workspace names discovered on the machine.

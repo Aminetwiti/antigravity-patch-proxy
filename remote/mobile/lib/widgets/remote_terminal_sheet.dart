@@ -137,8 +137,10 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
   @override
   void dispose() {
     _eventSub?.cancel();
-    if (_ptyId != null) {
-      widget.api?.terminalKill(_ptyId!);
+    if (_ptyId != null && _ptyId!.isNotEmpty) {
+      try {
+        widget.api?.terminalKill(_ptyId!);
+      } catch (_) {}
     }
     _inputController.dispose();
     _scrollController.dispose();
@@ -149,8 +151,10 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
   Future<void> _writePty(String input) async {
     final id = _ptyId;
     final api = widget.api;
-    if (id == null || api == null || _ptyClosed) return;
-    await api.terminalWrite(id, input);
+    if (id == null || id.isEmpty || api == null || _ptyClosed) return;
+    try {
+      await api.terminalWrite(id, input);
+    } catch (_) {}
   }
 
   /// Point d'entrée unique de la barre de saisie : PTY si session active,

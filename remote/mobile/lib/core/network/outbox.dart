@@ -99,6 +99,7 @@ class OutboxReplayer {
       if (requestId == '' || _queue.shouldSkip(requestId)) continue;
       _queue.markReplayed(requestId);
       _send(msg);
+      _queue.remove(requestId);
     }
     try {
       await _resync(); // list_sessions → état complet rejoué côté UI

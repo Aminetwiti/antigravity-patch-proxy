@@ -1394,9 +1394,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                         onSend: _handleSendMessage,
                         isConnected: isConnected,
                         hasActiveStream: _activeStreamCount > 0,
-                        onStop: () {
-                          widget.api?.stopGeneration(cascadeId: widget.activeSessionId);
-                        },
+                        onStop: _handleStopGeneration,
                         api: widget.api,
                         cascadeId: widget.activeSessionId,
                         initialText: currentDraft,
@@ -1500,9 +1498,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           onSend: _handleSendMessage,
           isConnected: isConnected,
           hasActiveStream: _activeStreamCount > 0,
-          onStop: () {
-            widget.api?.stopGeneration(cascadeId: widget.activeSessionId);
-          },
+          onStop: _handleStopGeneration,
           api: widget.api,
           cascadeId: widget.activeSessionId,
           initialText: currentDraft,
@@ -1510,6 +1506,21 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         ),
       ],
     );
+  }
+
+  void _handleStopGeneration() {
+    widget.api?.stopGeneration(cascadeId: widget.activeSessionId);
+    setState(() {
+      _activeStreamCount = 0;
+      _showStillWorking = false;
+      _stillWorkingTimer?.cancel();
+      _stillWorkingTimer = null;
+      final idx = _messages.lastIndexWhere((m) => m.isStreaming);
+      if (idx >= 0) {
+        _messages[idx] = _messages[idx].copyWith(isStreaming: false);
+      }
+    });
+    widget.onStreamingStateChanged?.call(false);
   }
 
   Widget _buildActiveTabContent(ColorScheme scheme, bool isConnected) {
@@ -1801,15 +1812,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         onSendReview: (comments) {
           Navigator.of(ctx).pop();
           _handleSendMessage('Revue de code sur ${fileName ?? "les modifications"} :\n$comments', queued: false);
-        },
-        onCommentAdded: (c) {
-          // Le commentaire est déjà affiché inline dans le viewer (annotations
-          // locales). On l'ajoute aussi au fil de chat pour que l'agent reçoive
-          // la remarque immédiatement, sans attendre « Envoyer à l'Agent ».
-          _handleSendMessage(
-            c.formatPromptQuote(),
-            queued: false,
-          );
         },
       ),
     );

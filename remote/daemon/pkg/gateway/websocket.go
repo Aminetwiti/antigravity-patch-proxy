@@ -32,78 +32,78 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: checkOrigin,
 }
 
-// logJSON : logger structuré du gateway (JSON, niveau configurable).
-// Utilisé par les événements lifecycle ; les erreurs portent requestId pour
-// corréler mobile ↔ hub (C4).
+// logJSON : logger structur├® du gateway (JSON, niveau configurable).
+// Utilis├® par les ├®v├®nements lifecycle ; les erreurs portent requestId pour
+// corr├®ler mobile Ôåö hub (C4).
 var logJSON = slog.Default()
 
 // SetLogJSON permet au main de brancher le logger rotatif (health.go).
 func SetLogJSON(l *slog.Logger) { logJSON = l }
 
-// RPCClient est l'ensemble des méthodes du backend LanguageServer utilisées
+// RPCClient est l'ensemble des m├®thodes du backend LanguageServer utilis├®es
 // par le gateway (interface minimale pour permettre les tests avec un faux).
 type RPCClient interface {
 	Heartbeat() ([]byte, error)
 	CreateCascade(uri string, projectID string, modelUID string, modelEnum uint64) ([]byte, error)
 	GetAllCascades() ([]byte, error)
 	SendMessageStream(cascadeID, text string, onFrame func([]byte) error) error
-	// SendMessageStreamModel : variante avec modèle explicite (sélection
-	// mobile par message) — le daemon laisse le téléphone choisir le modèle.
+	// SendMessageStreamModel : variante avec mod├¿le explicite (s├®lection
+	// mobile par message) ÔÇö le daemon laisse le t├®l├®phone choisir le mod├¿le.
 	// noTools force planner_mode = 3 (NO_TOOL) dans le cascade_config.
 	SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error, noTools ...bool) error
 	SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error)
 	SetBrowserOpenConversation(cascadeID string) ([]byte, error)
 	SendCommand(commandText string) ([]byte, error)
-	// ListModels récupère la liste des modèles disponibles (GetAvailableModels).
+	// ListModels r├®cup├¿re la liste des mod├¿les disponibles (GetAvailableModels).
 	ListModels() ([]byte, error)
 	// DeleteCascade supprime une session (DeleteCascadeTrajectory).
 	DeleteCascade(cascadeID string) ([]byte, error)
 	// ReadFile lit un fichier via le RPC officiel du LS (ReadFile).
 	ReadFile(uri string) ([]byte, error)
-	// WriteFile écrit un fichier via le RPC officiel du LS (WriteFile).
+	// WriteFile ├®crit un fichier via le RPC officiel du LS (WriteFile).
 	WriteFile(uri string, content []byte, overwrite bool) ([]byte, error)
-	// TrackWorkspace déclare un dossier au hub (AddTrackedWorkspace) — le LS
-	// crée l'instance virtuelle ; StartCascade fonctionne ensuite sans projectID.
+	// TrackWorkspace d├®clare un dossier au hub (AddTrackedWorkspace) ÔÇö le LS
+	// cr├®e l'instance virtuelle ; StartCascade fonctionne ensuite sans projectID.
 	TrackWorkspace(workspacePath string) ([]byte, error)
 	// UntrackWorkspace retire un dossier du hub (RemoveTrackedWorkspace).
 	UntrackWorkspace(workspacePath string) ([]byte, error)
-	// GetCascadeTrajectory récupère l'historique structuré d'une session
-	// (GetCascadeTrajectory) — verbosity 0 = défaut du LS.
+	// GetCascadeTrajectory r├®cup├¿re l'historique structur├® d'une session
+	// (GetCascadeTrajectory) ÔÇö verbosity 0 = d├®faut du LS.
 	GetCascadeTrajectory(cascadeID string, verbosity uint64) ([]byte, error)
-	// GetTurnDiff récupère le diff officiel d'un tour (GetTurnDiff).
-	// stepIndex < 0 → le LS résout le dernier tour.
+	// GetTurnDiff r├®cup├¿re le diff officiel d'un tour (GetTurnDiff).
+	// stepIndex < 0 ÔåÆ le LS r├®sout le dernier tour.
 	GetTurnDiff(conversationID string, stepIndex int64) ([]byte, error)
-	// GetRevertPreview demande la prévisualisation du rollback d'une cascade.
+	// GetRevertPreview demande la pr├®visualisation du rollback d'une cascade.
 	GetRevertPreview(cascadeID string, stepIndex int64) ([]byte, error)
-	// RevertToCascadeStep applique le rollback de la cascade à une étape donnée.
+	// RevertToCascadeStep applique le rollback de la cascade ├á une ├®tape donn├®e.
 	RevertToCascadeStep(cascadeID string, stepIndex int64) error
-	// SendStepsToBackground bascule des étapes en tâche d'arrière-plan.
+	// SendStepsToBackground bascule des ├®tapes en t├óche d'arri├¿re-plan.
 	SendStepsToBackground(conversationID string, stepIndices []int64) error
-	// SkipBrowserSubagent saute une étape de sous-agent de navigation.
+	// SkipBrowserSubagent saute une ├®tape de sous-agent de navigation.
 	SkipBrowserSubagent(cascadeID string, stepIndex int64) error
-	// RetrieveUserQuotaSummary récupère le résumé des quotas utilisateur du Language Server.
+	// RetrieveUserQuotaSummary r├®cup├¿re le r├®sum├® des quotas utilisateur du Language Server.
 	RetrieveUserQuotaSummary() ([]byte, error)
-	// GetUserStatus récupère les infos et crédits de l'utilisateur.
+	// GetUserStatus r├®cup├¿re les infos et cr├®dits de l'utilisateur.
 	GetUserStatus() ([]byte, error)
-	// GetModelStatuses récupère la disponibilité et dégradation des modèles.
+	// GetModelStatuses r├®cup├¿re la disponibilit├® et d├®gradation des mod├¿les.
 	GetModelStatuses() ([]byte, error)
-	// GenerateCommitMessage génère un message de commit IA à partir du staging git.
+	// GenerateCommitMessage g├®n├¿re un message de commit IA ├á partir du staging git.
 	GenerateCommitMessage() ([]byte, error)
 	// ConvertTrajectoryToMarkdown convertit une session en document Markdown.
 	ConvertTrajectoryToMarkdown(trajectoryID string) ([]byte, error)
-	// CreateWorktree crée un nouveau worktree Git.
+	// CreateWorktree cr├®e un nouveau worktree Git.
 	CreateWorktree(branch, path string) ([]byte, error)
-	// GetLintErrors récupère les erreurs de lint d'un fichier (LSP).
+	// GetLintErrors r├®cup├¿re les erreurs de lint d'un fichier (LSP).
 	GetLintErrors(uri string) ([]byte, error)
-	// GetDefinition résout la définition du symbole à une position (LSP).
+	// GetDefinition r├®sout la d├®finition du symbole ├á une position (LSP).
 	GetDefinition(uri string, line, character int) ([]byte, error)
-	// GetCodeValidationStates récupère l'état de validation du code (LSP).
+	// GetCodeValidationStates r├®cup├¿re l'├®tat de validation du code (LSP).
 	GetCodeValidationStates(uri string) ([]byte, error)
 }
 
-// JetboxStreamer est la portion minimale du client LS nécessaire au flux
-// temps réel des résumés de sessions (JetboxSubscribeToSummaries). Interface
-// étroite : les tests injectent un faux sans réimplémenter RPCClient.
+// JetboxStreamer est la portion minimale du client LS n├®cessaire au flux
+// temps r├®el des r├®sum├®s de sessions (JetboxSubscribeToSummaries). Interface
+// ├®troite : les tests injectent un faux sans r├®impl├®menter RPCClient.
 type JetboxStreamer interface {
 	RunJetboxSubscription(onSummary func(updates map[string]connectrpc.JetboxSummary, deletes []string)) error
 }
@@ -113,7 +113,7 @@ type JetboxStreamer interface {
 func checkOrigin(r *http.Request) bool {
 	o := r.Header.Get("Origin")
 	if o == "" || o == "null" {
-		return true // clients natifs (app mobile, curl) — pas d'Origin
+		return true // clients natifs (app mobile, curl) ÔÇö pas d'Origin
 	}
 	u, err := url.Parse(o)
 	if err != nil {
@@ -123,7 +123,7 @@ func checkOrigin(r *http.Request) bool {
 	if h == "localhost" || h == "127.0.0.1" || h == "::1" {
 		return true
 	}
-	// Plages LAN privées strictes (CIDR) — un préfixe naïf "172." accepterait
+	// Plages LAN priv├®es strictes (CIDR) ÔÇö un pr├®fixe na├»f "172." accepterait
 	// 172.evil.com ; le parse CIDR le rejette.
 	ip := net.ParseIP(h)
 	if ip != nil {
@@ -137,10 +137,10 @@ func checkOrigin(r *http.Request) bool {
 		strings.HasSuffix(h, ".ngrok.io") || strings.HasSuffix(h, ".ngrok-free.app")
 }
 
-// pendingApproval : une approbation émise mais pas encore répondue, avec les
-// infos nécessaires à l'auto-refus (trajectoryId + stepIndex + payload), le
-// timer d'expiration (approvalTimeout, défaut 5 min) et la corrélation mobile
-// (callId + cascadeId : le client peut la ré-ouvrir après un tap-notification
+// pendingApproval : une approbation ├®mise mais pas encore r├®pondue, avec les
+// infos n├®cessaires ├á l'auto-refus (trajectoryId + stepIndex + payload), le
+// timer d'expiration (approvalTimeout, d├®faut 5 min) et la corr├®lation mobile
+// (callId + cascadeId : le client peut la r├®-ouvrir apr├¿s un tap-notification
 // via get_pending_approval).
 type pendingApproval struct {
 	callID       string
@@ -151,10 +151,10 @@ type pendingApproval struct {
 	command      string
 	filePath     string
 	timer        *time.Timer
-	// expired : true une fois le timer d'auto-refus parti (auto-deny envoyé,
-	// broadcast approval_expired émis). L'entrée reste en place pour qu'un
-	// submit_approval tardif soit refusé (garde de fraîcheur) au lieu de
-	// ré-autoriser une commande déjà auto-refusée.
+	// expired : true une fois le timer d'auto-refus parti (auto-deny envoy├®,
+	// broadcast approval_expired ├®mis). L'entr├®e reste en place pour qu'un
+	// submit_approval tardif soit refus├® (garde de fra├«cheur) au lieu de
+	// r├®-autoriser une commande d├®j├á auto-refus├®e.
 	expired bool
 }
 
@@ -163,93 +163,93 @@ type Server struct {
 	AuthToken string
 	clients   map[*websocket.Conn]bool
 	mu        sync.Mutex
-	// writeLocks (défini plus bas dans le struct) sérialise les écritures PAR
+	// writeLocks (d├®fini plus bas dans le struct) s├®rialise les ├®critures PAR
 	// connexion : gorilla/websocket n'autorise qu'un seul writer concurrent par
-	// connexion — le broadcast, les réponses unary et la goroutine de ping
-	// passent tous par le mutex de LA connexion ciblée, jamais par un mutex
-	// global (qui causait des réponses croisées entre clients).
-	// approvals : cascadeId → approbation en attente (posée par
-	// MarkApprovalPending quand un événement approval_required est émis,
-	// retirée à la décision utilisateur ou à l'expiration).
+	// connexion ÔÇö le broadcast, les r├®ponses unary et la goroutine de ping
+	// passent tous par le mutex de LA connexion cibl├®e, jamais par un mutex
+	// global (qui causait des r├®ponses crois├®es entre clients).
+	// approvals : cascadeId ÔåÆ approbation en attente (pos├®e par
+	// MarkApprovalPending quand un ├®v├®nement approval_required est ├®mis,
+	// retir├®e ├á la d├®cision utilisateur ou ├á l'expiration).
 	approvals map[string]*pendingApproval
-	// approvalTimeout : délai avant auto-refus d'une approbation sans réponse
-	// (sécurité : téléphone perdu). 0 = désactivé. Défaut 5 minutes.
+	// approvalTimeout : d├®lai avant auto-refus d'une approbation sans r├®ponse
+	// (s├®curit├® : t├®l├®phone perdu). 0 = d├®sactiv├®. D├®faut 5 minutes.
 	approvalTimeout time.Duration
-	// sessionApprovals : cascadeId+approvalType → l'utilisateur a choisi
-	// « toujours autoriser pour cette session » (B3). Les demandes suivantes
-	// du même type sont auto-approuvées sans repasser par le téléphone.
+	// sessionApprovals : cascadeId+approvalType ÔåÆ l'utilisateur a choisi
+	// ┬½ toujours autoriser pour cette session ┬╗ (B3). Les demandes suivantes
+	// du m├¬me type sont auto-approuv├®es sans repasser par le t├®l├®phone.
 	sessionApprovals map[string]bool
 	// autoAcceptEnabled : auto-approbation des actions read-only (toggle des
-	// réglages mobile, message WS set_auto_accept). Règles volontairement
-	// conservatrices : lecture seule → approuvée ; écriture hors workspace et
-	// commandes → jamais auto-approuvées (l'utilisateur décide). L'état vit en
-	// mémoire : le mobile le re-synchronise à chaque reconnexion.
-	// ponytail: plafond = perte d'état au redémarrage du daemon ; upgrade =
-	// persistance via SettingsService si le besoin apparaît.
+	// r├®glages mobile, message WS set_auto_accept). R├¿gles volontairement
+	// conservatrices : lecture seule ÔåÆ approuv├®e ; ├®criture hors workspace et
+	// commandes ÔåÆ jamais auto-approuv├®es (l'utilisateur d├®cide). L'├®tat vit en
+	// m├®moire : le mobile le re-synchronise ├á chaque reconnexion.
+	// ponytail: plafond = perte d'├®tat au red├®marrage du daemon ; upgrade =
+	// persistance via SettingsService si le besoin appara├«t.
 	autoAcceptEnabled bool
-	// noToolsEnabled : mode global « répondre sans outils » — les send_prompt
-	// qui ne portent pas leur propre flag noTools héritent de ce défaut
-	// (toggle des réglages mobile). L'état vit en mémoire comme autoAccept.
+	// noToolsEnabled : mode global ┬½ r├®pondre sans outils ┬╗ ÔÇö les send_prompt
+	// qui ne portent pas leur propre flag noTools h├®ritent de ce d├®faut
+	// (toggle des r├®glages mobile). L'├®tat vit en m├®moire comme autoAccept.
 	noToolsEnabled bool
-	// activeCascades : cascadeId → le daemon est en train de streamer un tour
-	// pour cette cascade (C5 : compteur d'activité exposé au /health).
+	// activeCascades : cascadeId ÔåÆ le daemon est en train de streamer un tour
+	// pour cette cascade (C5 : compteur d'activit├® expos├® au /health).
 	activeCascades map[string]bool
-	// lastError : dernière erreur RPC notable, exposée au /health (C5).
+	// lastError : derni├¿re erreur RPC notable, expos├®e au /health (C5).
 	lastError string
-	// startedAt : horodatage de démarrage du serveur (C5, uptime).
+	// startedAt : horodatage de d├®marrage du serveur (C5, uptime).
 	startedAt time.Time
-	// sentRequestIDs : requestId déjà traités (C1, idempotence). Un send_prompt
-	// retransmis après coupure Wi-Fi ne duplique pas le tour : le hub reçoit
-	// chaque requête au plus une fois.
+	// sentRequestIDs : requestId d├®j├á trait├®s (C1, idempotence). Un send_prompt
+	// retransmis apr├¿s coupure Wi-Fi ne duplique pas le tour : le hub re├ºoit
+	// chaque requ├¬te au plus une fois.
 	sentRequestIDs map[string]bool
 	// clientInFlight : nombre de send_prompt en cours PAR CLIENT (C3, limite
-	// de streams simultanés — un client ne peut pas saturer le hub).
+	// de streams simultan├®s ÔÇö un client ne peut pas saturer le hub).
 	clientInFlight map[*websocket.Conn]int
-	// writeLocks : mutex d'écriture PAR CONNEXION (remplace l'ancien writeMu
-	// global). Deux clients concurrents n'ont plus AUCUN point de sérialisation
-	// commun : 20 clients × 30 heartbeats ne produisent plus de réponses
-	// croisées (les écritures sont ordonnées par connexion, pas globalement).
+	// writeLocks : mutex d'├®criture PAR CONNEXION (remplace l'ancien writeMu
+	// global). Deux clients concurrents n'ont plus AUCUN point de s├®rialisation
+	// commun : 20 clients ├ù 30 heartbeats ne produisent plus de r├®ponses
+	// crois├®es (les ├®critures sont ordonn├®es par connexion, pas globalement).
 	writeLocks map[*websocket.Conn]*sync.Mutex
-	// streamBuffer : tampon circulaire StepRecovery pour reprise sur déconnexion 4G/Wi-Fi
+	// streamBuffer : tampon circulaire StepRecovery pour reprise sur d├®connexion 4G/Wi-Fi
 	streamBuffer *SessionStreamBuffer
-	// outbox : persistance disque des send_prompt non confirmés (offline
-	// buffering 3.2) — le mobile les ré-affiche via sync_session.
+	// outbox : persistance disque des send_prompt non confirm├®s (offline
+	// buffering 3.2) ÔÇö le mobile les r├®-affiche via sync_session.
 	outbox *DaemonOutbox
-	// activeCancels : cascadeId → fonction d'annulation active
+	// activeCancels : cascadeId ÔåÆ fonction d'annulation active
 	activeCancels map[string]context.CancelFunc
-	// activeRequestIDs : cascadeId → requestId en cours
+	// activeRequestIDs : cascadeId ÔåÆ requestId en cours
 	activeRequestIDs map[string]string
-	// scheduledTasks : taskId → tâche planifiée gérée par le daemon
+	// scheduledTasks : taskId ÔåÆ t├óche planifi├®e g├®r├®e par le daemon
 	scheduledTasks map[string]*ScheduledTask
-	// sessionsCache : résultat list_sessions déjà calculé (GetAllCascades coûte
-	// ~9,5 s côté hub) + single-flight (fetchDone) pour que N reconnexions
-	// simultanées du mobile ne déclenchent qu'UN appel LS au lieu de N.
+	// sessionsCache : r├®sultat list_sessions d├®j├á calcul├® (GetAllCascades co├╗te
+	// ~9,5 s c├┤t├® hub) + single-flight (fetchDone) pour que N reconnexions
+	// simultan├®es du mobile ne d├®clenchent qu'UN appel LS au lieu de N.
 	sessionsCache    []byte
 	sessionsCachedAt time.Time
 	fetchDone        chan struct{}
-	// jetboxSummaries : cache temps réel alimenté par le stream
-	// JetboxSubscribeToSummaries (démarre au boot, cf. RunJetboxSubscription).
+	// jetboxSummaries : cache temps r├®el aliment├® par le stream
+	// JetboxSubscribeToSummaries (d├®marre au boot, cf. RunJetboxSubscription).
 	// Quand il est chaud (non nil), list_sessions est servi depuis cette carte
-	// SANS appeler GetAllCascades (~9,5 s) : le stream pousse l'état courant
-	// complet en snapshot initial, puis des updates/deletes incrémentaux.
-	// Invalidation : si le stream échoue durablement, une liste vide remplace
+	// SANS appeler GetAllCascades (~9,5 s) : le stream pousse l'├®tat courant
+	// complet en snapshot initial, puis des updates/deletes incr├®mentaux.
+	// Invalidation : si le stream ├®choue durablement, une liste vide remplace
 	// la carte pour retomber sur le chemin GetAllCascades + fallback local.
 	jetboxSummaries map[string]connectrpc.JetboxSummary
-	// terminals : sessions shell interactives (P3), nettoyées à la déconnexion.
+	// terminals : sessions shell interactives (P3), nettoy├®es ├á la d├®connexion.
 	terminals *terminalPtyManager
 	// tokenValidator : validateur dynamique de jetons de session (P4 pairing PIN).
 	tokenValidator func(token string) bool
 	// sessionValidator : variante enrichie qui retourne les infos de session
-	// (deviceId, allowedProjects). Branché par main.go quand le PairingManager
+	// (deviceId, allowedProjects). Branch├® par main.go quand le PairingManager
 	// expose ValidateSession. Si nil, aucun filtrage par projet (comportement
 	// historique).
 	sessionValidator func(token string) (discovery.SessionInfo, bool)
-	// clientSessions : connexion → infos de session (scope projet 3.3). Rempli
-	// au handshake, lu à chaque message pour filtrer send_prompt/list_sessions.
+	// clientSessions : connexion ÔåÆ infos de session (scope projet 3.3). Rempli
+	// au handshake, lu ├á chaque message pour filtrer send_prompt/list_sessions.
 	clientSessions map[*websocket.Conn]discovery.SessionInfo
 }
 
-// ScheduledTask représente une tâche planifiée / cron job gérée par le daemon.
+// ScheduledTask repr├®sente une t├óche planifi├®e / cron job g├®r├®e par le daemon.
 type ScheduledTask struct {
 	ID              string               `json:"id"`
 	Name            string               `json:"name"`
@@ -274,8 +274,8 @@ type ScheduledTaskEvent struct {
 	DurationMs int    `json:"durationMs,omitempty"`
 }
 
-// Stats snapshot de l'état du serveur pour l'endpoint /health (C5).
-// Champs JSON stables — le mobile (ou un script) peut les afficher tels quels.
+// Stats snapshot de l'├®tat du serveur pour l'endpoint /health (C5).
+// Champs JSON stables ÔÇö le mobile (ou un script) peut les afficher tels quels.
 type Stats struct {
 	Status         string   `json:"status"`
 	Sessions       int      `json:"sessions"`
@@ -308,7 +308,7 @@ func NewServer(client RPCClient, authToken string) *Server {
 		clientSessions:   make(map[*websocket.Conn]discovery.SessionInfo),
 	}
 	s.terminals.onBroadcast = s.broadcast
-	// Recharge les tâches planifiées persistées au redémarrage (non-fatal :
+	// Recharge les t├óches planifi├®es persist├®es au red├®marrage (non-fatal :
 	// un fichier absent ou corrompu repart avec une liste vide).
 	if err := s.LoadScheduledTasks(); err != nil {
 		logJSON.Warn("scheduled_tasks_load_failed", "error", err.Error())
@@ -316,13 +316,13 @@ func NewServer(client RPCClient, authToken string) *Server {
 	return s
 }
 
-// sessionsCacheTTL : durée de fraîcheur du cache list_sessions. Le mobile
-// rafraîchit la liste à chaque reconnexion ; le LS met ~9,5 s à répondre.
+// sessionsCacheTTL : dur├®e de fra├«cheur du cache list_sessions. Le mobile
+// rafra├«chit la liste ├á chaque reconnexion ; le LS met ~9,5 s ├á r├®pondre.
 // 5 s = 1 seule recharge si l'utilisateur rouvre l'app 2 fois de suite, mais
-// la liste reste assez fraîche pour un usage réel.
+// la liste reste assez fra├«che pour un usage r├®el.
 const sessionsCacheTTL = 5 * time.Second
 
-// cachedSessions retourne le résultat list_sessions frais s'il existe (moins
+// cachedSessions retourne le r├®sultat list_sessions frais s'il existe (moins
 // de sessionsCacheTTL), sinon (nil, false).
 func (s *Server) cachedSessions() ([]byte, bool) {
 	s.mu.Lock()
@@ -331,8 +331,8 @@ func (s *Server) cachedSessions() ([]byte, bool) {
 }
 
 func (s *Server) cachedSessionsLocked() ([]byte, bool) {
-	// Jetbox chaud (stream actif) : la carte est la source de vérité temps
-	// réel — toujours servie, jamais de GetAllCascades (~9,5 s).
+	// Jetbox chaud (stream actif) : la carte est la source de v├®rit├® temps
+	// r├®el ÔÇö toujours servie, jamais de GetAllCascades (~9,5 s).
 	if s.jetboxSummaries != nil {
 		return s.jetboxSessionsLocked(), true
 	}
@@ -342,17 +342,17 @@ func (s *Server) cachedSessionsLocked() ([]byte, bool) {
 	return nil, false
 }
 
-// jetboxSessionsLocked sérialise la carte Jetbox au format historique
-// list_sessions (mêmes clés que sessionsOut, filtres Antigravity 2.0 inclus).
+// jetboxSessionsLocked s├®rialise la carte Jetbox au format historique
+// list_sessions (m├¬mes cl├®s que sessionsOut, filtres Antigravity 2.0 inclus).
 func (s *Server) jetboxSessionsLocked() []byte {
 	out := sessionsFromSummaries(s.jetboxSummaries)
 	raw, _ := json.Marshal(out)
 	return raw
 }
 
-// jetboxSyncUpdates applique une frame Jetbox (updates/deletes) à la carte et
-// diffuse sessions_updated à tous les clients. Appelée par la goroutine du
-// stream — le lock protège la carte contre list_sessions concurrent.
+// jetboxSyncUpdates applique une frame Jetbox (updates/deletes) ├á la carte et
+// diffuse sessions_updated ├á tous les clients. Appel├®e par la goroutine du
+// stream ÔÇö le lock prot├¿ge la carte contre list_sessions concurrent.
 func (s *Server) jetboxSyncUpdates(updates map[string]connectrpc.JetboxSummary, deletes []string) {
 	s.mu.Lock()
 	if s.jetboxSummaries == nil {
@@ -365,8 +365,8 @@ func (s *Server) jetboxSyncUpdates(updates map[string]connectrpc.JetboxSummary, 
 		delete(s.jetboxSummaries, id)
 	}
 	s.mu.Unlock()
-	// Notifie les clients connectés : le mobile rafraîchit sa sidebar
-	// (message réactif, contrat inchangé côté Flutter : mêmes clés sessions).
+	// Notifie les clients connect├®s : le mobile rafra├«chit sa sidebar
+	// (message r├®actif, contrat inchang├® c├┤t├® Flutter : m├¬mes cl├®s sessions).
 	s.broadcast(OutgoingMessage{
 		Type: "sessions_updated",
 		Data: sessionsFromSummaries(s.snapshotSummaries()),
@@ -387,10 +387,10 @@ func (s *Server) snapshotSummaries() map[string]connectrpc.JetboxSummary {
 	return cp
 }
 
-// sessionsFromSummaries applique le filtre Antigravity 2.0 (archivées, killed,
-// subagents) et produit la payload list_sessions partagée par sessionsOut et
+// sessionsFromSummaries applique le filtre Antigravity 2.0 (archiv├®es, killed,
+// subagents) et produit la payload list_sessions partag├®e par sessionsOut et
 // le broadcast sessions_updated. Les sessions locales servent de fallback si
-// la carte est vide (hub fraîchement démarré, stream pas encore chaud).
+// la carte est vide (hub fra├«chement d├®marr├®, stream pas encore chaud).
 func sessionsFromSummaries(jetbox map[string]connectrpc.JetboxSummary) map[string]interface{} {
 	projects := ListOfficialProjects()
 	items := make([]map[string]interface{}, 0, len(jetbox))
@@ -419,10 +419,10 @@ func sessionsFromSummaries(jetbox map[string]connectrpc.JetboxSummary) map[strin
 	}
 }
 
-// cachedProjectID resolve le projectID d'un workspace à partir du cache
-// list_sessions déjà chaud (coût nul). Retourne ("", false) si le cache est
-// vide — l'appelant retombe alors sur le comportement cascade "orpheline".
-// Ponctuellement utilisé par create_cascade pour éviter le GetAllCascades
+// cachedProjectID resolve le projectID d'un workspace ├á partir du cache
+// list_sessions d├®j├á chaud (co├╗t nul). Retourne ("", false) si le cache est
+// vide ÔÇö l'appelant retombe alors sur le comportement cascade "orpheline".
+// Ponctuellement utilis├® par create_cascade pour ├®viter le GetAllCascades
 // synchrone (~9,5 s) sur le chemin critique.
 func (s *Server) cachedProjectID(uri string) (string, bool) {
 	s.mu.Lock()
@@ -446,12 +446,12 @@ func (s *Server) cachedProjectID(uri string) (string, bool) {
 	return "", false
 }
 
-// fetchSessionsSingleFlight : un seul appel GetAllCascades à la fois, quel que
+// fetchSessionsSingleFlight : un seul appel GetAllCascades ├á la fois, quel que
 // soit le nombre de clients qui demandent la liste. Les appelants concurrents
-// attendent le même résultat au lieu de marteler le hub LS.
+// attendent le m├¬me r├®sultat au lieu de marteler le hub LS.
 //
 // Si la carte Jetbox est chaude, elle est servie directement (chemin rapide,
-// aucun appel LS) — le single-flight ne sert que de repli.
+// aucun appel LS) ÔÇö le single-flight ne sert que de repli.
 func (s *Server) fetchSessionsSingleFlight() []byte {
 	s.mu.Lock()
 	if raw, ok := s.cachedSessionsLocked(); ok {
@@ -487,16 +487,16 @@ func (s *Server) fetchSessionsSingleFlight() []byte {
 	return raw
 }
 
-// SetApprovalTimeout expose le délai d'auto-refus des approbations (5 min par
-// défaut) aux Settings mobile via le message WS "set_approval_timeout".
+// SetApprovalTimeout expose le d├®lai d'auto-refus des approbations (5 min par
+// d├®faut) aux Settings mobile via le message WS "set_approval_timeout".
 func (s *Server) SetApprovalTimeout(d time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.approvalTimeout = d
 }
 
-// SetAutoAccept active/désactive l'auto-approbation des actions read-only
-// (toggle des réglages mobile, message WS set_auto_accept).
+// SetAutoAccept active/d├®sactive l'auto-approbation des actions read-only
+// (toggle des r├®glages mobile, message WS set_auto_accept).
 func (s *Server) SetAutoAccept(enabled bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -510,8 +510,8 @@ func (s *Server) autoAccept() bool {
 	return s.autoAcceptEnabled
 }
 
-// SetNoTools active/désactive le mode global « répondre sans outils »
-// (planner_mode 3 = NO_TOOL, message WS set_no_tools). Défaut appliqué aux
+// SetNoTools active/d├®sactive le mode global ┬½ r├®pondre sans outils ┬╗
+// (planner_mode 3 = NO_TOOL, message WS set_no_tools). D├®faut appliqu├® aux
 // send_prompt sans flag explicite ; le flag par prompt reste prioritaire.
 func (s *Server) SetNoTools(enabled bool) {
 	s.mu.Lock()
@@ -519,16 +519,16 @@ func (s *Server) SetNoTools(enabled bool) {
 	s.noToolsEnabled = enabled
 }
 
-// jetboxBackoff plafonne le délai de reconnexion après un échec du stream
-// Jetbox (le LS peut être en cours de redémarrage).
+// jetboxBackoff plafonne le d├®lai de reconnexion apr├¿s un ├®chec du stream
+// Jetbox (le LS peut ├¬tre en cours de red├®marrage).
 const jetboxBackoff = 30 * time.Second
 
-// RunJetboxSubscription démarre la boucle long-vivante du stream
-// JetboxSubscribeToSummaries (source de vérité temps réel de la sidebar).
+// RunJetboxSubscription d├®marre la boucle long-vivante du stream
+// JetboxSubscribeToSummaries (source de v├®rit├® temps r├®el de la sidebar).
 // Le snapshot initial remplit la carte jetboxSummaries, les frames suivantes
-// l'actualisent ; chaque mise à jour est broadcastée (sessions_updated).
-// Reconnecte en boucle avec backoff — goroutine autonome, ne bloque jamais
-// le démarrage du serveur. La carte est invalidée (nil) quand le stream n'a
+// l'actualisent ; chaque mise ├á jour est broadcast├®e (sessions_updated).
+// Reconnecte en boucle avec backoff ÔÇö goroutine autonome, ne bloque jamais
+// le d├®marrage du serveur. La carte est invalid├®e (nil) quand le stream n'a
 // jamais produit de frame pour retomber sur GetAllCascades + fallback local.
 func (s *Server) RunJetboxSubscription(rpc JetboxStreamer) {
 	go func() {
@@ -536,8 +536,8 @@ func (s *Server) RunJetboxSubscription(rpc JetboxStreamer) {
 		for {
 			err := rpc.RunJetboxSubscription(s.jetboxSyncUpdates)
 			if err == nil {
-				// Stream fermé proprement par le LS (restart) : on invalide
-				// la carte pour ne pas servir un état périmé pendant la
+				// Stream ferm├® proprement par le LS (restart) : on invalide
+				// la carte pour ne pas servir un ├®tat p├®rim├® pendant la
 				// reconnexion, puis on retente.
 				s.mu.Lock()
 				s.jetboxSummaries = nil
@@ -559,9 +559,9 @@ func (s *Server) noTools() bool {
 	return s.noToolsEnabled
 }
 
-// mcpProxyBase est le point d'entrée HTTP du proxy MCP Antigravity desktop
-// (antigravity-patch-proxy, écoute sur 127.0.0.1:50999). Le daemon y route
-// les appels d'outils MCP venus du mobile — la session du PC fait foi pour
+// mcpProxyBase est le point d'entr├®e HTTP du proxy MCP Antigravity desktop
+// (antigravity-patch-proxy, ├®coute sur 127.0.0.1:50999). Le daemon y route
+// les appels d'outils MCP venus du mobile ÔÇö la session du PC fait foi pour
 // l'authentification et l'allowlist des serveurs MCP.
 const mcpProxyBase = "http://127.0.0.1:50999"
 
@@ -570,11 +570,11 @@ func (s *Server) CancelGeneration(cascadeID string) {
 	s.mu.Lock()
 	cancel, hasCancel := s.activeCancels[cascadeID]
 	reqID := s.activeRequestIDs[cascadeID]
-	// Un stream_end(cancelled) déjà émis (par la goroutine du send_prompt)
-	// puis retransmis ici créerait une course de déduplication : si le
-	// requestId actif a déjà été confirmé à l'outbox, ce cancel tardif est un
+	// Un stream_end(cancelled) d├®j├á ├®mis (par la goroutine du send_prompt)
+	// puis retransmis ici cr├®erait une course de d├®duplication : si le
+	// requestId actif a d├®j├á ├®t├® confirm├® ├á l'outbox, ce cancel tardif est un
 	// no-op. Sinon on diffuse un stream_end(cancelled) avec un requestId de
-	// repli (le mobile n'a pas besoin de corréler une annulation).
+	// repli (le mobile n'a pas besoin de corr├®ler une annulation).
 	if hasCancel {
 		delete(s.activeCancels, cascadeID)
 		delete(s.activeRequestIDs, cascadeID)
@@ -597,18 +597,18 @@ func (s *Server) CancelGeneration(cascadeID string) {
 			"hostActive": false,
 		},
 	})
-	// Le stream_end(cancelled) est broadcasté → même confirmation outbox que
-	// le send_prompt (le prompt n'est plus « non confirmé »). La goroutine du
+	// Le stream_end(cancelled) est broadcast├® ÔåÆ m├¬me confirmation outbox que
+	// le send_prompt (le prompt n'est plus ┬½ non confirm├® ┬╗). La goroutine du
 	// send_prompt sort sur ctx.Err() SANS confirmer : c'est ici que le
-	// prompt annulé est retiré de la file, sinon sync_session le re-proposerait
-	// au mobile alors que l'utilisateur l'a explicitement annulé.
+	// prompt annul├® est retir├® de la file, sinon sync_session le re-proposerait
+	// au mobile alors que l'utilisateur l'a explicitement annul├®.
 	if errOut := s.outbox.Confirm(cascadeID, reqID); errOut != nil {
 		logJSON.Warn("outbox_confirm_failed", "cascadeId", cascadeID, "err", errOut.Error())
 	}
 }
 
-// MarkCascadeActive marque une cascade comme « en cours de stream » (posé à
-// l'entrée de send_prompt, retiré à la sortie). Servi au /health.
+// MarkCascadeActive marque une cascade comme ┬½ en cours de stream ┬╗ (pos├® ├á
+// l'entr├®e de send_prompt, retir├® ├á la sortie). Servi au /health.
 func (s *Server) MarkCascadeActive(cascadeID string) {
 	s.mu.Lock()
 	s.activeCascades[cascadeID] = true
@@ -622,7 +622,7 @@ func (s *Server) ClearCascadeActive(cascadeID string) {
 	s.mu.Unlock()
 }
 
-// Stats renvoie un snapshot cohérent de l'état du serveur (C5).
+// Stats renvoie un snapshot coh├®rent de l'├®tat du serveur (C5).
 func (s *Server) Stats() Stats {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -654,7 +654,7 @@ func (s *Server) SetTokenValidator(v func(token string) bool) {
 }
 
 // SetSessionValidator configure le validateur enrichi (SessionInfo + allowedProjects).
-// Si présent, il est utilisé au handshake pour stocker le scope projet de chaque
+// Si pr├®sent, il est utilis├® au handshake pour stocker le scope projet de chaque
 // connexion (3.3). Sans lui, aucun filtrage par projet (comportement historique).
 func (s *Server) SetSessionValidator(v func(token string) (discovery.SessionInfo, bool)) {
 	s.mu.Lock()
@@ -669,8 +669,8 @@ func (s *Server) sessionFor(conn *websocket.Conn) discovery.SessionInfo {
 	return s.clientSessions[conn]
 }
 
-// allowProject détermine si une connexion a le droit d'agir sur un projet.
-// Sans session (client non pairé / ancien token) ou sans allowedProjects,
+// allowProject d├®termine si une connexion a le droit d'agir sur un projet.
+// Sans session (client non pair├® / ancien token) ou sans allowedProjects,
 // aucun filtrage (comportement historique : tout est permis).
 func (s *Server) allowProject(conn *websocket.Conn, uri string) bool {
 	sess := s.sessionFor(conn)
@@ -678,7 +678,7 @@ func (s *Server) allowProject(conn *websocket.Conn, uri string) bool {
 		return true
 	}
 	// Le scope stocke des URIs (file:///...) ; on compare aussi le chemin nu
-	// pour tolérer workspacePath côté mobile.
+	// pour tol├®rer workspacePath c├┤t├® mobile.
 	plain := strings.TrimPrefix(strings.TrimPrefix(uri, "file://"), "/")
 	plain = strings.ReplaceAll(plain, `\`, "/")
 	for _, p := range sess.AllowedProjects {
@@ -689,41 +689,103 @@ func (s *Server) allowProject(conn *websocket.Conn, uri string) bool {
 	return false
 }
 
+// filterByScope restreint la payload list_sessions (sessions + projects) aux
+// projets autoris├®s de la connexion. Sans allowedProjects, la payload est
+// retourn├®e inchang├®e (comportement historique). Utilis├® par le case
+// "list_sessions" ÔÇö le broadcast sessions_updated reste non filtr├® (chaque
+// client re-filtre ├á la lecture).
+func (s *Server) filterByScope(conn *websocket.Conn, data map[string]interface{}) map[string]interface{} {
+	sess := s.sessionFor(conn)
+	if len(sess.AllowedProjects) == 0 {
+		return data
+	}
+	allowed := make(map[string]bool, len(sess.AllowedProjects))
+	for _, p := range sess.AllowedProjects {
+		plain := strings.TrimPrefix(strings.TrimPrefix(p, "file://"), "/")
+		plain = strings.ReplaceAll(plain, `\`, "/")
+		allowed[plain] = true
+	}
+	// Sessions : filtr├®es sur projectId, puis workspaceUri en repli.
+	if sessions, ok := data["sessions"].([]interface{}); ok {
+		filtered := sessions[:0:0]
+		for _, s := range sessions {
+			if m, ok := s.(map[string]interface{}); ok {
+				proj := ""
+				if v, ok := m["projectId"].(string); ok {
+					proj = strings.TrimPrefix(strings.TrimPrefix(v, "file://"), "/")
+					proj = strings.ReplaceAll(proj, `\`, "/")
+				}
+				if w, ok := m["workspaceUri"].(string); ok && proj == "" {
+					proj = strings.TrimPrefix(strings.TrimPrefix(w, "file://"), "/")
+					proj = strings.ReplaceAll(proj, `\`, "/")
+				}
+				if proj != "" && !allowed[proj] {
+					continue
+				}
+			}
+			filtered = append(filtered, s)
+		}
+		data["sessions"] = filtered
+	}
+	// Projets : filtr├®s sur path (ou uri en repli).
+	if projects, ok := data["projects"].([]interface{}); ok {
+		filtered := projects[:0:0]
+		for _, p := range projects {
+			if m, ok := p.(map[string]interface{}); ok {
+				var proj string
+				if v, ok := m["path"].(string); ok {
+					proj = v
+				} else if v, ok := m["uri"].(string); ok {
+					proj = v
+				}
+				proj = strings.TrimPrefix(strings.TrimPrefix(proj, "file://"), "/")
+				proj = strings.ReplaceAll(proj, `\`, "/")
+				if proj != "" && !allowed[proj] {
+					continue
+				}
+			}
+			filtered = append(filtered, p)
+		}
+		data["projects"] = filtered
+	}
+	return data
+}
+
 // maxWSMessageSize borne la taille des messages WebSocket entrants (1 Mo)
-// pour empêcher un client de faire un DoS mémoire.
+// pour emp├¬cher un client de faire un DoS m├®moire.
 const maxWSMessageSize = 1 << 20
 
-// maxConcurrentStreams : nombre maximum de send_prompt simultanés PAR CLIENT
-// (C3). Au-delà, la requête est refusée avec une erreur explicite — un seul
-// téléphone ne peut pas saturer le hub.
+// maxConcurrentStreams : nombre maximum de send_prompt simultan├®s PAR CLIENT
+// (C3). Au-del├á, la requ├¬te est refus├®e avec une erreur explicite ÔÇö un seul
+// t├®l├®phone ne peut pas saturer le hub.
 const maxConcurrentStreams = 2
 
-// hostActiveWindow : fenêtre d'activité clavier/souris du PC hôte (C7-B).
-// Si l'utilisateur a interagi dans les 90 dernières secondes, on considère
-// qu'il est devant le PC → le mobile supprime la notification d'approbation.
+// hostActiveWindow : fen├¬tre d'activit├® clavier/souris du PC h├┤te (C7-B).
+// Si l'utilisateur a interagi dans les 90 derni├¿res secondes, on consid├¿re
+// qu'il est devant le PC ÔåÆ le mobile supprime la notification d'approbation.
 const hostActiveWindow = 90 * time.Second
 
-// pingInterval / pongWait : garde-fous de connexions mortes. Le ping échoue
-// si le pair ne répond pas (network parti, app fermée) → read error → le
-// client est retiré du broadcast.
+// pingInterval / pongWait : garde-fous de connexions mortes. Le ping ├®choue
+// si le pair ne r├®pond pas (network parti, app ferm├®e) ÔåÆ read error ÔåÆ le
+// client est retir├® du broadcast.
 const (
 	pingInterval = 30 * time.Second
 	pongWait     = 60 * time.Second
 )
 
-// writeTimeout : deadline d'écriture par message. Un client mort (buffer TCP
-// plein) ferait sinon bloquer WriteJSON indéfiniment sous writeMu → head-of-line
-// blocking sur TOUTES les connexions (le broadcast passe par le même mutex).
+// writeTimeout : deadline d'├®criture par message. Un client mort (buffer TCP
+// plein) ferait sinon bloquer WriteJSON ind├®finiment sous writeMu ÔåÆ head-of-line
+// blocking sur TOUTES les connexions (le broadcast passe par le m├¬me mutex).
 const writeTimeout = 10 * time.Second
 
-// quotaPushInterval : cadence du push de quotas scheduler → clients mobiles.
-// Alignée sur l'ancien timer mobile de 60 s ; 1 appel LS/min max.
+// quotaPushInterval : cadence du push de quotas scheduler ÔåÆ clients mobiles.
+// Align├®e sur l'ancien timer mobile de 60 s ; 1 appel LS/min max.
 const quotaPushInterval = 60 * time.Second
 
-// writeJSON envoie un message à une connexion donnée (writer unique par
-// connexion : un seul goroutine écrit sur un websocket.Conn à la fois — le
-// broadcast, les réponses unary et la goroutine de ping passent tous par le
-// mutex de LA connexion ciblée, jamais par un mutex global).
+// writeJSON envoie un message ├á une connexion donn├®e (writer unique par
+// connexion : un seul goroutine ├®crit sur un websocket.Conn ├á la fois ÔÇö le
+// broadcast, les r├®ponses unary et la goroutine de ping passent tous par le
+// mutex de LA connexion cibl├®e, jamais par un mutex global).
 func (s *Server) writeJSON(conn *websocket.Conn, msg OutgoingMessage) error {
 	mu := s.writeLock(conn)
 	mu.Lock()
@@ -736,8 +798,8 @@ func (s *Server) writeJSON(conn *websocket.Conn, msg OutgoingMessage) error {
 	return nil
 }
 
-// writeLock retourne le mutex d'écriture dédié à conn (créé à la volée si le
-// client s'est connecté avant l'initialisation — chemin de test uniquement).
+// writeLock retourne le mutex d'├®criture d├®di├® ├á conn (cr├®├® ├á la vol├®e si le
+// client s'est connect├® avant l'initialisation ÔÇö chemin de test uniquement).
 func (s *Server) writeLock(conn *websocket.Conn) *sync.Mutex {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -749,25 +811,25 @@ func (s *Server) writeLock(conn *websocket.Conn) *sync.Mutex {
 	return lk
 }
 
-// releaseWriteLock libère la mémoire du mutex d'écriture d'un client déconnecté.
+// releaseWriteLock lib├¿re la m├®moire du mutex d'├®criture d'un client d├®connect├®.
 func (s *Server) releaseWriteLock(conn *websocket.Conn) {
 	s.mu.Lock()
 	delete(s.writeLocks, conn)
 	s.mu.Unlock()
 }
 
-// mcpTimeout borne l'appel HTTP vers le proxy MCP desktop (30 s) — aligné sur
-// le timeout 15 s côté mobile + la marge de traversée tunnel/4G.
+// mcpTimeout borne l'appel HTTP vers le proxy MCP desktop (30 s) ÔÇö align├® sur
+// le timeout 15 s c├┤t├® mobile + la marge de travers├®e tunnel/4G.
 const mcpTimeout = 30 * time.Second
 
 // handleMcpAction relaie call_mcp_tool / connect_mcp_server /
 // refresh_mcp_oauth_token / list_mcp_servers vers le proxy MCP Antigravity
 // desktop (127.0.0.1:50999). Le mobile n'a ni les identifiants ni l'allowlist
-// MCP : la session du PC est le seul détenteur légitime — le daemon n'est
-// qu'un tunnel. La réponse JSON du proxy est relayée telle quelle dans Data.
+// MCP : la session du PC est le seul d├®tenteur l├®gitime ÔÇö le daemon n'est
+// qu'un tunnel. La r├®ponse JSON du proxy est relay├®e telle quelle dans Data.
 func (s *Server) handleMcpAction(conn *websocket.Conn, msg IncomingMessage) {
-	// list_mcp_servers est une opération de listing (GET, sans serverName) :
-	// le mobile demande la liste des serveurs configurés sur le PC. Les autres
+	// list_mcp_servers est une op├®ration de listing (GET, sans serverName) :
+	// le mobile demande la liste des serveurs configur├®s sur le PC. Les autres
 	// actions MCP exigent un serverName.
 	if msg.Type != "list_mcp_servers" && msg.ServerName == "" {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "serverName requis"})
@@ -811,7 +873,7 @@ func (s *Server) handleMcpAction(conn *websocket.Conn, msg IncomingMessage) {
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
-		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "lecture de la réponse proxy: " + err.Error()})
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "lecture de la r├®ponse proxy: " + err.Error()})
 		return
 	}
 	if resp.StatusCode >= 400 {
@@ -824,7 +886,7 @@ func (s *Server) handleMcpAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"raw": string(respBody)}})
 		return
 	}
-	// list_mcp_servers : nettoyage lger du payload relay — un serveur MCP
+	// list_mcp_servers : nettoyage lger du payload relay ÔÇö un serveur MCP
 	// configur sans champ "name" n'a pas  exposer serverName:"" au mobile.
 	if msg.Type == "list_mcp_servers" {
 		if servers, ok := proxyResp["servers"].([]interface{}); ok {
@@ -849,12 +911,12 @@ func (s *Server) handleMcpAction(conn *websocket.Conn, msg IncomingMessage) {
 	s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: proxyResp})
 }
 
-// broadcast envoie le même message à TOUS les clients connectés : c'est ce qui
-// permet la synchronisation multi-surface (un téléphone voit le stream déclenché
-// par le PC ou par un autre téléphone). Un client dont l'écriture échoue
-// (deadline dépassée) est retiré de la liste — il ne doit pas bloquer ni
-// ré-échouer les broadcasts suivants (il sera aussi purgé par la boucle de
-// lecture côté HandleWebSocket).
+// broadcast envoie le m├¬me message ├á TOUS les clients connect├®s : c'est ce qui
+// permet la synchronisation multi-surface (un t├®l├®phone voit le stream d├®clench├®
+// par le PC ou par un autre t├®l├®phone). Un client dont l'├®criture ├®choue
+// (deadline d├®pass├®e) est retir├® de la liste ÔÇö il ne doit pas bloquer ni
+// r├®-├®chouer les broadcasts suivants (il sera aussi purg├® par la boucle de
+// lecture c├┤t├® HandleWebSocket).
 func (s *Server) broadcast(msg OutgoingMessage) {
 	s.mu.Lock()
 	conns := make([]*websocket.Conn, 0, len(s.clients))
@@ -873,9 +935,9 @@ func (s *Server) broadcast(msg OutgoingMessage) {
 	}
 }
 
-// buildQuotaData parse la réponse protobuf brute du LS en map JSON stable pour
+// buildQuotaData parse la r├®ponse protobuf brute du LS en map JSON stable pour
 // le mobile (les 4 % attendus par le badge et le sheet Limites). ok=false si
-// aucune clé reconnue (schéma LS changé) — l'appelant retombe sur toOutgoing.
+// aucune cl├® reconnue (sch├®ma LS chang├®) ÔÇö l'appelant retombe sur toOutgoing.
 func (s *Server) buildQuotaData(raw []byte) (map[string]interface{}, bool) {
 	q := connectrpc.ParseQuotaSummary(raw)
 	if !q.HasQuota() {
@@ -889,10 +951,10 @@ func (s *Server) buildQuotaData(raw []byte) (map[string]interface{}, bool) {
 	}, true
 }
 
-// pushQuotaUpdate récupère les quotas auprès du LS et les diffuse à tous les
-// clients (type "quota_update", pas de requestId — événement poussé, le mobile
-// le consomme via events). Appelé par le scheduler ; les erreurs sont loggées
-// et silencieuses pour le client (le prochain tick réessaiera).
+// pushQuotaUpdate r├®cup├¿re les quotas aupr├¿s du LS et les diffuse ├á tous les
+// clients (type "quota_update", pas de requestId ÔÇö ├®v├®nement pouss├®, le mobile
+// le consomme via events). Appel├® par le scheduler ; les erreurs sont logg├®es
+// et silencieuses pour le client (le prochain tick r├®essaiera).
 func (s *Server) pushQuotaUpdate() {
 	raw, err := s.RPCClient.RetrieveUserQuotaSummary()
 	if err != nil {
@@ -919,10 +981,10 @@ type IncomingMessage struct {
 	ApprovalType  string `json:"approvalType,omitempty"`
 	Decision      string `json:"decision,omitempty"`
 	Scope         string `json:"scope,omitempty"`
-	// DenyReason : instruction libre envoyée à l'agent quand l'utilisateur
-	// refuse une approbation run_command (ex. « fais un revert d'abord »).
+	// DenyReason : instruction libre envoy├®e ├á l'agent quand l'utilisateur
+	// refuse une approbation run_command (ex. ┬½ fais un revert d'abord ┬╗).
 	// Transmise dans le champ 3 (submitted) du CascadeRunCommandInteraction.
-	// Vide → comportement historique (deny simple).
+	// Vide ÔåÆ comportement historique (deny simple).
 	DenyReason      string                 `json:"denyReason,omitempty"`
 	Prompt          string                 `json:"prompt,omitempty"`
 	FilePath        string                 `json:"filePath,omitempty"`
@@ -937,37 +999,37 @@ type IncomingMessage struct {
 	MimeType        string                 `json:"mimeType,omitempty"`
 	Data            map[string]interface{} `json:"data,omitempty"`
 	Images          []string               `json:"images,omitempty"`
-	// ModelUID : identifiant du modèle sélectionné dans l'app mobile
-	// (requested_model_uid du cascade_config). Vide → repli sur ModelEnum.
+	// ModelUID : identifiant du mod├¿le s├®lectionn├® dans l'app mobile
+	// (requested_model_uid du cascade_config). Vide ÔåÆ repli sur ModelEnum.
 	ModelUID string `json:"modelUID,omitempty"`
 	// Query : terme de recherche pour search_files.
 	Query string `json:"query,omitempty"`
 	// ModelEnum : repli historique (requested_model_id) quand ModelUID est vide.
 	ModelEnum uint64 `json:"modelEnum,omitempty"`
-	// Confirm : confirmation explicite exigée pour les actions destructives
-	// (delete_cascade) — le mobile DOIT l'envoyer à true après dialog natif.
+	// Confirm : confirmation explicite exig├®e pour les actions destructives
+	// (delete_cascade) ÔÇö le mobile DOIT l'envoyer ├á true apr├¿s dialog natif.
 	Confirm bool `json:"confirm,omitempty"`
-	// Content : contenu du fichier pour write_file (encodage base64 JSON → bytes).
+	// Content : contenu du fichier pour write_file (encodage base64 JSON ÔåÆ bytes).
 	Content string `json:"content,omitempty"`
-	// Overwrite : autorise l'écrasement pour write_file (sinon erreur si existe).
+	// Overwrite : autorise l'├®crasement pour write_file (sinon erreur si existe).
 	Overwrite      bool    `json:"overwrite,omitempty"`
 	ConversationID string  `json:"conversationId,omitempty"`
 	StepIndices    []int64 `json:"stepIndices,omitempty"`
 	// Champs MCP (call_mcp_tool / connect_mcp_server / refresh_mcp_oauth_token) :
-	// relayés au proxy Antigravity desktop (127.0.0.1:50999).
+	// relay├®s au proxy Antigravity desktop (127.0.0.1:50999).
 	ServerName string                 `json:"serverName,omitempty"`
 	ToolName   string                 `json:"toolName,omitempty"`
 	Arguments  map[string]interface{} `json:"arguments,omitempty"`
 	Endpoint   string                 `json:"endpoint,omitempty"`
 	GrantType  string                 `json:"grantType,omitempty"`
 	// TerminalID + Input : session shell interactive (P3). terminal_create
-	// crée la session, terminal_write injecte l'entrée clavier, terminal_kill
-	// la ferme. La sortie est poussée en broadcast terminal_output.
+	// cr├®e la session, terminal_write injecte l'entr├®e clavier, terminal_kill
+	// la ferme. La sortie est pouss├®e en broadcast terminal_output.
 	TerminalID string `json:"terminalId,omitempty"`
 	Input      string `json:"input,omitempty"`
-	// NoTools : mode « réponse directe sans boucle d'outils » (planner_mode 3
-	// = NO_TOOL côté LS). Porté par le message send_prompt — le mobile décide
-	// par prompt si l'agent peut utiliser des outils (toggle dédié).
+	// NoTools : mode ┬½ r├®ponse directe sans boucle d'outils ┬╗ (planner_mode 3
+	// = NO_TOOL c├┤t├® LS). Port├® par le message send_prompt ÔÇö le mobile d├®cide
+	// par prompt si l'agent peut utiliser des outils (toggle d├®di├®).
 	NoTools bool `json:"noTools,omitempty"`
 }
 
@@ -1002,19 +1064,19 @@ func (m *IncomingMessage) UnmarshalJSON(data []byte) error {
 }
 
 // hasPendingApproval rapporte si une approbation est en attente pour cette
-// cascade (posée par MarkApprovalPending, retirée à la décision ou à
-// l'expiration). Sans marquage, la valeur de repli est false → le stream est
-// classé "done" (comportement hérité, tests inchangés).
+// cascade (pos├®e par MarkApprovalPending, retir├®e ├á la d├®cision ou ├á
+// l'expiration). Sans marquage, la valeur de repli est false ÔåÆ le stream est
+// class├® "done" (comportement h├®rit├®, tests inchang├®s).
 func (s *Server) hasPendingApproval(cascadeID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, ok := s.approvals[cascadeID]
-	// Expirée → plus « en attente » (auto-refus parti, stream classé done).
+	// Expir├®e ÔåÆ plus ┬½ en attente ┬╗ (auto-refus parti, stream class├® done).
 	return ok && !p.expired
 }
 
 // MarkApprovalPending enregistre une approbation en attente pour une cascade
-// (appelé quand un événement approval_required est émis) et arme le timer
+// (appel├® quand un ├®v├®nement approval_required est ├®mis) et arme le timer
 // d'auto-refus si approvalTimeout > 0.
 func (s *Server) MarkApprovalPending(cascadeID string, ev connectrpc.StreamEvent) {
 	s.mu.Lock()
@@ -1038,15 +1100,15 @@ func (s *Server) MarkApprovalPending(cascadeID string, ev connectrpc.StreamEvent
 }
 
 // pendingApprovalInfo renvoie le contexte d'approbation en attente pour un
-// client qui la ré-ouvre (tap sur la notification locale) : null si aucune.
-// Les champs sont stables même si le stream_delta d'origine a été perdu
-// (app tuée entre l'émission et le tap).
+// client qui la r├®-ouvre (tap sur la notification locale) : null si aucune.
+// Les champs sont stables m├¬me si le stream_delta d'origine a ├®t├® perdu
+// (app tu├®e entre l'├®mission et le tap).
 func (s *Server) pendingApprovalInfo(cascadeID string) map[string]interface{} {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, ok := s.approvals[cascadeID]
 	if !ok || p.expired {
-		return nil // expirée : le mobile a reçu approval_expired, pas de fantôme
+		return nil // expir├®e : le mobile a re├ºu approval_expired, pas de fant├┤me
 	}
 	expiresAt := int64(0)
 	if p.timer != nil {
@@ -1063,7 +1125,7 @@ func (s *Server) pendingApprovalInfo(cascadeID string) map[string]interface{} {
 	}
 }
 
-// clearApproval retire une approbation en attente (décision utilisateur) et
+// clearApproval retire une approbation en attente (d├®cision utilisateur) et
 // stoppe son timer d'expiration.
 func (s *Server) clearApproval(cascadeID string) {
 	s.mu.Lock()
@@ -1076,10 +1138,10 @@ func (s *Server) clearApproval(cascadeID string) {
 	}
 }
 
-// purgeCascadeState nettoie TOUT l'état local d'une cascade supprimée :
+// purgeCascadeState nettoie TOUT l'├®tat local d'une cascade supprim├®e :
 // buffer StepRecovery, approbation en attente, auto-approbations de session,
 // stream actif. Sans cette purge, un get_pending_approval sur une cascade
-// supprimée répondrait un fantôme.
+// supprim├®e r├®pondrait un fant├┤me.
 func (s *Server) purgeCascadeState(cascadeID string) {
 	s.streamBuffer.ClearCascade(cascadeID)
 	s.mu.Lock()
@@ -1089,7 +1151,7 @@ func (s *Server) purgeCascadeState(cascadeID string) {
 		}
 		delete(s.approvals, cascadeID)
 	}
-	// sessionApprovals : clés "cascadeID|type" — purge par préfixe.
+	// sessionApprovals : cl├®s "cascadeID|type" ÔÇö purge par pr├®fixe.
 	prefix := cascadeID + "|"
 	for k := range s.sessionApprovals {
 		if strings.HasPrefix(k, prefix) {
@@ -1105,15 +1167,15 @@ func (s *Server) purgeCascadeState(cascadeID string) {
 	s.mu.Unlock()
 }
 
-// expireApproval est le callback du timer : l'approbation n'a pas reçu de
-// réponse à temps → auto-refus (sécurité : téléphone perdu) puis broadcast
+// expireApproval est le callback du timer : l'approbation n'a pas re├ºu de
+// r├®ponse ├á temps ÔåÆ auto-refus (s├®curit├® : t├®l├®phone perdu) puis broadcast
 // approval_expired pour que toutes les surfaces nettoient la carte.
 func (s *Server) expireApproval(cascadeID string) {
 	s.mu.Lock()
 	p, ok := s.approvals[cascadeID]
 	if !ok || p.expired {
 		s.mu.Unlock()
-		return // déjà traitée (submit) ou déjà expirée — timer obsolète
+		return // d├®j├á trait├®e (submit) ou d├®j├á expir├®e ÔÇö timer obsol├¿te
 	}
 	p.expired = true
 	p.timer = nil
@@ -1132,14 +1194,14 @@ func (s *Server) expireApproval(cascadeID string) {
 		Data: map[string]interface{}{
 			"cascadeId": cascadeID,
 			// callId permet au mobile d'annuler la notification locale de
-			// l'approbation expirée (Phase 3) sans re-fetch.
+			// l'approbation expir├®e (Phase 3) sans re-fetch.
 			"callId": p.callID,
 		},
 	})
 }
 
-// approvalFor retourne une copie de l'approbation en attente (ou expirée)
-// pour une cascade. Utilisée par submit_approval pour la garde de fraîcheur.
+// approvalFor retourne une copie de l'approbation en attente (ou expir├®e)
+// pour une cascade. Utilis├®e par submit_approval pour la garde de fra├«cheur.
 func (s *Server) approvalFor(cascadeID string) (pendingApproval, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1150,9 +1212,9 @@ func (s *Server) approvalFor(cascadeID string) (pendingApproval, bool) {
 	return *p, true
 }
 
-// commandLineRe extrait la commande proposée du détail d'approbation
-// run_command — accepte "command_line" (format réel) et "run_command"
-// (format du blob de corrélation), comme le fallback mobile (stream_parser.dart).
+// commandLineRe extrait la commande propos├®e du d├®tail d'approbation
+// run_command ÔÇö accepte "command_line" (format r├®el) et "run_command"
+// (format du blob de corr├®lation), comme le fallback mobile (stream_parser.dart).
 var commandLineRe = regexp.MustCompile(`"(?:command_line|commandline|run_command)"\s*:\s*"((?:[^"\\]|\\.)*)"`)
 
 func extractCommand(detail string) string {
@@ -1162,15 +1224,15 @@ func extractCommand(detail string) string {
 	return ""
 }
 
-// isReadOnlyTool détermine si un outil est read-only (lecture/recherche) — la
-// seule catégorie auto-approuvable par l'auto-accept. Tout le reste (écritures,
-// commandes, appels MCP) reste soumis à l'approbation utilisateur.
+// isReadOnlyTool d├®termine si un outil est read-only (lecture/recherche) ÔÇö la
+// seule cat├®gorie auto-approuvable par l'auto-accept. Tout le reste (├®critures,
+// commandes, appels MCP) reste soumis ├á l'approbation utilisateur.
 //
 // Liste EXACTE volontairement : ce sont les seuls noms que extractToolName
 // (event_parser.go) peut produire pour le flux d'approbation. Un test par
-// préfixe (strings.HasPrefix) auto-approuverait tout futur outil "get_*" /
-// "view_*" sans revue — faux positif de sécurité. generic_tool et les
-// inconnus retombent dans le default → jamais auto-approuvés.
+// pr├®fixe (strings.HasPrefix) auto-approuverait tout futur outil "get_*" /
+// "view_*" sans revue ÔÇö faux positif de s├®curit├®. generic_tool et les
+// inconnus retombent dans le default ÔåÆ jamais auto-approuv├®s.
 func isReadOnlyTool(tool string) bool {
 	switch strings.ToLower(tool) {
 	case "read_file", "list_files", "search_files", "grep", "glob", "fetch":
@@ -1181,14 +1243,14 @@ func isReadOnlyTool(tool string) bool {
 }
 
 // buildApprovalPayload construit le oneof + payload HandleCascadeUserInteraction
-// pour une décision. run_command = 5, file_permission = 19, permission = 21,
-// approval = 23 (fallback générique). Partagé entre submit_approval et
-// l'auto-refus d'expiration. denyReason (texte libre, ex. instruction après un
-// refus) n'est transmis que pour run_command — champ 3 (submitted) du
+// pour une d├®cision. run_command = 5, file_permission = 19, permission = 21,
+// approval = 23 (fallback g├®n├®rique). Partag├® entre submit_approval et
+// l'auto-refus d'expiration. denyReason (texte libre, ex. instruction apr├¿s un
+// refus) n'est transmis que pour run_command ÔÇö champ 3 (submitted) du
 // CascadeRunCommandInteraction ; le protocole n'expose pas de texte libre pour
-// les autres types, il est ignoré sans erreur.
+// les autres types, il est ignor├® sans erreur.
 func buildApprovalPayload(approvalType string, confirm bool, command, filePath, denyReason string) (int, []byte) {
-	oneofField := connectrpc.InteractionApproval // fallback générique
+	oneofField := connectrpc.InteractionApproval // fallback g├®n├®rique
 	var oneofPayload []byte
 	switch strings.ToLower(approvalType) {
 	case "run_command":
@@ -1206,12 +1268,12 @@ func buildApprovalPayload(approvalType string, confirm bool, command, filePath, 
 	return oneofField, oneofPayload
 }
 
-// sessionApprovalKey : clé de cache « toujours autoriser pour cette session ».
+// sessionApprovalKey : cl├® de cache ┬½ toujours autoriser pour cette session ┬╗.
 func sessionApprovalKey(cascadeID, approvalType string) string {
 	return cascadeID + "|" + strings.ToLower(approvalType)
 }
 
-// hasSessionApproval rapporte si l'utilisateur a déjà auto-approuvé ce type
+// hasSessionApproval rapporte si l'utilisateur a d├®j├á auto-approuv├® ce type
 // d'approbation pour cette cascade (B3).
 func (s *Server) hasSessionApproval(cascadeID, approvalType string) bool {
 	s.mu.Lock()
@@ -1241,39 +1303,39 @@ func toWorkspaceURI(path string) string {
 	return "file:///" + strings.ReplaceAll(path, "\\", "/")
 }
 
-// TrajectoryVerbosityFull est la verbosité par défaut de get_trajectory
+// TrajectoryVerbosityFull est la verbosit├® par d├®faut de get_trajectory
 // (enum ClientTrajectoryVerbosity, language_server_pb.ts ligne 257) :
-// 3 = FULL → vue structurée complète (steps + métadonnées).
+// 3 = FULL ÔåÆ vue structur├®e compl├¿te (steps + m├®tadonn├®es).
 const TrajectoryVerbosityFull uint64 = 3
 
-// maxTrajectorySteps : plafond de steps renvoyés au mobile par get_trajectory
-// (fenêtre glissante sur la fin de session). 60 steps ≈ 1-2 tours de travail
-// complets — au-delà, le JSON devient lourd et le rendu mobile illisible.
+// maxTrajectorySteps : plafond de steps renvoy├®s au mobile par get_trajectory
+// (fen├¬tre glissante sur la fin de session). 60 steps Ôëê 1-2 tours de travail
+// complets ÔÇö au-del├á, le JSON devient lourd et le rendu mobile illisible.
 const maxTrajectorySteps = 60
 
-// trajectoryOut convertit une réponse GetCascadeTrajectoryResponse brute en
-// JSON stable pour le mobile. Schéma vérifié dans antigravity-client
+// trajectoryOut convertit une r├®ponse GetCascadeTrajectoryResponse brute en
+// JSON stable pour le mobile. Sch├®ma v├®rifi├® dans antigravity-client
 // (language_server_pb.ts ligne 8760) :
 //
 //	GetCascadeTrajectoryResponse {1: Trajectory, 2: status, 3: num_total_steps}
 //	Trajectory {1: trajectory_id, 6: cascade_id, 2: repeated Step}
 //
-// Le détail des steps (oneof variants) n'est pas décodé ici : le mobile
-// reçoit le nombre + les champs d'en-tête, et peut demander le diff d'un
-// tour précis via get_turn_diff. Best-effort : un schéma inconnu renvoie
-// le dump champs (toOutgoing) plutôt qu'une erreur.
+// Le d├®tail des steps (oneof variants) n'est pas d├®cod├® ici : le mobile
+// re├ºoit le nombre + les champs d'en-t├¬te, et peut demander le diff d'un
+// tour pr├®cis via get_turn_diff. Best-effort : un sch├®ma inconnu renvoie
+// le dump champs (toOutgoing) plut├┤t qu'une erreur.
 func trajectoryOut(raw []byte) interface{} {
 	if len(raw) == 0 {
 		return map[string]interface{}{"steps": []interface{}{}, "numTotalSteps": 0}
 	}
-	// Dé-framming gRPC-Web : flags(1) + longueur BE(4) + payload.
+	// D├®-framming gRPC-Web : flags(1) + longueur BE(4) + payload.
 	payload := raw
 	for len(payload) >= 5 {
 		length := int(binary.BigEndian.Uint32(payload[1:5]))
 		if length <= 0 || 5+length > len(payload) {
 			break
 		}
-		if payload[0]&0x80 == 0 { // frame de données
+		if payload[0]&0x80 == 0 { // frame de donn├®es
 			payload = payload[5 : 5+length]
 			break
 		}
@@ -1319,10 +1381,10 @@ func trajectoryOut(raw []byte) interface{} {
 			}
 		}
 	}
-	// C9 — plafond de steps envoyés au mobile : une très longue session
-	// (centaines de steps) ferait un JSON énorme et un rendu inutilisable sur
-	// téléphone. Le diff d'un tour précis reste accessible via get_turn_diff.
-	// numTotalSteps reste fidèle — le mobile sait qu'il n'a qu'une fenêtre.
+	// C9 ÔÇö plafond de steps envoy├®s au mobile : une tr├¿s longue session
+	// (centaines de steps) ferait un JSON ├®norme et un rendu inutilisable sur
+	// t├®l├®phone. Le diff d'un tour pr├®cis reste accessible via get_turn_diff.
+	// numTotalSteps reste fid├¿le ÔÇö le mobile sait qu'il n'a qu'une fen├¬tre.
 	if steps, _ := out["steps"].([]interface{}); len(steps) > maxTrajectorySteps {
 		out["steps"] = steps[len(steps)-maxTrajectorySteps:]
 		out["truncated"] = true
@@ -1332,7 +1394,7 @@ func trajectoryOut(raw []byte) interface{} {
 
 // stepSummary extrait d'un Step gemini_coder (trajectory_pb.ts ligne 302)
 // les champs stables : type, status, et un best-effort du texte visible
-// (description de l'action exécutée par l'agent).
+// (description de l'action ex├®cut├®e par l'agent).
 func stepSummary(blob []byte) map[string]interface{} {
 	s := map[string]interface{}{"type": 0, "status": 0}
 	for _, f := range connectrpc.DecodeFields(blob) {
@@ -1356,8 +1418,8 @@ func stepSummary(blob []byte) map[string]interface{} {
 	return s
 }
 
-// firstReadable cherche la première chaîne UTF-8 lisible (≤300 octets) dans
-// un blob de sous-message protobuf — best-effort, jamais fatal.
+// firstReadable cherche la premi├¿re cha├«ne UTF-8 lisible (Ôëñ300 octets) dans
+// un blob de sous-message protobuf ÔÇö best-effort, jamais fatal.
 func firstReadable(b []byte) string {
 	if s := strings.TrimSpace(string(b)); s != "" && connectrpc.IsPrintable(s) && len(s) < 300 {
 		return s
@@ -1373,8 +1435,8 @@ func firstReadable(b []byte) string {
 	return ""
 }
 
-// turnDiffOut convertit une réponse GetTurnDiffResponse brute en JSON stable
-// pour le mobile. Schéma vérifié (language_server_pb.ts ligne 7883) :
+// turnDiffOut convertit une r├®ponse GetTurnDiffResponse brute en JSON stable
+// pour le mobile. Sch├®ma v├®rifi├® (language_server_pb.ts ligne 7883) :
 //
 //	GetTurnDiffResponse {
 //	  1: repeated FileDiffsEntry {1: key(path), 2: FileDiffData}
@@ -1489,18 +1551,18 @@ func fileDiffData(blob []byte) map[string]interface{} {
 	return d
 }
 
-// uuidRe : les cascadeId sont des UUID v4 (36 chars, hex + tirets) émis par
+// uuidRe : les cascadeId sont des UUID v4 (36 chars, hex + tirets) ├®mis par
 // le language server. Validation stricte = pas de traversal via "../".
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// saveUploadedImage décode une image base64 et la sauvegarde dans le dossier scratch de la cascade.
+// saveUploadedImage d├®code une image base64 et la sauvegarde dans le dossier scratch de la cascade.
 func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, error) {
 	if cascadeID == "" {
 		return "", "", fmt.Errorf("cascadeId requis")
 	}
-	// Frontière de confiance : cascadeID vient du mobile (send_prompt/upload_media).
-	// Un UUID v4 strict ne peut contenir ni ".." ni "/" ni "\" — un seul test
-	// regex suffit à bloquer tout path traversal.
+	// Fronti├¿re de confiance : cascadeID vient du mobile (send_prompt/upload_media).
+	// Un UUID v4 strict ne peut contenir ni ".." ni "/" ni "\" ÔÇö un seul test
+	// regex suffit ├á bloquer tout path traversal.
 	if !uuidRe.MatchString(cascadeID) {
 		return "", "", fmt.Errorf("cascadeId invalide: %q", cascadeID)
 	}
@@ -1514,7 +1576,7 @@ func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, 
 
 	rawBytes, err := base64.StdEncoding.DecodeString(base64Data)
 	if err != nil {
-		return "", "", fmt.Errorf("erreur de décodage base64: %w", err)
+		return "", "", fmt.Errorf("erreur de d├®codage base64: %w", err)
 	}
 
 	if len(rawBytes) > 15<<20 {
@@ -1528,7 +1590,7 @@ func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, 
 
 	scratchDir := filepath.Join(home, ".gemini", "antigravity", "brain", cascadeID, "scratch")
 	if err := os.MkdirAll(scratchDir, 0755); err != nil {
-		return "", "", fmt.Errorf("erreur de création du dossier scratch: %w", err)
+		return "", "", fmt.Errorf("erreur de cr├®ation du dossier scratch: %w", err)
 	}
 
 	ext := ".png"
@@ -1546,7 +1608,7 @@ func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, 
 	targetPath := filepath.Join(scratchDir, safeName)
 
 	if err := os.WriteFile(targetPath, rawBytes, 0644); err != nil {
-		return "", "", fmt.Errorf("erreur d'écriture du fichier image: %w", err)
+		return "", "", fmt.Errorf("erreur d'├®criture du fichier image: %w", err)
 	}
 
 	absPath := filepath.ToSlash(targetPath)
@@ -1554,7 +1616,7 @@ func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, 
 	return targetPath, markdownRef, nil
 }
 
-// toOutgoing convertit une réponse protobuf brute en JSON lisible (hex + champs).
+// toOutgoing convertit une r├®ponse protobuf brute en JSON lisible (hex + champs).
 func toOutgoing(raw []byte) interface{} {
 	fields := connectrpc.DecodeFields(raw)
 	if len(fields) == 0 {
@@ -1567,7 +1629,7 @@ func toOutgoing(raw []byte) interface{} {
 			item["value"] = f.Varint
 		} else {
 			item["bytes"] = len(f.Bytes)
-			// tente une lecture UTF-8 lisible (cascadeId, workspace, texte…)
+			// tente une lecture UTF-8 lisible (cascadeId, workspace, texteÔÇª)
 			s := strings.TrimSpace(string(f.Bytes))
 			if s != "" && connectrpc.IsPrintable(s) && len(s) < 300 {
 				item["text"] = s
@@ -1619,43 +1681,47 @@ func sessionsOut(raw []byte) interface{} {
 }
 
 func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	// Vérification de l'authentification si AuthToken ou tokenValidator est défini.
-	// ConstantTimeCompare : évite le timing attack (token comparé en temps
-	// constant) — le comportement "token optionnel" reste inchangé.
+	// V├®rification de l'authentification si AuthToken ou tokenValidator est d├®fini.
+	// ConstantTimeCompare : ├®vite le timing attack (token compar├® en temps
+	// constant) ÔÇö le comportement "token optionnel" reste inchang├®.
 	s.mu.Lock()
 	validator := s.tokenValidator
 	s.mu.Unlock()
 
-	clientToken := r.URL.Query().Get("token")
-	if clientToken == "" {
-		clientToken = r.URL.Query().Get("auth_token")
-	}
-	if clientToken == "" {
-		clientToken = r.Header.Get("Authorization")
-		clientToken = strings.TrimPrefix(clientToken, "Bearer ")
-	}
+	var sessInfo discovery.SessionInfo
+	var hasSession bool
 
-	authValid := false
-	sessInfo, hasSession := discovery.SessionInfo{}, false
-	if s.AuthToken != "" && subtle.ConstantTimeCompare([]byte(clientToken), []byte(s.AuthToken)) == 1 {
-		authValid = true
-	} else if validator != nil && validator(clientToken) {
-		authValid = true
-	}
-	// Variante enrichie : si le validateur session est branché (main.go), on
-	// récupère deviceId + allowedProjects pour le filtrage par projet (3.3).
-	if s.sessionValidator != nil {
-		if si, ok := s.sessionValidator(clientToken); ok {
-			authValid = true
-			sessInfo = si
-			hasSession = true
+	if s.AuthToken != "" || validator != nil || s.sessionValidator != nil {
+		clientToken := r.URL.Query().Get("token")
+		if clientToken == "" {
+			clientToken = r.URL.Query().Get("auth_token")
 		}
-	}
+		if clientToken == "" {
+			clientToken = r.Header.Get("Authorization")
+			clientToken = strings.TrimPrefix(clientToken, "Bearer ")
+		}
 
-	if !authValid {
-		logJSON.Warn("auth_rejected", "remote", r.RemoteAddr)
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+		authValid := false
+		if s.AuthToken != "" && subtle.ConstantTimeCompare([]byte(clientToken), []byte(s.AuthToken)) == 1 {
+			authValid = true
+		} else if validator != nil && validator(clientToken) {
+			authValid = true
+		}
+		// Variante enrichie : si le validateur session est branch├® (main.go), on
+		// r├®cup├¿re deviceId + allowedProjects pour le filtrage par projet (3.3).
+		if s.sessionValidator != nil {
+			if si, ok := s.sessionValidator(clientToken); ok {
+				authValid = true
+				sessInfo = si
+				hasSession = true
+			}
+		}
+
+		if !authValid {
+			logJSON.Warn("auth_rejected", "remote", r.RemoteAddr)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
 	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -1663,7 +1729,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		logJSON.Error("upgrade_error", "err", err)
 		return
 	}
-	// Scope projet de cette connexion : stocké AVANT la boucle de lecture.
+	// Scope projet de cette connexion : stock├® AVANT la boucle de lecture.
 	if hasSession {
 		s.mu.Lock()
 		s.clientSessions[conn] = sessInfo
@@ -1685,7 +1751,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		clients := len(s.clients)
 		s.mu.Unlock()
 		s.releaseWriteLock(conn)
-		// Nettoyage terminal : si ce client est le dernier à partir, on ferme
+		// Nettoyage terminal : si ce client est le dernier ├á partir, on ferme
 		// les sessions PTY qu'il avait ouvertes.
 		s.terminals.killAll()
 		logJSON.Info("client_disconnected", "remote", conn.RemoteAddr().String(), "clients", clients)
@@ -1696,13 +1762,13 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.clients[conn] = true
 	s.clientInFlight[conn] = 0
 	s.mu.Unlock()
-	// Le mutex d'écriture de cette connexion existe avant la première réponse.
+	// Le mutex d'├®criture de cette connexion existe avant la premi├¿re r├®ponse.
 	s.writeLock(conn)
 
 	logJSON.Info("client_connected", "remote", conn.RemoteAddr().String())
 
-	// Goroutine de ping : si le pair est mort, l'écriture échoue et la
-	// prochaine lecture échoue aussi → le client est purgé du broadcast.
+	// Goroutine de ping : si le pair est mort, l'├®criture ├®choue et la
+	// prochaine lecture ├®choue aussi ÔåÆ le client est purg├® du broadcast.
 	go func() {
 		ticker := time.NewTicker(pingInterval)
 		defer ticker.Stop()
@@ -1733,11 +1799,11 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			s.writeJSON(conn, OutgoingMessage{Type: "error", Error: "Invalid JSON format"})
 			continue
 		}
-		// send_prompt est long (streaming jusqu'à 120 s) : il tourne en
-		// goroutine pour ne PAS bloquer la boucle de lecture — sinon un hub
-		// lent gèlerait heartbeat, submit_approval et les autres messages
-		// de la même connexion (C3). Les réponses portent leur requestId,
-		// donc le client les corrèle sans ordre garanti.
+		// send_prompt est long (streaming jusqu'├á 120 s) : il tourne en
+		// goroutine pour ne PAS bloquer la boucle de lecture ÔÇö sinon un hub
+		// lent g├¿lerait heartbeat, submit_approval et les autres messages
+		// de la m├¬me connexion (C3). Les r├®ponses portent leur requestId,
+		// donc le client les corr├¿le sans ordre garanti.
 		if msg.Type == "send_prompt" {
 			go s.handleAction(conn, msg)
 			continue
@@ -1756,9 +1822,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 	var err error
 
 	// Garde anti-blocage (C3) : tout handler unary RPC (list_sessions,
-	// get_context, …) est borné par une deadline courte. Un hub lent ne doit
-	// JAMAIS laisser une réponse unary indéfiniment en attente — sinon le
-	// mobile (timeout 10 s) considère le daemon mort et boucle reconnexion.
+	// get_context, ÔÇª) est born├® par une deadline courte. Un hub lent ne doit
+	// JAMAIS laisser une r├®ponse unary ind├®finiment en attente ÔÇö sinon le
+	// mobile (timeout 10 s) consid├¿re le daemon mort et boucle reconnexion.
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if msg.Type != "send_prompt" && msg.Type != "cancel_generation" &&
@@ -1775,14 +1841,14 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		go func() {
 			select {
 			case <-time.After(15 * time.Second):
-				// ponytail: time.After au lieu de ctx.Done() — si le handler
-				// répond vite, close(c) puis cancel() s'exécutent presque en
-				// même temps et le select verrait DEUX canaux prêts (choix
-				// arbitraire → 'rpc timeout' parasite sur un handler sain).
-				// time.After n'est prêt qu'après 15s réelles : aucun race.
-				// Le double-select garde le cas où le handler termine pendant
-				// l'expiration (deadline et close(c) simultanés) : handler
-				// fini (c fermé) → on supprime l'erreur parasite.
+				// ponytail: time.After au lieu de ctx.Done() ÔÇö si le handler
+				// r├®pond vite, close(c) puis cancel() s'ex├®cutent presque en
+				// m├¬me temps et le select verrait DEUX canaux pr├¬ts (choix
+				// arbitraire ÔåÆ 'rpc timeout' parasite sur un handler sain).
+				// time.After n'est pr├¬t qu'apr├¿s 15s r├®elles : aucun race.
+				// Le double-select garde le cas o├╣ le handler termine pendant
+				// l'expiration (deadline et close(c) simultan├®s) : handler
+				// fini (c ferm├®) ÔåÆ on supprime l'erreur parasite.
 				select {
 				case <-c:
 					return
@@ -1797,9 +1863,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 
 	switch msg.Type {
 	// Keep-alive applicatif : le mobile envoie {"type":"ping"} toutes les
-	// 20 s quand il est en arrière-plan. Même sans réponse, toute frame
-	// reçue reset le read deadline (pongWait) — le ping seul suffit à
-	// garder la connexion ouverte côté serveur. On répond quand même
+	// 20 s quand il est en arri├¿re-plan. M├¬me sans r├®ponse, toute frame
+	// re├ºue reset le read deadline (pongWait) ÔÇö le ping seul suffit ├á
+	// garder la connexion ouverte c├┤t├® serveur. On r├®pond quand m├¬me
 	// pour que le client puisse mesurer la latence (round-trip).
 	case "ping":
 		s.writeJSON(conn, OutgoingMessage{Type: "pong", RequestID: msg.RequestID, Data: map[string]interface{}{"ts": time.Now().UnixMilli()}})
@@ -1812,21 +1878,21 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		if uri == "" {
 			err = fmt.Errorf("workspaceUri requis")
 		} else {
-			// projectID : résolu depuis le cache list_sessions quand dispo (coût
-			// nul) — JAMAIS via un GetAllCascades synchrone ici (~9,5 s) sinon le
+			// projectID : r├®solu depuis le cache list_sessions quand dispo (co├╗t
+			// nul) ÔÇö JAMAIS via un GetAllCascades synchrone ici (~9,5 s) sinon le
 			// create part avec 10 s de retard et le mobile (deadline 10 s) timeoute
-			// → boucle connect/disconnect. Sans cache, cascade "orpheline" : le LS
-			// crée la cascade sur le workspace URI (comportement déjà existant).
+			// ÔåÆ boucle connect/disconnect. Sans cache, cascade "orpheline" : le LS
+			// cr├®e la cascade sur le workspace URI (comportement d├®j├á existant).
 			projectID, _ := s.cachedProjectID(uri)
 
 			if projectID != "" {
 				logJSON.Info("cascade_created", "projectId", projectID)
 			} else {
-				// Workspace inconnu du hub → on le déclare explicitement via
+				// Workspace inconnu du hub ÔåÆ on le d├®clare explicitement via
 				// AddTrackedWorkspace avant StartCascade (technique Deck,
-				// detector.js ensureWorkspaceTracked). The LS crée l'instance
-				// virtuelle du workspace : plus de cascade « orpheline » qui
-				// renvoyait un payload vide, ni de retry 9,5 s à cache chaud.
+				// detector.js ensureWorkspaceTracked). The LS cr├®e l'instance
+				// virtuelle du workspace : plus de cascade ┬½ orpheline ┬╗ qui
+				// renvoyait un payload vide, ni de retry 9,5 s ├á cache chaud.
 				plain := strings.TrimPrefix(uri, "file:///")
 				plain = strings.ReplaceAll(plain, `\`, "/")
 				if _, errTrack := s.RPCClient.TrackWorkspace(plain); errTrack != nil {
@@ -1837,19 +1903,19 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				logJSON.Info("cascade_created_orphan")
 			}
 
-			// Le modèle vient du mobile (ModelUID) ; en l'absence de sélection
+			// Le mod├¿le vient du mobile (ModelUID) ; en l'absence de s├®lection
 			// explicite on garde le repli commun (DefaultModelEnum, cf.
-			// protobuf.go — même valeur que plan_model de BuildCascadeConfig).
+			// protobuf.go ÔÇö m├¬me valeur que plan_model de BuildCascadeConfig).
 			modelEnum := msg.ModelEnum
 			if modelEnum == 0 && msg.ModelUID == "" {
 				modelEnum = connectrpc.DefaultModelEnum
 			}
 			raw, err = s.RPCClient.CreateCascade(uri, projectID, msg.ModelUID, modelEnum)
-			// Orphelin sans projectID → réponse LS vide (payload 0 octet) :
-			// le mobile ne peut rien créer avec ça. On rechauffe le cache
+			// Orphelin sans projectID ÔåÆ r├®ponse LS vide (payload 0 octet) :
+			// le mobile ne peut rien cr├®er avec ├ºa. On rechauffe le cache
 			// list_sessions UNE fois (single-flight, 15 s max) puis on
-			// retente avec le projectID résolu. Si le cache ne contient
-			// pas encore le workspace, on renvoie la réponse vide brute.
+			// retente avec le projectID r├®solu. Si le cache ne contient
+			// pas encore le workspace, on renvoie la r├®ponse vide brute.
 			if len(raw) == 0 {
 				logJSON.Info("create_cascade_retry_warm_cache")
 				s.fetchSessionsSingleFlight()
@@ -1876,33 +1942,26 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"id": id}})
-		return
-
-	case "terminal_write":
-		if errWrite := s.terminals.write(msg.TerminalID, msg.Input); errWrite != nil {
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errWrite.Error()})
-			return
-		}
-		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"ok": true}})
-		return
-
-	case "terminal_kill":
-		if errKill := s.terminals.kill(msg.TerminalID); errKill != nil {
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errKill.Error()})
-			return
-		}
-		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"ok": true}})
-		return
+	return
 
 	case "list_sessions":
-		// C4 : borne l'appel au LS (60 s max côté hub, on n'attend pas plus de
-		// 15 s ici) — sinon un hub lent laisse la réponse unary arriver trop
-		// tard : le mobile a déjà timeouté (10 s) et s'est déconnecté → boucle
-		// connect/disconnect. Timeout local + réponse d'erreur explicite.
+		// C4 : borne l'appel au LS (60 s max c├┤t├® hub, on n'attend pas plus de
+		// 15 s ici) ÔÇö sinon un hub lent laisse la r├®ponse unary arriver trop
+		// tard : le mobile a d├®j├á timeout├® (10 s) et s'est d├®connect├® ÔåÆ boucle
+		// connect/disconnect. Timeout local + r├®ponse d'erreur explicite.
 		// Cache single-flight : les reconnexions en rafale du mobile partagent
 		// un SEUL appel GetAllCascades (~9,5 s) au lieu de le multiplier.
+		// Scope projet (3.3) : un device pair├® avec allowedProjects ne voit que
+		// ses projets autoris├®s (sessions + projets list├®s).
+		writeScoped := func(data interface{}) {
+			m, _ := data.(map[string]interface{})
+			if m != nil {
+				m = s.filterByScope(conn, m)
+			}
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: m})
+		}
 		if raw, ok := s.cachedSessions(); ok {
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: sessionsOut(raw)})
+			writeScoped(sessionsOut(raw))
 			return
 		}
 		raw = s.fetchSessionsSingleFlight()
@@ -1911,14 +1970,14 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 		if len(raw) > 0 {
-			// sessionsOut applique le filtre Antigravity 2.0 (archivées,
+			// sessionsOut applique le filtre Antigravity 2.0 (archiv├®es,
 			// killed, subagents) + fallback sessions locales si vide.
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: sessionsOut(raw)})
+			writeScoped(sessionsOut(raw))
 			return
 		}
 		local := ListLocalSessions()
 		projects := ListOfficialProjects()
-		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"projects": projects, "sessions": local}})
+		writeScoped(map[string]interface{}{"projects": projects, "sessions": local})
 		return
 
 	case "get_session_history":
@@ -1945,9 +2004,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			"missedEvents":     missed,
 			"currentStepIndex": currentSeq,
 		}
-		// Offline buffering (3.2) : les send_prompt non confirmés de cette
-		// cascade sont joints au catch-up — le mobile ré-affiche les messages
-		// que le hub a peut-être reçus (dédupliqués par requestId au re-send).
+		// Offline buffering (3.2) : les send_prompt non confirm├®s de cette
+		// cascade sont joints au catch-up ÔÇö le mobile r├®-affiche les messages
+		// que le hub a peut-├¬tre re├ºus (d├®dupliqu├®s par requestId au re-send).
 		if pending := s.outbox.Pending(msg.CascadeID); len(pending) > 0 {
 			data["pendingMessages"] = pending
 		}
@@ -1980,28 +2039,28 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		logJSON.Info("question_response", "cascadeId", msg.CascadeID, "answer", responseText)
 
 		if p, ok := s.approvalFor(msg.CascadeID); ok && !p.expired {
-			// Fraîche : annule le timer AVANT l'envoi (pas de course entre
-			// réponse et auto-refus), même contrat que submit_approval.
+			// Fra├«che : annule le timer AVANT l'envoi (pas de course entre
+			// r├®ponse et auto-refus), m├¬me contrat que submit_approval.
 			s.clearApproval(msg.CascadeID)
 			oneofField, oneofPayload := buildApprovalPayload("ask_question", true, responseText, "", "")
 			raw, err = s.RPCClient.SubmitToolApproval(msg.CascadeID, msg.TrajectoryID, uint32(msg.StepIndex), oneofField, oneofPayload)
-			// Réponse unary au client demandeur (même contrat que
-			// submit_approval) — sinon le fallthrough écrirait un dump protobuf
-			// vide, et une écriture sans lecture préalable créerait une course
-			// avec le stream_end diffusé en parallèle.
+			// R├®ponse unary au client demandeur (m├¬me contrat que
+			// submit_approval) ÔÇö sinon le fallthrough ├®crirait un dump protobuf
+			// vide, et une ├®criture sans lecture pr├®alable cr├®erait une course
+			// avec le stream_end diffus├® en parall├¿le.
 			if err == nil {
 				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "submitted"}})
 			}
 			return
 		} else if ok {
-			// Garde de fraîcheur : l'approbation ask_question a expiré (auto-
-			// refus parti). Une réponse tardive serait un « oui » après
-			// expiration → refuser sans contact RPC.
+			// Garde de fra├«cheur : l'approbation ask_question a expir├® (auto-
+			// refus parti). Une r├®ponse tardive serait un ┬½ oui ┬╗ apr├¿s
+			// expiration ÔåÆ refuser sans contact RPC.
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "approval expired (auto-denied)"})
 			return
 		}
-		// Réponse libre : fire-and-forget vers le LS (le flux arrive par
-		// SendMessageStream) — le mobile n'attend pas de réponse unary ici,
+		// R├®ponse libre : fire-and-forget vers le LS (le flux arrive par
+		// SendMessageStream) ÔÇö le mobile n'attend pas de r├®ponse unary ici,
 		// c'est le prochain stream_delta qui fait foi.
 		go func() {
 			_ = s.RPCClient.SendMessageStream(msg.CascadeID, responseText, func([]byte) error { return nil })
@@ -2024,24 +2083,30 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
 			return
 		}
-		// C1 — idempotence : un requestId déjà traité ne rejoue PAS le tour
-		// (retransmission après coupure Wi-Fi). Réponse dédupliquée.
+		// Scope projet (3.3) : un device pair├® avec allowedProjects ne peut
+		// envoyer de prompt que sur ses projets autoris├®s.
+		if !s.allowProject(conn, uri) {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "projet non autoris├® pour cet appareil"})
+			return
+		}
+		// C1 ÔÇö idempotence : un requestId d├®j├á trait├® ne rejoue PAS le tour
+		// (retransmission apr├¿s coupure Wi-Fi). R├®ponse d├®dupliqu├®e.
 		s.mu.Lock()
 		if s.sentRequestIDs[msg.RequestID] {
 			s.mu.Unlock()
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"deduplicated": true}})
 			return
 		}
-		// C3 — plafond de streams simultanés PAR CLIENT (anti-saturation hub).
-		// Vérifié AVANT le marquage idempotent : un requestId refusé ici doit
-		// pouvoir être retransmis une fois un slot libéré.
+		// C3 ÔÇö plafond de streams simultan├®s PAR CLIENT (anti-saturation hub).
+		// V├®rifi├® AVANT le marquage idempotent : un requestId refus├® ici doit
+		// pouvoir ├¬tre retransmis une fois un slot lib├®r├®.
 		if s.clientInFlight[conn] >= maxConcurrentStreams {
 			s.mu.Unlock()
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "trop de streams simultanés (max " + itoa(maxConcurrentStreams) + ")"})
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "trop de streams simultan├®s (max " + itoa(maxConcurrentStreams) + ")"})
 			return
 		}
 		s.sentRequestIDs[msg.RequestID] = true
-		// C1 — borne mémoire : la map d'idempotence ne doit pas grossir sans
+		// C1 ÔÇö borne m├®moire : la map d'idempotence ne doit pas grossir sans
 		// limite (un mobile qui spamme des requestId uniques). Purge FIFO simple.
 		if len(s.sentRequestIDs) > 10000 {
 			oldest := ""
@@ -2072,16 +2137,16 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.mu.Unlock()
 		}()
 		startData := map[string]interface{}{"cascadeId": msg.CascadeID}
-		// P1 : le mobile notifie « Tâche démarrée » quand personne n'est actif
-		// sur le PC (idle detection) — même champ que stream_delta/stream_end.
+		// P1 : le mobile notifie ┬½ T├óche d├®marr├®e ┬╗ quand personne n'est actif
+		// sur le PC (idle detection) ÔÇö m├¬me champ que stream_delta/stream_end.
 		startData["hostActive"] = hostActiveSince(hostActiveWindow)
 		s.broadcast(OutgoingMessage{Type: "stream_start", RequestID: msg.RequestID, Data: startData})
 		logJSON.Info("stream_start", "requestId", msg.RequestID, "cascadeId", msg.CascadeID)
 
-		// 1. Force l'IDE à afficher la conversation avant de lancer le prompt
-		// (best-effort : le LS 2.5+ répond 200 sans frame de données pour
-		// SetBrowserOpenConversation — l'échec est attendu et n'affecte pas
-		// le stream ; le mobile re-synchronise la session lui-même).
+		// 1. Force l'IDE ├á afficher la conversation avant de lancer le prompt
+		// (best-effort : le LS 2.5+ r├®pond 200 sans frame de donn├®es pour
+		// SetBrowserOpenConversation ÔÇö l'├®chec est attendu et n'affecte pas
+		// le stream ; le mobile re-synchronise la session lui-m├¬me).
 		if _, errSet := s.RPCClient.SetBrowserOpenConversation(msg.CascadeID); errSet != nil {
 			logJSON.Debug("open_conversation_failed", "cascadeId", msg.CascadeID, "err", errSet)
 		}
@@ -2098,10 +2163,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 		}
 
-		// Offline buffering (3.2) : le prompt part vers le hub → on le persiste
-		// tant qu'il n'est pas confirmé (stream_end reçu). En cas de coupure
+		// Offline buffering (3.2) : le prompt part vers le hub ÔåÆ on le persiste
+		// tant qu'il n'est pas confirm├® (stream_end re├ºu). En cas de coupure
 		// avant stream_end, le mobile le retrouvera via sync_session.pendingMessages
-		// et décidera de le retransmettre (dédupliqué par requestId).
+		// et d├®cidera de le retransmettre (d├®dupliqu├® par requestId).
 		if errOut := s.outbox.Append(msg.CascadeID, msg.RequestID, promptText); errOut != nil {
 			logJSON.Warn("outbox_append_failed", "cascadeId", msg.CascadeID, "err", errOut.Error())
 		}
@@ -2115,13 +2180,13 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 			frameIndex++
 			events := connectrpc.ParseFrameEvents(frame, msg.CascadeID)
-			// Étape 4/6 : si la frame porte une demande d'approbation, la cascade
-			// est considérée « en attente » — le stream_end le reflètera, et le
-			// timer d'auto-refus est armé (approvalTimeout).
+			// ├ëtape 4/6 : si la frame porte une demande d'approbation, la cascade
+			// est consid├®r├®e ┬½ en attente ┬╗ ÔÇö le stream_end le refl├¿tera, et le
+			// timer d'auto-refus est arm├® (approvalTimeout).
 			for _, ev := range events {
 				if ev.Kind == connectrpc.EventKindApprovalRequired {
 					// B3 : auto-approbation si l'utilisateur a choisi
-					// « toujours autoriser ce type pour la session ».
+					// ┬½ toujours autoriser ce type pour la session ┬╗.
 					if s.hasSessionApproval(msg.CascadeID, ev.Tool) {
 						oneofField, oneofPayload := buildApprovalPayload(ev.Tool, true, extractCommand(ev.Detail), "", "")
 						if _, errSubmit := s.RPCClient.SubmitToolApproval(
@@ -2132,8 +2197,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 						}
 					} else if s.autoAccept() && isReadOnlyTool(ev.Tool) {
 						// Auto-accept read-only : les lectures/recherches passent
-						// sans confirmation (toggle des réglages mobile). Les
-						// écritures et commandes ne sont jamais auto-approuvées.
+						// sans confirmation (toggle des r├®glages mobile). Les
+						// ├®critures et commandes ne sont jamais auto-approuv├®es.
 						oneofField, oneofPayload := buildApprovalPayload(ev.Tool, true, extractCommand(ev.Detail), "", "")
 						if _, errSubmit := s.RPCClient.SubmitToolApproval(
 							msg.CascadeID, ev.TrajectoryID, ev.StepIndex,
@@ -2146,21 +2211,21 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 					}
 				}
 			}
-			// B2 : push dédié approval_pending (avec contexte) en plus du
-			// stream_delta — le mobile s'en sert au tap-notification pour
-			// ré-ouvrir l'approbation même si le delta a été perdu.
+			// B2 : push d├®di├® approval_pending (avec contexte) en plus du
+			// stream_delta ÔÇö le mobile s'en sert au tap-notification pour
+			// r├®-ouvrir l'approbation m├¬me si le delta a ├®t├® perdu.
 			if len(events) > 0 {
 				for _, ev := range events {
 					// Pas de push si l'auto-approbation (session ou read-only) a
-					// déjà répondu — le mobile ne doit pas afficher une carte
-					// pour une action déjà traitée.
+					// d├®j├á r├®pondu ÔÇö le mobile ne doit pas afficher une carte
+					// pour une action d├®j├á trait├®e.
 					if ev.Kind == connectrpc.EventKindApprovalRequired &&
 						!s.hasSessionApproval(msg.CascadeID, ev.Tool) &&
 						!(s.autoAccept() && isReadOnlyTool(ev.Tool)) {
 						pending := s.pendingApprovalInfo(msg.CascadeID)
-						// C7-B : idle detection hôte — si l'utilisateur est actif sur
-						// le PC, le mobile ne sonne pas (la boîte de dialogue
-						// d'approbation est déjà sous ses yeux).
+						// C7-B : idle detection h├┤te ÔÇö si l'utilisateur est actif sur
+						// le PC, le mobile ne sonne pas (la bo├«te de dialogue
+						// d'approbation est d├®j├á sous ses yeux).
 						pending["hostActive"] = hostActiveSince(hostActiveWindow)
 						s.broadcast(OutgoingMessage{
 							Type: "approval_pending",
@@ -2174,8 +2239,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				"events":     events,
 				"raw":        toOutgoing(frame),
 				// C7-B : hostActive=true quand l'utilisateur interagit avec le
-				// PC hôte → le mobile supprime ses notifications d'approbation
-				// (le dialogue d'approbation est visible sur l'écran du PC).
+				// PC h├┤te ÔåÆ le mobile supprime ses notifications d'approbation
+				// (le dialogue d'approbation est visible sur l'├®cran du PC).
 				"hostActive": hostActiveSince(hostActiveWindow),
 			}
 			deltaMsg := OutgoingMessage{
@@ -2189,9 +2254,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return nil
 		}
 
-		// Mode sans-outils : le prompt porte son propre flag (décision par
-		// prompt) sinon le défaut global des réglages mobile (toggle).
-		// planner_mode 3 = NO_TOOL : pas de boucle d'outils, réponse directe.
+		// Mode sans-outils : le prompt porte son propre flag (d├®cision par
+		// prompt) sinon le d├®faut global des r├®glages mobile (toggle).
+		// planner_mode 3 = NO_TOOL : pas de boucle d'outils, r├®ponse directe.
 		noTools := msg.NoTools || s.noTools()
 		err = s.RPCClient.SendMessageStreamModel(msg.CascadeID, promptText, msg.ModelUID, msg.ModelEnum, onFrameHandler, noTools)
 
@@ -2201,6 +2266,30 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 
 		if ctx.Err() != nil {
+			// stream_end(cancelled) garanti : CancelGeneration supprime la
+			// cascade de activeCancels AVANT de diffuser — si elle y est
+			// encore, aucun stream_end(cancelled) n'est parti (la goroutine
+			// sort sur ctx.Err() sans broadcast, l'ancien chemin). On le
+			// diffuse ici, sinon le mobile resterait sur « en cours ».
+			s.mu.Lock()
+			_, stillActive := s.activeCancels[msg.CascadeID]
+			if stillActive {
+				delete(s.activeCancels, msg.CascadeID)
+				delete(s.activeRequestIDs, msg.CascadeID)
+			}
+			s.mu.Unlock()
+			if stillActive {
+				endData := map[string]interface{}{"cascadeId": msg.CascadeID}
+				endData["hostActive"] = hostActiveSince(hostActiveWindow)
+				endData["outcome"] = "cancelled"
+				endData["message"] = "Generation stopped by user"
+				s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, Data: endData})
+				// Même confirmation outbox que CancelGeneration : le prompt
+				// annulé ne doit pas être re-proposé par sync_session.
+				if errOut := s.outbox.Confirm(msg.CascadeID, msg.RequestID); errOut != nil {
+					logJSON.Warn("outbox_confirm_failed", "cascadeId", msg.CascadeID, "err", errOut.Error())
+				}
+			}
 			return
 		}
 
@@ -2228,8 +2317,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, Data: endData})
 		}
 		logJSON.Info("stream_end", "requestId", msg.RequestID, "cascadeId", msg.CascadeID, "outcome", endData["outcome"])
-		// stream_end broadcasté → le mobile a tout reçu : le prompt est confirmé,
-		// on le retire de l'outbox (best-effort — un échec d'écriture n'est pas
+		// stream_end broadcast├® ÔåÆ le mobile a tout re├ºu : le prompt est confirm├®,
+		// on le retire de l'outbox (best-effort ÔÇö un ├®chec d'├®criture n'est pas
 		// fatal, le prochain sync_session le re-proposera).
 		if errOut := s.outbox.Confirm(msg.CascadeID, msg.RequestID); errOut != nil {
 			logJSON.Warn("outbox_confirm_failed", "cascadeId", msg.CascadeID, "err", errOut.Error())
@@ -2245,14 +2334,14 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		if strings.EqualFold(msg.Decision, "deny") {
 			confirm = false
 		}
-		// Garde de fraîcheur : si le daemon connaît l'approbation locale et
-		// qu'elle est déjà expirée (timer parti, auto-refus envoyé), un submit
-		// tardif — même confirm=true — serait un « oui » après expiration : la
-		// carte mobile affiche déjà « expirée » en lecture seule. Refuser sans
-		// contact RPC évite d'exécuter une commande que l'utilisateur n'a pas
-		// validée à temps. Ponytail: compare le callId quand le mobile le fournit.
+		// Garde de fra├«cheur : si le daemon conna├«t l'approbation locale et
+		// qu'elle est d├®j├á expir├®e (timer parti, auto-refus envoy├®), un submit
+		// tardif ÔÇö m├¬me confirm=true ÔÇö serait un ┬½ oui ┬╗ apr├¿s expiration : la
+		// carte mobile affiche d├®j├á ┬½ expir├®e ┬╗ en lecture seule. Refuser sans
+		// contact RPC ├®vite d'ex├®cuter une commande que l'utilisateur n'a pas
+		// valid├®e ├á temps. Ponytail: compare le callId quand le mobile le fournit.
 		if p, ok := s.approvalFor(msg.CascadeID); ok && !p.expired {
-			// Fraîche : annule le timer AVANT l'envoi (pas de course entre
+			// Fra├«che : annule le timer AVANT l'envoi (pas de course entre
 			// submit et auto-refus).
 			s.clearApproval(msg.CascadeID)
 		} else if ok {
@@ -2260,7 +2349,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 
-		// B3 : « pour toute la session » → le daemon ne redemandera plus pour
+		// B3 : ┬½ pour toute la session ┬╗ ÔåÆ le daemon ne redemandera plus pour
 		// ce type d'approbation sur cette cascade.
 		if msg.Scope == "session" && confirm {
 			s.markSessionApproval(msg.CascadeID, msg.ApprovalType)
@@ -2271,8 +2360,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 
 	case "get_pending_approval":
 		// B2 : un client qui revient (tap sur la notification locale) demande
-		// le contexte de l'approbation en attente — même si son stream_delta
-		// d'origine a été perdu (app tuée). Réponse unary, null si aucune.
+		// le contexte de l'approbation en attente ÔÇö m├¬me si son stream_delta
+		// d'origine a ├®t├® perdu (app tu├®e). R├®ponse unary, null si aucune.
 		s.writeJSON(conn, OutgoingMessage{
 			Type:      "response",
 			RequestID: msg.RequestID,
@@ -2317,7 +2406,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 		if msg.WorkspacePath != "" {
-			// Confinement : le fichier doit être sous la racine workspace.
+			// Confinement : le fichier doit ├¬tre sous la racine workspace.
 			abs, errRes := resolvePath(homeRoot(msg.WorkspacePath), msg.FilePath)
 			if errRes != nil {
 				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errRes.Error()})
@@ -2345,7 +2434,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 		}
 		if len(cascadeIDs) == 0 {
-			// Cache froid (pas de list_sessions rÃ©cent) : on le rÃ©chauffe UNE
+			// Cache froid (pas de list_sessions r├â┬®cent) : on le r├â┬®chauffe UNE
 			// fois via le single-flight au lieu de retomber sur les sessions
 			// locales (qui comptent 0 artefact pour une vraie session LS).
 			s.fetchSessionsSingleFlight()
@@ -2467,8 +2556,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		if err == nil {
 			models, ok := connectrpc.ParseModels(raw)
 			if !ok {
-				// Dégradation gracieuse : schéma inconnu → liste vide + warning.
-				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"models": []interface{}{}, "warning": "schéma GetAvailableModels non décodable"}})
+				// D├®gradation gracieuse : sch├®ma inconnu ÔåÆ liste vide + warning.
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"models": []interface{}{}, "warning": "sch├®ma GetAvailableModels non d├®codable"}})
 				return
 			}
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"models": models}})
@@ -2480,7 +2569,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
 			return
 		}
-		// Destructif et irréversible : confirmation explicite obligatoire.
+		// Destructif et irr├®versible : confirmation explicite obligatoire.
 		if !msg.Confirm {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "confirmation requise (champ confirm=true)"})
 			return
@@ -2491,7 +2580,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.purgeCascadeState(msg.CascadeID)
 			// Purge la cascade de la carte Jetbox (si chaude) et invalide le
 			// cache cold-path pour que list_sessions ne renvoie plus la session
-			// supprimée avant le prochain tick Jetbox.
+			// supprim├®e avant le prochain tick Jetbox.
 			s.mu.Lock()
 			if s.jetboxSummaries != nil {
 				delete(s.jetboxSummaries, msg.CascadeID)
@@ -2499,8 +2588,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.sessionsCache = nil
 			s.mu.Unlock()
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "deleted"}})
-			// Broadcast : toutes les surfaces (autres téléphones, même téléphone
-			// après reconnexion) rafraîchissent immédiatement — sans attendre le
+			// Broadcast : toutes les surfaces (autres t├®l├®phones, m├¬me t├®l├®phone
+			// apr├¿s reconnexion) rafra├«chissent imm├®diatement ÔÇö sans attendre le
 			// prochain tick Jetbox ni la fin du TTL cache (5 s).
 			s.broadcast(OutgoingMessage{
 				Type: "sessions_updated",
@@ -2516,11 +2605,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 		content, errDec := base64.StdEncoding.DecodeString(msg.Content)
 		if errDec != nil {
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "content doit être base64: " + errDec.Error()})
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "content doit ├¬tre base64: " + errDec.Error()})
 			return
 		}
-		// Confinement : comme read_file, le fichier doit être sous la racine
-		// workspace — un chemin "../" venu du mobile ne doit pas écrire ailleurs.
+		// Confinement : comme read_file, le fichier doit ├¬tre sous la racine
+		// workspace ÔÇö un chemin "../" venu du mobile ne doit pas ├®crire ailleurs.
 		if msg.WorkspacePath != "" {
 			abs, errRes := resolvePath(homeRoot(msg.WorkspacePath), msg.FilePath)
 			if errRes != nil {
@@ -2592,8 +2681,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 		}
 
-		// NextRunAt initialisé dès la création : le mobile l'affiche sans
-		// attendre la première exécution cron.
+		// NextRunAt initialis├® d├¿s la cr├®ation : le mobile l'affiche sans
+		// attendre la premi├¿re ex├®cution cron.
 		task := &ScheduledTask{
 			ID:             taskID,
 			Name:           name,
@@ -2721,8 +2810,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "scheduled task inconnue: " + taskId})
 			return
 		}
-		// Exécution immédiate en arrière-plan (même chemin que le tick cron) :
-		// le broadcast scheduled_task_event fera vivre le suivi côté mobile.
+		// Ex├®cution imm├®diate en arri├¿re-plan (m├¬me chemin que le tick cron) :
+		// le broadcast scheduled_task_event fera vivre le suivi c├┤t├® mobile.
 		go s.runScheduledTask(taskId)
 		s.writeJSON(conn, OutgoingMessage{
 			Type:      "response",
@@ -2780,7 +2869,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{
 				Type:      "response",
 				RequestID: msg.RequestID,
-				Error:     "minutes (nombre ≥ 0) requis",
+				Error:     "minutes (nombre ÔëÑ 0) requis",
 			})
 			return
 		}
@@ -2812,10 +2901,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		return
 
 	case "set_no_tools":
-		// Mode global « répondre sans outils » (planner_mode 3 = NO_TOOL) :
-		// défaut appliqué aux send_prompt sans flag explicite. Le flag par
-		// prompt (msg.NoTools) reste prioritaire — un prompt isolé peut
-		// demander les outils même si le défaut global est sans-outils.
+		// Mode global ┬½ r├®pondre sans outils ┬╗ (planner_mode 3 = NO_TOOL) :
+		// d├®faut appliqu├® aux send_prompt sans flag explicite. Le flag par
+		// prompt (msg.NoTools) reste prioritaire ÔÇö un prompt isol├® peut
+		// demander les outils m├¬me si le d├®faut global est sans-outils.
 		enabled := false
 		if msg.Data != nil {
 			if b, ok := msg.Data["enabled"].(bool); ok {
@@ -2833,9 +2922,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		return
 
 	case "get_trajectory":
-		// C9 — historique structuré d'une session : le mobile demande le
-		// détail d'une cascade (turns, steps) via le RPC officiel
-		// GetCascadeTrajectory. Réponse unary — le JSON structuré est fourni
+		// C9 ÔÇö historique structur├® d'une session : le mobile demande le
+		// d├®tail d'une cascade (turns, steps) via le RPC officiel
+		// GetCascadeTrajectory. R├®ponse unary ÔÇö le JSON structur├® est fourni
 		// par trajectoryOut (pas le dump binaire).
 		if msg.CascadeID == "" {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
@@ -2854,9 +2943,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 
 	case "get_turn_diff":
-		// C9 — diff officiel d'un tour : {conversationId, stepIndex} → diff
-		// des fichiers modifiés par ce tour (GetTurnDiff). stepIndex absent
-		// ou négatif → le LS résout le dernier tour.
+		// C9 ÔÇö diff officiel d'un tour : {conversationId, stepIndex} ÔåÆ diff
+		// des fichiers modifi├®s par ce tour (GetTurnDiff). stepIndex absent
+		// ou n├®gatif ÔåÆ le LS r├®sout le dernier tour.
 		conversationID := msg.CascadeID
 		if msg.Data != nil {
 			if cid, ok := msg.Data["conversationId"].(string); ok && cid != "" {
@@ -2867,7 +2956,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "conversationId requis"})
 			return
 		}
-		stepIndex := int64(-1) // absent → le LS résout le dernier tour
+		stepIndex := int64(-1) // absent ÔåÆ le LS r├®sout le dernier tour
 		if msg.StepIndex != 0 {
 			stepIndex = msg.StepIndex
 		}
@@ -2948,8 +3037,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: data})
 				return
 			}
-			// Schéma LS inconnu (aucune clé reconnue) : on renvoie la forme
-			// brute pour ne jamais casser le débogage.
+			// Sch├®ma LS inconnu (aucune cl├® reconnue) : on renvoie la forme
+			// brute pour ne jamais casser le d├®bogage.
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
 			return
 		}
@@ -2986,7 +3075,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				s.writeJSON(conn, OutgoingMessage{
 					Type:      "response",
 					RequestID: msg.RequestID,
-					Error:     "Aucune modification indexée (staged). Exécutez 'git add' d'abord.",
+					Error:     "Aucune modification index├®e (staged). Ex├®cutez 'git add' d'abord.",
 				})
 				return
 			}
@@ -3107,8 +3196,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 	case "call_mcp_tool", "connect_mcp_server", "refresh_mcp_oauth_token", "list_mcp_servers":
 		// Route les actions MCP vers le proxy Antigravity desktop
 		// (127.0.0.1:50999). Le mobile n'a pas les identifiants MCP :
-		// la session du PC est le seul détenteur des jetons OAuth et de
-		// l'allowlist stricte. Réponse unary relayée telle quelle.
+		// la session du PC est le seul d├®tenteur des jetons OAuth et de
+		// l'allowlist stricte. R├®ponse unary relay├®e telle quelle.
 		s.handleMcpAction(conn, msg)
 		return
 
@@ -3121,15 +3210,15 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
 		return
 	}
-	// Réponse unary au client DEMANDEUR uniquement : un broadcast polluerait
+	// R├®ponse unary au client DEMANDEUR uniquement : un broadcast polluerait
 	// les autres surfaces (elles n'ont pas ce requestId) et casserait la
-	// corrélation des tests.
+	// corr├®lation des tests.
 	s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
 }
 
-// homeRoot : résout un chemin relatif (ex: .gemini/antigravity-ide/brain/...)
-// contre le home de l'utilisateur — le CWD du daemon n'est pas fiable (il peut
-// être lancé depuis n'importe où). Les chemins absolus passent inchangés.
+// homeRoot : r├®sout un chemin relatif (ex: .gemini/antigravity-ide/brain/...)
+// contre le home de l'utilisateur ÔÇö le CWD du daemon n'est pas fiable (il peut
+// ├¬tre lanc├® depuis n'importe o├╣). Les chemins absolus passent inchang├®s.
 func homeRoot(root string) string {
 	if root == "" || filepath.IsAbs(root) {
 		return root
@@ -3140,15 +3229,15 @@ func homeRoot(root string) string {
 	return root
 }
 
-// resolvePath confine un chemin demandé sous une racine : rejette les
-// traversées (..), les chemins absolus hors racine et les variantes
+// resolvePath confine un chemin demand├® sous une racine : rejette les
+// travers├®es (..), les chemins absolus hors racine et les variantes
 // casse/volumes qui sortiraient de root.
 func resolvePath(root, requested string) (string, error) {
 	rootAbs, err := filepath.Abs(root)
 	if err != nil {
 		return "", err
 	}
-	// Le chemin demandé peut être relatif au workspace, ou absolu mais
+	// Le chemin demand├® peut ├¬tre relatif au workspace, ou absolu mais
 	// sous la racine (le mobile envoie des fullPath issus du tree).
 	requested = filepath.Clean(requested)
 	var candidate string
@@ -3169,7 +3258,7 @@ func resolvePath(root, requested string) (string, error) {
 	return candidate, nil
 }
 
-// maxTreeDepth borne la récursion de buildFileTree (anti-boucle symlink).
+// maxTreeDepth borne la r├®cursion de buildFileTree (anti-boucle symlink).
 const maxTreeDepth = 8
 
 func buildFileTree(root, relativePath string, depth int) ([]map[string]interface{}, error) {
@@ -3196,8 +3285,8 @@ func buildFileTree(root, relativePath string, depth int) ([]map[string]interface
 			continue
 		}
 
-		// Anti-symlink : un lien vers un répertoire parent créerait une
-		// récursion infinie (depth n'est pas borné par le contenu réel).
+		// Anti-symlink : un lien vers un r├®pertoire parent cr├®erait une
+		// r├®cursion infinie (depth n'est pas born├® par le contenu r├®el).
 		info, errInfo := os.Lstat(fullPath + string(filepath.Separator) + name)
 		if errInfo != nil {
 			continue
@@ -3224,8 +3313,8 @@ func buildFileTree(root, relativePath string, depth int) ([]map[string]interface
 }
 
 // searchInWorkspace cherche query dans les noms et le contenu des fichiers du
-// workspace (mêmes exclusions que buildFileTree, anti-symlink), borné par
-// maxResults et une taille de fichier raisonnable (2 Mo) — le grep mobile ne
+// workspace (m├¬mes exclusions que buildFileTree, anti-symlink), born├® par
+// maxResults et une taille de fichier raisonnable (2 Mo) ÔÇö le grep mobile ne
 // doit jamais charger un binaire dans la RAM.
 func searchInWorkspace(root, query string, maxResults int) ([]map[string]interface{}, error) {
 	results := make([]map[string]interface{}, 0, maxResults)
@@ -3289,7 +3378,7 @@ func searchInWorkspace(root, query string, maxResults int) ([]map[string]interfa
 }
 
 // isIgnoredDir reproduit les exclusions de buildFileTree (dossiers de build /
-// dépendances jamais indexés par la recherche).
+// d├®pendances jamais index├®s par la recherche).
 func isIgnoredDir(name string) bool {
 	return name == ".git" || name == "node_modules" || name == "build" || name == "dist" || name == ".dart_tool"
 }
@@ -3297,12 +3386,12 @@ func isIgnoredDir(name string) bool {
 // ---------------------------------------------------------------------------
 // Terminal PTY (P3)
 //
-// Le mobile pilote un vrai shell interactif sur le PC hôte. Implémentation
+// Le mobile pilote un vrai shell interactif sur le PC h├┤te. Impl├®mentation
 // volontairement stdlib-only : exec.Cmd avec stdin/stdout/stderr pipe, un
-// scanner de sortie par session et un nettoyage à la déconnexion.
+// scanner de sortie par session et un nettoyage ├á la d├®connexion.
 //
-// ponytail: pas de vrai PTY (creack/pty) — sur Windows un PTY natif exigerait
-// une dépendance CGO (conpty). Ce pipe-based shell couvre l'usage mobile
+// ponytail: pas de vrai PTY (creack/pty) ÔÇö sur Windows un PTY natif exigerait
+// une d├®pendance CGO (conpty). Ce pipe-based shell couvre l'usage mobile
 // (cd, git, npm, ls) ; plafond connu : pas de TUIO/tty raw, pas de resize.
 // Upgrade path : brancher creack/pty sur les builds non-Windows.
 // ---------------------------------------------------------------------------
@@ -3318,15 +3407,15 @@ type terminalSession struct {
 	closing bool
 }
 
-// terminalPtyManager possède toutes les sessions terminal du daemon.
-// La clé id est un identifiant opaque renvoyé au mobile.
+// terminalPtyManager poss├¿de toutes les sessions terminal du daemon.
+// La cl├® id est un identifiant opaque renvoy├® au mobile.
 type terminalPtyManager struct {
 	mu        sync.Mutex
 	sessions  map[string]*terminalSession
 	nextID    int
 	shellPath string
 	// onBroadcast : hook vers le Server (s.broadcast) pour diffuser la
-	// sortie terminal à tous les clients connectés.
+	// sortie terminal ├á tous les clients connect├®s.
 	onBroadcast func(OutgoingMessage)
 }
 
@@ -3410,7 +3499,7 @@ func (m *terminalPtyManager) pump(sess *terminalSession, r io.Reader, kind strin
 	}
 }
 
-// broadcastOutput émet terminal_output {id, data, kind} à tous les clients.
+// broadcastOutput ├®met terminal_output {id, data, kind} ├á tous les clients.
 func (m *terminalPtyManager) broadcastOutput(sess *terminalSession, data []byte, kind string) {
 	// Le broadcast se fait via le Server ; on expose un hook.
 	if m.onBroadcast != nil {
@@ -3438,7 +3527,7 @@ func (m *terminalPtyManager) broadcastExit(sess *terminalSession) {
 	}
 }
 
-// write injecte l'entrée clavier dans la session.
+// write injecte l'entr├®e clavier dans la session.
 func (m *terminalPtyManager) write(id, input string) error {
 	m.mu.Lock()
 	sess := m.sessions[id]
@@ -3450,7 +3539,7 @@ func (m *terminalPtyManager) write(id, input string) error {
 	closed := sess.closed
 	sess.mu.Unlock()
 	if closed {
-		return fmt.Errorf("terminal %q fermé", id)
+		return fmt.Errorf("terminal %q ferm├®", id)
 	}
 	_, err := io.WriteString(sess.stdin, input)
 	return err
@@ -3480,7 +3569,7 @@ func (m *terminalPtyManager) kill(id string) error {
 	return nil
 }
 
-// killAll ferme toutes les sessions (appelé à la déconnexion du client).
+// killAll ferme toutes les sessions (appel├® ├á la d├®connexion du client).
 func (m *terminalPtyManager) killAll() {
 	m.mu.Lock()
 	ids := make([]string, 0, len(m.sessions))

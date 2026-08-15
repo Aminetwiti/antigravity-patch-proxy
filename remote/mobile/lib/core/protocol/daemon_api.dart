@@ -807,6 +807,7 @@ class DaemonApi {
     final error = msg['error'] as String?;
 
     if (type == 'stream_start' || type == 'stream_delta') {
+      _outbox?.remove(requestId);
       final stepIdx = (msg['data'] is Map ? (msg['data'] as Map)['stepIndex'] : null) as num?;
       final cascadeId = (msg['data'] is Map ? (msg['data'] as Map)['cascadeId'] : null) as String? ?? msg['cascadeId'] as String?;
       if (stepIdx != null && cascadeId != null && cascadeId.isNotEmpty) {
@@ -821,7 +822,7 @@ class DaemonApi {
         return;
       }
       controller.add(msg);
-      _emitBatched({...msg, 'broadcast': true});
+      _emitBatched({...msg, 'broadcast': false});
       return;
     }
 
@@ -849,15 +850,11 @@ class DaemonApi {
         controller.add(msg);
         controller.close();
         _streams.remove(requestId);
+        _emitBatched({...msg, 'broadcast': false});
+      } else {
+        // Broadcasté pour fermer le statut « en cours » dans l'UI si stream externe.
+        _emitBatched({...msg, 'broadcast': true});
       }
-      // Toujours broadcasté — un stream_end sans controller local (session
-      // pilotée depuis une autre surface, ou stream déjà fermé) doit quand
-      // même fermer le statut « en cours » dans l'UI (A8).
-      _emitBatched(msg);
-      // État terminal : flush immédiat — le stream_end ne doit pas rester
-      // dans la fenêtre de batch de 100 ms ouverte par le dernier delta
-      // (l'UI resterait « en cours » et les listeners globaux verraient
-      // l'événement en retard). Documenté en tête de classe, jamais codé.
       _flushBatch();
       return;
     }

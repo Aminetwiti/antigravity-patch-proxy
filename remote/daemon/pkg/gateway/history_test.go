@@ -1,10 +1,13 @@
-package gateway
+﻿package gateway
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestParseWorkspaceFromTranscript(t *testing.T) {
@@ -55,16 +58,16 @@ func TestListLocalSessions(t *testing.T) {
 	}
 }
 
-// TestFindTranscriptPathGhostSession — régression : un dossier de session sans
+// TestFindTranscriptPathGhostSession ÔÇö r├®gression : un dossier de session sans
 // transcript (ghost) ne doit PAS renvoyer un chemin inexistant (l'ancien
-// return candidates[0] produisait un faux path → transcript_not_found dans
-// les logs et une erreur silencieuse). findTranscriptPath lit le home réel de
-// la machine, donc on vérifie l'invariant par un ID inexistant garanti : la
+// return candidates[0] produisait un faux path ÔåÆ transcript_not_found dans
+// les logs et une erreur silencieuse). findTranscriptPath lit le home r├®el de
+// la machine, donc on v├®rifie l'invariant par un ID inexistant garanti : la
 // fonction doit renvoyer "" et GetSessionHistory un historique vide propre.
 func TestFindTranscriptPathGhostSession(t *testing.T) {
 	ghostID := "ghost-session-" + time.Now().Format("150405.000000000")
 	if p := findTranscriptPath(ghostID); p != "" {
-		t.Fatalf("findTranscriptPath(%q) = %q, want empty pour une session fantôme", ghostID, p)
+		t.Fatalf("findTranscriptPath(%q) = %q, want empty pour une session fant├┤me", ghostID, p)
 	}
 	hist, err := GetSessionHistory(ghostID)
 	if err != nil {
@@ -75,8 +78,8 @@ func TestFindTranscriptPathGhostSession(t *testing.T) {
 	}
 }
 
-// TestFindTranscriptPathSkipsMissingCandidates — vérifie la logique de
-// candidats directement (sans dépendre du home réel) : aucune des variantes
+// TestFindTranscriptPathSkipsMissingCandidates ÔÇö v├®rifie la logique de
+// candidats directement (sans d├®pendre du home r├®el) : aucune des variantes
 // n'existant, la fonction d'aide locale doit renvoyer "".
 func TestFindTranscriptPathSkipsMissingCandidates(t *testing.T) {
 	candidates := []string{
@@ -91,14 +94,14 @@ func TestFindTranscriptPathSkipsMissingCandidates(t *testing.T) {
 		}
 	}
 	if got != "" {
-		t.Fatalf("aucun candidat n'existe mais un chemin a été retourné: %q", got)
+		t.Fatalf("aucun candidat n'existe mais un chemin a ├®t├® retourn├®: %q", got)
 	}
 }
 
-// TestParseTranscriptLine — régression du contenu vide : les PLANNER_RESPONSE
-// intermédiaires stockent la réponse dans `thinking` (pas `content`), les
-// enchaînements d'outils purs n'ont ni l'un ni l'autre, et les lignes
-// d'outils ne doivent jamais apparaître comme messages assistant.
+// TestParseTranscriptLine ÔÇö r├®gression du contenu vide : les PLANNER_RESPONSE
+// interm├®diaires stockent la r├®ponse dans `thinking` (pas `content`), les
+// encha├«nements d'outils purs n'ont ni l'un ni l'autre, et les lignes
+// d'outils ne doivent jamais appara├«tre comme messages assistant.
 func TestParseTranscriptLine(t *testing.T) {
 	line := func(l string) []byte { return []byte(l) }
 
@@ -118,9 +121,9 @@ func TestParseTranscriptLine(t *testing.T) {
 		},
 		{
 			name:     "final response with content",
-			line:     line(`{"step_index":137,"source":"MODEL","type":"PLANNER_RESPONSE","created_at":"2026-08-15T15:44:39+01:00","content":"Voici la réponse finale"}`),
+			line:     line(`{"step_index":137,"source":"MODEL","type":"PLANNER_RESPONSE","created_at":"2026-08-15T15:44:39+01:00","content":"Voici la r├®ponse finale"}`),
 			wantSend: "assistant",
-			wantText: "Voici la réponse finale",
+			wantText: "Voici la r├®ponse finale",
 		},
 		{
 			name:     "intermediate reasoning in thinking only",
@@ -130,10 +133,10 @@ func TestParseTranscriptLine(t *testing.T) {
 		},
 		{
 			name:     "content plus thinking",
-			line:     line(`{"step_index":201,"source":"MODEL","type":"PLANNER_RESPONSE","created_at":"2026-08-15T15:44:39+01:00","content":"Réponse","thinking":"réfléchi"}`),
+			line:     line(`{"step_index":201,"source":"MODEL","type":"PLANNER_RESPONSE","created_at":"2026-08-15T15:44:39+01:00","content":"R├®ponse","thinking":"r├®fl├®chi"}`),
 			wantSend: "assistant",
-			wantText: "Réponse",
-			wantTh:   "réfléchi",
+			wantText: "R├®ponse",
+			wantTh:   "r├®fl├®chi",
 		},
 		{
 			name:    "empty planner response skipped",
@@ -177,10 +180,105 @@ func TestParseTranscriptLine(t *testing.T) {
 	}
 }
 
+// TestReadSQLiteSteps ÔÇö v├®rifie la lecture de l'historique depuis la table
+// `steps` (source de v├®rit├® Antigravity 2.0). Construit une base temporaire
+// avec de VRAIS step_payload protobuf (layout valid├® sur 500+ conversations) :
+//   - type 14 (user)   : f19 { f3 { f1: texte } } et legacy f5 { f2: texte }
+//   - type 15 (assistant) : f20 { f1: texte, f3: raisonnement }
+//   - type 23 (titre)  : f30 { f4: titre }
+//   - metadata         : f1 { 1: secondes, 2: nanos }
+func TestReadSQLiteSteps(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "conversation.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(`CREATE TABLE steps (
+		idx INTEGER, step_type INTEGER, status INTEGER,
+		has_subtrajectory INTEGER, metadata BLOB, error_details BLOB,
+		permissions BLOB, task_details BLOB, render_info BLOB,
+		step_payload BLOB, step_format INTEGER)`); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	// metadata : f1 { 1: 1786813316 (secondes), 2: 787964600 (nanos) }
+	meta := []byte{0x0a, 0x0c, 0x08, 0x84, 0xe2, 0xe5, 0xb3, 0x06, 0x10, 0xb8, 0xdc, 0xee, 0xf7, 0x02}
+
+	// type 14 moderne : f19 { f3 { f1: "bonjour" } }
+	userModern := []byte{0x9a, 0x01, 0x0b, 0x1a, 0x09, 0x0a, 0x07, 0x62, 0x6f, 0x6e, 0x6a, 0x6f, 0x75, 0x72}
+	// type 14 legacy : f5 { f1 { f2: ts }, f2: "ancien texte" }
+	userLegacy := []byte{0x2a, 0x14, 0x0a, 0x0c, 0x08, 0x84, 0xe2, 0xe5, 0xb3, 0x06, 0x10, 0xb8, 0xdc, 0xee, 0xf7, 0x02, 0x12, 0x04, 0x68, 0x69, 0x21, 0x21}
+
+	// type 15 : f20 { f1: "r├®ponse", f3: "r├®fl├®chi" }
+	// f1 ÔåÆ 0x0a 0x08 "r├®ponse" (8 octets UTF-8) ; f3 ÔåÆ 0x1a 0x09 "r├®fl├®chi" (9 octets)
+	assistant := []byte{0xa2, 0x01, 0x17, 0x0a, 0x08, 0x72, 0xc3, 0xa9, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x1a, 0x09, 0x72, 0xc3, 0xa9, 0x66, 0x6c, 0xc3, 0xa9, 0x63, 0x68, 0x69}
+
+	// type 23 : f30 { f4: "Titre de session" }
+	title := []byte{0xf2, 0x01, 0x12, 0x22, 0x10, 0x54, 0x69, 0x74, 0x72, 0x65, 0x20, 0x64, 0x65, 0x20, 0x73, 0x65, 0x73, 0x73, 0x69, 0x6f, 0x6e}
+
+	rows := [][]interface{}{
+		{0, 14, 3, 0, meta, nil, nil, nil, nil, userModern, 0},
+		{1, 15, 3, 0, meta, nil, nil, nil, nil, assistant, 0},
+		{2, 23, 3, 0, meta, nil, nil, nil, nil, title, 0},
+		{3, 14, 3, 0, meta, nil, nil, nil, nil, userLegacy, 0},
+	}
+	for _, r := range rows {
+		if _, err := db.Exec("INSERT INTO steps VALUES (?,?,?,?,?,?,?,?,?,?,?)", r...); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+	}
+
+	messages, gotTitle, err := readSQLiteSteps(dbPath, "test-cascade")
+	if err != nil {
+		t.Fatalf("readSQLiteSteps: %v", err)
+	}
+	if len(messages) != 4 {
+		t.Fatalf("got %d messages, want 4: %+v", len(messages), messages)
+	}
+	if gotTitle != "Titre de session" {
+		t.Errorf("title = %q, want %q", gotTitle, "Titre de session")
+	}
+
+	want := []HistoryMessage{
+		{ID: "h-0", Sender: "user", Text: "bonjour", Timestamp: "00:00"},
+		{ID: "h-1", Sender: "assistant", Text: "r├®ponse", Thought: "r├®fl├®chi", Timestamp: "00:00"},
+		{ID: "h-3", Sender: "user", Text: "hi!!", Timestamp: "00:00"},
+	}
+	for i, w := range want {
+		m := messages[i]
+		if m.Sender != w.Sender || m.Text != w.Text || m.Thought != w.Thought || m.ID != w.ID {
+			t.Errorf("messages[%d] = %+v, want %+v", i, m, w)
+		}
+	}
+}
+
+// TestSQLiteEmptyDBFallback ÔÇö une base vide (aucune ├®tape exploitable) ne doit
+// pas casser GetSessionHistory : le fallback transcript.jsonl prend le relais.
+func TestSQLiteEmptyDBFallback(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "empty.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE steps (idx INTEGER, step_type INTEGER, status INTEGER, metadata BLOB, step_payload BLOB)`); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	db.Close()
+
+	msgs, title, err := readSQLiteSteps(dbPath, "empty")
+	if err != nil {
+		t.Fatalf("readSQLiteSteps: %v", err)
+	}
+	if len(msgs) != 0 || title != "" {
+		t.Fatalf("empty db: got %d msgs, title %q", len(msgs), title)
+	}
+}
+
 func TestExtractSubagentsEmpty(t *testing.T) {
 	subs := ExtractSubagents("non-existent-session-id")
 	if len(subs) != 0 {
 		t.Fatalf("expected empty slice for non-existent session, got %d", len(subs))
 	}
 }
-

@@ -1,4 +1,4 @@
-package main
+﻿package main
 
 import (
 	"context"
@@ -19,7 +19,7 @@ import (
 	"github.com/antigravity/remote-daemon/pkg/tunnel"
 )
 
-// maskToken affiche un préfixe du jeton sans paniquer sur les jetons courts.
+// maskToken affiche un pr├®fixe du jeton sans paniquer sur les jetons courts.
 func maskToken(token string) string {
 	if len(token) > 10 {
 		return token[:10]
@@ -41,17 +41,17 @@ func main() {
 	flag.IntVar(&approvalTimeoutMin, "approval-timeout", 5, "Auto-deny timeout for pending approvals in minutes (0 = disabled)")
 	flag.Parse()
 
-	fmt.Printf("🚀 Starting Antigravity Remote Daemon Bridge on %s:%d...\n", host, listenPort)
+	fmt.Printf("­ƒÜÇ Starting Antigravity Remote Daemon Bridge on %s:%d...\n", host, listenPort)
 	if authToken != "" {
-		fmt.Println("🔒 Authentication is ENABLED")
+		fmt.Println("­ƒöÆ Authentication is ENABLED")
 	}
 
 	info, err := discovery.Discover()
 	if err != nil {
-		log.Fatalf("❌ Failed to discover localharness process: %v", err)
+		log.Fatalf("ÔØî Failed to discover localharness process: %v", err)
 	}
 
-	fmt.Println("✅ LocalHarness Discovered:")
+	fmt.Println("Ô£à LocalHarness Discovered:")
 	fmt.Printf("   PID: %d\n", info.PID)
 	token := info.ExtensionCSRF
 	if token == "" {
@@ -64,44 +64,47 @@ func main() {
 	// Lancement du Watchdog CSRF
 	watchdog := discovery.NewWatchdog(rpcClient, 10*time.Second)
 	watchdog.Start()
-	fmt.Println("🛡️ Watchdog CSRF démarré (vérification toutes les 10s)")
+	fmt.Println("­ƒøí´©Å Watchdog CSRF d├®marr├® (v├®rification toutes les 10s)")
 
 	// Lancement asynchrone du Tunnel Distant (Cloudflare / Pinggy / Ngrok)
 	tunnelMgr := tunnel.NewManager(tunnelFlag)
 	go func() {
 		if url, err := tunnelMgr.StartAutoTunnel(listenPort); err == nil {
-			log.Printf("🌐 Tunnel public actif : %s", url)
+			log.Printf("­ƒîÉ Tunnel public actif : %s", url)
 		} else {
-			log.Printf("⚠️ Tunnel non démarré (accès local Wi-Fi disponible sur port %d) : %v", listenPort, err)
+			log.Printf("ÔÜá´©Å Tunnel non d├®marr├® (acc├¿s local Wi-Fi disponible sur port %d) : %v", listenPort, err)
 		}
 	}()
 
-	// Lancement du Beacon de Découverte Automatique LAN (Zero-Config UDP).
-	// Aucun jeton n'y est passé : le beacon ne diffuse JAMAIS le token sur le
-	// LAN (broadcast lisible par tout hôte) — pairing par QR ou saisie manuelle.
+	// Lancement du Beacon de D├®couverte Automatique LAN (Zero-Config UDP).
+	// Aucun jeton n'y est pass├® : le beacon ne diffuse JAMAIS le token sur le
+	// LAN (broadcast lisible par tout h├┤te) ÔÇö pairing par QR ou saisie manuelle.
 	beacon := discovery.NewLANBeacon(
 		listenPort,
 		func() string { return tunnelMgr.PublicURL },
 		gateway.GetUniqueWorkspaces,
 	)
 	if err := beacon.Start(); err == nil {
-		fmt.Printf("📡 Beacon LAN UDP actif sur le port %d (Zero-Config Auto-Discovery)\n", discovery.DiscoveryPort)
+		fmt.Printf("­ƒôí Beacon LAN UDP actif sur le port %d (Zero-Config Auto-Discovery)\n", discovery.DiscoveryPort)
 	}
 
-	// C4 : branche le logger structuré rotatif (AG_REMOTE_LOG_FILE) ou stdout
-	// (AG_REMOTE_LOG_LEVEL) — les logs du gateway partent en JSON exploitable.
+	// C4 : branche le logger structur├® rotatif (AG_REMOTE_LOG_FILE) ou stdout
+	// (AG_REMOTE_LOG_LEVEL) ÔÇö les logs du gateway partent en JSON exploitable.
 	gateway.SetLogJSON(gateway.NewLogger())
 
-	// P4 : Pairing PIN éphémère + anti-brute-force
+	// P4 : Pairing PIN ├®ph├®m├¿re + anti-brute-force
 	pairingMgr := discovery.NewPairingManager()
 	pin, _ := pairingMgr.CurrentPIN()
-	fmt.Printf("🔑 Code PIN d'appairage mobile : %s (valable 60s — saisissez ce code sur votre téléphone)\n", pin)
+	fmt.Printf("­ƒöæ Code PIN d'appairage mobile : %s (valable 60s ÔÇö saisissez ce code sur votre t├®l├®phone)\n", pin)
 
 	server := gateway.NewServer(rpcClient, authToken)
 	server.SetTokenValidator(pairingMgr.ValidateToken)
+	// Variante enrichie (3.3) : le gateway r├®cup├¿re deviceId + allowedProjects
+	// au handshake pour le filtrage par projet (send_prompt / list_sessions).
+	server.SetSessionValidator(pairingMgr.ValidateSession)
 	server.SetApprovalTimeout(time.Duration(approvalTimeoutMin) * time.Minute)
-	// Flux temps réel Jetbox : la sidebar mobile est alimentée par le stream
-	// JetboxSubscribeToSummaries (snapshot initial + updates incrémentaux) au
+	// Flux temps r├®el Jetbox : la sidebar mobile est aliment├®e par le stream
+	// JetboxSubscribeToSummaries (snapshot initial + updates incr├®mentaux) au
 	// lieu de GetAllCascades (~9,5 s). Reconnecte automatiquement en boucle.
 	server.RunJetboxSubscription(rpcClient)
 	sched := gateway.NewScheduler(server)
@@ -125,20 +128,20 @@ func main() {
 		fmt.Fprintf(w, `{"status":"%s","rpcPort":%d,"pid":%d,"heartbeatOk":%t,"tunnelProvider":"%s","publicUrl":"%s","error":"%s"}`, status, port, info.PID, hbErr == "", tunnelMgr.Provider, tunnelMgr.PublicURL, hbErr)
 	})
 
-	// Arrêt propre sur Ctrl+C / SIGTERM : ferme le tunnel (cloudflared/ssh) et le beacon.
+	// Arr├¬t propre sur Ctrl+C / SIGTERM : ferme le tunnel (cloudflared/ssh) et le beacon.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go func() {
 		<-ctx.Done()
-		log.Println("🛑 Arrêt du daemon, fermeture du tunnel…")
+		log.Println("­ƒøæ Arr├¬t du daemon, fermeture du tunnelÔÇª")
 		tunnelMgr.Stop()
 		beacon.Stop()
 		watchdog.Stop()
 		sched.Stop()
 	}()
 
-	fmt.Printf("🌐 Daemon listening on ws://%s:%d/ws\n", host, listenPort)
+	fmt.Printf("­ƒîÉ Daemon listening on ws://%s:%d/ws\n", host, listenPort)
 	if err := http.ListenAndServe(net.JoinHostPort(host, strconv.Itoa(listenPort)), nil); err != nil {
-		log.Fatalf("❌ Server error: %v", err)
+		log.Fatalf("ÔØî Server error: %v", err)
 	}
 }

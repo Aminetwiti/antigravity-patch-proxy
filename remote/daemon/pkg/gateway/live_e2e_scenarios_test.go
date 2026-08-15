@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -17,8 +18,14 @@ import (
 )
 
 // helper to setup a live daemon test server connected to the real Antigravity IDE.
+// Nécessite DAEMON_LIVE_E2E=1 : ces scénarios créent/suppriment de vraies
+// cascades sur le LS et ne doivent jamais s'exécuter dans un test de routine.
 func setupLiveServer(t *testing.T, authToken string) (*Server, *httptest.Server, *connectrpc.Client) {
 	t.Helper()
+	if os.Getenv("DAEMON_LIVE_E2E") != "1" {
+		t.Skip("Scénario live E2E désactivé (définir DAEMON_LIVE_E2E=1 pour exécuter)")
+		return nil, nil, nil
+	}
 	info, err := discovery.Discover()
 	if err != nil {
 		t.Skipf("Ignoré: Language Server Antigravity non détecté: %v", err)
