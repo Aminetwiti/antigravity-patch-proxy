@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/network/websocket_client.dart';
 import '../../core/notifications/approval_notifier.dart';
@@ -64,12 +65,23 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   // ponytail: Map simple, pas de provider — l'historique n'est pas persisté sur
   // disque (session restart repart de zéro, ce qui est le comportement voulu).
   final Map<String, List<ChatMessage>> _sessionMessages = {};
-  static final Map<String, String> _sessionDrafts = {};
-  String get currentDraft => _sessionDrafts[widget.activeSessionId] ?? '';
-  void setDraft(String draft) => _sessionDrafts[widget.activeSessionId] = draft;
 
   List<ChatMessage> get _messages {
     return _sessionMessages.putIfAbsent(widget.activeSessionId, () => []);
+  }
+
+  // P6 : brouillons persistés par session — SharedPreferences pour survivre
+  // au switch de session/onglet ET au redémarrage de l'app.
+  // ponytail: getter/setter synchrones sur cache mémoire + écriture fire-and-forget
+  // (même schéma que P4 pinning). Pas de debounce : chaque setDraft écrit ~2-3x
+  // par seconde au pire, SharedPreferences supporte très bien ce débit.
+  static const String _draftPrefsPrefix = 'session_draft_';
+  static final Map<String, String> _draftCache = {};
+  String get currentDraft => _draftCache[widget.activeSessionId] ?? '';
+  void setDraft(String draft) {
+    _draftCache[widget.activeSessionId] = draft;
+    SharedPreferences.getInstance().then((prefs) => prefs.setString(
+        '$_draftPrefsPrefix${widget.activeSessionId}', draft));
   }
 
   // File d'attente des approbations (audit UX P0-1) : une 2ᵉ demande ne doit
@@ -249,6 +261,16 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     _quotaTimer = Timer.periodic(const Duration(seconds: 60), (_) {
       if (mounted) _refreshQuotaSummary();
     });
+    _loadPersistedDraft();
+  }
+
+  /// P6 : recharge le brouillon persisté de la session courante dans le cache
+  /// mémoire (le widget ChatInputBar lit `currentDraft` à son initState).
+  Future<void> _loadPersistedDraft() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted || widget.activeSessionId.isEmpty) return;
+    _draftCache[widget.activeSessionId] =
+        prefs.getString('$_draftPrefsPrefix${widget.activeSessionId}') ?? '';
   }
 
   Future<void> _refreshQuotaSummary() async {
@@ -484,6 +506,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         _visibleCounts[widget.activeSessionId] = _pageSize;
       }
       _loadHistoryIfEmpty();
+      _loadPersistedDraft();
     }
     if (oldWidget.api != widget.api) {
       // Bug agent bloqué : réinitialiser le compteur de streams actifs à la
@@ -1347,6 +1370,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                         },
                         api: widget.api,
                         cascadeId: widget.activeSessionId,
+                        initialText: currentDraft,
+                        onDraftChanged: setDraft,
                       ),
                       const SizedBox(height: 48),
                     ],
@@ -1429,6 +1454,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           },
           api: widget.api,
           cascadeId: widget.activeSessionId,
+          initialText: currentDraft,
+          onDraftChanged: setDraft,
         ),
       ],
     );

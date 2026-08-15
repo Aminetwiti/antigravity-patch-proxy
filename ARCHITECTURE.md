@@ -90,6 +90,8 @@ IDE Chat UI ↔ Language Server (Hub :55256) ◄── gRPC-Web ── Daemon Go
    - **Protocol Translator**: Connects over gRPC-Web with manual Protobuf wire encoding to translate mobile WebSocket messages into `StartCascade`, `SendUserCascadeMessage`, `SubmitToolApproval`, `GetAvailableModels`, and file operations.
    - **Tunnel Bridge**: Seamlessly spins up Cloudflare Quick Tunnels (`cloudflared.exe`) and prints paired terminal QR codes for zero-config remote access.
    - **StepRecovery**: Retains in-memory ring buffers of trajectory events to replay lost messages after transient mobile network disconnections.
+   - **Quota Push (real-time)**: The `Scheduler` (30 s tick) calls `RetrieveUserQuotaSummary` (force_refresh) at most every 60 s — and only while ≥1 WebSocket client is connected — then parses the raw protobuf (`ParseQuotaSummary` scans for `gemini-weekly`/`gemini-5h`/`3p-weekly`/`3p-5h` + fixed32 marker `0x25`) and broadcasts `quota_update` with the 4 usage percentages. The mobile consumes the push instead of polling; its 60 s timer stays as a fallback for older daemons.
+   - **Binary Patch Auto-heal**: `repatch.bat` caches the patched `app.asar` (+ `.unpacked`) under `~/.gemini\antigravity\scratch\` and registers `register-auto-heal.ps1` (Startup VBS). `auto-heal.ps1` restores the cache when the `MODEL_PLACEHOLDER_` signature is missing (official update); `supervise-daemon.ps1` also checks mid-session, not only at boot.
 
 2. **Flutter Mobile Companion (`remote/mobile`)**:
    - **Antigravity 2.0 Design System**: Replicated design tokens directly from IDE computed stylesheets (`htmlcss.log`) — including `#101010` canvas, `#21252B` sidebars, `#528BFF` focus borders, `#D7BA7D` syntax highlights, and IDE-native diff editor coloration.

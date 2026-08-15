@@ -57,6 +57,12 @@ class ChatInputBar extends StatefulWidget {
   final ValueChanged<String>? onModelChanged;
   final VoidCallback? onStop;
 
+  /// P6 : texte initial (brouillon persisté) à charger dans le champ.
+  final String initialText;
+
+  /// P6 : notifie le parent de chaque frappe pour persister le brouillon.
+  final ValueChanged<String>? onDraftChanged;
+
   const ChatInputBar({
     super.key,
     required this.onSend,
@@ -66,6 +72,8 @@ class ChatInputBar extends StatefulWidget {
     this.cascadeId,
     this.onModelChanged,
     this.onStop,
+    this.initialText = '',
+    this.onDraftChanged,
   });
 
   @override
@@ -94,11 +102,20 @@ class _ChatInputBarState extends State<ChatInputBar> {
   // Permet de fermer mention/action à la frappe sans toucher au dropdown
   // modèle (ouvert au tap, pas au clavier).
   bool _mentionOrActionOpen = false;
+  bool _isSending = false;
 
   @override
   void initState() {
     super.initState();
+    if (widget.initialText.isNotEmpty) {
+      // P6 : restaure le brouillon persisté avant d'écouter les frappes.
+      _controller.text = widget.initialText;
+      _controller.selection = TextSelection.collapsed(
+        offset: _controller.text.length,
+      );
+    }
     _controller.addListener(_onTextChanged);
+    widget.onDraftChanged?.call(_controller.text);
     _loadModelsAndPreferences();
   }
 
@@ -141,6 +158,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   void _onTextChanged() {
+    // P6 : chaque frappe met à jour le brouillon persisté côté parent.
+    widget.onDraftChanged?.call(_controller.text);
     final text = _controller.text;
     final selection = _controller.selection;
     if (!selection.isValid || selection.isCollapsed == false) {
@@ -183,11 +202,13 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   void _handleSend() {
+    if (_isSending) return;
     final rawText = _controller.text;
     final text = _sanitizeInput(rawText);
     final hasContent = text.isNotEmpty || _attachedFileContent != null;
     if (!hasContent) return;
 
+    _isSending = true;
     HapticFeedback.lightImpact();
 
     // Normaliser les commandes barriques avec saut de ligne \n ou tabulation \t
@@ -216,12 +237,18 @@ class _ChatInputBarState extends State<ChatInputBar> {
       modelEnum: _selectedModelEnum,
     );
     _controller.clear();
+    // P6 : le message a été envoyé → purge le brouillon persisté.
+    widget.onDraftChanged?.call('');
     FocusScope.of(
       context,
     ).unfocus(); // Ferme le clavier sur mobile après l'envoi
     setState(() {
       _attachedFileName = null;
       _attachedFileContent = null;
+    });
+
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted) _isSending = false;
     });
   }
 

@@ -87,12 +87,25 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
   }
 
   void _saveChanges() {
+    final promptText = _promptController.text.trim();
+    if (promptText.isEmpty) {
+      HapticFeedback.heavyImpact();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Le prompt ne peut pas être vide'),
+          duration: Duration(seconds: 2),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+      return;
+    }
+
     HapticFeedback.selectionClick();
     setState(() => _isSaving = true);
 
     final updated = _task.copyWith(
       name: _nameController.text.trim(),
-      prompt: _promptController.text.trim(),
+      prompt: promptText,
       cronExpression: _computeCron(),
     );
 
@@ -111,6 +124,41 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
         backgroundColor: Color(0xFF1B1D22),
       ),
     );
+  }
+
+  Future<void> _confirmDelete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surfaceRaised,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          side: const BorderSide(color: AppColors.borderStrong),
+        ),
+        title: const Text(
+          'Supprimer la tâche planifiée ?',
+          style: TextStyle(fontSize: 16, color: AppColors.inkPrimary, fontWeight: FontWeight.w600),
+        ),
+        content: const Text(
+          'Cette action est irréversible et supprimera la planification récurrente.',
+          style: TextStyle(fontSize: 13, color: AppColors.inkSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Annuler', style: TextStyle(color: AppColors.inkMuted)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Supprimer', style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      widget.onDeleteTask?.call(_task.id);
+      Navigator.of(context).pop();
+    }
   }
 
   void _triggerExecution() {
@@ -148,24 +196,19 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
         backgroundColor: const Color(0xFF0F1012),
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: AppColors.inkPrimary),
+          icon: const Icon(Icons.arrow_back_rounded, size: 20, color: Color(0xFF8F909A)),
           onPressed: () => Navigator.of(context).pop(),
           tooltip: 'Retour',
         ),
         title: Text(
-          'Scheduled Tasks / ${_task.displayName}',
-          style: const TextStyle(
-            fontSize: 13.5,
-            color: Color(0xFF8F909A),
-            fontWeight: FontWeight.w400,
-          ),
-          overflow: TextOverflow.ellipsis,
+          _task.displayName,
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.inkPrimary),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.play_arrow_rounded, size: 22, color: AppColors.accentBlue),
-            tooltip: 'Trigger Now',
+            icon: const Icon(Icons.play_arrow_rounded, size: 22, color: Color(0xFF22C55E)),
             onPressed: _triggerExecution,
+            tooltip: 'Run Once',
           ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert_rounded, size: 20, color: Color(0xFF8F909A)),
@@ -178,8 +221,7 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
               if (val == 'restart') {
                 _triggerExecution();
               } else if (val == 'delete') {
-                widget.onDeleteTask?.call(_task.id);
-                Navigator.of(context).pop();
+                _confirmDelete();
               }
             },
             itemBuilder: (context) => [

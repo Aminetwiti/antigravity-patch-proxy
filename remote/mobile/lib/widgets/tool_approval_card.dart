@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/protocol/messages.dart';
+import 'app_toast.dart';
 
 class ToolApprovalCard extends StatefulWidget {
   final ToolApprovalRequest request;
@@ -76,7 +77,14 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
     // Bug #13 : timeout guard — débloque après 5 s si pas de réponse daemon.
     _submitTimeout?.cancel();
     _submitTimeout = Timer(const Duration(seconds: 5), () {
-      if (mounted) setState(() => _isSubmitting = false);
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+        AppToast.show(
+          context,
+          message: 'Le serveur n\'a pas répondu. Veuillez réessayer.',
+          type: ToastType.error,
+        );
+      }
     });
     try {
       await widget.onDecision(

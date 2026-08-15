@@ -205,6 +205,9 @@ type Server struct {
 	writeLocks map[*websocket.Conn]*sync.Mutex
 	// streamBuffer : tampon circulaire StepRecovery pour reprise sur déconnexion 4G/Wi-Fi
 	streamBuffer *SessionStreamBuffer
+	// outbox : persistance disque des send_prompt non confirmés (offline
+	// buffering 3.2) — le mobile les ré-affiche via sync_session.
+	outbox *DaemonOutbox
 	// activeCancels : cascadeId → fonction d'annulation active
 	activeCancels map[string]context.CancelFunc
 	// activeRequestIDs : cascadeId → requestId en cours
@@ -274,6 +277,7 @@ func NewServer(client RPCClient, authToken string) *Server {
 		clientInFlight:   make(map[*websocket.Conn]int),
 		writeLocks:       make(map[*websocket.Conn]*sync.Mutex),
 		streamBuffer:     NewSessionStreamBuffer(100),
+		outbox:           NewDaemonOutbox(),
 		activeCancels:    make(map[string]context.CancelFunc),
 		activeRequestIDs: make(map[string]string),
 		scheduledTasks:   make(map[string]*ScheduledTask),
@@ -617,8 +621,8 @@ func (s *Server) handleMcpAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"raw": string(respBody)}})
 		return
 	}
-	// list_mcp_servers : nettoyage l�ger du payload relay� — un serveur MCP
-	// configur� sans champ "name" n'a pas � exposer serverName:"" au mobile.
+	// list_mcp_servers : nettoyage lger du payload relay — un serveur MCP
+	// configur sans champ "name" n'a pas  exposer serverName:"" au mobile.
 	if msg.Type == "list_mcp_servers" {
 		if servers, ok := proxyResp["servers"].([]interface{}); ok {
 			cleaned := make([]interface{}, 0, len(servers))
@@ -1602,7 +1606,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			} else {
 				// Workspace inconnu du hub → on le déclare explicitement via
 				// AddTrackedWorkspace avant StartCascade (technique Deck,
-				// detector.js ensureWorkspaceTracked). Le LS crée l'instance
+				// detector.js ensureWorkspaceTracked). The LS crée l'instance
 				// virtuelle du workspace : plus de cascade « orpheline » qui
 				// renvoyait un payload vide, ni de retry 9,5 s à cache chaud.
 				plain := strings.TrimPrefix(uri, "file:///")
@@ -1718,14 +1722,21 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 		missed, currentSeq := s.streamBuffer.GetEventsSince(msg.CascadeID, msg.LastStepIndex)
+		data := map[string]interface{}{
+			"cascadeId":        msg.CascadeID,
+			"missedEvents":     missed,
+			"currentStepIndex": currentSeq,
+		}
+		// Offline buffering (3.2) : les send_prompt non confirmés de cette
+		// cascade sont joints au catch-up — le mobile ré-affiche les messages
+		// que le hub a peut-être reçus (dédupliqués par requestId au re-send).
+		if pending := s.outbox.Pending(msg.CascadeID); len(pending) > 0 {
+			data["pendingMessages"] = pending
+		}
 		s.writeJSON(conn, OutgoingMessage{
 			Type:      "sync_catchup",
 			RequestID: msg.RequestID,
-			Data: map[string]interface{}{
-				"cascadeId":        msg.CascadeID,
-				"missedEvents":     missed,
-				"currentStepIndex": currentSeq,
-			},
+			Data:      data,
 		})
 		return
 
@@ -1865,6 +1876,14 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 		}
 
+		// Offline buffering (3.2) : le prompt part vers le hub → on le persiste
+		// tant qu'il n'est pas confirmé (stream_end reçu). En cas de coupure
+		// avant stream_end, le mobile le retrouvera via sync_session.pendingMessages
+		// et décidera de le retransmettre (dédupliqué par requestId).
+		if errOut := s.outbox.Append(msg.CascadeID, msg.RequestID, promptText); errOut != nil {
+			logJSON.Warn("outbox_append_failed", "cascadeId", msg.CascadeID, "err", errOut.Error())
+		}
+
 		frameIndex := 0
 		onFrameHandler := func(frame []byte) error {
 			select {
@@ -1987,6 +2006,12 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, Data: endData})
 		}
 		logJSON.Info("stream_end", "requestId", msg.RequestID, "cascadeId", msg.CascadeID, "outcome", endData["outcome"])
+		// stream_end broadcasté → le mobile a tout reçu : le prompt est confirmé,
+		// on le retire de l'outbox (best-effort — un échec d'écriture n'est pas
+		// fatal, le prochain sync_session le re-proposera).
+		if errOut := s.outbox.Confirm(msg.CascadeID, msg.RequestID); errOut != nil {
+			logJSON.Warn("outbox_confirm_failed", "cascadeId", msg.CascadeID, "err", errOut.Error())
+		}
 		return
 
 	case "submit_approval":

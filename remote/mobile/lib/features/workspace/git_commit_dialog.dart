@@ -37,6 +37,7 @@ class GitCommitDialog extends StatefulWidget {
 class _GitCommitDialogState extends State<GitCommitDialog> {
   final TextEditingController _controller = TextEditingController();
   bool _isGenerating = false;
+  bool _isCommitting = false;
   String? _errorMessage;
 
   @override
@@ -78,8 +79,10 @@ class _GitCommitDialogState extends State<GitCommitDialog> {
   }
 
   void _submit() {
+    if (_isCommitting) return;
     final text = _controller.text.trim();
     if (text.isEmpty) return;
+    setState(() => _isCommitting = true);
     HapticFeedback.mediumImpact();
     widget.onCommitted?.call(text);
   }
@@ -113,68 +116,48 @@ class _GitCommitDialogState extends State<GitCommitDialog> {
           ),
         ],
       ),
-      content: SizedBox(
-        width: 420,
+      content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'Message de commit conventionnel :',
-              style: TextStyle(
-                fontSize: 12,
-                color: scheme.onSurfaceVariant,
-                fontWeight: FontWeight.w500,
-              ),
+              'Rédigez ou générez automatiquement un message de commit concis.',
+              style: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 14),
             TextField(
               controller: _controller,
               maxLines: 4,
               minLines: 2,
-              autofocus: true,
-              style: TextStyle(
-                fontSize: 13,
-                fontFamily: 'monospace',
-                color: scheme.onSurface,
-              ),
+              style: const TextStyle(fontSize: 13),
               decoration: InputDecoration(
-                hintText: 'feat: ajouter la nouvelle fonctionnalité...',
-                hintStyle: TextStyle(fontSize: 12, color: scheme.outline),
+                hintText: 'feat: message de commit...',
                 filled: true,
                 fillColor: scheme.surfaceContainerHighest,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide: BorderSide(color: scheme.outlineVariant),
                 ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: scheme.primary, width: 1.5),
-                ),
                 contentPadding: const EdgeInsets.all(12),
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             Row(
               children: [
                 OutlinedButton.icon(
-                  onPressed: _isGenerating ? null : _generateMessage,
+                  onPressed: _isGenerating || _isCommitting ? null : _generateMessage,
                   icon: _isGenerating
-                      ? SizedBox(
-                          width: 12,
-                          height: 12,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: scheme.primary,
-                          ),
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Icon(Icons.auto_awesome, size: 14),
-                  label: Text(
-                    _isGenerating ? 'Génération IA...' : 'Générer avec l\'IA',
-                    style: const TextStyle(fontSize: 12),
-                  ),
+                      : const Icon(Icons.auto_awesome_rounded, size: 16),
+                  label: Text(_isGenerating ? 'Génération...' : 'Générer avec l\'IA'),
                   style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    textStyle: const TextStyle(fontSize: 12),
                   ),
                 ),
               ],
@@ -207,17 +190,23 @@ class _GitCommitDialogState extends State<GitCommitDialog> {
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: _isCommitting ? null : () => Navigator.of(context).pop(),
           child: const Text('Annuler'),
         ),
         ElevatedButton(
-          onPressed: _submit,
+          onPressed: _isCommitting ? null : _submit,
           style: ElevatedButton.styleFrom(
             backgroundColor: scheme.primary,
             foregroundColor: scheme.onPrimary,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           ),
-          child: const Text('Valider le Commit'),
+          child: _isCommitting
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                )
+              : const Text('Valider le Commit'),
         ),
       ],
     );
