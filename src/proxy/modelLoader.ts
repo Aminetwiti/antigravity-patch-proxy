@@ -25,6 +25,7 @@ interface RawProviderEntry {
   useRawBaseUrl?: boolean;
   extraHeaders?: Record<string, string>;
   extraBody?: Record<string, unknown>;
+  fallbackModel?: string;
   models?: RawModelEntry[];
 }
 
@@ -35,6 +36,7 @@ interface RawModelEntry {
   enabled?: boolean;
   extraHeaders?: Record<string, string>;
   extraBody?: Record<string, unknown>;
+  fallbackModel?: string;
 }
 
 
@@ -168,6 +170,7 @@ function parseProvidersSchema(providers: RawProviderEntry[]): CustomModel[] {
         allowUnauthorized: p.allowUnauthorized,
         encrypted: p.encrypted,
         useRawBaseUrl: p.useRawBaseUrl,
+        fallbackModel: m.fallbackModel ?? p.fallbackModel,
         extraHeaders: Object.keys(mergedHeaders).length > 0 ? mergedHeaders : undefined,
         extraBody: Object.keys(mergedBody).length > 0 ? mergedBody : undefined,
       };

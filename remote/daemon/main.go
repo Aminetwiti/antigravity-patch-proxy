@@ -92,12 +92,19 @@ func main() {
 	// (AG_REMOTE_LOG_LEVEL) — les logs du gateway partent en JSON exploitable.
 	gateway.SetLogJSON(gateway.NewLogger())
 
+	// P4 : Pairing PIN éphémère + anti-brute-force
+	pairingMgr := discovery.NewPairingManager()
+	pin, _ := pairingMgr.CurrentPIN()
+	fmt.Printf("🔑 Code PIN d'appairage mobile : %s (valable 60s — saisissez ce code sur votre téléphone)\n", pin)
+
 	server := gateway.NewServer(rpcClient, authToken)
+	server.SetTokenValidator(pairingMgr.ValidateToken)
 	server.SetApprovalTimeout(time.Duration(approvalTimeoutMin) * time.Minute)
 	sched := gateway.NewScheduler(server)
 	sched.Start()
 
 	http.HandleFunc("/ws", server.HandleWebSocket)
+	http.HandleFunc("/pair", pairingMgr.HTTPHandler())
 	http.HandleFunc("/health", server.HTTPHandler)
 	http.HandleFunc("/health/diagnostic", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

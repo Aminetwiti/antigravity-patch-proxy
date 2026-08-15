@@ -21,6 +21,7 @@ import '../../widgets/background_tasks_bar.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/unified_diff_viewer.dart';
 import 'widgets/overview_panel_view.dart';
+import 'widgets/session_review_view.dart';
 import 'package:mobile/theme/app_colors.dart';
 
 class ChatStreamScreen extends StatefulWidget {
@@ -113,7 +114,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   // ── Session Top Tabs & Artifact state ──────────────────────────────
   SessionTabType _currentTab = SessionTabType.chat;
   final Set<String> _modifiedFiles = {};
+  final List<SessionModifiedFile> _modifiedFileList = [];
   final List<String> _artifacts = [];
+  String? _activeArtifact;
   String? _latestPlanText;
 
   // ── Side Question (/btw) & Background Tasks state ───────────────────
@@ -121,6 +124,14 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   String? _sideQuestionAnswer;
   bool _isSideQuestionLoading = false;
   final List<String> _runningBackgroundTasks = [];
+
+  // ── Sync & Catch-up status ─────────────────────────────────────────
+  bool _isSyncing = false;
+  Timer? _syncTimer;
+
+  // ── Quota temps réel (P8) ───────────────────────────────────────────
+  Map<String, dynamic>? _quotaSummary;
+  Timer? _quotaTimer;
 
   // ── État de connexion live (alimenté par wsClient) ─────────────────────
   ConnectionStatus _status = ConnectionStatus.disconnected;
@@ -197,6 +208,21 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           : ConnectionStatus.disconnected;
     }
     _loadHistoryIfEmpty();
+    _refreshQuotaSummary();
+    _quotaTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+      if (mounted) _refreshQuotaSummary();
+    });
+  }
+
+  Future<void> _refreshQuotaSummary() async {
+    final api = widget.api;
+    if (api == null || !widget.isConnected) return;
+    try {
+      final q = await api.getUserQuotaSummary();
+      if (mounted) {
+        setState(() => _quotaSummary = q);
+      }
+    } catch (_) {}
   }
 
   void _loadHistoryIfEmpty() {
@@ -441,6 +467,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     _streamSub?.cancel();
     _tapSub?.cancel();
     _stillWorkingTimer?.cancel();
+    _syncTimer?.cancel();
+    _quotaTimer?.cancel();
     _scrollController.dispose();
     final client = widget.wsClient;
     client?.statusNotifier.removeListener(_onConnectionStatusChanged);
@@ -531,6 +559,17 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       // l'index reste sur la demande en cours (la nouvelle se rejoint via ▶).
       if (wasEmpty) _approvalIndex = 0;
       _pendingApprovalCallIds.add(approval.callId);
+      final fp = approval.filePath;
+      if (fp != null && fp.isNotEmpty) {
+        _modifiedFiles.add(fp);
+        if (!_modifiedFileList.any((f) => f.path == fp)) {
+          _modifiedFileList.add(SessionModifiedFile(
+            path: fp,
+            additions: 1,
+            deletions: 0,
+          ));
+        }
+      }
     });
     if (!hostActive && !fromTap && ApprovalNotifier.instance.initialized) {
       ApprovalNotifier.instance.notifyApprovalRequired(
@@ -611,6 +650,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       // Bug tâches arrière-plan : si l'évènement concerne une autre session,
       // on le bufferise dans _sessionMessages[sessionId] au lieu de le jeter.
       // L'utilisateur verra les messages à jour quand il reviendra sur la session.
+      final targetSessionId = sessionId ?? widget.activeSessionId;
+      final thKey = '${targetSessionId}_$requestId';
       final isActiveSession = sessionId == null || sessionId == widget.activeSessionId;
       if (!isActiveSession) {
         // sessionId is non-null here (isActiveSession=false implies sessionId != null)
@@ -628,19 +669,19 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           if (idx >= 0) {
             final textDelta = StreamDeltaParser.textOf(msg);
             final thoughtDelta = StreamDeltaParser.thinkingOf(msg);
-            _externalThoughts[requestId] =
-                (_externalThoughts[requestId] ?? '') + thoughtDelta;
+            _externalThoughts[thKey] =
+                (_externalThoughts[thKey] ?? '') + thoughtDelta;
             buf[idx] = buf[idx].copyWith(
               text: buf[idx].text + textDelta,
-              thought: _externalThoughts[requestId]!.isNotEmpty
-                  ? _externalThoughts[requestId]!.trim()
+              thought: _externalThoughts[thKey]!.isNotEmpty
+                  ? _externalThoughts[thKey]!.trim()
                   : buf[idx].thought,
             );
           }
         } else if (type == 'stream_end') {
           final idx = buf.indexWhere((m) => m.id == 'ext-$requestId');
           if (idx >= 0) buf[idx] = buf[idx].copyWith(isStreaming: false);
-          _externalThoughts.remove(requestId);
+          _externalThoughts.remove(thKey);
         }
         return; // ne pas toucher l'état UI de la session active
       }
@@ -656,6 +697,39 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             isStreaming: true,
           ));
         });
+      } else if (type == 'sync_catchup') {
+        setState(() => _isSyncing = true);
+        _syncTimer?.cancel();
+        _syncTimer = Timer(const Duration(milliseconds: 1200), () {
+          if (mounted) setState(() => _isSyncing = false);
+        });
+        final data = msg['data'] as Map<String, dynamic>? ?? const {};
+        final missedEvents = data['missedEvents'] as List<dynamic>? ?? const [];
+        if (missedEvents.isNotEmpty) {
+          for (final rawEv in missedEvents) {
+            if (rawEv is Map) {
+              final evMap = rawEv.cast<String, dynamic>();
+              final reqId = evMap['requestId'] as String? ?? '';
+              final textDelta = StreamDeltaParser.textOf(evMap);
+              final thoughtDelta = StreamDeltaParser.thinkingOf(evMap);
+              final key = '${widget.activeSessionId}_$reqId';
+              final idx = _messages.indexWhere((m) =>
+                  m.id == 'ext-$reqId' ||
+                  (_messages.isNotEmpty && m == _messages.last && m.isStreaming));
+              if (idx >= 0) {
+                final current = _messages[idx];
+                _externalThoughts[key] = (_externalThoughts[key] ?? '') + thoughtDelta;
+                _messages[idx] = current.copyWith(
+                  text: current.text + textDelta,
+                  thought: _externalThoughts[key]!.isNotEmpty
+                      ? _externalThoughts[key]!.trim()
+                      : current.thought,
+                );
+              }
+            }
+          }
+          _scheduleThrottledUpdate();
+        }
       } else if (type == 'stream_delta') {
         final textDelta = StreamDeltaParser.textOf(msg);
         final thoughtDelta = StreamDeltaParser.thinkingOf(msg);
@@ -664,12 +738,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         final idx = _messages.indexWhere((m) => m.id == 'ext-$requestId');
         if (idx >= 0) {
           final current = _messages[idx];
-          _externalThoughts[requestId] =
-              (_externalThoughts[requestId] ?? '') + thoughtDelta;
+          _externalThoughts[thKey] =
+              (_externalThoughts[thKey] ?? '') + thoughtDelta;
           _messages[idx] = current.copyWith(
             text: current.text + textDelta,
-            thought: _externalThoughts[requestId]!.isNotEmpty
-                ? _externalThoughts[requestId]!.trim()
+            thought: _externalThoughts[thKey]!.isNotEmpty
+                ? _externalThoughts[thKey]!.trim()
                 : current.thought,
           );
         }
@@ -704,7 +778,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           if (idx >= 0) {
             _messages[idx] = _messages[idx].copyWith(isStreaming: false);
           }
-          _externalThoughts.remove(requestId);
+          _externalThoughts.remove(thKey);
         });
         _scrollToBottom();
       } else if (type == 'approval_expired') {
@@ -789,6 +863,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     _onStreamEnded();
     final assistantId = 'a${++_messageCounter}';
     _lastLocalStreamEnd = null;
+    final modelLabel = modelUID != null && modelUID.isNotEmpty
+        ? modelUID
+        : 'Gemini 3.7 Flash';
     setState(() {
       _messages.add(ChatMessage(
         id: assistantId,
@@ -796,6 +873,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         text: '',
         timestamp: _timestamp(),
         isStreaming: true,
+        modelLabel: modelLabel,
       ));
     });
     _scrollToBottom();
@@ -1074,6 +1152,104 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     );
   }
 
+  Widget _buildSyncStatusBadge(ColorScheme scheme) {
+    final pendingCount = widget.api?.outbox?.pendingCount ?? 0;
+    if (!_isSyncing && pendingCount == 0) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: _isSyncing
+            ? scheme.primary.withValues(alpha: 0.12)
+            : const Color(0xFFD29922).withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        border: Border.all(
+          color: _isSyncing
+              ? scheme.primary.withValues(alpha: 0.3)
+              : const Color(0xFFD29922).withValues(alpha: 0.3),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_isSyncing) ...[
+            SizedBox(
+              width: 10,
+              height: 10,
+              child: CircularProgressIndicator(
+                strokeWidth: 1.5,
+                valueColor: AlwaysStoppedAnimation<Color>(scheme.primary),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              'Rattrapage des messages en cours…',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: scheme.primary,
+              ),
+            ),
+          ] else ...[
+            const Icon(Icons.cloud_upload_outlined, size: 12, color: Color(0xFFD29922)),
+            const SizedBox(width: 6),
+            Text(
+              '$pendingCount message${pendingCount > 1 ? 's' : ''} en attente de connexion',
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: Color(0xFFD29922),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Badge de quotas temps réel (P8).
+  Widget _buildQuotaBadge(ColorScheme scheme) {
+    if (_quotaSummary == null) return const SizedBox.shrink();
+    final gRaw = _quotaSummary?['weeklyPercent'] ?? _quotaSummary?['geminiQuotaPercent'];
+    final cRaw = _quotaSummary?['weeklyPercentClaude'] ?? _quotaSummary?['claudeQuotaPercent'];
+    final gVal = gRaw is num ? gRaw.round() : null;
+    final cVal = cRaw is num ? cRaw.round() : null;
+    if (gVal == null && cVal == null) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.speed_outlined, size: 11, color: scheme.onSurfaceVariant),
+          const SizedBox(width: 4),
+          if (gVal != null)
+            Text(
+              'Gemini: $gVal%',
+              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500, color: gVal > 85 ? scheme.error : scheme.onSurfaceVariant),
+            ),
+          if (gVal != null && cVal != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text('•', style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant)),
+            ),
+          if (cVal != null)
+            Text(
+              'Claude: $cVal%',
+              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500, color: cVal > 85 ? scheme.error : scheme.onSurfaceVariant),
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -1099,6 +1275,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       return Column(
         children: [
           connectivityBanner,
+          _buildSyncStatusBadge(scheme),
+          _buildQuotaBadge(scheme),
           Expanded(
             child: Center(
               child: SingleChildScrollView(
@@ -1138,12 +1316,22 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         connectivityBanner,
         SessionTopTabs(
           activeTab: _currentTab,
-          onTabChanged: (tab) => setState(() => _currentTab = tab),
+          onTabChanged: (tab) => setState(() {
+            _activeArtifact = null;
+            _currentTab = tab;
+          }),
           filesChangedCount: _modifiedFiles.length,
           hasPlan: _latestPlanText != null,
           hasTasks: false,
           runningTasksCount: _activeStreamCount,
+          artifactTabs: _artifacts,
+          activeArtifact: _activeArtifact,
+          onOpenArtifact: (art) => setState(() {
+            _activeArtifact = art;
+          }),
         ),
+        _buildSyncStatusBadge(scheme),
+        _buildQuotaBadge(scheme),
         Expanded(
           child: _buildActiveTabContent(scheme, isConnected),
         ),
@@ -1179,6 +1367,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   Widget _buildActiveTabContent(ColorScheme scheme, bool isConnected) {
+    if (_activeArtifact != null) {
+      return _buildArtifactTabContent(_activeArtifact!);
+    }
+
     switch (_currentTab) {
       case SessionTabType.overview:
         return OverviewPanelView(
@@ -1187,8 +1379,14 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           modifiedFiles: _modifiedFiles.toList(),
           artifacts: _artifacts,
           subagentsCount: 0,
-          onOpenReview: () => setState(() => _currentTab = SessionTabType.review),
-          onOpenPlan: () => setState(() => _currentTab = SessionTabType.plan),
+          onOpenReview: () => setState(() {
+            _activeArtifact = null;
+            _currentTab = SessionTabType.review;
+          }),
+          onOpenPlan: () => setState(() {
+            _activeArtifact = null;
+            _currentTab = SessionTabType.plan;
+          }),
           onOpenSubagents: () {},
         );
       case SessionTabType.review:
@@ -1219,43 +1417,28 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                         decoration: BoxDecoration(
-                          color: Theme.of(context).brightness == Brightness.dark
-                              ? AppColors.surfaceRaised
-                              : Theme.of(context).colorScheme.surfaceContainerHighest,
+                          color: const Color(0xFF1E2025),
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
-                            color: Theme.of(context).brightness == Brightness.dark
-                                ? AppColors.borderSubtle
-                                : Theme.of(context).colorScheme.outlineVariant,
+                            color: const Color(0xFF2C2F36),
+                            width: 1,
                           ),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            if (_isLoadingMoreOlder)
-                              const SizedBox(
-                                width: 12,
-                                height: 12,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 1.5,
-                                  color: AppColors.accentBlue,
-                                ),
-                              )
-                            else
-                              Icon(
-                                Icons.arrow_upward_rounded,
-                                size: 13,
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
+                            const Icon(
+                              Icons.history_rounded,
+                              size: 14,
+                              color: AppColors.accentBlue,
+                            ),
                             const SizedBox(width: 6),
                             Text(
-                              _isLoadingMoreOlder
-                                  ? 'Chargement des messages précédents...'
-                                  : '↑ Afficher les messages précédents ($hiddenCount restants)',
-                              style: TextStyle(
+                              'Charger les $hiddenCount messages précédents',
+                              style: const TextStyle(
                                 fontSize: 11.5,
+                                color: AppColors.accentBlue,
                                 fontWeight: FontWeight.w500,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
                               ),
                             ),
                           ],
@@ -1266,33 +1449,38 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                 ),
               ),
             _buildReminderBanners(),
-            ...visibleList.map((msg) => TweenAnimationBuilder<double>(
-                  key: ValueKey(msg.id),
-                  duration: const Duration(milliseconds: 400),
+            ...visibleList.map((msg) => AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
                   curve: Curves.easeOutQuart,
-                  tween: Tween(begin: 0.0, end: 1.0),
-                  builder: (context, value, child) {
-                    return Opacity(
-                      opacity: value,
-                      child: Transform.translate(
-                        offset: Offset(0, 10 * (1 - value)),
-                        child: child,
-                      ),
-                    );
-                  },
-                  child: _MessageBubble(
-                    message: msg,
-                    isThoughtExpanded: _expandedThoughts.contains(msg.id),
-                    onToggleThought: () => setState(() {
-                      if (_expandedThoughts.contains(msg.id)) {
-                        _expandedThoughts.remove(msg.id);
-                      } else {
-                        _expandedThoughts.add(msg.id);
-                      }
-                    }),
-                    onProceedPlan: () => _handleSendMessage('Proceed', queued: false),
-                    onViewPlan: () => setState(() => _currentTab = SessionTabType.plan),
-                    onViewReview: () => setState(() => _currentTab = SessionTabType.review),
+                  margin: const EdgeInsets.only(bottom: 16),
+                  child: TweenAnimationBuilder<double>(
+                    key: ValueKey(msg.id),
+                    duration: const Duration(milliseconds: 400),
+                    curve: Curves.easeOutQuart,
+                    tween: Tween(begin: 0.0, end: 1.0),
+                    builder: (context, value, child) {
+                      return Opacity(
+                        opacity: value,
+                        child: Transform.translate(
+                          offset: Offset(0, 10 * (1 - value)),
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: _MessageBubble(
+                      message: msg,
+                      isThoughtExpanded: _expandedThoughts.contains(msg.id),
+                      onToggleThought: () => setState(() {
+                        if (_expandedThoughts.contains(msg.id)) {
+                          _expandedThoughts.remove(msg.id);
+                        } else {
+                          _expandedThoughts.add(msg.id);
+                        }
+                      }),
+                      onProceedPlan: () => _handleSendMessage('Proceed', queued: false),
+                      onViewPlan: () => setState(() => _currentTab = SessionTabType.plan),
+                      onViewReview: () => setState(() => _currentTab = SessionTabType.review),
+                    ),
                   ),
                 )),
             ],
@@ -1302,41 +1490,61 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   Widget _buildReviewTabContent() {
-    if (_modifiedFiles.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.rate_review_outlined, size: 36, color: AppColors.inkMuted),
-              const SizedBox(height: 12),
-              const Text(
-                'Aucune modification de fichier',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.inkPrimary),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'Les fichiers modifiés par l\'agent apparaîtront ici avec leurs statistiques.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: AppColors.inkMuted),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
+    return SessionReviewView(
+      files: _modifiedFileList.isNotEmpty
+          ? _modifiedFileList
+          : _modifiedFiles
+              .map((p) => SessionModifiedFile(
+                    path: p,
+                    additions: 1,
+                    deletions: 0,
+                  ))
+              .toList(),
+      onOpenFileDiff: (file) {
+        _openUnifiedDiffViewer(
+          fileName: file.fileName,
+          diffContent: file.diffContent,
+        );
+      },
+      onSplitDiffView: () {
+        _openUnifiedDiffViewer(
+          fileName: _modifiedFiles.isNotEmpty ? _modifiedFiles.first : null,
+        );
+      },
+      onExpandAll: () {
+        _openUnifiedDiffViewer(
+          fileName: _modifiedFiles.isNotEmpty ? _modifiedFiles.first : null,
+        );
+      },
+    );
+  }
 
+  Widget _buildArtifactTabContent(String artifactName) {
     return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.all(16),
       children: [
-        FilesChangedCard(
-          files: _modifiedFiles.toList(),
-          additions: 12,
-          deletions: 4,
-          onReview: () => _openUnifiedDiffViewer(
-            fileName: _modifiedFiles.isNotEmpty ? _modifiedFiles.first : null,
-          ),
+        Row(
+          children: [
+            const Icon(Icons.description_outlined, size: 20, color: AppColors.accentBlue),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                artifactName,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.inkPrimary,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        const Divider(color: Color(0xFF2C2F36)),
+        const SizedBox(height: 12),
+        Text(
+          'Contenu de l\'artefact "$artifactName" généré pour cette session.',
+          style: const TextStyle(fontSize: 13, color: AppColors.inkSecondary, height: 1.5),
         ),
       ],
     );
@@ -1578,6 +1786,38 @@ class _MessageBubble extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (message.modelLabel != null && message.modelLabel!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest.withValues(alpha: 0.8),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: scheme.outlineVariant, width: 0.6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.auto_awesome,
+                      size: 11,
+                      color: scheme.primary,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      message.modelLabel!,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.w600,
+                        color: scheme.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           if (hasThought) ...[
             InkWell(
               key: Key('thought-toggle-${message.id}'),

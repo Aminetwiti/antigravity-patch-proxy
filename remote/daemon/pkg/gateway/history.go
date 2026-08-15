@@ -633,6 +633,132 @@ func countTranscriptActivity(cascadeID string) map[string]int {
 	return out
 }
 
+// SubagentSummary représente un sous-agent découvert dans l'arbre d'exécution (DAG).
+type SubagentSummary struct {
+	ID          string `json:"id"`
+	ParentID    string `json:"parentId"`
+	TypeName    string `json:"typeName"`
+	Role        string `json:"role"`
+	Prompt      string `json:"prompt"`
+	State       string `json:"state"` // running, idle, completed, errored
+	CreatedAt   int64  `json:"createdAt"`
+	LastMessage string `json:"lastMessage,omitempty"`
+}
+
+// ExtractSubagents parcourt le transcript d'une cascade et extrait la liste
+// ordonnée des sous-agents invoqués (DAG / arborescence).
+func ExtractSubagents(cascadeID string) []SubagentSummary {
+	var results []SubagentSummary
+	transcriptPath := findTranscriptPath(cascadeID)
+	if transcriptPath == "" {
+		return results
+	}
+	f, err := os.Open(transcriptPath)
+	if err != nil {
+		return results
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 10*1024*1024)
+
+	seen := make(map[string]int) // id -> index in results
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		var entry struct {
+			Type      string          `json:"type"`
+			Source    string          `json:"source"`
+			Content   string          `json:"content"`
+			ToolCalls json.RawMessage `json:"tool_calls"`
+			StepIndex int64           `json:"step_index"`
+			Timestamp int64           `json:"timestamp"`
+		}
+		if err := json.Unmarshal(line, &entry); err != nil {
+			continue
+		}
+
+		// Détection dans tool_calls JSON array
+		if len(entry.ToolCalls) > 0 {
+			var calls []struct {
+				Name      string                 `json:"name"`
+				Arguments map[string]interface{} `json:"arguments"`
+			}
+			if json.Unmarshal(entry.ToolCalls, &calls) == nil {
+				for _, c := range calls {
+					if c.Name == "invoke_subagent" {
+						if subList, ok := c.Arguments["Subagents"].([]interface{}); ok {
+							for _, item := range subList {
+								if smap, ok := item.(map[string]interface{}); ok {
+									typeName, _ := smap["TypeName"].(string)
+									role, _ := smap["Role"].(string)
+									prompt, _ := smap["Prompt"].(string)
+									subID, _ := smap["ConversationId"].(string)
+									if subID == "" {
+										subID = fmt.Sprintf("subagent-%s-%d", typeName, len(results)+1)
+									}
+									if idx, exists := seen[subID]; exists {
+										results[idx].State = "running"
+									} else {
+										seen[subID] = len(results)
+										results = append(results, SubagentSummary{
+											ID:        subID,
+											ParentID:  cascadeID,
+											TypeName:  typeName,
+											Role:      role,
+											Prompt:    prompt,
+											State:     "running",
+											CreatedAt: entry.Timestamp,
+										})
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Détection dans Content texte si stringifié
+		if strings.Contains(entry.Content, "invoke_subagent") || strings.Contains(entry.Content, "manage_subagents") {
+			var tc struct {
+				Name      string                 `json:"name"`
+				Arguments map[string]interface{} `json:"arguments"`
+			}
+			if json.Unmarshal([]byte(entry.Content), &tc) == nil && tc.Name == "invoke_subagent" {
+				if subList, ok := tc.Arguments["Subagents"].([]interface{}); ok {
+					for _, item := range subList {
+						if smap, ok := item.(map[string]interface{}); ok {
+							typeName, _ := smap["TypeName"].(string)
+							role, _ := smap["Role"].(string)
+							prompt, _ := smap["Prompt"].(string)
+							subID, _ := smap["ConversationId"].(string)
+							if subID == "" {
+								subID = fmt.Sprintf("subagent-%s-%d", typeName, len(results)+1)
+							}
+							if _, exists := seen[subID]; !exists {
+								seen[subID] = len(results)
+								results = append(results, SubagentSummary{
+									ID:        subID,
+									ParentID:  cascadeID,
+									TypeName:  typeName,
+									Role:      role,
+									Prompt:    prompt,
+									State:     "completed",
+									CreatedAt: entry.Timestamp,
+								})
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return results
+}
+
+
 // filePathsIn extrait les chemins absolus (Windows, POSIX et file:///) d'un
 // texte — ils identifient fichiers, artefacts et uploads dans les transcripts.
 func filePathsIn(s string) []string {

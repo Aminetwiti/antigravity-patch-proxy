@@ -77,13 +77,20 @@ class _ParagraphView extends StatelessWidget {
   }
 }
 
-class _CodeBlockView extends StatelessWidget {
+class _CodeBlockView extends StatefulWidget {
   final CodeBlock code;
 
   const _CodeBlockView({required this.code});
 
+  @override
+  State<_CodeBlockView> createState() => _CodeBlockViewState();
+}
+
+class _CodeBlockViewState extends State<_CodeBlockView> {
+  bool _expanded = false;
+
   bool get _isDiff {
-    final lang = code.language.toLowerCase();
+    final lang = widget.code.language.toLowerCase();
     return lang == 'diff' || lang == 'patch';
   }
 
@@ -91,7 +98,9 @@ class _CodeBlockView extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final isDiff = _isDiff;
-    final lines = code.code.split('\n');
+    final lines = widget.code.code.split('\n');
+    final isLong = lines.length > 15;
+    final displayLines = (isLong && !_expanded) ? lines.take(12).toList() : lines;
 
     return Container(
       width: double.infinity,
@@ -118,12 +127,21 @@ class _CodeBlockView extends StatelessWidget {
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  code.language.isEmpty ? 'code' : code.language,
+                  widget.code.language.isEmpty ? 'code' : widget.code.language,
                   style: TextStyle(
                     fontSize: 11,
                     fontFamily: 'monospace',
                     fontWeight: isDiff ? FontWeight.w600 : FontWeight.normal,
                     color: isDiff ? scheme.primary : scheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  '(${lines.length} lines)',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: scheme.outline,
+                    fontFamily: 'monospace',
                   ),
                 ),
                 const Spacer(),
@@ -138,7 +156,7 @@ class _CodeBlockView extends StatelessWidget {
                         builder: (ctx) => FractionallySizedBox(
                           heightFactor: 0.9,
                           child: UnifiedDiffViewer(
-                            diffContent: code.code,
+                            diffContent: widget.code.code,
                             fileName: 'Code Diff',
                             onClose: () => Navigator.of(ctx).pop(),
                           ),
@@ -162,7 +180,7 @@ class _CodeBlockView extends StatelessWidget {
                 InkWell(
                   onTap: () {
                     HapticFeedback.lightImpact();
-                    Clipboard.setData(ClipboardData(text: code.code));
+                    Clipboard.setData(ClipboardData(text: widget.code.code));
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text('Code copié dans le presse-papiers'),
@@ -187,7 +205,7 @@ class _CodeBlockView extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  for (final line in lines)
+                  for (final line in displayLines)
                     _DiffLineRow(line: line),
                 ],
               ),
@@ -197,12 +215,47 @@ class _CodeBlockView extends StatelessWidget {
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.all(12),
               child: Text(
-                code.code,
+                (isLong && !_expanded) ? displayLines.join('\n') : widget.code.code,
                 style: TextStyle(
                   fontFamily: 'monospace',
                   fontSize: 12,
                   height: 1.5,
                   color: scheme.onSurface,
+                ),
+              ),
+            ),
+          if (isLong)
+            InkWell(
+              onTap: () {
+                setState(() => _expanded = !_expanded);
+                HapticFeedback.selectionClick();
+              },
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainer.withValues(alpha: 0.5),
+                  border: Border(top: BorderSide(color: scheme.outlineVariant, width: 0.5)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                      size: 14,
+                      color: scheme.primary,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      _expanded ? 'Réduire le code' : 'Afficher tout (+${lines.length - 12} lignes)',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: scheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -253,18 +306,25 @@ class _DiffLineRow extends StatelessWidget {
   }
 }
 
-class _ToolCallPill extends StatelessWidget {
+class _ToolCallPill extends StatefulWidget {
   final ToolCallBlock call;
 
   const _ToolCallPill({required this.call});
 
+  @override
+  State<_ToolCallPill> createState() => _ToolCallPillState();
+}
+
+class _ToolCallPillState extends State<_ToolCallPill> {
+  bool _expanded = false;
+
   bool get _isSubagent {
-    final t = call.toolName.toLowerCase();
+    final t = widget.call.toolName.toLowerCase();
     return t.contains('subagent') || t == 'manage_task';
   }
 
   bool get _isBrowser {
-    final t = call.toolName.toLowerCase();
+    final t = widget.call.toolName.toLowerCase();
     return t.contains('browser') || t.contains('read_url');
   }
 
@@ -285,7 +345,7 @@ class _ToolCallPill extends StatelessWidget {
   String get _badgeText {
     if (_isSubagent) return 'SUBAGENT';
     if (_isBrowser) return 'BROWSER';
-    final t = call.toolName.toLowerCase();
+    final t = widget.call.toolName.toLowerCase();
     if (t.contains('command') || t.contains('run')) return 'COMMAND';
     if (t.contains('file')) return 'FILE';
     return 'TOOL';
@@ -294,7 +354,7 @@ class _ToolCallPill extends StatelessWidget {
   Color get _badgeColor {
     if (_isSubagent) return const Color(0xFF528BFF);
     if (_isBrowser) return const Color(0xFF00B4D8);
-    final t = call.toolName.toLowerCase();
+    final t = widget.call.toolName.toLowerCase();
     if (t.contains('command') || t.contains('run')) return const Color(0xFFE07A5F);
     if (t.contains('file')) return const Color(0xFF81B29A);
     return const Color(0xFFA1A1AA);
@@ -304,11 +364,11 @@ class _ToolCallPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final badgeColor = _badgeColor;
+    final hasDetails = widget.call.raw.isNotEmpty;
 
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.symmetric(vertical: 2),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: _isSubagent
             ? const Color(0xFF528BFF).withValues(alpha: 0.1)
@@ -324,41 +384,83 @@ class _ToolCallPill extends StatelessWidget {
                   : scheme.secondary.withValues(alpha: 0.3),
         ),
       ),
-      child: Row(
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Icon(_iconFor(call.toolName), size: 15, color: badgeColor),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              call.summary.isEmpty ? call.toolName : '${call.toolName} — ${call.summary}',
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12,
-                fontFamily: 'monospace',
-                color: scheme.onSecondaryContainer,
-                fontWeight: _isSubagent || _isBrowser ? FontWeight.w500 : FontWeight.normal,
+          InkWell(
+            onTap: hasDetails
+                ? () {
+                    setState(() => _expanded = !_expanded);
+                    HapticFeedback.selectionClick();
+                  }
+                : null,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                children: [
+                  Icon(_iconFor(widget.call.toolName), size: 15, color: badgeColor),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      widget.call.summary.isEmpty ? widget.call.toolName : '${widget.call.toolName} — ${widget.call.summary}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontFamily: 'monospace',
+                        color: scheme.onSecondaryContainer,
+                        fontWeight: _isSubagent || _isBrowser ? FontWeight.w500 : FontWeight.normal,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: badgeColor.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: badgeColor.withValues(alpha: 0.4), width: 0.8),
+                    ),
+                    child: Text(
+                      _badgeText,
+                      style: TextStyle(
+                        fontSize: 9,
+                        letterSpacing: 0.8,
+                        fontWeight: FontWeight.w700,
+                        color: badgeColor,
+                      ),
+                    ),
+                  ),
+                  if (hasDetails) ...[
+                    const SizedBox(width: 4),
+                    Icon(
+                      _expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                      size: 14,
+                      color: scheme.outline,
+                    ),
+                  ],
+                ],
               ),
             ),
           ),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: badgeColor.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: badgeColor.withValues(alpha: 0.4), width: 0.8),
-            ),
-            child: Text(
-              _badgeText,
-              style: TextStyle(
-                fontSize: 9,
-                letterSpacing: 0.8,
-                fontWeight: FontWeight.w700,
-                color: badgeColor,
+          if (_expanded && hasDetails)
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest.withValues(alpha: 0.7),
+                border: Border(top: BorderSide(color: scheme.outlineVariant, width: 0.5)),
+              ),
+              child: SelectableText(
+                widget.call.raw,
+                style: TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 11,
+                  color: scheme.onSurfaceVariant,
+                  height: 1.35,
+                ),
               ),
             ),
-          ),
         ],
       ),
     );

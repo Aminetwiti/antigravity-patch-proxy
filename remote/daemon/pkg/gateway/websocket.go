@@ -207,13 +207,15 @@ type Server struct {
 	// scheduledTasks : taskId → tâche planifiée gérée par le daemon
 	scheduledTasks map[string]*ScheduledTask
 	// sessionsCache : résultat list_sessions déjà calculé (GetAllCascades coûte
-	// ~9,5 s côté hub) + single-flight (fetchInFlight) pour que N reconnexions
+	// ~9,5 s côté hub) + single-flight (fetchDone) pour que N reconnexions
 	// simultanées du mobile ne déclenchent qu'UN appel LS au lieu de N.
 	sessionsCache    []byte
 	sessionsCachedAt time.Time
-	fetchInFlight    bool
+	fetchDone        chan struct{}
 	// terminals : sessions shell interactives (P3), nettoyées à la déconnexion.
 	terminals *terminalPtyManager
+	// tokenValidator : validateur dynamique de jetons de session (P4 pairing PIN).
+	tokenValidator func(token string) bool
 }
 
 // ScheduledTask représente une tâche planifiée / cron job gérée par le daemon.
@@ -292,6 +294,10 @@ const sessionsCacheTTL = 5 * time.Second
 func (s *Server) cachedSessions() ([]byte, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.cachedSessionsLocked()
+}
+
+func (s *Server) cachedSessionsLocked() ([]byte, bool) {
 	if len(s.sessionsCache) > 0 && time.Since(s.sessionsCachedAt) < sessionsCacheTTL {
 		return s.sessionsCache, true
 	}
@@ -322,40 +328,36 @@ func (s *Server) cachedProjectID(uri string) (string, bool) {
 // attendent le même résultat au lieu de marteler le hub LS.
 func (s *Server) fetchSessionsSingleFlight() []byte {
 	s.mu.Lock()
-	if s.fetchInFlight {
+	if raw, ok := s.cachedSessionsLocked(); ok {
 		s.mu.Unlock()
-		for {
-			time.Sleep(50 * time.Millisecond)
-			if raw, ok := s.cachedSessions(); ok {
-				return raw
-			}
-			s.mu.Lock()
-			inFlight := s.fetchInFlight
-			s.mu.Unlock()
-			if !inFlight {
-				break
-			}
-		}
-	} else {
-		s.fetchInFlight = true
-		s.mu.Unlock()
-	}
-
-	// Waiter qui a attendu la fin de l'appel en vol : le premier appelant vient
-	// de peupler le cache — le servir au lieu de refaire un GetAllCascades.
-	if raw, ok := s.cachedSessions(); ok {
 		return raw
 	}
 
-	// Premier appelant : fait l'appel LS et peuple le cache.
+	if s.fetchDone != nil {
+		waitCh := s.fetchDone
+		s.mu.Unlock()
+		<-waitCh
+		s.mu.Lock()
+		raw, _ := s.cachedSessionsLocked()
+		s.mu.Unlock()
+		return raw
+	}
+
+	doneCh := make(chan struct{})
+	s.fetchDone = doneCh
+	s.mu.Unlock()
+
 	raw, err := s.RPCClient.GetAllCascades()
+
 	s.mu.Lock()
-	s.fetchInFlight = false
 	if err == nil && len(raw) > 0 {
 		s.sessionsCache = raw
 		s.sessionsCachedAt = time.Now()
 	}
+	s.fetchDone = nil
+	close(doneCh)
 	s.mu.Unlock()
+
 	return raw
 }
 
@@ -466,6 +468,13 @@ func (s *Server) Stats() Stats {
 		st.Status = "degraded"
 	}
 	return st
+}
+
+// SetTokenValidator configure un validateur dynamique de jetons de session (P4).
+func (s *Server) SetTokenValidator(v func(token string) bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tokenValidator = v
 }
 
 // maxWSMessageSize borne la taille des messages WebSocket entrants (1 Mo)
@@ -1360,10 +1369,14 @@ func sessionsOut(raw []byte) interface{} {
 }
 
 func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	// Vérification de l'authentification si AuthToken est défini.
+	// Vérification de l'authentification si AuthToken ou tokenValidator est défini.
 	// ConstantTimeCompare : évite le timing attack (token comparé en temps
 	// constant) — le comportement "token optionnel" reste inchangé.
-	if s.AuthToken != "" {
+	s.mu.Lock()
+	validator := s.tokenValidator
+	s.mu.Unlock()
+
+	if s.AuthToken != "" || validator != nil {
 		clientToken := r.URL.Query().Get("token")
 		if clientToken == "" {
 			clientToken = r.URL.Query().Get("auth_token")
@@ -1373,7 +1386,14 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			clientToken = strings.TrimPrefix(clientToken, "Bearer ")
 		}
 
-		if subtle.ConstantTimeCompare([]byte(clientToken), []byte(s.AuthToken)) != 1 {
+		authValid := false
+		if s.AuthToken != "" && subtle.ConstantTimeCompare([]byte(clientToken), []byte(s.AuthToken)) == 1 {
+			authValid = true
+		} else if validator != nil && validator(clientToken) {
+			authValid = true
+		}
+
+		if !authValid {
 			logJSON.Warn("auth_rejected", "remote", r.RemoteAddr)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
@@ -1675,7 +1695,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 		logJSON.Info("question_response", "cascadeId", msg.CascadeID, "answer", responseText)
 
-		if s.hasPendingApproval(msg.CascadeID) {
+		if p, ok := s.approvalFor(msg.CascadeID); ok && !p.expired {
+			// Fraîche : annule le timer AVANT l'envoi (pas de course entre
+			// réponse et auto-refus), même contrat que submit_approval.
 			s.clearApproval(msg.CascadeID)
 			oneofField, oneofPayload := buildApprovalPayload("ask_question", true, responseText, "", "")
 			raw, err = s.RPCClient.SubmitToolApproval(msg.CascadeID, msg.TrajectoryID, uint32(msg.StepIndex), oneofField, oneofPayload)
@@ -1686,6 +1708,12 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			if err == nil {
 				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "submitted"}})
 			}
+			return
+		} else if ok {
+			// Garde de fraîcheur : l'approbation ask_question a expiré (auto-
+			// refus parti). Une réponse tardive serait un « oui » après
+			// expiration → refuser sans contact RPC.
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "approval expired (auto-denied)"})
 			return
 		}
 		// Réponse libre : fire-and-forget vers le LS (le flux arrive par
@@ -2048,6 +2076,26 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			stats["backgroundTasksCount"] += counts["tasks"]
 		}
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: stats})
+		return
+
+	case "get_subagents":
+		cascadeID := msg.CascadeID
+		if cascadeID == "" && msg.Data != nil {
+			cascadeID, _ = msg.Data["cascadeId"].(string)
+		}
+		if cascadeID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
+			return
+		}
+		subagents := ExtractSubagents(cascadeID)
+		s.writeJSON(conn, OutgoingMessage{
+			Type:      "response",
+			RequestID: msg.RequestID,
+			Data: map[string]interface{}{
+				"cascadeId": cascadeID,
+				"subagents": subagents,
+			},
+		})
 		return
 
 	case "upload_media", "upload_image":

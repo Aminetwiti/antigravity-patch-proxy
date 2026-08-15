@@ -33,7 +33,14 @@ class LeftSidebarDrawer extends StatefulWidget {
     this.projects,
     this.isConnected = false,
     required this.onToggleConnection,
+    this.onDeleteSession,
+    this.onRenameSession,
+    this.onExportSession,
   });
+
+  final Function(String id)? onDeleteSession;
+  final Function(String id, String newTitle)? onRenameSession;
+  final Function(CascadeSession session)? onExportSession;
 
   @override
   State<LeftSidebarDrawer> createState() => _LeftSidebarDrawerState();
@@ -348,6 +355,9 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                             Navigator.of(context).pop();
                             widget.onOpenSettings?.call();
                           },
+                          onDeleteSession: widget.onDeleteSession,
+                          onRenameSession: widget.onRenameSession,
+                          onExportSession: widget.onExportSession,
                         );
                       }),
                     const SizedBox(height: 16),
@@ -470,12 +480,15 @@ class _SidebarActionItemState extends State<_SidebarActionItem> {
                 color: isSelected ? const Color(0xFFFFFFFF) : const Color(0xFF9E9FA9),
               ),
               const SizedBox(width: 10),
-              Text(
-                widget.label,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: isSelected ? FontWeight.w500 : FontWeight.w400,
-                  color: isSelected ? const Color(0xFFFFFFFF) : const Color(0xFFD4D4D8),
+              Expanded(
+                child: Text(
+                  widget.label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: isSelected ? FontWeight.w500 : FontWeight.w400,
+                    color: isSelected ? const Color(0xFFFFFFFF) : const Color(0xFFD4D4D8),
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
@@ -498,6 +511,9 @@ class _WorkspaceFolderSection extends StatefulWidget {
   final Function(String id) onSessionTap;
   final VoidCallback? onNewConversation;
   final VoidCallback? onOpenSettings;
+  final Function(String id)? onDeleteSession;
+  final Function(String id, String newTitle)? onRenameSession;
+  final Function(CascadeSession session)? onExportSession;
 
   const _WorkspaceFolderSection({
     required this.folderName,
@@ -510,6 +526,9 @@ class _WorkspaceFolderSection extends StatefulWidget {
     required this.onSessionTap,
     this.onNewConversation,
     this.onOpenSettings,
+    this.onDeleteSession,
+    this.onRenameSession,
+    this.onExportSession,
   });
 
   @override
@@ -655,6 +674,15 @@ class _WorkspaceFolderSectionState extends State<_WorkspaceFolderSection> {
                   isSelected: s.id == widget.activeSessionId,
                   showSubtitle: widget.showSubtitle,
                   onTap: () => widget.onSessionTap(s.id),
+                  onDelete: widget.onDeleteSession != null
+                      ? () => widget.onDeleteSession!(s.id)
+                      : null,
+                  onRename: widget.onRenameSession != null
+                      ? (newTitle) => widget.onRenameSession!(s.id, newTitle)
+                      : null,
+                  onExport: widget.onExportSession != null
+                      ? () => widget.onExportSession!(s)
+                      : null,
                 )),
             if (hasMore)
               Padding(
@@ -700,12 +728,18 @@ class _SessionRowItem extends StatefulWidget {
   final bool isSelected;
   final bool showSubtitle;
   final VoidCallback onTap;
+  final VoidCallback? onDelete;
+  final Function(String newTitle)? onRename;
+  final VoidCallback? onExport;
 
   const _SessionRowItem({
     required this.session,
     required this.isSelected,
     this.showSubtitle = true,
     required this.onTap,
+    this.onDelete,
+    this.onRename,
+    this.onExport,
   });
 
   @override
@@ -715,13 +749,178 @@ class _SessionRowItem extends StatefulWidget {
 class _SessionRowItemState extends State<_SessionRowItem> {
   bool _hovered = false;
 
+  void _showSessionContextMenu(BuildContext context) {
+    HapticFeedback.mediumImpact();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1B1D22),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF3B3E47),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        widget.session.title,
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.inkPrimary,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(color: Color(0xFF2C2F36)),
+              ListTile(
+                leading: const Icon(Icons.edit_outlined, size: 18, color: AppColors.inkPrimary),
+                title: const Text('Renommer la conversation', style: TextStyle(fontSize: 13, color: AppColors.inkPrimary)),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _promptRename(context);
+                },
+              ),
+              if (widget.onExport != null)
+                ListTile(
+                  leading: const Icon(Icons.download_rounded, size: 18, color: AppColors.inkPrimary),
+                  title: const Text('Exporter en Markdown', style: TextStyle(fontSize: 13, color: AppColors.inkPrimary)),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    widget.onExport?.call();
+                  },
+                ),
+              ListTile(
+                leading: const Icon(Icons.copy_rounded, size: 18, color: AppColors.inkPrimary),
+                title: const Text('Copy Title', style: TextStyle(fontSize: 13, color: AppColors.inkPrimary)),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  Clipboard.setData(ClipboardData(text: widget.session.title));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Titre copié'), duration: Duration(seconds: 2)),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.tag_rounded, size: 18, color: AppColors.inkPrimary),
+                title: const Text('Copy Session ID', style: TextStyle(fontSize: 13, color: AppColors.inkPrimary)),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  Clipboard.setData(ClipboardData(text: widget.session.id));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('ID de session copié'), duration: Duration(seconds: 2)),
+                  );
+                },
+              ),
+              if (widget.onDelete != null)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline_rounded, size: 18, color: AppColors.danger),
+                  title: const Text('Supprimer la conversation', style: TextStyle(fontSize: 13, color: AppColors.danger)),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    _confirmDelete(context);
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _promptRename(BuildContext context) {
+    final controller = TextEditingController(text: widget.session.title);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1B1D22),
+        title: const Text('Renommer la conversation', style: TextStyle(fontSize: 15, color: AppColors.inkPrimary)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
+          decoration: InputDecoration(
+            hintText: 'Nouveau titre...',
+            hintStyle: const TextStyle(color: AppColors.inkMuted),
+            filled: true,
+            fillColor: const Color(0xFF22252B),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Annuler', style: TextStyle(color: AppColors.inkMuted)),
+          ),
+          FilledButton(
+            onPressed: () {
+              final newTitle = controller.text.trim();
+              Navigator.of(ctx).pop();
+              if (newTitle.isNotEmpty && newTitle != widget.session.title) {
+                widget.onRename?.call(newTitle);
+              }
+            },
+            child: const Text('Enregistrer'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmDelete(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1B1D22),
+        title: const Text('Supprimer la conversation ?', style: TextStyle(fontSize: 15, color: AppColors.inkPrimary)),
+        content: Text(
+          'Voulez-vous supprimer définitivement "${widget.session.title}" ?',
+          style: const TextStyle(fontSize: 13, color: AppColors.inkSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Annuler', style: TextStyle(color: AppColors.inkMuted)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              widget.onDelete?.call();
+            },
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isSelected = widget.isSelected;
     final isRunning = widget.session.isRunning;
     final subtitleText = widget.session.worktree ?? WorkspacePath.displayName(widget.session.workspacePath);
 
-    return MouseRegion(
+    Widget item = MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: GestureDetector(
@@ -729,6 +928,8 @@ class _SessionRowItemState extends State<_SessionRowItem> {
           HapticFeedback.selectionClick();
           widget.onTap();
         },
+        onLongPress: () => _showSessionContextMenu(context),
+        onSecondaryTap: () => _showSessionContextMenu(context),
         child: AnimatedContainer(
           duration: AppMotion.fast,
           curve: AppMotion.easeOut,
@@ -782,12 +983,14 @@ class _SessionRowItemState extends State<_SessionRowItem> {
               ),
               const SizedBox(width: 8),
               if (isRunning)
-                const SizedBox(
-                  width: 12,
-                  height: 12,
+                SizedBox(
+                  width: 13,
+                  height: 13,
                   child: CircularProgressIndicator(
                     strokeWidth: 1.5,
-                    color: AppColors.accentBlue,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      isSelected ? const Color(0xFFFFFFFF) : const Color(0xFF9E9FA9),
+                    ),
                   ),
                 )
               else if (widget.session.time.isNotEmpty)
@@ -806,6 +1009,36 @@ class _SessionRowItemState extends State<_SessionRowItem> {
         ),
       ),
     );
+
+    if (widget.onDelete != null) {
+      return Dismissible(
+        key: ValueKey('dismiss-${widget.session.id}'),
+        direction: DismissDirection.endToStart,
+        confirmDismiss: (_) async {
+          _confirmDelete(context);
+          return false;
+        },
+        background: Container(
+          alignment: Alignment.centerRight,
+          padding: const EdgeInsets.only(right: 16),
+          margin: const EdgeInsets.only(left: 14, right: 6, top: 1, bottom: 1),
+          decoration: BoxDecoration(
+            color: AppColors.danger.withValues(alpha: 0.85),
+            borderRadius: BorderRadius.circular(AppRadius.md),
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.delete_outline_rounded, color: Colors.white, size: 18),
+              SizedBox(width: 4),
+              Text('Supprimer', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ),
+        child: item,
+      );
+    }
+    return item;
   }
 }
 

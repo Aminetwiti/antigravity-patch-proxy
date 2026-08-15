@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/antigravity/remote-daemon/pkg/connectrpc"
 	"github.com/gorilla/websocket"
 )
 
@@ -25,8 +24,8 @@ func (c *countingCascadesClient) GetAllCascades() ([]byte, error) {
 	c.mu.Unlock()
 	// Simule la latence réelle du hub (~9,5 s) : le single-flight doit
 	// absorber N requêtes concurrentes pendant que le premier appel est en vol.
-	time.Sleep(300 * time.Millisecond)
-	return connectrpc.Frame(pbTextFrame("sess")), nil
+	time.Sleep(100 * time.Millisecond)
+	return trajectoryFrame("11111111-2222-3333-4444-555555555555"), nil
 }
 
 func (c *countingCascadesClient) callCount() int {

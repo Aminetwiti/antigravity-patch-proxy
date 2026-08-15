@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import '../../config/env_config.dart';
 import '../../core/discovery/lan_discovery.dart';
 import '../../services/settings_store.dart';
@@ -20,6 +22,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
   final TextEditingController _portController =
       TextEditingController(text: EnvConfig.daemonPort.toString());
   final TextEditingController _csrfController = TextEditingController();
+  final TextEditingController _pinController = TextEditingController();
 
   final LanDiscoveryService _lanDiscovery = LanDiscoveryService();
   List<DiscoveredDaemon> _discoveredDaemons = [];
@@ -133,12 +136,60 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
     });
   }
 
+  /// Appairage par code PIN 6 chiffres (P4) : interroge POST /pair sur le daemon,
+  /// récupère le token de session et se connecte automatiquement.
+  Future<void> _pairWithPin() async {
+    final host = _hostController.text.trim();
+    final port = int.tryParse(_portController.text.trim());
+    final pin = _pinController.text.trim();
+    if (host.isEmpty || port == null || pin.isEmpty) {
+      setState(() => _errorMessage = 'Veuillez saisir l\'hôte, le port et le code PIN 6 chiffres.');
+      return;
+    }
+    setState(() {
+      _isConnecting = true;
+      _errorMessage = null;
+      _successMessage = null;
+    });
+    try {
+      final scheme = (host.startsWith('https') || host.startsWith('wss')) ? 'https' : 'http';
+      final cleanHost = host.replaceAll(RegExp(r'^https?://|^wss?://'), '').replaceAll(RegExp(r'/.*$'), '');
+      final uri = Uri.parse('$scheme://$cleanHost:$port/pair');
+      final res = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'pin': pin, 'deviceId': 'antigravity-mobile'}),
+      ).timeout(const Duration(seconds: 10));
+
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      if (res.statusCode == 200 && data['token'] != null) {
+        final token = data['token'] as String;
+        _csrfController.text = token;
+        _pinController.clear();
+        await _connect();
+      } else {
+        if (!mounted) return;
+        setState(() {
+          _isConnecting = false;
+          _errorMessage = data['error']?.toString() ?? 'Échec d\'appairage (HTTP ${res.statusCode})';
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isConnecting = false;
+        _errorMessage = 'Impossible de joindre le daemon pour appairage: $e';
+      });
+    }
+  }
+
   @override
   void dispose() {
     _lanDiscovery.dispose();
     _hostController.dispose();
     _portController.dispose();
     _csrfController.dispose();
+    _pinController.dispose();
     super.dispose();
   }
 
@@ -428,7 +479,44 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                     },
                   ),
                   const SizedBox(height: 12),
-                  Text('Token Auth (optionnel)', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Code PIN (6 chiffres affichés sur PC)', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                            const SizedBox(height: 6),
+                            TextField(
+                              controller: _pinController,
+                              keyboardType: TextInputType.number,
+                              maxLength: 6,
+                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 3, color: Theme.of(context).colorScheme.onSurface),
+                              decoration: InputDecoration(
+                                counterText: '',
+                                prefixIcon: Icon(Icons.pin_outlined, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                hintText: '123456',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 22),
+                        child: OutlinedButton(
+                          onPressed: _isConnecting ? null : _pairWithPin,
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                          ),
+                          child: const Text('Valider PIN', style: TextStyle(fontSize: 12)),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text('Token Auth (optionnel ou obtenu via PIN)', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                   const SizedBox(height: 6),
                   TextField(
                     controller: _csrfController,

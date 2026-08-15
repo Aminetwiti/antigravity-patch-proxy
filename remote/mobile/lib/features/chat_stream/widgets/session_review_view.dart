@@ -1,0 +1,449 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:mobile/theme/app_colors.dart';
+
+/// Modèle représentant un fichier modifié dans la session (avec additions/deletions)
+class SessionModifiedFile {
+  final String path;
+  final int additions;
+  final int deletions;
+  final String? diffContent;
+
+  const SessionModifiedFile({
+    required this.path,
+    this.additions = 0,
+    this.deletions = 0,
+    this.diffContent,
+  });
+
+  String get fileName {
+    final clean = path.replaceAll('\\', '/');
+    final idx = clean.lastIndexOf('/');
+    return idx >= 0 ? clean.substring(idx + 1) : clean;
+  }
+
+  String get directoryPath {
+    final clean = path.replaceAll('\\', '/');
+    final idx = clean.lastIndexOf('/');
+    return idx >= 0 ? clean.substring(0, idx) : '';
+  }
+}
+
+/// Vue "Review" de session identique au Desktop IDE Antigravity 2.0
+class SessionReviewView extends StatefulWidget {
+  final List<SessionModifiedFile> files;
+  final Function(SessionModifiedFile file) onOpenFileDiff;
+  final VoidCallback? onExpandAll;
+  final VoidCallback? onSplitDiffView;
+
+  const SessionReviewView({
+    super.key,
+    required this.files,
+    required this.onOpenFileDiff,
+    this.onExpandAll,
+    this.onSplitDiffView,
+  });
+
+  @override
+  State<SessionReviewView> createState() => _SessionReviewViewState();
+}
+
+class _SessionReviewViewState extends State<SessionReviewView> {
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  bool _isSearchOpen = false;
+  bool _groupByFolder = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(() {
+      setState(() => _searchQuery = _searchController.text.trim().toLowerCase());
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  IconData _iconForName(String name) {
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.dart')) return Icons.flutter_dash_outlined;
+    if (lower.endsWith('.go')) return Icons.code_rounded;
+    if (lower.endsWith('.json') ||
+        lower.endsWith('.yaml') ||
+        lower.endsWith('.yml') ||
+        lower.endsWith('.toml')) {
+      return Icons.settings_suggest_outlined;
+    }
+    if (lower.endsWith('.md') || lower.endsWith('.txt')) {
+      return Icons.article_outlined;
+    }
+    if (lower.endsWith('.sh') || lower.endsWith('.bat') || lower.endsWith('.ps1')) {
+      return Icons.terminal_rounded;
+    }
+    if (lower.endsWith('.gitignore') || lower.startsWith('.git')) {
+      return Icons.alt_route_rounded;
+    }
+    if (lower.endsWith('.js') || lower.endsWith('.ts') || lower.endsWith('.tsx') || lower.endsWith('.jsx')) {
+      return Icons.javascript_rounded;
+    }
+    return Icons.insert_drive_file_outlined;
+  }
+
+  Color _colorForName(String name) {
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.dart')) return const Color(0xFF29B6F6);
+    if (lower.endsWith('.go')) return const Color(0xFF00ADD8);
+    if (lower.endsWith('.json') || lower.endsWith('.yaml') || lower.endsWith('.yml') || lower.endsWith('.toml')) {
+      return const Color(0xFFEAB308);
+    }
+    if (lower.endsWith('.md')) return const Color(0xFFA855F7);
+    if (lower.endsWith('.sh') || lower.endsWith('.bat')) return const Color(0xFF22C55E);
+    if (lower.endsWith('.gitignore')) return const Color(0xFFF43F5E);
+    if (lower.endsWith('.ts') || lower.endsWith('.tsx')) return const Color(0xFF3178C6);
+    if (lower.endsWith('.js') || lower.endsWith('.jsx')) return const Color(0xFFF7DF1E);
+    return const Color(0xFF9E9FA9);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = widget.files.where((f) {
+      if (_searchQuery.isEmpty) return true;
+      return f.path.toLowerCase().contains(_searchQuery);
+    }).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // ── Review Header: [Review] [⋮] [🔍] [☰]
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 12, 8),
+          child: Row(
+            children: [
+              const Text(
+                'Review',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.inkPrimary,
+                  letterSpacing: -0.2,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF23262D),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '${widget.files.length}',
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.inkSecondary,
+                  ),
+                ),
+              ),
+              const Spacer(),
+
+              // ⋮ Options menu
+              PopupMenuButton<String>(
+                tooltip: 'Options de revue',
+                color: const Color(0xFF1B1D22),
+                surfaceTintColor: Colors.transparent,
+                elevation: 8,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                  side: const BorderSide(color: Color(0xFF2C2F36), width: 1),
+                ),
+                icon: const Icon(
+                  Icons.more_vert_rounded,
+                  size: 18,
+                  color: Color(0xFF8F909A),
+                ),
+                padding: EdgeInsets.zero,
+                onSelected: (val) {
+                  if (val == 'split') {
+                    widget.onSplitDiffView?.call();
+                  } else if (val == 'expand') {
+                    widget.onExpandAll?.call();
+                  } else if (val == 'copy_paths') {
+                    final paths = widget.files.map((f) => f.path).join('\n');
+                    Clipboard.setData(ClipboardData(text: paths));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Liste des chemins copiée'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  }
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem<String>(
+                    value: 'split',
+                    height: 34,
+                    child: Row(
+                      children: [
+                        Icon(Icons.splitscreen_rounded, size: 15, color: AppColors.inkPrimary),
+                        SizedBox(width: 8),
+                        Text('View Split Diff', style: TextStyle(fontSize: 13, color: AppColors.inkPrimary)),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem<String>(
+                    value: 'expand',
+                    height: 34,
+                    child: Row(
+                      children: [
+                        Icon(Icons.unfold_more_rounded, size: 15, color: AppColors.inkPrimary),
+                        SizedBox(width: 8),
+                        Text('Expand All', style: TextStyle(fontSize: 13, color: AppColors.inkPrimary)),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem<String>(
+                    value: 'copy_paths',
+                    height: 34,
+                    child: Row(
+                      children: [
+                        Icon(Icons.copy_rounded, size: 15, color: AppColors.inkPrimary),
+                        SizedBox(width: 8),
+                        Text('Copy File Paths', style: TextStyle(fontSize: 13, color: AppColors.inkPrimary)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+
+              // 🔍 Search toggle
+              IconButton(
+                icon: Icon(
+                  Icons.search_rounded,
+                  size: 18,
+                  color: _isSearchOpen ? AppColors.accentBlue : const Color(0xFF8F909A),
+                ),
+                tooltip: 'Rechercher un fichier modifié',
+                onPressed: () {
+                  setState(() {
+                    _isSearchOpen = !_isSearchOpen;
+                    if (!_isSearchOpen) _searchController.clear();
+                  });
+                },
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              ),
+
+              // ☰ Group/View toggle
+              IconButton(
+                icon: Icon(
+                  _groupByFolder ? Icons.view_list_rounded : Icons.folder_outlined,
+                  size: 18,
+                  color: _groupByFolder ? AppColors.accentBlue : const Color(0xFF8F909A),
+                ),
+                tooltip: _groupByFolder ? 'Vue liste plate' : 'Grouper par dossier',
+                onPressed: () => setState(() => _groupByFolder = !_groupByFolder),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              ),
+            ],
+          ),
+        ),
+
+        // ── Barre de recherche conditionnelle
+        if (_isSearchOpen)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+            child: Container(
+              height: 34,
+              decoration: BoxDecoration(
+                color: const Color(0xFF1B1D22),
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                border: Border.all(color: const Color(0xFF2C2F36), width: 1),
+              ),
+              child: TextField(
+                controller: _searchController,
+                style: const TextStyle(fontSize: 12.5, color: AppColors.inkPrimary),
+                cursorColor: AppColors.accentBlue,
+                decoration: InputDecoration(
+                  hintText: 'Filtrer les modifications...',
+                  hintStyle: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+                  prefixIcon: const Icon(Icons.search_rounded, size: 16, color: Color(0xFF6B7280)),
+                  suffixIcon: _searchQuery.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.close_rounded, size: 14, color: Color(0xFF6B7280)),
+                          onPressed: () => _searchController.clear(),
+                          padding: EdgeInsets.zero,
+                        )
+                      : null,
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                ),
+              ),
+            ),
+          ),
+
+        const Divider(color: Color(0xFF212328), height: 1),
+
+        // ── Liste des fichiers modifiés
+        Expanded(
+          child: filtered.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _searchQuery.isNotEmpty ? Icons.search_off_rounded : Icons.check_circle_outline_rounded,
+                          size: 36,
+                          color: const Color(0xFF5E606A),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          _searchQuery.isNotEmpty
+                              ? 'Aucun fichier pour "$_searchQuery"'
+                              : 'Aucun fichier modifié dans cette session',
+                          style: const TextStyle(fontSize: 13, color: AppColors.inkMuted),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  itemCount: filtered.length,
+                  separatorBuilder: (context, index) => const Divider(
+                    color: Color(0xFF1B1D22),
+                    height: 1,
+                    indent: 14,
+                    endIndent: 14,
+                  ),
+                  itemBuilder: (context, index) {
+                    final file = filtered[index];
+                    return _ChangedFileRow(
+                      file: file,
+                      icon: _iconForName(file.fileName),
+                      iconColor: _colorForName(file.fileName),
+                      onTap: () => widget.onOpenFileDiff(file),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ChangedFileRow extends StatelessWidget {
+  final SessionModifiedFile file;
+  final IconData icon;
+  final Color iconColor;
+  final VoidCallback onTap;
+
+  const _ChangedFileRow({
+    required this.file,
+    required this.icon,
+    required this.iconColor,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      hoverColor: const Color(0xFF1E2127),
+      splashColor: AppColors.accentBlue.withValues(alpha: 0.1),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        child: Row(
+          children: [
+              // Icône du langage / fichier
+              Icon(
+                icon,
+                size: 16,
+                color: iconColor,
+              ),
+              const SizedBox(width: 9),
+
+              // Nom du fichier + chemin relatif
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        file.fileName,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFFE4E4E7),
+                          letterSpacing: -0.1,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (file.directoryPath.isNotEmpty) ...[
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          file.directoryPath,
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            color: Color(0xFF6B7280),
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+
+              const SizedBox(width: 10),
+
+              // Badges Additions / Deletions: +X -Y
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (file.additions > 0 || file.deletions == 0)
+                    Text(
+                      '+${file.additions}',
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF22C55E),
+                      ),
+                    ),
+                  if (file.deletions > 0) ...[
+                    const SizedBox(width: 5),
+                    Text(
+                      '-${file.deletions}',
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFFEF4444),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+
+              const SizedBox(width: 6),
+              const Icon(
+                Icons.chevron_right_rounded,
+                size: 15,
+                color: Color(0xFF5E606A),
+              ),
+            ],
+          ),
+        ),
+      );
+  }
+}

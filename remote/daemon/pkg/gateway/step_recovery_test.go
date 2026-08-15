@@ -50,3 +50,26 @@ func TestSessionStreamBuffer_Eviction(t *testing.T) {
 		t.Fatalf("expected exactly 3 events after eviction, got %d", len(missed))
 	}
 }
+
+func TestSessionStreamBuffer_MultiSessionAndClear(t *testing.T) {
+	buf := NewSessionStreamBuffer(10)
+	buf.RecordEvent("casc-A", OutgoingMessage{Type: "stream_delta"})
+	buf.RecordEvent("casc-B", OutgoingMessage{Type: "stream_delta"})
+	buf.RecordEvent("casc-A", OutgoingMessage{Type: "stream_delta"})
+
+	missedA, seqA := buf.GetEventsSince("casc-A", 0)
+	missedB, seqB := buf.GetEventsSince("casc-B", 0)
+
+	if len(missedA) != 2 || seqA != 2 {
+		t.Fatalf("casc-A expected 2 events, got %d (seq %d)", len(missedA), seqA)
+	}
+	if len(missedB) != 1 || seqB != 1 {
+		t.Fatalf("casc-B expected 1 event, got %d (seq %d)", len(missedB), seqB)
+	}
+
+	buf.ClearCascade("casc-A")
+	missedACleared, seqACleared := buf.GetEventsSince("casc-A", 0)
+	if len(missedACleared) != 0 || seqACleared != 0 {
+		t.Fatalf("casc-A expected cleared buffer, got %d events (seq %d)", len(missedACleared), seqACleared)
+	}
+}

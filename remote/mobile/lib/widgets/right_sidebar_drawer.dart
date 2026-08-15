@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/protocol/daemon_api.dart';
 import '../features/scheduled_tasks/scheduled_tasks_screen.dart';
 import '../features/subagents/subagents_drawer.dart';
+import '../features/subagents/subagents_tree_sheet.dart';
 import '../features/mcp/mcp_explorer_screen.dart';
 import 'artifact_viewer_modal.dart';
 import '../theme/app_colors.dart';
@@ -179,17 +180,10 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
                     title: 'Subagents',
                     badgeCount: widget.subagentsCount,
                     onTap: () {
-                      showModalBottomSheet(
-                        context: context,
-                        isScrollControlled: true,
-                        backgroundColor: Colors.transparent,
-                        builder: (ctx) => SizedBox(
-                          height: MediaQuery.of(context).size.height * 0.7,
-                          child: SubagentsDrawer(
-                            subagents: const [],
-                            onKillAgent: (_) {},
-                          ),
-                        ),
+                      SubagentsTreeSheet.show(
+                        context,
+                        api: widget.api,
+                        cascadeId: widget.activeSessionId,
                       );
                     },
                   ),

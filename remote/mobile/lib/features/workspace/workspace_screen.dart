@@ -1,7 +1,10 @@
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../core/protocol/daemon_api.dart';
 import '../../widgets/custom_dropdown_overlay.dart';
 import 'package:mobile/theme/app_colors.dart';
@@ -135,6 +138,20 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           _isLoadingCode = false;
         });
       }
+    }
+  }
+
+  /// Partage / exportation du fichier ouvert via Share.shareXFiles (P7).
+  Future<void> _shareFile() async {
+    if (_selectedFilePath.isEmpty || _isLoadingCode) return;
+    try {
+      final fileName = _selectedFilePath.split('/').last.split('\\').last;
+      final tempDir = await getTemporaryDirectory();
+      final tempFile = File('${tempDir.path}/$fileName');
+      await tempFile.writeAsString(_codeContent);
+      await Share.shareXFiles([XFile(tempFile.path)], text: 'Fichier $fileName depuis Antigravity Workspace');
+    } catch (_) {
+      await Share.share(_codeContent, subject: _selectedFilePath.split('/').last);
     }
   }
 
@@ -472,6 +489,19 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                                         _findController.clear();
                                       }
                                     }),
+                          ),
+                          // Share file (P7)
+                          IconButton(
+                            icon: Icon(
+                              Icons.share_outlined,
+                              size: 16,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                            tooltip: 'Partager le fichier',
+                            onPressed:
+                                _selectedFilePath.isEmpty || _isLoadingCode
+                                    ? null
+                                    : _shareFile,
                           ),
                         ],
                       ),

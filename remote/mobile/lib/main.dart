@@ -296,6 +296,17 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       _api!.attachReconnect(
         _wsClient.reconnectVersion,
         _resyncSessions,
+        onCatchup: () async {
+          if (_activeSessionId.isNotEmpty && _api != null) {
+            final lastStep = _api!.getLastStepIndex(_activeSessionId);
+            try {
+              await _api!.syncSession(
+                cascadeId: _activeSessionId,
+                lastStepIndex: lastStep,
+              );
+            } catch (_) {}
+          }
+        },
       );
       _watchSessionEvents();
       _refreshSessions();
@@ -492,9 +503,114 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
             });
             _refreshContext();
           },
+          onDeleteSession: _deleteSession,
         ),
       ),
     );
+  }
+
+  Future<void> _deleteSession(String id) async {
+    final api = _api;
+    if (api == null) return;
+    try {
+      await api.deleteCascade(id);
+      final wasActive = (id == _activeSessionId);
+      await _refreshSessions();
+      if (wasActive) {
+        final remaining = _sessions.where((s) => s.id != id).toList();
+        if (remaining.isNotEmpty) {
+          if (mounted) {
+            setState(() {
+              _activeSessionId = remaining.first.id;
+              _activeSessionTitle = remaining.first.title;
+            });
+          }
+        } else {
+          if (mounted) {
+            setState(() {
+              _activeSessionId = '';
+              _activeSessionTitle = 'Nouvelle conversation';
+            });
+          }
+        }
+        await _refreshContext();
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Conversation supprimée'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Failed to delete cascade: $e');
+    }
+  }
+
+  Future<void> _renameSession(String id, String newTitle) async {
+    final api = _api;
+    if (api == null) return;
+    try {
+      await api.renameCascade(id, newTitle);
+    } catch (_) {
+      try {
+        await api.sendCommand('/rename $newTitle');
+      } catch (_) {}
+    }
+    if (mounted) {
+      setState(() {
+        _sessions = _sessions
+            .map((s) => s.id == id ? s.copyWith(title: newTitle) : s)
+            .toList();
+        if (_activeSessionId == id) {
+          _activeSessionTitle = newTitle;
+        }
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Conversation renommée'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  Future<void> _exportSession(CascadeSession session) async {
+    final api = _api;
+    if (api == null) return;
+    try {
+      final md = await api.exportMarkdown(session.id);
+      if (md.isNotEmpty) {
+        await Clipboard.setData(ClipboardData(text: md));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Markdown de la conversation copié !'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Aucun contenu à exporter'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Échec de l\'export: $e'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
   }
 
   /// Stub scheduled tasks : la liste est vide tant que le daemon n'expose pas
@@ -610,6 +726,9 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
             }
           } catch (_) {}
         },
+        onDeleteSession: _deleteSession,
+        onRenameSession: _renameSession,
+        onExportSession: _exportSession,
         onConversationHistory: () {
           _showSessionHistory();
         },

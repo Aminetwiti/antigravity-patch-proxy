@@ -13,6 +13,7 @@ class ConversationHistoryScreen extends StatefulWidget {
   final String activeSessionId;
   final Function(String sessionId) onSessionSelected;
   final VoidCallback? onRefresh;
+  final Function(String sessionId)? onDeleteSession;
 
   const ConversationHistoryScreen({
     super.key,
@@ -20,6 +21,7 @@ class ConversationHistoryScreen extends StatefulWidget {
     required this.activeSessionId,
     required this.onSessionSelected,
     this.onRefresh,
+    this.onDeleteSession,
   });
 
   @override
@@ -353,6 +355,9 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
                             widget.onSessionSelected(session.id);
                             Navigator.of(context).pop();
                           },
+                          onDelete: widget.onDeleteSession != null
+                              ? () => widget.onDeleteSession!(session.id)
+                              : null,
                         );
                       },
                     ),
@@ -424,6 +429,7 @@ class _ConversationHistoryRow extends StatelessWidget {
   final bool isRunning;
   final bool showSubtitle;
   final VoidCallback onTap;
+  final VoidCallback? onDelete;
 
   const _ConversationHistoryRow({
     required this.session,
@@ -432,7 +438,116 @@ class _ConversationHistoryRow extends StatelessWidget {
     required this.isRunning,
     this.showSubtitle = true,
     required this.onTap,
+    this.onDelete,
   });
+
+  void _showContextMenu(BuildContext context) {
+    HapticFeedback.mediumImpact();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1B1D22),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF3B3E47),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        session.title,
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.inkPrimary,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(color: Color(0xFF2C2F36)),
+              ListTile(
+                leading: const Icon(Icons.copy_rounded, size: 18, color: AppColors.inkPrimary),
+                title: const Text('Copy Title', style: TextStyle(fontSize: 13, color: AppColors.inkPrimary)),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  Clipboard.setData(ClipboardData(text: session.title));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Titre copié'), duration: Duration(seconds: 2)),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.tag_rounded, size: 18, color: AppColors.inkPrimary),
+                title: const Text('Copy Session ID', style: TextStyle(fontSize: 13, color: AppColors.inkPrimary)),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  Clipboard.setData(ClipboardData(text: session.id));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('ID de session copié'), duration: Duration(seconds: 2)),
+                  );
+                },
+              ),
+              if (onDelete != null)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline_rounded, size: 18, color: AppColors.danger),
+                  title: const Text('Supprimer la conversation', style: TextStyle(fontSize: 13, color: AppColors.danger)),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    _confirmDelete(context);
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _confirmDelete(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1B1D22),
+        title: const Text('Supprimer la conversation ?', style: TextStyle(fontSize: 15, color: AppColors.inkPrimary)),
+        content: Text(
+          'Voulez-vous supprimer définitivement "${session.title}" ?',
+          style: const TextStyle(fontSize: 13, color: AppColors.inkSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Annuler', style: TextStyle(color: AppColors.inkMuted)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              onDelete?.call();
+            },
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -440,6 +555,8 @@ class _ConversationHistoryRow extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
+        onLongPress: () => _showContextMenu(context),
+        onSecondaryTap: () => _showContextMenu(context),
         borderRadius: BorderRadius.circular(AppRadius.md),
         hoverColor: const Color(0xFF1E2127),
         splashColor: AppColors.accentBlue.withValues(alpha: 0.1),
@@ -495,12 +612,14 @@ class _ConversationHistoryRow extends StatelessWidget {
 
               // Trailing Status: Active blue dot, Spinner, or relative time
               if (isRunning)
-                const SizedBox(
-                  width: 14,
-                  height: 14,
+                SizedBox(
+                  width: 13,
+                  height: 13,
                   child: CircularProgressIndicator(
                     strokeWidth: 1.5,
-                    color: AppColors.accentBlue,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      isActive ? AppColors.accentBlue : const Color(0xFF9E9FA9),
+                    ),
                   ),
                 )
               else if (isActive)

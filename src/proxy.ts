@@ -1026,11 +1026,24 @@ function handleCustomModelRequest(
 
     try {
       const allModels = loadCustomModels();
+      // If a specific fallback model is configured on the model, prioritize it!
+      let orderedModels = allModels;
+      if (model.fallbackModel) {
+        const preferred = allModels.filter(m =>
+          m.name === model.fallbackModel ||
+          m.displayName === model.fallbackModel ||
+          m.externalModelName === model.fallbackModel ||
+          m.name.endsWith(`/${model.fallbackModel}`)
+        );
+        const rest = allModels.filter(m => !preferred.includes(m));
+        orderedModels = [...preferred, ...rest];
+      }
+
       // ponytail: skip same-provider on rate_limit — shared quota, fallback is a no-op
       const sameProviderRateLimit = diagnostic.errorType === 'rate_limit'
         ? new URL(model.apiUrl).hostname
         : null;
-      for (const m of allModels) {
+      for (const m of orderedModels) {
         if (m.name !== model.name && m.apiKey && !m.apiKey.startsWith('fallback:')) {
           if (sameProviderRateLimit && new URL(m.apiUrl).hostname === sameProviderRateLimit) {
             log.warn(`[Proxy] Auto-fallback: skipping ${m.displayName || m.name} (same provider ${sameProviderRateLimit}, shared quota)`);

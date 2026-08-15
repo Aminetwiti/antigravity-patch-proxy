@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/core/protocol/messages.dart';
 import 'package:mobile/features/sessions/display_options.dart';
+import 'package:mobile/features/sessions/sessions_list.dart';
 
 void main() {
   group('Display Options Helpers', () {
@@ -169,6 +170,55 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(filterToggled, isTrue);
+    });
+
+    testWidgets('renders LeftSidebarDrawer with real-time spinner on running session', (tester) async {
+      const runningSession = CascadeSession(
+        id: 's_run',
+        workspacePath: '/ws/proj1',
+        title: 'Streaming Session',
+        status: 'CASCADE_STATUS_RUNNING',
+        time: 'Just now',
+      );
+      const idleSession = CascadeSession(
+        id: 's_idle',
+        workspacePath: '/ws/proj1',
+        title: 'Idle Session',
+        status: 'CASCADE_STATUS_READY',
+        time: '2h',
+      );
+
+      expect(runningSession.isRunning, isTrue);
+      expect(idleSession.isRunning, isFalse);
+
+      final mutated = idleSession.copyWith(status: 'CASCADE_STATUS_RUNNING');
+      expect(mutated.isRunning, isTrue);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            drawer: LeftSidebarDrawer(
+              sessions: const [runningSession, idleSession],
+              activeSessionId: 's_run',
+              isConnected: true,
+              onToggleConnection: () {},
+              onSessionSelected: (_) {},
+              onNewConversation: () {},
+            ),
+            body: const Center(child: Text('Content')),
+          ),
+        ),
+      );
+
+      // Open Drawer
+      final ScaffoldState state = tester.firstState(find.byType(Scaffold));
+      state.openDrawer();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      // Verify title & running spinner
+      expect(find.text('Streaming Session'), findsOneWidget);
+      expect(find.text('Idle Session'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsWidgets);
     });
   });
 }

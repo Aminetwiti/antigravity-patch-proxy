@@ -845,6 +845,57 @@ func TestWebSocketApprovalExpiry(t *testing.T) {
 			t.Fatalf("SubmitToolApproval appelé %d fois après expiration, attendu 0 (garde de fraîcheur)", backend.submitted)
 		}
 	})
+
+	t.Run("stale question response après expiration => refus + aucun RPC", func(t *testing.T) {
+		backend := &fakeApprovalRPC{}
+		backend.streamDeltas = []string{`{"ask_question":"Voulez-vous continuer ?","step_index":1,"trajectory_id":"123e4567-e89b-12d3-a456-426614174000"}`}
+		server := NewServer(backend, "")
+		server.SetApprovalTimeout(60 * time.Millisecond)
+		mux := http.NewServeMux()
+		mux.HandleFunc("/ws", server.HandleWebSocket)
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+		defer client.conn.Close()
+
+		client.send(t, map[string]string{
+			"type": "send_prompt", "requestId": "r9",
+			"cascadeId": "casc-1", "prompt": "question ?",
+		})
+		for {
+			msg := client.recv(t)
+			if msg["type"] == "stream_end" {
+				break
+			}
+		}
+
+		// Le timer expire → approval_expired (auto-refus parti).
+		for {
+			msg := client.recv(t)
+			if msg["type"] == "approval_expired" {
+				break
+			}
+		}
+		backend.submitted = 0
+
+		// Réponse tardive : même protection que submit_approval — la question
+		// a été auto-refusée, un « Oui » arrivé après coup serait un faux
+		// consentement. Refus sans contact RPC.
+		if err := client.conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"submit_question_response","requestId":"r12","cascadeId":"casc-1","trajectoryId":"123e4567-e89b-12d3-a456-426614174000","stepIndex":1,"selectedAnswers":["Oui"]}`)); err != nil {
+			t.Fatalf("envoi submit_question_response: %v", err)
+		}
+		got := client.recv(t)
+		if got["type"] != "response" || got["error"] == nil {
+			t.Fatalf("Attendu error 'approval expired', reçu %v", got)
+		}
+		if errStr, _ := got["error"].(string); !strings.Contains(errStr, "expired") {
+			t.Fatalf("Erreur inattendue: %v", errStr)
+		}
+		if backend.submitted != 0 {
+			t.Fatalf("SubmitToolApproval appelé %d fois après expiration, attendu 0 (garde de fraîcheur)", backend.submitted)
+		}
+	})
 }
 
 type submitApprovalCall struct {

@@ -545,6 +545,79 @@ void main() {
       await controller.close();
       api.dispose();
     });
+
+    test('syncSession tracks step index and handles sync_catchup events', () async {
+      final outgoing = <Map<String, dynamic>>[];
+      final controller = StreamController<dynamic>();
+      final api = DaemonApi(
+        incoming: controller.stream,
+        send: (data) => outgoing.add(data as Map<String, dynamic>),
+      );
+
+      final future = api.syncSession(cascadeId: 'casc-catchup', lastStepIndex: 2);
+      await Future<void>.delayed(Duration.zero);
+      expect(outgoing.first['type'], 'sync_session');
+      expect(outgoing.first['cascadeId'], 'casc-catchup');
+      expect(outgoing.first['lastStepIndex'], 2);
+      final requestId = outgoing.first['requestId'] as String;
+
+      controller.add(
+        jsonEncode({
+          'type': 'sync_catchup',
+          'requestId': requestId,
+          'data': {
+            'cascadeId': 'casc-catchup',
+            'currentStepIndex': 5,
+            'missedEvents': [
+              {
+                'type': 'stream_delta',
+                'requestId': 'r-missed',
+                'data': {
+                  'events': [
+                    {'kind': 'text', 'delta': 'recovered text'},
+                  ],
+                },
+              },
+            ],
+          },
+        }),
+      );
+
+      final res = await future;
+      expect(res['currentStepIndex'], 5);
+      expect((res['missedEvents'] as List), hasLength(1));
+      expect(api.getLastStepIndex('casc-catchup'), 5);
+
+      await controller.close();
+      api.dispose();
+    });
+
+    test('attachReconnect triggers onCatchup on reconnect version tick', () async {
+      final controller = StreamController<dynamic>();
+      final outbox = OutboxQueue();
+      final api = DaemonApi(
+        incoming: controller.stream,
+        send: (_) {},
+        outbox: outbox,
+      );
+      final version = ValueNotifier<int>(0);
+
+      var catchupInvoked = false;
+      api.attachReconnect(
+        version,
+        () async => const {'ok': true},
+        onCatchup: () async {
+          catchupInvoked = true;
+        },
+      );
+
+      version.value = 1;
+      await Future<void>.delayed(Duration.zero);
+      expect(catchupInvoked, isTrue);
+
+      await controller.close();
+      api.dispose();
+    });
   });
 }
 

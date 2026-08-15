@@ -224,6 +224,14 @@ void main() {
               },
             }));
           }
+          if (msg['type'] == 'get_user_status') {
+            // Évite le timer de timeout de 5 s (getUserStatus n'est pas testé ici).
+            ctrl.add(jsonEncode({
+              'type': 'response',
+              'requestId': msg['requestId'],
+              'data': {'user': {'plan': 'free'}},
+            }));
+          }
         },
       );
       addTearDown(ctrl.close);

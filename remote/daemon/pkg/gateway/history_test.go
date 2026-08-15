@@ -176,3 +176,11 @@ func TestParseTranscriptLine(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractSubagentsEmpty(t *testing.T) {
+	subs := ExtractSubagents("non-existent-session-id")
+	if len(subs) != 0 {
+		t.Fatalf("expected empty slice for non-existent session, got %d", len(subs))
+	}
+}
+

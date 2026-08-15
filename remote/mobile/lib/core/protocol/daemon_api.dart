@@ -168,15 +168,23 @@ class DaemonApi {
   // PUIS on re-synchronise toujours (même file vide : les sessions peuvent
   // avoir changé pendant la coupure).
   final OutboxQueue? _outbox;
+  OutboxQueue? get outbox => _outbox;
   OutboxReplayer? _replayer;
   int _lastReconnectVersion = 0;
   ValueListenable<int>? _reconnectVersion;
   VoidCallback? _reconnectListener;
+  final Map<String, int> _lastStepIndices = {};
+
+  int getLastStepIndex(String cascadeId) => _lastStepIndices[cascadeId] ?? 0;
+  void setLastStepIndex(String cascadeId, int index) {
+    _lastStepIndices[cascadeId] = index;
+  }
 
   void attachReconnect(
     ValueListenable<int> version,
-    Future<Map<String, dynamic>> Function() resync,
-  ) {
+    Future<Map<String, dynamic>> Function() resync, {
+    Future<void> Function()? onCatchup,
+  }) {
     _reconnectVersion?.removeListener(_reconnectListener!);
     _reconnectVersion = version;
     final outbox = _outbox;
@@ -189,7 +197,15 @@ class DaemonApi {
         final clean = Map<String, dynamic>.from(msg)..remove('queuedAt');
         _send(clean);
       },
-      resync: resync,
+      resync: () async {
+        final res = await resync();
+        if (onCatchup != null) {
+          try {
+            await onCatchup();
+          } catch (_) {}
+        }
+        return res;
+      },
     );
     _reconnectListener = () {
       final v = version.value;
@@ -302,6 +318,12 @@ class DaemonApi {
 
   Future<Map<String, dynamic>> createCascade(String workspacePath) =>
       rpc('create_cascade', {'workspacePath': workspacePath});
+
+  Future<Map<String, dynamic>> deleteCascade(String cascadeId) =>
+      rpc('delete_cascade', {'cascadeId': cascadeId, 'confirm': 'true'});
+
+  Future<Map<String, dynamic>> renameCascade(String cascadeId, String title) =>
+      rpc('rename_cascade', {'cascadeId': cascadeId, 'title': title});
 
   Future<Map<String, dynamic>> listFiles(String workspacePath) =>
       rpc('list_files', {'workspacePath': workspacePath});
@@ -698,6 +720,13 @@ class DaemonApi {
     return res['status'] == 'skipped';
   }
 
+  /// Récupère l'arbre des sous-agents d'une session (DAG).
+  Future<List<Map<String, dynamic>>> getSubagents(String cascadeId) async {
+    final res = await rpc('get_subagents', {'cascadeId': cascadeId});
+    final list = res['subagents'] as List? ?? [];
+    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
   /// Récupère le résumé des quotas utilisateur réels du compte Antigravity.
   Future<Map<String, dynamic>> getUserQuotaSummary() async {
     return await rpc('get_quota_summary', {});
@@ -778,6 +807,11 @@ class DaemonApi {
     final error = msg['error'] as String?;
 
     if (type == 'stream_start' || type == 'stream_delta') {
+      final stepIdx = (msg['data'] is Map ? (msg['data'] as Map)['stepIndex'] : null) as num?;
+      final cascadeId = (msg['data'] is Map ? (msg['data'] as Map)['cascadeId'] : null) as String? ?? msg['cascadeId'] as String?;
+      if (stepIdx != null && cascadeId != null && cascadeId.isNotEmpty) {
+        _lastStepIndices[cascadeId] = stepIdx.toInt();
+      }
       final controller = _streams[requestId];
       if (controller == null) {
         // Stream déclenché par une AUTRE surface (PC ou autre téléphone) :
@@ -787,14 +821,22 @@ class DaemonApi {
         return;
       }
       controller.add(msg);
-      _emitBatched(msg);
+      _emitBatched({...msg, 'broadcast': true});
       return;
+    }
+
+    if (type == 'sync_catchup') {
+      final curIdx = (data['currentStepIndex'] ?? (msg['data'] is Map ? (msg['data'] as Map)['currentStepIndex'] : null)) as num?;
+      final cascadeId = (data['cascadeId'] ?? (msg['data'] is Map ? (msg['data'] as Map)['cascadeId'] : null)) as String?;
+      if (curIdx != null && cascadeId != null && cascadeId.isNotEmpty) {
+        _lastStepIndices[cascadeId] = curIdx.toInt();
+      }
     }
 
     // Sortie de terminal PTY poussée par le daemon (P3) : pas de requestId
     // local — les terminaux sont des sessions poussées, corrélées par id.
     if (type == 'terminal_output') {
-      _emitBatched(msg);
+      _emitBatched({...msg, 'broadcast': true});
       return;
     }
 
