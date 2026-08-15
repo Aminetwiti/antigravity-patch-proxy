@@ -1209,9 +1209,15 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                         decoration: BoxDecoration(
-                          color: AppColors.surfaceRaised,
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? AppColors.surfaceRaised
+                              : Theme.of(context).colorScheme.surfaceContainerHighest,
                           borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: AppColors.borderSubtle),
+                          border: Border.all(
+                            color: Theme.of(context).brightness == Brightness.dark
+                                ? AppColors.borderSubtle
+                                : Theme.of(context).colorScheme.outlineVariant,
+                          ),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -1226,16 +1232,20 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                                 ),
                               )
                             else
-                              const Icon(Icons.arrow_upward_rounded, size: 13, color: AppColors.accentBlue),
+                              Icon(
+                                Icons.arrow_upward_rounded,
+                                size: 13,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
                             const SizedBox(width: 6),
                             Text(
                               _isLoadingMoreOlder
                                   ? 'Chargement des messages précédents...'
                                   : '↑ Afficher les messages précédents ($hiddenCount restants)',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 11.5,
                                 fontWeight: FontWeight.w500,
-                                color: AppColors.inkSecondary,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
                               ),
                             ),
                           ],
@@ -1542,8 +1552,14 @@ class _MessageBubble extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
+    final cleanThought = message.thought != null
+        ? message.thought!.replaceAll(RegExp(r'(\*\*|\*|`|#)'), '').trim()
+        : '';
+
+    final isCompact = !hasContent && !isError && !message.isStreaming;
+
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
+      margin: EdgeInsets.only(bottom: isCompact ? 6 : 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1564,9 +1580,9 @@ class _MessageBubble extends StatelessWidget {
                         size: 13, color: scheme.onSurfaceVariant),
                     const SizedBox(width: 6),
                     ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 240),
+                      constraints: const BoxConstraints(maxWidth: 260),
                       child: Text(
-                        message.thought!,
+                        isThoughtExpanded ? message.thought! : cleanThought,
                         key: Key('thought-${message.id}'),
                         maxLines: isThoughtExpanded ? null : 1,
                         overflow: isThoughtExpanded
@@ -1662,9 +1678,10 @@ class _MessageBubble extends StatelessWidget {
                 onViewPlan: onViewPlan ?? () {},
               ),
           ],
-          const SizedBox(height: 8),
-          Row(
-            children: [
+          if (!isCompact) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
               Text(
                 message.timestamp,
                 style: TextStyle(fontSize: 10.5, color: scheme.onSurfaceVariant),
@@ -1767,8 +1784,9 @@ class _MessageBubble extends StatelessWidget {
             ],
           ),
         ],
-      ),
-    );
+      ],
+    ),
+  );
   }
 }
 

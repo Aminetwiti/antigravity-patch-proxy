@@ -170,7 +170,6 @@ List<CascadeSession> sortSessions({
       copy.sort((a, b) => a.id.compareTo(b.id));
       break;
     case SessionSortBy.lastUpdated:
-    default:
       // Preserves original dynamic order
       break;
   }

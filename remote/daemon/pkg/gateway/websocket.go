@@ -213,19 +213,19 @@ type Server struct {
 
 // ScheduledTask représente une tâche planifiée / cron job gérée par le daemon.
 type ScheduledTask struct {
-	ID             string               `json:"id"`
-	Name           string               `json:"name"`
-	Prompt         string               `json:"prompt"`
-	WorkspaceName  string               `json:"workspaceName"`
-	CronExpression string               `json:"cronExpression,omitempty"`
-	DurationSeconds int                 `json:"durationSeconds,omitempty"`
-	IsDaemon       bool                 `json:"isDaemon"`
-	IterationsRun  int                  `json:"iterationsRun"`
-	NextRunAt      string               `json:"nextRunAt,omitempty"`
-	IsEnabled      bool                 `json:"isEnabled"`
-	Status         string               `json:"status"`
-	Uptime         string               `json:"uptime"`
-	Events         []ScheduledTaskEvent `json:"events"`
+	ID              string               `json:"id"`
+	Name            string               `json:"name"`
+	Prompt          string               `json:"prompt"`
+	WorkspaceName   string               `json:"workspaceName"`
+	CronExpression  string               `json:"cronExpression,omitempty"`
+	DurationSeconds int                  `json:"durationSeconds,omitempty"`
+	IsDaemon        bool                 `json:"isDaemon"`
+	IterationsRun   int                  `json:"iterationsRun"`
+	NextRunAt       string               `json:"nextRunAt,omitempty"`
+	IsEnabled       bool                 `json:"isEnabled"`
+	Status          string               `json:"status"`
+	Uptime          string               `json:"uptime"`
+	Events          []ScheduledTaskEvent `json:"events"`
 }
 
 type ScheduledTaskEvent struct {
@@ -644,22 +644,22 @@ func (s *Server) broadcast(msg OutgoingMessage) {
 }
 
 type IncomingMessage struct {
-	Type            string                 `json:"type"`
-	RequestID       string                 `json:"requestId"`
-	WorkspaceURI    string                 `json:"workspaceUri"`
-	WorkspacePath   string                 `json:"workspacePath,omitempty"`
-	CascadeID       string                 `json:"cascadeId,omitempty"`
-	CallID          string                 `json:"callId,omitempty"`
-	TrajectoryID    string                 `json:"trajectoryID,omitempty"`
-	StepIndex       int64                  `json:"stepIndex,omitempty"`
-	ApprovalType    string                 `json:"approvalType,omitempty"`
-	Decision        string                 `json:"decision,omitempty"`
-	Scope           string                 `json:"scope,omitempty"`
+	Type          string `json:"type"`
+	RequestID     string `json:"requestId"`
+	WorkspaceURI  string `json:"workspaceUri"`
+	WorkspacePath string `json:"workspacePath,omitempty"`
+	CascadeID     string `json:"cascadeId,omitempty"`
+	CallID        string `json:"callId,omitempty"`
+	TrajectoryID  string `json:"trajectoryID,omitempty"`
+	StepIndex     int64  `json:"stepIndex,omitempty"`
+	ApprovalType  string `json:"approvalType,omitempty"`
+	Decision      string `json:"decision,omitempty"`
+	Scope         string `json:"scope,omitempty"`
 	// DenyReason : instruction libre envoyée à l'agent quand l'utilisateur
 	// refuse une approbation run_command (ex. « fais un revert d'abord »).
 	// Transmise dans le champ 3 (submitted) du CascadeRunCommandInteraction.
 	// Vide → comportement historique (deny simple).
-	DenyReason string `json:"denyReason,omitempty"`
+	DenyReason      string                 `json:"denyReason,omitempty"`
 	Prompt          string                 `json:"prompt,omitempty"`
 	FilePath        string                 `json:"filePath,omitempty"`
 	StreamCount     int                    `json:"streamCount,omitempty"`
@@ -686,9 +686,9 @@ type IncomingMessage struct {
 	// Content : contenu du fichier pour write_file (encodage base64 JSON → bytes).
 	Content string `json:"content,omitempty"`
 	// Overwrite : autorise l'écrasement pour write_file (sinon erreur si existe).
-	Overwrite       bool                   `json:"overwrite,omitempty"`
-	ConversationID  string                 `json:"conversationId,omitempty"`
-	StepIndices     []int64                `json:"stepIndices,omitempty"`
+	Overwrite      bool    `json:"overwrite,omitempty"`
+	ConversationID string  `json:"conversationId,omitempty"`
+	StepIndices    []int64 `json:"stepIndices,omitempty"`
 	// Champs MCP (call_mcp_tool / connect_mcp_server / refresh_mcp_oauth_token) :
 	// relayés au proxy Antigravity desktop (127.0.0.1:50999).
 	ServerName string                 `json:"serverName,omitempty"`
@@ -1119,7 +1119,7 @@ func turnDiffOut(raw []byte) interface{} {
 
 	fields := connectrpc.DecodeFields(payload)
 	out := map[string]interface{}{
-		"fileDiffs":     []interface{}{},
+		"fileDiffs":      []interface{}{},
 		"totalAdditions": 0,
 		"totalDeletions": 0,
 	}
@@ -1305,7 +1305,7 @@ func sessionsOut(raw []byte) interface{} {
 			"sessions": local,
 		}
 	}
-	
+
 	items := make([]map[string]interface{}, 0, len(summaries))
 	for _, s := range summaries {
 		if s.Archived || s.Killed || s.Source == 16 {
@@ -1398,14 +1398,14 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		defer ticker.Stop()
 		for {
 			select {
-		case <-ticker.C:
-			mu := s.writeLock(conn)
-			mu.Lock()
-			err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second))
-			mu.Unlock()
-			if err != nil {
-				return
-			}
+			case <-ticker.C:
+				mu := s.writeLock(conn)
+				mu.Lock()
+				err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second))
+				mu.Unlock()
+				if err != nil {
+					return
+				}
 			}
 		}
 	}()
@@ -1464,7 +1464,20 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		c := make(chan struct{})
 		go func() {
 			select {
-			case <-ctx.Done():
+			case <-time.After(15 * time.Second):
+				// ponytail: time.After au lieu de ctx.Done() — si le handler
+				// répond vite, close(c) puis cancel() s'exécutent presque en
+				// même temps et le select verrait DEUX canaux prêts (choix
+				// arbitraire → 'rpc timeout' parasite sur un handler sain).
+				// time.After n'est prêt qu'après 15s réelles : aucun race.
+				// Le double-select garde le cas où le handler termine pendant
+				// l'expiration (deadline et close(c) simultanés) : handler
+				// fini (c fermé) → on supprime l'erreur parasite.
+				select {
+				case <-c:
+					return
+				default:
+				}
 				s.writeJSON(conn, OutgoingMessage{Type: "error", RequestID: msg.RequestID, Error: "rpc timeout after 15s"})
 			case <-c:
 			}
@@ -1585,7 +1598,6 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		projects := ListOfficialProjects()
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"projects": projects, "sessions": local}})
 		return
-
 
 	case "get_session_history":
 		if msg.CascadeID == "" {
@@ -2001,7 +2013,6 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: stats})
 		return
-
 
 	case "upload_media", "upload_image":
 		cascadeID := msg.CascadeID
@@ -2902,10 +2913,10 @@ type terminalSession struct {
 // terminalPtyManager possède toutes les sessions terminal du daemon.
 // La clé id est un identifiant opaque renvoyé au mobile.
 type terminalPtyManager struct {
-	mu         sync.Mutex
-	sessions   map[string]*terminalSession
-	nextID     int
-	shellPath  string
+	mu        sync.Mutex
+	sessions  map[string]*terminalSession
+	nextID    int
+	shellPath string
 	// onBroadcast : hook vers le Server (s.broadcast) pour diffuser la
 	// sortie terminal à tous les clients connectés.
 	onBroadcast func(OutgoingMessage)

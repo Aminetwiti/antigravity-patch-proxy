@@ -30,12 +30,18 @@ class SessionTopTabs extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
       height: 38,
-      decoration: const BoxDecoration(
-        color: AppColors.surfaceRaised,
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
         border: Border(
-          bottom: BorderSide(color: AppColors.borderSubtle, width: 1),
+          bottom: BorderSide(
+            color: isDark ? AppColors.borderSubtle : scheme.outlineVariant,
+            width: 1,
+          ),
         ),
       ),
       child: ListView(
@@ -54,7 +60,7 @@ class SessionTopTabs extends StatelessWidget {
             label: 'Overview',
             isSelected: activeTab == SessionTabType.overview,
             badge: runningTasksCount > 0 ? '$runningTasksCount active' : null,
-            badgeColor: AppColors.accentBlue,
+            badgeColor: isDark ? AppColors.accentBlue : scheme.primary,
             onTap: () => onTabChanged(SessionTabType.overview),
           ),
           if (filesChangedCount > 0) ...[
@@ -63,7 +69,7 @@ class SessionTopTabs extends StatelessWidget {
               icon: Icons.rate_review_outlined,
               label: 'Review',
               badge: '+$filesChangedCount',
-              badgeColor: AppColors.positive,
+              badgeColor: isDark ? AppColors.positive : const Color(0xFF1A7F37),
               isSelected: activeTab == SessionTabType.review,
               onTap: () => onTabChanged(SessionTabType.review),
             ),
@@ -74,7 +80,7 @@ class SessionTopTabs extends StatelessWidget {
               icon: Icons.description_outlined,
               label: 'Plan',
               badge: 'Proceed ⌘↵',
-              badgeColor: AppColors.accentBlue,
+              badgeColor: isDark ? AppColors.accentBlue : scheme.primary,
               isSelected: activeTab == SessionTabType.plan,
               onTap: () => onTabChanged(SessionTabType.plan),
             ),
@@ -120,10 +126,33 @@ class _TabPillState extends State<_TabPill> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final isSelected = widget.isSelected;
-    final fgColor = isSelected
-        ? AppColors.inkPrimary
-        : (_hovered ? AppColors.inkSecondary : AppColors.inkMuted);
+
+    final Color fgColor;
+    final Color bgColor;
+    final Color borderColor;
+
+    if (isDark) {
+      fgColor = isSelected
+          ? AppColors.inkPrimary
+          : (_hovered ? AppColors.inkSecondary : AppColors.inkMuted);
+      bgColor = isSelected
+          ? AppColors.listSelectionBg
+          : (_hovered ? AppColors.surfaceHover.withValues(alpha: 0.5) : Colors.transparent);
+      borderColor = isSelected ? AppColors.borderStrong : Colors.transparent;
+    } else {
+      fgColor = isSelected
+          ? scheme.primary
+          : (_hovered ? scheme.onSurface : scheme.onSurfaceVariant);
+      bgColor = isSelected
+          ? scheme.primary.withValues(alpha: 0.12)
+          : (_hovered ? scheme.surfaceContainerHighest : Colors.transparent);
+      borderColor = isSelected
+          ? scheme.primary.withValues(alpha: 0.35)
+          : Colors.transparent;
+    }
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
@@ -138,14 +167,10 @@ class _TabPillState extends State<_TabPill> {
           curve: AppMotion.easeOut,
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           decoration: BoxDecoration(
-            color: isSelected
-                ? AppColors.listSelectionBg
-                : (_hovered
-                    ? AppColors.surfaceHover.withValues(alpha: 0.5)
-                    : Colors.transparent),
+            color: bgColor,
             borderRadius: BorderRadius.circular(AppRadius.md),
             border: Border.all(
-              color: isSelected ? AppColors.borderStrong : Colors.transparent,
+              color: borderColor,
               width: 1,
             ),
           ),
@@ -158,7 +183,7 @@ class _TabPillState extends State<_TabPill> {
                 widget.label,
                 style: TextStyle(
                   fontSize: 12,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
                   color: fgColor,
                   letterSpacing: -0.1,
                 ),
@@ -168,12 +193,12 @@ class _TabPillState extends State<_TabPill> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                   decoration: BoxDecoration(
-                    color: (widget.badgeColor ?? AppColors.accentBlue)
-                        .withValues(alpha: 0.2),
+                    color: (widget.badgeColor ?? (isDark ? AppColors.accentBlue : scheme.primary))
+                        .withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(4),
                     border: Border.all(
-                      color: (widget.badgeColor ?? AppColors.accentBlue)
-                          .withValues(alpha: 0.4),
+                      color: (widget.badgeColor ?? (isDark ? AppColors.accentBlue : scheme.primary))
+                          .withValues(alpha: 0.35),
                       width: 0.5,
                     ),
                   ),
@@ -182,7 +207,7 @@ class _TabPillState extends State<_TabPill> {
                     style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.w600,
-                      color: widget.badgeColor ?? AppColors.accentBlue,
+                      color: widget.badgeColor ?? (isDark ? AppColors.accentBlue : scheme.primary),
                     ),
                   ),
                 ),

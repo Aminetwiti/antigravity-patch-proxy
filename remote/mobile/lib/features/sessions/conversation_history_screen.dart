@@ -87,6 +87,19 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
       groupBy: _groupBy,
     );
 
+    // Flatten for list rendering with headers
+    final List<dynamic> displayItems = [];
+    if (_groupBy == SessionGroupBy.none) {
+      displayItems.addAll(filtered);
+    } else {
+      for (final entry in groupedSessions.entries) {
+        if (entry.value.isNotEmpty) {
+          displayItems.add(entry.key);
+          displayItems.addAll(entry.value);
+        }
+      }
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFF0F1012),
       appBar: AppBar(
@@ -295,19 +308,36 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
 
             // ── Session List ────────────────────────────────────────────────
             Expanded(
-              child: filtered.isEmpty
+              child: displayItems.isEmpty
                   ? _buildEmptyState()
-                  : ListView.separated(
+                  : ListView.builder(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                      itemCount: filtered.length,
-                      separatorBuilder: (context, index) => const Divider(
-                        height: 1,
-                        color: Color(0xFF1B1D22),
-                        indent: 12,
-                        endIndent: 12,
-                      ),
+                      itemCount: displayItems.length,
                       itemBuilder: (context, index) {
-                        final session = filtered[index];
+                        final item = displayItems[index];
+
+                        if (item is String) {
+                          return Padding(
+                            padding: const EdgeInsets.fromLTRB(8, 14, 8, 6),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.folder_outlined, size: 13, color: AppColors.inkMuted),
+                                const SizedBox(width: 6),
+                                Text(
+                                  item,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.inkMuted,
+                                    letterSpacing: 0.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+
+                        final session = item as CascadeSession;
                         final isActive = session.id == widget.activeSessionId;
                         final isRunning = session.isRunning;
                         final wsName = WorkspacePath.displayName(session.workspacePath);

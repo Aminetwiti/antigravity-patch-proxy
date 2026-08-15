@@ -160,6 +160,15 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(groupBy, equals(SessionGroupBy.workspace));
+
+      // Open popup menu again and tap Filter
+      await tester.tap(find.byIcon(Icons.tune_rounded));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Filter'));
+      await tester.pumpAndSettle();
+
+      expect(filterToggled, isTrue);
     });
   });
 }
