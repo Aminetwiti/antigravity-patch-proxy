@@ -22,15 +22,15 @@ class ApprovalNotifier {
   /// `approval:<cascadeId>` ou `task:<cascadeId>` — l'UI écoute ce stream pour
   /// naviguer vers la session concernée. Broadcast : plusieurs écrans peuvent
   /// écouter sans conflit.
-  final StreamController<Map<String, String>> _tapController =
+  final StreamController<Map<String, dynamic>> _tapController =
       StreamController.broadcast();
-  Stream<Map<String, String>> get taps => _tapController.stream;
+  Stream<Map<String, dynamic>> get taps => _tapController.stream;
 
   /// Sink de simulation (tests uniquement) : émet un tap comme si le plugin
   /// avait décodé le payload d'une notification. ponytail: plafond = les
   /// tests n'exercent pas le plugin natif ; upgrade = fake platform.
   @visibleForTesting
-  StreamSink<Map<String, String>> get tapsSink => _tapController.sink;
+  StreamSink<Map<String, dynamic>> get tapsSink => _tapController.sink;
 
   /// null avant init() réussi ou quand le registrant de plugin est absent
   /// (flutter test headless) : les méthodes notify* ignorent alors l'appel.
@@ -45,6 +45,12 @@ class ApprovalNotifier {
   /// de re-sonner quand le broadcast stream_end arrive sur plusieurs surfaces.
   String? _lastTaskDoneCascade;
   DateTime? _lastTaskDoneAt;
+
+  /// Auto-annulation différée des notifications de tâche (C7/UX) : on garde
+  /// une référence pour pouvoir l'annuler avant son déclenchement quand
+  /// l'utilisateur répond (côté mobile) à une notification d'approbation
+  /// « Action requise » via une action inline.
+  Timer? _autoCancelTimer;
 
   bool _initialized = false;
 
@@ -118,6 +124,11 @@ class ApprovalNotifier {
   /// Décode le payload et publie la cible de navigation sur [taps].
   /// Hors try/catch : tout échec (plugin indisponible en test headless) est
   /// déjà avalé par init() — ici on ne fait que notifier les écouteurs.
+  ///
+  /// Phase 3 : les actions inline Android (`allow`/`deny`) arrivent ici aussi
+  /// (response.actionId != null). On publie `action` dans le payload — l'UI
+  /// existante l'ignore (deep-link tap) ; la nouvelle écoute actionnelle
+  /// (chat_stream) la consomme pour soumettre directement.
   void _handleTap(NotificationResponse response) {
     final payload = response.payload ?? '';
     if (!payload.contains(':')) return;
@@ -125,8 +136,18 @@ class ApprovalNotifier {
     final cascadeId = payload.substring(payload.indexOf(':') + 1);
     if (cascadeId.isEmpty || cascadeId == 'null') return;
     if (kind != 'approval' && kind != 'task') return;
-    _tapController.add({'kind': kind, 'cascadeId': cascadeId});
-    debugPrint('[Notifier] tap -> $kind $cascadeId');
+    final action = response.actionId;
+    if (action == null) {
+      _tapController.add({'kind': kind, 'cascadeId': cascadeId});
+      debugPrint('[Notifier] tap -> $kind $cascadeId');
+    } else {
+      _tapController.add({
+        'kind': kind,
+        'cascadeId': cascadeId,
+        'action': action,
+      });
+      debugPrint('[Notifier] action -> $kind $cascadeId $action');
+    }
   }
 
   /// Notifie une demande d'approbation — dédupliquée par [callId] avec un
@@ -162,7 +183,12 @@ class ApprovalNotifier {
       await androidImpl.requestFullScreenIntentPermission();
     }
 
-    const details = NotificationDetails(
+    // Phase 3 — actions inline : « Autoriser / Refuser » directement dans la
+    // notification (Android). L'utilisateur n'a pas besoin d'ouvrir l'app :
+    // l'action renvoie actionId=allow|deny dans le même callback que le tap.
+    // Le payload reste `approval:<cascadeId>` — l'UI re-fetch le contexte
+    // (get_pending_approval) avant de soumettre, comme pour le deep-link.
+    final details = NotificationDetails(
       android: AndroidNotificationDetails(
         'approval_required',
         'Approbations',
@@ -178,8 +204,12 @@ class ApprovalNotifier {
         // La notification « vole » l'écran — l'utilisateur approuve ou refuse
         // directement, sans devoir déverrouiller ni ouvrir l'app.
         fullScreenIntent: true,
+        actions: <AndroidNotificationAction>[
+          const AndroidNotificationAction('allow', 'Autoriser'),
+          const AndroidNotificationAction('deny', 'Refuser'),
+        ],
       ),
-      iOS: DarwinNotificationDetails(
+      iOS: const DarwinNotificationDetails(
         presentAlert: true,
         presentBadge: true,
         presentSound: true,
@@ -187,7 +217,12 @@ class ApprovalNotifier {
     );
 
     await plugin.show(
-      callId.hashCode,
+      // Phase 3 — dédup par cascade : deux demandes successives dans la même
+      // cascade remplacent la notification précédente au lieu d'empiler.
+      // cancelApproval(callId) reste cohérent : il calcule callId.hashCode,
+      // identique au tag de la dernière demande de cette cascade (un callId
+      // n'est jamais réutilisé).
+      cascadeId.hashCode,
       'Approbation requise — $toolName',
       command.length > 120 ? '${command.substring(0, 120)}…' : command,
       details,
@@ -286,8 +321,12 @@ class ApprovalNotifier {
     );
     debugPrint('[Notifier] task notification -> $cascadeId ($outcome)');
 
-    // Restauration du comportement automatique par défaut de 5 secondes pour les notifications in-app
-    Timer(const Duration(seconds: 5), () {
+    // Auto-annulation différée (5 s) pour ne pas laisser de notification
+    // « Tâche terminée » s'accumuler. Référence annulable : si l'utilisateur
+    // répond via une action inline d'une notification d'approbation, on
+    // annule ce timer pour ne pas retirer la notification pendant la réponse.
+    _autoCancelTimer?.cancel();
+    _autoCancelTimer = Timer(const Duration(seconds: 5), () {
       plugin.cancel(cascadeId.hashCode);
     });
   }
@@ -366,6 +405,16 @@ class ApprovalNotifier {
 
   /// Annule la notification de fin de tâche d'une cascade.
   Future<void> cancelTask(String cascadeId) async {
+    if (!_initialized) return;
+    final plugin = _plugin;
+    if (plugin == null) return;
+    await plugin.cancel(cascadeId.hashCode);
+  }
+
+  /// Annule la notification d'approbation d'une cascade (Phase 3 — l'id de la
+  /// notification est désormais `cascadeId.hashCode`, pas `callId.hashCode`).
+  /// Équivalent de [cancelApproval] quand on ne connaît que la cascade.
+  Future<void> cancelApprovalByCascadeId(String cascadeId) async {
     if (!_initialized) return;
     final plugin = _plugin;
     if (plugin == null) return;

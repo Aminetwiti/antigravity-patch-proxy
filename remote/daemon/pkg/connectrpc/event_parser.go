@@ -39,8 +39,11 @@ func ParseFrameEvents(raw []byte, cascadeID string) []StreamEvent {
 			continue
 		}
 
-		// Détection empirique des blocs d'approbation ou de texte
-		if strings.Contains(s, "run_command") || strings.Contains(s, "write_to_file") || strings.Contains(s, "ask_question") || strings.Contains(s, "ask_user") {
+		// Détection empirique des blocs d'approbation ou de texte. Les blobs
+		// d'approbation d'outils (run_command, write_to_file, read_file, ...)
+		// contiennent le nom de l'outil (clé JSON) ; les blobs de questions
+		// contiennent ask_question/ask_user. Ailleurs → texte.
+		if strings.Contains(s, "run_command") || strings.Contains(s, "write_to_file") || strings.Contains(s, "read_file") || strings.Contains(s, "edit_file") || strings.Contains(s, "list_files") || strings.Contains(s, "search_files") || strings.Contains(s, "ask_question") || strings.Contains(s, "ask_user") {
 			ev := StreamEvent{
 				Kind:      EventKindApprovalRequired,
 				CascadeID: cascadeID,
@@ -91,6 +94,13 @@ func extractToolName(s string) string {
 	}
 	if strings.Contains(s, "write_to_file") {
 		return "write_to_file"
+	}
+	// Outils de lecture/recherche : le blob JSON contient la clé de l'outil
+	// ("read_file": "path"). Sans clé connue → generic_tool (non auto-accepté).
+	for _, k := range []string{"read_file", "edit_file", "list_files", "search_files", "grep", "glob", "fetch"} {
+		if strings.Contains(s, k) {
+			return k
+		}
 	}
 	return "generic_tool"
 }

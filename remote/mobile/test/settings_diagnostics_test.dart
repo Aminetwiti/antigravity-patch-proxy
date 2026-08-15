@@ -128,6 +128,42 @@ void main() {
     expect(prefs.getBool('settings.toolNotifications'), isFalse);
   });
 
+  testWidgets('auto-accept: le toggle persiste et envoie set_auto_accept au daemon',
+      (tester) async {
+    final out = <Map<String, dynamic>>[];
+    final ctrl = StreamController<dynamic>();
+    final api = DaemonApi(
+      incoming: ctrl.stream,
+      send: (d) => out.add(d is String ? jsonDecode(d) as Map<String, dynamic> : Map<String, dynamic>.from(d as Map)),
+      timeout: const Duration(seconds: 1),
+    );
+    addTearDown(ctrl.close);
+    addTearDown(api.dispose);
+
+    await _pumpScreen(tester, api: api);
+
+    final toggle = find.text('Auto-approuver les actions en lecture seule');
+    await tester.ensureVisible(toggle);
+    await tester.pumpAndSettle();
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool('settings.autoAcceptEnabled'), isTrue,
+        reason: 'le toggle doit persister le réglage');
+
+    expect(
+      out.any((m) =>
+          m['type'] == 'set_auto_accept' &&
+          (m['data'] as Map<String, dynamic>)['enabled'] == true),
+      isTrue,
+      reason: 'set_auto_accept doit être poussé au daemon avec enabled=true',
+    );
+    // Le RPC sans daemon expire au bout de 1 s : on pompe au-delà pour ne
+    // laisser aucun Timer fake en attente en fin de test.
+    await tester.pump(const Duration(seconds: 2));
+  });
+
   testWidgets('modèle par défaut: persisté et /model envoyé au daemon',
       (tester) async {
     final out = <Map<String, dynamic>>[];

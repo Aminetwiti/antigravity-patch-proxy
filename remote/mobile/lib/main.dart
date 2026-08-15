@@ -127,6 +127,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
   final OutboxQueue _outbox = OutboxQueue();
 
   List<CascadeSession> _sessions = const [];
+  List<ProjectItem> _projects = const [];
   // Bug #15 : guard pour éviter le double fetch concurrent de sessions.
   bool _sessionsFetching = false;
 
@@ -350,9 +351,20 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     try {
       final data = await api.listSessions();
       final sessions = SessionParser.parseListSessions(data);
-      if (sessions.isNotEmpty) {
-        if (mounted) {
-          setState(() {
+
+      List<ProjectItem> projects = [];
+      if (data['projects'] is List) {
+        projects = (data['projects'] as List)
+            .map((p) => ProjectItem.fromJson(p as Map<String, dynamic>))
+            .toList();
+      }
+
+      if (mounted) {
+        setState(() {
+          if (projects.isNotEmpty) {
+            _projects = projects;
+          }
+          if (sessions.isNotEmpty) {
             final stillActive = sessions.any((s) => s.id == _activeSessionId);
             _sessions = sessions;
             if (!stillActive || _activeSessionId == 's3') {
@@ -362,9 +374,9 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
               final cur = sessions.firstWhere((s) => s.id == _activeSessionId);
               _activeSessionTitle = cur.title;
             }
-          });
-          // Re-persiste la session restaurée (le sessionId peut avoir changé
-          // si l'ancien n'existait plus côté daemon).
+          }
+        });
+        if (sessions.isNotEmpty) {
           SettingsStore.saveSession(
             wsUrl: _wsClient.targetUrl,
             token: _wsClient.authToken ?? '',
@@ -488,6 +500,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       drawer: LeftSidebarDrawer(
         activeSessionId: _activeSessionId,
         sessions: _sessions,
+        projects: _projects,
         isConnected: isConnected,
         onToggleConnection: () {
           if (isConnected) {

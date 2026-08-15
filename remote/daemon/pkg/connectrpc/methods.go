@@ -1,6 +1,7 @@
 package connectrpc
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -29,8 +30,9 @@ func (c *Client) SendMessageStream(cascadeID, text string, onFrame func([]byte) 
 // SendMessageStreamModel comme SendMessageStream mais avec un modèle
 // explicite (venant du message send_prompt du mobile) : le daemon doit
 // respecter la sélection du téléphone, pas le repli global du client.
-func (c *Client) SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error) error {
-	return c.CallStream("SendUserCascadeMessage", BuildSendMessage(cascadeID, text, c.APIKey, c.SessionID, modelUID, modelEnum), 120*time.Second, onFrame)
+// noTools force planner_mode = 3 (NO_TOOL) dans le cascade_config.
+func (c *Client) SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error, noTools ...bool) error {
+	return c.CallStream("SendUserCascadeMessage", BuildSendMessage(cascadeID, text, c.APIKey, c.SessionID, modelUID, modelEnum, noTools...), 120*time.Second, onFrame)
 }
 
 // SubmitToolApproval approuve/refuse une interaction d'outil via le RPC officiel
@@ -117,5 +119,25 @@ func (c *Client) ConvertTrajectoryToMarkdown(trajectoryID string) ([]byte, error
 func (c *Client) CreateWorktree(branch, path string) ([]byte, error) {
 	payload := []byte(`{"branch":"` + branch + `","path":"` + path + `"}`)
 	return c.CallJSON("CreateWorktree", payload)
+}
+
+// GetLintErrors récupère les erreurs de lint d'un fichier (diagnostics LSP).
+func (c *Client) GetLintErrors(uri string) ([]byte, error) {
+	payload := []byte(`{"uri":"` + uri + `"}`)
+	return c.CallJSON("GetLintErrors", payload)
+}
+
+// GetDefinition résout la définition du symbole à la position donnée
+// (line/character, indices 0-based comme le protocole LSP).
+func (c *Client) GetDefinition(uri string, line, character int) ([]byte, error) {
+	payload := []byte(fmt.Sprintf(`{"uri":"%s","position":{"line":%d,"character":%d}}`, uri, line, character))
+	return c.CallJSON("GetDefinition", payload)
+}
+
+// GetCodeValidationStates récupère l'état de validation du code
+// (erreurs/squiggles visibles dans l'éditeur).
+func (c *Client) GetCodeValidationStates(uri string) ([]byte, error) {
+	payload := []byte(`{"uri":"` + uri + `"}`)
+	return c.CallJSON("GetCodeValidationStates", payload)
 }
 

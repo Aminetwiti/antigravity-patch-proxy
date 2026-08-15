@@ -49,7 +49,8 @@ type RPCClient interface {
 	SendMessageStream(cascadeID, text string, onFrame func([]byte) error) error
 	// SendMessageStreamModel : variante avec modèle explicite (sélection
 	// mobile par message) — le daemon laisse le téléphone choisir le modèle.
-	SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error) error
+	// noTools force planner_mode = 3 (NO_TOOL) dans le cascade_config.
+	SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error, noTools ...bool) error
 	SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error)
 	SetBrowserOpenConversation(cascadeID string) ([]byte, error)
 	SendCommand(commandText string) ([]byte, error)
@@ -87,6 +88,12 @@ type RPCClient interface {
 	ConvertTrajectoryToMarkdown(trajectoryID string) ([]byte, error)
 	// CreateWorktree crée un nouveau worktree Git.
 	CreateWorktree(branch, path string) ([]byte, error)
+	// GetLintErrors récupère les erreurs de lint d'un fichier (LSP).
+	GetLintErrors(uri string) ([]byte, error)
+	// GetDefinition résout la définition du symbole à une position (LSP).
+	GetDefinition(uri string, line, character int) ([]byte, error)
+	// GetCodeValidationStates récupère l'état de validation du code (LSP).
+	GetCodeValidationStates(uri string) ([]byte, error)
 }
 
 // checkOrigin rejette les navigateurs web arbitraires (CSWSH) tout en
@@ -163,6 +170,10 @@ type Server struct {
 	// ponytail: plafond = perte d'état au redémarrage du daemon ; upgrade =
 	// persistance via SettingsService si le besoin apparaît.
 	autoAcceptEnabled bool
+	// noToolsEnabled : mode global « répondre sans outils » — les send_prompt
+	// qui ne portent pas leur propre flag noTools héritent de ce défaut
+	// (toggle des réglages mobile). L'état vit en mémoire comme autoAccept.
+	noToolsEnabled bool
 	// activeCascades : cascadeId → le daemon est en train de streamer un tour
 	// pour cette cascade (C5 : compteur d'activité exposé au /health).
 	activeCascades map[string]bool
@@ -257,6 +268,11 @@ func NewServer(client RPCClient, authToken string) *Server {
 		terminals:        newTerminalPtyManager(),
 	}
 	s.terminals.onBroadcast = s.broadcast
+	// Recharge les tâches planifiées persistées au redémarrage (non-fatal :
+	// un fichier absent ou corrompu repart avec une liste vide).
+	if err := s.LoadScheduledTasks(); err != nil {
+		logJSON.Warn("scheduled_tasks_load_failed", "error", err.Error())
+	}
 	return s
 }
 
@@ -320,6 +336,12 @@ func (s *Server) fetchSessionsSingleFlight() []byte {
 		s.mu.Unlock()
 	}
 
+	// Waiter qui a attendu la fin de l'appel en vol : le premier appelant vient
+	// de peupler le cache — le servir au lieu de refaire un GetAllCascades.
+	if raw, ok := s.cachedSessions(); ok {
+		return raw
+	}
+
 	// Premier appelant : fait l'appel LS et peuple le cache.
 	raw, err := s.RPCClient.GetAllCascades()
 	s.mu.Lock()
@@ -353,6 +375,22 @@ func (s *Server) autoAccept() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.autoAcceptEnabled
+}
+
+// SetNoTools active/désactive le mode global « répondre sans outils »
+// (planner_mode 3 = NO_TOOL, message WS set_no_tools). Défaut appliqué aux
+// send_prompt sans flag explicite ; le flag par prompt reste prioritaire.
+func (s *Server) SetNoTools(enabled bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.noToolsEnabled = enabled
+}
+
+// noTools rapporte si le mode global sans-outils est actif.
+func (s *Server) noTools() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.noToolsEnabled
 }
 
 // mcpProxyBase est le point d'entrée HTTP du proxy MCP Antigravity desktop
@@ -663,6 +701,10 @@ type IncomingMessage struct {
 	// la ferme. La sortie est poussée en broadcast terminal_output.
 	TerminalID string `json:"terminalId,omitempty"`
 	Input      string `json:"input,omitempty"`
+	// NoTools : mode « réponse directe sans boucle d'outils » (planner_mode 3
+	// = NO_TOOL côté LS). Porté par le message send_prompt — le mobile décide
+	// par prompt si l'agent peut utiliser des outils (toggle dédié).
+	NoTools bool `json:"noTools,omitempty"`
 }
 
 func (m *IncomingMessage) UnmarshalJSON(data []byte) error {
@@ -820,7 +862,12 @@ func (s *Server) expireApproval(cascadeID string) {
 	}
 	s.broadcast(OutgoingMessage{
 		Type: "approval_expired",
-		Data: map[string]interface{}{"cascadeId": cascadeID},
+		Data: map[string]interface{}{
+			"cascadeId": cascadeID,
+			// callId permet au mobile d'annuler la notification locale de
+			// l'approbation expirée (Phase 3) sans re-fetch.
+			"callId": p.callID,
+		},
 	})
 }
 
@@ -1247,53 +1294,21 @@ func toOutgoing(raw []byte) interface{} {
 	return map[string]interface{}{"fields": items, "rawBytes": len(raw)}
 }
 
-// sessionsOut convertit la réponse GetAllCascadeTrajectories en une liste de
-// sessions structurées (cascadeId, titre, workspace, statut, updatedAt) en
-// appliquant le filtre Antigravity 2.0 (exclut archivées, killed, subagents).
-// Le parsing protobuf vit côté Go (connectrpc.ParseTrajectories) — le mobile
-// reçoit du JSON propre au lieu d'un dump de champs binaires.
 func sessionsOut(raw []byte) interface{} {
+	projects := ListOfficialProjects()
 	summaries := connectrpc.ParseTrajectories(raw)
-	
-	// Filtre des workspaces actifs (uniquement ceux ouverts dans l'IDE)
-	activeWorkspaces := discovery.GetActiveWorkspaces()
-	isActive := make(map[string]bool)
-	for _, ws := range activeWorkspaces {
-		isActive[ws] = true
-	}
 
 	if len(summaries) == 0 {
 		local := ListLocalSessions()
-		var filteredLocal []map[string]interface{}
-		for _, s := range local {
-			wsPath, ok := s["workspacePath"].(string)
-			if !ok {
-				continue
-			}
-			cleanWs := strings.TrimPrefix(wsPath, "file:///")
-			cleanWs = strings.ReplaceAll(cleanWs, `\`, `/`)
-			cleanWs = strings.TrimRight(cleanWs, "/")
-			if len(activeWorkspaces) == 0 || isActive[cleanWs] {
-				filteredLocal = append(filteredLocal, s)
-			}
+		return map[string]interface{}{
+			"projects": projects,
+			"sessions": local,
 		}
-		if len(filteredLocal) > 0 {
-			return map[string]interface{}{"sessions": filteredLocal}
-		}
-		return map[string]interface{}{"sessions": []map[string]interface{}{}, "rawBytes": len(raw)}
 	}
 	
 	items := make([]map[string]interface{}, 0, len(summaries))
 	for _, s := range summaries {
 		if s.Archived || s.Killed || s.Source == 16 {
-			continue
-		}
-		
-		// Ne conserver que les sessions des espaces de travail ouverts
-		cleanWs := strings.TrimPrefix(s.Workspace, "file:///")
-		cleanWs = strings.ReplaceAll(cleanWs, `\`, `/`)
-		cleanWs = strings.TrimRight(cleanWs, "/")
-		if len(activeWorkspaces) > 0 && !isActive[cleanWs] {
 			continue
 		}
 
@@ -1308,24 +1323,15 @@ func sessionsOut(raw []byte) interface{} {
 	}
 	if len(items) == 0 {
 		local := ListLocalSessions()
-		var filteredLocal []map[string]interface{}
-		for _, s := range local {
-			wsPath, ok := s["workspacePath"].(string)
-			if !ok {
-				continue
-			}
-			cleanWs := strings.TrimPrefix(wsPath, "file:///")
-			cleanWs = strings.ReplaceAll(cleanWs, `\`, `/`)
-			cleanWs = strings.TrimRight(cleanWs, "/")
-			if len(activeWorkspaces) == 0 || isActive[cleanWs] {
-				filteredLocal = append(filteredLocal, s)
-			}
-		}
-		if len(filteredLocal) > 0 {
-			return map[string]interface{}{"sessions": filteredLocal}
+		return map[string]interface{}{
+			"projects": projects,
+			"sessions": local,
 		}
 	}
-	return map[string]interface{}{"sessions": items}
+	return map[string]interface{}{
+		"projects": projects,
+		"sessions": items,
+	}
 }
 
 func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -1576,7 +1582,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 		local := ListLocalSessions()
-		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"sessions": local}})
+		projects := ListOfficialProjects()
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"projects": projects, "sessions": local}})
 		return
 
 
@@ -1821,7 +1828,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return nil
 		}
 
-		err = s.RPCClient.SendMessageStreamModel(msg.CascadeID, promptText, msg.ModelUID, msg.ModelEnum, onFrameHandler)
+		// Mode sans-outils : le prompt porte son propre flag (décision par
+		// prompt) sinon le défaut global des réglages mobile (toggle).
+		// planner_mode 3 = NO_TOOL : pas de boucle d'outils, réponse directe.
+		noTools := msg.NoTools || s.noTools()
+		err = s.RPCClient.SendMessageStreamModel(msg.CascadeID, promptText, msg.ModelUID, msg.ModelEnum, onFrameHandler, noTools)
 
 		// 3. Force l'IDE à ouvrir cette nouvelle session (best-effort, cf. ci-dessus).
 		if _, errSet := s.RPCClient.SetBrowserOpenConversation(msg.CascadeID); errSet != nil {
@@ -1950,9 +1961,20 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 
 	case "get_context":
 		var cascadeIDs []string
-		if raw, errList := s.RPCClient.GetAllCascades(); errList == nil && len(raw) > 0 {
+		if raw, ok := s.cachedSessions(); ok && len(raw) > 0 {
 			for _, sum := range connectrpc.ParseTrajectories(raw) {
 				cascadeIDs = append(cascadeIDs, sum.CascadeID)
+			}
+		}
+		if len(cascadeIDs) == 0 {
+			// Cache froid (pas de list_sessions rÃ©cent) : on le rÃ©chauffe UNE
+			// fois via le single-flight au lieu de retomber sur les sessions
+			// locales (qui comptent 0 artefact pour une vraie session LS).
+			s.fetchSessionsSingleFlight()
+			if raw, ok := s.cachedSessions(); ok && len(raw) > 0 {
+				for _, sum := range connectrpc.ParseTrajectories(raw) {
+					cascadeIDs = append(cascadeIDs, sum.CascadeID)
+				}
 			}
 		}
 		if len(cascadeIDs) == 0 {
@@ -2177,6 +2199,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.mu.Lock()
 		s.scheduledTasks[taskID] = task
 		s.mu.Unlock()
+		if err := s.SaveScheduledTasks(); err != nil {
+			logJSON.Warn("scheduled_tasks_save_failed", "error", err.Error())
+		}
 
 		logJSON.Info("scheduled_task_created", "taskId", taskID, "name", name)
 		s.broadcast(OutgoingMessage{
@@ -2243,6 +2268,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 		}
 		s.mu.Unlock()
+		if err := s.SaveScheduledTasks(); err != nil {
+			logJSON.Warn("scheduled_tasks_save_failed", "error", err.Error())
+		}
 
 		logJSON.Info("scheduled_task_updated", "taskId", taskID)
 		s.broadcast(OutgoingMessage{
@@ -2305,6 +2333,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.mu.Lock()
 		delete(s.scheduledTasks, taskId)
 		s.mu.Unlock()
+		if err := s.SaveScheduledTasks(); err != nil {
+			logJSON.Warn("scheduled_tasks_save_failed", "error", err.Error())
+		}
 
 		logJSON.Info("scheduled_task_cancelled", "taskId", taskId)
 		s.broadcast(OutgoingMessage{
@@ -2363,6 +2394,27 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			RequestID: msg.RequestID,
 			Data: map[string]interface{}{
 				"autoAcceptEnabled": enabled,
+			},
+		})
+		return
+
+	case "set_no_tools":
+		// Mode global « répondre sans outils » (planner_mode 3 = NO_TOOL) :
+		// défaut appliqué aux send_prompt sans flag explicite. Le flag par
+		// prompt (msg.NoTools) reste prioritaire — un prompt isolé peut
+		// demander les outils même si le défaut global est sans-outils.
+		enabled := false
+		if msg.Data != nil {
+			if b, ok := msg.Data["enabled"].(bool); ok {
+				enabled = b
+			}
+		}
+		s.SetNoTools(enabled)
+		s.writeJSON(conn, OutgoingMessage{
+			Type:      "response",
+			RequestID: msg.RequestID,
+			Data: map[string]interface{}{
+				"noToolsEnabled": enabled,
 			},
 		})
 		return
@@ -2559,6 +2611,19 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 
+	case "export_jsonl", "trajectory.export_jsonl":
+		if msg.CascadeID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
+			return
+		}
+		path, errExport := ExportSessionJSONL(msg.CascadeID)
+		if errExport != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "export_jsonl: " + errExport.Error()})
+			return
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"path": path}})
+		return
+
 	case "create_worktree", "workspace.create_worktree":
 		branch := msg.Command
 		path := msg.FilePath
@@ -2585,6 +2650,40 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 
+	case "get_lint_errors", "lsp.get_lint_errors":
+		if msg.FilePath == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "filePath requis"})
+			return
+		}
+		raw, err = s.RPCClient.GetLintErrors(toWorkspaceURI(msg.FilePath))
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+			return
+		}
+
+	case "get_definition", "lsp.get_definition":
+		if msg.FilePath == "" || msg.Data == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "filePath + position requis"})
+			return
+		}
+		line, _ := msg.Data["line"].(float64)
+		character, _ := msg.Data["character"].(float64)
+		raw, err = s.RPCClient.GetDefinition(toWorkspaceURI(msg.FilePath), int(line), int(character))
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+			return
+		}
+
+	case "get_code_validation", "lsp.get_code_validation":
+		if msg.FilePath == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "filePath requis"})
+			return
+		}
+		raw, err = s.RPCClient.GetCodeValidationStates(toWorkspaceURI(msg.FilePath))
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+			return
+		}
 
 	case "call_mcp_tool", "connect_mcp_server", "refresh_mcp_oauth_token", "list_mcp_servers":
 		// Route les actions MCP vers le proxy Antigravity desktop

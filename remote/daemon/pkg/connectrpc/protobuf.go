@@ -87,7 +87,9 @@ func BuildStartCascade(workspaceURI, projectID, modelUID string, modelEnum uint6
 // buildSendCascadeMessageRequest de windsurf_main.js (éprouvé en prod).
 // Le modelUID est fourni par le client mobile ; s'il est vide on retombe
 // sur l'enum historique (requested_model_id).
-func BuildSendMessage(cascadeID, text, apiKey, sessionID, modelUID string, modelEnum uint64) []byte {
+// BuildSendMessage construit un SendMessageRequest. noTools force
+// planner_mode = 3 (NO_TOOL) dans le cascade_config.
+func BuildSendMessage(cascadeID, text, apiKey, sessionID, modelUID string, modelEnum uint64, noTools ...bool) []byte {
 	item := &writer{}
 	item.stringField(1, text)
 
@@ -97,7 +99,7 @@ func BuildSendMessage(cascadeID, text, apiKey, sessionID, modelUID string, model
 	if apiKey != "" {
 		w.bytesField(3, buildMetadata(apiKey, sessionID))
 	}
-	w.bytesField(5, BuildCascadeConfig(modelUID, modelEnum))
+	w.bytesField(5, BuildCascadeConfig(modelUID, modelEnum, noTools...))
 	return w.b
 }
 
@@ -125,7 +127,7 @@ const DefaultModelEnum uint64 = 312
 //
 // planner_mode 3 = NO_TOOL (pas de boucle d'outils — le mobile ne voit
 // que le texte). requested_model (15) est la clé qui débloque le LS.
-func BuildCascadeConfig(modelUID string, modelEnum uint64) []byte {
+func BuildCascadeConfig(modelUID string, modelEnum uint64, noTools ...bool) []byte {
 	planner := &writer{}
 
 	// plan_model (field 1) : même valeur que requested_model ci-dessous.
@@ -135,9 +137,15 @@ func BuildCascadeConfig(modelUID string, modelEnum uint64) []byte {
 	}
 	planner.varintField(1, modelEnum)
 
-	// conversational_config (field 2) {1: planner_mode} — planner_mode 3 = NO_TOOL.
+	// conversational_config (field 2) {1: planner_mode} :
+	// 3 = NO_TOOL (pas de boucle d'outils — le mobile ne voit que le texte),
+	// sinon 1 = AUTO (boucle d'outils par défaut du LS).
+	mode := uint64(1) // AUTO
+	if len(noTools) > 0 && noTools[0] {
+		mode = 3 // NO_TOOL
+	}
 	conv := &writer{}
-	conv.varintField(1, 3)
+	conv.varintField(1, mode)
 	planner.bytesField(2, conv.b)
 
 	// requested_model (field 15) = ModelOrAlias {1: model}.

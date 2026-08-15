@@ -15,6 +15,8 @@ import 'package:mobile/widgets/tool_approval_card.dart';
 //   UX3 — le raisonnement (« Thought ») est replié par défaut et se déplie
 //   UX4 — hors-ligne : le champ reste éditable (promesse de l'outbox)
 //   UX5 — les erreurs de stream sont stylisées (pas de markdown brut)
+//   B2  — tap notification → ré-ouverture de l'approbation (deep-link)
+//   P3  — actions inline « Autoriser / Refuser » depuis la notification
 // ──────────────────────────────────────────────────────────────────────────────
 
 ({DaemonApi api, StreamController<dynamic> ctrl, List<Map<String, dynamic>> out})
@@ -325,6 +327,94 @@ void main() {
       expect(submits.first['callId'], 'call_tap');
       expect(submits.first['trajectoryId'], 'traj_t');
       expect(submits.first['stepIndex'], 2);
+      expect(find.byType(ToolApprovalCard), findsNothing);
+
+      await ctrl.close();
+      api.dispose();
+    });
+
+    testWidgets('action inline « Autoriser » soumet directement sans carte',
+        (tester) async {
+      final (:api, :ctrl, :out) = _mkApi();
+      await _pumpScreen(tester, api: api, ctrl: ctrl);
+      out.clear(); // Ignorer l'appel get_session_history initial
+
+      // L'utilisateur tape « Autoriser » directement dans la notification
+      // (Phase 3 — action inline Android). Le notifier publie actionId.
+      ApprovalNotifier.instance.tapsSink.add({
+        'kind': 'approval',
+        'cascadeId': 'c1',
+        'action': 'allow',
+      });
+      await tester.pump();
+
+      // get_pending_approval part vers le daemon pour le contexte…
+      final getReq =
+          out.where((m) => m['type'] == 'get_pending_approval').toList();
+      expect(getReq, hasLength(1));
+
+      // … puis la décision est soumise dès la réponse, sans afficher la carte.
+      ctrl.add(jsonEncode({
+        'type': 'response',
+        'requestId': getReq.first['requestId'],
+        'data': {
+          'cascadeId': 'c1',
+          'callId': 'call_inline',
+          'trajectoryId': 'traj_i',
+          'stepIndex': 3,
+          'approvalType': 'run_command',
+          'command': 'rm -rf build',
+        },
+      }));
+      await tester.pump(const Duration(milliseconds: 120));
+
+      final submits = out.where((m) => m['type'] == 'submit_approval').toList();
+      expect(submits, hasLength(1));
+      expect(submits.first['callId'], 'call_inline');
+      expect(submits.first['decision'], 'allow');
+      expect(submits.first['trajectoryId'], 'traj_i');
+      expect(submits.first['stepIndex'], 3);
+      // Jamais de carte : la décision vient de la notification.
+      expect(find.byType(ToolApprovalCard), findsNothing);
+
+      await ctrl.close();
+      api.dispose();
+    });
+
+    testWidgets('action inline « Refuser » soumet deny avec le même contexte',
+        (tester) async {
+      final (:api, :ctrl, :out) = _mkApi();
+      await _pumpScreen(tester, api: api, ctrl: ctrl);
+      out.clear();
+
+      ApprovalNotifier.instance.tapsSink.add({
+        'kind': 'approval',
+        'cascadeId': 'c1',
+        'action': 'deny',
+      });
+      await tester.pump();
+
+      final getReq =
+          out.where((m) => m['type'] == 'get_pending_approval').toList();
+      expect(getReq, hasLength(1));
+      ctrl.add(jsonEncode({
+        'type': 'response',
+        'requestId': getReq.first['requestId'],
+        'data': {
+          'cascadeId': 'c1',
+          'callId': 'call_inline_deny',
+          'trajectoryId': 'traj_d',
+          'stepIndex': 1,
+          'approvalType': 'run_command',
+          'command': 'git reset --hard',
+        },
+      }));
+      await tester.pump(const Duration(milliseconds: 120));
+
+      final submits = out.where((m) => m['type'] == 'submit_approval').toList();
+      expect(submits, hasLength(1));
+      expect(submits.first['callId'], 'call_inline_deny');
+      expect(submits.first['decision'], 'deny');
       expect(find.byType(ToolApprovalCard), findsNothing);
 
       await ctrl.close();

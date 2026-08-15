@@ -14,6 +14,7 @@ class LeftSidebarDrawer extends StatefulWidget {
   final VoidCallback? onConversationHistory;
   final VoidCallback? onScheduledTasks;
   final List<CascadeSession>? sessions;
+  final List<ProjectItem>? projects;
   final bool isConnected;
   final VoidCallback onToggleConnection;
 
@@ -28,6 +29,7 @@ class LeftSidebarDrawer extends StatefulWidget {
     this.onConversationHistory,
     this.onScheduledTasks,
     this.sessions,
+    this.projects,
     this.isConnected = false,
     required this.onToggleConnection,
   });
@@ -44,6 +46,12 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
   String _filterQuery = '';
 
   @override
+  void initState() {
+    super.initState();
+    // Replier par défaut les projets secondaires pour un affichage propre comme dans Antigravity
+  }
+
+  @override
   void dispose() {
     _scrollController.dispose();
     _filterController.dispose();
@@ -52,7 +60,6 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
 
   @override
   Widget build(BuildContext context) {
-    // Ne conserver STRICTEMENT que les sessions disponibles (non archivées et non supprimées)
     final allSessions = widget.sessions ?? [];
     final availableSessions = allSessions
         .where((s) => s.isAvailable && s.id.isNotEmpty)
@@ -64,17 +71,57 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
         })
         .toList();
 
-    // Organiser les sessions par workspace
-    final Map<String, List<CascadeSession>> groupedSessions = {};
-    for (final s in availableSessions) {
-      final folderName = WorkspacePath.displayName(
-        s.workspacePath,
-        fallback: 'antigravity-workspace',
-      );
-      groupedSessions.putIfAbsent(folderName, () => []).add(s);
+    // Récupère les projets officiels d'Antigravity 2.0
+    final officialProjects = widget.projects ?? [];
+
+    // Map de regroupement : nom de projet -> sessions
+    final Map<String, List<CascadeSession>> projectSessions = {};
+
+    if (officialProjects.isNotEmpty) {
+      for (final p in officialProjects) {
+        projectSessions[p.name] = [];
+      }
+
+      // Associer chaque session à son projet officiel
+      for (final s in availableSessions) {
+        bool matched = false;
+        final cleanSPath = s.workspacePath.replaceAll('\\', '/').toLowerCase();
+        
+        for (final p in officialProjects) {
+          final cleanPPath = p.path.replaceAll('\\', '/').toLowerCase();
+          final cleanName = p.name.toLowerCase();
+          
+          if ((cleanPPath.isNotEmpty && cleanSPath.contains(cleanPPath)) ||
+              (cleanPPath.isNotEmpty && cleanPPath.contains(cleanSPath)) ||
+              (cleanName.isNotEmpty && cleanSPath.contains(cleanName)) ||
+              (cleanName.isNotEmpty && cleanName.contains(cleanSPath))) {
+            projectSessions[p.name]?.add(s);
+            matched = true;
+            break;
+          }
+        }
+
+        // Si la session est un sous-dossier ou nouvelle session du projet actif
+        if (!matched && officialProjects.isNotEmpty) {
+          final mainProj = officialProjects.firstWhere(
+            (p) => p.name.toLowerCase().contains('antigravity') || p.path.toLowerCase().contains('antigravity'),
+            orElse: () => officialProjects.first,
+          );
+          projectSessions[mainProj.name]?.add(s);
+        }
+      }
+    } else {
+      // Repli si aucun projet officiel n'est transmis
+      for (final s in availableSessions) {
+        final folderName = WorkspacePath.displayName(
+          s.workspacePath,
+          fallback: 'antigravity-workspace',
+        );
+        projectSessions.putIfAbsent(folderName, () => []).add(s);
+      }
     }
 
-    final folderNames = groupedSessions.keys.toList()..sort();
+    final projectNames = projectSessions.keys.toList();
 
     return Drawer(
       backgroundColor: const Color(0xFF131416),
@@ -285,7 +332,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                   controller: _scrollController,
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                   children: [
-                    if (folderNames.isEmpty)
+                    if (projectNames.isEmpty)
                       _EmptyState(
                         isConnected: widget.isConnected,
                         onConnect: () {
@@ -294,20 +341,20 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                         },
                       )
                     else
-                      ...folderNames.map((folder) {
-                        final sessions = groupedSessions[folder] ?? [];
-                        final isCollapsed = _collapsedFolders.contains(folder);
+                      ...projectNames.map((proj) {
+                        final sessions = projectSessions[proj] ?? [];
+                        final isCollapsed = _collapsedFolders.contains(proj);
                         return _WorkspaceFolderSection(
-                          folderName: folder,
+                          folderName: proj,
                           sessions: sessions,
                           isCollapsed: isCollapsed,
                           activeSessionId: widget.activeSessionId,
                           onToggleCollapse: () {
                             setState(() {
                               if (isCollapsed) {
-                                _collapsedFolders.remove(folder);
+                                _collapsedFolders.remove(proj);
                               } else {
-                                _collapsedFolders.add(folder);
+                                _collapsedFolders.add(proj);
                               }
                             });
                           },

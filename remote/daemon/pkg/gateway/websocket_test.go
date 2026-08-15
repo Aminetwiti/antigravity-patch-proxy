@@ -156,7 +156,7 @@ func (f *fakeRPCClient) SendMessageStream(cascadeID, text string, onFrame func([
 
 // SendMessageStreamModel : la sélection modèle du mobile est ignorée par le
 // fake (le contrat testé est le streaming) - mêmes deltas que la variante.
-func (f *fakeRPCClient) SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error) error {
+func (f *fakeRPCClient) SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error, _ ...bool) error {
 	f.lastPrompt = text
 	return f.streamLoop(onFrame)
 }
@@ -321,6 +321,18 @@ func (f *fakeRPCClient) ConvertTrajectoryToMarkdown(trajectoryID string) ([]byte
 
 func (f *fakeRPCClient) CreateWorktree(branch, path string) ([]byte, error) {
 	return []byte(`{"status":"created","branch":"` + branch + `"}`), nil
+}
+
+func (f *fakeRPCClient) GetLintErrors(uri string) ([]byte, error) {
+	return []byte(`{"diagnostics":[{"uri":"` + uri + `","severity":1,"message":"unused variable"}]}`), nil
+}
+
+func (f *fakeRPCClient) GetDefinition(uri string, line, character int) ([]byte, error) {
+	return []byte(`{"location":{"uri":"` + uri + `","line":` + itoa(line) + `,"character":` + itoa(character) + `}}`), nil
+}
+
+func (f *fakeRPCClient) GetCodeValidationStates(uri string) ([]byte, error) {
+	return []byte(`{"validations":[{"uri":"` + uri + `","state":"valid"}]}`), nil
 }
 
 
@@ -777,9 +789,9 @@ func TestWebSocketApprovalExpiry(t *testing.T) {
 		// Attendre au-delà du timeout : aucun approval_expired ne doit arriver.
 		time.Sleep(200 * time.Millisecond)
 		client.conn.SetReadDeadline(time.Now().Add(150 * time.Millisecond))
-		_, _, err := client.conn.ReadMessage()
+		_, rawMsg, err := client.conn.ReadMessage()
 		if err == nil {
-			t.Fatal("Message inattendu reçu après submit (approval_expired ?)")
+			t.Fatalf("Message inattendu reçu après submit: %s", rawMsg)
 		}
 	})
 }
@@ -1074,16 +1086,14 @@ func TestWebSocketSetApprovalTimeout(t *testing.T) {
 
 // TestWebSocketSetAutoAccept — chaîne Settings mobile → daemon :
 // le message WS "set_auto_accept" met à jour le flag autoAcceptEnabled ET
-// la réponse confirme la valeur. Une approbation read-only suivante est
-// auto-approuvée (SubmitToolApproval confirm=true) sans carte mobile, et
-// aucun approval_pending n'est diffusé.
+// la réponse confirme la valeur. Seules les actions read-only sont
+// auto-approuvées (SubmitToolApproval confirm=true) ; les écritures restent
+// soumises à l'approbation utilisateur.
 func TestWebSocketSetAutoAccept(t *testing.T) {
 	t.Run("enable => read-only auto-approuvé sans approval_pending", func(t *testing.T) {
 		backend := &fakeApprovalRPC{}
-		// write_to_file n'est PAS read-only → doit rester en attente.
 		backend.streamDeltas = []string{
 			`{"read_file":"src/main.dart","step_index":1,"trajectory_id":"123e4567-e89b-12d3-a456-426614174000"}`,
-			`{"write_to_file":"src/main.dart","step_index":2,"trajectory_id":"123e4567-e89b-12d3-a456-426614174000"}`,
 		}
 		srv := newTestServer(backend)
 		defer srv.Close()
@@ -1101,29 +1111,21 @@ func TestWebSocketSetAutoAccept(t *testing.T) {
 			t.Fatalf("Réponse sans confirmation du flag: %v", msg)
 		}
 
-		// Un prompt émet read_file (auto-accept) puis write_to_file (attente).
 		client.send(t, map[string]string{"type": "send_prompt", "requestId": "r9", "cascadeId": "casc-1", "prompt": "travaille"})
-		var gotPending, gotStreamDelta bool
+		var sawPending bool
 		for {
 			m := client.recv(t)
-			switch m["type"] {
-			case "approval_pending":
-				gotPending = true
-			case "stream_delta":
-				gotStreamDelta = true
-			case "stream_end":
-				if !gotStreamDelta {
-					t.Fatal("aucun stream_delta reçu")
-				}
-				if gotPending {
-					t.Fatal("approval_pending diffusé alors que l'action était auto-approuvée")
-				}
-				goto done
+			if m["type"] == "approval_pending" {
+				sawPending = true
+			}
+			if m["type"] == "stream_end" {
+				break
 			}
 		}
-	done:
+		if sawPending {
+			t.Fatal("approval_pending diffusé alors que read_file était auto-approuvé")
+		}
 
-		// read_file auto-approuvé (confirm=true) ; write_to_file jamais soumis.
 		got, ok := backend.lastApproval.(*submitApprovalCall)
 		if !ok {
 			t.Fatalf("Aucun SubmitToolApproval enregistré: %v", backend.lastApproval)
@@ -1132,7 +1134,41 @@ func TestWebSocketSetAutoAccept(t *testing.T) {
 			t.Fatalf("Auto-approbation attendue confirm=true, reçu confirm=%v", got.confirm)
 		}
 		if backend.submitted != 1 {
-			t.Fatalf("SubmitToolApproval appelé %d fois, attendu 1 (seul read_file)", backend.submitted)
+			t.Fatalf("SubmitToolApproval appelé %d fois, attendu 1", backend.submitted)
+		}
+	})
+
+	t.Run("enable => écriture jamais auto-approuvée", func(t *testing.T) {
+		backend := &fakeApprovalRPC{}
+		backend.streamDeltas = []string{
+			`{"write_to_file":"src/main.dart","step_index":1,"trajectory_id":"123e4567-e89b-12d3-a456-426614174000"}`,
+		}
+		srv := newTestServer(backend)
+		defer srv.Close()
+		client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+		defer client.conn.Close()
+
+		client.sendRaw(t, `{"type":"set_auto_accept","requestId":"aa2","data":{"enabled":true}}`)
+		if msg := client.recv(t); msg["type"] != "response" || msg["error"] != nil {
+			t.Fatalf("Réponse inattendue: %v", msg)
+		}
+
+		client.send(t, map[string]string{"type": "send_prompt", "requestId": "r9", "cascadeId": "casc-1", "prompt": "travaille"})
+		var sawPending bool
+		for {
+			m := client.recv(t)
+			if m["type"] == "approval_pending" {
+				sawPending = true
+			}
+			if m["type"] == "stream_end" {
+				if !sawPending {
+					t.Fatal("approval_pending jamais émis pour write_to_file (non read-only)")
+				}
+				break
+			}
+		}
+		if backend.submitted != 0 {
+			t.Fatalf("SubmitToolApproval appelé %d fois, attendu 0 (écriture jamais auto-approuvée)", backend.submitted)
 		}
 	})
 
@@ -1147,9 +1183,8 @@ func TestWebSocketSetAutoAccept(t *testing.T) {
 		defer client.conn.Close()
 
 		// Désactive (valeur par défaut) : aucune auto-approbation.
-		client.sendRaw(t, `{"type":"set_auto_accept","requestId":"aa2","data":{"enabled":false}}`)
-		msg := client.recv(t)
-		if msg["type"] != "response" || msg["error"] != nil {
+		client.sendRaw(t, `{"type":"set_auto_accept","requestId":"aa3","data":{"enabled":false}}`)
+		if msg := client.recv(t); msg["type"] != "response" || msg["error"] != nil {
 			t.Fatalf("Réponse inattendue: %v", msg)
 		}
 

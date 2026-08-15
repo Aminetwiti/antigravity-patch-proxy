@@ -259,5 +259,37 @@ void main() {
       expect(sent['modelUID'], 'deepseek-v4-flash');
       expect(sent['modelEnum'], 342);
     });
+
+    testWidgets('ChatInputBar displays unified stop button when streaming without layout overflow', (tester) async {
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      bool stopCalled = false;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ChatInputBar(
+              onSend: (_, {queued = false, modelUID, modelEnum}) {},
+              onStop: () => stopCalled = true,
+              hasActiveStream: true,
+              isConnected: true,
+            ),
+          ),
+        ),
+      );
+
+      expect(tester.takeException(), isNull);
+      final stopButton = find.byKey(const Key('stop-generation-button'));
+      expect(stopButton, findsOneWidget);
+
+      await tester.tap(stopButton);
+      await tester.pump();
+
+      expect(stopCalled, isTrue);
+    });
   });
 }
+

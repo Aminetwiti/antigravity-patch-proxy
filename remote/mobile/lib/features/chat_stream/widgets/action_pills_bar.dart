@@ -31,7 +31,7 @@ class ActionPillsBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 38,
+      height: 44,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -40,11 +40,10 @@ class ActionPillsBar extends StatelessWidget {
         itemBuilder: (context, index) {
           final action = actions[index];
           return ActionChip(
-            avatar: Icon(action.icon, size: 14),
-            label: Text(action.command, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+            avatar: Icon(action.icon, size: 16),
+            label: Text(action.command, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
             tooltip: action.label,
             onPressed: () => onActionSelected(action.command),
-            visualDensity: VisualDensity.compact,
           );
         },
       ),

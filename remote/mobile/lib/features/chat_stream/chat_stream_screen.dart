@@ -81,7 +81,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   StreamSubscription<Map<String, dynamic>>? _streamSub;
-  StreamSubscription<Map<String, String>>? _tapSub;
+  StreamSubscription<Map<String, dynamic>>? _tapSub;
   int _messageCounter = 0;
 
   static const _stillWorkingDelay = Duration(seconds: 15);
@@ -238,6 +238,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   /// « Approbation requise » (app en arrière-plan ou tuée), on re-fetch le
   /// contexte via get_pending_approval et on pousse la carte. Le daemon garde
   /// l'approbation même si le stream_delta d'origine a été perdu.
+  ///
+  /// Phase 3 — action inline : la notification porte des boutons
+  /// « Autoriser / Refuser » (Android). Le même stream délivre alors
+  /// `action: allow|deny` : on soumet la décision directement après le
+  /// re-fetch du contexte, sans afficher la carte.
   void _watchNotificationTaps() {
     _tapSub?.cancel();
     _tapSub = ApprovalNotifier.instance.taps.listen((tap) {
@@ -252,8 +257,49 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         // session affichée EST la bonne.
         return;
       }
-      _pendingApprovalFromTap();
+      final action = tap['action'] as String?;
+      if (action != null) {
+        _submitApprovalFromNotification(action);
+      } else {
+        _pendingApprovalFromTap();
+      }
     });
+  }
+
+  /// Phase 3 — action inline « Autoriser/Refuser » d'une notification :
+  /// re-fetch le contexte en attente puis soumet la décision, comme si
+  /// l'utilisateur avait tapé le bouton de la carte.
+  Future<void> _submitApprovalFromNotification(String action) async {
+    final api = widget.api;
+    if (api == null) return;
+    try {
+      final info = await api.getPendingApproval(widget.activeSessionId);
+      if (!mounted || info == null || info.isEmpty) return;
+      await api.submitApproval(
+        cascadeId: widget.activeSessionId,
+        callId: info['callId'] as String? ?? '',
+        allow: action == 'allow',
+        trajectoryId: info['trajectoryId'] as String? ?? '',
+        stepIndex: (info['stepIndex'] as num?)?.toInt() ?? -1,
+        approvalType: info['approvalType'] as String? ?? 'approval',
+        command: info['command'] as String? ?? '',
+      );
+      final callId = info['callId'] as String? ?? '';
+      if (callId.isNotEmpty && mounted) {
+        // Retire immédiatement la carte si elle est affichée (l'utilisateur
+        // a répondu depuis la notification, pas depuis l'app).
+        _processedCallIds.add(callId);
+        _removeApproval(callId);
+      }
+      // La réponse du daemon (approval_resolved / stream_delta) nettoiera la
+      // carte si elle est affichée ; on annule la notification localement
+      // pour un retour immédiat.
+      ApprovalNotifier.instance.cancelApprovalByCascadeId(widget.activeSessionId);
+      ApprovalNotifier.instance.cancelTask(widget.activeSessionId);
+    } catch (_) {
+      // Daemon injoignable ou approbation déjà résolue : silencieux — la
+      // notification d'origine a pu être remplacée/annulée par le daemon.
+    }
   }
 
   Future<void> _pendingApprovalFromTap() async {
@@ -658,13 +704,21 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         // Phase 6 : le daemon a auto-refusé l'approbation (timeout) — la carte
         // reste visible en lecture seule pour expliquer la disparition, et la
         // notification locale est annulée.
-        final callId = msg['data']?['callId'] as String? ??
-            msg['data']?['approvalId'] as String? ??
+        final data = msg['data'] as Map<String, dynamic>? ?? const {};
+        final callId = data['callId'] as String? ??
+            data['approvalId'] as String? ??
             '';
+        // Phase 3 : le daemon peut n'envoyer que cascadeId — la notification
+        // d'approbation est taguée par cascade (id = cascadeId.hashCode), on
+        // peut donc l'annuler même sans connaître le callId.
+        final cascadeId = data['cascadeId'] as String? ?? '';
         if (callId.isNotEmpty && _pendingApprovalCallIds.contains(callId)) {
           setState(() => _expiredCallIds.add(callId));
           _pendingApprovalCallIds.remove(callId);
           ApprovalNotifier.instance.cancelApproval(callId);
+        } else if (cascadeId.isNotEmpty) {
+          ApprovalNotifier.instance
+              .cancelApprovalByCascadeId(cascadeId);
         }
       }
     });
@@ -1454,15 +1508,15 @@ class _MessageBubble extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
-            color: const Color(0xFF1B1D23),
+            color: AppColors.surfaceInput,
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: const Color(0xFF3F3F46), width: 0.5),
+            border: Border.all(color: AppColors.borderStrong, width: 0.5),
           ),
           child: SelectableText(
             message.text,
             style: const TextStyle(
               fontSize: 13.5,
-              color: Color(0xFFD4D4D8),
+              color: AppColors.inkSecondary,
             ),
           ),
         ),
@@ -1470,12 +1524,19 @@ class _MessageBubble extends StatelessWidget {
     }
 
     final isError = message.isError;
+    final hasContent = message.text.trim().isNotEmpty;
+    final hasThought = message.thought != null && message.thought!.trim().isNotEmpty;
+
+    if (!hasContent && !hasThought && !isError && !message.isStreaming) {
+      return const SizedBox.shrink();
+    }
+
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (message.thought != null) ...[
+          if (hasThought) ...[
             InkWell(
               key: Key('thought-toggle-${message.id}'),
               onTap: () {
@@ -1549,10 +1610,11 @@ class _MessageBubble extends StatelessWidget {
               ),
             )
           else ...[
-            MarkdownBubble(
-              text: message.text,
-              isStreaming: message.isStreaming,
-            ),
+            if (hasContent || message.isStreaming)
+              MarkdownBubble(
+                text: message.text,
+                isStreaming: message.isStreaming,
+              ),
             if (!message.isStreaming &&
                 (message.text.contains('Implementation Plan') ||
                     message.text.contains('implementation_plan.md') ||
@@ -1566,7 +1628,6 @@ class _MessageBubble extends StatelessWidget {
           const SizedBox(height: 8),
           Row(
             children: [
-              // Timestamp capturé mais jamais affiché (audit UX P1-7).
               Text(
                 message.timestamp,
                 style: TextStyle(fontSize: 10.5, color: scheme.onSurfaceVariant),
@@ -1590,56 +1651,82 @@ class _MessageBubble extends StatelessWidget {
                 ],
               ],
               const Spacer(),
-              Tooltip(
-                message: 'Copier le message',
-                child: InkWell(
-                  onTap: () {
-                    Clipboard.setData(ClipboardData(text: message.text));
-                    AppToast.show(
-                      context,
-                      message: 'Message copié dans le presse-papiers',
-                      icon: Icons.copy_outlined,
-                      type: ToastType.success,
-                    );
-                  },
-                  borderRadius: BorderRadius.circular(4),
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: Semantics(
-                      label: 'Copier le message',
-                      button: true,
-                      child: Icon(Icons.copy_outlined,
-                          size: 14, color: scheme.onSurfaceVariant),
+              if (hasContent) ...[
+                Tooltip(
+                  message: 'Copier le message',
+                  child: InkWell(
+                    onTap: () {
+                      Clipboard.setData(ClipboardData(text: message.text));
+                      AppToast.show(
+                        context,
+                        message: 'Message copié dans le presse-papiers',
+                        icon: Icons.copy_outlined,
+                        type: ToastType.success,
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Semantics(
+                        label: 'Copier le message',
+                        button: true,
+                        child: Icon(Icons.copy_outlined,
+                            size: 15, color: scheme.onSurfaceVariant),
+                      ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Tooltip(
-                message: 'Utile',
-                child: Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: Semantics(
-                    label: 'Marquer comme utile',
-                    button: true,
-                    child: Icon(Icons.thumb_up_outlined,
-                        size: 14, color: scheme.onSurfaceVariant),
+                const SizedBox(width: 4),
+                Tooltip(
+                  message: 'Utile',
+                  child: InkWell(
+                    onTap: () {
+                      HapticFeedback.lightImpact();
+                      AppToast.show(
+                        context,
+                        message: 'Merci pour votre retour !',
+                        icon: Icons.thumb_up_outlined,
+                        type: ToastType.info,
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Semantics(
+                        label: 'Marquer comme utile',
+                        button: true,
+                        child: Icon(Icons.thumb_up_outlined,
+                            size: 15, color: scheme.onSurfaceVariant),
+                      ),
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Tooltip(
-                message: 'Pas utile',
-                child: Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: Semantics(
-                    label: 'Marquer comme pas utile',
-                    button: true,
-                    child: Icon(Icons.thumb_down_outlined,
-                        size: 14, color: scheme.onSurfaceVariant),
+                const SizedBox(width: 4),
+                Tooltip(
+                  message: 'Pas utile',
+                  child: InkWell(
+                    onTap: () {
+                      HapticFeedback.lightImpact();
+                      AppToast.show(
+                        context,
+                        message: 'Retour enregistré',
+                        icon: Icons.thumb_down_outlined,
+                        type: ToastType.info,
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Semantics(
+                        label: 'Marquer comme pas utile',
+                        button: true,
+                        child: Icon(Icons.thumb_down_outlined,
+                            size: 15, color: scheme.onSurfaceVariant),
+                      ),
+                    ),
                   ),
                 ),
-              ),
+              ],
             ],
           ),
         ],

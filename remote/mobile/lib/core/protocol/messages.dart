@@ -64,6 +64,43 @@ class CascadeSession {
       };
 }
 
+/// Official Antigravity 2.0 Project model (from ~/.gemini/config/projects/)
+class ProjectItem {
+  final String id;
+  final String name;
+  final String folderUri;
+  final String path;
+  final DateTime? updatedAt;
+
+  const ProjectItem({
+    required this.id,
+    required this.name,
+    required this.folderUri,
+    required this.path,
+    this.updatedAt,
+  });
+
+  factory ProjectItem.fromJson(Map<String, dynamic> json) {
+    return ProjectItem(
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? 'Unnamed Project',
+      folderUri: json['folderUri']?.toString() ?? '',
+      path: json['path']?.toString() ?? '',
+      updatedAt: json['updatedAt'] != null
+          ? DateTime.tryParse(json['updatedAt'].toString())
+          : null,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'folderUri': folderUri,
+        'path': path,
+        'updatedAt': updatedAt?.toIso8601String(),
+      };
+}
+
 class ChatMessage {
   final String id;
   final String sender; // 'user' or 'assistant'

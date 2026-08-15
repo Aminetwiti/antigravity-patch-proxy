@@ -182,7 +182,7 @@ func (l *loadRPCClient) GetAllCascades() ([]byte, error) {
 func (l *loadRPCClient) SendMessageStream(cascadeID, text string, onFrame func([]byte) error) error {
 	return l.streamLoop(onFrame)
 }
-func (l *loadRPCClient) SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error) error {
+func (l *loadRPCClient) SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error, noTools ...bool) error {
 	return l.streamLoop(onFrame)
 }
 func (l *loadRPCClient) streamLoop(onFrame func([]byte) error) error {
@@ -243,6 +243,15 @@ func (l *loadRPCClient) SkipBrowserSubagent(cascadeID string, stepIndex int64) e
 }
 func (l *loadRPCClient) RetrieveUserQuotaSummary() ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("quota")), nil
+}
+func (l *loadRPCClient) GetDefinition(uri string, line, character int) ([]byte, error) {
+	return []byte(`{"location":{"uri":"` + uri + `"}}`), nil
+}
+func (l *loadRPCClient) GetLintErrors(uri string) ([]byte, error) {
+	return []byte(`{"diagnostics":[]}`), nil
+}
+func (l *loadRPCClient) GetCodeValidationStates(uri string) ([]byte, error) {
+	return []byte(`{"validations":[{"uri":"` + uri + `","state":"valid"}]}`), nil
 }
 func (l *loadRPCClient) GetUserStatus() ([]byte, error) {
 	return []byte(`{"status":"ok"}`), nil
@@ -385,7 +394,7 @@ func (f *failingStreamClient) SendMessageStream(cascadeID, text string, onFrame 
 	_ = onFrame(connectrpc.Frame(pbTextFrame("hello")))
 	return fmt.Errorf("stream interrompu par le backend")
 }
-func (f *failingStreamClient) SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error) error {
+func (f *failingStreamClient) SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error, noTools ...bool) error {
 	return f.SendMessageStream(cascadeID, text, onFrame)
 }
 

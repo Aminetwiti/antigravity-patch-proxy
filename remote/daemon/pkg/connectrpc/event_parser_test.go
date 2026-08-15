@@ -38,6 +38,15 @@ func TestExtractToolName(t *testing.T) {
 	if name := extractToolName("modifying write_to_file"); name != "write_to_file" {
 		t.Errorf("Attendu write_to_file, reçu=%s", name)
 	}
+	if name := extractToolName(`{"read_file":"src/main.dart"}`); name != "read_file" {
+		t.Errorf("Attendu read_file, reçu=%s", name)
+	}
+	if name := extractToolName(`{"edit_file":"src/main.dart"}`); name != "edit_file" {
+		t.Errorf("Attendu edit_file, reçu=%s", name)
+	}
+	if name := extractToolName(`{"search_files":"todo"}`); name != "search_files" {
+		t.Errorf("Attendu search_files, reçu=%s", name)
+	}
 	if name := extractToolName("unknown action"); name != "generic_tool" {
 		t.Errorf("Attendu generic_tool, reçu=%s", name)
 	}

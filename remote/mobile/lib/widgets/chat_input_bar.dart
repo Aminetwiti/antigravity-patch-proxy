@@ -1255,15 +1255,14 @@ class _ChatInputBarState extends State<ChatInputBar> {
                                 ),
                                 const SizedBox(width: 4),
                                 Flexible(
-                                  child: FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    child: Text(
-                                      '$_selectedModel ($_reasoningEffort)',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: scheme.onSurface,
-                                        fontWeight: FontWeight.w500,
-                                      ),
+                                  child: Text(
+                                    '$_selectedModel ($_reasoningEffort)',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: scheme.onSurface,
+                                      fontWeight: FontWeight.w500,
                                     ),
                                   ),
                                 ),
@@ -1292,86 +1291,62 @@ class _ChatInputBarState extends State<ChatInputBar> {
                         onPressed: () {},
                         tooltip: 'Saisie vocale — bientôt disponible',
                       ),
-                      // Stop button (Emergency Stop)
-                      if (widget.hasActiveStream && widget.onStop != null) ...[
-                        Tooltip(
-                          message: 'Arrêter la génération (Emergency Stop)',
-                          child: InkWell(
-                            key: const Key('stop-generation-button'),
-                            onTap: () {
-                              HapticFeedback.heavyImpact();
-                              widget.onStop!();
-                            },
-                            borderRadius: BorderRadius.circular(AppRadius.pill),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: scheme.error.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(AppRadius.pill),
-                                border: Border.all(color: scheme.error.withValues(alpha: 0.4)),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.stop_circle_outlined, size: 16, color: scheme.error),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    'Arrêter',
-                                    style: TextStyle(
-                                      fontSize: 11.5,
-                                      fontWeight: FontWeight.w600,
-                                      color: scheme.error,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                      ],
-
-                      // Send button
-                      GestureDetector(
-                        onTapDown: (_) => setState(() => _isSendPressed = true),
-                        onTapUp: (_) {
-                          setState(() => _isSendPressed = false);
-                          _handleSend();
-                        },
-                        onTapCancel:
-                            () => setState(() => _isSendPressed = false),
-                        child: AnimatedScale(
-                          scale: _isSendPressed ? 0.85 : 1.0,
-                          duration: const Duration(milliseconds: 100),
-                          curve: Curves.easeOutQuart,
-                          child: Padding(
-                            padding: const EdgeInsets.all(6),
-                            child: GestureDetector(
-                              onLongPress: () => _showQueueSettings(context),
+                      // Send / Stop button (unified primary action)
+                      Tooltip(
+                        message: widget.hasActiveStream
+                            ? 'Arrêter la génération (Emergency Stop)'
+                            : 'Envoyer',
+                        child: GestureDetector(
+                          key: widget.hasActiveStream
+                              ? const Key('stop-generation-button')
+                              : const Key('send-message-button'),
+                          onTapDown: (_) => setState(() => _isSendPressed = true),
+                          onTapUp: (_) {
+                            setState(() => _isSendPressed = false);
+                            if (widget.hasActiveStream) {
+                              if (widget.onStop != null) {
+                                HapticFeedback.heavyImpact();
+                                widget.onStop!();
+                              }
+                            } else {
+                              _handleSend();
+                            }
+                          },
+                          onTapCancel:
+                              () => setState(() => _isSendPressed = false),
+                          child: AnimatedScale(
+                            scale: _isSendPressed ? 0.85 : 1.0,
+                            duration: const Duration(milliseconds: 100),
+                            curve: Curves.easeOutQuart,
+                            child: Padding(
+                              padding: const EdgeInsets.all(6),
+                              child: GestureDetector(
+                                onLongPress: () => _showQueueSettings(context),
                                 child: Container(
-                                width: 28,
-                                height: 28,
-                                decoration: BoxDecoration(
-                                  color: widget.hasActiveStream
-                                      ? const Color(0xFFEF4444)
-                                      : (_controller.text.trim().isNotEmpty &&
-                                              widget.isConnected
-                                          ? const Color(0xFF3B82F6)
-                                          : const Color(0xFF27272A)),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Icon(
-                                  isQueued
-                                      ? Icons.playlist_add_check
-                                      : (widget.hasActiveStream
-                                          ? Icons.stop_rounded
-                                          : Icons.arrow_forward),
-                                  size: 15,
-                                  color: (_controller.text.trim().isNotEmpty &&
-                                              widget.isConnected) ||
-                                          widget.hasActiveStream
-                                      ? Colors.white
-                                      : const Color(0xFF71717A),
+                                  width: 28,
+                                  height: 28,
+                                  decoration: BoxDecoration(
+                                    color: widget.hasActiveStream
+                                        ? AppColors.danger
+                                        : (_controller.text.trim().isNotEmpty &&
+                                                widget.isConnected
+                                            ? AppColors.accentBlue
+                                            : AppColors.surfaceInput),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(
+                                    isQueued
+                                        ? Icons.playlist_add_check
+                                        : (widget.hasActiveStream
+                                            ? Icons.stop_rounded
+                                            : Icons.arrow_forward),
+                                    size: 15,
+                                    color: (_controller.text.trim().isNotEmpty &&
+                                                widget.isConnected) ||
+                                            widget.hasActiveStream
+                                        ? AppColors.onAccent
+                                        : AppColors.inkMuted,
+                                  ),
                                 ),
                               ),
                             ),
