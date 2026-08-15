@@ -959,18 +959,39 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     }
 
     if (filtered.isEmpty) {
+      final hasFilters = _searchQuery.isNotEmpty || _selectedExtensionFilter != null;
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Text(
-            _searchQuery.isEmpty
-                ? 'Aucun fichier dans ce workspace'
-                : 'Aucun résultat pour «\u00a0$_searchQuery\u00a0»',
-            style: TextStyle(
-              fontSize: 12.5,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-            textAlign: TextAlign.center,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _searchQuery.isEmpty
+                    ? (_selectedExtensionFilter != null
+                        ? 'Aucun fichier «\u00a0$_selectedExtensionFilter\u00a0»'
+                        : 'Aucun fichier dans ce workspace')
+                    : 'Aucun résultat pour «\u00a0$_searchQuery\u00a0»',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              if (hasFilters) ...[
+                const SizedBox(height: 12),
+                TextButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _searchController.clear();
+                      _selectedExtensionFilter = null;
+                    });
+                  },
+                  icon: const Icon(Icons.refresh_rounded, size: 14),
+                  label: const Text('Réinitialiser les filtres', style: TextStyle(fontSize: 12)),
+                ),
+              ],
+            ],
           ),
         ),
       );

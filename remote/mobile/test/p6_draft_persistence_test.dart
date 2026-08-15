@@ -9,7 +9,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ChatInputBar(
-              onSend: (_, {queued, modelUID, modelEnum}) {},
+              onSend: (_, {queued = false, modelUID, modelEnum}) {},
               initialText: 'brouillon persisté',
             ),
           ),
@@ -25,7 +25,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ChatInputBar(
-              onSend: (_, {queued, modelUID, modelEnum}) {},
+              onSend: (_, {queued = false, modelUID, modelEnum}) {},
               onDraftChanged: (d) => lastDraft = d,
             ),
           ),
@@ -44,7 +44,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ChatInputBar(
-              onSend: (m, {queued, modelUID, modelEnum}) => sent = m,
+              onSend: (m, {queued = false, modelUID, modelEnum}) => sent = m,
               onDraftChanged: (d) => lastDraft = d,
             ),
           ),
@@ -53,10 +53,12 @@ void main() {
       await tester.enterText(find.byType(TextField), 'message');
       await tester.pump();
       expect(lastDraft, 'message');
-      await tester.tap(find.byKey(const Key('send-button')));
+      await tester.tap(find.byKey(const Key('send-message-button')));
       await tester.pump();
       expect(sent, 'message');
       expect(lastDraft, '');
+      // Laisse expirer le verrou d'envoi de 300 ms (timer encore pendant).
+      await tester.pump(const Duration(milliseconds: 400));
     });
   });
 }

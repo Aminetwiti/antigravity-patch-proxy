@@ -21,10 +21,16 @@ import (
 // entrées de plus de 24 h sont purgées — upgrade = retransmission avec backoff
 // ou confirmation explicite par le mobile si le besoin apparaît.
 type DaemonOutbox struct {
-	mu sync.Mutex
 	// now : horloge injectable (tests déterministes).
 	now func() time.Time
 }
+
+// outboxFileMu : verrou de PACKAGE (pas par instance) — Windows n'autorise pas
+// deux handles en écriture simultanés sur le même JSONL. En production le daemon
+// ne crée qu'un serveur (verrou non contentieux) ; en test, plusieurs serveurs
+// partagent le même chemin (casc-1.jsonl) et le même processus → ce verrou
+// sérialise les accès disque qui sinon se marchaient dessus (tmp + rename).
+var outboxFileMu sync.Mutex
 
 // pendingMessageMaxAge : au-delà, un message non confirmé est considéré comme
 // obsolète (le transcript contiendra l'échange si l'agent a répondu) et purgé.
@@ -52,8 +58,8 @@ func (o *DaemonOutbox) Append(cascadeID, requestID, prompt string) error {
 	if cascadeID == "" || requestID == "" || prompt == "" {
 		return nil // rien à persister
 	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
+	outboxFileMu.Lock()
+	defer outboxFileMu.Unlock()
 
 	if o.existsLocked(cascadeID, requestID) {
 		return nil // déjà persisté (retransmission)
@@ -88,8 +94,8 @@ func (o *DaemonOutbox) Pending(cascadeID string) []map[string]interface{} {
 	if cascadeID == "" {
 		return nil
 	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
+	outboxFileMu.Lock()
+	defer outboxFileMu.Unlock()
 
 	path := pendingOutboxPath(cascadeID)
 	f, err := os.Open(path)
@@ -134,8 +140,8 @@ func (o *DaemonOutbox) Confirm(cascadeID, requestID string) error {
 	if cascadeID == "" || requestID == "" {
 		return nil
 	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
+	outboxFileMu.Lock()
+	defer outboxFileMu.Unlock()
 
 	path := pendingOutboxPath(cascadeID)
 	lines, err := o.readLinesLocked(path)

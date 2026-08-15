@@ -137,6 +137,21 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
   // ── Session Top Tabs & Artifact state ──────────────────────────────
   SessionTabType _currentTab = SessionTabType.chat;
+
+  // P6 : ordre des onglets pour la navigation horizontale — miroir des pills
+  // visibles (Plan/Tasks conditionnels). Tasks n'a pas de pill (hasTasks:false
+  // côté SessionTopTabs) mais est atteignable via BackgroundTasksBar : on le
+  // garde dans l'ordre pour ne pas y rester bloqué.
+  // ponytail: liste dérivée simple, pas de TabController/PageView — les pages
+  // sont lourdes (chat ListView + scroll controllers), un swipe instantané par
+  // setState suffit et évite de tout garder vivant en mémoire.
+  List<SessionTabType> get _swipeableTabs => [
+        SessionTabType.chat,
+        SessionTabType.review,
+        SessionTabType.overview,
+        if (_latestPlanText != null) SessionTabType.plan,
+        if (_activeStreamCount > 0) SessionTabType.tasks,
+      ];
   final Set<String> _modifiedFiles = {};
   final List<SessionModifiedFile> _modifiedFileList = [];
   final List<String> _artifacts = [];
@@ -1410,7 +1425,29 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           child: Stack(
             children: [
               Positioned.fill(
-                child: _buildActiveTabContent(scheme, isConnected),
+                // P6 : swipe horizontal gauche/droite pour changer d'onglet.
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onHorizontalDragEnd: (details) {
+                    if (_activeArtifact != null) return; // onglet artefact : pas de swipe
+                    final tabs = _swipeableTabs;
+                    if (tabs.length < 2) return;
+                    final idx = tabs.indexOf(_currentTab);
+                    if (idx < 0) return;
+                    final velocity = details.primaryVelocity ?? 0;
+                    final next = velocity < -200
+                        ? idx + 1
+                        : velocity > 200
+                            ? idx - 1
+                            : -1;
+                    if (next < 0 || next >= tabs.length) return;
+                    setState(() {
+                      _activeArtifact = null;
+                      _currentTab = tabs[next];
+                    });
+                  },
+                  child: _buildActiveTabContent(scheme, isConnected),
+                ),
               ),
               // P1 : bouton flottant « retour en bas » — uniquement sur
               // l'onglet chat, quand l'utilisateur s'est éloigné du bas.

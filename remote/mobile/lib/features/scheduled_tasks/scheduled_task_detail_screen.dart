@@ -201,8 +201,13 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
           tooltip: 'Retour',
         ),
         title: Text(
-          _task.displayName,
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.inkPrimary),
+          'Scheduled Tasks / ${_task.displayName}',
+          style: const TextStyle(
+            fontSize: 13.5,
+            color: Color(0xFF8F909A),
+            fontWeight: FontWeight.w400,
+          ),
+          overflow: TextOverflow.ellipsis,
         ),
         actions: [
           IconButton(
