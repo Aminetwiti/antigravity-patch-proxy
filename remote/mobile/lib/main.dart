@@ -815,7 +815,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       },
     );
 
-    return Scaffold(
+    final scaffold = Scaffold(
       key: _scaffoldKey,
       extendBodyBehindAppBar: false,
       drawer: isWideScreen ? null : sidebar,
@@ -947,6 +947,22 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
               ],
             )
           : chatStream,
+    );
+
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
+            _scaffoldKey.currentState?.closeDrawer();
+          } else if (_scaffoldKey.currentState?.isEndDrawerOpen ?? false) {
+            _scaffoldKey.currentState?.closeEndDrawer();
+          }
+        },
+      },
+      child: Focus(
+        autofocus: false,
+        child: scaffold,
+      ),
     );
   }
 }

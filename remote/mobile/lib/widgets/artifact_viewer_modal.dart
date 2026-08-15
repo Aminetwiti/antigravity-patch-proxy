@@ -24,6 +24,33 @@ class ArtifactViewerModal extends StatefulWidget {
     this.onRequestFeedback,
   });
 
+  static Future<void> show(
+    BuildContext context, {
+    required DaemonApi api,
+    required String artifactPath,
+    required String artifactName,
+    String? workspacePath,
+    bool requestFeedback = false,
+    VoidCallback? onProceed,
+    VoidCallback? onRequestFeedback,
+  }) {
+    HapticFeedback.selectionClick();
+    return showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => ArtifactViewerModal(
+        api: api,
+        artifactPath: artifactPath,
+        artifactName: artifactName,
+        workspacePath: workspacePath,
+        requestFeedback: requestFeedback,
+        onProceed: onProceed,
+        onRequestFeedback: onRequestFeedback,
+      ),
+    );
+  }
+
   @override
   State<ArtifactViewerModal> createState() => _ArtifactViewerModalState();
 }

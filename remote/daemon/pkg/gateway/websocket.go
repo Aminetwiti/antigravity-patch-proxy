@@ -62,6 +62,11 @@ type RPCClient interface {
 	ReadFile(uri string) ([]byte, error)
 	// WriteFile écrit un fichier via le RPC officiel du LS (WriteFile).
 	WriteFile(uri string, content []byte, overwrite bool) ([]byte, error)
+	// TrackWorkspace déclare un dossier au hub (AddTrackedWorkspace) — le LS
+	// crée l'instance virtuelle ; StartCascade fonctionne ensuite sans projectID.
+	TrackWorkspace(workspacePath string) ([]byte, error)
+	// UntrackWorkspace retire un dossier du hub (RemoveTrackedWorkspace).
+	UntrackWorkspace(workspacePath string) ([]byte, error)
 	// GetCascadeTrajectory récupère l'historique structuré d'une session
 	// (GetCascadeTrajectory) — verbosity 0 = défaut du LS.
 	GetCascadeTrajectory(cascadeID string, verbosity uint64) ([]byte, error)
@@ -503,6 +508,10 @@ const (
 // plein) ferait sinon bloquer WriteJSON indéfiniment sous writeMu → head-of-line
 // blocking sur TOUTES les connexions (le broadcast passe par le même mutex).
 const writeTimeout = 10 * time.Second
+
+// quotaPushInterval : cadence du push de quotas scheduler → clients mobiles.
+// Alignée sur l'ancien timer mobile de 60 s ; 1 appel LS/min max.
+const quotaPushInterval = 60 * time.Second
 
 // writeJSON envoie un message à une connexion donnée (writer unique par
 // connexion : un seul goroutine écrit sur un websocket.Conn à la fois — le
@@ -1557,6 +1566,18 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			if projectID != "" {
 				logJSON.Info("cascade_created", "projectId", projectID)
 			} else {
+				// Workspace inconnu du hub → on le déclare explicitement via
+				// AddTrackedWorkspace avant StartCascade (technique Deck,
+				// detector.js ensureWorkspaceTracked). Le LS crée l'instance
+				// virtuelle du workspace : plus de cascade « orpheline » qui
+				// renvoyait un payload vide, ni de retry 9,5 s à cache chaud.
+				plain := strings.TrimPrefix(uri, "file:///")
+				plain = strings.ReplaceAll(plain, `\`, "/")
+				if _, errTrack := s.RPCClient.TrackWorkspace(plain); errTrack != nil {
+					logJSON.Warn("track_workspace_failed", "workspace", plain, "error", errTrack.Error())
+				} else {
+					logJSON.Info("workspace_tracked", "workspace", plain)
+				}
 				logJSON.Info("cascade_created_orphan")
 			}
 
@@ -2626,14 +2647,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 	case "get_quota_summary", "system.get_quota_summary":
 		raw, err = s.RPCClient.RetrieveUserQuotaSummary()
 		if err == nil {
-			q := connectrpc.ParseQuotaSummary(raw)
-			if q.HasQuota() {
-				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{
-					"weeklyPercent":         q.WeeklyPercent,
-					"fiveHourPercent":       q.FiveHourPercent,
-					"weeklyPercentClaude":   q.WeeklyPercentClaude,
-					"fiveHourPercentClaude": q.FiveHourPercentClaude,
-				}})
+			if data, ok := s.buildQuotaData(raw); ok {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: data})
 				return
 			}
 			// Schéma LS inconnu (aucune clé reconnue) : on renvoie la forme

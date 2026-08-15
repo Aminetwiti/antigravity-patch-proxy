@@ -106,16 +106,12 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
 
   void _openArtifact(Map<String, dynamic> artifact) {
     if (widget.api == null) return;
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => ArtifactViewerModal(
-        api: widget.api!,
-        artifactPath: artifact['path'],
-        artifactName: artifact['name'],
-        workspacePath: _brainRoot,
-      ),
+    ArtifactViewerModal.show(
+      context,
+      api: widget.api!,
+      artifactPath: artifact['path'],
+      artifactName: artifact['name'],
+      workspacePath: _brainRoot,
     );
   }
 

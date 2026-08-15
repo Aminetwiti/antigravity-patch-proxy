@@ -269,6 +269,14 @@ func (f *fakeRPCClient) WriteFile(uri string, content []byte, overwrite bool) ([
 	return connectrpc.Frame(pbTextFrame("written")), nil
 }
 
+func (f *fakeRPCClient) TrackWorkspace(workspacePath string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("tracked")), nil
+}
+
+func (f *fakeRPCClient) UntrackWorkspace(workspacePath string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("untracked")), nil
+}
+
 func (f *fakeRPCClient) GetCascadeTrajectory(cascadeID string, verbosity uint64) ([]byte, error) {
 	f.lastTrajectory = &trajectoryCall{cascadeID: cascadeID, verbosity: verbosity}
 	if f.trajectoryRaw != nil {

@@ -76,6 +76,20 @@ func (c *Client) ReadFile(uri string) ([]byte, error) {
 	return c.Call("ReadFile", BuildReadFileRequest(uri))
 }
 
+// TrackWorkspace déclare un dossier au hub via AddTrackedWorkspace — le LS
+// crée l'instance virtuelle du workspace ; StartCascade avec workspace_uri
+// fonctionne ensuite sans project_id (plus de cascade « orpheline » qui
+// renvoyait un payload vide). doNotWatchFiles évite le file-watcher du LS
+// (inutile pour un accès distant). Réponse vide (AddTrackedWorkspaceResponse).
+func (c *Client) TrackWorkspace(workspacePath string) ([]byte, error) {
+	return c.Call("AddTrackedWorkspace", BuildTrackWorkspace(workspacePath))
+}
+
+// UntrackWorkspace retire un dossier du hub (RemoveTrackedWorkspace).
+func (c *Client) UntrackWorkspace(workspacePath string) ([]byte, error) {
+	return c.Call("RemoveTrackedWorkspace", BuildTrackWorkspace(workspacePath))
+}
+
 // WriteFile écrit un fichier via le RPC officiel WriteFile du Language Server.
 // overwrite=false → erreur si le fichier existe déjà (pas d'écrasement silencieux).
 func (c *Client) WriteFile(uri string, content []byte, overwrite bool) ([]byte, error) {

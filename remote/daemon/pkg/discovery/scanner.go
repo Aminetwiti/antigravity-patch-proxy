@@ -3,6 +3,7 @@ package discovery
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
@@ -193,7 +194,18 @@ func listeningPortsForPID(pid int) []int {
 }
 
 // probeService vérifie que le port expose bien le LanguageServerService.
+// 1. Sonde HTTP : frame gRPC-Web Heartbeat (chemin principal).
+// 2. Sonde HTTPS : GetUserStatus en JSON — le LS expose parfois des ports
+// TLS (certificat auto-signé) que la sonde HTTP rate ; technique reprise de
+// Deck/IDE-mobile (quota-service.ts, rejectUnauthorized: false).
 func probeService(port int, csrfToken string) bool {
+	if probeHTTPHeartbeat(port, csrfToken) {
+		return true
+	}
+	return probeHTTPSGetUserStatus(port, csrfToken)
+}
+
+func probeHTTPHeartbeat(port int, csrfToken string) bool {
 	url := fmt.Sprintf("http://127.0.0.1:%d/exa.language_server_pb.LanguageServerService/Heartbeat", port)
 	body := make([]byte, 5) // frame gRPC-Web vide
 	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
@@ -214,6 +226,32 @@ func probeService(port int, csrfToken string) bool {
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
 	return resp.StatusCode == http.StatusOK
+}
+
+func probeHTTPSGetUserStatus(port int, csrfToken string) bool {
+	body := []byte(`{"metadata":{"ideName":"antigravity"}}`)
+	req, err := http.NewRequest("POST", fmt.Sprintf("https://127.0.0.1:%d/exa.language_server_pb.LanguageServerService/GetUserStatus", port), bytes.NewReader(body))
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Connect-Protocol-Version", "1")
+	req.Header.Set("X-Codeium-Csrf-Token", csrfToken)
+
+	// Certificat auto-signé du LS : on accepte tout (le jeton CSRF authentifie).
+	client := &http.Client{
+		Timeout: 3 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // #nosec G402 — jeton CSRF requis
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode == http.StatusOK && bytes.Contains(raw, []byte("user_status"))
 }
 
 func getProcesses() ([]procEntry, error) {

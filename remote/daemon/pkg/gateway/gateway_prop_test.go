@@ -268,6 +268,12 @@ func (l *loadRPCClient) ConvertTrajectoryToMarkdown(trajectoryID string) ([]byte
 func (l *loadRPCClient) CreateWorktree(branch, path string) ([]byte, error) {
 	return []byte(`{"status":"created"}`), nil
 }
+func (l *loadRPCClient) TrackWorkspace(workspacePath string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("tracked")), nil
+}
+func (l *loadRPCClient) UntrackWorkspace(workspacePath string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("untracked")), nil
+}
 
 
 // TestWebSocketConcurrentClients — 20 clients en parallèle, 30 messages chacun :
@@ -396,6 +402,12 @@ func (f *failingStreamClient) SendMessageStream(cascadeID, text string, onFrame 
 }
 func (f *failingStreamClient) SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error, noTools ...bool) error {
 	return f.SendMessageStream(cascadeID, text, onFrame)
+}
+func (f *failingStreamClient) TrackWorkspace(workspacePath string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("tracked")), nil
+}
+func (f *failingStreamClient) UntrackWorkspace(workspacePath string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("untracked")), nil
 }
 
 func TestWebSocketStreamBackendError(t *testing.T) {

@@ -360,6 +360,18 @@ func BuildStatUriRequest(uri string) []byte {
 	return w.b
 }
 
+// BuildTrackWorkspace construit un AddTrackedWorkspaceRequest :
+// {1: workspace (chemin brut, séparateurs '/'), 2: do_not_watch_files} —
+// schéma vérifié dans antigravity-client (language_server_pb.ts ligne 4425).
+// do_not_watch_files=true : le file-watcher LS est inutile pour un accès
+// distant et coûte des ressources. is_passive_workspace (3) reste à false.
+func BuildTrackWorkspace(workspacePath string) []byte {
+	w := &writer{}
+	w.stringField(1, workspacePath)
+	w.varintField(2, 1)
+	return w.b
+}
+
 // Verbosités ClientTrajectoryVerbosity (enum exa.language_server_pb,
 // language_server_pb.ts ligne 257) — 0 = UNSPECIFIED, 1 = DEBUG,
 // 2 = PROD_UI, 3 = FULL. 3 est demandé par défaut (vue structurée complète).

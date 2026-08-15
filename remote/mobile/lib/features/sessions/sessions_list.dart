@@ -1060,13 +1060,42 @@ class _SessionRowItemState extends State<_SessionRowItem> {
               ),
               const SizedBox(width: 8),
               if (isRunning)
-                SizedBox(
-                  width: 13,
-                  height: 13,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 1.5,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      isSelected ? const Color(0xFFFFFFFF) : const Color(0xFF9E9FA9),
+                Tooltip(
+                  message: 'En cours d\'exécution',
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: const BoxDecoration(
+                          color: AppColors.success,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                      SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 1.5,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            isSelected ? const Color(0xFFFFFFFF) : AppColors.success,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else if (widget.session.status.toUpperCase().contains('WAIT'))
+                Tooltip(
+                  message: 'En attente d\'approbation',
+                  child: Container(
+                    width: 7,
+                    height: 7,
+                    decoration: const BoxDecoration(
+                      color: AppColors.warning,
+                      shape: BoxShape.circle,
                     ),
                   ),
                 )

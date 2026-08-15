@@ -16,11 +16,15 @@ import (
 // pendant que le daemon était éteint (un daemon qui redémarre ne rejoue pas
 // les crons passés, il repart sur le prochain tick). Upgrade path: persister
 // lastRunAt + timezone par tâche si le rattrapage devient un besoin réel.
+// quotaPushInterval : cadence de push des quotas vers les clients mobiles.
+// Aligné sur l'ancien timer mobile de 60 s — le daemon pousse désormais à la
+// place du polling (1 appel LS/min max, et seulement si des clients sont là).
 type Scheduler struct {
-	server       *Server
-	tickInterval time.Duration
-	stopCh       chan struct{}
-	doneCh       chan struct{}
+	server        *Server
+	tickInterval  time.Duration
+	lastQuotaPush time.Time
+	stopCh        chan struct{}
+	doneCh        chan struct{}
 }
 
 // NewScheduler crée un scheduler lié au serveur. Ne démarre rien tant que
@@ -61,6 +65,8 @@ func (sc *Scheduler) Stop() {
 // invalides sont ignorées silencieusement ; une tâche éligible est exécutée en
 // arrière-plan (goroutine) pour ne jamais bloquer le tick suivant.
 func (sc *Scheduler) tick(now time.Time) {
+	sc.maybePushQuota(now)
+
 	sc.server.mu.Lock()
 	tasks := make([]*ScheduledTask, 0, len(sc.server.scheduledTasks))
 	for _, t := range sc.server.scheduledTasks {
@@ -78,6 +84,23 @@ func (sc *Scheduler) tick(now time.Time) {
 		logJSON.Info("scheduled_task_fire", "taskId", task.ID, "cron", task.CronExpression)
 		go sc.server.runScheduledTask(task.ID)
 	}
+}
+
+// maybePushQuota diffuse les quotas aux clients connectés au plus toutes les
+// quotaPushInterval. Sans client, on ne martèle pas le LS. tick est appelé
+// depuis la goroutine unique du scheduler → pas de course sur lastQuotaPush.
+func (sc *Scheduler) maybePushQuota(now time.Time) {
+	if now.Sub(sc.lastQuotaPush) < quotaPushInterval {
+		return
+	}
+	sc.lastQuotaPush = now
+	sc.server.mu.Lock()
+	clients := len(sc.server.clients)
+	sc.server.mu.Unlock()
+	if clients == 0 {
+		return
+	}
+	go sc.server.pushQuotaUpdate()
 }
 
 // cronMatches évalue une expression cron 5 champs (minute heure jour-mois

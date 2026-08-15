@@ -135,6 +135,33 @@ class AppTheme {
       iconTheme: IconThemeData(
         color: colorScheme.onSurfaceVariant,
       ),
+      tooltipTheme: TooltipThemeData(
+        decoration: BoxDecoration(
+          color: colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: colorScheme.outlineVariant, width: 1),
+        ),
+        textStyle: TextStyle(
+          color: colorScheme.onSurface,
+          fontSize: 11.5,
+          fontWeight: FontWeight.w500,
+        ),
+        waitDuration: const Duration(milliseconds: 400),
+      ),
+      scrollbarTheme: ScrollbarThemeData(
+        thumbColor: WidgetStatePropertyAll(colorScheme.onSurfaceVariant.withValues(alpha: 0.3)),
+        radius: const Radius.circular(3),
+        thickness: const WidgetStatePropertyAll(4),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: colorScheme.surfaceContainerHighest,
+        contentTextStyle: TextStyle(color: colorScheme.onSurface, fontSize: 12.5),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(color: colorScheme.outlineVariant),
+        ),
+        behavior: SnackBarBehavior.floating,
+      ),
     );
   }
 
@@ -258,6 +285,33 @@ class AppTheme {
         dense: true,
       ),
       iconTheme: IconThemeData(color: colorScheme.onSurfaceVariant),
+      tooltipTheme: TooltipThemeData(
+        decoration: BoxDecoration(
+          color: colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: colorScheme.outlineVariant, width: 1),
+        ),
+        textStyle: TextStyle(
+          color: colorScheme.onSurface,
+          fontSize: 11.5,
+          fontWeight: FontWeight.w500,
+        ),
+        waitDuration: const Duration(milliseconds: 400),
+      ),
+      scrollbarTheme: ScrollbarThemeData(
+        thumbColor: WidgetStatePropertyAll(colorScheme.onSurfaceVariant.withValues(alpha: 0.3)),
+        radius: const Radius.circular(3),
+        thickness: const WidgetStatePropertyAll(4),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: colorScheme.surfaceContainerHighest,
+        contentTextStyle: TextStyle(color: colorScheme.onSurface, fontSize: 12.5),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(color: colorScheme.outlineVariant),
+        ),
+        behavior: SnackBarBehavior.floating,
+      ),
     );
   }
 }
