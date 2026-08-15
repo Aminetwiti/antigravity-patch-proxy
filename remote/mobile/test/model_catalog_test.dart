@@ -120,7 +120,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ChatInputBar(
-              onSend: (_, {queued = false}) {},
+              onSend: (_, {queued = false, modelUID, modelEnum}) {},
               isConnected: true,
               api: api,
               onModelChanged: (m) => selectedModelFromCallback = m,
@@ -171,7 +171,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ChatInputBar(
-              onSend: (_, {queued = false}) {},
+              onSend: (_, {queued = false, modelUID, modelEnum}) {},
               isConnected: true,
             ),
           ),

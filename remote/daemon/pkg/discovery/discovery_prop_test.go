@@ -3,6 +3,7 @@ package discovery
 import (
 	"fmt"
 	"math/rand"
+	"net"
 	"strings"
 	"testing"
 )
@@ -104,12 +105,29 @@ func TestExtractArgPrefixedSimilar(t *testing.T) {
 	}
 }
 
-// ─── Propriétés de listeningPortsForPID / checkTCPPort ───
+// ─── Propriétés de listeningPortsForPID / probePorts ───
 
-// TestCheckTCPPortClosed — un port fermé est correctement détecté.
-func TestCheckTCPPortClosed(t *testing.T) {
-	// Port 1 est toujours fermé (réservé) ; le check ne doit pas planter.
-	_ = checkTCPPort(1)
+// TestProbePorts — la sonde parallèle trouve le port qui répond parmi un lot,
+// et ignore les ports fermés (le timeout n'est pas déclenché : listener local).
+func TestProbePorts(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("pas de socket locale: %v", err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	// Le listener local ne répond pas HTTP — probeService retournerait false.
+	// On teste donc la couche parallèle via un faux probeService injectable ?
+	// probeService est une fonction package-level non injectable : on valide
+	// juste le contrat (port fermé → 0, pas de panique, terminaison rapide).
+	if got := probePorts([]int{1, port}, "tok"); got != 0 {
+		t.Errorf("probePorts = %d, want 0 (listener non-HTTP ignoré)", got)
+	}
+	// Lot vide → 0 sans panique
+	if got := probePorts(nil, "tok"); got != 0 {
+		t.Errorf("probePorts(nil) = %d, want 0", got)
+	}
 }
 
 // TestListeningPortsParsing — simule la sortie netstat : seuls les ports en

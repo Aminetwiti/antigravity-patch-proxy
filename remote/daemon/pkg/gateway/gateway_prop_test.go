@@ -133,7 +133,7 @@ func TestWebSocketCreateCascadeModelPropagation(t *testing.T) {
 		}
 	})
 
-	t.Run("repli enum 190", func(t *testing.T) {
+	t.Run("repli enum défaut (DefaultModelEnum)", func(t *testing.T) {
 		backend := &fakeRPCClient{}
 		srv := newTestServer(backend)
 		defer srv.Close()
@@ -152,8 +152,8 @@ func TestWebSocketCreateCascadeModelPropagation(t *testing.T) {
 		if backend.lastCascade == nil {
 			t.Fatal("CreateCascade n'a jamais été appelé")
 		}
-		if backend.lastCascade.modelEnum != 190 {
-			t.Errorf("Attendu repli modelEnum=190, reçu %d", backend.lastCascade.modelEnum)
+		if backend.lastCascade.modelEnum != connectrpc.DefaultModelEnum {
+			t.Errorf("Attendu repli modelEnum=%d, reçu %d", connectrpc.DefaultModelEnum, backend.lastCascade.modelEnum)
 		}
 		if backend.lastCascade.modelUID != "" {
 			t.Errorf("Attendu modelUID vide (repli enum), reçu %q", backend.lastCascade.modelUID)

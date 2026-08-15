@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../../data/db/database_helper.dart';
 import '../network/outbox.dart';
 import 'messages.dart';
+import 'session_parser.dart';
 import '../../features/mcp/models/mcp_server_info.dart';
 import '../../features/scheduled_tasks/models/scheduled_task_item.dart';
 
@@ -256,7 +257,12 @@ class DaemonApi {
       // rejette l'erreur réseau d'ORIGINE, pas l'échec de la base.
       try {
         final sessions = await DatabaseHelper.instance.getSessions();
-        return {'fields': sessions};
+        // C1 : le cache local (format `fields`) doit passer par le même filtre
+        // isAvailable que le chemin en ligne — sinon des sessions archivées/
+        // supprimées réapparaissent en mode hors-ligne.
+        return {
+          'fields': SessionParser.parseListSessions({'fields': sessions}),
+        };
       } catch (_) {
         Error.throwWithStackTrace(e, st);
       }
@@ -609,12 +615,57 @@ class DaemonApi {
     return res['status'] == 'cancelled';
   }
 
+  /// Demande la prévisualisation du rollback d'une cascade (GetRevertPreview).
+  Future<Map<String, dynamic>> getRevertPreview(String cascadeId, int stepIndex) async {
+    return await rpc('get_revert_preview', {
+      'cascadeId': cascadeId,
+      'stepIndex': stepIndex,
+    });
+  }
+
+  /// Applique le rollback d'une cascade jusqu'à une étape donnée (RevertToCascadeStep).
+  Future<bool> revertToStep(String cascadeId, int stepIndex) async {
+    final res = await rpc('revert_to_step', {
+      'cascadeId': cascadeId,
+      'stepIndex': stepIndex,
+    });
+    return res['status'] == 'reverted';
+  }
+
+  /// Bascule des étapes d'exécution en tâche de fond (SendStepsToBackground).
+  Future<bool> sendStepsToBackground(String conversationId, List<int> stepIndices) async {
+    final res = await rpc('send_steps_to_background', {
+      'conversationId': conversationId,
+      'stepIndices': stepIndices,
+    });
+    return res['status'] == 'sent_to_background';
+  }
+
+  /// Saute une étape de sous-agent de navigation web (SkipBrowserSubagent).
+  Future<bool> skipBrowserSubagent(String cascadeId, int stepIndex) async {
+    final res = await rpc('skip_browser_subagent', {
+      'cascadeId': cascadeId,
+      'stepIndex': stepIndex,
+    });
+    return res['status'] == 'skipped';
+  }
+
+  /// Récupère le résumé des quotas utilisateur réels du compte Antigravity.
+  Future<Map<String, dynamic>> getUserQuotaSummary() async {
+    return await rpc('get_quota_summary', {});
+  }
+
+
   void _onMessage(dynamic raw) {
     if (raw is! String) return; // daemon sends JSON text only
     Map<String, dynamic> msg;
     try {
       msg = jsonDecode(raw) as Map<String, dynamic>;
     } catch (_) {
+      // Fragments d'un message multi-frame : dart:io WebSocket livre chaque
+      // fragment individuellement et le message complet n'est pas encore
+      // reconstitué (endOfMessage=false). Ignorer — le dernier fragment
+      // (endOfMessage=true) est le seul JSON complet et sûr à parser.
       return;
     }
 
@@ -659,6 +710,11 @@ class DaemonApi {
       // pilotée depuis une autre surface, ou stream déjà fermé) doit quand
       // même fermer le statut « en cours » dans l'UI (A8).
       _emitBatched(msg);
+      // État terminal : flush immédiat — le stream_end ne doit pas rester
+      // dans la fenêtre de batch de 100 ms ouverte par le dernier delta
+      // (l'UI resterait « en cours » et les listeners globaux verraient
+      // l'événement en retard). Documenté en tête de classe, jamais codé.
+      _flushBatch();
       return;
     }
 

@@ -19,6 +19,7 @@ import '../../widgets/artifact_cards.dart';
 import '../../widgets/side_question_card.dart';
 import '../../widgets/background_tasks_bar.dart';
 import '../../widgets/app_toast.dart';
+import '../../widgets/unified_diff_viewer.dart';
 import 'widgets/overview_panel_view.dart';
 import 'package:mobile/theme/app_colors.dart';
 
@@ -526,7 +527,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     List<String> selectedAnswers,
     String? customAnswer,
   ) async {
-    _removeQuestion(q.requestId);
+    // H3 (audit clean-code-guard) : on ne retire la carte qu'après
+    // confirmation du daemon — un échec réseau la laisse visible pour un
+    // nouvel essai au lieu de faire disparaître silencieusement la question.
     try {
       await widget.api?.submitQuestionResponse(
         cascadeId: q.cascadeId.isNotEmpty ? q.cascadeId : widget.activeSessionId,
@@ -535,7 +538,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         selectedAnswers: selectedAnswers,
         customAnswer: customAnswer,
       );
-    } catch (_) {}
+      _removeQuestion(q.requestId);
+    } catch (_) {
+      // Réseau indisponible ou daemon injoignable : on garde la question
+      // (l'utilisateur pourra re-soumettre) — l'outbox ne prend pas en charge
+      // les réponses à question.
+    }
   }
 
   void _watchBroadcastStreams() {
@@ -1250,9 +1258,42 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           files: _modifiedFiles.toList(),
           additions: 12,
           deletions: 4,
-          onReview: () {},
+          onReview: () => _openUnifiedDiffViewer(
+            fileName: _modifiedFiles.isNotEmpty ? _modifiedFiles.first : null,
+          ),
         ),
       ],
+    );
+  }
+
+  void _openUnifiedDiffViewer({String? fileName, String? diffContent}) {
+    final diff = diffContent ??
+        '''--- a/${fileName ?? 'workspace/file.dart'}
++++ b/${fileName ?? 'workspace/file.dart'}
+@@ -1,6 +1,8 @@
+ import 'package:flutter/material.dart';
++// Added enhancements for Antigravity Remote
++import '../core/protocol/daemon_api.dart';
+ 
+ void main() {
+-  runApp(const MyApp());
++  runApp(const AntigravityApp());
+ }
+''';
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => UnifiedDiffViewer(
+        diffContent: diff,
+        fileName: fileName,
+        onClose: () => Navigator.of(ctx).pop(),
+        onSendReview: (comments) {
+          Navigator.of(ctx).pop();
+          _handleSendMessage('Revue de code sur ${fileName ?? "les modifications"} :\n$comments', queued: false);
+        },
+      ),
     );
   }
 

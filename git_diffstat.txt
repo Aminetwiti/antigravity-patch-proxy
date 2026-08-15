@@ -1,0 +1,11 @@
+warning: in the working copy of 'ag-doctor-ui/src/main.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'remote/mobile/test/live_ws_open_session_test.dart', LF will be replaced by CRLF the next time Git touches it
+ ag-doctor-ui/src/main.ts                           |  29 ++++
+ remote/daemon/pkg/gateway/websocket.go             |  69 +++++----
+ remote/mobile/lib/core/protocol/daemon_api.dart    |  46 ++++++
+ .../features/chat_stream/chat_stream_screen.dart   |  36 ++++-
+ remote/mobile/lib/main.dart                        |  13 ++
+ .../mobile/lib/widgets/right_sidebar_drawer.dart   | 172 +++++++++++++++++----
+ remote/mobile/test/live_ws_open_session_test.dart  |  10 +-
+ scratch_e2e_test.txt                               |   2 +-
+ 8 files changed, 315 insertions(+), 62 deletions(-)

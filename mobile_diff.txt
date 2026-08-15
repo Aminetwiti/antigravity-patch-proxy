@@ -1,0 +1,154 @@
+diff --git a/remote/mobile/lib/core/protocol/daemon_api.dart b/remote/mobile/lib/core/protocol/daemon_api.dart
+index d2e6962..8413252 100644
+--- a/remote/mobile/lib/core/protocol/daemon_api.dart
++++ b/remote/mobile/lib/core/protocol/daemon_api.dart
+@@ -609,6 +609,47 @@ class DaemonApi {
+     return res['status'] == 'cancelled';
+   }
+ 
++  /// Demande la prévisualisation du rollback d'une cascade (GetRevertPreview).
++  Future<Map<String, dynamic>> getRevertPreview(String cascadeId, int stepIndex) async {
++    return await rpc('get_revert_preview', {
++      'cascadeId': cascadeId,
++      'stepIndex': stepIndex,
++    });
++  }
++
++  /// Applique le rollback d'une cascade jusqu'à une étape donnée (RevertToCascadeStep).
++  Future<bool> revertToStep(String cascadeId, int stepIndex) async {
++    final res = await rpc('revert_to_step', {
++      'cascadeId': cascadeId,
++      'stepIndex': stepIndex,
++    });
++    return res['status'] == 'reverted';
++  }
++
++  /// Bascule des étapes d'exécution en tâche de fond (SendStepsToBackground).
++  Future<bool> sendStepsToBackground(String conversationId, List<int> stepIndices) async {
++    final res = await rpc('send_steps_to_background', {
++      'conversationId': conversationId,
++      'stepIndices': stepIndices,
++    });
++    return res['status'] == 'sent_to_background';
++  }
++
++  /// Saute une étape de sous-agent de navigation web (SkipBrowserSubagent).
++  Future<bool> skipBrowserSubagent(String cascadeId, int stepIndex) async {
++    final res = await rpc('skip_browser_subagent', {
++      'cascadeId': cascadeId,
++      'stepIndex': stepIndex,
++    });
++    return res['status'] == 'skipped';
++  }
++
++  /// Récupère le résumé des quotas utilisateur réels du compte Antigravity.
++  Future<Map<String, dynamic>> getUserQuotaSummary() async {
++    return await rpc('get_quota_summary', {});
++  }
++
++
+   void _onMessage(dynamic raw) {
+     if (raw is! String) return; // daemon sends JSON text only
+     Map<String, dynamic> msg;
+@@ -659,6 +700,11 @@ class DaemonApi {
+       // pilotée depuis une autre surface, ou stream déjà fermé) doit quand
+       // même fermer le statut « en cours » dans l'UI (A8).
+       _emitBatched(msg);
++      // État terminal : flush immédiat — le stream_end ne doit pas rester
++      // dans la fenêtre de batch de 100 ms ouverte par le dernier delta
++      // (l'UI resterait « en cours » et les listeners globaux verraient
++      // l'événement en retard). Documenté en tête de classe, jamais codé.
++      _flushBatch();
+       return;
+     }
+ 
+diff --git a/remote/mobile/lib/features/chat_stream/chat_stream_screen.dart b/remote/mobile/lib/features/chat_stream/chat_stream_screen.dart
+index 5c5345e..102e1eb 100644
+--- a/remote/mobile/lib/features/chat_stream/chat_stream_screen.dart
++++ b/remote/mobile/lib/features/chat_stream/chat_stream_screen.dart
+@@ -19,6 +19,7 @@ import '../../widgets/artifact_cards.dart';
+ import '../../widgets/side_question_card.dart';
+ import '../../widgets/background_tasks_bar.dart';
+ import '../../widgets/app_toast.dart';
++import '../../widgets/unified_diff_viewer.dart';
+ import 'widgets/overview_panel_view.dart';
+ import 'package:mobile/theme/app_colors.dart';
+ 
+@@ -1250,12 +1251,45 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
+           files: _modifiedFiles.toList(),
+           additions: 12,
+           deletions: 4,
+-          onReview: () {},
++          onReview: () => _openUnifiedDiffViewer(
++            fileName: _modifiedFiles.isNotEmpty ? _modifiedFiles.first : null,
++          ),
+         ),
+       ],
+     );
+   }
+ 
++  void _openUnifiedDiffViewer({String? fileName, String? diffContent}) {
++    final diff = diffContent ??
++        '''--- a/${fileName ?? 'workspace/file.dart'}
+++++ b/${fileName ?? 'workspace/file.dart'}
++@@ -1,6 +1,8 @@
++ import 'package:flutter/material.dart';
+++// Added enhancements for Antigravity Remote
+++import '../core/protocol/daemon_api.dart';
++ 
++ void main() {
++-  runApp(const MyApp());
+++  runApp(const AntigravityApp());
++ }
++''';
++
++    showModalBottomSheet(
++      context: context,
++      isScrollControlled: true,
++      backgroundColor: Colors.transparent,
++      builder: (ctx) => UnifiedDiffViewer(
++        diffContent: diff,
++        fileName: fileName,
++        onClose: () => Navigator.of(ctx).pop(),
++        onSendReview: (comments) {
++          Navigator.of(ctx).pop();
++          _handleSendMessage('Revue de code sur ${fileName ?? "les modifications"} :\n$comments', queued: false);
++        },
++      ),
++    );
++  }
++
+   Widget _buildPlanTabContent() {
+     if (_latestPlanText == null) {
+       return Center(
+diff --git a/remote/mobile/lib/main.dart b/remote/mobile/lib/main.dart
+index b138d38..34390f1 100644
+--- a/remote/mobile/lib/main.dart
++++ b/remote/mobile/lib/main.dart
+@@ -19,6 +19,7 @@ import 'features/sessions/sessions_list.dart';
+ import 'features/sessions/conversation_history_screen.dart';
+ import 'features/scheduled_tasks/scheduled_tasks_screen.dart';
+ import 'services/settings_store.dart';
++import 'widgets/remote_terminal_sheet.dart';
+ import 'widgets/right_sidebar_drawer.dart';
+ 
+ void main() {
+@@ -673,6 +674,18 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
+           ],
+         ),
+         actions: [
++          IconButton(
++            icon: Icon(Icons.terminal_rounded, size: 20, color: Theme.of(context).colorScheme.onSurface),
++            onPressed: () {
++              HapticFeedback.selectionClick();
++              RemoteTerminalSheet.show(
++                context,
++                api: _api,
++                projectName: _activeProjectName,
++              );
++            },
++            tooltip: 'Ouvrir le terminal distant',
++          ),
+           IconButton(
+             icon: Icon(Icons.vertical_split_outlined, size: 20, color: Theme.of(context).colorScheme.onSurface),
+             onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),

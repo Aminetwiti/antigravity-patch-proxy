@@ -704,6 +704,18 @@ function getCliPool(): CliWorkerPool {
 
   let daemonProcess: any = null;
 
+  // Windows : netstat PID de l'ancien daemon + taskkill des orphelins
+  // (daemon.exe ET cloudflared.exe) AVANT tout lancement. Un ancien
+  // daemon.exe resté accroché sur le port garde le port 8090 occupé :
+  // le nouveau daemon ne peut pas bind → le mobile boucle connect/déconnect
+  // (cause racine confirmée dans les logs de session).
+  function killOrphanDaemonProcesses(): void {
+    try {
+      const { execSync } = require('child_process') as typeof import('child_process');
+      execSync('taskkill /F /IM daemon.exe /T 2>nul & taskkill /F /IM cloudflared.exe /T 2>nul', { stdio: 'ignore', windowsHide: true });
+    } catch { /* aucun processus à tuer — pas une erreur */ }
+  }
+
   ipcMain.handle('ag:network:startDaemon', async (event, options: { port: number; tunnel: string; token: string }) => {
     const { spawn } = require('child_process');
     const path = require('path');
@@ -712,6 +724,10 @@ function getCliPool(): CliWorkerPool {
       daemonProcess.kill();
       daemonProcess = null;
     }
+
+    // Nettoyage des orphelins avant bind : garantit que le port n'est pas
+    // déjà occupé par une instance précédente (boucle connect/déconnect).
+    killOrphanDaemonProcesses();
 
     // Resolve path to remote/daemon/daemon.exe (assuming ag-doctor-ui is in repo root's child dir)
     const daemonExePath = path.join(__dirname, '..', '..', 'remote', 'daemon', 'daemon.exe');
@@ -1785,6 +1801,19 @@ app.on('window-all-closed', () => {
   for (const proc of activeStreams.values()) proc.kill();
   activeStreams.clear();
   cliPool?.shutdown();
+
+  // Nettoyage des processus daemon + cloudflared avant sortie : un daemon
+  // laissé en vie garde le port 8090 occupé → boucle connect/déconnect au
+  // prochain lancement.
+  try {
+    if (typeof daemonProcess !== 'undefined' && daemonProcess) {
+      daemonProcess.kill();
+      daemonProcess = null;
+    }
+  } catch { /* ignore */ }
+  try {
+    killOrphanDaemonProcesses();
+  } catch { /* ignore */ }
   
   // Cleanup proxy server
   try {

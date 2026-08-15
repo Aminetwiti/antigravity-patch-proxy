@@ -127,9 +127,11 @@ type Server struct {
 	AuthToken string
 	clients   map[*websocket.Conn]bool
 	mu        sync.Mutex
-	// writeMu sérialise les écritures : gorilla/websocket n'autorise qu'un
-	// seul writer concurrent par connexion, or le broadcast écrit sur toutes.
-	writeMu sync.Mutex
+	// writeLocks (défini plus bas dans le struct) sérialise les écritures PAR
+	// connexion : gorilla/websocket n'autorise qu'un seul writer concurrent par
+	// connexion — le broadcast, les réponses unary et la goroutine de ping
+	// passent tous par le mutex de LA connexion ciblée, jamais par un mutex
+	// global (qui causait des réponses croisées entre clients).
 	// approvals : cascadeId → approbation en attente (posée par
 	// MarkApprovalPending quand un événement approval_required est émis,
 	// retirée à la décision utilisateur ou à l'expiration).
@@ -155,6 +157,11 @@ type Server struct {
 	// clientInFlight : nombre de send_prompt en cours PAR CLIENT (C3, limite
 	// de streams simultanés — un client ne peut pas saturer le hub).
 	clientInFlight map[*websocket.Conn]int
+	// writeLocks : mutex d'écriture PAR CONNEXION (remplace l'ancien writeMu
+	// global). Deux clients concurrents n'ont plus AUCUN point de sérialisation
+	// commun : 20 clients × 30 heartbeats ne produisent plus de réponses
+	// croisées (les écritures sont ordonnées par connexion, pas globalement).
+	writeLocks map[*websocket.Conn]*sync.Mutex
 	// streamBuffer : tampon circulaire StepRecovery pour reprise sur déconnexion 4G/Wi-Fi
 	streamBuffer *SessionStreamBuffer
 	// activeCancels : cascadeId → fonction d'annulation active
@@ -163,6 +170,12 @@ type Server struct {
 	activeRequestIDs map[string]string
 	// scheduledTasks : taskId → tâche planifiée gérée par le daemon
 	scheduledTasks map[string]*ScheduledTask
+	// sessionsCache : résultat list_sessions déjà calculé (GetAllCascades coûte
+	// ~9,5 s côté hub) + single-flight (fetchInFlight) pour que N reconnexions
+	// simultanées du mobile ne déclenchent qu'UN appel LS au lieu de N.
+	sessionsCache    []byte
+	sessionsCachedAt time.Time
+	fetchInFlight    bool
 }
 
 // ScheduledTask représente une tâche planifiée / cron job gérée par le daemon.
@@ -214,11 +227,84 @@ func NewServer(client RPCClient, authToken string) *Server {
 		startedAt:        time.Now(),
 		sentRequestIDs:   make(map[string]bool),
 		clientInFlight:   make(map[*websocket.Conn]int),
+		writeLocks:       make(map[*websocket.Conn]*sync.Mutex),
 		streamBuffer:     NewSessionStreamBuffer(100),
 		activeCancels:    make(map[string]context.CancelFunc),
 		activeRequestIDs: make(map[string]string),
 		scheduledTasks:   make(map[string]*ScheduledTask),
 	}
+}
+
+// sessionsCacheTTL : durée de fraîcheur du cache list_sessions. Le mobile
+// rafraîchit la liste à chaque reconnexion ; le LS met ~9,5 s à répondre.
+// 5 s = 1 seule recharge si l'utilisateur rouvre l'app 2 fois de suite, mais
+// la liste reste assez fraîche pour un usage réel.
+const sessionsCacheTTL = 5 * time.Second
+
+// cachedSessions retourne le résultat list_sessions frais s'il existe (moins
+// de sessionsCacheTTL), sinon (nil, false).
+func (s *Server) cachedSessions() ([]byte, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.sessionsCache) > 0 && time.Since(s.sessionsCachedAt) < sessionsCacheTTL {
+		return s.sessionsCache, true
+	}
+	return nil, false
+}
+
+// cachedProjectID resolve le projectID d'un workspace à partir du cache
+// list_sessions déjà chaud (coût nul). Retourne ("", false) si le cache est
+// vide — l'appelant retombe alors sur le comportement cascade "orpheline".
+// Ponctuellement utilisé par create_cascade pour éviter le GetAllCascades
+// synchrone (~9,5 s) sur le chemin critique.
+func (s *Server) cachedProjectID(uri string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.sessionsCache) == 0 {
+		return "", false
+	}
+	for _, sum := range connectrpc.ParseTrajectories(s.sessionsCache) {
+		if sum.ProjectID != "" && strings.EqualFold(sum.Workspace, uri) {
+			return sum.ProjectID, true
+		}
+	}
+	return "", false
+}
+
+// fetchSessionsSingleFlight : un seul appel GetAllCascades à la fois, quel que
+// soit le nombre de clients qui demandent la liste. Les appelants concurrents
+// attendent le même résultat au lieu de marteler le hub LS.
+func (s *Server) fetchSessionsSingleFlight() []byte {
+	s.mu.Lock()
+	if s.fetchInFlight {
+		s.mu.Unlock()
+		for {
+			time.Sleep(50 * time.Millisecond)
+			if raw, ok := s.cachedSessions(); ok {
+				return raw
+			}
+			s.mu.Lock()
+			inFlight := s.fetchInFlight
+			s.mu.Unlock()
+			if !inFlight {
+				break
+			}
+		}
+	} else {
+		s.fetchInFlight = true
+		s.mu.Unlock()
+	}
+
+	// Premier appelant : fait l'appel LS et peuple le cache.
+	raw, err := s.RPCClient.GetAllCascades()
+	s.mu.Lock()
+	s.fetchInFlight = false
+	if err == nil && len(raw) > 0 {
+		s.sessionsCache = raw
+		s.sessionsCachedAt = time.Now()
+	}
+	s.mu.Unlock()
+	return raw
 }
 
 // SetApprovalTimeout expose le délai d'auto-refus des approbations (5 min par
@@ -321,13 +407,44 @@ const (
 	pongWait     = 60 * time.Second
 )
 
-// writeJSON envoie un message à une connexion donnée (writer unique sérialisé).
-func (s *Server) writeJSON(conn *websocket.Conn, msg OutgoingMessage) {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
+// writeTimeout : deadline d'écriture par message. Un client mort (buffer TCP
+// plein) ferait sinon bloquer WriteJSON indéfiniment sous writeMu → head-of-line
+// blocking sur TOUTES les connexions (le broadcast passe par le même mutex).
+const writeTimeout = 10 * time.Second
+
+// writeJSON envoie un message à une connexion donnée (writer unique par
+// connexion : un seul goroutine écrit sur un websocket.Conn à la fois — le
+// broadcast, les réponses unary et la goroutine de ping passent tous par le
+// mutex de LA connexion ciblée, jamais par un mutex global).
+func (s *Server) writeJSON(conn *websocket.Conn, msg OutgoingMessage) error {
+	s.writeLock(conn).Lock()
+	defer s.writeLock(conn).Unlock()
+	conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 	if err := conn.WriteJSON(msg); err != nil {
 		logJSON.Warn("write_error", "err", err)
+		return err
 	}
+	return nil
+}
+
+// writeLock retourne le mutex d'écriture dédié à conn (créé à la volée si le
+// client s'est connecté avant l'initialisation — chemin de test uniquement).
+func (s *Server) writeLock(conn *websocket.Conn) *sync.Mutex {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if lk, ok := s.writeLocks[conn]; ok {
+		return lk
+	}
+	lk := &sync.Mutex{}
+	s.writeLocks[conn] = lk
+	return lk
+}
+
+// releaseWriteLock libère la mémoire du mutex d'écriture d'un client déconnecté.
+func (s *Server) releaseWriteLock(conn *websocket.Conn) {
+	s.mu.Lock()
+	delete(s.writeLocks, conn)
+	s.mu.Unlock()
 }
 
 // mcpTimeout borne l'appel HTTP vers le proxy MCP desktop (30 s) — aligné sur
@@ -395,7 +512,10 @@ func (s *Server) handleMcpAction(conn *websocket.Conn, msg IncomingMessage) {
 
 // broadcast envoie le même message à TOUS les clients connectés : c'est ce qui
 // permet la synchronisation multi-surface (un téléphone voit le stream déclenché
-// par le PC ou par un autre téléphone).
+// par le PC ou par un autre téléphone). Un client dont l'écriture échoue
+// (deadline dépassée) est retiré de la liste — il ne doit pas bloquer ni
+// ré-échouer les broadcasts suivants (il sera aussi purgé par la boucle de
+// lecture côté HandleWebSocket).
 func (s *Server) broadcast(msg OutgoingMessage) {
 	s.mu.Lock()
 	conns := make([]*websocket.Conn, 0, len(s.clients))
@@ -404,7 +524,13 @@ func (s *Server) broadcast(msg OutgoingMessage) {
 	}
 	s.mu.Unlock()
 	for _, c := range conns {
-		s.writeJSON(c, msg)
+		if s.writeJSON(c, msg) != nil {
+			s.mu.Lock()
+			delete(s.clients, c)
+			delete(s.clientInFlight, c)
+			s.mu.Unlock()
+			s.releaseWriteLock(c)
+		}
 	}
 }
 
@@ -930,7 +1056,8 @@ func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, 
 		return "", "", fmt.Errorf("cascadeId requis")
 	}
 	// Frontière de confiance : cascadeID vient du mobile (send_prompt/upload_media).
-	// Un ID non-UUID (ex. "../../x") écrirait hors du répertoire brain.
+	// Un UUID v4 strict ne peut contenir ni ".." ni "/" ni "\" — un seul test
+	// regex suffit à bloquer tout path traversal.
 	if !uuidRe.MatchString(cascadeID) {
 		return "", "", fmt.Errorf("cascadeId invalide: %q", cascadeID)
 	}
@@ -1009,7 +1136,8 @@ func toOutgoing(raw []byte) interface{} {
 }
 
 // sessionsOut convertit la réponse GetAllCascadeTrajectories en une liste de
-// sessions structurées (cascadeId, titre, workspace, statut, updatedAt).
+// sessions structurées (cascadeId, titre, workspace, statut, updatedAt) en
+// appliquant le filtre Antigravity 2.0 (exclut archivées, killed, subagents).
 // Le parsing protobuf vit côté Go (connectrpc.ParseTrajectories) — le mobile
 // reçoit du JSON propre au lieu d'un dump de champs binaires.
 func sessionsOut(raw []byte) interface{} {
@@ -1023,6 +1151,9 @@ func sessionsOut(raw []byte) interface{} {
 	}
 	items := make([]map[string]interface{}, 0, len(summaries))
 	for _, s := range summaries {
+		if s.Archived || s.Killed || s.Source == 16 {
+			continue
+		}
 		items = append(items, map[string]interface{}{
 			"cascadeId": s.CascadeID,
 			"title":     s.Title,
@@ -1031,6 +1162,12 @@ func sessionsOut(raw []byte) interface{} {
 			"status":    s.Status,
 			"updatedAt": s.UpdatedAt,
 		})
+	}
+	if len(items) == 0 {
+		local := ListLocalSessions()
+		if len(local) > 0 {
+			return map[string]interface{}{"sessions": local}
+		}
 	}
 	return map[string]interface{}{"sessions": items}
 }
@@ -1075,13 +1212,17 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		delete(s.clientInFlight, conn)
 		clients := len(s.clients)
 		s.mu.Unlock()
+		s.releaseWriteLock(conn)
 		logJSON.Info("client_disconnected", "remote", conn.RemoteAddr().String(), "clients", clients)
 		conn.Close()
 	}()
 
 	s.mu.Lock()
 	s.clients[conn] = true
+	s.clientInFlight[conn] = 0
 	s.mu.Unlock()
+	// Le mutex d'écriture de cette connexion existe avant la première réponse.
+	s.writeLock(conn)
 
 	logJSON.Info("client_connected", "remote", conn.RemoteAddr().String())
 
@@ -1092,10 +1233,10 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		defer ticker.Stop()
 		for {
 			select {
-			case <-ticker.C:
-				s.writeMu.Lock()
-				err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second))
-				s.writeMu.Unlock()
+		case <-ticker.C:
+			s.writeLock(conn).Lock()
+			err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second))
+			s.writeLock(conn).Unlock()
 				if err != nil {
 					return
 				}
@@ -1138,6 +1279,28 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 	var raw []byte
 	var err error
 
+	// Garde anti-blocage (C3) : tout handler unary RPC (list_sessions,
+	// get_context, …) est borné par une deadline courte. Un hub lent ne doit
+	// JAMAIS laisser une réponse unary indéfiniment en attente — sinon le
+	// mobile (timeout 10 s) considère le daemon mort et boucle reconnexion.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if msg.Type != "send_prompt" && msg.Type != "cancel_generation" &&
+		msg.Type != "create_cascade" &&
+		msg.Type != "get_pending_approval" && msg.Type != "list_files" &&
+		msg.Type != "read_file" && msg.Type != "sync_session" &&
+		msg.Type != "get_quota_summary" && msg.Type != "system.get_quota_summary" {
+		c := make(chan struct{})
+		go func() {
+			select {
+			case <-ctx.Done():
+				s.writeJSON(conn, OutgoingMessage{Type: "error", RequestID: msg.RequestID, Error: "rpc timeout after 15s"})
+			case <-c:
+			}
+		}()
+		defer close(c)
+	}
+
 	switch msg.Type {
 	// Keep-alive applicatif : le mobile envoie {"type":"ping"} toutes les
 	// 20 s quand il est en arrière-plan. Même sans réponse, toute frame
@@ -1155,16 +1318,12 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		if uri == "" {
 			err = fmt.Errorf("workspaceUri requis")
 		} else {
-			var projectID string
-			if rawList, errList := s.RPCClient.GetAllCascades(); errList == nil {
-				summaries := connectrpc.ParseTrajectories(rawList)
-				for _, sum := range summaries {
-					if sum.ProjectID != "" && strings.EqualFold(sum.Workspace, uri) {
-						projectID = sum.ProjectID
-						break
-					}
-				}
-			}
+			// projectID : résolu depuis le cache list_sessions quand dispo (coût
+			// nul) — JAMAIS via un GetAllCascades synchrone ici (~9,5 s) sinon le
+			// create part avec 10 s de retard et le mobile (deadline 10 s) timeoute
+			// → boucle connect/disconnect. Sans cache, cascade "orpheline" : le LS
+			// crée la cascade sur le workspace URI (comportement déjà existant).
+			projectID, _ := s.cachedProjectID(uri)
 
 			if projectID != "" {
 				logJSON.Info("cascade_created", "projectId", projectID)
@@ -1173,10 +1332,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 
 			// Le modèle vient du mobile (ModelUID) ; en l'absence de sélection
-			// explicite on garde le repli historique 190 (enum gemini-3.7-flash).
+			// explicite on garde le repli commun (DefaultModelEnum, cf.
+			// protobuf.go — même valeur que plan_model de BuildCascadeConfig).
 			modelEnum := msg.ModelEnum
 			if modelEnum == 0 && msg.ModelUID == "" {
-				modelEnum = 190
+				modelEnum = connectrpc.DefaultModelEnum
 			}
 			raw, err = s.RPCClient.CreateCascade(uri, projectID, msg.ModelUID, modelEnum)
 		}
@@ -1191,32 +1351,26 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		raw, err = s.RPCClient.SendCommand(msg.Command)
 
 	case "list_sessions":
-		raw, err = s.RPCClient.GetAllCascades()
-		if err == nil && len(raw) > 0 {
-			summaries := connectrpc.ParseTrajectories(raw)
-			// Filtrer comme Antigravity 2.0 : exclure archivées, killed, subagents
-			var filtered []connectrpc.TrajectorySummary
-			for _, sum := range summaries {
-				if sum.Archived || sum.Killed || sum.Source == 16 {
-					continue
-				}
-				filtered = append(filtered, sum)
-			}
-			if len(filtered) > 0 {
-				items := make([]map[string]interface{}, 0, len(filtered))
-				for _, sum := range filtered {
-					items = append(items, map[string]interface{}{
-						"cascadeId": sum.CascadeID,
-						"title":     sum.Title,
-						"workspace": sum.Workspace,
-						"projectId": sum.ProjectID,
-						"status":    sum.Status,
-						"updatedAt": sum.UpdatedAt,
-					})
-				}
-				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"sessions": items}})
-				return
-			}
+		// C4 : borne l'appel au LS (60 s max côté hub, on n'attend pas plus de
+		// 15 s ici) — sinon un hub lent laisse la réponse unary arriver trop
+		// tard : le mobile a déjà timeouté (10 s) et s'est déconnecté → boucle
+		// connect/disconnect. Timeout local + réponse d'erreur explicite.
+		// Cache single-flight : les reconnexions en rafale du mobile partagent
+		// un SEUL appel GetAllCascades (~9,5 s) au lieu de le multiplier.
+		if raw, ok := s.cachedSessions(); ok {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: sessionsOut(raw)})
+			return
+		}
+		raw = s.fetchSessionsSingleFlight()
+		if ctx.Err() != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "error", RequestID: msg.RequestID, Error: "rpc timeout after 15s"})
+			return
+		}
+		if len(raw) > 0 {
+			// sessionsOut applique le filtre Antigravity 2.0 (archivées,
+			// killed, subagents) + fallback sessions locales si vide.
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: sessionsOut(raw)})
+			return
 		}
 		local := ListLocalSessions()
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"sessions": local}})
@@ -1328,6 +1482,17 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 		s.sentRequestIDs[msg.RequestID] = true
+		// C1 — borne mémoire : la map d'idempotence ne doit pas grossir sans
+		// limite (un mobile qui spamme des requestId uniques). Purge FIFO simple.
+		if len(s.sentRequestIDs) > 10000 {
+			oldest := ""
+			for id := range s.sentRequestIDs {
+				if oldest == "" || id < oldest {
+					oldest = id
+				}
+			}
+			delete(s.sentRequestIDs, oldest)
+		}
 		s.clientInFlight[conn]++
 		s.mu.Unlock()
 
@@ -1679,6 +1844,21 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		content, errDec := base64.StdEncoding.DecodeString(msg.Content)
 		if errDec != nil {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "content doit être base64: " + errDec.Error()})
+			return
+		}
+		// Confinement : comme read_file, le fichier doit être sous la racine
+		// workspace — un chemin "../" venu du mobile ne doit pas écrire ailleurs.
+		if msg.WorkspacePath != "" {
+			abs, errRes := resolvePath(homeRoot(msg.WorkspacePath), msg.FilePath)
+			if errRes != nil {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errRes.Error()})
+				return
+			}
+			if errWrite := os.WriteFile(abs, content, 0644); errWrite != nil {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errWrite.Error()})
+				return
+			}
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "written"}})
 			return
 		}
 		_, err = s.RPCClient.WriteFile(toWorkspaceURI(msg.FilePath), content, msg.Overwrite)

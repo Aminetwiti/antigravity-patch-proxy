@@ -10,7 +10,6 @@ type EventKind string
 const (
 	EventKindText             EventKind = "text"
 	EventKindThinking         EventKind = "thinking"
-	EventKindStatusChange     EventKind = "status_change"
 	EventKindApprovalRequired EventKind = "approval_required"
 )
 

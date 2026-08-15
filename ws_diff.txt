@@ -1,0 +1,122 @@
+diff --git a/remote/daemon/pkg/gateway/websocket.go b/remote/daemon/pkg/gateway/websocket.go
+index d09c15b..12d1a22 100644
+--- a/remote/daemon/pkg/gateway/websocket.go
++++ b/remote/daemon/pkg/gateway/websocket.go
+@@ -930,7 +930,8 @@ func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string,
+ 		return "", "", fmt.Errorf("cascadeId requis")
+ 	}
+ 	// Frontière de confiance : cascadeID vient du mobile (send_prompt/upload_media).
+-	// Un ID non-UUID (ex. "../../x") écrirait hors du répertoire brain.
++	// Un UUID v4 strict ne peut contenir ni ".." ni "/" ni "\" — un seul test
++	// regex suffit à bloquer tout path traversal.
+ 	if !uuidRe.MatchString(cascadeID) {
+ 		return "", "", fmt.Errorf("cascadeId invalide: %q", cascadeID)
+ 	}
+@@ -1009,7 +1010,8 @@ func toOutgoing(raw []byte) interface{} {
+ }
+ 
+ // sessionsOut convertit la réponse GetAllCascadeTrajectories en une liste de
+-// sessions structurées (cascadeId, titre, workspace, statut, updatedAt).
++// sessions structurées (cascadeId, titre, workspace, statut, updatedAt) en
++// appliquant le filtre Antigravity 2.0 (exclut archivées, killed, subagents).
+ // Le parsing protobuf vit côté Go (connectrpc.ParseTrajectories) — le mobile
+ // reçoit du JSON propre au lieu d'un dump de champs binaires.
+ func sessionsOut(raw []byte) interface{} {
+@@ -1023,6 +1025,9 @@ func sessionsOut(raw []byte) interface{} {
+ 	}
+ 	items := make([]map[string]interface{}, 0, len(summaries))
+ 	for _, s := range summaries {
++		if s.Archived || s.Killed || s.Source == 16 {
++			continue
++		}
+ 		items = append(items, map[string]interface{}{
+ 			"cascadeId": s.CascadeID,
+ 			"title":     s.Title,
+@@ -1032,6 +1037,12 @@ func sessionsOut(raw []byte) interface{} {
+ 			"updatedAt": s.UpdatedAt,
+ 		})
+ 	}
++	if len(items) == 0 {
++		local := ListLocalSessions()
++		if len(local) > 0 {
++			return map[string]interface{}{"sessions": local}
++		}
++	}
+ 	return map[string]interface{}{"sessions": items}
+ }
+ 
+@@ -1193,30 +1204,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
+ 	case "list_sessions":
+ 		raw, err = s.RPCClient.GetAllCascades()
+ 		if err == nil && len(raw) > 0 {
+-			summaries := connectrpc.ParseTrajectories(raw)
+-			// Filtrer comme Antigravity 2.0 : exclure archivées, killed, subagents
+-			var filtered []connectrpc.TrajectorySummary
+-			for _, sum := range summaries {
+-				if sum.Archived || sum.Killed || sum.Source == 16 {
+-					continue
+-				}
+-				filtered = append(filtered, sum)
+-			}
+-			if len(filtered) > 0 {
+-				items := make([]map[string]interface{}, 0, len(filtered))
+-				for _, sum := range filtered {
+-					items = append(items, map[string]interface{}{
+-						"cascadeId": sum.CascadeID,
+-						"title":     sum.Title,
+-						"workspace": sum.Workspace,
+-						"projectId": sum.ProjectID,
+-						"status":    sum.Status,
+-						"updatedAt": sum.UpdatedAt,
+-					})
+-				}
+-				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"sessions": items}})
+-				return
+-			}
++			// sessionsOut applique le filtre Antigravity 2.0 (archivées,
++			// killed, subagents) + fallback sessions locales si vide.
++			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: sessionsOut(raw)})
++			return
+ 		}
+ 		local := ListLocalSessions()
+ 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"sessions": local}})
+@@ -1328,6 +1319,17 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
+ 			return
+ 		}
+ 		s.sentRequestIDs[msg.RequestID] = true
++		// C1 — borne mémoire : la map d'idempotence ne doit pas grossir sans
++		// limite (un mobile qui spamme des requestId uniques). Purge FIFO simple.
++		if len(s.sentRequestIDs) > 10000 {
++			oldest := ""
++			for id := range s.sentRequestIDs {
++				if oldest == "" || id < oldest {
++					oldest = id
++				}
++			}
++			delete(s.sentRequestIDs, oldest)
++		}
+ 		s.clientInFlight[conn]++
+ 		s.mu.Unlock()
+ 
+@@ -1681,6 +1683,21 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
+ 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "content doit être base64: " + errDec.Error()})
+ 			return
+ 		}
++		// Confinement : comme read_file, le fichier doit être sous la racine
++		// workspace — un chemin "../" venu du mobile ne doit pas écrire ailleurs.
++		if msg.WorkspacePath != "" {
++			abs, errRes := resolvePath(homeRoot(msg.WorkspacePath), msg.FilePath)
++			if errRes != nil {
++				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errRes.Error()})
++				return
++			}
++			if errWrite := os.WriteFile(abs, content, 0644); errWrite != nil {
++				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errWrite.Error()})
++				return
++			}
++			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "written"}})
++			return
++		}
+ 		_, err = s.RPCClient.WriteFile(toWorkspaceURI(msg.FilePath), content, msg.Overwrite)
+ 		if err == nil {
+ 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "written"}})

@@ -1,0 +1,104 @@
+# scripts/supervise-daemon.ps1
+# Watchdog du daemon Remote Antigravity (persistance Windows).
+#
+# Problème : le daemon lancé depuis un shell meurt avec le Job Object, et un
+# superviseur tiers le relance parfois avec un mauvais token (aa) -> le mobile
+# (fix99token) est rejeté -> « rien reçu à Antigravity ».
+#
+# Solution : ce script garantit qu'UN daemon avec le bon token écoute sur :8090,
+# relancé via WMI (détaché du Job Object) si absent ou mauvais token, tunnel
+# cloudflared inclus (CWD = dossier daemon pour trouver .\cloudflared.exe).
+#
+# Usage :
+#   powershell -NoProfile -File supervise-daemon.ps1 -Once   # une vérification
+#   powershell -NoProfile -File supervise-daemon.ps1 -Loop   # boucle (tâche planifiée)
+param([switch]$Loop, [switch]$Once)
+
+$ErrorActionPreference = "SilentlyContinue"
+
+$RepoRoot = Split-Path -Parent $PSScriptRoot
+$DaemonDir = Join-Path $RepoRoot "remote\daemon"
+$DaemonExe = Join-Path $DaemonDir "daemon.exe"
+$Token     = "fix99token"
+$Port      = 8090
+$SupLog    = Join-Path $DaemonDir "daemon_supervisor.log"
+$DmnLog    = Join-Path $DaemonDir "daemon_watch.log"
+$lastStart = Get-Date 0
+
+function Write-Log($m) {
+    $line = "{0} {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $m
+    Add-Content $SupLog $line
+    if (-not $Loop) { Write-Host $line }
+}
+
+# Vrai si un daemon.exe avec le BON token écoute sur $Port.
+function Test-DaemonOk {
+    $lis = Get-NetTCPConnection -LocalPort $Port -State Listen
+    if (-not $lis) { return $false }
+    $owner = ($lis | Select-Object -First 1).OwningProcess
+    $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$owner"
+    return ($proc -and $proc.Name -eq "daemon.exe" -and $proc.CommandLine -match "auth-token $Token")
+}
+
+# Vrai si le daemon expose un tunnel cloudflare (publicUrl non vide).
+function Test-TunnelOk {
+    try {
+        $d = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health/diagnostic" -TimeoutSec 3
+        return ($d.tunnelProvider -eq "cloudflare" -and $d.publicUrl -ne "")
+    } catch { return $false }
+}
+
+# Tue tout daemon/cloudflared (mauvais token ou orphelins) puis relance proprement
+# via WMI avec le bon token. CWD = dossier daemon pour que cloudflared.exe soit trouvé.
+function Start-Daemon {
+    Get-CimInstance Win32_Process -Filter "Name='daemon.exe'" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+    Get-CimInstance Win32_Process -Filter "Name='cloudflared.exe'" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+    Start-Sleep -Seconds 1
+    $cmd = "cmd /c cd /d `"$DaemonDir`" && set AG_REMOTE_LOG_FILE=$DmnLog && `"$DaemonExe`" --port $Port --tunnel cloudflare --auth-token $Token"
+    $r = ([wmiclass]"Win32_Process").Create($cmd)
+    if ($r.ReturnValue -eq 0) {
+        Write-Log "relance WMI OK (wrapper PID $($r.ProcessId), token=$Token)"
+    } else {
+        Write-Log "ECHEC WMI Create ReturnValue=$($r.ReturnValue)"
+    }
+}
+
+if ($Loop) {
+    Write-Log "watchdog demarre (boucle 30s, token=$Token, port=$Port)"
+    while ($true) {
+        # IDE fermé (language_server absent) : pas de daemon à maintenir.
+        if (-not (Get-Process -Name language_server)) {
+            Start-Sleep -Seconds 30
+            continue
+        }
+        if (-not (Test-DaemonOk)) {
+            Start-Daemon
+            $lastStart = Get-Date
+            Start-Sleep -Seconds 5
+            continue
+        }
+        # Tunnel mort ? (grace 90s après un (re)démarrage : cloudflared met ~15s à s'enregistrer)
+        # ponytail: heuristique 90s — si cloudflared met plus longtemps, le daemon sera
+        # redémarré une fois de plus ; acceptable, upgrade = surveiller /health/diagnostic en boucle.
+        if ((Get-Date) -gt $lastStart.AddSeconds(90) -and -not (Test-TunnelOk)) {
+            Write-Log "tunnel absent - redemarrage du daemon pour relancer cloudflared"
+            Start-Daemon
+            $lastStart = Get-Date
+        } else {
+            Write-Log "ok: daemon $Token sur :$Port"
+        }
+        Start-Sleep -Seconds 30
+    }
+} elseif ($Once) {
+    if (-not (Get-Process -Name language_server)) {
+        Write-Host "IDE (language_server) non demarre - daemon inutile pour l'instant"
+        exit 0
+    }
+    if (Test-DaemonOk) {
+        Write-Host "deja OK: daemon fix99token sur :$Port"
+    } else {
+        Start-Daemon
+    }
+} else {
+    Write-Host "Usage: supervise-daemon.ps1 -Once | -Loop"
+}

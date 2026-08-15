@@ -2,15 +2,16 @@ package discovery
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os/exec"
 	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -93,14 +94,57 @@ func Discover() (*LocalHarnessInfo, error) {
 
 		candidates := candidatePorts(info, &pick)
 		token := info.ExtensionCSRF
-		for _, port := range candidates {
-			if probeService(port, token) {
-				info.ConnectRPCPort = port
-				return info, nil
-			}
+		if port := probePorts(candidates, token); port > 0 {
+			info.ConnectRPCPort = port
+			return info, nil
 		}
 	}
 	return nil, fmt.Errorf("aucun port ne répond au service RPC parmi les %d processus testés", len(sortedProcs))
+}
+
+// probePorts sonde les ports candidats EN PARALLÈLE (worker pool borné — le
+// premier port qui répond gagne). L'ancien balayage séquentiel coûtait jusqu'à
+// 20 × timeout HTTP (3 s) = 60 s au pire quand le hub était sur un port haut.
+func probePorts(ports []int, csrfToken string) int {
+	if len(ports) == 0 {
+		return 0
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan int, 1)
+
+	workers := len(ports)
+	if workers > 8 {
+		workers = 8 // 8 workers suffisent : le goulot est le timeout réseau
+	}
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	for _, port := range ports {
+		port := port // capture de boucle (Go < 1.22)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				return
+			}
+			if probeService(port, csrfToken) {
+				select {
+				case result <- port:
+					cancel() // le premier gagnant arrête les autres sondes
+				default:
+				}
+			}
+		}()
+	}
+	go func() { wg.Wait(); close(result) }()
+
+	for port := range result {
+		return port
+	}
+	return 0
 }
 
 // candidatePorts : extension_server_port+1..+20 si présent, sinon netstat PID.
@@ -288,15 +332,6 @@ func extractArg(cmdLine, name string) string {
 		}
 	}
 	return ""
-}
-
-func checkTCPPort(port int) bool {
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 200*time.Millisecond)
-	if err != nil {
-		return false
-	}
-	conn.Close()
-	return true
 }
 
 func atoi(s string) int {

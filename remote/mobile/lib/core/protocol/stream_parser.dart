@@ -1,4 +1,7 @@
 import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
+
 import 'messages.dart';
 
 /// Parses daemon `stream_delta` payloads into UI-ready message parts.
@@ -64,6 +67,10 @@ class StreamDeltaParser {
   }
 
   /// Extracts an interactive question request if the delta carries one.
+  /// H1 (audit clean-code-guard) : ne fabrique JAMAIS de question synthétique
+  /// — un `approval_required` sans payload JSON exploitable (ex. run_command
+  /// avec un champ "options" dans ses args) retourne null au lieu d'une carte
+  /// fantôme, et l'anomalie est loggée pour diagnostic.
   static AskQuestionChoiceRequest? questionOf(Map<String, dynamic> message) {
     final data = message['data'];
     if (data is! Map<String, dynamic>) return null;
@@ -73,18 +80,28 @@ class StreamDeltaParser {
       if (e is Map<String, dynamic> && e['kind'] == 'approval_required') {
         final tool = (e['tool'] ?? '').toString().toLowerCase();
         final detail = (e['detail'] ?? '').toString();
-        if (tool == 'ask_question' ||
-            tool == 'ask_user' ||
-            detail.contains('"questions"') ||
-            detail.contains('"options"')) {
-          return _parseQuestionDetail(e);
+        if (tool == 'ask_question' || tool == 'ask_user') {
+          final q = _parseQuestionDetail(e);
+          if (q != null) return q;
+          debugPrint('stream_parser: ask_question sans payload JSON exploitable '
+              '(callId=${e['callId'] ?? '?'}) — ignoré');
+          continue;
+        }
+        // Heuristique legacy : certains daemons marquent ask_question avec un
+        // tool générique mais un detail contenant "questions"/"options".
+        // H1 : on exige alors un champ question réel — un run_command dont les
+        // args contiennent un tableau "options" ne doit pas créer de question.
+        if (detail.contains('"questions"') || detail.contains('"options"')) {
+          final q = _parseQuestionDetail(e);
+          if (q != null) return q;
         }
       }
     }
     return null;
   }
 
-  static AskQuestionChoiceRequest _parseQuestionDetail(Map<String, dynamic> event) {
+  static AskQuestionChoiceRequest? _parseQuestionDetail(
+      Map<String, dynamic> event) {
     final detail = (event['detail'] ?? '').toString();
     final callId = event['callId'] ?? '';
     final cascadeId = event['cascadeId'] ?? '';
@@ -99,6 +116,13 @@ class StreamDeltaParser {
         final jsonStr = detail.substring(startIndex, endIndex + 1);
         final decoded = json.decode(jsonStr);
         if (decoded is Map<String, dynamic>) {
+          // H1 : un approval_required non-question (tool générique) ne doit
+          // pas produire de question fantôme — exiger question/questions.
+          if (decoded['question'] == null && decoded['questions'] == null) {
+            debugPrint('stream_parser: detail JSON sans champ question '
+                '(callId=$callId) — ignoré');
+            return null;
+          }
           return AskQuestionChoiceRequest.fromJson({
             ...decoded,
             'callId': callId,
@@ -108,16 +132,10 @@ class StreamDeltaParser {
           });
         }
       }
-    } catch (_) {}
-
-    return AskQuestionChoiceRequest(
-      requestId: callId,
-      cascadeId: cascadeId,
-      trajectoryId: trajectoryId,
-      stepIndex: stepIndex,
-      question: 'Please review and choose an option:',
-      options: const ['Yes, proceed', 'No, cancel'],
-    );
+    } catch (e) {
+      debugPrint('stream_parser: détail JSON illisible (callId=$callId) : $e');
+    }
+    return null;
   }
 }
 

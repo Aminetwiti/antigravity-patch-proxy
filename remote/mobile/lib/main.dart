@@ -19,6 +19,7 @@ import 'features/sessions/sessions_list.dart';
 import 'features/sessions/conversation_history_screen.dart';
 import 'features/scheduled_tasks/scheduled_tasks_screen.dart';
 import 'services/settings_store.dart';
+import 'widgets/remote_terminal_sheet.dart';
 import 'widgets/right_sidebar_drawer.dart';
 
 void main() {
@@ -312,7 +313,11 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           _contextStats = stats;
         });
       }
-    } catch (_) {}
+    } catch (e) {
+      // C3 (audit clean-code-guard) : silencieux auparavant — le contexte
+      // (compteurs sidebar droite) est décoratif, on logge sans alerter.
+      debugPrint('refreshContext failed: $e');
+    }
   }
 
   Future<void> _refreshSessions() async {
@@ -410,6 +415,12 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     );
   }
 
+  /// Stub scheduled tasks : la liste est vide tant que le daemon n'expose pas
+  /// de RPC tasks ; l'écran affiche l'empty state et les callbacks sont des
+  /// no-ops sûrs.
+  /// ponytail: stub volontaire (M5) — pas de tâches planifiées réelles côté
+  /// daemon aujourd'hui ; à brancher sur un RPC `list_scheduled_tasks` quand
+  /// il existera, sans changer la signature de ScheduledTasksScreen.
   void _showScheduledTasks() {
     final workspaces = _sessions
         .map((s) {
@@ -674,6 +685,18 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         ),
         actions: [
           IconButton(
+            icon: Icon(Icons.terminal_rounded, size: 20, color: Theme.of(context).colorScheme.onSurface),
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              RemoteTerminalSheet.show(
+                context,
+                api: _api,
+                projectName: _activeProjectName,
+              );
+            },
+            tooltip: 'Ouvrir le terminal distant',
+          ),
+          IconButton(
             icon: Icon(Icons.vertical_split_outlined, size: 20, color: Theme.of(context).colorScheme.onSurface),
             onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
             tooltip: 'Ouvrir le panneau contexte',
@@ -691,172 +714,5 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
   }
 }
 
-/// Feuille « Historique des conversations » : charge get_session_history de la
-/// session active via DaemonApi (repli offline : cache sqflite). Affiche les
-/// messages dans l'ordre chronologique avec des bulles user/assistant.
-class _SessionHistorySheet extends StatefulWidget {
-  final DaemonApi api;
-  final String sessionId;
-
-  const _SessionHistorySheet({required this.api, required this.sessionId});
-
-  @override
-  State<_SessionHistorySheet> createState() => _SessionHistorySheetState();
-}
-
-class _SessionHistorySheetState extends State<_SessionHistorySheet> {
-  bool _isLoading = true;
-  String? _error;
-  List<ChatMessage> _messages = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      final data = await widget.api.getSessionHistory(widget.sessionId);
-      if (!mounted) return;
-      final raw = data['messages'] as List? ?? [];
-      final msgs = <ChatMessage>[];
-      for (final m in raw) {
-        if (m is Map) {
-          msgs.add(ChatMessage(
-            id: m['id']?.toString() ?? '',
-            sender: m['sender']?.toString() ?? 'assistant',
-            text: m['text']?.toString() ?? '',
-            thought: m['thought']?.toString(),
-            timestamp: m['timestamp']?.toString() ?? '',
-            isError: m['isError'] == true,
-          ));
-        }
-      }
-      if (mounted) {
-        setState(() {
-          _messages = msgs;
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _error = e.toString();
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.75,
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
-      ),
-      child: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Drag handle
-            Center(
-              child: Container(
-                margin: const EdgeInsets.only(top: 8, bottom: 4),
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: scheme.outlineVariant,
-                  borderRadius: BorderRadius.circular(AppRadius.pill),
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                  Icon(Icons.history, size: 18, color: scheme.primary),
-                  const SizedBox(width: 10),
-                  Text(
-                    'Historique des conversations',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: scheme.onSurface),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    icon: Icon(Icons.close, size: 18, color: scheme.onSurfaceVariant),
-                    onPressed: () => Navigator.of(context).pop(),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                  ),
-                ],
-              ),
-            ),
-            Divider(height: 1, color: scheme.outlineVariant),
-            Expanded(
-              child: _isLoading
-                  ? Center(
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation(scheme.primary),
-                      ),
-                    )
-                  : _error != null
-                      ? Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(24),
-                            child: Text(
-                              'Impossible de charger l\'historique:\n$_error',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(fontSize: 12, color: scheme.error),
-                            ),
-                          ),
-                        )
-                      : _messages.isEmpty
-                          ? Center(
-                              child: Text(
-                                'Aucun message dans cette session.',
-                                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                              ),
-                            )
-                          : ListView.builder(
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              itemCount: _messages.length,
-                              itemBuilder: (context, i) {
-                                final m = _messages[i];
-                                final isUser = m.sender == 'user';
-                                return Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                                  child: Align(
-                                    alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-                                    child: Container(
-                                      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
-                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                      decoration: BoxDecoration(
-                                        color: isUser ? scheme.primary.withValues(alpha: 0.18) : scheme.surfaceContainerHighest,
-                                        borderRadius: BorderRadius.circular(AppRadius.lg),
-                                      ),
-                                      child: Text(
-                                        m.text.isEmpty ? (m.thought ?? '') : m.text,
-                                        style: TextStyle(
-                                          fontSize: 12.5,
-                                          height: 1.4,
-                                          color: scheme.onSurface,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 

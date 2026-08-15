@@ -44,14 +44,12 @@ export const STUB_PORT_DEFAULT = 51999;
 /** Path (relative to home) where the active proxy port is persisted for IPC. */
 export const ACTIVE_PORT_FILE = '.gemini/antigravity/active_port';
 
-/** Maximum request body size accepted by the proxy (10 MB). Prevents memory exhaustion DoS. */
-export const MAX_REQUEST_BODY_SIZE = 10 * 1024 * 1024;
+
 
 /** Timeout for Google proxy requests (60 seconds). */
 export const GOOGLE_PROXY_TIMEOUT_MS = 60_000;
 
-/** Timeout for forwarding requests to upstream Google APIs (30 seconds). */
-export const GOOGLE_FORWARD_TIMEOUT_MS = 30_000;
+
 
 /** Timeout for downloading file content from external URIs (30 seconds). */
 export const FILE_DOWNLOAD_TIMEOUT_MS = 30_000;
@@ -171,20 +169,7 @@ export const PLACEHOLDER_ID_RANGE = 200;
 /** Public DNS servers used to bypass local DNS poisoning. */
 export const PUBLIC_DNS_SERVERS = ['8.8.8.8', '1.1.1.1', '8.8.4.4'];
 
-// ─── HTTP Status Codes ────────────────────────────────────────────────────
 
-export const HTTP_STATUS = {
-  OK: 200,
-  BAD_REQUEST: 400,
-  UNAUTHORIZED: 401,
-  PAYMENT_REQUIRED: 402,
-  FORBIDDEN: 403,
-  PAYLOAD_TOO_LARGE: 413,
-  TOO_MANY_REQUESTS: 429,
-  INTERNAL_SERVER_ERROR: 500,
-  BAD_GATEWAY: 502,
-  GATEWAY_TIMEOUT: 504,
-} as const;
 
 // ─── Google API Hosts ─────────────────────────────────────────────────────
 

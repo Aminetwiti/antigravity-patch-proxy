@@ -13,7 +13,8 @@ vi.mock('electron-log/main', () => ({
   },
 }));
 
-import { generateModelPlaceholderId, toSlug, parseRetryAfter } from '../proxy';
+import { parseRetryAfter } from '../proxy';
+import { generateModelPlaceholderId, toSlug } from '../proxy/idGenerator';
 
 describe('generateModelPlaceholderId', () => {
   it('generates deterministic IDs for the same input', () => {

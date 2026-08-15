@@ -16,7 +16,15 @@ import '../theme/app_colors.dart';
 enum SendMode { immediate, queued }
 
 class ChatInputBar extends StatefulWidget {
-  final Function(String message, {bool queued}) onSend;
+  /// Signature unique : message + mode file + modèle sélectionné.
+  /// C2 (audit clean-code-guard) : typée — plus de `Function` opaque ni de
+  /// try/catch en cascade côté appelant.
+  final void Function(
+    String message, {
+    bool queued,
+    String? modelUID,
+    int? modelEnum,
+  }) onSend;
   final bool isConnected;
 
   /// Feature queue : true si l'agent a un travail actif.
@@ -173,20 +181,14 @@ class _ChatInputBarState extends State<ChatInputBar> {
                 .trim()
             : finalPayload;
 
-    try {
-      (widget.onSend as dynamic)(
-        fullMessage,
-        queued: _sendMode == SendMode.queued,
-        modelUID: _selectedModelId,
-        modelEnum: _selectedModelEnum,
-      );
-    } catch (_) {
-      try {
-        (widget.onSend as dynamic)(fullMessage, queued: _sendMode == SendMode.queued);
-      } catch (_) {
-        (widget.onSend as dynamic)(fullMessage);
-      }
-    }
+    // C2 : signature désormais unique et typée — l'ancien try/catch en cascade
+    // (compat rétro) n'a plus de raison d'être.
+    widget.onSend(
+      fullMessage,
+      queued: _sendMode == SendMode.queued,
+      modelUID: _selectedModelId,
+      modelEnum: _selectedModelEnum,
+    );
     _controller.clear();
     FocusScope.of(
       context,

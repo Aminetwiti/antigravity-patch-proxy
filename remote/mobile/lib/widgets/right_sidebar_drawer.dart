@@ -38,6 +38,10 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
   List<Map<String, dynamic>> _artifacts = [];
   bool _artifactsExpanded = false;
 
+  bool _isLoadingUploads = false;
+  List<Map<String, dynamic>> _uploads = [];
+  bool _uploadsExpanded = false;
+
   Future<void> _fetchArtifacts() async {
     if (widget.api == null || widget.activeSessionId.isEmpty) return;
     setState(() => _isLoadingArtifacts = true);
@@ -58,6 +62,45 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
       debugPrint('Failed to fetch artifacts: $e');
     } finally {
       if (mounted) setState(() => _isLoadingArtifacts = false);
+    }
+  }
+
+  Future<void> _fetchUploads() async {
+    if (widget.api == null || widget.activeSessionId.isEmpty) return;
+    setState(() => _isLoadingUploads = true);
+    try {
+      final base = '.gemini/antigravity-ide/brain/${widget.activeSessionId}';
+      final pathsToTry = ['$base/scratch/', '$base/.user_uploaded/', '$base/'];
+      final ups = <Map<String, dynamic>>[];
+
+      for (final p in pathsToTry) {
+        try {
+          final res = await widget.api!.listFiles(p);
+          final files = res['files'] as List<dynamic>? ?? [];
+          for (final f in files) {
+            if (f is Map && f['name'] != null) {
+              final name = f['name'].toString().toLowerCase();
+              if (name.endsWith('.png') ||
+                  name.endsWith('.jpg') ||
+                  name.endsWith('.jpeg') ||
+                  name.endsWith('.gif') ||
+                  name.endsWith('.webp') ||
+                  name.endsWith('.pdf') ||
+                  name.endsWith('.mp4')) {
+                ups.add({
+                  'name': f['name'],
+                  'path': f['path'] ?? '$p${f['name']}',
+                });
+              }
+            }
+          }
+        } catch (_) {}
+      }
+      if (mounted) setState(() => _uploads = ups);
+    } catch (e) {
+      debugPrint('Failed to fetch uploads: $e');
+    } finally {
+      if (mounted) setState(() => _isLoadingUploads = false);
     }
   }
 
@@ -211,37 +254,107 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
                         ),
                     ],
                   ),
-                  _ContextItemRow(
-                    title: 'Uploads',
-                    badgeCount: widget.uploadsCount,
-                    onTap: () {},
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _ContextItemRow(
+                        title: 'Uploads',
+                        badgeCount: widget.uploadsCount > 0 ? widget.uploadsCount : _uploads.length,
+                        onTap: () {
+                          setState(() {
+                            _uploadsExpanded = !_uploadsExpanded;
+                          });
+                          if (_uploadsExpanded && _uploads.isEmpty) {
+                            _fetchUploads();
+                          }
+                        },
+                        isExpanded: _uploadsExpanded,
+                      ),
+                      if (_uploadsExpanded)
+                        AnimatedContainer(
+                          duration: AppMotion.fast,
+                          padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
+                          child: _isLoadingUploads
+                              ? Padding(
+                                  padding: const EdgeInsets.all(8.0),
+                                  child: Center(
+                                    child: SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor: AlwaysStoppedAnimation(scheme.primary),
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              : _uploads.isEmpty
+                                  ? Padding(
+                                      padding: const EdgeInsets.all(8.0),
+                                      child: Text(
+                                        'Aucun fichier téléversé',
+                                        style: TextStyle(color: scheme.outline, fontSize: 12),
+                                      ),
+                                    )
+                                  : Column(
+                                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                                      children: _uploads.map((up) => InkWell(
+                                        onTap: () => _openArtifact(up),
+                                        borderRadius: BorderRadius.circular(AppRadius.sm),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                up['name']?.toString().endsWith('.pdf') == true
+                                                    ? Icons.picture_as_pdf_outlined
+                                                    : Icons.image_outlined,
+                                                size: 14,
+                                                color: scheme.secondary,
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: Text(
+                                                  up['name'] ?? 'Fichier',
+                                                  style: TextStyle(fontSize: 12, color: scheme.onSurface),
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      )).toList(),
+                                    ),
+                        ),
+                    ],
                   ),
-                    _ContextItemRow(
-                      title: 'Scheduled Tasks',
-                      badgeCount: widget.scheduledTasksCount > 0 ? widget.scheduledTasksCount : widget.backgroundTasksCount,
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (ctx) => ScheduledTasksScreen(
-                              tasks: const [],
-                              onCancelTask: (id) => widget.api?.cancelScheduledTask(id),
-                              onTriggerNow: (id) => widget.api?.triggerScheduledTask(id),
-                            ),
+                  _ContextItemRow(
+                    title: 'Scheduled Tasks',
+                    badgeCount: widget.scheduledTasksCount > 0 ? widget.scheduledTasksCount : widget.backgroundTasksCount,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (ctx) => ScheduledTasksScreen(
+                            tasks: const [],
+                            api: widget.api,
+                            onCancelTask: (id) => widget.api?.cancelScheduledTask(id),
+                            onTriggerNow: (id) => widget.api?.triggerScheduledTask(id),
                           ),
-                        );
-                      },
-                    ),
-                    _ContextItemRow(
-                      title: 'MCP Servers',
-                      badgeCount: 0,
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (ctx) => McpExplorerScreen(api: widget.api),
-                          ),
-                        );
-                      },
-                    ),
+                        ),
+                      );
+                    },
+                  ),
+                  _ContextItemRow(
+                    title: 'MCP Servers',
+                    badgeCount: 0,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (ctx) => McpExplorerScreen(api: widget.api),
+                        ),
+                      );
+                    },
+                  ),
                   _ContextItemRow(
                     title: 'Background Tasks',
                     badgeCount: widget.backgroundTasksCount,
@@ -250,6 +363,7 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
                         MaterialPageRoute(
                           builder: (ctx) => ScheduledTasksScreen(
                             tasks: const [],
+                            api: widget.api,
                             onCancelTask: (id) => widget.api?.cancelScheduledTask(id),
                             onTriggerNow: (id) => widget.api?.triggerScheduledTask(id),
                           ),

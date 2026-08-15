@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile/core/protocol/messages.dart';
+import 'package:mobile/core/protocol/workspace_path.dart';
 import 'package:mobile/theme/app_colors.dart';
 
 /// Écran Conversation History (Antigravity 2.0)
@@ -46,18 +47,6 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
     super.dispose();
   }
 
-  String _cleanWorkspaceName(String rawPath) {
-    if (rawPath.isEmpty || rawPath == '.') return 'Outside of Project';
-    var clean = rawPath.replaceAll('\\', '/');
-    if (clean.startsWith('file:///')) clean = clean.substring(8);
-    if (clean.startsWith('file://')) clean = clean.substring(7);
-    final segments = clean.split('/').where((s) => s.isNotEmpty).toList();
-    if (segments.isNotEmpty) {
-      return segments.last;
-    }
-    return 'Outside of Project';
-  }
-
   @override
   Widget build(BuildContext context) {
     // Filtrer STRICTEMENT les sessions disponibles (non archivées et non supprimées)
@@ -65,7 +54,7 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
 
     // Extraire tous les workspaces distincts pour le filtre
     final workspaces = available
-        .map((s) => _cleanWorkspaceName(s.workspacePath))
+        .map((s) => WorkspacePath.displayName(s.workspacePath))
         .toSet()
         .toList()
       ..sort();
@@ -73,14 +62,14 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
     // Appliquer le filtre par workspace
     var filtered = available;
     if (_selectedWorkspaceFilter != null) {
-      filtered = filtered.where((s) => _cleanWorkspaceName(s.workspacePath) == _selectedWorkspaceFilter).toList();
+      filtered = filtered.where((s) => WorkspacePath.displayName(s.workspacePath) == _selectedWorkspaceFilter).toList();
     }
 
     // Appliquer la recherche textuelle
     if (_searchQuery.isNotEmpty) {
       filtered = filtered.where((s) {
         final title = s.title.toLowerCase();
-        final ws = _cleanWorkspaceName(s.workspacePath).toLowerCase();
+        final ws = WorkspacePath.displayName(s.workspacePath).toLowerCase();
         return title.contains(_searchQuery) || ws.contains(_searchQuery);
       }).toList();
     }
@@ -346,7 +335,7 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
                         final session = filtered[index];
                         final isActive = session.id == widget.activeSessionId;
                         final isRunning = session.isRunning;
-                        final wsName = _cleanWorkspaceName(session.workspacePath);
+                        final wsName = WorkspacePath.displayName(session.workspacePath);
 
                         return _ConversationHistoryRow(
                           session: session,

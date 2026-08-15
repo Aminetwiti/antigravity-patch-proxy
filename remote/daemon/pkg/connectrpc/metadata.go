@@ -1,9 +1,6 @@
 package connectrpc
 
-import (
-	"crypto/rand"
-	"encoding/hex"
-)
+import ()
 
 // buildMetadata construit le sous-message Metadata (champs validés par le
 // DescriptorProto réel du LS 2.5.0) :
@@ -28,11 +25,4 @@ func buildMetadata(apiKey, sessionID string) []byte {
 		w.stringField(10, sessionID)
 	}
 	return w.b
-}
-
-// randomSessionID génère un identifiant de session aléatoire (16 octets hex).
-func randomSessionID() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
 }

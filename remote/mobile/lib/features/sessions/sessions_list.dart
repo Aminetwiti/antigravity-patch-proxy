@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/protocol/messages.dart';
+import '../../core/protocol/workspace_path.dart';
 import 'package:mobile/theme/app_colors.dart';
 
 class LeftSidebarDrawer extends StatefulWidget {
@@ -42,18 +43,6 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
   final TextEditingController _filterController = TextEditingController();
   String _filterQuery = '';
 
-  String _cleanWorkspaceName(String rawPath) {
-    if (rawPath.isEmpty || rawPath == '.') return 'antigravity-workspace';
-    var clean = rawPath.replaceFirst(RegExp(r'^file:\/\/\/'), '');
-    clean = clean.replaceAll('\\', '/');
-    if (clean.endsWith('/')) clean = clean.substring(0, clean.length - 1);
-    final parts = clean.split('/');
-    if (parts.isNotEmpty && parts.last.isNotEmpty) {
-      return parts.last;
-    }
-    return clean;
-  }
-
   @override
   void dispose() {
     _scrollController.dispose();
@@ -78,7 +67,10 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
     // Organiser les sessions par workspace
     final Map<String, List<CascadeSession>> groupedSessions = {};
     for (final s in availableSessions) {
-      final folderName = _cleanWorkspaceName(s.workspacePath);
+      final folderName = WorkspacePath.displayName(
+        s.workspacePath,
+        fallback: 'antigravity-workspace',
+      );
       groupedSessions.putIfAbsent(folderName, () => []).add(s);
     }
 

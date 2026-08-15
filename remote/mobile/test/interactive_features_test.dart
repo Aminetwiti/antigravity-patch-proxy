@@ -31,6 +31,64 @@ void main() {
       expect(q.isMultiSelect, isFalse);
     });
 
+    test('questionOf returns null on run_command with options (H1 ghost guard)', () {
+      final msg = {
+        'type': 'stream_delta',
+        'data': {
+          'events': [
+            {
+              'kind': 'approval_required',
+              'tool': 'run_command',
+              'callId': 'cmd_1',
+              'detail': '{"command_line":"ls","options":{"cwd":"/tmp"}}',
+            }
+          ]
+        }
+      };
+
+      // H1 : un run_command dont les args contiennent un champ "options" ne
+      // doit PAS produire de carte question fantôme.
+      expect(StreamDeltaParser.questionOf(msg), isNull);
+    });
+
+    test('questionOf returns null on unparseable detail (H1 ghost guard)', () {
+      final msg = {
+        'type': 'stream_delta',
+        'data': {
+          'events': [
+            {
+              'kind': 'approval_required',
+              'tool': 'ask_question',
+              'callId': 'q_bad',
+              'detail': 'not json at all',
+            }
+          ]
+        }
+      };
+
+      // H1 : plus de question synthétique "Please review and choose an option"
+      // — payload inexploitable => null (le debugPrint aide au diagnostic).
+      expect(StreamDeltaParser.questionOf(msg), isNull);
+    });
+
+    test('questionOf returns null on detail without question field (H1)', () {
+      final msg = {
+        'type': 'stream_delta',
+        'data': {
+          'events': [
+            {
+              'kind': 'approval_required',
+              'tool': 'generic_tool',
+              'callId': 't_1',
+              'detail': '{"options":["a","b"]}',
+            }
+          ]
+        }
+      };
+
+      expect(StreamDeltaParser.questionOf(msg), isNull);
+    });
+
     testWidgets('AskQuestionChoiceCard single-select toggle and submit', (tester) async {
       List<String> submittedAnswers = [];
       String? submittedCustom;

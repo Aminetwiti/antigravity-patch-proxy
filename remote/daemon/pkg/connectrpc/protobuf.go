@@ -101,6 +101,12 @@ func BuildSendMessage(cascadeID, text, apiKey, sessionID, modelUID string, model
 	return w.b
 }
 
+// DefaultModelEnum : repli quand aucun modèle n'est demandé — enum LS
+// GOOGLE_GEMINI_3_7_FLASH (défaut Antigravity 2.0 / haute capacité).
+// CONSTANTE UNIQUE partagée entre BuildCascadeConfig (plan_model) et le repli
+// create_cascade du gateway : deux littéraux 312/190 auraient divergé.
+const DefaultModelEnum uint64 = 312
+
 // BuildCascadeConfig construit le sous-message cascade_config.
 //
 // Format validé contre le vrai Language Server 2.8.0 (probe gRPC-Web le
@@ -125,7 +131,7 @@ func BuildCascadeConfig(modelUID string, modelEnum uint64) []byte {
 	// plan_model (field 1) : même valeur que requested_model ci-dessous.
 	// Le LS l'exige explicitement (« neither PlanModel nor RequestedModel »).
 	if modelEnum == 0 {
-		modelEnum = 312 // GOOGLE_GEMINI_3_7_FLASH (défaut Antigravity 2.0 / haute capacité)
+		modelEnum = DefaultModelEnum
 	}
 	planner.varintField(1, modelEnum)
 

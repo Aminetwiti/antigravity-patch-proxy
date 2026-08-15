@@ -16,6 +16,11 @@ class DaemonWebSocketClient {
   final ValueNotifier<ConnectionStatus> statusNotifier =
       ValueNotifier(ConnectionStatus.disconnected);
 
+  /// Reassemblage des messages texte multi-frames (dart:io WebSocket livre
+  /// chaque fragment sÃ©parÃ©ment). RÃ©initialisÃ© Ã  chaque (re)connexion.
+  String _textBuffer = '';
+  bool _inPartialMessage = false;
+
   Timer? _reconnectTimer;
   Timer? _retryCountdownTimer;
   String _targetUrl = EnvConfig.wsUrl;
@@ -110,13 +115,16 @@ class DaemonWebSocketClient {
       return;
     }
 
-    _manualDisconnect = false;
-    // Garde anti-boucle : si un connect() est déjà en vol (par ex. le
-    // onAuthRejected qui relance pendant que _handleDisconnect a déjà
-    // planifié un backoff), on ne lance pas un second connect() concurrent.
-    if (_connecting) {
+    // Garde anti-boucle (C3) : une tentative de connexion en vol (connect()
+    // appelé par onAuthRejected/onEndpointDead/reconnect-timer alors que le
+    // socket est encore vivant ou que _connecting n'a pas été réarmé) ne doit
+    // JAMAIS muter _targetUrl/_authToken ni lancer une seconde tentative en
+    // parallèle de la première — sinon la connexion part en ping-timeout /
+    // reconnect storm (la boucle connecter/déconnecter observée).
+    if (_connecting || _socket != null) {
       return;
     }
+    _manualDisconnect = false;
     _connecting = true;
     statusNotifier.value = ConnectionStatus.connecting;
     _messageController ??= StreamController<dynamic>.broadcast();
@@ -173,7 +181,7 @@ class DaemonWebSocketClient {
 
       _socket!.listen(
         (data) {
-          _messageController?.add(data);
+          _handleData(data);
         },
         onError: (error) {
           if (kDebugMode) {
@@ -229,6 +237,38 @@ class DaemonWebSocketClient {
       }
       _handleDisconnect();
     }
+  }
+
+  /// Reconstruit le message texte complet (multi-frames) avant Ã©mission :
+  /// seuls les messages complets (endOfMessage=true) sont publiÃ©s sur le
+  /// stream, dans l'ordre du flux.
+  void _handleData(dynamic data) {
+    if (data is! String) {
+      _messageController?.add(data);
+      return;
+    }
+    if (_inPartialMessage) {
+      _textBuffer += data;
+    } else {
+      _textBuffer = data;
+      _inPartialMessage = true;
+    }
+    // Note: `WebSocketMessage.endOfMessage` n'est pas exposÃ© par l'API
+    // dart:io; le message est complet quand il se termine par le dÃ©limiteur
+    // fermant du JSON (aprÃ¨s les fragments intermÃ©diaires, dont le contenu
+    // est un préfixe JSON non valide).
+    final trimmed = _textBuffer.trimRight();
+    if (_isCompleteJson(trimmed)) {
+      _inPartialMessage = false;
+      _textBuffer = '';
+      _messageController?.add(trimmed);
+    }
+  }
+
+  bool _isCompleteJson(String s) {
+    if (s.isEmpty) return false;
+    return (s.startsWith('{') && s.endsWith('}')) ||
+        (s.startsWith('[') && s.endsWith(']'));
   }
 
   void send(dynamic data) {

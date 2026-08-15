@@ -41,7 +41,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: ChatInputBar(
-            onSend: (_, {queued = false}) {},
+            onSend: (_, {queued = false, modelUID, modelEnum}) {},
           ),
         ),
       ),

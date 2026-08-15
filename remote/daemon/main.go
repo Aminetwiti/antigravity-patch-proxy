@@ -76,10 +76,11 @@ func main() {
 		}
 	}()
 
-	// Lancement du Beacon de Découverte Automatique LAN (Zero-Config UDP)
+	// Lancement du Beacon de Découverte Automatique LAN (Zero-Config UDP).
+	// Aucun jeton n'y est passé : le beacon ne diffuse JAMAIS le token sur le
+	// LAN (broadcast lisible par tout hôte) — pairing par QR ou saisie manuelle.
 	beacon := discovery.NewLANBeacon(
 		listenPort,
-		authToken,
 		func() string { return tunnelMgr.PublicURL },
 		gateway.GetUniqueWorkspaces,
 	)
