@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../../core/protocol/messages.dart';
 import '../../core/protocol/workspace_path.dart';
 import 'package:mobile/theme/app_colors.dart';
+import 'display_options.dart';
 
 class LeftSidebarDrawer extends StatefulWidget {
   final String activeSessionId;
@@ -45,6 +46,10 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
   final TextEditingController _filterController = TextEditingController();
   String _filterQuery = '';
 
+  SessionGroupBy _groupBy = SessionGroupBy.project;
+  SessionSortBy _sortBy = SessionSortBy.lastUpdated;
+  SessionSubtitle _subtitle = SessionSubtitle.worktree;
+
   @override
   void initState() {
     super.initState();
@@ -71,55 +76,16 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
         })
         .toList();
 
-    // Récupère les projets officiels d'Antigravity 2.0
-    final officialProjects = widget.projects ?? [];
+    final sortedSessions = sortSessions(
+      sessions: availableSessions,
+      sortBy: _sortBy,
+    );
 
-    // Map de regroupement : nom de projet -> sessions
-    final Map<String, List<CascadeSession>> projectSessions = {};
-
-    if (officialProjects.isNotEmpty) {
-      for (final p in officialProjects) {
-        projectSessions[p.name] = [];
-      }
-
-      // Associer chaque session à son projet officiel
-      for (final s in availableSessions) {
-        bool matched = false;
-        final cleanSPath = s.workspacePath.replaceAll('\\', '/').toLowerCase();
-        
-        for (final p in officialProjects) {
-          final cleanPPath = p.path.replaceAll('\\', '/').toLowerCase();
-          final cleanName = p.name.toLowerCase();
-          
-          if ((cleanPPath.isNotEmpty && cleanSPath.contains(cleanPPath)) ||
-              (cleanPPath.isNotEmpty && cleanPPath.contains(cleanSPath)) ||
-              (cleanName.isNotEmpty && cleanSPath.contains(cleanName)) ||
-              (cleanName.isNotEmpty && cleanName.contains(cleanSPath))) {
-            projectSessions[p.name]?.add(s);
-            matched = true;
-            break;
-          }
-        }
-
-        // Si la session est un sous-dossier ou nouvelle session du projet actif
-        if (!matched && officialProjects.isNotEmpty) {
-          final mainProj = officialProjects.firstWhere(
-            (p) => p.name.toLowerCase().contains('antigravity') || p.path.toLowerCase().contains('antigravity'),
-            orElse: () => officialProjects.first,
-          );
-          projectSessions[mainProj.name]?.add(s);
-        }
-      }
-    } else {
-      // Repli si aucun projet officiel n'est transmis
-      for (final s in availableSessions) {
-        final folderName = WorkspacePath.displayName(
-          s.workspacePath,
-          fallback: 'antigravity-workspace',
-        );
-        projectSessions.putIfAbsent(folderName, () => []).add(s);
-      }
-    }
+    final projectSessions = groupSessions(
+      sessions: sortedSessions,
+      groupBy: _groupBy,
+      projects: widget.projects,
+    );
 
     final projectNames = projectSessions.keys.toList();
 
@@ -227,24 +193,35 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
 
             const SizedBox(height: 14),
 
-            // ── Section Header: Projects [filter] [new folder]
+            // ── Section Header: Projects [display options] [new folder]
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
               child: Row(
                 children: [
-                  const Text(
-                    'Projects',
-                    style: TextStyle(
+                  Text(
+                    _groupBy == SessionGroupBy.project
+                        ? 'Projects'
+                        : _groupBy == SessionGroupBy.workspace
+                            ? 'Workspaces'
+                            : _groupBy == SessionGroupBy.status
+                                ? 'Status'
+                                : 'Conversations',
+                    style: const TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w600,
                       color: Color(0xFF8F909A),
                     ),
                   ),
                   const Spacer(),
-                  _HeaderIconBtn(
-                    icon: _isFilterOpen ? Icons.filter_list_off_rounded : Icons.filter_list_rounded,
-                    tooltip: _isFilterOpen ? 'Fermer le filtre' : 'Filtrer',
-                    onTap: () {
+                  DisplayOptionsMenuButton(
+                    selectedGroupBy: _groupBy,
+                    selectedSortBy: _sortBy,
+                    selectedSubtitle: _subtitle,
+                    isFilterOpen: _isFilterOpen,
+                    onGroupByChanged: (val) => setState(() => _groupBy = val),
+                    onSortByChanged: (val) => setState(() => _sortBy = val),
+                    onSubtitleChanged: (val) => setState(() => _subtitle = val),
+                    onToggleFilter: () {
                       HapticFeedback.selectionClick();
                       setState(() {
                         _isFilterOpen = !_isFilterOpen;
@@ -254,7 +231,6 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                         }
                       });
                     },
-                    size: 15,
                   ),
                   const SizedBox(width: 6),
                   _HeaderIconBtn(
@@ -348,6 +324,8 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                           folderName: proj,
                           sessions: sessions,
                           isCollapsed: isCollapsed,
+                          showSubtitle: _subtitle == SessionSubtitle.worktree,
+                          hideHeader: _groupBy == SessionGroupBy.none,
                           activeSessionId: widget.activeSessionId,
                           onToggleCollapse: () {
                             setState(() {
@@ -505,6 +483,8 @@ class _WorkspaceFolderSection extends StatelessWidget {
   final String folderName;
   final List<CascadeSession> sessions;
   final bool isCollapsed;
+  final bool showSubtitle;
+  final bool hideHeader;
   final String activeSessionId;
   final VoidCallback onToggleCollapse;
   final Function(String id) onSessionTap;
@@ -513,6 +493,8 @@ class _WorkspaceFolderSection extends StatelessWidget {
     required this.folderName,
     required this.sessions,
     required this.isCollapsed,
+    this.showSubtitle = true,
+    this.hideHeader = false,
     required this.activeSessionId,
     required this.onToggleCollapse,
     required this.onSessionTap,
@@ -523,35 +505,36 @@ class _WorkspaceFolderSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Workspace Folder Header
-        InkWell(
-          onTap: onToggleCollapse,
-          borderRadius: BorderRadius.circular(4),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.folder_outlined,
-                  size: 15,
-                  color: Color(0xFF8F909A),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    folderName,
-                    style: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w500,
-                      color: Color(0xFFA1A1AA),
-                    ),
-                    overflow: TextOverflow.ellipsis,
+        // Workspace Folder Header (hidden if hideHeader is true)
+        if (!hideHeader && folderName.isNotEmpty)
+          InkWell(
+            onTap: onToggleCollapse,
+            borderRadius: BorderRadius.circular(4),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.folder_outlined,
+                    size: 15,
+                    color: Color(0xFF8F909A),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      folderName,
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w500,
+                        color: Color(0xFFA1A1AA),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
 
         // Session list under this workspace
         if (!isCollapsed) ...[
@@ -571,6 +554,7 @@ class _WorkspaceFolderSection extends StatelessWidget {
             ...sessions.map((s) => _SessionRowItem(
                   session: s,
                   isSelected: s.id == activeSessionId,
+                  showSubtitle: showSubtitle,
                   onTap: () => onSessionTap(s.id),
                 )),
         ],
@@ -584,11 +568,13 @@ class _WorkspaceFolderSection extends StatelessWidget {
 class _SessionRowItem extends StatefulWidget {
   final CascadeSession session;
   final bool isSelected;
+  final bool showSubtitle;
   final VoidCallback onTap;
 
   const _SessionRowItem({
     required this.session,
     required this.isSelected,
+    this.showSubtitle = true,
     required this.onTap,
   });
 
@@ -603,6 +589,7 @@ class _SessionRowItemState extends State<_SessionRowItem> {
   Widget build(BuildContext context) {
     final isSelected = widget.isSelected;
     final isRunning = widget.session.isRunning;
+    final subtitleText = widget.session.worktree ?? WorkspacePath.displayName(widget.session.workspacePath);
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
@@ -628,17 +615,39 @@ class _SessionRowItemState extends State<_SessionRowItem> {
           child: Row(
             children: [
               Expanded(
-                child: Text(
-                  widget.session.title,
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    color: isSelected
-                        ? const Color(0xFFFFFFFF)
-                        : const Color(0xFFB0B0BA),
-                    fontWeight: isSelected ? FontWeight.w500 : FontWeight.w400,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 1,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      widget.session.title,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: isSelected
+                            ? const Color(0xFFFFFFFF)
+                            : const Color(0xFFB0B0BA),
+                        fontWeight: isSelected ? FontWeight.w500 : FontWeight.w400,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+                    if (widget.showSubtitle && subtitleText.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1.5),
+                        child: Text(
+                          subtitleText,
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            color: isSelected
+                                ? const Color(0xFF8F909A)
+                                : const Color(0xFF6E707A),
+                            fontWeight: FontWeight.w400,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                        ),
+                      ),
+                  ],
                 ),
               ),
               const SizedBox(width: 8),

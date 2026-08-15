@@ -1,0 +1,165 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:mobile/core/protocol/messages.dart';
+import 'package:mobile/features/sessions/display_options.dart';
+
+void main() {
+  group('Display Options Helpers', () {
+    final s1 = const CascadeSession(
+      id: 'sess_1',
+      workspacePath: 'c:/projects/antigravity/app',
+      title: 'Zebra Feature',
+      status: 'CASCADE_STATUS_RUNNING',
+      time: '10m',
+      lastPrompt: 'Add Zebra',
+    );
+
+    final s2 = const CascadeSession(
+      id: 'sess_2',
+      workspacePath: 'c:/projects/antigravity/app',
+      title: 'Alpha Bugfix',
+      status: 'CASCADE_STATUS_READY',
+      time: '1h',
+      lastPrompt: 'Fix Alpha',
+    );
+
+    final s3 = const CascadeSession(
+      id: 'sess_3',
+      workspacePath: 'c:/other/project',
+      title: 'Beta Refactor',
+      status: 'CASCADE_STATUS_COMPLETED',
+      time: '2d',
+      lastPrompt: 'Refactor Beta',
+    );
+
+    final sessions = [s1, s2, s3];
+
+    test('groupSessions by Project', () {
+      final projects = [
+        const ProjectItem(
+          id: 'p1',
+          name: 'antigravity',
+          folderUri: 'file:///c:/projects/antigravity',
+          path: 'c:/projects/antigravity',
+        ),
+      ];
+
+      final grouped = groupSessions(
+        sessions: sessions,
+        groupBy: SessionGroupBy.project,
+        projects: projects,
+      );
+
+      expect(grouped.containsKey('antigravity'), isTrue);
+      expect(grouped['antigravity']!.length, equals(2));
+    });
+
+    test('groupSessions by Workspace', () {
+      final grouped = groupSessions(
+        sessions: sessions,
+        groupBy: SessionGroupBy.workspace,
+      );
+
+      expect(grouped.keys.length, equals(2));
+      expect(grouped.values.expand((element) => element).length, equals(3));
+    });
+
+    test('groupSessions by Status', () {
+      final grouped = groupSessions(
+        sessions: sessions,
+        groupBy: SessionGroupBy.status,
+      );
+
+      expect(grouped.containsKey('Active'), isTrue);
+      expect(grouped['Active']!.first.id, equals('sess_1'));
+      expect(grouped.containsKey('Ready'), isTrue);
+      expect(grouped['Ready']!.first.id, equals('sess_2'));
+    });
+
+    test('groupSessions by None', () {
+      final grouped = groupSessions(
+        sessions: sessions,
+        groupBy: SessionGroupBy.none,
+      );
+
+      expect(grouped.containsKey('All Conversations'), isTrue);
+      expect(grouped['All Conversations']!.length, equals(3));
+    });
+
+    test('sortSessions Alphabetical', () {
+      final sorted = sortSessions(
+        sessions: sessions,
+        sortBy: SessionSortBy.alphabetical,
+      );
+
+      expect(sorted.first.title, equals('Alpha Bugfix'));
+      expect(sorted.last.title, equals('Zebra Feature'));
+    });
+
+    test('sortSessions Last Prompt', () {
+      final sorted = sortSessions(
+        sessions: sessions,
+        sortBy: SessionSortBy.lastPrompt,
+      );
+
+      expect(sorted.first.lastPrompt, equals('Add Zebra'));
+      expect(sorted.last.lastPrompt, equals('Refactor Beta'));
+    });
+
+    test('sortSessions Date Added', () {
+      final sorted = sortSessions(
+        sessions: sessions,
+        sortBy: SessionSortBy.dateAdded,
+      );
+
+      expect(sorted.first.id, equals('sess_1'));
+      expect(sorted.last.id, equals('sess_3'));
+    });
+  });
+
+  group('DisplayOptionsMenuButton Widget', () {
+    testWidgets('renders DisplayOptionsMenuButton and triggers callbacks', (tester) async {
+      SessionGroupBy groupBy = SessionGroupBy.project;
+      SessionSortBy sortBy = SessionSortBy.lastUpdated;
+      SessionSubtitle subtitle = SessionSubtitle.worktree;
+      bool filterToggled = false;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: DisplayOptionsMenuButton(
+                selectedGroupBy: groupBy,
+                selectedSortBy: sortBy,
+                selectedSubtitle: subtitle,
+                isFilterOpen: false,
+                onGroupByChanged: (val) => groupBy = val,
+                onSortByChanged: (val) => sortBy = val,
+                onSubtitleChanged: (val) => subtitle = val,
+                onToggleFilter: () => filterToggled = true,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.byType(DisplayOptionsMenuButton), findsOneWidget);
+      expect(find.byIcon(Icons.tune_rounded), findsOneWidget);
+
+      // Open popup menu
+      await tester.tap(find.byIcon(Icons.tune_rounded));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Group By'), findsOneWidget);
+      expect(find.text('Sort Conversations'), findsOneWidget);
+      expect(find.text('Subtitles'), findsOneWidget);
+      expect(find.text('Filter'), findsOneWidget);
+
+      // Select 'Workspace' in Group By
+      await tester.tap(find.text('Workspace'));
+      await tester.pumpAndSettle();
+
+      expect(groupBy, equals(SessionGroupBy.workspace));
+    });
+  });
+}

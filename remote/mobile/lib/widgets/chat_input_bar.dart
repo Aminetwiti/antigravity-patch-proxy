@@ -1016,7 +1016,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
       ),
-      builder: (ctx) => const _UsageLimitsModal(),
+      builder: (ctx) => _UsageLimitsModal(api: widget.api),
     );
   }
 
@@ -1443,8 +1443,39 @@ class _QueueTile extends StatelessWidget {
 }
 
 /// Antigravity 2.0 Quotas / Limits flyout sheet (matching the desktop IDE UI).
-class _UsageLimitsModal extends StatelessWidget {
-  const _UsageLimitsModal();
+/// Charge le résumé des quotas réel via getUserQuotaSummary() dès l'ouverture
+/// (dynamique) et retombe sur les valeurs statiques si le daemon est
+/// injoignable ou ne renvoie pas de données exploitables.
+class _UsageLimitsModal extends StatefulWidget {
+  const _UsageLimitsModal({this.api});
+
+  final DaemonApi? api;
+
+  @override
+  State<_UsageLimitsModal> createState() => _UsageLimitsModalState();
+}
+
+class _UsageLimitsModalState extends State<_UsageLimitsModal> {
+  Map<String, dynamic>? _quota;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadQuota();
+  }
+
+  Future<void> _loadQuota() async {
+    final api = widget.api;
+    if (api == null) return;
+    try {
+      final q = await api.getUserQuotaSummary();
+      if (mounted && q.isNotEmpty) {
+        setState(() => _quota = q);
+      }
+    } catch (_) {
+      // Daemon injoignable : les jauges statiques restent affichées.
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1480,14 +1511,14 @@ class _UsageLimitsModal extends StatelessWidget {
               context: context,
               title: 'Limite hebdomadaire restante',
               subtitle: 'Quota hebdomadaire disponible',
-              percent: 51,
+              percent: _quotaPercent('weeklyPercent') ?? 51,
             ),
             const SizedBox(height: 10),
             _buildUsageTile(
               context: context,
               title: 'Limite sur 5 heures',
               subtitle: 'Quota sur fenêtre de 5 heures',
-              percent: 95,
+              percent: _quotaPercent('fiveHourPercent') ?? 95,
             ),
             const SizedBox(height: 20),
             Divider(color: scheme.outlineVariant, height: 1),
@@ -1505,19 +1536,28 @@ class _UsageLimitsModal extends StatelessWidget {
               context: context,
               title: 'Limite hebdomadaire restante',
               subtitle: 'Quota hebdomadaire disponible',
-              percent: 81,
+              percent: _quotaPercent('weeklyPercentClaude') ?? 81,
             ),
             const SizedBox(height: 10),
             _buildUsageTile(
               context: context,
               title: 'Limite sur 5 heures',
               subtitle: 'Quota complet de 5 heures disponible',
-              percent: 100,
+              percent: _quotaPercent('fiveHourPercentClaude') ?? 100,
             ),
           ],
         ),
       ),
     );
+  }
+
+  /// Extrait un pourcentage entier depuis le résumé de quota (fallback null).
+  /// Accepte num/num comme la réponse protobuf décodée du daemon.
+  int? _quotaPercent(String key) {
+    final raw = _quota?[key];
+    if (raw is num) return raw.round().clamp(0, 100);
+    if (raw is String) return int.tryParse(raw)?.clamp(0, 100);
+    return null;
   }
 
   Widget _buildUsageTile({

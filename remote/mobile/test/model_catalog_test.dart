@@ -192,6 +192,67 @@ void main() {
       expect(find.text('Claude and GPT models'), findsOneWidget);
     });
 
+    testWidgets('Usage Limits modal shows real quota from daemon when connected', (tester) async {
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final ctrl = StreamController<dynamic>();
+      final out = <Map<String, dynamic>>[];
+      final api = DaemonApi(
+        incoming: ctrl.stream,
+        send: (d) {
+          final msg = d as Map<String, dynamic>;
+          out.add(msg);
+          if (msg['type'] == 'read_file') {
+            // Répondre vide : évite le timer de timeout de 5 s en attente.
+            ctrl.add(jsonEncode({
+              'type': 'response',
+              'requestId': msg['requestId'],
+              'data': {'content': ''},
+            }));
+          }
+          if (msg['type'] == 'get_quota_summary') {
+            // Répond comme le daemon : résumé de quota décodé.
+            ctrl.add(jsonEncode({
+              'type': 'response',
+              'requestId': msg['requestId'],
+              'data': {
+                'weeklyPercent': 34,
+                'fiveHourPercent': 12,
+              },
+            }));
+          }
+        },
+      );
+      addTearDown(ctrl.close);
+      addTearDown(api.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ChatInputBar(
+              onSend: (_, {queued = false, modelUID, modelEnum}) {},
+              api: api,
+              isConnected: true,
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.textContaining('Gemini 3.7 Flash'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('View Usage'));
+      await tester.pumpAndSettle();
+
+      // Le daemon a répondu : les vraies valeurs remplacent les jauges statiques.
+      expect(out.map((m) => m['type']), contains('get_quota_summary'));
+      expect(find.text('34%'), findsOneWidget);
+      expect(find.text('12%'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('ChatInputBar forwards selected modelUID and modelEnum on send', (tester) async {
       tester.view.physicalSize = const Size(1080, 1920);
       tester.view.devicePixelRatio = 1.0;

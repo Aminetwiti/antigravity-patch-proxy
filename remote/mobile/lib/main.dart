@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -496,7 +495,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
 
     return Scaffold(
       key: _scaffoldKey,
-      extendBodyBehindAppBar: true,
+      extendBodyBehindAppBar: false,
       drawer: LeftSidebarDrawer(
         activeSessionId: _activeSessionId,
         sessions: _sessions,
@@ -636,14 +635,10 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         backgroundTasksCount: _contextStats['backgroundTasksCount'] as int? ?? 0,
       ),
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.surface.withValues(alpha: 0.75),
+        backgroundColor: Theme.of(context).colorScheme.surface,
         elevation: 0,
-        flexibleSpace: ClipRect(
-          child: BackdropFilter(
-            filter: ui.ImageFilter.blur(sigmaX: 10.0, sigmaY: 10.0),
-            child: Container(color: Colors.transparent),
-          ),
-        ),
+        scrolledUnderElevation: 1,
+        surfaceTintColor: Colors.transparent,
         leading: IconButton(
           icon: Icon(Icons.dock_outlined, size: 20, color: Theme.of(context).colorScheme.onSurface),
           onPressed: () => _scaffoldKey.currentState?.openDrawer(),

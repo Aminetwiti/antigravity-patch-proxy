@@ -1457,20 +1457,21 @@ class _ReminderBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Container(
+      margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: scheme.primaryContainer.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: scheme.primary.withValues(alpha: 0.35)),
+        color: scheme.primaryContainer.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: scheme.primary.withValues(alpha: 0.25)),
       ),
       child: Row(
         children: [
-          Icon(icon, size: 16, color: scheme.primary),
+          Icon(icon, size: 15, color: scheme.primary),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               message,
-              style: TextStyle(fontSize: 12.5, color: scheme.onPrimaryContainer),
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: scheme.onPrimaryContainer),
             ),
           ),
         ],
@@ -1500,23 +1501,33 @@ class _MessageBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final isUser = message.sender == 'user';
     final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     if (isUser) {
       return Container(
-        margin: const EdgeInsets.only(bottom: 16, left: 40),
+        margin: const EdgeInsets.only(bottom: 16, left: 48),
         alignment: Alignment.centerRight,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
-            color: AppColors.surfaceInput,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: AppColors.borderStrong, width: 0.5),
+            color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(16),
+              topRight: Radius.circular(4),
+              bottomLeft: Radius.circular(16),
+              bottomRight: Radius.circular(16),
+            ),
+            border: Border.all(
+              color: isDark ? AppColors.borderStrong : scheme.outlineVariant,
+              width: 0.8,
+            ),
           ),
           child: SelectableText(
             message.text,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13.5,
-              color: AppColors.inkSecondary,
+              height: 1.35,
+              color: isDark ? AppColors.inkPrimary : scheme.onSurface,
             ),
           ),
         ),
@@ -1610,7 +1621,33 @@ class _MessageBubble extends StatelessWidget {
               ),
             )
           else ...[
-            if (hasContent || message.isStreaming)
+            if (message.isStreaming && !hasContent)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: scheme.primary,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Génération en cours...',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontStyle: FontStyle.italic,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else if (hasContent || message.isStreaming)
               MarkdownBubble(
                 text: message.text,
                 isStreaming: message.isStreaming,

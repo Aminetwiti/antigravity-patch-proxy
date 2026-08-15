@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:mobile/core/protocol/messages.dart';
 import 'package:mobile/core/protocol/workspace_path.dart';
 import 'package:mobile/theme/app_colors.dart';
+import 'display_options.dart';
 
 /// Écran Conversation History (Antigravity 2.0)
 /// Affiche la liste complète de toutes les conversations avec recherche en temps réel,
@@ -29,7 +30,10 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   String? _selectedWorkspaceFilter; // null = all workspaces
-  bool _sortByRecent = true;
+
+  SessionGroupBy _groupBy = SessionGroupBy.project;
+  SessionSortBy _sortBy = SessionSortBy.lastUpdated;
+  SessionSubtitle _subtitle = SessionSubtitle.worktree;
 
   @override
   void initState() {
@@ -74,10 +78,14 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
       }).toList();
     }
 
-    // Tri
-    if (!_sortByRecent) {
-      filtered.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
-    }
+    // Tri dynamique selon Display Options
+    filtered = sortSessions(sessions: filtered, sortBy: _sortBy);
+
+    // Groupement dynamique selon Display Options
+    final groupedSessions = groupSessions(
+      sessions: filtered,
+      groupBy: _groupBy,
+    );
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F1012),
@@ -108,55 +116,22 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
               },
               tooltip: 'Actualiser',
             ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert_rounded, size: 20, color: AppColors.inkSecondary),
-            color: AppColors.surfaceRaised,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppRadius.md),
-              side: const BorderSide(color: AppColors.borderStrong),
-            ),
-            onSelected: (val) {
+          DisplayOptionsMenuButton(
+            selectedGroupBy: _groupBy,
+            selectedSortBy: _sortBy,
+            selectedSubtitle: _subtitle,
+            isFilterOpen: true,
+            onGroupByChanged: (val) => setState(() => _groupBy = val),
+            onSortByChanged: (val) => setState(() => _sortBy = val),
+            onSubtitleChanged: (val) => setState(() => _subtitle = val),
+            onToggleFilter: () {
               setState(() {
-                if (val == 'toggle_sort') {
-                  _sortByRecent = !_sortByRecent;
-                } else if (val == 'clear_filter') {
+                if (_searchQuery.isNotEmpty || _selectedWorkspaceFilter != null) {
+                  _searchController.clear();
                   _selectedWorkspaceFilter = null;
                 }
               });
             },
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                value: 'toggle_sort',
-                child: Row(
-                  children: [
-                    Icon(
-                      _sortByRecent ? Icons.sort_by_alpha_rounded : Icons.access_time_rounded,
-                      size: 16,
-                      color: AppColors.inkPrimary,
-                    ),
-                    const SizedBox(width: 10),
-                    Text(
-                      _sortByRecent ? 'Trier par nom (A-Z)' : 'Trier par date (récent)',
-                      style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
-                    ),
-                  ],
-                ),
-              ),
-              if (_selectedWorkspaceFilter != null)
-                const PopupMenuItem(
-                  value: 'clear_filter',
-                  child: Row(
-                    children: [
-                      Icon(Icons.clear_all_rounded, size: 16, color: AppColors.accentBlue),
-                      SizedBox(width: 10),
-                      Text(
-                        'Réinitialiser les filtres',
-                        style: TextStyle(fontSize: 13, color: AppColors.accentBlue),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
           ),
           const SizedBox(width: 6),
         ],
@@ -342,6 +317,7 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
                           workspaceName: wsName,
                           isActive: isActive,
                           isRunning: isRunning,
+                          showSubtitle: _subtitle == SessionSubtitle.worktree,
                           onTap: () {
                             HapticFeedback.selectionClick();
                             widget.onSessionSelected(session.id);
@@ -416,6 +392,7 @@ class _ConversationHistoryRow extends StatelessWidget {
   final String workspaceName;
   final bool isActive;
   final bool isRunning;
+  final bool showSubtitle;
   final VoidCallback onTap;
 
   const _ConversationHistoryRow({
@@ -423,6 +400,7 @@ class _ConversationHistoryRow extends StatelessWidget {
     required this.workspaceName,
     required this.isActive,
     required this.isRunning,
+    this.showSubtitle = true,
     required this.onTap,
   });
 
@@ -455,28 +433,30 @@ class _ConversationHistoryRow extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 3),
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.folder_outlined,
-                          size: 12,
-                          color: Color(0xFF6B7280),
-                        ),
-                        const SizedBox(width: 5),
-                        Expanded(
-                          child: Text(
-                            workspaceName,
-                            style: const TextStyle(
-                              fontSize: 11.5,
-                              color: Color(0xFF8F909A),
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                    if (showSubtitle) ...[
+                      const SizedBox(height: 3),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.folder_outlined,
+                            size: 12,
+                            color: Color(0xFF6B7280),
                           ),
-                        ),
-                      ],
-                    ),
+                          const SizedBox(width: 5),
+                          Expanded(
+                            child: Text(
+                              workspaceName,
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                color: Color(0xFF8F909A),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),

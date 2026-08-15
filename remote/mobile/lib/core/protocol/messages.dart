@@ -5,6 +5,8 @@ class CascadeSession {
   final String title;
   final String status;
   final String time;
+  final String? lastPrompt;
+  final String? worktree;
 
   const CascadeSession({
     required this.id,
@@ -12,6 +14,8 @@ class CascadeSession {
     required this.title,
     required this.status,
     required this.time,
+    this.lastPrompt,
+    this.worktree,
   });
 
   factory CascadeSession.fromJson(Map<String, dynamic> json) {
@@ -21,6 +25,8 @@ class CascadeSession {
       title: json['title'] ?? 'Cascade Session',
       status: json['status'] ?? 'CASCADE_STATUS_READY',
       time: json['time'] ?? _relativeTime(json['updatedAt']),
+      lastPrompt: json['lastPrompt']?.toString(),
+      worktree: json['worktree']?.toString(),
     );
   }
 
@@ -61,6 +67,8 @@ class CascadeSession {
         'title': title,
         'status': status,
         'time': time,
+        if (lastPrompt != null) 'lastPrompt': lastPrompt,
+        if (worktree != null) 'worktree': worktree,
       };
 }
 
