@@ -61,7 +61,7 @@ class AntigravityRemoteApp extends StatefulWidget {
 }
 
 class _AntigravityRemoteAppState extends State<AntigravityRemoteApp> {
-  int _themeModeIndex = 0; // 0: system, 1: light, 2: dark
+  int _themeModeIndex = 2; // 0: system, 1: light, 2: dark — AG2.0 dark-first
 
   @override
   void initState() {
@@ -73,7 +73,7 @@ class _AntigravityRemoteAppState extends State<AntigravityRemoteApp> {
     try {
       final s = await SettingsStore.load();
       if (!mounted) return;
-      setState(() => _themeModeIndex = (s['themeMode'] as int?) ?? 0);
+      setState(() => _themeModeIndex = (s['themeMode'] as int?) ?? 2);
     } catch (_) {
       // Tests sans mock SharedPreferences : thème système par défaut.
     }
@@ -400,9 +400,59 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     _sessionsSub = _api?.events.listen((msg) {
       if (!mounted) return;
       final type = msg['type'] as String?;
-      // stream_delta à haute fréquence → on ne rafraîchit qu'à la fin du
-      // stream et sur les événements discrets (approbation expirée, etc.).
-      if (type == 'stream_delta') return;
+      final cascadeId = (msg['cascadeId'] ?? msg['data']?['cascadeId']) as String? ?? _activeSessionId;
+
+      if (type == 'stream_start') {
+        if (cascadeId.isNotEmpty) {
+          setState(() {
+            _sessions = _sessions.map((s) {
+              if (s.id == cascadeId) {
+                return s.copyWith(status: 'CASCADE_STATUS_RUNNING');
+              }
+              return s;
+            }).toList();
+          });
+        }
+        return;
+      }
+
+      if (type == 'stream_end') {
+        if (cascadeId.isNotEmpty) {
+          setState(() {
+            _sessions = _sessions.map((s) {
+              if (s.id == cascadeId) {
+                return s.copyWith(status: 'CASCADE_STATUS_READY');
+              }
+              return s;
+            }).toList();
+          });
+        }
+        _refreshSessions();
+        return;
+      }
+
+      // stream_delta à haute fréquence → pas de rechargement réseau complet,
+      // mais s'assurer que la session est bien marquée RUNNING si ce n'est pas déjà le cas
+      if (type == 'stream_delta') {
+        if (cascadeId.isNotEmpty) {
+          final target = _sessions.firstWhere(
+            (s) => s.id == cascadeId,
+            orElse: () => const CascadeSession(id: '', workspacePath: '', title: '', status: '', time: ''),
+          );
+          if (target.id.isNotEmpty && !target.isRunning) {
+            setState(() {
+              _sessions = _sessions.map((s) {
+                if (s.id == cascadeId) {
+                  return s.copyWith(status: 'CASCADE_STATUS_RUNNING');
+                }
+                return s;
+              }).toList();
+            });
+          }
+        }
+        return;
+      }
+
       _refreshSessions();
     });
   }
@@ -738,6 +788,17 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         activeProjectName: _activeProjectName,
         isConnected: isConnected,
         wsClient: _wsClient,
+        onStreamingStateChanged: (isStreaming) {
+          if (!mounted) return;
+          setState(() {
+            _sessions = _sessions.map((s) {
+              if (s.id == _activeSessionId) {
+                return s.copyWith(status: isStreaming ? 'CASCADE_STATUS_RUNNING' : 'CASCADE_STATUS_READY');
+              }
+              return s;
+            }).toList();
+          });
+        },
       ),
     );
   }

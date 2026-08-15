@@ -794,6 +794,57 @@ func TestWebSocketApprovalExpiry(t *testing.T) {
 			t.Fatalf("Message inattendu reçu après submit: %s", rawMsg)
 		}
 	})
+
+	t.Run("stale submit après expiration => refus + aucun RPC", func(t *testing.T) {
+		backend := &fakeApprovalRPC{}
+		backend.streamDeltas = []string{`{"run_command":"npx jest","step_index":1,"trajectory_id":"123e4567-e89b-12d3-a456-426614174000"}`}
+		server := NewServer(backend, "")
+		server.SetApprovalTimeout(60 * time.Millisecond)
+		mux := http.NewServeMux()
+		mux.HandleFunc("/ws", server.HandleWebSocket)
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+		defer client.conn.Close()
+
+		client.send(t, map[string]string{
+			"type": "send_prompt", "requestId": "r9",
+			"cascadeId": "casc-1", "prompt": "travaille",
+		})
+		for {
+			msg := client.recv(t)
+			if msg["type"] == "stream_end" {
+				break
+			}
+		}
+
+		// Le timer expire → approval_expired (auto-refus parti).
+		for {
+			msg := client.recv(t)
+			if msg["type"] == "approval_expired" {
+				break
+			}
+		}
+		backend.submitted = 0
+
+		// L'utilisateur tappe « allow » APRÈS expiration (carte expirée en
+		// lecture seule, ou double-tap réseau) : le daemon doit refuser sans
+		// contacter le LS — la commande a déjà été auto-refusée.
+		if err := client.conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"submit_approval","requestId":"r11","cascadeId":"casc-1","trajectoryId":"123e4567-e89b-12d3-a456-426614174000","stepIndex":1,"approvalType":"run_command","decision":"allow","command":"npx jest"}`)); err != nil {
+			t.Fatalf("envoi submit_approval: %v", err)
+		}
+		got := client.recv(t)
+		if got["type"] != "error" || got["error"] == nil {
+			t.Fatalf("Attendu error 'approval expired', reçu %v", got)
+		}
+		if errStr, _ := got["error"].(string); !strings.Contains(errStr, "expired") {
+			t.Fatalf("Erreur inattendue: %v", errStr)
+		}
+		if backend.submitted != 0 {
+			t.Fatalf("SubmitToolApproval appelé %d fois après expiration, attendu 0 (garde de fraîcheur)", backend.submitted)
+		}
+	})
 }
 
 type submitApprovalCall struct {

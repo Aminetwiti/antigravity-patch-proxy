@@ -139,6 +139,11 @@ type pendingApproval struct {
 	command      string
 	filePath     string
 	timer        *time.Timer
+	// expired : true une fois le timer d'auto-refus parti (auto-deny envoyé,
+	// broadcast approval_expired émis). L'entrée reste en place pour qu'un
+	// submit_approval tardif soit refusé (garde de fraîcheur) au lieu de
+	// ré-autoriser une commande déjà auto-refusée.
+	expired bool
 }
 
 type Server struct {
@@ -744,8 +749,9 @@ func (m *IncomingMessage) UnmarshalJSON(data []byte) error {
 func (s *Server) hasPendingApproval(cascadeID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, ok := s.approvals[cascadeID]
-	return ok
+	p, ok := s.approvals[cascadeID]
+	// Expirée → plus « en attente » (auto-refus parti, stream classé done).
+	return ok && !p.expired
 }
 
 // MarkApprovalPending enregistre une approbation en attente pour une cascade
@@ -780,8 +786,8 @@ func (s *Server) pendingApprovalInfo(cascadeID string) map[string]interface{} {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, ok := s.approvals[cascadeID]
-	if !ok {
-		return nil
+	if !ok || p.expired {
+		return nil // expirée : le mobile a reçu approval_expired, pas de fantôme
 	}
 	expiresAt := int64(0)
 	if p.timer != nil {
@@ -846,11 +852,13 @@ func (s *Server) purgeCascadeState(cascadeID string) {
 func (s *Server) expireApproval(cascadeID string) {
 	s.mu.Lock()
 	p, ok := s.approvals[cascadeID]
-	if !ok {
+	if !ok || p.expired {
 		s.mu.Unlock()
-		return // déjà traitée (submit) — timer obsolète
+		return // déjà traitée (submit) ou déjà expirée — timer obsolète
 	}
-	delete(s.approvals, cascadeID)
+	p.expired = true
+	p.timer = nil
+	s.approvals[cascadeID] = p
 	s.mu.Unlock()
 
 	logJSON.Info("approval_expired", "cascadeId", cascadeID)
@@ -871,6 +879,18 @@ func (s *Server) expireApproval(cascadeID string) {
 	})
 }
 
+// approvalFor retourne une copie de l'approbation en attente (ou expirée)
+// pour une cascade. Utilisée par submit_approval pour la garde de fraîcheur.
+func (s *Server) approvalFor(cascadeID string) (pendingApproval, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.approvals[cascadeID]
+	if !ok {
+		return pendingApproval{}, false
+	}
+	return *p, true
+}
+
 // commandLineRe extrait la commande proposée du détail d'approbation
 // run_command — accepte "command_line" (format réel) et "run_command"
 // (format du blob de corrélation), comme le fallback mobile (stream_parser.dart).
@@ -886,14 +906,19 @@ func extractCommand(detail string) string {
 // isReadOnlyTool détermine si un outil est read-only (lecture/recherche) — la
 // seule catégorie auto-approuvable par l'auto-accept. Tout le reste (écritures,
 // commandes, appels MCP) reste soumis à l'approbation utilisateur.
+//
+// Liste EXACTE volontairement : ce sont les seuls noms que extractToolName
+// (event_parser.go) peut produire pour le flux d'approbation. Un test par
+// préfixe (strings.HasPrefix) auto-approuverait tout futur outil "get_*" /
+// "view_*" sans revue — faux positif de sécurité. generic_tool et les
+// inconnus retombent dans le default → jamais auto-approuvés.
 func isReadOnlyTool(tool string) bool {
-	t := strings.ToLower(tool)
-	for _, p := range []string{"read", "list", "view", "search", "glob", "grep", "find", "fetch", "get"} {
-		if strings.HasPrefix(t, p) {
-			return true
-		}
+	switch strings.ToLower(tool) {
+	case "read_file", "list_files", "search_files", "grep", "glob", "fetch":
+		return true
+	default:
+		return false
 	}
-	return false
 }
 
 // buildApprovalPayload construit le oneof + payload HandleCascadeUserInteraction
@@ -1890,9 +1915,20 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		if strings.EqualFold(msg.Decision, "deny") {
 			confirm = false
 		}
-		// Étape 6 : la décision utilisateur annule le timer d'expiration AVANT
-		// l'envoi (pas de course entre submit et auto-refus).
-		s.clearApproval(msg.CascadeID)
+		// Garde de fraîcheur : si le daemon connaît l'approbation locale et
+		// qu'elle est déjà expirée (timer parti, auto-refus envoyé), un submit
+		// tardif — même confirm=true — serait un « oui » après expiration : la
+		// carte mobile affiche déjà « expirée » en lecture seule. Refuser sans
+		// contact RPC évite d'exécuter une commande que l'utilisateur n'a pas
+		// validée à temps. Ponytail: compare le callId quand le mobile le fournit.
+		if p, ok := s.approvalFor(msg.CascadeID); ok && !p.expired {
+			// Fraîche : annule le timer AVANT l'envoi (pas de course entre
+			// submit et auto-refus).
+			s.clearApproval(msg.CascadeID)
+		} else if ok {
+			s.writeJSON(conn, OutgoingMessage{Type: "error", RequestID: msg.RequestID, Error: "approval expired (auto-denied)"})
+			return
+		}
 
 		// B3 : « pour toute la session » → le daemon ne redemandera plus pour
 		// ce type d'approbation sur cette cascade.

@@ -61,6 +61,26 @@ class CascadeSession {
     return st.contains('RUNNING');
   }
 
+  CascadeSession copyWith({
+    String? id,
+    String? workspacePath,
+    String? title,
+    String? status,
+    String? time,
+    String? lastPrompt,
+    String? worktree,
+  }) {
+    return CascadeSession(
+      id: id ?? this.id,
+      workspacePath: workspacePath ?? this.workspacePath,
+      title: title ?? this.title,
+      status: status ?? this.status,
+      time: time ?? this.time,
+      lastPrompt: lastPrompt ?? this.lastPrompt,
+      worktree: worktree ?? this.worktree,
+    );
+  }
+
   Map<String, dynamic> toJson() => {
         'cascadeId': id,
         'workspacePath': workspacePath,

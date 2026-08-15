@@ -33,6 +33,10 @@ class ChatStreamScreen extends StatefulWidget {
   /// connexion en temps réel (statut, tentative, compte à rebours) au banner.
   final DaemonWebSocketClient? wsClient;
 
+  /// Notifie le parent (main.dart) du changement d'état de streaming pour
+  /// mettre à jour les indicateurs de statut en direct dans la barre latérale.
+  final ValueChanged<bool>? onStreamingStateChanged;
+
   const ChatStreamScreen({
     super.key,
     required this.api,
@@ -40,6 +44,7 @@ class ChatStreamScreen extends StatefulWidget {
     required this.activeProjectName,
     this.isConnected = true,
     this.wsClient,
+    this.onStreamingStateChanged,
   });
 
   @override
@@ -451,6 +456,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   void _onStreamStarted() {
     _activeStreamCount++;
     if (_activeStreamCount == 1) {
+      widget.onStreamingStateChanged?.call(true);
       _stillWorkingTimer?.cancel();
       _stillWorkingTimer = Timer(_stillWorkingDelay, () {
         if (mounted && _activeStreamCount > 0) {
@@ -463,6 +469,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   void _onStreamEnded() {
     if (_activeStreamCount > 0) _activeStreamCount--;
     if (_activeStreamCount == 0) {
+      widget.onStreamingStateChanged?.call(false);
       _stillWorkingTimer?.cancel();
       _stillWorkingTimer = null;
       if (_showStillWorking && mounted) {
@@ -1193,10 +1200,13 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       case SessionTabType.chat:
         final visibleList = _visibleMessages;
         final hiddenCount = _hiddenOlderCount;
-        return ListView(
+        return Scrollbar(
           controller: _scrollController,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          children: [
+          thumbVisibility: false,
+          child: ListView(
+            controller: _scrollController,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            children: [
             if (hiddenCount > 0)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
@@ -1285,7 +1295,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                     onViewReview: () => setState(() => _currentTab = SessionTabType.review),
                   ),
                 )),
-          ],
+            ],
+          ),
         );
     }
   }
@@ -1553,9 +1564,13 @@ class _MessageBubble extends StatelessWidget {
     }
 
     final cleanThought = message.thought != null
-        ? message.thought!.replaceAll(RegExp(r'(\*\*|\*|`|#)'), '').trim()
+        ? message.thought!
+            .replaceAll(RegExp(r'\*{1,3}|`{1,3}|#{1,6}\s?|_'), '')
+            .trim()
         : '';
 
+    // isCompact = thought-only message (no body text, no error, not streaming)
+    // → hide timestamp/action row, tighten margin
     final isCompact = !hasContent && !isError && !message.isStreaming;
 
     return Container(

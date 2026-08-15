@@ -1457,6 +1457,7 @@ class _UsageLimitsModal extends StatefulWidget {
 
 class _UsageLimitsModalState extends State<_UsageLimitsModal> {
   Map<String, dynamic>? _quota;
+  String? _plan;
 
   @override
   void initState() {
@@ -1467,14 +1468,21 @@ class _UsageLimitsModalState extends State<_UsageLimitsModal> {
   Future<void> _loadQuota() async {
     final api = widget.api;
     if (api == null) return;
-    try {
-      final q = await api.getUserQuotaSummary();
-      if (mounted && q.isNotEmpty) {
-        setState(() => _quota = q);
+    // Run independently so a missing/slow getUserStatus doesn't block quota.
+    api.getUserQuotaSummary().then((q) {
+      if (!mounted || q.isEmpty) return;
+      setState(() => _quota = q);
+    }).catchError((_) {});
+    api.getUserStatus().then((s) {
+      if (!mounted) return;
+      final user = s['user'];
+      if (user is Map) {
+        final plan = user['plan'];
+        if (plan is String && plan.isNotEmpty) {
+          setState(() => _plan = plan);
+        }
       }
-    } catch (_) {
-      // Daemon injoignable : les jauges statiques restent affichées.
-    }
+    }).catchError((_) {});
   }
 
   @override
@@ -1506,19 +1514,29 @@ class _UsageLimitsModalState extends State<_UsageLimitsModal> {
                 color: scheme.onSurface,
               ),
             ),
+            if (_plan != null) ...[
+              const SizedBox(height: 2),
+              Text(
+                'Plan $_plan',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             _buildUsageTile(
               context: context,
               title: 'Limite hebdomadaire restante',
               subtitle: 'Quota hebdomadaire disponible',
-              percent: _quotaPercent('weeklyPercent') ?? 51,
+              percent: _quotaPercent('weeklyPercent'),
             ),
             const SizedBox(height: 10),
             _buildUsageTile(
               context: context,
               title: 'Limite sur 5 heures',
               subtitle: 'Quota sur fenêtre de 5 heures',
-              percent: _quotaPercent('fiveHourPercent') ?? 95,
+              percent: _quotaPercent('fiveHourPercent'),
             ),
             const SizedBox(height: 20),
             Divider(color: scheme.outlineVariant, height: 1),
@@ -1536,14 +1554,14 @@ class _UsageLimitsModalState extends State<_UsageLimitsModal> {
               context: context,
               title: 'Limite hebdomadaire restante',
               subtitle: 'Quota hebdomadaire disponible',
-              percent: _quotaPercent('weeklyPercentClaude') ?? 81,
+              percent: _quotaPercent('weeklyPercentClaude'),
             ),
             const SizedBox(height: 10),
             _buildUsageTile(
               context: context,
               title: 'Limite sur 5 heures',
               subtitle: 'Quota complet de 5 heures disponible',
-              percent: _quotaPercent('fiveHourPercentClaude') ?? 100,
+              percent: _quotaPercent('fiveHourPercentClaude'),
             ),
           ],
         ),
@@ -1564,13 +1582,14 @@ class _UsageLimitsModalState extends State<_UsageLimitsModal> {
     required BuildContext context,
     required String title,
     required String subtitle,
-    required int percent,
+    int? percent,
   }) {
     final scheme = Theme.of(context).colorScheme;
+    final value = percent;
     Color progressColor = scheme.primary;
-    if (percent < 30) {
+    if (value != null && value < 30) {
       progressColor = scheme.error;
-    } else if (percent < 60) {
+    } else if (value != null && value < 60) {
       progressColor = scheme.tertiary;
     }
 
@@ -1609,7 +1628,7 @@ class _UsageLimitsModalState extends State<_UsageLimitsModal> {
           ),
           const SizedBox(width: 12),
           Semantics(
-            label: '$title: $percent%',
+            label: value == null ? '$title: indisponible' : '$title: $value%',
             child: Stack(
               alignment: Alignment.center,
               children: [
@@ -1617,14 +1636,14 @@ class _UsageLimitsModalState extends State<_UsageLimitsModal> {
                   width: 36,
                   height: 36,
                   child: CircularProgressIndicator(
-                    value: percent / 100.0,
+                    value: value == null ? 0.0 : value / 100.0,
                     backgroundColor: scheme.surfaceContainer,
                     color: progressColor,
                     strokeWidth: 3,
                   ),
                 ),
                 Text(
-                  '$percent%',
+                  value == null ? '—' : '$value%',
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w700,

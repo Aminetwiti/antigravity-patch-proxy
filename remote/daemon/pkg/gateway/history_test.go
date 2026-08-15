@@ -94,3 +94,85 @@ func TestFindTranscriptPathSkipsMissingCandidates(t *testing.T) {
 		t.Fatalf("aucun candidat n'existe mais un chemin a été retourné: %q", got)
 	}
 }
+
+// TestParseTranscriptLine — régression du contenu vide : les PLANNER_RESPONSE
+// intermédiaires stockent la réponse dans `thinking` (pas `content`), les
+// enchaînements d'outils purs n'ont ni l'un ni l'autre, et les lignes
+// d'outils ne doivent jamais apparaître comme messages assistant.
+func TestParseTranscriptLine(t *testing.T) {
+	line := func(l string) []byte { return []byte(l) }
+
+	tests := []struct {
+		name     string
+		line     []byte
+		wantNil  bool
+		wantSend string
+		wantText string
+		wantTh   string
+	}{
+		{
+			name:     "user request",
+			line:     line(`{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","created_at":"2026-08-15T15:44:39+01:00","content":"<USER_REQUEST>\nhello\n</USER_REQUEST>"}`),
+			wantSend: "user",
+			wantText: "hello",
+		},
+		{
+			name:     "final response with content",
+			line:     line(`{"step_index":137,"source":"MODEL","type":"PLANNER_RESPONSE","created_at":"2026-08-15T15:44:39+01:00","content":"Voici la réponse finale"}`),
+			wantSend: "assistant",
+			wantText: "Voici la réponse finale",
+		},
+		{
+			name:     "intermediate reasoning in thinking only",
+			line:     line(`{"step_index":2,"source":"MODEL","type":"PLANNER_RESPONSE","created_at":"2026-08-15T15:44:39+01:00","thinking":"**Analyzing**\nreasoning here"}`),
+			wantSend: "assistant",
+			wantTh:   "**Analyzing**\nreasoning here",
+		},
+		{
+			name:     "content plus thinking",
+			line:     line(`{"step_index":201,"source":"MODEL","type":"PLANNER_RESPONSE","created_at":"2026-08-15T15:44:39+01:00","content":"Réponse","thinking":"réfléchi"}`),
+			wantSend: "assistant",
+			wantText: "Réponse",
+			wantTh:   "réfléchi",
+		},
+		{
+			name:    "empty planner response skipped",
+			line:    line(`{"step_index":5,"source":"MODEL","type":"PLANNER_RESPONSE","created_at":"2026-08-15T15:44:39+01:00"}`),
+			wantNil: true,
+		},
+		{
+			name:    "tool call invisible",
+			line:    line(`{"step_index":6,"source":"MODEL","type":"VIEW_FILE","created_at":"2026-08-15T15:44:39+01:00","content":"..."}`),
+			wantNil: true,
+		},
+		{
+			name:    "garbage line ignored",
+			line:    line(`not json`),
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseTranscriptLine(tt.line)
+			if tt.wantNil {
+				if got != nil {
+					t.Fatalf("parseTranscriptLine() = %+v, want nil", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatalf("parseTranscriptLine() = nil, want message")
+			}
+			if got.Sender != tt.wantSend {
+				t.Errorf("Sender = %q, want %q", got.Sender, tt.wantSend)
+			}
+			if got.Text != tt.wantText {
+				t.Errorf("Text = %q, want %q", got.Text, tt.wantText)
+			}
+			if got.Thought != tt.wantTh {
+				t.Errorf("Thought = %q, want %q", got.Thought, tt.wantTh)
+			}
+		})
+	}
+}

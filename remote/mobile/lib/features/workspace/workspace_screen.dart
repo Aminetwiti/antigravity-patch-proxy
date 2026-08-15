@@ -83,11 +83,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
 
   Future<void> _loadFiles() async {
     if (widget.api == null) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _isLoadingTree = false;
           _loadError = null;
         });
+      }
       return;
     }
     try {
@@ -467,8 +468,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                                     ? null
                                     : () => setState(() {
                                       _showFindBar = !_showFindBar;
-                                      if (!_showFindBar)
+                                      if (!_showFindBar) {
                                         _findController.clear();
+                                      }
                                     }),
                           ),
                         ],
@@ -1280,19 +1282,23 @@ class _TreeFile extends StatelessWidget {
     if (lower.endsWith('.json') ||
         lower.endsWith('.yaml') ||
         lower.endsWith('.yml') ||
-        lower.endsWith('.toml'))
+        lower.endsWith('.toml')) {
       return Icons.settings_suggest_outlined;
-    if (lower.endsWith('.md') || lower.endsWith('.txt'))
+    }
+    if (lower.endsWith('.md') || lower.endsWith('.txt')) {
       return Icons.article_outlined;
+    }
     if (lower.endsWith('.sh') ||
         lower.endsWith('.bat') ||
-        lower.endsWith('.ps1'))
+        lower.endsWith('.ps1')) {
       return Icons.terminal_rounded;
+    }
     if (lower.endsWith('.png') ||
         lower.endsWith('.jpg') ||
         lower.endsWith('.svg') ||
-        lower.endsWith('.webp'))
+        lower.endsWith('.webp')) {
       return Icons.image_outlined;
+    }
     return Icons.insert_drive_file_outlined;
   }
 
@@ -1302,11 +1308,13 @@ class _TreeFile extends StatelessWidget {
     if (lower.endsWith('.go')) return const Color(0xFF00ADD8);
     if (lower.endsWith('.json') ||
         lower.endsWith('.yaml') ||
-        lower.endsWith('.yml'))
+        lower.endsWith('.yml')) {
       return const Color(0xFFEAB308);
+    }
     if (lower.endsWith('.md')) return const Color(0xFFA855F7);
-    if (lower.endsWith('.sh') || lower.endsWith('.bat'))
+    if (lower.endsWith('.sh') || lower.endsWith('.bat')) {
       return const Color(0xFF22C55E);
+    }
     if (lower.endsWith('.png') ||
         lower.endsWith('.jpg') ||
         lower.endsWith('.svg')) {

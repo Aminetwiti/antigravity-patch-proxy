@@ -427,6 +427,78 @@ func parseWorkspaceFromTranscript(content string) string {
 	return ""
 }
 
+// transcriptEntry mirrors the JSONL shape written by the Antigravity brain.
+// PLANNER_RESPONSE entries store the assistant's visible answer in `content`
+// (final messages) OR in `thinking` (intermediate reasoning when the model
+// continued with tool calls — `content` is then absent).
+type transcriptEntry struct {
+	StepIndex int    `json:"step_index"`
+	Source    string `json:"source"`
+	Type      string `json:"type"`
+	CreatedAt string `json:"created_at"`
+	Content   string `json:"content"`
+	Thinking  string `json:"thinking"`
+	Status    string `json:"status"`
+	Error     string `json:"error"`
+}
+
+// parseTranscriptLine converts one JSONL line into a HistoryMessage, or
+// returns nil for lines that should not appear in the mobile chat.
+func parseTranscriptLine(line []byte) *HistoryMessage {
+	var entry transcriptEntry
+	if err := json.Unmarshal(line, &entry); err != nil {
+		return nil
+	}
+
+	ts := "00:00"
+	if t, err := time.Parse(time.RFC3339, entry.CreatedAt); err == nil {
+		ts = fmt.Sprintf("%02d:%02d", t.Hour(), t.Minute())
+	}
+	msgID := fmt.Sprintf("h-%d", entry.StepIndex)
+
+	if entry.Type == "USER_INPUT" {
+		return &HistoryMessage{
+			ID:        msgID,
+			Sender:    "user",
+			Text:      extractUserRequest(entry.Content),
+			Timestamp: ts,
+		}
+	}
+
+	if entry.Type == "TOOL_CALL" || entry.Type == "TOOL_RESULT" || entry.Source == "TOOL" {
+		return nil // events d'outils : invisibles dans le chat mobile
+	}
+
+	// Réponse visible du modèle : PLANNER_RESPONSE place la réponse finale
+	// dans `content`, et le raisonnement intermédiaire (quand le modèle a
+	// enchaîné des appels d'outils) dans `thinking` — `content` est alors
+	// absent. Les lignes vides (modèle n'a produit ni texte ni raisonnement,
+	// ex. enchaînement d'outils purs) sont ignorées pour ne pas polluer le chat.
+	if entry.Type == "PLANNER_RESPONSE" {
+		text := entry.Content
+		thought := entry.Thinking
+		if text == "" && thought == "" {
+			return nil
+		}
+		msg := &HistoryMessage{
+			ID:        msgID,
+			Sender:    "assistant",
+			Text:      text,
+			Thought:   thought,
+			Timestamp: ts,
+		}
+		if entry.Error != "" {
+			msg.IsError = true
+			if msg.Text == "" {
+				msg.Text = entry.Error
+			}
+		}
+		return msg
+	}
+
+	return nil
+}
+
 // GetSessionHistory reads transcript.jsonl for the cascadeID and converts it to messages.
 func GetSessionHistory(cascadeID string) ([]HistoryMessage, error) {
 	transcriptPath := findTranscriptPath(cascadeID)
@@ -448,59 +520,9 @@ func GetSessionHistory(cascadeID string) ([]HistoryMessage, error) {
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 10*1024*1024)
 
-	var lastAssistantMsg *HistoryMessage
-
 	for scanner.Scan() {
-		line := scanner.Bytes()
-		var entry struct {
-			StepIndex int    `json:"step_index"`
-			Source    string `json:"source"`
-			Type      string `json:"type"`
-			CreatedAt string `json:"created_at"`
-			Content   string `json:"content"`
-			Thinking  string `json:"thinking"`
-			Status    string `json:"status"`
-			Error     string `json:"error"`
-		}
-
-		if err := json.Unmarshal(line, &entry); err != nil {
-			continue
-		}
-
-		ts := "00:00"
-		if t, err := time.Parse(time.RFC3339, entry.CreatedAt); err == nil {
-			ts = fmt.Sprintf("%02d:%02d", t.Hour(), t.Minute())
-		}
-
-		msgID := fmt.Sprintf("h-%d", entry.StepIndex)
-
-		if entry.Type == "USER_INPUT" {
-			content := extractUserRequest(entry.Content)
-			messages = append(messages, HistoryMessage{
-				ID:        msgID,
-				Sender:    "user",
-				Text:      content,
-				Timestamp: ts,
-			})
-			lastAssistantMsg = nil
-		} else if entry.Source == "MODEL" && entry.Type == "PLANNER_RESPONSE" {
-			msg := HistoryMessage{
-				ID:        msgID,
-				Sender:    "assistant",
-				Text:      entry.Content,
-				Thought:   entry.Thinking,
-				Timestamp: ts,
-			}
-			if entry.Error != "" {
-				msg.IsError = true
-				if msg.Text == "" {
-					msg.Text = entry.Error
-				}
-			}
-			messages = append(messages, msg)
-			lastAssistantMsg = &messages[len(messages)-1]
-		} else if entry.Type == "TOOL_CALL" || entry.Type == "TOOL_RESULT" || entry.Source == "TOOL" {
-			_ = lastAssistantMsg
+		if msg := parseTranscriptLine(scanner.Bytes()); msg != nil {
+			messages = append(messages, *msg)
 		}
 	}
 
