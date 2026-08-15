@@ -2626,6 +2626,18 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 	case "get_quota_summary", "system.get_quota_summary":
 		raw, err = s.RPCClient.RetrieveUserQuotaSummary()
 		if err == nil {
+			q := connectrpc.ParseQuotaSummary(raw)
+			if q.HasQuota() {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{
+					"weeklyPercent":         q.WeeklyPercent,
+					"fiveHourPercent":       q.FiveHourPercent,
+					"weeklyPercentClaude":   q.WeeklyPercentClaude,
+					"fiveHourPercentClaude": q.FiveHourPercentClaude,
+				}})
+				return
+			}
+			// Schéma LS inconnu (aucune clé reconnue) : on renvoie la forme
+			// brute pour ne jamais casser le débogage.
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
 			return
 		}

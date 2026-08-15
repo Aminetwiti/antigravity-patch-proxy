@@ -11,22 +11,32 @@ class RemoteTerminalSheet extends StatefulWidget {
   final DaemonApi? api;
   final String projectName;
 
+  /// P3 : contenu pré-rempli dans la barre de saisie (bloc shell envoyé
+  /// depuis un message — l'utilisateur n'a plus qu'à valider).
+  final String initialCommand;
+
   const RemoteTerminalSheet({
     super.key,
     required this.api,
     this.projectName = 'Workspace',
+    this.initialCommand = '',
   });
 
   static Future<void> show(
     BuildContext context, {
     DaemonApi? api,
     String projectName = 'Workspace',
+    String initialCommand = '',
   }) {
     return showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => RemoteTerminalSheet(api: api, projectName: projectName),
+      builder: (_) => RemoteTerminalSheet(
+        api: api,
+        projectName: projectName,
+        initialCommand: initialCommand,
+      ),
     );
   }
 
@@ -83,6 +93,10 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
             'Antigravity Remote Terminal Bridge v3.1.0\nConnecté au PC hôte — prêt pour exécution.',
       ),
     );
+    // P3 : bloc shell pré-rempli — l'utilisateur valide d'une touche.
+    if (widget.initialCommand.isNotEmpty) {
+      _inputController.text = widget.initialCommand;
+    }
     _openPty();
   }
 
@@ -304,15 +318,17 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
     final bottomInset = mq.viewInsets.bottom;
     final height = (mq.size.height * 0.85).clamp(360.0, 720.0);
 
+    final scheme = Theme.of(context).colorScheme;
+
     return Container(
       height: height + bottomInset,
-      decoration: const BoxDecoration(
-        color: Color(0xFF0F1014),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
         border: Border(
-          top: BorderSide(color: Color(0xFF27272A), width: 1),
-          left: BorderSide(color: Color(0xFF27272A), width: 1),
-          right: BorderSide(color: Color(0xFF27272A), width: 1),
+          top: BorderSide(color: scheme.outlineVariant, width: 1),
+          left: BorderSide(color: scheme.outlineVariant, width: 1),
+          right: BorderSide(color: scheme.outlineVariant, width: 1),
         ),
       ),
       child: Column(
@@ -323,7 +339,7 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
             width: 36,
             height: 4,
             decoration: BoxDecoration(
-              color: const Color(0xFF3F3F46),
+              color: scheme.outline,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -376,7 +392,7 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
             ),
           ),
 
-          const Divider(height: 1, color: Color(0xFF27272A)),
+          Divider(height: 1, color: scheme.outlineVariant),
 
           // Quick command pills
           SizedBox(
@@ -399,19 +415,19 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
                         vertical: 3,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF18181B),
+                        color: scheme.surfaceContainer,
                         borderRadius: BorderRadius.circular(6),
                         border: Border.all(
-                          color: const Color(0xFF27272A),
+                          color: scheme.outlineVariant,
                           width: 1,
                         ),
                       ),
                       child: Text(
                         cmd,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 11,
                           fontFamily: 'monospace',
-                          color: AppColors.inkSecondary,
+                          color: scheme.onSurfaceVariant,
                         ),
                       ),
                     ),
@@ -421,7 +437,7 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
             ),
           ),
 
-          const Divider(height: 1, color: Color(0xFF27272A)),
+          Divider(height: 1, color: scheme.outlineVariant),
 
           // Console Output — en mode PTY, affiche le buffer live ; sinon
           // la liste commande→résultat existante.
@@ -500,15 +516,15 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
                                   width: double.infinity,
                                   padding: const EdgeInsets.all(8),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF141518),
+                                    color: scheme.surfaceContainerHighest,
                                     borderRadius: BorderRadius.circular(6),
                                     border: Border.all(
                                       color:
                                           entry.isError
-                                              ? AppColors.danger.withValues(
+                                              ? scheme.error.withValues(
                                                 alpha: 0.4,
                                               )
-                                              : const Color(0xFF22242A),
+                                              : scheme.outlineVariant,
                                       width: 1,
                                     ),
                                   ),
@@ -519,8 +535,8 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
                                       fontFamily: 'monospace',
                                       color:
                                           entry.isError
-                                              ? const Color(0xFFF87171)
-                                              : const Color(0xFFD4D4D8),
+                                              ? scheme.error
+                                              : scheme.onSurface,
                                       height: 1.35,
                                     ),
                                   ),
@@ -536,10 +552,10 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
           // Bottom Input bar
           Container(
             padding: EdgeInsets.fromLTRB(10, 8, 10, 8 + bottomInset),
-            decoration: const BoxDecoration(
-              color: Color(0xFF141518),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainer,
               border: Border(
-                top: BorderSide(color: Color(0xFF27272A), width: 1),
+                top: BorderSide(color: scheme.outlineVariant, width: 1),
               ),
             ),
             child: Row(

@@ -111,6 +111,13 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   // Auto-scroll pendant le streaming (audit UX P1-6).
   final ScrollController _scrollController = ScrollController();
 
+  // Bouton flottant « retour en bas » (P1) : visible quand l'utilisateur
+  // scrolle loin du bas pendant un stream. Compte les nouveaux messages
+  // arrivés pendant qu'il lit l'historique, et se cache dès qu'il revient
+  // près du bas (ou tape le bouton).
+  bool _showJumpToBottom = false;
+  int _hiddenNewCount = 0;
+
   // ── Session Top Tabs & Artifact state ──────────────────────────────
   SessionTabType _currentTab = SessionTabType.chat;
   final Set<String> _modifiedFiles = {};
@@ -171,10 +178,35 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   void _onScroll() {
-    if (!_scrollController.hasClients || _isLoadingMoreOlder) return;
-    if (_scrollController.position.pixels <= 80 && _hiddenOlderCount > 0) {
+    if (!_scrollController.hasClients) return;
+    final pos = _scrollController.position;
+    // P1 : bascule du bouton flottant — on ne setState que lors d'un
+    // changement d'état (une fois par départ/retour, pas à chaque pixel).
+    final nearBottom = (pos.maxScrollExtent - pos.pixels) < 120;
+    if (nearBottom != _showJumpToBottom) {
+      setState(() {
+        _showJumpToBottom = !nearBottom;
+        if (nearBottom) _hiddenNewCount = 0;
+      });
+    }
+    if (!_isLoadingMoreOlder && pos.pixels <= 80 && _hiddenOlderCount > 0) {
       _loadMoreOlderMessages();
     }
+  }
+
+  void _jumpToBottom() {
+    HapticFeedback.lightImpact();
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    }
+    setState(() {
+      _showJumpToBottom = false;
+      _hiddenNewCount = 0;
+    });
   }
 
   void _loadMoreOlderMessages() {
@@ -688,6 +720,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
       if (type == 'stream_start') {
         _onStreamStarted();
+        // P1 : nouveau message arrivé pendant que l'utilisateur lit plus
+        // haut → le badge « ↓ N » s'incrémente.
+        if (_showJumpToBottom) _hiddenNewCount++;
         setState(() {
           _messages.add(ChatMessage(
             id: 'ext-$requestId',
@@ -1333,7 +1368,26 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         _buildSyncStatusBadge(scheme),
         _buildQuotaBadge(scheme),
         Expanded(
-          child: _buildActiveTabContent(scheme, isConnected),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: _buildActiveTabContent(scheme, isConnected),
+              ),
+              // P1 : bouton flottant « retour en bas » — uniquement sur
+              // l'onglet chat, quand l'utilisateur s'est éloigné du bas.
+              if (_showJumpToBottom &&
+                  _activeArtifact == null &&
+                  _currentTab == SessionTabType.chat)
+                Positioned(
+                  right: 16,
+                  bottom: 12,
+                  child: _JumpToBottomButton(
+                    count: _hiddenNewCount,
+                    onTap: _jumpToBottom,
+                  ),
+                ),
+            ],
+          ),
         ),
         _buildApprovalArea(),
         if (_sideQuestion != null)
@@ -1469,6 +1523,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                     },
                     child: _MessageBubble(
                       message: msg,
+                      api: widget.api,
+                      workspacePath: widget.activeProjectName,
                       isThoughtExpanded: _expandedThoughts.contains(msg.id),
                       onToggleThought: () => setState(() {
                         if (_expandedThoughts.contains(msg.id)) {
@@ -1486,6 +1542,69 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             ],
           ),
         );
+    }
+  }
+
+  /// P5 : exécute une commande shell sur le workspace hôte via le daemon
+  /// (mode legacy send_command — aucun besoin de PTY pour git apply).
+  Future<void> _runWorkspaceCommand(String command) async {
+    final api = widget.api;
+    if (api == null) return;
+    try {
+      await api.sendCommand(command);
+    } catch (_) {
+      // Silencieux : le terminal / logs affichent déjà l'erreur côté daemon.
+    }
+  }
+
+  /// P5 : confirmation avant action groupée (accepter / rejeter tout).
+  Future<void> _confirmBulkAction({
+    required String title,
+    required String message,
+    required String confirmLabel,
+    required String command,
+  }) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1B1D22),
+        title: Text(title, style: const TextStyle(fontSize: 15, color: AppColors.inkPrimary)),
+        content: Text(
+          message,
+          style: const TextStyle(fontSize: 13, color: AppColors.inkSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Annuler', style: TextStyle(color: AppColors.inkMuted)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: confirmLabel == 'Tout rejeter'
+                  ? AppColors.danger
+                  : null,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(confirmLabel),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _runWorkspaceCommand(command);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              confirmLabel == 'Tout rejeter'
+                  ? 'Modifications rejetées — commande envoyée au workspace.'
+                  : 'Modifications acceptées — commande envoyée au workspace.',
+            ),
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     }
   }
 
@@ -1516,6 +1635,20 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           fileName: _modifiedFiles.isNotEmpty ? _modifiedFiles.first : null,
         );
       },
+      onAcceptAll: () => _confirmBulkAction(
+        title: 'Accepter toutes les modifications ?',
+        message:
+            'Les changements de cette session seront appliqués au workspace (git apply).',
+        confirmLabel: 'Tout accepter',
+        command: 'git apply --3way',
+      ),
+      onDiscardAll: () => _confirmBulkAction(
+        title: 'Rejeter toutes les modifications ?',
+        message:
+            'Les changements de cette session seront annulés dans le workspace (git checkout).',
+        confirmLabel: 'Tout rejeter',
+        command: 'git checkout -- .',
+      ),
     );
   }
 
@@ -1645,7 +1778,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           ),
         ),
         const SizedBox(height: 12),
-        MarkdownBubble(text: _latestPlanText!),
+        MarkdownBubble(
+          text: _latestPlanText!,
+          api: widget.api,
+          workspacePath: widget.activeProjectName,
+        ),
       ],
     );
   }
@@ -1711,6 +1848,12 @@ class _ReminderBanner extends StatelessWidget {
 
 class _MessageBubble extends StatelessWidget {
   final ChatMessage message;
+
+  /// P3 : API daemon pour le bouton « Exécuter » des blocs shell.
+  final DaemonApi? api;
+
+  /// P3 : chemin du workspace hôte pour créer le PTY du terminal.
+  final String workspacePath;
   final bool isThoughtExpanded;
   final VoidCallback? onToggleThought;
   final VoidCallback? onProceedPlan;
@@ -1719,6 +1862,8 @@ class _MessageBubble extends StatelessWidget {
 
   const _MessageBubble({
     required this.message,
+    this.api,
+    this.workspacePath = '',
     this.isThoughtExpanded = false,
     this.onToggleThought,
     this.onProceedPlan,
@@ -1922,6 +2067,8 @@ class _MessageBubble extends StatelessWidget {
               MarkdownBubble(
                 text: message.text,
                 isStreaming: message.isStreaming,
+                api: api,
+                workspacePath: workspacePath,
               ),
             if (!message.isStreaming &&
                 (message.text.contains('Implementation Plan') ||
@@ -2042,6 +2189,69 @@ class _MessageBubble extends StatelessWidget {
       ],
     ),
   );
+  }
+}
+
+/// P1 — bouton flottant « retour en bas » : pilule sombre avec icône ↓ et
+/// badge compteur des nouveaux messages arrivés pendant la lecture.
+class _JumpToBottomButton extends StatelessWidget {
+  final int count;
+  final VoidCallback onTap;
+
+  const _JumpToBottomButton({required this.count, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        key: const Key('jump-to-bottom'),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(24),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E2025),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: const Color(0xFF2C2F36), width: 1),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.35),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: scheme.primary),
+              const SizedBox(width: 4),
+              if (count > 0) ...[
+                Text(
+                  '$count',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    color: scheme.primary,
+                  ),
+                ),
+                const SizedBox(width: 4),
+              ],
+              Text(
+                count > 0 ? 'nouveaux' : 'Retour en bas',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 

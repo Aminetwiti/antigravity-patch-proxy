@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../features/code_review/models/code_comment.dart';
 import '../features/code_review/widgets/add_comment_dialog.dart';
+import '../theme/app_colors.dart';
 
 /// Unifié et interactif : affiche un diff de code et permet d'annoter
 /// des lignes spécifiques pour envoyer une revue de code groupée à l'agent.
@@ -409,15 +410,16 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
     Color textColor = scheme.onSurface;
     String prefix = ' ';
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     switch (line.type) {
       case _DiffLineType.addition:
-        bg = const Color(0x339BB955);
-        textColor = const Color(0xFF4ADE80);
+        bg = isDark ? AppColors.diffInsertedLine : const Color(0x221A7F37);
+        textColor = isDark ? const Color(0xFF4ADE80) : const Color(0xFF1A7F37);
         prefix = '+';
         break;
       case _DiffLineType.deletion:
-        bg = const Color(0x33FF0000);
-        textColor = const Color(0xFFF87171);
+        bg = isDark ? AppColors.diffRemovedLine : const Color(0x22CF222E);
+        textColor = isDark ? const Color(0xFFF87171) : const Color(0xFFCF222E);
         prefix = '-';
         break;
       case _DiffLineType.hunkHeader:

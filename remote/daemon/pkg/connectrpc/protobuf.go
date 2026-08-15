@@ -456,12 +456,16 @@ func BuildSkipBrowserSubagent(cascadeID string, stepIndex int64) []byte {
 }
 
 // BuildRetrieveUserQuotaSummary construit un RetrieveUserQuotaSummaryRequest :
-// {1: metadata}
+// {1: metadata, 2: force_refresh=true}
+// Le champ 2 (force_refresh varint 1) force le LS à recalculer le quota au lieu
+// de renvoyer son cache — même payload que le projet Antigravity-Chinese
+// ([0,0,0,0,2,16,1] = frame vide + field 2 varint 1).
 func BuildRetrieveUserQuotaSummary(apiKey, sessionID string) []byte {
 	w := &writer{}
 	if apiKey != "" {
 		w.bytesField(1, buildMetadata(apiKey, sessionID))
 	}
+	w.varintField(2, 1)
 	return w.b
 }
 

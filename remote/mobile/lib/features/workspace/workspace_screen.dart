@@ -364,6 +364,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                                       context,
                                     ).colorScheme.onSurfaceVariant,
                               ),
+                              tooltip: 'Effacer la recherche',
                               onPressed: () => _searchController.clear(),
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(
@@ -698,6 +699,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                               ),
                             IconButton(
                               icon: const Icon(Icons.close, size: 16),
+                              tooltip: 'Fermer la recherche',
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(
                                 minWidth: 28,
@@ -1100,6 +1102,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                         _grepController.text.isNotEmpty
                             ? IconButton(
                               icon: const Icon(Icons.close, size: 16),
+                              tooltip: 'Effacer',
                               onPressed: () {
                                 _grepController.clear();
                                 setState(() => _grepResults = []);

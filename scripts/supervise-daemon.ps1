@@ -23,6 +23,8 @@ $Token     = "11"
 $Port      = 8090
 $SupLog    = Join-Path $DaemonDir "daemon_supervisor.log"
 $DmnLog    = Join-Path $DaemonDir "daemon_watch.log"
+$PatchSig  = "MODEL_PLACEHOLDER_"
+$HealScript = Join-Path (Split-Path -Parent $PSScriptRoot) "scripts\auto-heal.ps1"
 $lastStart = Get-Date 0
 
 function Write-Log($m) {
@@ -63,6 +65,14 @@ function Start-Daemon {
     }
 }
 
+# Vrai si le asar actif a perdu la signature du patch (écrasé par un update officiel).
+function Test-PatchLost {
+    $asar = "$env:LOCALAPPDATA\Programs\Antigravity\resources\app.asar"
+    if (-not (Test-Path $asar)) { return $false }
+    $content = [System.IO.File]::ReadAllText($asar, [System.Text.Encoding]::GetEncoding('latin1'))
+    return ($content -notlike "*$PatchSig*")
+}
+
 if ($Loop) {
     Write-Log "watchdog demarre (boucle 30s, token=$Token, port=$Port)"
     while ($true) {
@@ -86,6 +96,12 @@ if ($Loop) {
             $lastStart = Get-Date
         } else {
             Write-Log "ok: daemon $Token sur :$Port"
+        }
+        # Patch écrasé par un update officiel pendant la session ? Le VBS startup
+        # ne couvre que le boot — ce check attrape le cas « update en cours d'usage ».
+        if ((Test-Path $HealScript) -and (Test-PatchLost)) {
+            Write-Log "patch perdu (update officiel?) - auto-heal"
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $HealScript
         }
         Start-Sleep -Seconds 30
     }

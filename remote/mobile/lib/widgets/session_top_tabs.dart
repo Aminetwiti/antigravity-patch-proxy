@@ -217,12 +217,16 @@ class _TabPillState extends State<_TabPill> {
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        onTap: () {
-          HapticFeedback.selectionClick();
-          widget.onTap();
-        },
-        child: AnimatedContainer(
+      child: Semantics(
+        button: true,
+        selected: isSelected,
+        label: '${widget.label} tab',
+        child: GestureDetector(
+          onTap: () {
+            HapticFeedback.selectionClick();
+            widget.onTap();
+          },
+          child: AnimatedContainer(
           duration: AppMotion.fast,
           curve: AppMotion.easeOut,
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -276,6 +280,7 @@ class _TabPillState extends State<_TabPill> {
           ),
         ),
       ),
-    );
+    ),
+  );
   }
 }

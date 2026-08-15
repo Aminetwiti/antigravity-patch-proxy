@@ -109,6 +109,7 @@ class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
                   ),
                   IconButton(
                     icon: Icon(Icons.close, size: 20, color: scheme.onSurfaceVariant),
+                    tooltip: 'Fermer',
                     onPressed: () => Navigator.of(context).pop(),
                   ),
                 ],

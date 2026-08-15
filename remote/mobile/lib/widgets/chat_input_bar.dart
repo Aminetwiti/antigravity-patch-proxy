@@ -15,6 +15,28 @@ import '../theme/app_colors.dart';
 /// Modes d'envoi : immédiat ou mis en file pour exécution séquentielle.
 enum SendMode { immediate, queued }
 
+/// Entrée de la palette de commandes slash (/btw, /plan, ...).
+class _SlashCommand {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  const _SlashCommand(this.icon, this.title, this.subtitle);
+}
+
+/// Registre unique des commandes slash — filtré en tapant (P2).
+const List<_SlashCommand> _slashCommands = [
+  _SlashCommand(Icons.chat_bubble_outline_rounded, '/btw', 'Side question without breaking flow'),
+  _SlashCommand(Icons.quiz_outlined, '/grill-me', 'Interactive planning interview'),
+  _SlashCommand(Icons.flag_outlined, '/goal', 'Autonomous goal until fully achieved'),
+  _SlashCommand(Icons.schedule_outlined, '/schedule', 'Set recurring timer / background cron'),
+  _SlashCommand(Icons.rate_review_outlined, '/review', 'Audit code diffs and complexity'),
+  _SlashCommand(Icons.edit_note_rounded, '/plan', 'Draft technical implementation plan'),
+  _SlashCommand(Icons.design_services, '/design', 'Generate UI components & screens'),
+  _SlashCommand(Icons.code, '/code', 'Generate Code Implementation'),
+  _SlashCommand(Icons.search, '/search', 'Semantic project search'),
+];
+
 class ChatInputBar extends StatefulWidget {
   /// Signature unique : message + mode file + modèle sélectionné.
   /// C2 (audit clean-code-guard) : typée — plus de `Function` opaque ni de
@@ -134,7 +156,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
       _showMentionDropdown(query);
     } else if (textBeforeCursor.startsWith('/') ||
         textBeforeCursor.contains(RegExp(r'\n/\w*$'))) {
-      _showActionDropdown();
+      // P2 : extraire le début de commande tapé pour filtrer la palette.
+      final slashIndex = textBeforeCursor.lastIndexOf('/');
+      final query =
+          slashIndex >= 0 ? textBeforeCursor.substring(slashIndex + 1) : '';
+      _showActionDropdown(query);
     } else {
       // On tape autre chose : fermer les dropdowns mention/action restés
       // ouverts (le dropdown modèle, ouvert au tap, n'est pas concerné).
@@ -616,8 +642,14 @@ class _ChatInputBarState extends State<ChatInputBar> {
     );
   }
 
-  void _showActionDropdown() {
+  void _showActionDropdown([String query = '']) {
     _mentionOrActionOpen = true;
+    final q = query.toLowerCase();
+    // P2 : filtre au fur et à mesure — '/pl' ne montre que /plan.
+    final filtered = _slashCommands
+        .where((c) => q.isEmpty || c.title.toLowerCase().contains(q))
+        .toList();
+
     CustomDropdownOverlay.show(
       context: context,
       targetKey: _textFieldKey,
@@ -625,104 +657,55 @@ class _ChatInputBarState extends State<ChatInputBar> {
       maxHeight: 200,
       child: Material(
         color: Colors.transparent,
-        child: ListView(
-          padding: EdgeInsets.zero,
-          shrinkWrap: true,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Text(
-                'Slash Commands & Actions',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+        child: filtered.isEmpty
+            ? _buildEmptySlashState(query)
+            : ListView(
+                padding: EdgeInsets.zero,
+                shrinkWrap: true,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    child: Text(
+                      'Slash Commands & Actions',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                  for (final c in filtered)
+                    _buildPopupItem(
+                      c.icon,
+                      c.title,
+                      c.subtitle,
+                      () {
+                        _insertTextAtCursor('${c.title} ');
+                        CustomDropdownOverlay.hide();
+                      },
+                    ),
+                ],
               ),
+      ),
+    );
+  }
+
+  /// État vide de la palette slash : aucune commande ne matche le début tapé.
+  Widget _buildEmptySlashState(String query) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        children: [
+          Icon(Icons.search_off, size: 16, color: scheme.onSurfaceVariant),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              "Aucune commande ne correspond à '/$query'",
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
             ),
-            _buildPopupItem(
-              Icons.chat_bubble_outline_rounded,
-              '/btw',
-              'Side question without breaking flow',
-              () {
-                _insertTextAtCursor('/btw ');
-                CustomDropdownOverlay.hide();
-              },
-            ),
-            _buildPopupItem(
-              Icons.quiz_outlined,
-              '/grill-me',
-              'Interactive planning interview',
-              () {
-                _insertTextAtCursor('/grill-me ');
-                CustomDropdownOverlay.hide();
-              },
-            ),
-            _buildPopupItem(
-              Icons.flag_outlined,
-              '/goal',
-              'Autonomous goal until fully achieved',
-              () {
-                _insertTextAtCursor('/goal ');
-                CustomDropdownOverlay.hide();
-              },
-            ),
-            _buildPopupItem(
-              Icons.schedule_outlined,
-              '/schedule',
-              'Set recurring timer / background cron',
-              () {
-                _insertTextAtCursor('/schedule ');
-                CustomDropdownOverlay.hide();
-              },
-            ),
-            _buildPopupItem(
-              Icons.rate_review_outlined,
-              '/review',
-              'Audit code diffs and complexity',
-              () {
-                _insertTextAtCursor('/review ');
-                CustomDropdownOverlay.hide();
-              },
-            ),
-            _buildPopupItem(
-              Icons.edit_note_rounded,
-              '/plan',
-              'Draft technical implementation plan',
-              () {
-                _insertTextAtCursor('/plan ');
-                CustomDropdownOverlay.hide();
-              },
-            ),
-            _buildPopupItem(
-              Icons.design_services,
-              '/design',
-              'Generate UI components & screens',
-              () {
-                _insertTextAtCursor('/design ');
-                CustomDropdownOverlay.hide();
-              },
-            ),
-            _buildPopupItem(
-              Icons.code,
-              '/code',
-              'Generate Code Implementation',
-              () {
-                _insertTextAtCursor('/code ');
-                CustomDropdownOverlay.hide();
-              },
-            ),
-            _buildPopupItem(
-              Icons.search,
-              '/search',
-              'Semantic project search',
-              () {
-                _insertTextAtCursor('/search ');
-                CustomDropdownOverlay.hide();
-              },
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

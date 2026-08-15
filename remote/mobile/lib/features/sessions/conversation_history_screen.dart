@@ -178,6 +178,7 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
                           suffixIcon: _searchQuery.isNotEmpty
                               ? IconButton(
                                   icon: const Icon(Icons.close_rounded, size: 16, color: Color(0xFF636D83)),
+                                  tooltip: 'Effacer la recherche',
                                   onPressed: () {
                                     _searchController.clear();
                                   },

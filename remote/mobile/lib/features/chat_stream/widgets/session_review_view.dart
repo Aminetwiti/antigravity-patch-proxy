@@ -36,12 +36,20 @@ class SessionReviewView extends StatefulWidget {
   final VoidCallback? onExpandAll;
   final VoidCallback? onSplitDiffView;
 
+  /// P5 : actions groupées — accepter / rejeter l'ensemble des modifications.
+  /// Les callbacks restent optionnels : si absents, la barre d'actions est
+  /// masquée (l'écran parent décide si le daemon peut les appliquer).
+  final VoidCallback? onAcceptAll;
+  final VoidCallback? onDiscardAll;
+
   const SessionReviewView({
     super.key,
     required this.files,
     required this.onOpenFileDiff,
     this.onExpandAll,
     this.onSplitDiffView,
+    this.onAcceptAll,
+    this.onDiscardAll,
   });
 
   @override
@@ -275,6 +283,7 @@ class _SessionReviewViewState extends State<SessionReviewView> {
                   suffixIcon: _searchQuery.isNotEmpty
                       ? IconButton(
                           icon: const Icon(Icons.close_rounded, size: 14, color: Color(0xFF6B7280)),
+                          tooltip: 'Effacer le filtre',
                           onPressed: () => _searchController.clear(),
                           padding: EdgeInsets.zero,
                         )
@@ -285,6 +294,46 @@ class _SessionReviewViewState extends State<SessionReviewView> {
               ),
             ),
           ),
+
+        // P5 : actions groupées (Accepter tout / Tout rejeter) — uniquement
+        // quand des fichiers sont listés et que l'écran parent fournit les
+        // callbacks d'application.
+        if (widget.files.isNotEmpty &&
+            (widget.onAcceptAll != null || widget.onDiscardAll != null)) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
+            child: Row(
+              children: [
+                if (widget.onAcceptAll != null)
+                  Expanded(
+                    child: _BulkActionChip(
+                      icon: Icons.check_circle_outline_rounded,
+                      label: 'Tout accepter',
+                      color: const Color(0xFF22C55E),
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        widget.onAcceptAll?.call();
+                      },
+                    ),
+                  ),
+                if (widget.onAcceptAll != null && widget.onDiscardAll != null)
+                  const SizedBox(width: 8),
+                if (widget.onDiscardAll != null)
+                  Expanded(
+                    child: _BulkActionChip(
+                      icon: Icons.undo_rounded,
+                      label: 'Tout rejeter',
+                      color: const Color(0xFFEF4444),
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        widget.onDiscardAll?.call();
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
 
         const Divider(color: Color(0xFF212328), height: 1),
 
@@ -445,5 +494,54 @@ class _ChangedFileRow extends StatelessWidget {
           ),
         ),
       );
+  }
+}
+
+/// P5 : chip d'action groupée (Accepter / Rejeter) — bouton large, tactile.
+class _BulkActionChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _BulkActionChip({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xFF1B1D22),
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            border: Border.all(color: color.withValues(alpha: 0.4), width: 1),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 15, color: color),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

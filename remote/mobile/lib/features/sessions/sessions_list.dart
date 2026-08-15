@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/protocol/messages.dart';
 import '../../core/protocol/workspace_path.dart';
 import 'package:mobile/theme/app_colors.dart';
@@ -57,10 +58,35 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
   SessionSortBy _sortBy = SessionSortBy.lastUpdated;
   SessionSubtitle _subtitle = SessionSubtitle.worktree;
 
+  // P4 : sessions épinglées — local-only via SharedPreferences (jamais
+  // synchronisées avec le daemon).
+  final Set<String> _pinnedIds = {};
+
   @override
   void initState() {
     super.initState();
-    // Replier par défaut les projets secondaires pour un affichage propre comme dans Antigravity
+    _loadPins();
+  }
+
+  Future<void> _loadPins() async {
+    final prefs = await SharedPreferences.getInstance();
+    final ids = prefs.getStringList('pinned_session_ids') ?? const [];
+    if (!mounted) return;
+    setState(() {
+      _pinnedIds
+        ..clear()
+        ..addAll(ids);
+    });
+  }
+
+  void _togglePin(String id) {
+    HapticFeedback.selectionClick();
+    setState(() {
+      if (!_pinnedIds.remove(id)) _pinnedIds.add(id);
+    });
+    // ponytail: fire-and-forget, SharedPreferences garde le dernier état écrit.
+    SharedPreferences.getInstance().then((prefs) =>
+        prefs.setStringList('pinned_session_ids', _pinnedIds.toList()));
   }
 
   @override
@@ -88,8 +114,14 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
       sortBy: _sortBy,
     );
 
+    // P4 : épinglées d'abord (ordre stable — le tri interne est conservé).
+    final pinnedFirst = [
+      ...sortedSessions.where((s) => _pinnedIds.contains(s.id)),
+      ...sortedSessions.where((s) => !_pinnedIds.contains(s.id)),
+    ];
+
     final projectSessions = groupSessions(
-      sessions: sortedSessions,
+      sessions: pinnedFirst,
       groupBy: _groupBy,
       projects: widget.projects,
     );
@@ -97,7 +129,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
     final projectNames = projectSessions.keys.toList();
 
     return Drawer(
-      backgroundColor: const Color(0xFF131416),
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.zero,
       ),
@@ -115,13 +147,21 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                   _HeaderIconBtn(
                     icon: Icons.dock_outlined,
                     tooltip: 'Masquer la barre',
-                    onTap: () => Navigator.of(context).pop(),
+                    onTap: () {
+                      if (Navigator.of(context).canPop()) {
+                        Navigator.of(context).pop();
+                      }
+                    },
                   ),
                   const SizedBox(width: 8),
                   _HeaderIconBtn(
                     icon: Icons.arrow_back,
                     tooltip: 'Retour',
-                    onTap: () => Navigator.of(context).pop(),
+                    onTap: () {
+                      if (Navigator.of(context).canPop()) {
+                        Navigator.of(context).pop();
+                      }
+                    },
                   ),
                   const SizedBox(width: 8),
                   _HeaderIconBtn(
@@ -143,7 +183,9 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                 child: InkWell(
                   onTap: () {
                     HapticFeedback.selectionClick();
-                    Navigator.of(context).pop();
+                    if (Navigator.of(context).canPop()) {
+                      Navigator.of(context).pop();
+                    }
                     widget.onNewConversation();
                   },
                   borderRadius: BorderRadius.circular(AppRadius.lg),
@@ -270,6 +312,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                       suffixIcon: _filterQuery.isNotEmpty
                           ? IconButton(
                               icon: const Icon(Icons.close, size: 12, color: AppColors.inkMuted),
+                              tooltip: 'Effacer le filtre',
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(minWidth: 20),
                               onPressed: () {
@@ -358,6 +401,8 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                           onDeleteSession: widget.onDeleteSession,
                           onRenameSession: widget.onRenameSession,
                           onExportSession: widget.onExportSession,
+                          pinnedIds: _pinnedIds,
+                          onTogglePin: _togglePin,
                         );
                       }),
                     const SizedBox(height: 16),
@@ -515,6 +560,10 @@ class _WorkspaceFolderSection extends StatefulWidget {
   final Function(String id, String newTitle)? onRenameSession;
   final Function(CascadeSession session)? onExportSession;
 
+  // P4 : épinglage local
+  final Set<String> pinnedIds;
+  final ValueChanged<String>? onTogglePin;
+
   const _WorkspaceFolderSection({
     required this.folderName,
     required this.sessions,
@@ -529,6 +578,8 @@ class _WorkspaceFolderSection extends StatefulWidget {
     this.onDeleteSession,
     this.onRenameSession,
     this.onExportSession,
+    this.pinnedIds = const {},
+    this.onTogglePin,
   });
 
   @override
@@ -683,6 +734,10 @@ class _WorkspaceFolderSectionState extends State<_WorkspaceFolderSection> {
                   onExport: widget.onExportSession != null
                       ? () => widget.onExportSession!(s)
                       : null,
+                  isPinned: widget.pinnedIds.contains(s.id),
+                  onTogglePin: widget.onTogglePin != null
+                      ? () => widget.onTogglePin!(s.id)
+                      : null,
                 )),
             if (hasMore)
               Padding(
@@ -732,6 +787,10 @@ class _SessionRowItem extends StatefulWidget {
   final Function(String newTitle)? onRename;
   final VoidCallback? onExport;
 
+  // P4 : épinglage local
+  final bool isPinned;
+  final VoidCallback? onTogglePin;
+
   const _SessionRowItem({
     required this.session,
     required this.isSelected,
@@ -740,6 +799,8 @@ class _SessionRowItem extends StatefulWidget {
     this.onDelete,
     this.onRename,
     this.onExport,
+    this.isPinned = false,
+    this.onTogglePin,
   });
 
   @override
@@ -799,6 +860,22 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                   _promptRename(context);
                 },
               ),
+              if (widget.onTogglePin != null)
+                ListTile(
+                  leading: Icon(
+                    widget.isPinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
+                    size: 18,
+                    color: AppColors.inkPrimary,
+                  ),
+                  title: Text(
+                    widget.isPinned ? 'Désépingler la conversation' : 'Épingler la conversation',
+                    style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
+                  ),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    widget.onTogglePin?.call();
+                  },
+                ),
               if (widget.onExport != null)
                 ListTile(
                   leading: const Icon(Icons.download_rounded, size: 18, color: AppColors.inkPrimary),
@@ -1004,37 +1081,75 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                     fontWeight: FontWeight.w400,
                   ),
                 ),
+              if (widget.isPinned)
+                Padding(
+                  padding: const EdgeInsets.only(left: 4),
+                  child: Icon(
+                    Icons.push_pin_rounded,
+                    size: 11,
+                    color: isSelected ? const Color(0xFF9E9FA9) : const Color(0xFF6E707A),
+                  ),
+                ),
             ],
           ),
         ),
       ),
     );
 
-    if (widget.onDelete != null) {
+    // P4 : swipe gauche = supprimer (endToStart), swipe droite = épingler
+    // (startToEnd). Un seul Dismissible horizontal, chaque direction branchée
+    // sur son action — confirmDismiss retourne false pour ne jamais supprimer
+    // l'item de la liste (les actions passent par les callbacks parents).
+    if (widget.onDelete != null || widget.onTogglePin != null) {
       return Dismissible(
         key: ValueKey('dismiss-${widget.session.id}'),
-        direction: DismissDirection.endToStart,
-        confirmDismiss: (_) async {
-          _confirmDelete(context);
+        direction: DismissDirection.horizontal,
+        confirmDismiss: (dir) async {
+          if (dir == DismissDirection.endToStart) {
+            if (widget.onDelete != null) _confirmDelete(context);
+          } else {
+            widget.onTogglePin?.call();
+          }
           return false;
         },
-        background: Container(
-          alignment: Alignment.centerRight,
-          padding: const EdgeInsets.only(right: 16),
-          margin: const EdgeInsets.only(left: 14, right: 6, top: 1, bottom: 1),
-          decoration: BoxDecoration(
-            color: AppColors.danger.withValues(alpha: 0.85),
-            borderRadius: BorderRadius.circular(AppRadius.md),
-          ),
-          child: const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.delete_outline_rounded, color: Colors.white, size: 18),
-              SizedBox(width: 4),
-              Text('Supprimer', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
-            ],
-          ),
-        ),
+        background: widget.onTogglePin != null
+            ? Container(
+                alignment: Alignment.centerLeft,
+                padding: const EdgeInsets.only(left: 16),
+                margin: const EdgeInsets.only(left: 14, right: 6, top: 1, bottom: 1),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF3D5AFE).withValues(alpha: 0.85),
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.push_pin_outlined, color: Colors.white, size: 18),
+                    SizedBox(width: 4),
+                    Text('Épingler', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              )
+            : null,
+        secondaryBackground: widget.onDelete != null
+            ? Container(
+                alignment: Alignment.centerRight,
+                padding: const EdgeInsets.only(right: 16),
+                margin: const EdgeInsets.only(left: 14, right: 6, top: 1, bottom: 1),
+                decoration: BoxDecoration(
+                  color: AppColors.danger.withValues(alpha: 0.85),
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.delete_outline_rounded, color: Colors.white, size: 18),
+                    SizedBox(width: 4),
+                    Text('Supprimer', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              )
+            : null,
         child: item,
       );
     }

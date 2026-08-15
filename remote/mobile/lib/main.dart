@@ -654,101 +654,16 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final status = _wsClient.statusNotifier.value;
-    final isConnected = status == ConnectionStatus.connected;
-
-    return Scaffold(
-      key: _scaffoldKey,
-      extendBodyBehindAppBar: false,
-      drawer: LeftSidebarDrawer(
-        activeSessionId: _activeSessionId,
-        sessions: _sessions,
-        projects: _projects,
-        isConnected: isConnected,
-        onToggleConnection: () {
-          if (isConnected) {
-            _wsClient.disconnect();
-          } else {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (context) => DiscoveryScreen(
-                  onConnect: (host, port, token) async {
-                    final url = _formatWsUrl(host, port);
-                    _wsClient.disconnect();
-                    await _wsClient.connect(customUrl: url, authToken: token);
-                    return _wsClient.statusNotifier.value == ConnectionStatus.connected;
-                  },
-                ),
-              ),
-            );
-          }
-        },
-        onSessionSelected: (id) {
-          setState(() {
-            _activeSessionId = id;
-            final s = _sessions.firstWhere((s) => s.id == id, orElse: () => const CascadeSession(id: '', workspacePath: '', title: 'Session', status: '', time: ''));
-            _activeSessionTitle = s.title;
-          });
-          // Bug #2 : rafraîchir le contexte pour la nouvelle session.
-          _refreshContext();
-        },
-        onNewConversation: () async {
-          final api = _api;
-          if (api == null) return;
-          try {
-            var ws = _sessions.isNotEmpty ? _sessions.first.workspacePath : '';
-            if (ws.isEmpty) {
-              final cur = _sessions.where((s) => s.id == _activeSessionId);
-              if (cur.isNotEmpty) ws = cur.first.workspacePath;
-            }
-            final res = await api.createCascade(ws);
-            String newId = '';
-            if (res['cascadeId'] is String) {
-              newId = res['cascadeId'] as String;
-            } else if (res['id'] is String) {
-              newId = res['id'] as String;
-            } else if (res['fields'] is List) {
-              for (final f in res['fields']) {
-                if (f is Map && f['text'] is String && (f['text'] as String).isNotEmpty) {
-                  newId = f['text'] as String;
-                  break;
-                }
-              }
-            }
-            if (newId.isNotEmpty && mounted) {
-              setState(() {
-                _activeSessionId = newId;
-                _activeSessionTitle = 'Nouvelle conversation';
-              });
-              await _refreshSessions();
-            }
-          } catch (_) {}
-        },
-        onDeleteSession: _deleteSession,
-        onRenameSession: _renameSession,
-        onExportSession: _exportSession,
-        onConversationHistory: () {
-          _showSessionHistory();
-        },
-        onScheduledTasks: () {
-          _showScheduledTasks();
-        },
-        onOpenSettings: () {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (context) => SettingsScreen(
-                initialSettings: _savedSettings,
-                onThemeModeChanged: widget.onThemeModeChanged,
-                onDaemonSaved: _applyDaemonSettings,
-                api: _api,
-                notifier: ApprovalNotifier.instance,
-              ),
-            ),
-          );
-        },
-        onDiscover: () {
+  Widget _buildSidebar(bool isConnected) {
+    return LeftSidebarDrawer(
+      activeSessionId: _activeSessionId,
+      sessions: _sessions,
+      projects: _projects,
+      isConnected: isConnected,
+      onToggleConnection: () {
+        if (isConnected) {
+          _wsClient.disconnect();
+        } else {
           Navigator.of(context).push(
             MaterialPageRoute(
               builder: (context) => DiscoveryScreen(
@@ -756,44 +671,154 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                   final url = _formatWsUrl(host, port);
                   _wsClient.disconnect();
                   await _wsClient.connect(customUrl: url, authToken: token);
-                  final ok = _wsClient.statusNotifier.value == ConnectionStatus.connected;
-                  if (ok) {
-                    // Persiste l'appairage : le tunnel Cloudflare peut avoir
-                    // changé d'URL depuis la dernière sauvegarde.
-                    SettingsStore.saveSession(
-                      wsUrl: url,
-                      token: token,
-                      sessionId: _activeSessionId,
-                    );
-                  }
-                  return ok;
+                  return _wsClient.statusNotifier.value == ConnectionStatus.connected;
                 },
               ),
             ),
           );
-        },
-        onOpenWorkspace: () {
-          final activeSession = _sessions.firstWhere(
-            (s) => s.id == _activeSessionId,
-            orElse: () => const CascadeSession(id: '', workspacePath: '.', title: '', status: '', time: ''),
-          );
-          var path = activeSession.workspacePath;
-          if (path.startsWith('file:///')) {
-            path = path.substring(8);
-          } else if (path.startsWith('file://')) {
-            path = path.substring(7);
+        }
+      },
+      onSessionSelected: (id) {
+        setState(() {
+          _activeSessionId = id;
+          final s = _sessions.firstWhere((s) => s.id == id, orElse: () => const CascadeSession(id: '', workspacePath: '', title: 'Session', status: '', time: ''));
+          _activeSessionTitle = s.title;
+        });
+        // Bug #2 : rafraîchir le contexte pour la nouvelle session.
+        _refreshContext();
+      },
+      onNewConversation: () async {
+        final api = _api;
+        if (api == null) return;
+        try {
+          var ws = _sessions.isNotEmpty ? _sessions.first.workspacePath : '';
+          if (ws.isEmpty) {
+            final cur = _sessions.where((s) => s.id == _activeSessionId);
+            if (cur.isNotEmpty) ws = cur.first.workspacePath;
           }
-          
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (context) => WorkspaceScreen(
-                api: _api,
-                workspacePath: path,
-              ),
+          final res = await api.createCascade(ws);
+          String newId = '';
+          if (res['cascadeId'] is String) {
+            newId = res['cascadeId'] as String;
+          } else if (res['id'] is String) {
+            newId = res['id'] as String;
+          } else if (res['fields'] is List) {
+            for (final f in res['fields']) {
+              if (f is Map && f['text'] is String && (f['text'] as String).isNotEmpty) {
+                newId = f['text'] as String;
+                break;
+              }
+            }
+          }
+          if (newId.isNotEmpty && mounted) {
+            setState(() {
+              _activeSessionId = newId;
+              _activeSessionTitle = 'Nouvelle conversation';
+            });
+            await _refreshSessions();
+          }
+        } catch (_) {}
+      },
+      onDeleteSession: _deleteSession,
+      onRenameSession: _renameSession,
+      onExportSession: _exportSession,
+      onConversationHistory: () {
+        _showSessionHistory();
+      },
+      onScheduledTasks: () {
+        _showScheduledTasks();
+      },
+      onOpenSettings: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => SettingsScreen(
+              initialSettings: _savedSettings,
+              onThemeModeChanged: widget.onThemeModeChanged,
+              onDaemonSaved: _applyDaemonSettings,
+              api: _api,
+              notifier: ApprovalNotifier.instance,
             ),
-          );
-        },
-      ),
+          ),
+        );
+      },
+      onDiscover: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => DiscoveryScreen(
+              onConnect: (host, port, token) async {
+                final url = _formatWsUrl(host, port);
+                _wsClient.disconnect();
+                await _wsClient.connect(customUrl: url, authToken: token);
+                final ok = _wsClient.statusNotifier.value == ConnectionStatus.connected;
+                if (ok) {
+                  // Persiste l'appairage : le tunnel Cloudflare peut avoir
+                  // changé d'URL depuis la dernière sauvegarde.
+                  SettingsStore.saveSession(
+                    wsUrl: url,
+                    token: token,
+                    sessionId: _activeSessionId,
+                  );
+                }
+                return ok;
+              },
+            ),
+          ),
+        );
+      },
+      onOpenWorkspace: () {
+        final activeSession = _sessions.firstWhere(
+          (s) => s.id == _activeSessionId,
+          orElse: () => const CascadeSession(id: '', workspacePath: '.', title: '', status: '', time: ''),
+        );
+        var path = activeSession.workspacePath;
+        if (path.startsWith('file:///')) {
+          path = path.substring(8);
+        } else if (path.startsWith('file://')) {
+          path = path.substring(7);
+        }
+        
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => WorkspaceScreen(
+              api: _api,
+              workspacePath: path,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final status = _wsClient.statusNotifier.value;
+    final isConnected = status == ConnectionStatus.connected;
+    final isWideScreen = MediaQuery.sizeOf(context).width >= 840;
+    final sidebar = _buildSidebar(isConnected);
+
+    final chatStream = ChatStreamScreen(
+      api: _api,
+      activeSessionId: _activeSessionId,
+      activeProjectName: _activeProjectName,
+      isConnected: isConnected,
+      wsClient: _wsClient,
+      onStreamingStateChanged: (isStreaming) {
+        if (!mounted) return;
+        setState(() {
+          _sessions = _sessions.map((s) {
+            if (s.id == _activeSessionId) {
+              return s.copyWith(status: isStreaming ? 'CASCADE_STATUS_RUNNING' : 'CASCADE_STATUS_READY');
+            }
+            return s;
+          }).toList();
+        });
+      },
+    );
+
+    return Scaffold(
+      key: _scaffoldKey,
+      extendBodyBehindAppBar: false,
+      drawer: isWideScreen ? null : sidebar,
       endDrawer: RightSidebarDrawer(
         api: _api,
         activeSessionId: _activeSessionId,
@@ -808,11 +833,13 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         elevation: 0,
         scrolledUnderElevation: 1,
         surfaceTintColor: Colors.transparent,
-        leading: IconButton(
-          icon: Icon(Icons.dock_outlined, size: 20, color: Theme.of(context).colorScheme.onSurface),
-          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-          tooltip: 'Ouvrir le menu gauche',
-        ),
+        leading: isWideScreen
+            ? null
+            : IconButton(
+                icon: Icon(Icons.dock_outlined, size: 20, color: Theme.of(context).colorScheme.onSurface),
+                onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                tooltip: 'Ouvrir le menu gauche',
+              ),
         title: Row(
           children: [
             Expanded(
@@ -901,24 +928,25 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           ),
         ],
       ),
-      body: ChatStreamScreen(
-        api: _api,
-        activeSessionId: _activeSessionId,
-        activeProjectName: _activeProjectName,
-        isConnected: isConnected,
-        wsClient: _wsClient,
-        onStreamingStateChanged: (isStreaming) {
-          if (!mounted) return;
-          setState(() {
-            _sessions = _sessions.map((s) {
-              if (s.id == _activeSessionId) {
-                return s.copyWith(status: isStreaming ? 'CASCADE_STATUS_RUNNING' : 'CASCADE_STATUS_READY');
-              }
-              return s;
-            }).toList();
-          });
-        },
-      ),
+      body: isWideScreen
+          ? Row(
+              children: [
+                SizedBox(
+                  width: 320,
+                  child: Material(
+                    color: Theme.of(context).colorScheme.surfaceContainer,
+                    child: sidebar,
+                  ),
+                ),
+                VerticalDivider(
+                  width: 1,
+                  thickness: 1,
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
+                Expanded(child: chatStream),
+              ],
+            )
+          : chatStream,
     );
   }
 }

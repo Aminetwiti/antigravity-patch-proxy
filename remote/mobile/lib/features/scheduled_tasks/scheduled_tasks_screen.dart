@@ -264,6 +264,7 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
                     suffixIcon: _searchQuery.isNotEmpty
                         ? IconButton(
                             icon: const Icon(Icons.close_rounded, size: 16, color: Color(0xFF636D83)),
+                            tooltip: 'Effacer la recherche',
                             onPressed: () => _searchController.clear(),
                           )
                         : null,
@@ -630,6 +631,7 @@ class _NewScheduledTaskModalState extends State<_NewScheduledTaskModal> {
                 ),
                 IconButton(
                   icon: const Icon(Icons.close_rounded, size: 18, color: Color(0xFF8F909A)),
+                  tooltip: 'Fermer',
                   onPressed: () => Navigator.of(context).pop(),
                   constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                   padding: EdgeInsets.zero,

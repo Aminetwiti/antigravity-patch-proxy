@@ -454,44 +454,52 @@ class _AskQuestionModalState extends State<AskQuestionModal> {
             final isSelected = _selectedOption == opt;
             return Padding(
               padding: const EdgeInsets.only(bottom: 8),
-              child: InkWell(
-                onTap: () => setState(() => _selectedOption = opt),
-                borderRadius: BorderRadius.circular(8),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? Theme.of(context).colorScheme.primaryContainer
-                        : Theme.of(context).colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
+              child: Semantics(
+                button: true,
+                selected: isSelected,
+                label: opt,
+                child: InkWell(
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    setState(() => _selectedOption = opt);
+                  },
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    decoration: BoxDecoration(
                       color: isSelected
-                          ? Theme.of(context).colorScheme.primary
-                          : Theme.of(context).colorScheme.outlineVariant,
-                      width: isSelected ? 1.5 : 1.0,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
-                        size: 18,
+                          ? Theme.of(context).colorScheme.primaryContainer
+                          : Theme.of(context).colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
                         color: isSelected
                             ? Theme.of(context).colorScheme.primary
-                            : Theme.of(context).colorScheme.onSurfaceVariant,
+                            : Theme.of(context).colorScheme.outlineVariant,
+                        width: isSelected ? 1.5 : 1.0,
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          opt,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Theme.of(context).colorScheme.onSurface,
-                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
+                          size: 18,
+                          color: isSelected
+                              ? Theme.of(context).colorScheme.primary
+                              : Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            opt,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Theme.of(context).colorScheme.onSurface,
+                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),

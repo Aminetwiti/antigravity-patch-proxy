@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class SlashAction {
   final String command;
@@ -43,7 +44,10 @@ class ActionPillsBar extends StatelessWidget {
             avatar: Icon(action.icon, size: 16),
             label: Text(action.command, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
             tooltip: action.label,
-            onPressed: () => onActionSelected(action.command),
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              onActionSelected(action.command);
+            },
           );
         },
       ),

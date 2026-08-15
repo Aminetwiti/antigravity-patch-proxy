@@ -15,6 +15,7 @@ REM       - 2.3.x -> patch_2_3.js    (25 modules + 5 overwrites)
 REM    5. ag-doctor patch apply  (binary URL redirect)
 REM    6. Start MITM 443
 REM    7. Launch Antigravity
+REM    8. Cache patched asar (auto-heal) + register startup VBS
 REM ============================================================
 
 setlocal EnableDelayedExpansion
@@ -24,6 +25,7 @@ set "AG_INSTALL=%LOCALAPPDATA%\Programs\Antigravity"
 set "AG_ASAR=%AG_INSTALL%\resources\app.asar"
 set "AG_BIN_LS=%AG_INSTALL%\resources\bin\language_server.exe"
 set "STAGING_DIR=%TEMP%\antigravity-asar-staging-%RANDOM%"
+set "AG_SCRATCH=%USERPROFILE%\.gemini\antigravity\scratch"
 
 cd /d "%SCRIPT_DIR%"
 
@@ -107,6 +109,33 @@ echo ============================================================
 echo  Patch complete!
 echo  - Custom models now visible in Settings -> Models
 echo  - MITM 443 must stay running (separate window)
+echo ============================================================
+echo.
+
+REM -- 8. Cache the patched asar for the auto-healer (survives official updates)
+if not exist "%AG_SCRATCH%" mkdir "%AG_SCRATCH%"
+copy /Y "%AG_ASAR%" "%AG_SCRATCH%\app.asar.patched" >nul
+echo [8/9] Patched asar cached: %AG_SCRATCH%\app.asar.patched
+if exist "%AG_INSTALL%\resources\app.asar.unpacked" (
+  if exist "%AG_SCRATCH%\app.asar.unpacked" rmdir /S /Q "%AG_SCRATCH%\app.asar.unpacked"
+  xcopy /E /I /H /Y "%AG_INSTALL%\resources\app.asar.unpacked" "%AG_SCRATCH%\app.asar.unpacked" >nul
+  echo [8/9] app.asar.unpacked cached as well
+)
+
+REM -- 9. Register the startup VBS auto-healer
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%scripts\register-auto-heal.ps1"
+if errorlevel 1 (
+  echo   [WARN] Auto-heal registration failed -- re-run scripts\register-auto-heal.ps1 manually
+) else (
+  echo [9/9] Auto-heal registered in Windows Startup
+)
+
+echo.
+echo ============================================================
+echo  Patch complete!
+echo  - Custom models now visible in Settings -> Models
+echo  - MITM 443 must stay running (separate window)
+echo  - Auto-heal will restore the patch after official updates
 echo ============================================================
 echo.
 

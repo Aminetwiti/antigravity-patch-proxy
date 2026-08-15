@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -61,6 +62,7 @@ func pbTextFrame(s string) []byte {
 type fakeRPCClient struct {
 	streamDeltas []string // frames émises par SendMessageStream
 	cascadesRaw  []byte   // réponse GetAllCascades (nil → défaut)
+	quotaRaw     []byte   // réponse RetrieveUserQuotaSummary (nil → défaut)
 	// lastApproval : dernier SubmitToolApproval reçu (vérifié par les tests
 	// d'approbation : décision utilisateur ou auto-refus d'expiration).
 	lastApproval interface{}
@@ -300,6 +302,9 @@ func (f *fakeRPCClient) SkipBrowserSubagent(cascadeID string, stepIndex int64) e
 }
 
 func (f *fakeRPCClient) RetrieveUserQuotaSummary() ([]byte, error) {
+	if f.quotaRaw != nil {
+		return f.quotaRaw, nil
+	}
 	return connectrpc.Frame(pbTextFrame("quota-summary")), nil
 }
 
@@ -1308,6 +1313,55 @@ func TestWebSocketSetAutoAccept(t *testing.T) {
 			t.Fatalf("SubmitToolApproval appelé %d fois, attendu 0 (auto-accept désactivé)", backend.submitted)
 		}
 	})
+}
+
+// TestWebSocketGetQuotaSummary vérifie que get_quota_summary renvoie les 4
+// pourcentages décodés depuis la réponse protobuf brute (et non le protobuf).
+func TestWebSocketGetQuotaSummary(t *testing.T) {
+	backend := &fakeRPCClient{
+		quotaRaw: quotaFrame(t, map[string]float32{
+			"gemini-weekly": 0.42,
+			"gemini-5h":     0.68,
+			"3p-weekly":     0.10,
+			"3p-5h":         0.95,
+		}),
+	}
+	srv := newTestServer(backend)
+	defer srv.Close()
+	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	client.send(t, map[string]string{"type": "get_quota_summary", "requestId": "rQ1"})
+	msg := client.recv(t)
+	if msg["type"] != "response" || msg["requestId"] != "rQ1" {
+		t.Fatalf("Réponse inattendue: %v", msg)
+	}
+	data, ok := msg["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Données quota manquantes: %v", msg)
+	}
+	expected := map[string]int{"weeklyPercent": 42, "fiveHourPercent": 68, "weeklyPercentClaude": 10, "fiveHourPercentClaude": 95}
+	for k, want := range expected {
+		got, _ := data[k].(float64)
+		if int(got) != want {
+			t.Errorf("%s = %v, attendu %d", k, data[k], want)
+		}
+	}
+}
+
+// quotaFrame construit une réponse protobuf synthétique de quota (voir
+// connectrpc.ParseQuotaSummary pour le format attendu).
+func quotaFrame(t *testing.T, values map[string]float32) []byte {
+	t.Helper()
+	var buf []byte
+	for key, v := range values {
+		buf = append(buf, 0x0A, byte(len(key)))
+		buf = append(buf, key...)
+		buf = append(buf, 0x25)
+		bits := math.Float32bits(v)
+		buf = append(buf, byte(bits), byte(bits>>8), byte(bits>>16), byte(bits>>24))
+	}
+	return buf
 }
 
 // TestWebSocketGetUserStatus vérifie la récupération du statut utilisateur.

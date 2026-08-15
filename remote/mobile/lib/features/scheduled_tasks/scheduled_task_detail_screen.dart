@@ -250,6 +250,7 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
                       size: 17,
                       color: const Color(0xFF8F909A),
                     ),
+                    tooltip: _isEditingName ? 'Valider le nom' : 'Modifier le nom',
                     onPressed: () => setState(() => _isEditingName = !_isEditingName),
                   ),
                 ],

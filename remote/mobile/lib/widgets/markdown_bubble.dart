@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../core/protocol/daemon_api.dart';
 import '../core/protocol/markdown_renderer.dart';
+import 'remote_terminal_sheet.dart';
 import 'unified_diff_viewer.dart';
 
 /// Renders an assistant message with Markdown: fenced code blocks get a
@@ -10,10 +12,18 @@ class MarkdownBubble extends StatelessWidget {
   final String text;
   final bool isStreaming;
 
+  /// P3 : API daemon pour le bouton « Exécuter » des blocs shell.
+  final DaemonApi? api;
+
+  /// P3 : chemin du workspace hôte (utilisé pour créer le PTY).
+  final String workspacePath;
+
   const MarkdownBubble({
     super.key,
     required this.text,
     this.isStreaming = false,
+    this.api,
+    this.workspacePath = '',
   });
 
   @override
@@ -25,7 +35,7 @@ class MarkdownBubble extends StatelessWidget {
       children: [
         for (final block in blocks) ...[
           if (block.code != null)
-            _CodeBlockView(code: block.code!)
+            _CodeBlockView(code: block.code!, api: api, workspacePath: workspacePath)
           else if (block.toolCall != null)
             _ToolCallPill(call: block.toolCall!)
           else
@@ -79,8 +89,10 @@ class _ParagraphView extends StatelessWidget {
 
 class _CodeBlockView extends StatefulWidget {
   final CodeBlock code;
+  final DaemonApi? api;
+  final String workspacePath;
 
-  const _CodeBlockView({required this.code});
+  const _CodeBlockView({required this.code, this.api, this.workspacePath = ''});
 
   @override
   State<_CodeBlockView> createState() => _CodeBlockViewState();
@@ -92,6 +104,13 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
   bool get _isDiff {
     final lang = widget.code.language.toLowerCase();
     return lang == 'diff' || lang == 'patch';
+  }
+
+  /// P3 : blocs de code shell exécutables — le bouton « Exécuter » n'apparaît
+  /// que pour bash/sh/zsh/powershell/cmd (jamais pour dart, json, diff...).
+  bool get _isShell {
+    const shells = {'bash', 'sh', 'zsh', 'shell', 'powershell', 'pwsh', 'cmd'};
+    return shells.contains(widget.code.language.toLowerCase());
   }
 
   @override
@@ -171,6 +190,36 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
                           Icon(Icons.rate_review_outlined, size: 13, color: scheme.primary),
                           const SizedBox(width: 4),
                           Text('Review', style: TextStyle(fontSize: 11, color: scheme.primary, fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                if (_isShell) ...[
+                  // P3 : « Exécuter » — ouvre le terminal distant pré-rempli
+                  // avec le contenu du bloc shell (multi-ligne collé d'un coup).
+                  InkWell(
+                    key: const Key('run-in-terminal'),
+                    onTap: () {
+                      HapticFeedback.lightImpact();
+                      RemoteTerminalSheet.show(
+                        context,
+                        api: widget.api,
+                        projectName: widget.workspacePath.isEmpty
+                            ? 'Workspace'
+                            : widget.workspacePath,
+                        initialCommand: widget.code.code.trim(),
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(4),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      child: Row(
+                        children: [
+                          Icon(Icons.play_arrow_rounded, size: 13, color: scheme.primary),
+                          const SizedBox(width: 4),
+                          Text('Exécuter', style: TextStyle(fontSize: 11, color: scheme.primary, fontWeight: FontWeight.w600)),
                         ],
                       ),
                     ),
