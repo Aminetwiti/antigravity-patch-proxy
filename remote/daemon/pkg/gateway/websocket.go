@@ -666,6 +666,40 @@ func (s *Server) broadcast(msg OutgoingMessage) {
 	}
 }
 
+// buildQuotaData parse la réponse protobuf brute du LS en map JSON stable pour
+// le mobile (les 4 % attendus par le badge et le sheet Limites). ok=false si
+// aucune clé reconnue (schéma LS changé) — l'appelant retombe sur toOutgoing.
+func (s *Server) buildQuotaData(raw []byte) (map[string]interface{}, bool) {
+	q := connectrpc.ParseQuotaSummary(raw)
+	if !q.HasQuota() {
+		return nil, false
+	}
+	return map[string]interface{}{
+		"weeklyPercent":         q.WeeklyPercent,
+		"fiveHourPercent":       q.FiveHourPercent,
+		"weeklyPercentClaude":   q.WeeklyPercentClaude,
+		"fiveHourPercentClaude": q.FiveHourPercentClaude,
+	}, true
+}
+
+// pushQuotaUpdate récupère les quotas auprès du LS et les diffuse à tous les
+// clients (type "quota_update", pas de requestId — événement poussé, le mobile
+// le consomme via events). Appelé par le scheduler ; les erreurs sont loggées
+// et silencieuses pour le client (le prochain tick réessaiera).
+func (s *Server) pushQuotaUpdate() {
+	raw, err := s.RPCClient.RetrieveUserQuotaSummary()
+	if err != nil {
+		logJSON.Warn("quota_push_failed", "error", err.Error())
+		return
+	}
+	data, ok := s.buildQuotaData(raw)
+	if !ok {
+		logJSON.Debug("quota_push_skipped", "reason", "schema_unknown")
+		return
+	}
+	s.broadcast(OutgoingMessage{Type: "quota_update", Data: data})
+}
+
 type IncomingMessage struct {
 	Type          string `json:"type"`
 	RequestID     string `json:"requestId"`

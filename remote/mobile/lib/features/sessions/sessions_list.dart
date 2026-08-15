@@ -1069,7 +1069,7 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                         width: 6,
                         height: 6,
                         decoration: const BoxDecoration(
-                          color: AppColors.success,
+                          color: AppColors.positive,
                           shape: BoxShape.circle,
                         ),
                       ),
@@ -1080,7 +1080,7 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                         child: CircularProgressIndicator(
                           strokeWidth: 1.5,
                           valueColor: AlwaysStoppedAnimation<Color>(
-                            isSelected ? const Color(0xFFFFFFFF) : AppColors.success,
+                            isSelected ? const Color(0xFFFFFFFF) : AppColors.positive,
                           ),
                         ),
                       ),

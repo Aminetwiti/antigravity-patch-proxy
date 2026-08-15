@@ -38,6 +38,10 @@ class ChatStreamScreen extends StatefulWidget {
   /// mettre à jour les indicateurs de statut en direct dans la barre latérale.
   final ValueChanged<bool>? onStreamingStateChanged;
 
+  /// Crée une nouvelle conversation (bouton « + » des tabs). Laissé au parent
+  /// (main.dart) : il connaît la liste des sessions et le workspace actif.
+  final VoidCallback? onNewConversation;
+
   const ChatStreamScreen({
     super.key,
     required this.api,
@@ -46,6 +50,7 @@ class ChatStreamScreen extends StatefulWidget {
     this.isConnected = true,
     this.wsClient,
     this.onStreamingStateChanged,
+    this.onNewConversation,
   });
 
   @override
@@ -765,6 +770,14 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           }
           _scheduleThrottledUpdate();
         }
+      } else if (type == 'quota_update') {
+        // Push scheduler daemon (60 s) : remplace le polling mobile. La map
+        // data porte les 4 clés weeklyPercent/fiveHourPercent/… — on garde le
+        // timer 60 s en secours pour les daemons qui ne poussent pas encore.
+        final data = msg['data'] as Map<String, dynamic>?;
+        if (data != null && data.isNotEmpty && mounted) {
+          setState(() => _quotaSummary = data);
+        }
       } else if (type == 'stream_delta') {
         final textDelta = StreamDeltaParser.textOf(msg);
         final thoughtDelta = StreamDeltaParser.thinkingOf(msg);
@@ -1364,6 +1377,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           onOpenArtifact: (art) => setState(() {
             _activeArtifact = art;
           }),
+          onNewTab: widget.onNewConversation,
         ),
         _buildSyncStatusBadge(scheme),
         _buildQuotaBadge(scheme),

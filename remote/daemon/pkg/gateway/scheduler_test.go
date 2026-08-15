@@ -71,6 +71,52 @@ func TestNextRunAt(t *testing.T) {
 	}
 }
 
+// TestSchedulerQuotaPush vérifie le push de quotas scheduler → clients : un
+// client connecté reçoit un broadcast quota_update avec les 4 pourcentages
+// décodés (le LS n'est interrogé que si des clients sont là).
+func TestSchedulerQuotaPush(t *testing.T) {
+	backend := &fakeRPCClient{
+		quotaRaw: quotaFrame(t, map[string]float32{
+			"gemini-weekly": 0.42,
+			"gemini-5h":     0.68,
+			"3p-weekly":     0.10,
+			"3p-5h":         0.95,
+		}),
+	}
+	srv, server := newTestServerWithGW(backend)
+	defer srv.Close()
+	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	scheduler := NewScheduler(server)
+	// Forcer un push immédiat (horodatage zéro = jamais poussé).
+	scheduler.maybePushQuota(time.Now())
+
+	msg := client.recv(t)
+	if msg["type"] != "quota_update" {
+		t.Fatalf("Attendu broadcast quota_update, reçu %v", msg)
+	}
+	data, ok := msg["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Données quota manquantes: %v", msg)
+	}
+	expected := map[string]int{"weeklyPercent": 42, "fiveHourPercent": 68, "weeklyPercentClaude": 10, "fiveHourPercentClaude": 95}
+	for k, want := range expected {
+		got, _ := data[k].(float64)
+		if int(got) != want {
+			t.Errorf("%s = %v, attendu %d", k, data[k], want)
+		}
+	}
+	// second appel dans la fenêtre : rien de nouveau
+	if err := client.conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	scheduler.maybePushQuota(time.Now().Add(quotaPushInterval - time.Second))
+	if _, _, err := client.conn.ReadMessage(); err == nil {
+		t.Error("Un push dans la fenêtre d'intervalle n'aurait pas dû émettre de message")
+	}
+}
+
 func TestExtractCascadeID(t *testing.T) {
 	// Réponse protobuf : champ #1 length-delimited "casc-123" (0x0A 0x08 + 8 octets).
 	payload := append([]byte{0x0A, 0x08}, []byte("casc-123")...)

@@ -352,6 +352,42 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     }
   }
 
+  /// Crée une nouvelle conversation (bouton « + » de la barre latérale ET des
+  /// onglets de session) puis bascule dessus. Workflow partagé entre
+  /// LeftSidebarDrawer et ChatStreamScreen.
+  Future<void> _createNewConversation() async {
+    final api = _api;
+    if (api == null) return;
+    try {
+      var ws = _sessions.isNotEmpty ? _sessions.first.workspacePath : '';
+      if (ws.isEmpty) {
+        final cur = _sessions.where((s) => s.id == _activeSessionId);
+        if (cur.isNotEmpty) ws = cur.first.workspacePath;
+      }
+      final res = await api.createCascade(ws);
+      String newId = '';
+      if (res['cascadeId'] is String) {
+        newId = res['cascadeId'] as String;
+      } else if (res['id'] is String) {
+        newId = res['id'] as String;
+      } else if (res['fields'] is List) {
+        for (final f in res['fields']) {
+          if (f is Map && f['text'] is String && (f['text'] as String).isNotEmpty) {
+            newId = f['text'] as String;
+            break;
+          }
+        }
+      }
+      if (newId.isNotEmpty && mounted) {
+        setState(() {
+          _activeSessionId = newId;
+          _activeSessionTitle = 'Nouvelle conversation';
+        });
+        await _refreshSessions();
+      }
+    } catch (_) {}
+  }
+
   Future<void> _refreshSessions() async {
     // Bug #15 : évite le double appel concurrent (connexion + reconnectVersion).
     if (_sessionsFetching) return;
@@ -687,38 +723,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         // Bug #2 : rafraîchir le contexte pour la nouvelle session.
         _refreshContext();
       },
-      onNewConversation: () async {
-        final api = _api;
-        if (api == null) return;
-        try {
-          var ws = _sessions.isNotEmpty ? _sessions.first.workspacePath : '';
-          if (ws.isEmpty) {
-            final cur = _sessions.where((s) => s.id == _activeSessionId);
-            if (cur.isNotEmpty) ws = cur.first.workspacePath;
-          }
-          final res = await api.createCascade(ws);
-          String newId = '';
-          if (res['cascadeId'] is String) {
-            newId = res['cascadeId'] as String;
-          } else if (res['id'] is String) {
-            newId = res['id'] as String;
-          } else if (res['fields'] is List) {
-            for (final f in res['fields']) {
-              if (f is Map && f['text'] is String && (f['text'] as String).isNotEmpty) {
-                newId = f['text'] as String;
-                break;
-              }
-            }
-          }
-          if (newId.isNotEmpty && mounted) {
-            setState(() {
-              _activeSessionId = newId;
-              _activeSessionTitle = 'Nouvelle conversation';
-            });
-            await _refreshSessions();
-          }
-        } catch (_) {}
-      },
+      onNewConversation: _createNewConversation,
       onDeleteSession: _deleteSession,
       onRenameSession: _renameSession,
       onExportSession: _exportSession,
@@ -793,7 +798,9 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
   Widget build(BuildContext context) {
     final status = _wsClient.statusNotifier.value;
     final isConnected = status == ConnectionStatus.connected;
-    final isWideScreen = MediaQuery.sizeOf(context).width >= 840;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final isUltraWide = screenWidth >= 1280;
+    final isWideScreen = screenWidth >= 840;
     final sidebar = _buildSidebar(isConnected);
 
     final chatStream = ChatStreamScreen(
@@ -815,19 +822,21 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       },
     );
 
+    final contextDrawer = RightSidebarDrawer(
+      api: _api,
+      activeSessionId: _activeSessionId,
+      subagentsCount: _contextStats['subagentsCount'] as int? ?? 0,
+      filesChangedCount: _contextStats['filesChangedCount'] as int? ?? 0,
+      artifactsCount: _contextStats['artifactsCount'] as int? ?? 0,
+      uploadsCount: _contextStats['uploadsCount'] as int? ?? 0,
+      backgroundTasksCount: _contextStats['backgroundTasksCount'] as int? ?? 0,
+    );
+
     final scaffold = Scaffold(
       key: _scaffoldKey,
       extendBodyBehindAppBar: false,
       drawer: isWideScreen ? null : sidebar,
-      endDrawer: RightSidebarDrawer(
-        api: _api,
-        activeSessionId: _activeSessionId,
-        subagentsCount: _contextStats['subagentsCount'] as int? ?? 0,
-        filesChangedCount: _contextStats['filesChangedCount'] as int? ?? 0,
-        artifactsCount: _contextStats['artifactsCount'] as int? ?? 0,
-        uploadsCount: _contextStats['uploadsCount'] as int? ?? 0,
-        backgroundTasksCount: _contextStats['backgroundTasksCount'] as int? ?? 0,
-      ),
+      endDrawer: isUltraWide ? null : contextDrawer,
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.surface,
         elevation: 0,
@@ -861,45 +870,27 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                   _wsClient.connect();
                 }
               },
-              borderRadius: BorderRadius.circular(12),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeInOut,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: isConnected
-                      ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.15)
-                      : Theme.of(context).colorScheme.error.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: isConnected ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.error,
-                    width: 1,
-                  ),
-                ),
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
-                      curve: Curves.easeInOut,
-                      width: 6,
-                      height: 6,
+                    Container(
+                      width: 8,
+                      height: 8,
                       decoration: BoxDecoration(
-                        color: isConnected ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.error,
+                        color: isConnected ? AppColors.positive : AppColors.danger,
                         shape: BoxShape.circle,
                       ),
                     ),
-                    const SizedBox(width: 5),
-                    AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 300),
-                      child: Text(
-                        isConnected ? '💻 PC Direct' : 'Offline',
-                        key: ValueKey<bool>(isConnected),
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          color: isConnected ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.error,
-                          fontWeight: FontWeight.w600,
-                        ),
+                    const SizedBox(width: 6),
+                    Text(
+                      isConnected ? 'Connecté' : 'Hors ligne',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: isConnected ? AppColors.positive : AppColors.danger,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
@@ -921,18 +912,19 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
             },
             tooltip: 'Ouvrir le terminal distant',
           ),
-          IconButton(
-            icon: Icon(Icons.vertical_split_outlined, size: 20, color: Theme.of(context).colorScheme.onSurface),
-            onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
-            tooltip: 'Ouvrir le panneau contexte',
-          ),
+          if (!isUltraWide)
+            IconButton(
+              icon: Icon(Icons.vertical_split_outlined, size: 20, color: Theme.of(context).colorScheme.onSurface),
+              onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
+              tooltip: 'Ouvrir le panneau contexte',
+            ),
         ],
       ),
-      body: isWideScreen
+      body: isUltraWide
           ? Row(
               children: [
                 SizedBox(
-                  width: 320,
+                  width: 280,
                   child: Material(
                     color: Theme.of(context).colorScheme.surfaceContainer,
                     child: sidebar,
@@ -944,9 +936,39 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                   color: Theme.of(context).colorScheme.outlineVariant,
                 ),
                 Expanded(child: chatStream),
+                VerticalDivider(
+                  width: 1,
+                  thickness: 1,
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
+                SizedBox(
+                  width: 320,
+                  child: Material(
+                    color: Theme.of(context).colorScheme.surfaceContainer,
+                    child: contextDrawer,
+                  ),
+                ),
               ],
             )
-          : chatStream,
+          : isWideScreen
+              ? Row(
+                  children: [
+                    SizedBox(
+                      width: 320,
+                      child: Material(
+                        color: Theme.of(context).colorScheme.surfaceContainer,
+                        child: sidebar,
+                      ),
+                    ),
+                    VerticalDivider(
+                      width: 1,
+                      thickness: 1,
+                      color: Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                    Expanded(child: chatStream),
+                  ],
+                )
+              : chatStream,
     );
 
     return CallbackShortcuts(
