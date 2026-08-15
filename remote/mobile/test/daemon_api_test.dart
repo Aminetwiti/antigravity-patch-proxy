@@ -425,5 +425,126 @@ void main() {
       await controller.close();
       api.dispose();
     });
+
+    test('getUserStatus requests user profile and credits', () async {
+      final outgoing = <Map<String, dynamic>>[];
+      final controller = StreamController<dynamic>();
+      final api = DaemonApi(
+        incoming: controller.stream,
+        send: (data) => outgoing.add(data as Map<String, dynamic>),
+      );
+
+      final future = api.getUserStatus();
+      await Future<void>.delayed(Duration.zero);
+      expect(outgoing.first['type'], 'get_user_status');
+      final requestId = outgoing.first['requestId'] as String;
+
+      controller.add(
+        jsonEncode({
+          'type': 'response',
+          'requestId': requestId,
+          'data': {
+            'user': {'name': 'Amine', 'plan': 'pro'},
+            'credits': {'available': 100},
+          },
+        }),
+      );
+
+      final res = await future;
+      expect((res['user'] as Map)['name'], 'Amine');
+      expect((res['credits'] as Map)['available'], 100);
+      await controller.close();
+      api.dispose();
+    });
+
+    test('generateCommitMessage returns AI commit string', () async {
+      final outgoing = <Map<String, dynamic>>[];
+      final controller = StreamController<dynamic>();
+      final api = DaemonApi(
+        incoming: controller.stream,
+        send: (data) => outgoing.add(data as Map<String, dynamic>),
+      );
+
+      final future = api.generateCommitMessage();
+      await Future<void>.delayed(Duration.zero);
+      expect(outgoing.first['type'], 'generate_commit_message');
+      final requestId = outgoing.first['requestId'] as String;
+
+      controller.add(
+        jsonEncode({
+          'type': 'response',
+          'requestId': requestId,
+          'data': {
+            'commitMessage': 'feat(remote): add quota gauges',
+          },
+        }),
+      );
+
+      final res = await future;
+      expect(res, 'feat(remote): add quota gauges');
+      await controller.close();
+      api.dispose();
+    });
+
+    test('exportMarkdown returns markdown text', () async {
+      final outgoing = <Map<String, dynamic>>[];
+      final controller = StreamController<dynamic>();
+      final api = DaemonApi(
+        incoming: controller.stream,
+        send: (data) => outgoing.add(data as Map<String, dynamic>),
+      );
+
+      final future = api.exportMarkdown('casc-1');
+      await Future<void>.delayed(Duration.zero);
+      expect(outgoing.first['type'], 'export_markdown');
+      expect(outgoing.first['cascadeId'], 'casc-1');
+      final requestId = outgoing.first['requestId'] as String;
+
+      controller.add(
+        jsonEncode({
+          'type': 'response',
+          'requestId': requestId,
+          'data': {
+            'markdown': '# Cascade Transcript\n\nPrompt here',
+          },
+        }),
+      );
+
+      final res = await future;
+      expect(res, contains('# Cascade Transcript'));
+      await controller.close();
+      api.dispose();
+    });
+
+    test('createWorktree sends branch and returns status', () async {
+      final outgoing = <Map<String, dynamic>>[];
+      final controller = StreamController<dynamic>();
+      final api = DaemonApi(
+        incoming: controller.stream,
+        send: (data) => outgoing.add(data as Map<String, dynamic>),
+      );
+
+      final future = api.createWorktree('feat/sub-agent');
+      await Future<void>.delayed(Duration.zero);
+      expect(outgoing.first['type'], 'create_worktree');
+      expect(outgoing.first['branch'], 'feat/sub-agent');
+      final requestId = outgoing.first['requestId'] as String;
+
+      controller.add(
+        jsonEncode({
+          'type': 'response',
+          'requestId': requestId,
+          'data': {
+            'status': 'created',
+          },
+        }),
+      );
+
+      final res = await future;
+      expect(res, isTrue);
+      await controller.close();
+      api.dispose();
+    });
   });
 }
+

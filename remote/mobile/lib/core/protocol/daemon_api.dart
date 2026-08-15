@@ -655,6 +655,50 @@ class DaemonApi {
     return await rpc('get_quota_summary', {});
   }
 
+  /// Récupère le profil et statut utilisateur (plan, crédits disponibles).
+  Future<Map<String, dynamic>> getUserStatus() async {
+    return await rpc('get_user_status', {});
+  }
+
+  /// Récupère la disponibilité et dégradation des modèles IA.
+  Future<Map<String, dynamic>> getModelStatuses() async {
+    return await rpc('get_model_statuses', {});
+  }
+
+  /// Génère un message de commit IA conventionnel basé sur le staging git.
+  Future<String> generateCommitMessage() async {
+    final res = await rpc('generate_commit_message', {});
+    if (res['commitMessage'] != null) {
+      return res['commitMessage'].toString();
+    }
+    if (res['message'] != null) {
+      return res['message'].toString();
+    }
+    return '';
+  }
+
+  /// Exporte l'intégralité d'une session / trajectoire en Markdown.
+  Future<String> exportMarkdown(String cascadeId, {String? trajectoryId}) async {
+    final res = await rpc('export_markdown', {
+      'cascadeId': cascadeId,
+      if (trajectoryId != null) 'trajectoryId': trajectoryId,
+    });
+    if (res['markdown'] != null) {
+      return res['markdown'].toString();
+    }
+    return '';
+  }
+
+  /// Crée un worktree Git pour le développement parallèle.
+  Future<bool> createWorktree(String branch, {String? path}) async {
+    final res = await rpc('create_worktree', {
+      'branch': branch,
+      if (path != null) 'path': path,
+    });
+    return res['status'] == 'created';
+  }
+
+
 
   void _onMessage(dynamic raw) {
     if (raw is! String) return; // daemon sends JSON text only

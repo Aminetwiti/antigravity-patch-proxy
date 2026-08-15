@@ -127,6 +127,10 @@ import { trimContextPayload } from './proxy/contextTrimmer';
 import { checkAllModelsHealth } from './proxy/modelHealthChecker';
 import { recordRecentModel, restoreRecentModels } from './proxy/recentModelsStore';
 
+// MCP relay bridge (mobile companion): lists MCP servers configured on the
+// desktop session and forwards tool calls to the local MCP runtime.
+import { mcpListServers, mcpCallTool } from './proxy/mcpRelay';
+
 // ─── Proxy Error Emitter ──────────────────────────────────────────────────
 // Lets the main process fan-out notable diagnostics to the renderer without
 // proxy.ts depending on Electron directly. ipcHandlers.ts calls
@@ -1451,6 +1455,37 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
     const bodyStr = fullBody.toString('utf-8');
 
     log.info(`[Proxy] Request: ${req.method} ${req.url}`);
+
+    // MCP relay: the mobile companion asks the desktop session for the list
+    // of configured MCP servers (name + tools + status) because the phone
+    // holds no credentials or allowlist. The actual MCP runtime is the
+    // Antigravity IDE sidecar; we simply delegate and relay its JSON.
+    if (req.method === 'GET' && (req.url === '/list_mcp_servers' || req.url === '/mcp_servers')) {
+      const listRes = await mcpListServers();
+      if (safeWriteHead(res, 200, { 'Content-Type': 'application/json' })) {
+        safeEnd(res, JSON.stringify(listRes));
+      }
+      return;
+    }
+
+    // MCP tool relay (same shape the daemon sends): serverName, toolName,
+    // arguments. The proxy forwards to the MCP runtime and relays the JSON.
+    if (req.method === 'POST' && req.url === '/call_mcp_tool') {
+      let payload: Record<string, unknown> = {};
+      try {
+        payload = JSON.parse(bodyStr || '{}');
+      } catch (e) {
+        if (safeWriteHead(res, 400, { 'Content-Type': 'application/json' })) {
+          safeEnd(res, JSON.stringify({ error: { message: 'Invalid JSON body' } }));
+        }
+        return;
+      }
+      const callRes = await mcpCallTool(payload);
+      if (safeWriteHead(res, 200, { 'Content-Type': 'application/json' })) {
+        safeEnd(res, JSON.stringify(callRes));
+      }
+      return;
+    }
 
     // 0. Intercept GetAvailableModels (redirected from Electron webRequest)
     if (req.url!.startsWith('/GetAvailableModels')) {

@@ -75,6 +75,16 @@ type RPCClient interface {
 	SkipBrowserSubagent(cascadeID string, stepIndex int64) error
 	// RetrieveUserQuotaSummary récupère le résumé des quotas utilisateur du Language Server.
 	RetrieveUserQuotaSummary() ([]byte, error)
+	// GetUserStatus récupère les infos et crédits de l'utilisateur.
+	GetUserStatus() ([]byte, error)
+	// GetModelStatuses récupère la disponibilité et dégradation des modèles.
+	GetModelStatuses() ([]byte, error)
+	// GenerateCommitMessage génère un message de commit IA à partir du staging git.
+	GenerateCommitMessage() ([]byte, error)
+	// ConvertTrajectoryToMarkdown convertit une session en document Markdown.
+	ConvertTrajectoryToMarkdown(trajectoryID string) ([]byte, error)
+	// CreateWorktree crée un nouveau worktree Git.
+	CreateWorktree(branch, path string) ([]byte, error)
 }
 
 // checkOrigin rejette les navigateurs web arbitraires (CSWSH) tout en
@@ -417,8 +427,9 @@ const writeTimeout = 10 * time.Second
 // broadcast, les réponses unary et la goroutine de ping passent tous par le
 // mutex de LA connexion ciblée, jamais par un mutex global).
 func (s *Server) writeJSON(conn *websocket.Conn, msg OutgoingMessage) error {
-	s.writeLock(conn).Lock()
-	defer s.writeLock(conn).Unlock()
+	mu := s.writeLock(conn)
+	mu.Lock()
+	defer mu.Unlock()
 	conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 	if err := conn.WriteJSON(msg); err != nil {
 		logJSON.Warn("write_error", "err", err)
@@ -452,12 +463,15 @@ func (s *Server) releaseWriteLock(conn *websocket.Conn) {
 const mcpTimeout = 30 * time.Second
 
 // handleMcpAction relaie call_mcp_tool / connect_mcp_server /
-// refresh_mcp_oauth_token vers le proxy MCP Antigravity desktop
-// (127.0.0.1:50999). Le mobile n'a ni les identifiants ni l'allowlist MCP :
-// la session du PC est le seul détenteur légitime — le daemon n'est qu'un
-// tunnel. La réponse JSON du proxy est relayée telle quelle dans Data.
+// refresh_mcp_oauth_token / list_mcp_servers vers le proxy MCP Antigravity
+// desktop (127.0.0.1:50999). Le mobile n'a ni les identifiants ni l'allowlist
+// MCP : la session du PC est le seul détenteur légitime — le daemon n'est
+// qu'un tunnel. La réponse JSON du proxy est relayée telle quelle dans Data.
 func (s *Server) handleMcpAction(conn *websocket.Conn, msg IncomingMessage) {
-	if msg.ServerName == "" {
+	// list_mcp_servers est une opération de listing (GET, sans serverName) :
+	// le mobile demande la liste des serveurs configurés sur le PC. Les autres
+	// actions MCP exigent un serverName.
+	if msg.Type != "list_mcp_servers" && msg.ServerName == "" {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "serverName requis"})
 		return
 	}
@@ -478,14 +492,19 @@ func (s *Server) handleMcpAction(conn *websocket.Conn, msg IncomingMessage) {
 		payload["grantType"] = msg.GrantType
 	}
 
-	body, err := json.Marshal(payload)
-	if err != nil {
-		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "erreur d'encodage: " + err.Error()})
-		return
-	}
-
 	client := &http.Client{Timeout: mcpTimeout}
-	resp, err := client.Post(mcpProxyBase+"/"+msg.Type, "application/json", bytes.NewReader(body))
+	var resp *http.Response
+	var err error
+	if msg.Type == "list_mcp_servers" {
+		resp, err = client.Get(mcpProxyBase + "/list_mcp_servers")
+	} else {
+		body, errMarshal := json.Marshal(payload)
+		if errMarshal != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "erreur d'encodage: " + errMarshal.Error()})
+			return
+		}
+		resp, err = client.Post(mcpProxyBase+"/"+msg.Type, "application/json", bytes.NewReader(body))
+	}
 	if err != nil {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "proxy MCP injoignable: " + err.Error()})
 		return
@@ -506,6 +525,28 @@ func (s *Server) handleMcpAction(conn *websocket.Conn, msg IncomingMessage) {
 	if err := json.Unmarshal(respBody, &proxyResp); err != nil {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"raw": string(respBody)}})
 		return
+	}
+	// list_mcp_servers : nettoyage l�ger du payload relay� — un serveur MCP
+	// configur� sans champ "name" n'a pas � exposer serverName:"" au mobile.
+	if msg.Type == "list_mcp_servers" {
+		if servers, ok := proxyResp["servers"].([]interface{}); ok {
+			cleaned := make([]interface{}, 0, len(servers))
+			for _, s := range servers {
+				entry, ok := s.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				for k, v := range entry {
+					if v == nil {
+						delete(entry, k)
+					}
+				}
+				if name, _ := entry["name"].(string); name != "" {
+					cleaned = append(cleaned, entry)
+				}
+			}
+			proxyResp["servers"] = cleaned
+		}
 	}
 	s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: proxyResp})
 }
@@ -1234,12 +1275,13 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		for {
 			select {
 		case <-ticker.C:
-			s.writeLock(conn).Lock()
+			mu := s.writeLock(conn)
+			mu.Lock()
 			err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second))
-			s.writeLock(conn).Unlock()
-				if err != nil {
-					return
-				}
+			mu.Unlock()
+			if err != nil {
+				return
+			}
 			}
 		}
 	}()
@@ -1286,10 +1328,14 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if msg.Type != "send_prompt" && msg.Type != "cancel_generation" &&
+		msg.Type != "heartbeat" && msg.Type != "ping" &&
 		msg.Type != "create_cascade" &&
 		msg.Type != "get_pending_approval" && msg.Type != "list_files" &&
 		msg.Type != "read_file" && msg.Type != "sync_session" &&
-		msg.Type != "get_quota_summary" && msg.Type != "system.get_quota_summary" {
+		msg.Type != "get_quota_summary" && msg.Type != "system.get_quota_summary" &&
+		msg.Type != "get_user_status" && msg.Type != "get_model_statuses" &&
+		msg.Type != "generate_commit_message" && msg.Type != "export_markdown" &&
+		msg.Type != "create_worktree" {
 		c := make(chan struct{})
 		go func() {
 			select {
@@ -2208,7 +2254,110 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 
-	case "call_mcp_tool", "connect_mcp_server", "refresh_mcp_oauth_token":
+	case "get_user_status", "user.get_status":
+		raw, err = s.RPCClient.GetUserStatus()
+		if err == nil {
+			var parsed interface{}
+			if errJSON := json.Unmarshal(raw, &parsed); errJSON == nil {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: parsed})
+				return
+			}
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+			return
+		}
+
+	case "get_model_statuses", "models.get_statuses":
+		raw, err = s.RPCClient.GetModelStatuses()
+		if err == nil {
+			var parsed interface{}
+			if errJSON := json.Unmarshal(raw, &parsed); errJSON == nil {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: parsed})
+				return
+			}
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+			return
+		}
+
+	case "generate_commit_message", "workspace.generate_commit_message":
+		raw, err = s.RPCClient.GenerateCommitMessage()
+		if err != nil {
+			errStr := err.Error()
+			if strings.Contains(errStr, "repository does not exist") || strings.Contains(errStr, "500") {
+				s.writeJSON(conn, OutgoingMessage{
+					Type:      "response",
+					RequestID: msg.RequestID,
+					Error:     "Aucune modification indexée (staged). Exécutez 'git add' d'abord.",
+				})
+				return
+			}
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errStr})
+			return
+		}
+		var parsed interface{}
+		if errJSON := json.Unmarshal(raw, &parsed); errJSON == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: parsed})
+			return
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+		return
+
+	case "export_markdown", "trajectory.export_markdown":
+		cascadeID := msg.CascadeID
+		if cascadeID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
+			return
+		}
+		trajectoryID := msg.TrajectoryID
+		if trajectoryID == "" {
+			trajectoryID = cascadeID
+			if trajRaw, ok := s.cachedSessions(); ok {
+				for _, sum := range connectrpc.ParseTrajectories(trajRaw) {
+					if sum.CascadeID == cascadeID && sum.TrajectoryID != "" {
+						trajectoryID = sum.TrajectoryID
+						break
+					}
+				}
+			}
+		}
+		raw, err = s.RPCClient.ConvertTrajectoryToMarkdown(trajectoryID)
+		if err == nil {
+			var parsed interface{}
+			if errJSON := json.Unmarshal(raw, &parsed); errJSON == nil {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: parsed})
+				return
+			}
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"markdown": string(raw)}})
+			return
+		}
+
+	case "create_worktree", "workspace.create_worktree":
+		branch := msg.Command
+		path := msg.FilePath
+		if msg.Data != nil {
+			if b, ok := msg.Data["branch"].(string); ok && b != "" {
+				branch = b
+			}
+			if p, ok := msg.Data["path"].(string); ok && p != "" {
+				path = p
+			}
+		}
+		if branch == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "branch requis"})
+			return
+		}
+		raw, err = s.RPCClient.CreateWorktree(branch, path)
+		if err == nil {
+			var parsed interface{}
+			if errJSON := json.Unmarshal(raw, &parsed); errJSON == nil {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: parsed})
+				return
+			}
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+			return
+		}
+
+
+	case "call_mcp_tool", "connect_mcp_server", "refresh_mcp_oauth_token", "list_mcp_servers":
 		// Route les actions MCP vers le proxy Antigravity desktop
 		// (127.0.0.1:50999). Le mobile n'a pas les identifiants MCP :
 		// la session du PC est le seul détenteur des jetons OAuth et de

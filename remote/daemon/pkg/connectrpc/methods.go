@@ -91,3 +91,31 @@ func (c *Client) GetCascadeTrajectory(cascadeID string, verbosity uint64) ([]byt
 func (c *Client) GetTurnDiff(conversationID string, stepIndex int64) ([]byte, error) {
 	return c.Call("GetTurnDiff", BuildGetTurnDiff(conversationID, stepIndex))
 }
+
+// GetUserStatus récupère les infos du compte utilisateur (statut, crédits, plan).
+func (c *Client) GetUserStatus() ([]byte, error) {
+	return c.CallJSON("GetUserStatus", nil)
+}
+
+// GetModelStatuses récupère les statuts et disponibilités des modèles.
+func (c *Client) GetModelStatuses() ([]byte, error) {
+	return c.CallJSON("GetModelStatuses", nil)
+}
+
+// GenerateCommitMessage génère un message de commit IA basé sur le staging git.
+func (c *Client) GenerateCommitMessage() ([]byte, error) {
+	return c.CallJSON("GenerateCommitMessage", nil)
+}
+
+// ConvertTrajectoryToMarkdown convertit une trajectoire résolue en Markdown.
+func (c *Client) ConvertTrajectoryToMarkdown(trajectoryID string) ([]byte, error) {
+	payload := []byte(`{"trajectory":{"trajectoryId":"` + trajectoryID + `"}}`)
+	return c.CallJSON("ConvertTrajectoryToMarkdown", payload)
+}
+
+// CreateWorktree crée un worktree Git pour le développement parallèle.
+func (c *Client) CreateWorktree(branch, path string) ([]byte, error) {
+	payload := []byte(`{"branch":"` + branch + `","path":"` + path + `"}`)
+	return c.CallJSON("CreateWorktree", payload)
+}
+

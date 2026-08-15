@@ -124,6 +124,37 @@ func (c *Client) Call(method string, payload []byte) ([]byte, error) {
 	return frames[0], nil
 }
 
+// CallJSON exécute une méthode RPC en ConnectRPC JSON direct (Content-Type: application/json).
+func (c *Client) CallJSON(method string, payload []byte) ([]byte, error) {
+	port, csrfToken := c.Endpoint()
+	url := fmt.Sprintf("http://%s:%d/exa.language_server_pb.LanguageServerService/%s", c.Host, port, method)
+	if len(payload) == 0 {
+		payload = []byte("{}")
+	}
+	req, err := http.NewRequest("POST", url, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Connect-Protocol-Version", "1")
+	req.Header.Set("x-codeium-csrf-token", csrfToken)
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return raw, fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(string(raw), 200))
+	}
+	return raw, nil
+}
+
 // CallStream exécute une méthode RPC en streaming gRPC-Web et invoque onFrame pour chaque frame protobuf reçue.
 func (c *Client) CallStream(method string, payload []byte, timeout time.Duration, onFrame func([]byte) error) error {
 	port, csrfToken := c.Endpoint()

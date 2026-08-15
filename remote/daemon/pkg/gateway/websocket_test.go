@@ -293,6 +293,27 @@ func (f *fakeRPCClient) RetrieveUserQuotaSummary() ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("quota-summary")), nil
 }
 
+func (f *fakeRPCClient) GetUserStatus() ([]byte, error) {
+	return []byte(`{"user":{"name":"Test User","email":"test@antigravity.dev","plan":"pro"},"credits":{"available":100}}`), nil
+}
+
+func (f *fakeRPCClient) GetModelStatuses() ([]byte, error) {
+	return []byte(`{"modelStatuses":[{"modelId":"MODEL_PLACEHOLDER_M37","status":"AVAILABLE"}]}`), nil
+}
+
+func (f *fakeRPCClient) GenerateCommitMessage() ([]byte, error) {
+	return []byte(`{"commitMessage":"feat(remote): integrate quota gauges and commit generator"}`), nil
+}
+
+func (f *fakeRPCClient) ConvertTrajectoryToMarkdown(trajectoryID string) ([]byte, error) {
+	return []byte("# Session Export\n\n- User: Hello\n- Assistant: Hi!"), nil
+}
+
+func (f *fakeRPCClient) CreateWorktree(branch, path string) ([]byte, error) {
+	return []byte(`{"status":"created","branch":"` + branch + `"}`), nil
+}
+
+
 
 // --- Tests WebSocket ---
 
@@ -1020,6 +1041,7 @@ func TestWebSocketSetApprovalTimeout(t *testing.T) {
 				break
 			}
 		}
+
 		expired := client.recv(t)
 		if expired["type"] != "approval_expired" {
 			t.Fatalf("Attendu approval_expired après expiration rapide, reçu %v", expired)
@@ -1039,3 +1061,94 @@ func TestWebSocketSetApprovalTimeout(t *testing.T) {
 		}
 	})
 }
+
+// TestWebSocketGetUserStatus vérifie la récupération du statut utilisateur.
+func TestWebSocketGetUserStatus(t *testing.T) {
+	backend := &fakeRPCClient{}
+	srv := newTestServer(backend)
+	defer srv.Close()
+	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	client.send(t, map[string]string{"type": "get_user_status", "requestId": "rUsr1"})
+	msg := client.recv(t)
+	if msg["type"] != "response" || msg["requestId"] != "rUsr1" {
+		t.Fatalf("Réponse inattendue: %v", msg)
+	}
+	data, ok := msg["data"].(map[string]interface{})
+	if !ok || data["user"] == nil {
+		t.Fatalf("Données de statut utilisateur manquantes: %v", msg)
+	}
+}
+
+// TestWebSocketGetModelStatuses vérifie la récupération des statuts modèles.
+func TestWebSocketGetModelStatuses(t *testing.T) {
+	backend := &fakeRPCClient{}
+	srv := newTestServer(backend)
+	defer srv.Close()
+	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	client.send(t, map[string]string{"type": "get_model_statuses", "requestId": "rM1"})
+	msg := client.recv(t)
+	if msg["type"] != "response" || msg["requestId"] != "rM1" {
+		t.Fatalf("Réponse inattendue: %v", msg)
+	}
+	data, ok := msg["data"].(map[string]interface{})
+	if !ok || data["modelStatuses"] == nil {
+		t.Fatalf("Statuts modèles manquants: %v", msg)
+	}
+}
+
+// TestWebSocketGenerateCommitMessage vérifie la génération de commit IA.
+func TestWebSocketGenerateCommitMessage(t *testing.T) {
+	backend := &fakeRPCClient{}
+	srv := newTestServer(backend)
+	defer srv.Close()
+	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	client.send(t, map[string]string{"type": "generate_commit_message", "requestId": "rCm1"})
+	msg := client.recv(t)
+	if msg["type"] != "response" || msg["requestId"] != "rCm1" {
+		t.Fatalf("Réponse inattendue: %v", msg)
+	}
+	data, ok := msg["data"].(map[string]interface{})
+	if !ok || data["commitMessage"] == nil {
+		t.Fatalf("Message de commit manquant: %v", msg)
+	}
+}
+
+// TestWebSocketExportMarkdown vérifie l'export de trajectoire en Markdown.
+func TestWebSocketExportMarkdown(t *testing.T) {
+	backend := &fakeRPCClient{}
+	srv := newTestServer(backend)
+	defer srv.Close()
+	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	client.send(t, map[string]string{"type": "export_markdown", "requestId": "rMd1", "cascadeId": "casc-1"})
+	msg := client.recv(t)
+	if msg["type"] != "response" || msg["requestId"] != "rMd1" {
+		t.Fatalf("Réponse inattendue: %v", msg)
+	}
+	if msg["data"] == nil {
+		t.Fatalf("Données markdown manquantes: %v", msg)
+	}
+}
+
+// TestWebSocketCreateWorktree vérifie la création de worktree.
+func TestWebSocketCreateWorktree(t *testing.T) {
+	backend := &fakeRPCClient{}
+	srv := newTestServer(backend)
+	defer srv.Close()
+	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	client.send(t, map[string]string{"type": "create_worktree", "requestId": "rWt1", "command": "feature/new-branch"})
+	msg := client.recv(t)
+	if msg["type"] != "response" || msg["requestId"] != "rWt1" {
+		t.Fatalf("Réponse inattendue: %v", msg)
+	}
+}
+

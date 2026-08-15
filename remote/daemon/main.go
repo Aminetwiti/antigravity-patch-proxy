@@ -94,6 +94,8 @@ func main() {
 
 	server := gateway.NewServer(rpcClient, authToken)
 	server.SetApprovalTimeout(time.Duration(approvalTimeoutMin) * time.Minute)
+	sched := gateway.NewScheduler(server)
+	sched.Start()
 
 	http.HandleFunc("/ws", server.HandleWebSocket)
 	http.HandleFunc("/health", server.HTTPHandler)
@@ -121,6 +123,7 @@ func main() {
 		tunnelMgr.Stop()
 		beacon.Stop()
 		watchdog.Stop()
+		sched.Stop()
 	}()
 
 	fmt.Printf("🌐 Daemon listening on ws://%s:%d/ws\n", host, listenPort)

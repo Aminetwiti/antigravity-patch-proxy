@@ -272,6 +272,60 @@ Le contenu est transmis en **base64** (JSON ne transporte pas de binaire proprem
 ```
 *Note : le chemin est normalisé en URI `file:///` avant transmission au LS ; base64 invalide → erreur sans appel RPC.*
 
+#### 11. `get_user_status` / `user.get_status` (Profil, Plan et Crédits)
+Récupère les informations du compte utilisateur, plan actif et solde de crédits.
+
+```json
+{
+  "type": "get_user_status",
+  "requestId": "req_112"
+}
+```
+
+#### 12. `get_model_statuses` / `models.get_statuses` (Statuts et Dégradations Modèles)
+Récupère la disponibilité en temps réel de tous les modèles (Claude, Gemini, GPT-OSS).
+
+```json
+{
+  "type": "get_model_statuses",
+  "requestId": "req_113"
+}
+```
+
+#### 13. `generate_commit_message` / `workspace.generate_commit_message` (Générateur de Commit IA)
+Génère un message de commit conventionnel basé sur les fichiers actuellement dans le staging Git (`git add`).
+
+```json
+{
+  "type": "generate_commit_message",
+  "requestId": "req_114"
+}
+```
+*En cas d'absence de fichiers indexés, le daemon intercepte l'erreur interne 500 et renvoie une explication claire.*
+
+#### 14. `export_markdown` / `trajectory.export_markdown` (Export de Session Markdown)
+Résout le `trajectoryId` et convertit l'intégralité d'une conversation en document Markdown.
+
+```json
+{
+  "type": "export_markdown",
+  "requestId": "req_115",
+  "cascadeId": "cas_abc123"
+}
+```
+
+#### 15. `create_worktree` / `workspace.create_worktree` (Isolation Git Worktree)
+Crée un nouveau worktree Git pour exécuter une tâche agentique en parallèle.
+
+```json
+{
+  "type": "create_worktree",
+  "requestId": "req_116",
+  "branch": "feature/parallel-task"
+}
+```
+
+
 ---
 
 ## 7. Sécurité & Résilience Réseau

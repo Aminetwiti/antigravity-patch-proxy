@@ -244,6 +244,22 @@ func (l *loadRPCClient) SkipBrowserSubagent(cascadeID string, stepIndex int64) e
 func (l *loadRPCClient) RetrieveUserQuotaSummary() ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("quota")), nil
 }
+func (l *loadRPCClient) GetUserStatus() ([]byte, error) {
+	return []byte(`{"status":"ok"}`), nil
+}
+func (l *loadRPCClient) GetModelStatuses() ([]byte, error) {
+	return []byte(`{"modelStatuses":[]}`), nil
+}
+func (l *loadRPCClient) GenerateCommitMessage() ([]byte, error) {
+	return []byte(`{"commitMessage":"test commit"}`), nil
+}
+func (l *loadRPCClient) ConvertTrajectoryToMarkdown(trajectoryID string) ([]byte, error) {
+	return []byte("# Test Markdown"), nil
+}
+func (l *loadRPCClient) CreateWorktree(branch, path string) ([]byte, error) {
+	return []byte(`{"status":"created"}`), nil
+}
+
 
 // TestWebSocketConcurrentClients — 20 clients en parallèle, 30 messages chacun :
 // aucun message ne doit être perdu ni mélangé (chaque réponse doit porter

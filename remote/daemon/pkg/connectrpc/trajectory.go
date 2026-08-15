@@ -10,16 +10,17 @@ import (
 // TrajectorySummary décrit une cascade (session) listée par
 // GetAllCascadeTrajectories — extraite de la réponse protobuf réelle.
 type TrajectorySummary struct {
-	CascadeID string    `json:"cascadeId"`
-	Title     string    `json:"title"`
-	Workspace string    `json:"workspace"`
-	ProjectID string    `json:"projectId"`
-	Status    string    `json:"status"`
-	UpdatedAt time.Time `json:"updatedAt,omitempty"`
-	Size      int       `json:"size"`
-	Archived  bool      `json:"archived,omitempty"`  // annotations.archived (field 15→4)
-	Killed    bool      `json:"killed,omitempty"`    // field 23
-	Source    int       `json:"source,omitempty"`    // field 20 (1=CASCADE_CLIENT, 16=SUBAGENT)
+	CascadeID    string    `json:"cascadeId"`
+	TrajectoryID string    `json:"trajectoryId,omitempty"`
+	Title        string    `json:"title"`
+	Workspace    string    `json:"workspace"`
+	ProjectID    string    `json:"projectId"`
+	Status       string    `json:"status"`
+	UpdatedAt    time.Time `json:"updatedAt,omitempty"`
+	Size         int       `json:"size"`
+	Archived     bool      `json:"archived,omitempty"`  // annotations.archived (field 15→4)
+	Killed       bool      `json:"killed,omitempty"`    // field 23
+	Source       int       `json:"source,omitempty"`    // field 20 (1=CASCADE_CLIENT, 16=SUBAGENT)
 }
 
 var (
