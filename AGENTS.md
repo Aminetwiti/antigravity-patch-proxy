@@ -54,7 +54,7 @@ antigravity-add-model-main/
 │
 ├── ag-doctor/                       # Diagnostic CLI (bin/ag-doctor.js)
 ├── ag-doctor-ui/                    # Electron diagnostic UI
-├── scripts/                         # repack/, deploy/, mitm/, patch_*.js
+├── scripts/                         # repack/, deploy/, mitm/, patch_*.js, auto-heal.ps1, supervise-daemon.ps1
 ├── assets/                          # Screenshots & logos
 ├── ARCHITECTURE.md                  # Deep architecture documentation
 ├── DESIGN.md                        # UI design system specification
@@ -89,6 +89,8 @@ Language Server (Hub :55256) ◄── gRPC-Web ── Daemon Go (:8090 / Cloudf
 2. **HTTP Interception** — `session.defaultSession.webRequest.onBeforeRequest` + proxy server
 3. **Protobuf Injection** — Parse gRPC-Web `GetAvailableModels` response → append custom models → re-encode
 4. **Remote Daemon Bridge** — Automatic PID discovery, CSRF watchdog, gRPC-Web framing, and WebSocket multiplexing with StepRecovery buffer
+5. **Quota Push** — Daemon scheduler polls the LS `RetrieveUserQuotaSummary` every 60 s (only when clients are connected) and broadcasts `quota_update` over WebSocket; the mobile consumes it instead of polling
+6. **Auto-heal** — `scripts/auto-heal.ps1` + `register-auto-heal.ps1` (Startup VBS) + `supervise-daemon.ps1` restore the binary patch after an official update overwrites `app.asar`
 
 ---
 
@@ -121,6 +123,14 @@ cd remote/daemon
 go test ./...                   # Run all Go unit & property tests
 go run main.go --port 8090 --tunnel cloudflare --auth-token mysecret
 ```
+
+### Remote Resilience (Windows)
+```powershell
+powershell -NoProfile -File scripts\register-auto-heal.ps1   # one-time: Startup VBS → auto-heal at boot
+powershell -NoProfile -File scripts\supervise-daemon.ps1 -Once  # one-shot daemon watchdog
+powershell -NoProfile -File scripts\supervise-daemon.ps1 -Loop  # loop mode (scheduled task)
+```
+`repatch.bat` caches the patched `app.asar` (+ `.unpacked`) to `~/.gemini\antigravity\scratch\` and registers the auto-heal VBS. On an official update, `auto-heal.ps1` detects the lost `MODEL_PLACEHOLDER_` signature, kills Antigravity + language_server, restores the cache, and relaunches.
 
 ### Remote Mobile (Flutter App)
 ```bash

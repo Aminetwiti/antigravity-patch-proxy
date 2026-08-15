@@ -1,3 +1,0 @@
-# github.com/antigravity/remote-daemon/pkg/connectrpc [github.com/antigravity/remote-daemon/pkg/connectrpc.test]
-.\protobuf_test.go:4:2: "bytes" imported and not used
-FAIL	github.com/antigravity/remote-daemon/pkg/connectrpc [build failed]
