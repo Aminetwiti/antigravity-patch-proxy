@@ -58,6 +58,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late TextEditingController _approvalTimeoutController;
   int _approvalTimeoutMinutes = _defaultApprovalTimeoutMinutes;
   bool _approvalTimeoutSaved = false;
+  // Auto-approbation des actions read-only (lectures/recherches) : toggle
+  // poussé au daemon via le message WS set_auto_accept. Désactivé par défaut
+  // (toute action non read-only reste soumise à approbation).
+  bool _autoAcceptEnabled = false;
   bool _mcpAllowlistStrict = true;
   bool _isGeminiEnterprise = true;
   final List<String> _models = [
@@ -100,6 +104,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         (s['approvalTimeoutMinutes'] as int?) ?? _defaultApprovalTimeoutMinutes;
     _approvalTimeoutController =
         TextEditingController(text: '$_approvalTimeoutMinutes');
+    _autoAcceptEnabled = (s['autoAcceptEnabled'] as bool?) ?? false;
     // Applique le réglage persisté dès l'ouverture (le notifier est un
     // singleton : il faut re-synchroniser son état global).
     widget.notifier?.setEnabled(_toolNotifications);
@@ -597,6 +602,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       setState(() => _toolNotifications = val);
                       SettingsStore.save({'toolNotifications': val});
                       widget.notifier?.setEnabled(val);
+                    },
+                  ),
+                  const SizedBox(height: 4),
+                  SwitchListTile(
+                    title: Text(
+                      'Auto-approuver les actions en lecture seule',
+                      style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
+                    ),
+                    subtitle: Text(
+                      'Lire des fichiers, lister, chercher… passe sans confirmation. Écritures et commandes restent approuvées manuellement.',
+                      style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                    value: _autoAcceptEnabled,
+                    activeColor: Theme.of(context).colorScheme.primary,
+                    contentPadding: EdgeInsets.zero,
+                    onChanged: (val) async {
+                      setState(() => _autoAcceptEnabled = val);
+                      await SettingsStore.save({'autoAcceptEnabled': val});
+                      // Envoi non bloquant : sans daemon connecté, le RPC
+                      // expire silencieusement et le réglage sera réappliqué
+                      // à la prochaine connexion.
+                      try {
+                        await widget.api?.setAutoAccept(enabled: val);
+                      } catch (_) {}
                     },
                   ),
                 ],

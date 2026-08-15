@@ -125,7 +125,17 @@ func (f *fakeRPCClient) Heartbeat() ([]byte, error) {
 
 func (f *fakeRPCClient) CreateCascade(uri string, projectID string, modelUID string, modelEnum uint64) ([]byte, error) {
 	f.lastCascade = &createCascadeCall{uri: uri, projectID: projectID, modelUID: modelUID, modelEnum: modelEnum}
-	return connectrpc.Frame(pbTextFrame("casc-1")), nil
+	return connectrpc.Frame(pbCascadeFrame("casc-1")), nil
+}
+
+// pbCascadeFrame encode un champ protobuf #1 length-delimited (le format de la
+// réponse CreateCascade réelle) — sans en-tête gRPC-Web ; Frame() l'ajoute.
+func pbCascadeFrame(id string) []byte {
+	buf := make([]byte, 2+len(id))
+	buf[0] = 0x0A
+	buf[1] = byte(len(id))
+	copy(buf[2:], id)
+	return buf
 }
 
 func (f *fakeRPCClient) GetAllCascades() ([]byte, error) {
@@ -1058,6 +1068,107 @@ func TestWebSocketSetApprovalTimeout(t *testing.T) {
 		msg := client.recv(t)
 		if msg["type"] != "response" || msg["error"] == "" {
 			t.Fatalf("Attendu une erreur minutes invalides, reçu %v", msg)
+		}
+	})
+}
+
+// TestWebSocketSetAutoAccept — chaîne Settings mobile → daemon :
+// le message WS "set_auto_accept" met à jour le flag autoAcceptEnabled ET
+// la réponse confirme la valeur. Une approbation read-only suivante est
+// auto-approuvée (SubmitToolApproval confirm=true) sans carte mobile, et
+// aucun approval_pending n'est diffusé.
+func TestWebSocketSetAutoAccept(t *testing.T) {
+	t.Run("enable => read-only auto-approuvé sans approval_pending", func(t *testing.T) {
+		backend := &fakeApprovalRPC{}
+		// write_to_file n'est PAS read-only → doit rester en attente.
+		backend.streamDeltas = []string{
+			`{"read_file":"src/main.dart","step_index":1,"trajectory_id":"123e4567-e89b-12d3-a456-426614174000"}`,
+			`{"write_to_file":"src/main.dart","step_index":2,"trajectory_id":"123e4567-e89b-12d3-a456-426614174000"}`,
+		}
+		srv := newTestServer(backend)
+		defer srv.Close()
+		client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+		defer client.conn.Close()
+
+		// Active l'auto-accept via le message WS (comme le toggle mobile).
+		client.sendRaw(t, `{"type":"set_auto_accept","requestId":"aa1","data":{"enabled":true}}`)
+		msg := client.recv(t)
+		if msg["type"] != "response" || msg["requestId"] != "aa1" {
+			t.Fatalf("Réponse inattendue: %v", msg)
+		}
+		data, _ := msg["data"].(map[string]interface{})
+		if data == nil || data["autoAcceptEnabled"] != true {
+			t.Fatalf("Réponse sans confirmation du flag: %v", msg)
+		}
+
+		// Un prompt émet read_file (auto-accept) puis write_to_file (attente).
+		client.send(t, map[string]string{"type": "send_prompt", "requestId": "r9", "cascadeId": "casc-1", "prompt": "travaille"})
+		var gotPending, gotStreamDelta bool
+		for {
+			m := client.recv(t)
+			switch m["type"] {
+			case "approval_pending":
+				gotPending = true
+			case "stream_delta":
+				gotStreamDelta = true
+			case "stream_end":
+				if !gotStreamDelta {
+					t.Fatal("aucun stream_delta reçu")
+				}
+				if gotPending {
+					t.Fatal("approval_pending diffusé alors que l'action était auto-approuvée")
+				}
+				goto done
+			}
+		}
+	done:
+
+		// read_file auto-approuvé (confirm=true) ; write_to_file jamais soumis.
+		got, ok := backend.lastApproval.(*submitApprovalCall)
+		if !ok {
+			t.Fatalf("Aucun SubmitToolApproval enregistré: %v", backend.lastApproval)
+		}
+		if !got.confirm {
+			t.Fatalf("Auto-approbation attendue confirm=true, reçu confirm=%v", got.confirm)
+		}
+		if backend.submitted != 1 {
+			t.Fatalf("SubmitToolApproval appelé %d fois, attendu 1 (seul read_file)", backend.submitted)
+		}
+	})
+
+	t.Run("disable => read-only reste en attente", func(t *testing.T) {
+		backend := &fakeApprovalRPC{}
+		backend.streamDeltas = []string{
+			`{"read_file":"src/main.dart","step_index":1,"trajectory_id":"123e4567-e89b-12d3-a456-426614174000"}`,
+		}
+		srv := newTestServer(backend)
+		defer srv.Close()
+		client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+		defer client.conn.Close()
+
+		// Désactive (valeur par défaut) : aucune auto-approbation.
+		client.sendRaw(t, `{"type":"set_auto_accept","requestId":"aa2","data":{"enabled":false}}`)
+		msg := client.recv(t)
+		if msg["type"] != "response" || msg["error"] != nil {
+			t.Fatalf("Réponse inattendue: %v", msg)
+		}
+
+		client.send(t, map[string]string{"type": "send_prompt", "requestId": "r9", "cascadeId": "casc-1", "prompt": "travaille"})
+		var sawPending bool
+		for {
+			m := client.recv(t)
+			if m["type"] == "approval_pending" {
+				sawPending = true
+			}
+			if m["type"] == "stream_end" {
+				if !sawPending {
+					t.Fatal("approval_pending jamais émis (read-only non auto-approuvé)")
+				}
+				break
+			}
+		}
+		if backend.submitted != 0 {
+			t.Fatalf("SubmitToolApproval appelé %d fois, attendu 0 (auto-accept désactivé)", backend.submitted)
 		}
 	})
 }

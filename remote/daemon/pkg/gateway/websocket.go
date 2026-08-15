@@ -9,11 +9,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -153,6 +155,14 @@ type Server struct {
 	// « toujours autoriser pour cette session » (B3). Les demandes suivantes
 	// du même type sont auto-approuvées sans repasser par le téléphone.
 	sessionApprovals map[string]bool
+	// autoAcceptEnabled : auto-approbation des actions read-only (toggle des
+	// réglages mobile, message WS set_auto_accept). Règles volontairement
+	// conservatrices : lecture seule → approuvée ; écriture hors workspace et
+	// commandes → jamais auto-approuvées (l'utilisateur décide). L'état vit en
+	// mémoire : le mobile le re-synchronise à chaque reconnexion.
+	// ponytail: plafond = perte d'état au redémarrage du daemon ; upgrade =
+	// persistance via SettingsService si le besoin apparaît.
+	autoAcceptEnabled bool
 	// activeCascades : cascadeId → le daemon est en train de streamer un tour
 	// pour cette cascade (C5 : compteur d'activité exposé au /health).
 	activeCascades map[string]bool
@@ -186,6 +196,8 @@ type Server struct {
 	sessionsCache    []byte
 	sessionsCachedAt time.Time
 	fetchInFlight    bool
+	// terminals : sessions shell interactives (P3), nettoyées à la déconnexion.
+	terminals *terminalPtyManager
 }
 
 // ScheduledTask représente une tâche planifiée / cron job gérée par le daemon.
@@ -226,7 +238,7 @@ type Stats struct {
 }
 
 func NewServer(client RPCClient, authToken string) *Server {
-	return &Server{
+	s := &Server{
 		RPCClient:        client,
 		AuthToken:        authToken,
 		clients:          make(map[*websocket.Conn]bool),
@@ -242,7 +254,10 @@ func NewServer(client RPCClient, authToken string) *Server {
 		activeCancels:    make(map[string]context.CancelFunc),
 		activeRequestIDs: make(map[string]string),
 		scheduledTasks:   make(map[string]*ScheduledTask),
+		terminals:        newTerminalPtyManager(),
 	}
+	s.terminals.onBroadcast = s.broadcast
+	return s
 }
 
 // sessionsCacheTTL : durée de fraîcheur du cache list_sessions. Le mobile
@@ -323,6 +338,21 @@ func (s *Server) SetApprovalTimeout(d time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.approvalTimeout = d
+}
+
+// SetAutoAccept active/désactive l'auto-approbation des actions read-only
+// (toggle des réglages mobile, message WS set_auto_accept).
+func (s *Server) SetAutoAccept(enabled bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.autoAcceptEnabled = enabled
+}
+
+// autoAccept rapporte si l'auto-approbation read-only est active.
+func (s *Server) autoAccept() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.autoAcceptEnabled
 }
 
 // mcpProxyBase est le point d'entrée HTTP du proxy MCP Antigravity desktop
@@ -587,6 +617,11 @@ type IncomingMessage struct {
 	ApprovalType    string                 `json:"approvalType,omitempty"`
 	Decision        string                 `json:"decision,omitempty"`
 	Scope           string                 `json:"scope,omitempty"`
+	// DenyReason : instruction libre envoyée à l'agent quand l'utilisateur
+	// refuse une approbation run_command (ex. « fais un revert d'abord »).
+	// Transmise dans le champ 3 (submitted) du CascadeRunCommandInteraction.
+	// Vide → comportement historique (deny simple).
+	DenyReason string `json:"denyReason,omitempty"`
 	Prompt          string                 `json:"prompt,omitempty"`
 	FilePath        string                 `json:"filePath,omitempty"`
 	StreamCount     int                    `json:"streamCount,omitempty"`
@@ -603,6 +638,8 @@ type IncomingMessage struct {
 	// ModelUID : identifiant du modèle sélectionné dans l'app mobile
 	// (requested_model_uid du cascade_config). Vide → repli sur ModelEnum.
 	ModelUID string `json:"modelUID,omitempty"`
+	// Query : terme de recherche pour search_files.
+	Query string `json:"query,omitempty"`
 	// ModelEnum : repli historique (requested_model_id) quand ModelUID est vide.
 	ModelEnum uint64 `json:"modelEnum,omitempty"`
 	// Confirm : confirmation explicite exigée pour les actions destructives
@@ -621,6 +658,11 @@ type IncomingMessage struct {
 	Arguments  map[string]interface{} `json:"arguments,omitempty"`
 	Endpoint   string                 `json:"endpoint,omitempty"`
 	GrantType  string                 `json:"grantType,omitempty"`
+	// TerminalID + Input : session shell interactive (P3). terminal_create
+	// crée la session, terminal_write injecte l'entrée clavier, terminal_kill
+	// la ferme. La sortie est poussée en broadcast terminal_output.
+	TerminalID string `json:"terminalId,omitempty"`
+	Input      string `json:"input,omitempty"`
 }
 
 func (m *IncomingMessage) UnmarshalJSON(data []byte) error {
@@ -771,7 +813,7 @@ func (s *Server) expireApproval(cascadeID string) {
 
 	logJSON.Info("approval_expired", "cascadeId", cascadeID)
 	if p.trajectoryID != "" {
-		oneofField, oneofPayload := buildApprovalPayload(p.approvalType, false, p.command, p.filePath)
+		oneofField, oneofPayload := buildApprovalPayload(p.approvalType, false, p.command, p.filePath, "")
 		if _, err := s.RPCClient.SubmitToolApproval(cascadeID, p.trajectoryID, p.stepIndex, oneofField, oneofPayload); err != nil {
 			logJSON.Error("auto_deny_failed", "cascadeId", cascadeID, "err", err)
 		}
@@ -794,17 +836,33 @@ func extractCommand(detail string) string {
 	return ""
 }
 
+// isReadOnlyTool détermine si un outil est read-only (lecture/recherche) — la
+// seule catégorie auto-approuvable par l'auto-accept. Tout le reste (écritures,
+// commandes, appels MCP) reste soumis à l'approbation utilisateur.
+func isReadOnlyTool(tool string) bool {
+	t := strings.ToLower(tool)
+	for _, p := range []string{"read", "list", "view", "search", "glob", "grep", "find", "fetch", "get"} {
+		if strings.HasPrefix(t, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // buildApprovalPayload construit le oneof + payload HandleCascadeUserInteraction
 // pour une décision. run_command = 5, file_permission = 19, permission = 21,
 // approval = 23 (fallback générique). Partagé entre submit_approval et
-// l'auto-refus d'expiration.
-func buildApprovalPayload(approvalType string, confirm bool, command, filePath string) (int, []byte) {
+// l'auto-refus d'expiration. denyReason (texte libre, ex. instruction après un
+// refus) n'est transmis que pour run_command — champ 3 (submitted) du
+// CascadeRunCommandInteraction ; le protocole n'expose pas de texte libre pour
+// les autres types, il est ignoré sans erreur.
+func buildApprovalPayload(approvalType string, confirm bool, command, filePath, denyReason string) (int, []byte) {
 	oneofField := connectrpc.InteractionApproval // fallback générique
 	var oneofPayload []byte
 	switch strings.ToLower(approvalType) {
 	case "run_command":
 		oneofField = connectrpc.InteractionRunCommand
-		oneofPayload = connectrpc.BuildRunCommandInteraction(confirm, command, "")
+		oneofPayload = connectrpc.BuildRunCommandInteraction(confirm, command, denyReason)
 	case "file_permission":
 		oneofField = connectrpc.InteractionFilePermission
 		oneofPayload = connectrpc.BuildFilePermissionInteraction(confirm, 2, filePath)
@@ -856,6 +914,11 @@ func toWorkspaceURI(path string) string {
 // (enum ClientTrajectoryVerbosity, language_server_pb.ts ligne 257) :
 // 3 = FULL → vue structurée complète (steps + métadonnées).
 const TrajectoryVerbosityFull uint64 = 3
+
+// maxTrajectorySteps : plafond de steps renvoyés au mobile par get_trajectory
+// (fenêtre glissante sur la fin de session). 60 steps ≈ 1-2 tours de travail
+// complets — au-delà, le JSON devient lourd et le rendu mobile illisible.
+const maxTrajectorySteps = 60
 
 // trajectoryOut convertit une réponse GetCascadeTrajectoryResponse brute en
 // JSON stable pour le mobile. Schéma vérifié dans antigravity-client
@@ -924,6 +987,14 @@ func trajectoryOut(raw []byte) interface{} {
 				out["numTotalSteps"] = f.Varint
 			}
 		}
+	}
+	// C9 — plafond de steps envoyés au mobile : une très longue session
+	// (centaines de steps) ferait un JSON énorme et un rendu inutilisable sur
+	// téléphone. Le diff d'un tour précis reste accessible via get_turn_diff.
+	// numTotalSteps reste fidèle — le mobile sait qu'il n'a qu'une fenêtre.
+	if steps, _ := out["steps"].([]interface{}); len(steps) > maxTrajectorySteps {
+		out["steps"] = steps[len(steps)-maxTrajectorySteps:]
+		out["truncated"] = true
 	}
 	return out
 }
@@ -1183,18 +1254,49 @@ func toOutgoing(raw []byte) interface{} {
 // reçoit du JSON propre au lieu d'un dump de champs binaires.
 func sessionsOut(raw []byte) interface{} {
 	summaries := connectrpc.ParseTrajectories(raw)
+	
+	// Filtre des workspaces actifs (uniquement ceux ouverts dans l'IDE)
+	activeWorkspaces := discovery.GetActiveWorkspaces()
+	isActive := make(map[string]bool)
+	for _, ws := range activeWorkspaces {
+		isActive[ws] = true
+	}
+
 	if len(summaries) == 0 {
 		local := ListLocalSessions()
-		if len(local) > 0 {
-			return map[string]interface{}{"sessions": local}
+		var filteredLocal []map[string]interface{}
+		for _, s := range local {
+			wsPath, ok := s["workspacePath"].(string)
+			if !ok {
+				continue
+			}
+			cleanWs := strings.TrimPrefix(wsPath, "file:///")
+			cleanWs = strings.ReplaceAll(cleanWs, `\`, `/`)
+			cleanWs = strings.TrimRight(cleanWs, "/")
+			if len(activeWorkspaces) == 0 || isActive[cleanWs] {
+				filteredLocal = append(filteredLocal, s)
+			}
+		}
+		if len(filteredLocal) > 0 {
+			return map[string]interface{}{"sessions": filteredLocal}
 		}
 		return map[string]interface{}{"sessions": []map[string]interface{}{}, "rawBytes": len(raw)}
 	}
+	
 	items := make([]map[string]interface{}, 0, len(summaries))
 	for _, s := range summaries {
 		if s.Archived || s.Killed || s.Source == 16 {
 			continue
 		}
+		
+		// Ne conserver que les sessions des espaces de travail ouverts
+		cleanWs := strings.TrimPrefix(s.Workspace, "file:///")
+		cleanWs = strings.ReplaceAll(cleanWs, `\`, `/`)
+		cleanWs = strings.TrimRight(cleanWs, "/")
+		if len(activeWorkspaces) > 0 && !isActive[cleanWs] {
+			continue
+		}
+
 		items = append(items, map[string]interface{}{
 			"cascadeId": s.CascadeID,
 			"title":     s.Title,
@@ -1206,8 +1308,21 @@ func sessionsOut(raw []byte) interface{} {
 	}
 	if len(items) == 0 {
 		local := ListLocalSessions()
-		if len(local) > 0 {
-			return map[string]interface{}{"sessions": local}
+		var filteredLocal []map[string]interface{}
+		for _, s := range local {
+			wsPath, ok := s["workspacePath"].(string)
+			if !ok {
+				continue
+			}
+			cleanWs := strings.TrimPrefix(wsPath, "file:///")
+			cleanWs = strings.ReplaceAll(cleanWs, `\`, `/`)
+			cleanWs = strings.TrimRight(cleanWs, "/")
+			if len(activeWorkspaces) == 0 || isActive[cleanWs] {
+				filteredLocal = append(filteredLocal, s)
+			}
+		}
+		if len(filteredLocal) > 0 {
+			return map[string]interface{}{"sessions": filteredLocal}
 		}
 	}
 	return map[string]interface{}{"sessions": items}
@@ -1254,6 +1369,9 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		clients := len(s.clients)
 		s.mu.Unlock()
 		s.releaseWriteLock(conn)
+		// Nettoyage terminal : si ce client est le dernier à partir, on ferme
+		// les sessions PTY qu'il avait ouvertes.
+		s.terminals.killAll()
 		logJSON.Info("client_disconnected", "remote", conn.RemoteAddr().String(), "clients", clients)
 		conn.Close()
 	}()
@@ -1335,7 +1453,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		msg.Type != "get_quota_summary" && msg.Type != "system.get_quota_summary" &&
 		msg.Type != "get_user_status" && msg.Type != "get_model_statuses" &&
 		msg.Type != "generate_commit_message" && msg.Type != "export_markdown" &&
-		msg.Type != "create_worktree" {
+		msg.Type != "create_worktree" &&
+		!strings.HasPrefix(msg.Type, "terminal_") {
 		c := make(chan struct{})
 		go func() {
 			select {
@@ -1385,6 +1504,19 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				modelEnum = connectrpc.DefaultModelEnum
 			}
 			raw, err = s.RPCClient.CreateCascade(uri, projectID, msg.ModelUID, modelEnum)
+			// Orphelin sans projectID → réponse LS vide (payload 0 octet) :
+			// le mobile ne peut rien créer avec ça. On rechauffe le cache
+			// list_sessions UNE fois (single-flight, 15 s max) puis on
+			// retente avec le projectID résolu. Si le cache ne contient
+			// pas encore le workspace, on renvoie la réponse vide brute.
+			if len(raw) == 0 {
+				logJSON.Info("create_cascade_retry_warm_cache")
+				s.fetchSessionsSingleFlight()
+				projectID, _ = s.cachedProjectID(uri)
+				if projectID != "" {
+					raw, err = s.RPCClient.CreateCascade(uri, projectID, msg.ModelUID, modelEnum)
+				}
+			}
 		}
 
 	case "send_command":
@@ -1395,6 +1527,31 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 		logJSON.Info("slash_command", "command", msg.Command)
 		raw, err = s.RPCClient.SendCommand(msg.Command)
+
+	case "terminal_create":
+		id, errTerm := s.terminals.create(homeRoot(msg.WorkspacePath))
+		if errTerm != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "terminal_create: " + errTerm.Error()})
+			return
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"id": id}})
+		return
+
+	case "terminal_write":
+		if errWrite := s.terminals.write(msg.TerminalID, msg.Input); errWrite != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errWrite.Error()})
+			return
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"ok": true}})
+		return
+
+	case "terminal_kill":
+		if errKill := s.terminals.kill(msg.TerminalID); errKill != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errKill.Error()})
+			return
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"ok": true}})
+		return
 
 	case "list_sessions":
 		// C4 : borne l'appel au LS (60 s max côté hub, on n'attend pas plus de
@@ -1476,7 +1633,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 
 		if s.hasPendingApproval(msg.CascadeID) {
 			s.clearApproval(msg.CascadeID)
-			oneofField, oneofPayload := buildApprovalPayload("ask_question", true, responseText, "")
+			oneofField, oneofPayload := buildApprovalPayload("ask_question", true, responseText, "", "")
 			raw, err = s.RPCClient.SubmitToolApproval(msg.CascadeID, msg.TrajectoryID, uint32(msg.StepIndex), oneofField, oneofPayload)
 			// Réponse unary au client demandeur (même contrat que
 			// submit_approval) — sinon le fallthrough écrirait un dump protobuf
@@ -1598,12 +1755,23 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 					// B3 : auto-approbation si l'utilisateur a choisi
 					// « toujours autoriser ce type pour la session ».
 					if s.hasSessionApproval(msg.CascadeID, ev.Tool) {
-						oneofField, oneofPayload := buildApprovalPayload(ev.Tool, true, extractCommand(ev.Detail), "")
+						oneofField, oneofPayload := buildApprovalPayload(ev.Tool, true, extractCommand(ev.Detail), "", "")
 						if _, errSubmit := s.RPCClient.SubmitToolApproval(
 							msg.CascadeID, ev.TrajectoryID, ev.StepIndex,
 							oneofField, oneofPayload,
 						); errSubmit != nil {
 							logJSON.Error("auto_approve_failed", "cascadeId", msg.CascadeID, "tool", ev.Tool, "err", errSubmit)
+						}
+					} else if s.autoAccept() && isReadOnlyTool(ev.Tool) {
+						// Auto-accept read-only : les lectures/recherches passent
+						// sans confirmation (toggle des réglages mobile). Les
+						// écritures et commandes ne sont jamais auto-approuvées.
+						oneofField, oneofPayload := buildApprovalPayload(ev.Tool, true, extractCommand(ev.Detail), "", "")
+						if _, errSubmit := s.RPCClient.SubmitToolApproval(
+							msg.CascadeID, ev.TrajectoryID, ev.StepIndex,
+							oneofField, oneofPayload,
+						); errSubmit != nil {
+							logJSON.Error("auto_accept_failed", "cascadeId", msg.CascadeID, "tool", ev.Tool, "err", errSubmit)
 						}
 					} else {
 						s.MarkApprovalPending(msg.CascadeID, ev)
@@ -1615,7 +1783,12 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			// ré-ouvrir l'approbation même si le delta a été perdu.
 			if len(events) > 0 {
 				for _, ev := range events {
-					if ev.Kind == connectrpc.EventKindApprovalRequired && !s.hasSessionApproval(msg.CascadeID, ev.Tool) {
+					// Pas de push si l'auto-approbation (session ou read-only) a
+					// déjà répondu — le mobile ne doit pas afficher une carte
+					// pour une action déjà traitée.
+					if ev.Kind == connectrpc.EventKindApprovalRequired &&
+						!s.hasSessionApproval(msg.CascadeID, ev.Tool) &&
+						!(s.autoAccept() && isReadOnlyTool(ev.Tool)) {
 						pending := s.pendingApprovalInfo(msg.CascadeID)
 						// C7-B : idle detection hôte — si l'utilisateur est actif sur
 						// le PC, le mobile ne sonne pas (la boîte de dialogue
@@ -1704,7 +1877,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.markSessionApproval(msg.CascadeID, msg.ApprovalType)
 		}
 
-		oneofField, oneofPayload := buildApprovalPayload(msg.ApprovalType, confirm, msg.Command, msg.FilePath)
+		oneofField, oneofPayload := buildApprovalPayload(msg.ApprovalType, confirm, msg.Command, msg.FilePath, msg.DenyReason)
 		raw, err = s.RPCClient.SubmitToolApproval(msg.CascadeID, msg.TrajectoryID, uint32(msg.StepIndex), oneofField, oneofPayload)
 
 	case "get_pending_approval":
@@ -1717,6 +1890,25 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			Data:      s.pendingApprovalInfo(msg.CascadeID),
 		})
 		return
+	case "search_files":
+		if msg.WorkspacePath == "" || msg.Query == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "workspacePath + query requis"})
+			return
+		}
+		maxResults := 50
+		if msg.Data != nil {
+			if m, ok := msg.Data["maxResults"].(float64); ok && int(m) > 0 {
+				maxResults = int(m)
+			}
+		}
+		results, errSearch := searchInWorkspace(homeRoot(msg.WorkspacePath), msg.Query, maxResults)
+		if errSearch != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errSearch.Error()})
+			return
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"results": results}})
+		return
+
 	case "list_files":
 		if msg.WorkspacePath == "" {
 			err = fmt.Errorf("workspacePath requis")
@@ -1965,6 +2157,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 		}
 
+		// NextRunAt initialisé dès la création : le mobile l'affiche sans
+		// attendre la première exécution cron.
 		task := &ScheduledTask{
 			ID:             taskID,
 			Name:           name,
@@ -1976,6 +2170,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			IsEnabled:      enabled,
 			Status:         "Running",
 			Uptime:         "0m",
+			NextRunAt:      nextRunAt(cron),
 			Events:         []ScheduledTaskEvent{},
 		}
 
@@ -2074,11 +2269,28 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 		}
 		logJSON.Info("scheduled_task_triggered", "taskId", taskId)
-		// ponytail: aucun moteur cron réel dans le daemon — refuser explicitement
-		// plutôt que de fabriquer un événement "done" (mock prod interdit).
-		// Upgrade path : brancher un scheduler (robfig/cron) et exécuter le prompt.
-		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID,
-			Error: "scheduled tasks not implemented: no cron engine in daemon"})
+		if taskId == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "taskId requis"})
+			return
+		}
+		s.mu.Lock()
+		task, exists := s.scheduledTasks[taskId]
+		s.mu.Unlock()
+		if !exists {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "scheduled task inconnue: " + taskId})
+			return
+		}
+		// Exécution immédiate en arrière-plan (même chemin que le tick cron) :
+		// le broadcast scheduled_task_event fera vivre le suivi côté mobile.
+		go s.runScheduledTask(taskId)
+		s.writeJSON(conn, OutgoingMessage{
+			Type:      "response",
+			RequestID: msg.RequestID,
+			Data: map[string]interface{}{
+				"task":   task,
+				"status": "triggered",
+			},
+		})
 		return
 
 	case "cancel_scheduled_task", "delete_scheduled_task":
@@ -2134,6 +2346,23 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			RequestID: msg.RequestID,
 			Data: map[string]interface{}{
 				"approvalTimeoutMinutes": minutes,
+			},
+		})
+		return
+
+	case "set_auto_accept":
+		enabled := false
+		if msg.Data != nil {
+			if b, ok := msg.Data["enabled"].(bool); ok {
+				enabled = b
+			}
+		}
+		s.SetAutoAccept(enabled)
+		s.writeJSON(conn, OutgoingMessage{
+			Type:      "response",
+			RequestID: msg.RequestID,
+			Data: map[string]interface{}{
+				"autoAcceptEnabled": enabled,
 			},
 		})
 		return
@@ -2474,4 +2703,274 @@ func buildFileTree(root, relativePath string, depth int) ([]map[string]interface
 		}
 	}
 	return result, nil
+}
+
+// searchInWorkspace cherche query dans les noms et le contenu des fichiers du
+// workspace (mêmes exclusions que buildFileTree, anti-symlink), borné par
+// maxResults et une taille de fichier raisonnable (2 Mo) — le grep mobile ne
+// doit jamais charger un binaire dans la RAM.
+func searchInWorkspace(root, query string, maxResults int) ([]map[string]interface{}, error) {
+	results := make([]map[string]interface{}, 0, maxResults)
+	queryLower := strings.ToLower(query)
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			if path != root && isIgnoredDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if len(results) >= maxResults {
+			return filepath.SkipAll
+		}
+		rel, errRel := filepath.Rel(root, path)
+		if errRel != nil {
+			return nil
+		}
+		// Anti-symlink : ne jamais suivre un lien (boucle infinie possible).
+		if info, errInfo := d.Info(); errInfo == nil && info.Mode()&os.ModeSymlink != 0 {
+			return nil
+		}
+		// Correspondance sur le nom du fichier.
+		if strings.Contains(strings.ToLower(d.Name()), queryLower) {
+			results = append(results, map[string]interface{}{"path": rel, "match": "name"})
+			return nil
+		}
+		// Correspondance sur le contenu : fichiers texte seulement (max 2 Mo).
+		if info, errInfo := d.Info(); errInfo == nil && info.Size() > 2<<20 {
+			return nil
+		}
+		content, errRead := os.ReadFile(path)
+		if errRead != nil {
+			return nil
+		}
+		lines := strings.Split(string(content), "\n")
+		for i, line := range lines {
+			if strings.Contains(strings.ToLower(line), queryLower) {
+				results = append(results, map[string]interface{}{
+					"path":    rel,
+					"line":    i + 1,
+					"snippet": strings.TrimSpace(line),
+				})
+				if len(results) >= maxResults {
+					break
+				}
+			}
+			if len(results) >= maxResults {
+				break
+			}
+		}
+		return nil
+	})
+	return results, nil
+}
+
+// isIgnoredDir reproduit les exclusions de buildFileTree (dossiers de build /
+// dépendances jamais indexés par la recherche).
+func isIgnoredDir(name string) bool {
+	return name == ".git" || name == "node_modules" || name == "build" || name == "dist" || name == ".dart_tool"
+}
+
+// ---------------------------------------------------------------------------
+// Terminal PTY (P3)
+//
+// Le mobile pilote un vrai shell interactif sur le PC hôte. Implémentation
+// volontairement stdlib-only : exec.Cmd avec stdin/stdout/stderr pipe, un
+// scanner de sortie par session et un nettoyage à la déconnexion.
+//
+// ponytail: pas de vrai PTY (creack/pty) — sur Windows un PTY natif exigerait
+// une dépendance CGO (conpty). Ce pipe-based shell couvre l'usage mobile
+// (cd, git, npm, ls) ; plafond connu : pas de TUIO/tty raw, pas de resize.
+// Upgrade path : brancher creack/pty sur les builds non-Windows.
+// ---------------------------------------------------------------------------
+
+// terminalSession : une session shell interactive. La sortie du processus
+// est lue par une goroutine qui broadcast terminal_output.
+type terminalSession struct {
+	id      string
+	cmd     *exec.Cmd
+	stdin   io.WriteCloser
+	mu      sync.Mutex
+	closed  bool
+	closing bool
+}
+
+// terminalPtyManager possède toutes les sessions terminal du daemon.
+// La clé id est un identifiant opaque renvoyé au mobile.
+type terminalPtyManager struct {
+	mu         sync.Mutex
+	sessions   map[string]*terminalSession
+	nextID     int
+	shellPath  string
+	// onBroadcast : hook vers le Server (s.broadcast) pour diffuser la
+	// sortie terminal à tous les clients connectés.
+	onBroadcast func(OutgoingMessage)
+}
+
+func newTerminalPtyManager() *terminalPtyManager {
+	sh := "cmd.exe"
+	if _, err := exec.LookPath("bash"); err == nil {
+		sh = "bash"
+	}
+	return &terminalPtyManager{
+		sessions:  make(map[string]*terminalSession),
+		shellPath: sh,
+	}
+}
+
+// create lance un shell interactif dans dir et retourne son id.
+func (m *terminalPtyManager) create(dir string) (string, error) {
+	if dir == "" {
+		dir = "."
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.Command(m.shellPath)
+	cmd.Dir = abs
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return "", err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return "", err
+	}
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+
+	m.mu.Lock()
+	m.nextID++
+	id := fmt.Sprintf("pty-%d", m.nextID)
+	sess := &terminalSession{id: id, cmd: cmd, stdin: stdin}
+	m.sessions[id] = sess
+	m.mu.Unlock()
+
+	// Deux goroutines de lecture (stdout + stderr) qui broadcastent.
+	go m.pump(sess, stdout, "stdout")
+	go m.pump(sess, stderr, "stderr")
+
+	go func() {
+		_ = cmd.Wait()
+		m.mu.Lock()
+		still := m.sessions[sess.id] == sess
+		m.mu.Unlock()
+		if still {
+			m.broadcastExit(sess)
+		}
+	}()
+
+	return id, nil
+}
+
+func (m *terminalPtyManager) pump(sess *terminalSession, r io.Reader, kind string) {
+	buf := make([]byte, 4096)
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			sess.mu.Lock()
+			closing := sess.closing
+			sess.mu.Unlock()
+			if !closing {
+				m.broadcastOutput(sess, buf[:n], kind)
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+// broadcastOutput émet terminal_output {id, data, kind} à tous les clients.
+func (m *terminalPtyManager) broadcastOutput(sess *terminalSession, data []byte, kind string) {
+	// Le broadcast se fait via le Server ; on expose un hook.
+	if m.onBroadcast != nil {
+		m.onBroadcast(OutgoingMessage{
+			Type: "terminal_output",
+			Data: map[string]interface{}{
+				"id":   sess.id,
+				"data": string(data),
+				"kind": kind,
+			},
+		})
+	}
+}
+
+func (m *terminalPtyManager) broadcastExit(sess *terminalSession) {
+	if m.onBroadcast != nil {
+		m.onBroadcast(OutgoingMessage{
+			Type: "terminal_output",
+			Data: map[string]interface{}{
+				"id":   sess.id,
+				"data": "",
+				"kind": "exit",
+			},
+		})
+	}
+}
+
+// write injecte l'entrée clavier dans la session.
+func (m *terminalPtyManager) write(id, input string) error {
+	m.mu.Lock()
+	sess := m.sessions[id]
+	m.mu.Unlock()
+	if sess == nil {
+		return fmt.Errorf("terminal %q inconnu", id)
+	}
+	sess.mu.Lock()
+	closed := sess.closed
+	sess.mu.Unlock()
+	if closed {
+		return fmt.Errorf("terminal %q fermé", id)
+	}
+	_, err := io.WriteString(sess.stdin, input)
+	return err
+}
+
+// kill termine la session (le processus et la goroutine de lecture).
+func (m *terminalPtyManager) kill(id string) error {
+	m.mu.Lock()
+	sess := m.sessions[id]
+	if sess != nil {
+		delete(m.sessions, id)
+	}
+	m.mu.Unlock()
+	if sess == nil {
+		return fmt.Errorf("terminal %q inconnu", id)
+	}
+	sess.mu.Lock()
+	if sess.closed {
+		sess.mu.Unlock()
+		return nil
+	}
+	sess.closed = true
+	sess.closing = true
+	sess.mu.Unlock()
+	_ = sess.cmd.Process.Kill()
+	_ = sess.stdin.Close()
+	return nil
+}
+
+// killAll ferme toutes les sessions (appelé à la déconnexion du client).
+func (m *terminalPtyManager) killAll() {
+	m.mu.Lock()
+	ids := make([]string, 0, len(m.sessions))
+	for id := range m.sessions {
+		ids = append(ids, id)
+	}
+	m.mu.Unlock()
+	for _, id := range ids {
+		_ = m.kill(id)
+	}
 }

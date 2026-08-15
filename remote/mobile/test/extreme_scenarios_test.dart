@@ -26,7 +26,8 @@ void main() {
                 // By keeping the SAME Key or no key, Flutter reuses the State object.
                 return ToolApprovalCard(
                   request: request,
-                  onDecision: (decision, {scope = ApprovalScope.once}) {},
+                  onDecision: (decision,
+                      {scope = ApprovalScope.once, String denyReason = ''}) {},
                 );
               },
             ),

@@ -18,6 +18,7 @@ class SettingsStore {
   static const _kStatus = 'settings.status';
   static const _kToolNotifications = 'settings.toolNotifications';
   static const _kApprovalTimeout = 'settings.approvalTimeoutMinutes';
+  static const _kAutoAccept = 'settings.autoAcceptEnabled';
   static const _kCompactBubbles = 'settings.compactBubbles';
   static const _kMonospaceCode = 'settings.monospaceCode';
   static const _kIsGeminiEnterprise = 'settings.isGeminiEnterprise';
@@ -52,6 +53,7 @@ class SettingsStore {
       'status': prefs.getString(_kStatus) ?? 'Online',
       'toolNotifications': prefs.getBool(_kToolNotifications) ?? true,
       'approvalTimeoutMinutes': prefs.getInt(_kApprovalTimeout) ?? 5,
+      'autoAcceptEnabled': prefs.getBool(_kAutoAccept) ?? false,
       'compactBubbles': prefs.getBool(_kCompactBubbles) ?? false,
       'monospaceCode': prefs.getBool(_kMonospaceCode) ?? true,
       'isGeminiEnterprise': prefs.getBool(_kIsGeminiEnterprise) ?? true,
@@ -90,6 +92,8 @@ class SettingsStore {
           await prefs.setBool(_kToolNotifications, entry.value as bool);
         case 'approvalTimeoutMinutes':
           await prefs.setInt(_kApprovalTimeout, entry.value as int);
+        case 'autoAcceptEnabled':
+          await prefs.setBool(_kAutoAccept, entry.value as bool);
         case 'compactBubbles':
           await prefs.setBool(_kCompactBubbles, entry.value as bool);
         case 'monospaceCode':

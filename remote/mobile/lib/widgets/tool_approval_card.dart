@@ -6,7 +6,8 @@ import '../core/protocol/messages.dart';
 
 class ToolApprovalCard extends StatefulWidget {
   final ToolApprovalRequest request;
-  final Function(ToolDecision decision, {ApprovalScope scope}) onDecision;
+  final Function(ToolDecision decision,
+      {ApprovalScope scope, String denyReason}) onDecision;
   // true après approval_expired du daemon : la demande a été auto-refusée
   // (timeout) — la carte passe en lecture seule.
   final bool isExpired;
@@ -28,6 +29,10 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
   // Bug #13 : guard timeout — si le daemon ne répond pas en 5 s, on débloque
   // le bouton pour ne pas laisser l'utilisateur coincé.
   Timer? _submitTimeout;
+  // Deny avec instruction : le champ de saisie n'apparaît qu'après le tap sur
+  // « Refuser » — l'utilisateur peut expliquer à l'agent pourquoi il refuse.
+  bool _showDenyReason = false;
+  final TextEditingController _denyReasonController = TextEditingController();
 
   /// Détecte les commandes de lecture courantes pour réduire les demandes redondantes.
   bool _isReadCommand(String cmd) {
@@ -58,11 +63,13 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
     if (oldWidget.request.callId != widget.request.callId) {
       _isSubmitting = false;
       _alwaysAllow = _isReadCommand(widget.request.command);
+      _showDenyReason = false;
+      _denyReasonController.clear();
       _submitTimeout?.cancel();
     }
   }
 
-  void _handleDecision(ToolDecision decision) async {
+  void _handleDecision(ToolDecision decision, {String denyReason = ''}) async {
     if (_isSubmitting) return;
     HapticFeedback.lightImpact();
     setState(() => _isSubmitting = true);
@@ -75,6 +82,7 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
       await widget.onDecision(
         decision,
         scope: _alwaysAllow ? ApprovalScope.session : ApprovalScope.once,
+        denyReason: denyReason,
       );
     } finally {
       _submitTimeout?.cancel();
@@ -85,6 +93,7 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
   @override
   void dispose() {
     _submitTimeout?.cancel();
+    _denyReasonController.dispose();
     super.dispose();
   }
 
@@ -235,17 +244,103 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
             const SizedBox(height: 12),
           ],
 
+          // Deny avec instruction : champ libre affiché après le tap sur
+          // « Refuser » — l'utilisateur explique à l'agent pourquoi il refuse.
+          if (_showDenyReason) ...[
+            TextField(
+              key: const Key('deny-reason-field'),
+              controller: _denyReasonController,
+              maxLines: 2,
+              minLines: 1,
+              autofocus: true,
+              enabled: !_isSubmitting && !widget.isExpired,
+              style: TextStyle(
+                fontSize: 13,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+              decoration: InputDecoration(
+                labelText: "Expliquer à l'agent (optionnel)",
+                hintText: 'Ex. : fais un revert d\u2019abord, puis réessaie',
+                labelStyle: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                prefixIcon: Icon(
+                  Icons.reply_outlined,
+                  size: 18,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                filled: true,
+                fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              textInputAction: TextInputAction.newline,
+            ),
+            const SizedBox(height: 8),
+            // Deux choix : envoyer le refus avec l'instruction, ou sans texte.
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    key: const Key('deny-with-reason-btn'),
+                    onPressed: _isSubmitting || widget.isExpired
+                        ? null
+                        : () => _handleDecision(
+                              ToolDecision.deny,
+                              denyReason: _denyReasonController.text.trim(),
+                            ),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: scheme.error),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      minimumSize: const Size(0, 48),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: Text(
+                      'Refuser avec cette instruction',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: scheme.error,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  key: const Key('deny-plain-btn'),
+                  tooltip: 'Refuser simplement, sans message',
+                  onPressed: _isSubmitting || widget.isExpired
+                      ? null
+                      : () => _handleDecision(ToolDecision.deny),
+                  icon: Icon(Icons.close, size: 20, color: scheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+          ],
+
           // Actions Buttons (Approuver / Refuser) — Minimum 48dp touch targets
           LayoutBuilder(
             builder: (context, constraints) {
               final denyBtn = Semantics(
-                label: 'Refuser l\'exécution de ${request.toolName}',
+                label: 'Refuser l\u2019exécution de ${request.toolName}',
                 button: true,
                 child: OutlinedButton.icon(
                   key: const Key('deny-btn'),
                   onPressed: _isSubmitting || widget.isExpired
                       ? null
-                      : () => _handleDecision(ToolDecision.deny),
+                      : () {
+                          HapticFeedback.lightImpact();
+                          // Premier tap : afficher le champ d'instruction.
+                          // Deuxième tap sur « Refuser » : rien — l'utilisateur
+                          // utilise les boutons dédiés du champ.
+                          setState(() => _showDenyReason = true);
+                        },
                   icon: Icon(Icons.close, size: 16, color: scheme.error),
                   label: Text(
                     'Refuser',

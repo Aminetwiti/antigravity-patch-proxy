@@ -841,7 +841,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   void _handleToolDecision(ToolDecision decision,
-      {ApprovalScope scope = ApprovalScope.once}) {
+      {ApprovalScope scope = ApprovalScope.once, String denyReason = ''}) {
     final approval = _currentApproval;
     if (approval == null) return;
 
@@ -866,6 +866,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       approvalType: approval.approvalType,
       command: approval.command,
       scope: scope,
+      denyReason: denyReason,
     ).catchError((_) => <String, dynamic>{});
   }
 

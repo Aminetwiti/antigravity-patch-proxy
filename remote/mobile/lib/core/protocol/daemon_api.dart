@@ -64,8 +64,12 @@ class DaemonApi {
   static String resolveWorkspacePath(String rawPath) {
     try {
       final decoded = utf8.decode(rawPath.codeUnits, allowMalformed: true);
-      if (decoded.contains('.gemini/antigravity') && !decoded.contains('antigravity-ide')) {
-        return decoded.replaceAll('.gemini/antigravity', '.gemini/antigravity-ide');
+      if (decoded.contains('.gemini/antigravity') &&
+          !decoded.contains('antigravity-ide')) {
+        return decoded.replaceAll(
+          '.gemini/antigravity',
+          '.gemini/antigravity-ide',
+        );
       }
       return decoded;
     } catch (_) {
@@ -247,7 +251,9 @@ class DaemonApi {
       final data = await rpc('list_sessions');
       if (data['fields'] != null) {
         try {
-          await DatabaseHelper.instance.saveSessions(data['fields'] as List<dynamic>);
+          await DatabaseHelper.instance.saveSessions(
+            data['fields'] as List<dynamic>,
+          );
         } catch (_) {}
       }
       return data;
@@ -274,13 +280,18 @@ class DaemonApi {
       final data = await rpc('get_session_history', {'cascadeId': cascadeId});
       if (data['messages'] != null) {
         try {
-          await DatabaseHelper.instance.saveSessionMessages(cascadeId, data['messages'] as List<dynamic>);
+          await DatabaseHelper.instance.saveSessionMessages(
+            cascadeId,
+            data['messages'] as List<dynamic>,
+          );
         } catch (_) {}
       }
       return data;
     } catch (e, st) {
       try {
-        final messages = await DatabaseHelper.instance.getSessionMessages(cascadeId);
+        final messages = await DatabaseHelper.instance.getSessionMessages(
+          cascadeId,
+        );
         if (messages != null) {
           return {'messages': messages};
         }
@@ -294,6 +305,26 @@ class DaemonApi {
 
   Future<Map<String, dynamic>> listFiles(String workspacePath) =>
       rpc('list_files', {'workspacePath': workspacePath});
+
+  /// Recherche `query` dans le workspace (noms + contenu, exclusions git).
+  /// Le daemon confine la recherche sous workspacePath — jamais au-delà.
+  Future<Map<String, dynamic>> searchFiles(
+    String workspacePath,
+    String query,
+  ) => rpc('search_files', {'workspacePath': workspacePath, 'query': query});
+
+  /// Ouvre une session PTY interactive sur le PC hôte (P3). Retourne
+  /// {id} ; la sortie est poussée en broadcast terminal_output.
+  Future<Map<String, dynamic>> terminalCreate(String workspacePath) =>
+      rpc('terminal_create', {'workspacePath': workspacePath});
+
+  /// Écrit l'entrée clavier dans la session PTY.
+  Future<Map<String, dynamic>> terminalWrite(String id, String input) =>
+      rpc('terminal_write', {'id': id, 'input': input});
+
+  /// Tue la session PTY et son processus.
+  Future<Map<String, dynamic>> terminalKill(String id) =>
+      rpc('terminal_kill', {'id': id});
 
   Future<Map<String, dynamic>> readFile(
     String filePath, {
@@ -314,6 +345,9 @@ class DaemonApi {
     String approvalType = 'approval',
     String command = '',
     ApprovalScope scope = ApprovalScope.once,
+    // Instruction libre envoyée à l'agent quand on refuse (deny avec message).
+    // Vide → deny simple (comportement historique).
+    String denyReason = '',
   }) => rpc('submit_approval', {
     'cascadeId': cascadeId,
     'callId': callId,
@@ -323,6 +357,7 @@ class DaemonApi {
     'command': command,
     'scope': scope == ApprovalScope.session ? 'session' : 'once',
     'decision': allow ? 'allow' : 'deny',
+    if (denyReason.isNotEmpty) 'denyReason': denyReason,
   });
 
   /// B2 — contexte d'une approbation en attente (tap sur la notification
@@ -341,14 +376,13 @@ class DaemonApi {
     int? stepIndex,
     List<String> selectedAnswers = const [],
     String? customAnswer,
-  }) =>
-      rpc('submit_question_response', {
-        'cascadeId': cascadeId,
-        if (trajectoryId != null) 'trajectoryId': trajectoryId,
-        if (stepIndex != null) 'stepIndex': stepIndex,
-        'selectedAnswers': selectedAnswers,
-        if (customAnswer != null) 'customAnswer': customAnswer,
-      });
+  }) => rpc('submit_question_response', {
+    'cascadeId': cascadeId,
+    if (trajectoryId != null) 'trajectoryId': trajectoryId,
+    if (stepIndex != null) 'stepIndex': stepIndex,
+    'selectedAnswers': selectedAnswers,
+    if (customAnswer != null) 'customAnswer': customAnswer,
+  });
 
   /// Interrompt ou annule la génération / tâche en cours pour une cascade.
   void stopGeneration({required String cascadeId}) {
@@ -365,11 +399,10 @@ class DaemonApi {
   Future<Map<String, dynamic>> syncSession({
     required String cascadeId,
     required int lastStepIndex,
-  }) =>
-      rpc('sync_session', {
-        'cascadeId': cascadeId,
-        'lastStepIndex': lastStepIndex,
-      });
+  }) => rpc('sync_session', {
+    'cascadeId': cascadeId,
+    'lastStepIndex': lastStepIndex,
+  });
 
   /// Upload d'une image vers le dossier scratch de la cascade.
   Future<Map<String, dynamic>> uploadImage({
@@ -377,13 +410,12 @@ class DaemonApi {
     required String base64Data,
     String? fileName,
     String? mimeType,
-  }) =>
-      rpc('upload_image', {
-        'cascadeId': cascadeId,
-        'base64Data': base64Data,
-        if (fileName != null) 'fileName': fileName,
-        if (mimeType != null) 'mimeType': mimeType,
-      });
+  }) => rpc('upload_image', {
+    'cascadeId': cascadeId,
+    'base64Data': base64Data,
+    if (fileName != null) 'fileName': fileName,
+    if (mimeType != null) 'mimeType': mimeType,
+  });
 
   /// Upload de média multimodal (images/photos) vers le daemon.
   void uploadMedia({
@@ -416,7 +448,9 @@ class DaemonApi {
   }
 
   /// Liste les worktrees Git du workspace.
-  Future<List<Map<String, dynamic>>> listGitWorktrees({String? workspacePath}) async {
+  Future<List<Map<String, dynamic>>> listGitWorktrees({
+    String? workspacePath,
+  }) async {
     final res = await rpc('list_git_worktrees', {
       if (workspacePath != null) 'workspacePath': workspacePath,
     });
@@ -424,6 +458,13 @@ class DaemonApi {
     return list?.map((e) => (e as Map).cast<String, dynamic>()).toList() ?? [];
   }
 
+  /// Active/désactive l'auto-approbation des actions read-only côté daemon
+  /// (message WS set_auto_accept). Retourne true si le daemon a confirmé.
+  Future<bool> setAutoAccept({required bool enabled}) async {
+    return sendWithResult('set_auto_accept', {
+      'data': {'enabled': enabled},
+    });
+  }
 
   /// Streaming call: emits each decoded message (`stream_start`,
   /// `stream_delta`, ...) until `stream_end` closes the stream.
@@ -505,9 +546,10 @@ class DaemonApi {
   /// Rafraîchissement automatique des jetons OAuth pour Salesforce et Atlassian MCP
   Future<Map<String, dynamic>> refreshOAuthToken(String serverName) async {
     final provider = serverName.toLowerCase();
-    final endpoint = provider.contains('salesforce')
-        ? '/services/oauth2/token'
-        : provider.contains('atlassian')
+    final endpoint =
+        provider.contains('salesforce')
+            ? '/services/oauth2/token'
+            : provider.contains('atlassian')
             ? 'https://auth.atlassian.com/oauth/token'
             : '/oauth/token';
 
@@ -531,7 +573,11 @@ class DaemonApi {
   Future<Map<String, dynamic>> connectMcpServer(String serverName) async {
     return rpc('connect_mcp_server', {'serverName': serverName}).timeout(
       mcpTimeout,
-      onTimeout: () => throw TimeoutException('Connexion au serveur MCP "$serverName" a expiré après 15s.'),
+      onTimeout:
+          () =>
+              throw TimeoutException(
+                'Connexion au serveur MCP "$serverName" a expiré après 15s.',
+              ),
     );
   }
 
@@ -597,9 +643,7 @@ class DaemonApi {
 
   /// Déclenche l'exécution immédiate d'une tâche planifiée.
   Future<ScheduledTaskItem?> triggerScheduledTask(String taskId) async {
-    final res = await rpc('trigger_scheduled_task', {
-      'taskId': taskId,
-    });
+    final res = await rpc('trigger_scheduled_task', {'taskId': taskId});
     final rawTask = res['task'];
     if (rawTask is Map) {
       return ScheduledTaskItem.fromJson(rawTask.cast<String, dynamic>());
@@ -609,14 +653,15 @@ class DaemonApi {
 
   /// Annule / supprime une tâche planifiée.
   Future<bool> cancelScheduledTask(String taskId) async {
-    final res = await rpc('cancel_scheduled_task', {
-      'taskId': taskId,
-    });
+    final res = await rpc('cancel_scheduled_task', {'taskId': taskId});
     return res['status'] == 'cancelled';
   }
 
   /// Demande la prévisualisation du rollback d'une cascade (GetRevertPreview).
-  Future<Map<String, dynamic>> getRevertPreview(String cascadeId, int stepIndex) async {
+  Future<Map<String, dynamic>> getRevertPreview(
+    String cascadeId,
+    int stepIndex,
+  ) async {
     return await rpc('get_revert_preview', {
       'cascadeId': cascadeId,
       'stepIndex': stepIndex,
@@ -633,7 +678,10 @@ class DaemonApi {
   }
 
   /// Bascule des étapes d'exécution en tâche de fond (SendStepsToBackground).
-  Future<bool> sendStepsToBackground(String conversationId, List<int> stepIndices) async {
+  Future<bool> sendStepsToBackground(
+    String conversationId,
+    List<int> stepIndices,
+  ) async {
     final res = await rpc('send_steps_to_background', {
       'conversationId': conversationId,
       'stepIndices': stepIndices,
@@ -678,7 +726,10 @@ class DaemonApi {
   }
 
   /// Exporte l'intégralité d'une session / trajectoire en Markdown.
-  Future<String> exportMarkdown(String cascadeId, {String? trajectoryId}) async {
+  Future<String> exportMarkdown(
+    String cascadeId, {
+    String? trajectoryId,
+  }) async {
     final res = await rpc('export_markdown', {
       'cascadeId': cascadeId,
       if (trajectoryId != null) 'trajectoryId': trajectoryId,
@@ -698,8 +749,6 @@ class DaemonApi {
     return res['status'] == 'created';
   }
 
-
-
   void _onMessage(dynamic raw) {
     if (raw is! String) return; // daemon sends JSON text only
     Map<String, dynamic> msg;
@@ -714,14 +763,16 @@ class DaemonApi {
     }
 
     final type = msg['type'] as String? ?? '';
-    final requestId = (msg['requestId'] as String?) ??
+    final requestId =
+        (msg['requestId'] as String?) ??
         (type == 'response' ? msg['id'] as String? : null) ??
         '';
     final hasDataKey = msg.containsKey('data');
     final rawData = msg['data'];
-    final data = rawData is Map
-        ? rawData.map((k, v) => MapEntry('$k', v))
-        : hasDataKey
+    final data =
+        rawData is Map
+            ? rawData.map((k, v) => MapEntry('$k', v))
+            : hasDataKey
             ? const <String, dynamic>{}
             : msg;
     final error = msg['error'] as String?;
@@ -736,6 +787,13 @@ class DaemonApi {
         return;
       }
       controller.add(msg);
+      _emitBatched(msg);
+      return;
+    }
+
+    // Sortie de terminal PTY poussée par le daemon (P3) : pas de requestId
+    // local — les terminaux sont des sessions poussées, corrélées par id.
+    if (type == 'terminal_output') {
       _emitBatched(msg);
       return;
     }

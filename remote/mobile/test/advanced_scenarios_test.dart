@@ -23,7 +23,9 @@ void main() {
           home: Scaffold(
             body: ToolApprovalCard(
               request: request,
-              onDecision: (decision, {ApprovalScope scope = ApprovalScope.once}) async {
+              onDecision: (decision,
+                  {ApprovalScope scope = ApprovalScope.once,
+                  String denyReason = ''}) async {
                 tapCount++;
                 // Simulate a network delay of 500ms
                 await Future.delayed(const Duration(milliseconds: 500));
@@ -72,7 +74,9 @@ void main() {
             body: ToolApprovalCard(
               request: request,
               isExpired: true,
-              onDecision: (decision, {ApprovalScope scope = ApprovalScope.once}) async {
+              onDecision: (decision,
+                  {ApprovalScope scope = ApprovalScope.once,
+                  String denyReason = ''}) async {
                 calls++;
               },
             ),

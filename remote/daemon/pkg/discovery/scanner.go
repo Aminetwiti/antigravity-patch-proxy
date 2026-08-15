@@ -338,3 +338,28 @@ func atoi(s string) int {
 	v, _ := strconv.Atoi(s)
 	return v
 }
+
+// GetActiveWorkspaces scanne les processus language_server en cours d'exécution
+// et extrait la liste unique des chemins de workspaces actifs (--workspace_id).
+func GetActiveWorkspaces() []string {
+	procs, err := getProcesses()
+	if err != nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var active []string
+	for _, p := range procs {
+		ws := extractArg(p.commandLine, "workspace_id")
+		if ws != "" {
+			// Normalisation du chemin (séparateurs, file:///)
+			cleanWs := strings.TrimPrefix(ws, "file:///")
+			cleanWs = strings.ReplaceAll(cleanWs, `\`, `/`)
+			cleanWs = strings.TrimRight(cleanWs, "/")
+			if !seen[cleanWs] {
+				seen[cleanWs] = true
+				active = append(active, cleanWs)
+			}
+		}
+	}
+	return active
+}

@@ -300,6 +300,27 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       _watchSessionEvents();
       _refreshSessions();
       _refreshContext();
+      _applySavedApprovalSettings();
+    }
+  }
+
+  /// Re-synchronise les réglages d'approbation persistés vers le daemon à
+  /// chaque (re)connexion : le daemon ne persiste rien, il faut donc lui
+  /// ré-appliquer le délai d'auto-refus et l'auto-accept read-only après un
+  /// redémarrage (du daemon ou de l'app).
+  Future<void> _applySavedApprovalSettings() async {
+    final api = _api;
+    if (api == null) return;
+    try {
+      final s = await SettingsStore.load();
+      final timeout = (s['approvalTimeoutMinutes'] as int?) ?? 5;
+      await api.sendWithResult('set_approval_timeout', {
+        'data': {'minutes': timeout},
+      });
+      final autoAccept = (s['autoAcceptEnabled'] as bool?) ?? false;
+      await api.setAutoAccept(enabled: autoAccept);
+    } catch (_) {
+      // Réglages décoratifs : sans daemon, on ignore silencieusement.
     }
   }
 

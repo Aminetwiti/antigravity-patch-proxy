@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/protocol/daemon_api.dart';
@@ -15,7 +17,11 @@ class RemoteTerminalSheet extends StatefulWidget {
     this.projectName = 'Workspace',
   });
 
-  static Future<void> show(BuildContext context, {DaemonApi? api, String projectName = 'Workspace'}) {
+  static Future<void> show(
+    BuildContext context, {
+    DaemonApi? api,
+    String projectName = 'Workspace',
+  }) {
     return showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -50,6 +56,14 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
   int _historyIndex = -1;
   bool _isRunning = false;
 
+  // État de session PTY (P3) : quand le daemon répond à terminal_create
+  // avec un id, on bascule en mode "flux live" — la sortie streamée est
+  // affichée dans _ptyBuffer au lieu des entrées commande→résultat.
+  String? _ptyId;
+  String _ptyBuffer = '';
+  bool _ptyClosed = false;
+  StreamSubscription<Map<String, dynamic>>? _eventSub;
+
   final List<String> _quickCommands = [
     'git status',
     'git diff --stat',
@@ -62,17 +76,85 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
   @override
   void initState() {
     super.initState();
-    _entries.add(_TerminalEntry(
-      command: 'init',
-      output: 'Antigravity Remote Terminal Bridge v3.1.0\nConnecté au PC hôte — prêt pour exécution.',
-    ));
+    _entries.add(
+      _TerminalEntry(
+        command: 'init',
+        output:
+            'Antigravity Remote Terminal Bridge v3.1.0\nConnecté au PC hôte — prêt pour exécution.',
+      ),
+    );
+    _openPty();
+  }
+
+  /// Ouvre une session PTY interactive (terminal_create).
+  /// Fallback silencieux : si le daemon ne supporte pas encore le PTY
+  /// (version antérieure), on garde le mode commande→résultat existant.
+  Future<void> _openPty() async {
+    final api = widget.api;
+    if (api == null) return;
+    try {
+      final res = await api.terminalCreate('.');
+      final id = res['id'] as String?;
+      if (!mounted || id == null || id.isEmpty) return;
+      setState(() => _ptyId = id);
+      _eventSub = api.events.listen(_onTerminalEvent);
+    } catch (_) {
+      // Daemon sans support PTY → on reste en mode legacy.
+    }
+  }
+
+  void _onTerminalEvent(Map<String, dynamic> msg) {
+    if (msg['type'] != 'terminal_output') return;
+    if (msg['id'] != _ptyId) return;
+    final data = (msg['data'] as String?) ?? '';
+    final kind = (msg['kind'] as String?) ?? 'stdout';
+    if (!mounted) return;
+    setState(() {
+      if (kind == 'exit') {
+        _ptyClosed = true;
+        _ptyBuffer += '\n[process exited]\n';
+      } else {
+        _ptyBuffer += data;
+      }
+    });
+    _scrollToBottom();
   }
 
   @override
   void dispose() {
+    _eventSub?.cancel();
+    if (_ptyId != null) {
+      widget.api?.terminalKill(_ptyId!);
+    }
     _inputController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  /// Envoie une ligne à la session PTY (terminal_write).
+  Future<void> _writePty(String input) async {
+    final id = _ptyId;
+    final api = widget.api;
+    if (id == null || api == null || _ptyClosed) return;
+    await api.terminalWrite(id, input);
+  }
+
+  /// Point d'entrée unique de la barre de saisie : PTY si session active,
+  /// sinon mode legacy commande→résultat.
+  void _submitInput(String val) {
+    if (_ptyId != null) {
+      final text = val.trimRight();
+      if (text.isEmpty) return;
+      setState(() {
+        _ptyBuffer += '\$ $text\n';
+        _ptyClosed = false;
+      });
+      _writePty('$text\n');
+      _inputController.clear();
+      _scrollToBottom();
+      return;
+    }
+    _executeCommand(val);
   }
 
   Future<void> _executeCommand(String rawCmd) async {
@@ -94,11 +176,13 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
     if (api == null) {
       setState(() {
         _isRunning = false;
-        _entries.add(_TerminalEntry(
-          command: cmd,
-          output: 'Erreur: Daemon non connecté.',
-          isError: true,
-        ));
+        _entries.add(
+          _TerminalEntry(
+            command: cmd,
+            output: 'Erreur: Daemon non connecté.',
+            isError: true,
+          ),
+        );
       });
       _scrollToBottom();
       return;
@@ -115,7 +199,8 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
       } else if (res['data'] != null) {
         final d = res['data'];
         if (d is Map) {
-          output = d['output']?.toString() ??
+          output =
+              d['output']?.toString() ??
               d['text']?.toString() ??
               d['result']?.toString() ??
               d.toString();
@@ -131,11 +216,9 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
       if (mounted) {
         setState(() {
           _isRunning = false;
-          _entries.add(_TerminalEntry(
-            command: cmd,
-            output: output.trim(),
-            isError: isErr,
-          ));
+          _entries.add(
+            _TerminalEntry(command: cmd, output: output.trim(), isError: isErr),
+          );
         });
         _scrollToBottom();
       }
@@ -143,11 +226,13 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
       if (mounted) {
         setState(() {
           _isRunning = false;
-          _entries.add(_TerminalEntry(
-            command: cmd,
-            output: 'Échec d\'exécution : $e',
-            isError: true,
-          ));
+          _entries.add(
+            _TerminalEntry(
+              command: cmd,
+              output: 'Échec d\'exécution : $e',
+              isError: true,
+            ),
+          );
         });
         _scrollToBottom();
       }
@@ -166,12 +251,51 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
     });
   }
 
+  /// Console PTY live : buffer scrollable + invite en bas de flux.
+  Widget _buildPtyConsole() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            padding: const EdgeInsets.all(12),
+            child: SelectableText(
+              _ptyBuffer.isEmpty
+                  ? 'Session PTY ouverte — tapez une commande (ex: git status).\n'
+                  : _ptyBuffer,
+              style: const TextStyle(
+                fontSize: 11,
+                fontFamily: 'monospace',
+                color: Color(0xFFD4D4D8),
+                height: 1.4,
+              ),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+          child: Text(
+            _ptyClosed ? '[session terminée — fermez la console]' : r'$',
+            style: TextStyle(
+              fontSize: 11,
+              fontFamily: 'monospace',
+              color: _ptyClosed ? AppColors.inkMuted : AppColors.positive,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   void _navigateHistory(int direction) {
     if (_history.isEmpty) return;
     _historyIndex = (_historyIndex + direction).clamp(0, _history.length - 1);
     final cmd = _history[_historyIndex];
     _inputController.text = cmd;
-    _inputController.selection = TextSelection.fromPosition(TextPosition(offset: cmd.length));
+    _inputController.selection = TextSelection.fromPosition(
+      TextPosition(offset: cmd.length),
+    );
   }
 
   @override
@@ -209,7 +333,11 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             child: Row(
               children: [
-                const Icon(Icons.terminal_rounded, size: 18, color: AppColors.positive),
+                const Icon(
+                  Icons.terminal_rounded,
+                  size: 18,
+                  color: AppColors.positive,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -224,7 +352,11 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.delete_sweep_outlined, size: 18, color: AppColors.inkMuted),
+                  icon: const Icon(
+                    Icons.delete_sweep_outlined,
+                    size: 18,
+                    color: AppColors.inkMuted,
+                  ),
                   tooltip: 'Effacer l\'historique',
                   onPressed: () {
                     HapticFeedback.selectionClick();
@@ -232,7 +364,11 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
                   },
                 ),
                 IconButton(
-                  icon: const Icon(Icons.close, size: 18, color: AppColors.inkMuted),
+                  icon: const Icon(
+                    Icons.close,
+                    size: 18,
+                    color: AppColors.inkMuted,
+                  ),
                   tooltip: 'Fermer',
                   onPressed: () => Navigator.of(context).pop(),
                 ),
@@ -255,14 +391,20 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
                 return Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    onTap: _isRunning ? null : () => _executeCommand(cmd),
+                    onTap: () => _submitInput(cmd),
                     borderRadius: BorderRadius.circular(6),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
                       decoration: BoxDecoration(
                         color: const Color(0xFF18181B),
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: const Color(0xFF27272A), width: 1),
+                        border: Border.all(
+                          color: const Color(0xFF27272A),
+                          width: 1,
+                        ),
                       ),
                       child: Text(
                         cmd,
@@ -281,100 +423,114 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
 
           const Divider(height: 1, color: Color(0xFF27272A)),
 
-          // Console Output
+          // Console Output — en mode PTY, affiche le buffer live ; sinon
+          // la liste commande→résultat existante.
           Expanded(
-            child: ListView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.all(12),
-              itemCount: _entries.length + (_isRunning ? 1 : 0),
-              itemBuilder: (context, index) {
-                if (index == _entries.length && _isRunning) {
-                  return const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 6),
-                    child: Row(
-                      children: [
-                        SizedBox(
-                          width: 12,
-                          height: 12,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 1.5,
-                            valueColor: AlwaysStoppedAnimation(AppColors.positive),
-                          ),
-                        ),
-                        SizedBox(width: 8),
-                        Text(
-                          'Exécution en cours...',
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            fontFamily: 'monospace',
-                            color: AppColors.inkMuted,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                final entry = _entries[index];
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (entry.command != 'init')
-                        Row(
-                          children: [
-                            const Text(
-                              r'$ ',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.positive,
-                                fontFamily: 'monospace',
-                              ),
-                            ),
-                            Expanded(
-                              child: SelectableText(
-                                entry.command,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.inkPrimary,
-                                  fontFamily: 'monospace',
+            child:
+                _ptyId != null
+                    ? _buildPtyConsole()
+                    : ListView.builder(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.all(12),
+                      itemCount: _entries.length + (_isRunning ? 1 : 0),
+                      itemBuilder: (context, index) {
+                        if (index == _entries.length && _isRunning) {
+                          return const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 6),
+                            child: Row(
+                              children: [
+                                SizedBox(
+                                  width: 12,
+                                  height: 12,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 1.5,
+                                    valueColor: AlwaysStoppedAnimation(
+                                      AppColors.positive,
+                                    ),
+                                  ),
                                 ),
-                              ),
+                                SizedBox(width: 8),
+                                Text(
+                                  'Exécution en cours...',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontFamily: 'monospace',
+                                    color: AppColors.inkMuted,
+                                  ),
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
-                      if (entry.output.isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF141518),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(
-                              color: entry.isError ? AppColors.danger.withValues(alpha: 0.4) : const Color(0xFF22242A),
-                              width: 1,
-                            ),
+                          );
+                        }
+
+                        final entry = _entries[index];
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (entry.command != 'init')
+                                Row(
+                                  children: [
+                                    const Text(
+                                      r'$ ',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: AppColors.positive,
+                                        fontFamily: 'monospace',
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: SelectableText(
+                                        entry.command,
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppColors.inkPrimary,
+                                          fontFamily: 'monospace',
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              if (entry.output.isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF141518),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color:
+                                          entry.isError
+                                              ? AppColors.danger.withValues(
+                                                alpha: 0.4,
+                                              )
+                                              : const Color(0xFF22242A),
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: SelectableText(
+                                    entry.output,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontFamily: 'monospace',
+                                      color:
+                                          entry.isError
+                                              ? const Color(0xFFF87171)
+                                              : const Color(0xFFD4D4D8),
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
                           ),
-                          child: SelectableText(
-                            entry.output,
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontFamily: 'monospace',
-                              color: entry.isError ? const Color(0xFFF87171) : const Color(0xFFD4D4D8),
-                              height: 1.35,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                );
-              },
-            ),
+                        );
+                      },
+                    ),
           ),
 
           // Bottom Input bar
@@ -382,22 +538,56 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
             padding: EdgeInsets.fromLTRB(10, 8, 10, 8 + bottomInset),
             decoration: const BoxDecoration(
               color: Color(0xFF141518),
-              border: Border(top: BorderSide(color: Color(0xFF27272A), width: 1)),
+              border: Border(
+                top: BorderSide(color: Color(0xFF27272A), width: 1),
+              ),
             ),
             child: Row(
               children: [
-                if (_history.isNotEmpty) ...[
+                if (_ptyId != null) ...[
+                  // Ctrl-C : interrompt le processus en cours (SIGINT).
                   IconButton(
-                    icon: const Icon(Icons.arrow_upward_rounded, size: 16, color: AppColors.inkMuted),
+                    icon: const Icon(
+                      Icons.stop_circle_outlined,
+                      size: 16,
+                      color: AppColors.danger,
+                    ),
                     padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                    constraints: const BoxConstraints(
+                      minWidth: 28,
+                      minHeight: 28,
+                    ),
+                    onPressed: _ptyClosed ? null : () => _writePty('\x03'),
+                    tooltip: 'Ctrl-C (SIGINT)',
+                  ),
+                  const SizedBox(width: 4),
+                ],
+                if (_history.isNotEmpty && _ptyId == null) ...[
+                  IconButton(
+                    icon: const Icon(
+                      Icons.arrow_upward_rounded,
+                      size: 16,
+                      color: AppColors.inkMuted,
+                    ),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 28,
+                      minHeight: 28,
+                    ),
                     onPressed: () => _navigateHistory(-1),
                     tooltip: 'Commande précédente',
                   ),
                   IconButton(
-                    icon: const Icon(Icons.arrow_downward_rounded, size: 16, color: AppColors.inkMuted),
+                    icon: const Icon(
+                      Icons.arrow_downward_rounded,
+                      size: 16,
+                      color: AppColors.inkMuted,
+                    ),
                     padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                    constraints: const BoxConstraints(
+                      minWidth: 28,
+                      minHeight: 28,
+                    ),
                     onPressed: () => _navigateHistory(1),
                     tooltip: 'Commande suivante',
                   ),
@@ -422,18 +612,29 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
                       color: AppColors.inkPrimary,
                     ),
                     decoration: const InputDecoration(
-                      hintText: 'Taper une commande CLI (ex: git pull, npm test)...',
-                      hintStyle: TextStyle(fontSize: 12, color: AppColors.inkMuted),
+                      hintText:
+                          'Taper une commande CLI (ex: git pull, npm test)...',
+                      hintStyle: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.inkMuted,
+                      ),
                       border: InputBorder.none,
                       isDense: true,
-                      contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 6,
+                      ),
                     ),
-                    onSubmitted: (val) => _executeCommand(val),
+                    onSubmitted: (val) => _submitInput(val),
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.send_rounded, size: 16, color: AppColors.accentBlue),
-                  onPressed: _isRunning ? null : () => _executeCommand(_inputController.text),
+                  icon: const Icon(
+                    Icons.send_rounded,
+                    size: 16,
+                    color: AppColors.accentBlue,
+                  ),
+                  onPressed: () => _submitInput(_inputController.text),
                   tooltip: 'Exécuter',
                 ),
               ],

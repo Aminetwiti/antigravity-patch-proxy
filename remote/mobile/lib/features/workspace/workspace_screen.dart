@@ -33,6 +33,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   final GlobalKey _workspaceButtonKey = GlobalKey();
   // Workspace résolu en chemin absolu pour le daemon (resolvePath).
   String _workspaceResolved = '.';
+  // Grep workspace (P5) : recherche contenu+noms côté daemon.
+  final TextEditingController _grepController = TextEditingController();
+  final FocusNode _grepFocusNode = FocusNode();
+  bool _showGrep = false;
+  bool _isGrepLoading = false;
+  List<Map<String, dynamic>> _grepResults = [];
 
   /// Normalise le workspace en chemin absolu exploitable par le daemon.
   static String resolveWorkspace(String raw) {
@@ -62,6 +68,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   void dispose() {
     _searchController.dispose();
     _findController.dispose();
+    _grepController.dispose();
     super.dispose();
   }
 
@@ -76,7 +83,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
 
   Future<void> _loadFiles() async {
     if (widget.api == null) {
-      if (mounted) setState(() { _isLoadingTree = false; _loadError = null; });
+      if (mounted)
+        setState(() {
+          _isLoadingTree = false;
+          _loadError = null;
+        });
       return;
     }
     try {
@@ -99,14 +110,17 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     }
   }
 
-  void _loadFile(String path) async {
+  Future<void> _loadFile(String path) async {
     setState(() {
       _selectedFilePath = path;
       _isLoadingCode = true;
       _codeContent = '';
     });
     try {
-      final res = await widget.api!.readFile(path, workspacePath: _workspaceResolved);
+      final res = await widget.api!.readFile(
+        path,
+        workspacePath: _workspaceResolved,
+      );
       if (mounted) {
         setState(() {
           _codeContent = res['content'] as String? ?? '';
@@ -123,17 +137,68 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     }
   }
 
+  /// Grep workspace : délègue au daemon (search_files), résultats tapables.
+  /// On ferme le drawer si ouvert (mobile) puis on charge le fichier.
+  Future<void> _searchInWorkspace() async {
+    final query = _grepController.text.trim();
+    if (query.isEmpty || widget.api == null) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _isGrepLoading = true;
+      _grepResults = [];
+    });
+    try {
+      final res = await widget.api!.searchFiles(_workspaceResolved, query);
+      if (mounted) {
+        setState(() {
+          _grepResults = List<Map<String, dynamic>>.from(res['results'] ?? []);
+          _isGrepLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _grepResults = [];
+          _isGrepLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Recherche impossible : $e'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  void _openGrepResult(String path, int? line) {
+    final scaffold = Scaffold.maybeOf(context);
+    if (scaffold != null && scaffold.isDrawerOpen) {
+      scaffold.closeDrawer();
+    }
+    _loadFile(path);
+    // Retour au fichier si l'utilisateur est dans l'onglet Grep :
+    // l'aperçu code est prioritaire (le panneau reste accessible via l'icône).
+    if (_showGrep && _selectedFilePath == path) {
+      setState(() => _showGrep = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isMobile = constraints.maxWidth < 600;
-        
+
         final fileTree = Container(
           width: isMobile ? double.infinity : 280,
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.surface,
-            border: Border(right: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
+            border: Border(
+              right: BorderSide(
+                color: Theme.of(context).colorScheme.outlineVariant,
+              ),
+            ),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -145,16 +210,28 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                   padding: const EdgeInsets.all(12),
                   child: Row(
                     children: [
-                      Icon(Icons.folder_open, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      Icon(
+                        Icons.folder_open,
+                        size: 16,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           _workspaceLabel,
-                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface),
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      Icon(Icons.keyboard_arrow_down, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      Icon(
+                        Icons.keyboard_arrow_down,
+                        size: 16,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ],
                   ),
                 ),
@@ -164,45 +241,74 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                 child: TextField(
                   controller: _searchController,
-                  style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurface),
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
                   decoration: InputDecoration(
                     hintText: 'Rechercher...',
-                    hintStyle: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                    prefixIcon: Icon(Icons.search, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                    suffixIcon: _searchQuery.isNotEmpty
-                        ? IconButton(
-                            icon: Icon(Icons.close, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                            onPressed: () => _searchController.clear(),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                          )
-                        : null,
+                    hintStyle: TextStyle(
+                      fontSize: 12.5,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    prefixIcon: Icon(
+                      Icons.search,
+                      size: 16,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    suffixIcon:
+                        _searchQuery.isNotEmpty
+                            ? IconButton(
+                              icon: Icon(
+                                Icons.close,
+                                size: 14,
+                                color:
+                                    Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
+                              ),
+                              onPressed: () => _searchController.clear(),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 28,
+                                minHeight: 28,
+                              ),
+                            )
+                            : null,
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(vertical: 8),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(AppRadius.md),
-                      borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                      borderSide: BorderSide(
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                      ),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(AppRadius.md),
-                      borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                      borderSide: BorderSide(
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                      ),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(AppRadius.md),
-                      borderSide: BorderSide(color: Theme.of(context).colorScheme.primary),
+                      borderSide: BorderSide(
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
                     ),
                     filled: true,
-                    fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    fillColor:
+                        Theme.of(context).colorScheme.surfaceContainerHighest,
                   ),
                 ),
               ),
               const Divider(height: 1),
               Expanded(
-                child: _isLoadingTree
-                  ? _buildSkeletonTree()
-                  : _loadError != null
-                      ? _buildErrorState(_loadError!)
-                      : _buildFileList(),
+                child:
+                    _isLoadingTree
+                        ? _buildSkeletonTree()
+                        : _loadError != null
+                        ? _buildErrorState(_loadError!)
+                        : _buildFileList(),
               ),
             ],
           ),
@@ -213,6 +319,33 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           appBar: AppBar(
             title: const Text('Explorateur de Fichiers'),
             backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
+            actions: [
+              IconButton(
+                icon: Icon(
+                  Icons.manage_search_rounded,
+                  size: 20,
+                  color:
+                      _showGrep
+                          ? Theme.of(context).colorScheme.primary
+                          : Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                tooltip: 'Rechercher dans le workspace (grep)',
+                onPressed: () {
+                  setState(() {
+                    _showGrep = !_showGrep;
+                    if (!_showGrep) _grepResults = [];
+                  });
+                  if (_showGrep) {
+                    // Autofocus après le build du panneau.
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted && _grepController.text.isEmpty) {
+                        FocusScope.of(context).requestFocus(_grepFocusNode);
+                      }
+                    });
+                  }
+                },
+              ),
+            ],
           ),
           drawer: isMobile ? Drawer(child: SafeArea(child: fileTree)) : null,
           body: Row(
@@ -223,141 +356,238 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  color: Theme.of(context).colorScheme.surfaceContainer,
-                  child: Row(
-                    children: [
-                      Icon(
-                        _selectedFilePath.isEmpty
-                            ? Icons.folder_open_outlined
-                            : Icons.description_outlined,
-                        size: 16,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Tooltip(
-                          message: _selectedFilePath.isEmpty ? 'Sélectionnez un fichier' : _selectedFilePath,
-                          child: Text(
-                            _selectedFilePath.isEmpty ? 'Sélectionnez un fichier' : _selectedFilePath,
-                            style: TextStyle(
-                              fontSize: 12.5,
-                              color: _selectedFilePath.isEmpty
-                                  ? Theme.of(context).colorScheme.onSurfaceVariant
-                                  : Theme.of(context).colorScheme.onSurface,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 1,
+                      color: Theme.of(context).colorScheme.surfaceContainer,
+                      child: Row(
+                        children: [
+                          Icon(
+                            _selectedFilePath.isEmpty
+                                ? Icons.folder_open_outlined
+                                : Icons.description_outlined,
+                            size: 16,
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
-                        ),
-                      ),
-                      IconButton(
-                        icon: Icon(
-                          _selectedFilePath.endsWith('.png') || _selectedFilePath.endsWith('.jpg') || _selectedFilePath.endsWith('.svg')
-                              ? Icons.image_search_outlined
-                              : Icons.copy_all_outlined,
-                          size: 16,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                        tooltip: _selectedFilePath.endsWith('.png') || _selectedFilePath.endsWith('.jpg') || _selectedFilePath.endsWith('.svg')
-                            ? 'Copier l\'image'
-                            : 'Copier le contenu',
-                        onPressed: _selectedFilePath.isEmpty || _isLoadingCode
-                            ? null
-                            : () async {
-                                final messenger = ScaffoldMessenger.of(context);
-                                await Clipboard.setData(ClipboardData(text: _codeContent));
-                                if (!mounted) return;
-                                messenger.showSnackBar(
-                                  SnackBar(
-                                    content: Text(_selectedFilePath.endsWith('.png') || _selectedFilePath.endsWith('.jpg') || _selectedFilePath.endsWith('.svg')
-                                        ? 'Image copiée dans le presse-papier !'
-                                        : 'Contenu copié : ${_selectedFilePath.split('/').last}'),
-                                    duration: const Duration(seconds: 1),
-                                  ),
-                                );
-                              },
-                      ),
-                      // Find-in-page toggle
-                      IconButton(
-                        icon: Icon(
-                          Icons.search,
-                          size: 16,
-                          color: _showFindBar
-                              ? Theme.of(context).colorScheme.primary
-                              : Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                        tooltip: 'Rechercher dans le fichier (Cmd+F)',
-                        onPressed: _selectedFilePath.isEmpty
-                            ? null
-                            : () => setState(() {
-                                _showFindBar = !_showFindBar;
-                                if (!_showFindBar) _findController.clear();
-                              }),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                // Find-in-page bar (toggle via icône loupe)
-                if (_showFindBar)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    color: Theme.of(context).colorScheme.surfaceContainer,
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _findController,
-                            autofocus: true,
-                            style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurface),
-                            decoration: InputDecoration(
-                              hintText: 'Trouver dans le fichier...',
-                              hintStyle: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                              prefixIcon: Icon(Icons.search, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                              isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
-                              filled: true,
-                              fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Tooltip(
+                              message:
+                                  _selectedFilePath.isEmpty
+                                      ? 'Sélectionnez un fichier'
+                                      : _selectedFilePath,
+                              child: Text(
+                                _selectedFilePath.isEmpty
+                                    ? 'Sélectionnez un fichier'
+                                    : _selectedFilePath,
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  color:
+                                      _selectedFilePath.isEmpty
+                                          ? Theme.of(
+                                            context,
+                                          ).colorScheme.onSurfaceVariant
+                                          : Theme.of(
+                                            context,
+                                          ).colorScheme.onSurface,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        if (_findQuery.isNotEmpty)
-                          Text(
-                            '${_countMatches(_codeContent, _findQuery)} rés.',
-                            style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                          IconButton(
+                            icon: Icon(
+                              _selectedFilePath.endsWith('.png') ||
+                                      _selectedFilePath.endsWith('.jpg') ||
+                                      _selectedFilePath.endsWith('.svg')
+                                  ? Icons.image_search_outlined
+                                  : Icons.copy_all_outlined,
+                              size: 16,
+                              color:
+                                  Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                            ),
+                            tooltip:
+                                _selectedFilePath.endsWith('.png') ||
+                                        _selectedFilePath.endsWith('.jpg') ||
+                                        _selectedFilePath.endsWith('.svg')
+                                    ? 'Copier l\'image'
+                                    : 'Copier le contenu',
+                            onPressed:
+                                _selectedFilePath.isEmpty || _isLoadingCode
+                                    ? null
+                                    : () async {
+                                      final messenger = ScaffoldMessenger.of(
+                                        context,
+                                      );
+                                      await Clipboard.setData(
+                                        ClipboardData(text: _codeContent),
+                                      );
+                                      if (!mounted) return;
+                                      messenger.showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            _selectedFilePath.endsWith(
+                                                      '.png',
+                                                    ) ||
+                                                    _selectedFilePath.endsWith(
+                                                      '.jpg',
+                                                    ) ||
+                                                    _selectedFilePath.endsWith(
+                                                      '.svg',
+                                                    )
+                                                ? 'Image copiée dans le presse-papier !'
+                                                : 'Contenu copié : ${_selectedFilePath.split('/').last}',
+                                          ),
+                                          duration: const Duration(seconds: 1),
+                                        ),
+                                      );
+                                    },
                           ),
-                        IconButton(
-                          icon: const Icon(Icons.close, size: 16),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                          onPressed: () => setState(() {
-                            _showFindBar = false;
-                            _findController.clear();
-                          }),
-                        ),
-                      ],
+                          // Find-in-page toggle
+                          IconButton(
+                            icon: Icon(
+                              Icons.search,
+                              size: 16,
+                              color:
+                                  _showFindBar
+                                      ? Theme.of(context).colorScheme.primary
+                                      : Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                            ),
+                            tooltip: 'Rechercher dans le fichier (Cmd+F)',
+                            onPressed:
+                                _selectedFilePath.isEmpty
+                                    ? null
+                                    : () => setState(() {
+                                      _showFindBar = !_showFindBar;
+                                      if (!_showFindBar)
+                                        _findController.clear();
+                                    }),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                Expanded(
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(14),
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                    child: _isLoadingCode
-                        ? _buildSkeletonCode()
-                        : _buildCodeView(),
-                  ),
+                    const Divider(height: 1),
+                    // Find-in-page bar (toggle via icône loupe)
+                    if (_showFindBar)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        color: Theme.of(context).colorScheme.surfaceContainer,
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _findController,
+                                autofocus: true,
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  color:
+                                      Theme.of(context).colorScheme.onSurface,
+                                ),
+                                decoration: InputDecoration(
+                                  hintText: 'Trouver dans le fichier...',
+                                  hintStyle: TextStyle(
+                                    fontSize: 12.5,
+                                    color:
+                                        Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                  ),
+                                  prefixIcon: Icon(
+                                    Icons.search,
+                                    size: 16,
+                                    color:
+                                        Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                  ),
+                                  isDense: true,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    vertical: 8,
+                                  ),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  filled: true,
+                                  fillColor:
+                                      Theme.of(
+                                        context,
+                                      ).colorScheme.surfaceContainerHighest,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            if (_findQuery.isNotEmpty)
+                              Text(
+                                '${_countMatches(_codeContent, _findQuery)} rés.',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color:
+                                      Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            IconButton(
+                              icon: const Icon(Icons.close, size: 16),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 28,
+                                minHeight: 28,
+                              ),
+                              onPressed:
+                                  () => setState(() {
+                                    _showFindBar = false;
+                                    _findController.clear();
+                                  }),
+                            ),
+                          ],
+                        ),
+                      ),
+                    // Grep workspace : panneau de résultats en remplacement du
+                    // viewer de code quand _showGrep est actif.
+                    if (_showGrep)
+                      Expanded(
+                        child: Container(
+                          width: double.infinity,
+                          color:
+                              Theme.of(
+                                context,
+                              ).colorScheme.surfaceContainerHighest,
+                          child: _buildGrepPanel(),
+                        ),
+                      )
+                    else
+                      Expanded(
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          color:
+                              Theme.of(
+                                context,
+                              ).colorScheme.surfaceContainerHighest,
+                          child:
+                              _isLoadingCode
+                                  ? _buildSkeletonCode()
+                                  : _buildCodeView(),
+                        ),
+                      ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
-      ),
-    );
+        );
       },
     );
   }
@@ -377,21 +607,41 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             _buildWorkspaceItem('antigravity-add-model-main', true, scheme),
             _buildWorkspaceItem('www - Copie', false, scheme),
             _buildWorkspaceItem('sols-pro-vision', false, scheme),
-            _buildWorkspaceItem(r'c:\Users\amine\Desktop\ooredoo\posweb', false, scheme),
+            _buildWorkspaceItem(
+              r'c:\Users\amine\Desktop\ooredoo\posweb',
+              false,
+              scheme,
+            ),
             _buildWorkspaceItem(r'c:\Users\amine\OmniRoute', false, scheme),
             _buildWorkspaceItem('mo7i', false, scheme),
             Divider(color: scheme.outlineVariant, height: 1),
-            _buildWorkspaceActionItem(Icons.create_new_folder_outlined, 'New Project', scheme),
-            _buildWorkspaceActionItem(Icons.bolt_outlined, 'Quick Start', scheme),
+            _buildWorkspaceActionItem(
+              Icons.create_new_folder_outlined,
+              'New Project',
+              scheme,
+            ),
+            _buildWorkspaceActionItem(
+              Icons.bolt_outlined,
+              'Quick Start',
+              scheme,
+            ),
             Divider(color: scheme.outlineVariant, height: 1),
-            _buildWorkspaceActionItem(Icons.do_disturb_alt_outlined, 'No Project', scheme),
+            _buildWorkspaceActionItem(
+              Icons.do_disturb_alt_outlined,
+              'No Project',
+              scheme,
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildWorkspaceItem(String title, bool isSelected, ColorScheme scheme) {
+  Widget _buildWorkspaceItem(
+    String title,
+    bool isSelected,
+    ColorScheme scheme,
+  ) {
     return InkWell(
       onTap: () {
         CustomDropdownOverlay.hide();
@@ -402,7 +652,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: [
-            Icon(Icons.folder_outlined, size: 16, color: scheme.onSurfaceVariant),
+            Icon(
+              Icons.folder_outlined,
+              size: 16,
+              color: scheme.onSurfaceVariant,
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
@@ -421,7 +675,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
-  Widget _buildWorkspaceActionItem(IconData icon, String title, ColorScheme scheme) {
+  Widget _buildWorkspaceActionItem(
+    IconData icon,
+    String title,
+    ColorScheme scheme,
+  ) {
     return InkWell(
       onTap: () {
         CustomDropdownOverlay.hide();
@@ -435,10 +693,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             Expanded(
               child: Text(
                 title,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: scheme.onSurface,
-                ),
+                style: TextStyle(fontSize: 13, color: scheme.onSurface),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -455,27 +710,39 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.folder_open_outlined, size: 40, color: Theme.of(context).colorScheme.onSurfaceVariant),
+            Icon(
+              Icons.folder_open_outlined,
+              size: 40,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
             const SizedBox(height: 8),
             Text(
               'Espace de travail vide',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface),
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
             ),
             const SizedBox(height: 4),
             Text(
               'Aucun fichier à afficher dans ce répertoire.',
-              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
         ),
       );
     }
-    final filtered = _searchQuery.isEmpty
-        ? _files
-        : _files.where((f) {
-            final name = (f['name'] as String).toLowerCase();
-            return name.contains(_searchQuery);
-          }).toList();
+    final filtered =
+        _searchQuery.isEmpty
+            ? _files
+            : _files.where((f) {
+              final name = (f['name'] as String).toLowerCase();
+              return name.contains(_searchQuery);
+            }).toList();
 
     if (filtered.isEmpty) {
       return Center(
@@ -485,7 +752,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             _searchQuery.isEmpty
                 ? 'Aucun fichier dans ce workspace'
                 : 'Aucun résultat pour «\u00a0$_searchQuery\u00a0»',
-            style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+            style: TextStyle(
+              fontSize: 12.5,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
             textAlign: TextAlign.center,
           ),
         ),
@@ -532,17 +802,28 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.error_outline, size: 32, color: Theme.of(context).colorScheme.error),
+            Icon(
+              Icons.error_outline,
+              size: 32,
+              color: Theme.of(context).colorScheme.error,
+            ),
             const SizedBox(height: 12),
             Text(
               'Impossible de charger les fichiers',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface),
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 6),
             Text(
               error,
-              style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              style: TextStyle(
+                fontSize: 11.5,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
               textAlign: TextAlign.center,
               maxLines: 3,
               overflow: TextOverflow.ellipsis,
@@ -550,7 +831,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             const SizedBox(height: 16),
             OutlinedButton.icon(
               onPressed: () {
-                setState(() { _isLoadingTree = true; _loadError = null; });
+                setState(() {
+                  _isLoadingTree = true;
+                  _loadError = null;
+                });
                 _loadFiles();
               },
               icon: const Icon(Icons.refresh, size: 16),
@@ -566,9 +850,119 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   // ponytail: allMatches() d'une RegExp — stdlib, zéro allocation custom.
   int _countMatches(String content, String query) {
     if (query.isEmpty) return 0;
-    return RegExp(RegExp.escape(query), caseSensitive: false)
-        .allMatches(content)
-        .length;
+    return RegExp(
+      RegExp.escape(query),
+      caseSensitive: false,
+    ).allMatches(content).length;
+  }
+
+  /// Panneau grep : barre de recherche + résultats (fichier:ligne + snippet).
+  Widget _buildGrepPanel() {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _grepController,
+                  focusNode: _grepFocusNode,
+                  style: TextStyle(fontSize: 13, color: scheme.onSurface),
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: (_) => _searchInWorkspace(),
+                  decoration: InputDecoration(
+                    hintText: 'Rechercher dans le workspace…',
+                    hintStyle: TextStyle(
+                      fontSize: 13,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                    prefixIcon: Icon(
+                      Icons.search,
+                      size: 18,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                    suffixIcon:
+                        _grepController.text.isNotEmpty
+                            ? IconButton(
+                              icon: const Icon(Icons.close, size: 16),
+                              onPressed: () {
+                                _grepController.clear();
+                                setState(() => _grepResults = []);
+                              },
+                            )
+                            : null,
+                    isDense: true,
+                    filled: true,
+                    fillColor: scheme.surfaceContainer,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                onPressed: _isGrepLoading ? null : _searchInWorkspace,
+                icon:
+                    _isGrepLoading
+                        ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                        : const Icon(Icons.search, size: 16),
+                label: const Text('Chercher'),
+              ),
+            ],
+          ),
+        ),
+        if (_isGrepLoading)
+          const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          )
+        else if (_grepResults.isEmpty)
+          Padding(
+            padding: const EdgeInsets.all(24),
+            child: Center(
+              child: Text(
+                _grepController.text.trim().isEmpty
+                    ? 'Saisis un terme puis touche Chercher.'
+                    : 'Aucun résultat pour «\u00a0${_grepController.text.trim()}\u00a0»',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: scheme.onSurfaceVariant,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          )
+        else
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.only(bottom: 12),
+              itemCount: _grepResults.length,
+              itemBuilder: (context, index) {
+                final r = _grepResults[index];
+                final path = (r['path'] as String?) ?? '';
+                final line = (r['line'] as num?)?.toInt();
+                final snippet = (r['snippet'] as String?) ?? '';
+                final isNameMatch = r['match'] == 'name';
+                return _SearchResultTile(
+                  path: path,
+                  line: line,
+                  snippet: snippet,
+                  isNameMatch: isNameMatch,
+                  onTap: () => _openGrepResult(path, line),
+                );
+              },
+            ),
+          ),
+      ],
+    );
   }
 
   // Bug find-in-page + Bug #4 (diffs > 1000 lignes) :
@@ -587,9 +981,19 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             color: Theme.of(context).colorScheme.surfaceContainer,
             child: Row(
               children: [
-                Icon(Icons.image_outlined, size: 16, color: Theme.of(context).colorScheme.primary),
+                Icon(
+                  Icons.image_outlined,
+                  size: 16,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
                 const SizedBox(width: 8),
-                Text('Aperçu Vectoriel SVG', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.primary)),
+                Text(
+                  'Aperçu Vectoriel SVG',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
               ],
             ),
           ),
@@ -598,9 +1002,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             child: Container(
               constraints: const BoxConstraints(minWidth: 200, minHeight: 200),
               padding: const EdgeInsets.all(12),
-              child: SingleChildScrollView(
-                child: SelectableText(_codeContent),
-              ),
+              child: SingleChildScrollView(child: SelectableText(_codeContent)),
             ),
           ),
         ],
@@ -608,7 +1010,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     }
 
     // Fichiers binaires (images, audio, vidéo) : pas de numéros de ligne
-    final isBinary = _selectedFilePath.endsWith('.png') ||
+    final isBinary =
+        _selectedFilePath.endsWith('.png') ||
         _selectedFilePath.endsWith('.jpg') ||
         _selectedFilePath.endsWith('.mp3') ||
         _selectedFilePath.endsWith('.mp4');
@@ -621,18 +1024,28 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
               _selectedFilePath.endsWith('.mp3')
                   ? Icons.audio_file_outlined
                   : _selectedFilePath.endsWith('.mp4')
-                      ? Icons.video_file_outlined
-                      : Icons.image_outlined,
+                  ? Icons.video_file_outlined
+                  : Icons.image_outlined,
               size: 48,
               color: Theme.of(context).colorScheme.primary,
             ),
             const SizedBox(height: 12),
             Text(
               'Aperçu multimédia (${_selectedFilePath.split('.').last.toUpperCase()})',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface),
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
             ),
             const SizedBox(height: 4),
-            Text('Fichier binaire — numéros de ligne masqués', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            Text(
+              'Fichier binaire — numéros de ligne masqués',
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
           ],
         ),
       );
@@ -640,7 +1053,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
 
     // Tronquage de sécurité pour éviter les plantages sur les sorties > 2000 lignes ou > 50 000 caractères
     final bool isLargeFile = _codeContent.length > 50000;
-    final safeContent = isLargeFile ? _codeContent.substring(0, 50000) : _codeContent;
+    final safeContent =
+        isLargeFile ? _codeContent.substring(0, 50000) : _codeContent;
     final rawLines = safeContent.split('\n');
     final lines = rawLines.length > 2000 ? rawLines.sublist(0, 2000) : rawLines;
 
@@ -654,7 +1068,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       fontFamily: 'monospace',
       fontSize: 11,
       height: 1.5,
-      color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+      color: Theme.of(
+        context,
+      ).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
     );
 
     // Lignes du viewer : numéros + contenu (softWrap:false pour permettre le
@@ -689,22 +1105,24 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           if (match.start > cursor) {
             spans.add(TextSpan(text: line.substring(cursor, match.start)));
           }
-          spans.add(TextSpan(
-            text: line.substring(match.start, match.end),
-            style: TextStyle(
-              backgroundColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.30),
-              color: Theme.of(context).colorScheme.onSurface,
-              fontWeight: FontWeight.bold,
+          spans.add(
+            TextSpan(
+              text: line.substring(match.start, match.end),
+              style: TextStyle(
+                backgroundColor: Theme.of(
+                  context,
+                ).colorScheme.primary.withValues(alpha: 0.30),
+                color: Theme.of(context).colorScheme.onSurface,
+                fontWeight: FontWeight.bold,
+              ),
             ),
-          ));
+          );
           cursor = match.end;
         }
         if (cursor < line.length) {
           spans.add(TextSpan(text: line.substring(cursor)));
         }
-        return RichText(
-          text: TextSpan(style: textStyle, children: spans),
-        );
+        return RichText(text: TextSpan(style: textStyle, children: spans));
       },
     );
 
@@ -714,14 +1132,20 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.10),
+            color: Theme.of(
+              context,
+            ).colorScheme.primary.withValues(alpha: 0.10),
             child: Text(
               isLargeFile && rawLines.length > 2000
                   ? 'Fichier volumineux — ${rawLines.length} lignes, 2000 affichées (contenu tronqué à 50 000 caractères)'
                   : isLargeFile
-                      ? 'Fichier volumineux — contenu tronqué à 50 000 caractères'
-                      : 'Fichier volumineux — ${rawLines.length} lignes, 2000 affichées',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.primary),
+                  ? 'Fichier volumineux — contenu tronqué à 50 000 caractères'
+                  : 'Fichier volumineux — ${rawLines.length} lignes, 2000 affichées',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(context).colorScheme.primary,
+              ),
             ),
           ),
         Expanded(
@@ -733,7 +1157,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             child: SizedBox(
               width: math.max(
                 MediaQuery.sizeOf(context).width,
-                lines.fold<int>(0, (m, l) => l.length > m ? l.length : m) * 7.2 + 60,
+                lines.fold<int>(0, (m, l) => l.length > m ? l.length : m) *
+                        7.2 +
+                    60,
               ),
               child: codeList,
             ),
@@ -744,7 +1170,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   }
 
   Widget _buildSkeletonTree() {
-
     return ListView.builder(
       itemCount: 8,
       padding: const EdgeInsets.only(bottom: 12, left: 12, right: 12),
@@ -807,7 +1232,12 @@ class _TreeFolder extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: EdgeInsets.only(left: 8.0 + depth * 14, top: 4, bottom: 4, right: 8),
+      padding: EdgeInsets.only(
+        left: 8.0 + depth * 14,
+        top: 4,
+        bottom: 4,
+        right: 8,
+      ),
       child: Row(
         children: [
           Icon(Icons.folder_rounded, size: 15, color: scheme.onSurfaceVariant),
@@ -847,10 +1277,22 @@ class _TreeFile extends StatelessWidget {
     final lower = name.toLowerCase();
     if (lower.endsWith('.dart')) return Icons.flutter_dash_outlined;
     if (lower.endsWith('.go')) return Icons.code_rounded;
-    if (lower.endsWith('.json') || lower.endsWith('.yaml') || lower.endsWith('.yml') || lower.endsWith('.toml')) return Icons.settings_suggest_outlined;
-    if (lower.endsWith('.md') || lower.endsWith('.txt')) return Icons.article_outlined;
-    if (lower.endsWith('.sh') || lower.endsWith('.bat') || lower.endsWith('.ps1')) return Icons.terminal_rounded;
-    if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.svg') || lower.endsWith('.webp')) return Icons.image_outlined;
+    if (lower.endsWith('.json') ||
+        lower.endsWith('.yaml') ||
+        lower.endsWith('.yml') ||
+        lower.endsWith('.toml'))
+      return Icons.settings_suggest_outlined;
+    if (lower.endsWith('.md') || lower.endsWith('.txt'))
+      return Icons.article_outlined;
+    if (lower.endsWith('.sh') ||
+        lower.endsWith('.bat') ||
+        lower.endsWith('.ps1'))
+      return Icons.terminal_rounded;
+    if (lower.endsWith('.png') ||
+        lower.endsWith('.jpg') ||
+        lower.endsWith('.svg') ||
+        lower.endsWith('.webp'))
+      return Icons.image_outlined;
     return Icons.insert_drive_file_outlined;
   }
 
@@ -858,10 +1300,18 @@ class _TreeFile extends StatelessWidget {
     final lower = name.toLowerCase();
     if (lower.endsWith('.dart')) return const Color(0xFF29B6F6);
     if (lower.endsWith('.go')) return const Color(0xFF00ADD8);
-    if (lower.endsWith('.json') || lower.endsWith('.yaml') || lower.endsWith('.yml')) return const Color(0xFFEAB308);
+    if (lower.endsWith('.json') ||
+        lower.endsWith('.yaml') ||
+        lower.endsWith('.yml'))
+      return const Color(0xFFEAB308);
     if (lower.endsWith('.md')) return const Color(0xFFA855F7);
-    if (lower.endsWith('.sh') || lower.endsWith('.bat')) return const Color(0xFF22C55E);
-    if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.svg')) return const Color(0xFFEC4899);
+    if (lower.endsWith('.sh') || lower.endsWith('.bat'))
+      return const Color(0xFF22C55E);
+    if (lower.endsWith('.png') ||
+        lower.endsWith('.jpg') ||
+        lower.endsWith('.svg')) {
+      return const Color(0xFFEC4899);
+    }
     return isSelected ? scheme.primary : scheme.onSurfaceVariant;
   }
 
@@ -876,11 +1326,20 @@ class _TreeFile extends StatelessWidget {
       borderRadius: BorderRadius.circular(4),
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-        padding: EdgeInsets.only(left: 8.0 + depth * 14, top: 4, bottom: 4, right: 8),
+        padding: EdgeInsets.only(
+          left: 8.0 + depth * 14,
+          top: 4,
+          bottom: 4,
+          right: 8,
+        ),
         decoration: BoxDecoration(
-          color: isSelected ? scheme.surfaceContainerHighest : Colors.transparent,
+          color:
+              isSelected ? scheme.surfaceContainerHighest : Colors.transparent,
           borderRadius: BorderRadius.circular(4),
-          border: isSelected ? Border.all(color: scheme.outlineVariant, width: 1) : null,
+          border:
+              isSelected
+                  ? Border.all(color: scheme.outlineVariant, width: 1)
+                  : null,
         ),
         child: Row(
           children: [
@@ -895,13 +1354,91 @@ class _TreeFile extends StatelessWidget {
                 title,
                 style: TextStyle(
                   fontSize: 12.5,
-                  color: isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
+                  color:
+                      isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                 ),
                 overflow: TextOverflow.ellipsis,
                 maxLines: 1,
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Résultat de recherche grep : chemin (avec ligne) + snippet du match.
+class _SearchResultTile extends StatelessWidget {
+  final String path;
+  final int? line;
+  final String snippet;
+  final bool isNameMatch;
+  final VoidCallback onTap;
+
+  const _SearchResultTile({
+    required this.path,
+    required this.line,
+    required this.snippet,
+    required this.isNameMatch,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainer,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: scheme.outlineVariant, width: 0.5),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  isNameMatch
+                      ? Icons.folder_copy_outlined
+                      : Icons.description_outlined,
+                  size: 13,
+                  color: scheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    line != null ? '$path:$line' : path,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.onSurface,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  ),
+                ),
+              ],
+            ),
+            if (snippet.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                snippet,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontFamily: 'monospace',
+                  color: scheme.onSurfaceVariant,
+                ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
+            ],
           ],
         ),
       ),
