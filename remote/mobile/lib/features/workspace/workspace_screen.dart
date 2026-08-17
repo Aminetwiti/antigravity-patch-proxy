@@ -48,6 +48,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   // Branches Git du workspace (Axe 2)
   List<String> _gitBranches = [];
   String? _currentGitBranch;
+  // État Git & conflits (P3)
+  bool _inConflict = false;
+  List<String> _conflicts = [];
 
   /// Normalise le workspace en chemin absolu exploitable par le daemon.
   static String resolveWorkspace(String raw) {
@@ -66,6 +69,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     _workspaceResolved = resolveWorkspace(widget.workspacePath);
     _loadFiles();
     _loadGitBranches();
+    _loadGitState();
     _searchController.addListener(() {
       setState(() => _searchQuery = _searchController.text.toLowerCase());
     });
@@ -153,6 +157,38 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         });
       }
     }
+  }
+
+  /// Charge l'état VCS / Git complet (conflits, modifications indexées).
+  Future<void> _loadGitState() async {
+    if (widget.api == null) return;
+    try {
+      final state = await widget.api!.getGitState(
+        workspacePath: _workspaceResolved,
+      );
+      if (mounted) {
+        final conflictList = <String>[];
+        if (state['conflicts'] is List) {
+          for (final c in state['conflicts'] as List) {
+            if (c is Map && c['path'] != null) {
+              conflictList.add(c['path'].toString());
+            } else if (c is String) {
+              conflictList.add(c);
+            }
+          }
+        }
+        final bool isConflict = state['inConflict'] == true || conflictList.isNotEmpty;
+
+        setState(() {
+          _inConflict = isConflict;
+          _conflicts = conflictList;
+          if (state['currentRef'] is String &&
+              (state['currentRef'] as String).isNotEmpty) {
+            _currentGitBranch = state['currentRef'] as String;
+          }
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadFile(String path) async {
@@ -286,6 +322,24 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      if (_inConflict) ...[
+                        const SizedBox(width: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.error,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            'CONFLIT',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
                       if (_currentGitBranch != null) ...[
                         const SizedBox(width: 6),
                         Container(
@@ -333,6 +387,69 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                   ),
                 ),
               ),
+              if (_inConflict)
+                Container(
+                  margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.errorContainer,
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.error.withValues(alpha: 0.4),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.warning_amber_rounded,
+                            size: 15,
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Conflits Git (${_conflicts.length})',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.bold,
+                                color: Theme.of(context).colorScheme.onErrorContainer,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (_conflicts.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        ..._conflicts.take(3).map((c) => Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: InkWell(
+                            onTap: () {
+                              final scaffold = Scaffold.maybeOf(context);
+                              if (scaffold != null && scaffold.isDrawerOpen) {
+                                scaffold.closeDrawer();
+                              }
+                              _loadFile(c);
+                            },
+                            child: Text(
+                              '• $c',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontFamily: 'monospace',
+                                color: Theme.of(context).colorScheme.onErrorContainer,
+                                decoration: TextDecoration.underline,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )),
+                      ],
+                    ],
+                  ),
+                ),
               // Bug #5 : barre de recherche substring.
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),

@@ -158,17 +158,8 @@ func TestLiveE2E_MultiModelCascadeLifecycle(t *testing.T) {
 				t.Fatalf("Envoi create_cascade échoué: %v", err)
 			}
 
-			var resp map[string]interface{}
-			conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-			_, raw, err := conn.ReadMessage()
-			if err != nil {
-				t.Fatalf("Réception create_cascade échouée: %v", err)
-			}
-			if err := json.Unmarshal(raw, &resp); err != nil {
-				t.Fatalf("Décodage JSON create_cascade échoué: %v", err)
-			}
-
-			if resp["type"] != "response" || resp["error"] != nil {
+			resp := readResp(t, conn, reqID)
+			if resp["error"] != nil {
 				t.Fatalf("Création cascade rejetée: %v", resp)
 			}
 
@@ -181,10 +172,8 @@ func TestLiveE2E_MultiModelCascadeLifecycle(t *testing.T) {
 				"cascadeId": cascadeID,
 			})
 			conn.WriteMessage(websocket.TextMessage, trajReq)
-			_, rawTraj, _ := conn.ReadMessage()
-			var trajResp map[string]interface{}
-			json.Unmarshal(rawTraj, &trajResp)
-			if trajResp["type"] != "response" {
+			trajResp := readResp(t, conn, "req-traj-"+cascadeID)
+			if trajResp["error"] != nil {
 				t.Fatalf("Trajectoire invalide: %v", trajResp)
 			}
 			t.Logf("✅ Trajectoire Antigravity 2.0 inspectée avec succès")
@@ -197,10 +186,8 @@ func TestLiveE2E_MultiModelCascadeLifecycle(t *testing.T) {
 				"confirm":   true,
 			})
 			conn.WriteMessage(websocket.TextMessage, delReq)
-			_, rawDel, _ := conn.ReadMessage()
-			var delResp map[string]interface{}
-			json.Unmarshal(rawDel, &delResp)
-			if delResp["type"] != "response" || delResp["error"] != nil {
+			delResp := readResp(t, conn, "req-del-"+cascadeID)
+			if delResp["error"] != nil {
 				t.Fatalf("Suppression cascade échouée: %v", delResp)
 			}
 			t.Logf("✅ Cascade %s supprimée et nettoyée", cascadeID)
@@ -228,9 +215,7 @@ func TestLiveE2E_StreamingAndCancelGeneration(t *testing.T) {
 		"modelEnum":     312,
 	})
 	conn.WriteMessage(websocket.TextMessage, createReq)
-	_, rawCreate, _ := conn.ReadMessage()
-	var createResp map[string]interface{}
-	json.Unmarshal(rawCreate, &createResp)
+	createResp := readResp(t, conn, "req-create-cancel")
 
 	cascadeID := cascadeIDFromCreateResp(t, conn, createResp, "cancel")
 	_ = gw
@@ -304,10 +289,8 @@ func TestLiveE2E_FileSystemAndSandboxGuardrails(t *testing.T) {
 			"workspacePath": workspaceRoot,
 		})
 		conn.WriteMessage(websocket.TextMessage, req)
-		_, raw, _ := conn.ReadMessage()
-		var resp map[string]interface{}
-		json.Unmarshal(raw, &resp)
-		if resp["type"] != "response" || resp["error"] != nil {
+		resp := readResp(t, conn, "req-ls-1")
+		if resp["error"] != nil {
 			t.Fatalf("list_files échoué: %v", resp)
 		}
 		data, _ := resp["data"].(map[string]interface{})
@@ -326,10 +309,8 @@ func TestLiveE2E_FileSystemAndSandboxGuardrails(t *testing.T) {
 			"filePath":      "package.json",
 		})
 		conn.WriteMessage(websocket.TextMessage, req)
-		_, raw, _ := conn.ReadMessage()
-		var resp map[string]interface{}
-		json.Unmarshal(raw, &resp)
-		if resp["type"] != "response" || resp["error"] != nil {
+		resp := readResp(t, conn, "req-rf-1")
+		if resp["error"] != nil {
 			t.Fatalf("read_file échoué: %v", resp)
 		}
 		data, _ := resp["data"].(map[string]interface{})
@@ -348,10 +329,8 @@ func TestLiveE2E_FileSystemAndSandboxGuardrails(t *testing.T) {
 			"filePath":      "../../../../Windows/System32/drivers/etc/hosts",
 		})
 		conn.WriteMessage(websocket.TextMessage, req)
-		_, raw, _ := conn.ReadMessage()
-		var resp map[string]interface{}
-		json.Unmarshal(raw, &resp)
-		if resp["type"] != "response" || resp["error"] == nil {
+		resp := readResp(t, conn, "req-sec-1")
+		if resp["error"] == nil {
 			t.Fatalf("Attendu une erreur de violation de sandbox, reçu: %v", resp)
 		}
 		t.Logf("✅ Path traversal hors workspace correctement rejeté: %v", resp["error"])
@@ -368,10 +347,8 @@ func TestLiveE2E_FileSystemAndSandboxGuardrails(t *testing.T) {
 			"overwrite": true,
 		})
 		conn.WriteMessage(websocket.TextMessage, req)
-		_, raw, _ := conn.ReadMessage()
-		var resp map[string]interface{}
-		json.Unmarshal(raw, &resp)
-		if resp["type"] != "response" || resp["error"] != nil {
+		resp := readResp(t, conn, "req-wf-1")
+		if resp["error"] != nil {
 			t.Fatalf("write_file échoué: %v", resp)
 		}
 		t.Logf("✅ write_file validé avec succès")
@@ -476,6 +453,37 @@ func TestLiveE2E_HealthAndDiagnostics(t *testing.T) {
 	})
 }
 
+// readResp lit la réponse d'une requête unary sur la connexion partagée. Le
+// daemon broadcast des événements (sessions_updated, stream_start, …) sur la
+// même connexion : la première frame lue après une requête peut être un
+// broadcast intercalé, pas la réponse (flakiness MultiModelCascadeLifecycle).
+// On ignore les frames non-response (ou de requestId différent) jusqu'à la
+// vraie réponse ou la deadline 10 s.
+func readResp(t *testing.T, conn *websocket.Conn, wantReqID string) map[string]interface{} {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("Réception réponse %s échouée: %v", wantReqID, err)
+		}
+		var m map[string]interface{}
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatalf("Décodage JSON échoué: %v", err)
+		}
+		if m["type"] != "response" {
+			continue // broadcast intercalé
+		}
+		if wantReqID != "" && m["requestId"] != wantReqID {
+			continue // réponse d'une autre requête (rare)
+		}
+		return m
+	}
+	t.Fatalf("Réponse %s introuvable dans le délai", wantReqID)
+	return nil
+}
+
 // cascadeIDFromCreateResp extrait le cascadeID de la réponse create_cascade
 // (fields[0].text). Quand le cache projectID du daemon est froid, le LS crée
 // une cascade "orpheline" et renvoie un payload vide → le cascadeID n'est pas
@@ -511,21 +519,10 @@ func cascadeIDFromCreateResp(t *testing.T, conn *websocket.Conn, resp map[string
 			"type":      "list_sessions",
 			"requestId": "req-ls-fallback-" + label,
 		})
-		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 		if err := conn.WriteMessage(websocket.TextMessage, lsReq); err != nil {
 			t.Fatalf("Envoi list_sessions échoué: %v", err)
 		}
-		_, rawLS, err := conn.ReadMessage()
-		if err != nil {
-			t.Fatalf("Réception list_sessions échouée: %v", err)
-		}
-		var lsResp map[string]interface{}
-		if err := json.Unmarshal(rawLS, &lsResp); err != nil {
-			t.Fatalf("Décodage list_sessions échoué: %v", err)
-		}
-		if lsResp["type"] != "response" || lsResp["error"] != nil {
-			t.Fatalf("list_sessions en erreur: %v", lsResp)
-		}
+		lsResp := readResp(t, conn, "req-ls-fallback-"+label)
 		lastLS = lsResp
 		if data, ok := lsResp["data"].(map[string]interface{}); ok {
 			if sessions, ok := data["sessions"].([]interface{}); ok {
@@ -545,8 +542,10 @@ func cascadeIDFromCreateResp(t *testing.T, conn *websocket.Conn, resp map[string
 		}
 		if found == "" {
 			// Dernier recours : n'importe quel UUID frais dans la réponse.
-			if m := uuidRe.FindString(string(rawLS)); m != "" {
-				found = m
+			if raw, err := json.Marshal(lastLS); err == nil {
+				if m := uuidRe.FindString(string(raw)); m != "" {
+					found = m
+				}
 			}
 		}
 		if found == "" {

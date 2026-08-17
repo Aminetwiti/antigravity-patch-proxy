@@ -329,7 +329,8 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         'data': {'minutes': timeout},
       });
       final autoAccept = (s['autoAcceptEnabled'] as bool?) ?? false;
-      await api.setAutoAccept(enabled: autoAccept);
+      final mode = (s['autoAcceptMode'] as String?) ?? 'readonly';
+      await api.setAutoAccept(enabled: autoAccept, mode: mode);
     } catch (_) {
       // Réglages décoratifs : sans daemon, on ignore silencieusement.
     }

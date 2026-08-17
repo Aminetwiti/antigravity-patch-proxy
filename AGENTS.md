@@ -24,7 +24,7 @@ antigravity-add-model-main/
 │   ├── proxy/                       # Translators & proxy resilience (circuit breaker, retry budget, etc.)
 │   ├── services/                    # CryptoStore (safeStorage), ModelStore, SettingsService
 │   ├── ipc/                         # Modular IPC handlers
-│   └── __tests__/                   # 53 test files, 1459 tests (Vitest)
+│   └── __tests__/                   # 55 test files, 1469 tests (Vitest)
 │
 ├── remote/                          # Antigravity Remote 2.0 Ecosystem
 │   ├── PROTOCOL.md                  # ConnectRPC & WebSocket wire protocol specification
@@ -50,7 +50,7 @@ antigravity-add-model-main/
 │       │   │   ├── discovery/       # QR scanner & daemon pairing
 │       │   │   └── settings/        # Profile, appearances, timeouts & diagnostics export
 │       │   └── widgets/             # Tool approval cards, AskQuestion modal, diff viewers
-│       └── test/                    # 135 unit and widget tests
+│       └── test/                    # 215 unit and widget tests
 │
 ├── ag-doctor/                       # Diagnostic CLI (bin/ag-doctor.js)
 ├── ag-doctor-ui/                    # Electron diagnostic UI
@@ -120,7 +120,7 @@ npm run mitm:start              # Start MITM HTTPS proxy
 ### Remote Daemon (Go Bridge)
 ```bash
 cd remote/daemon
-go test ./...                   # Run all Go unit & property tests
+go test ./...                   # Run all 243 Go unit & property tests
 go run main.go --port 8090 --tunnel cloudflare --auth-token mysecret
 ```
 
@@ -136,14 +136,14 @@ powershell -NoProfile -File scripts\supervise-daemon.ps1 -Loop  # loop mode (sch
 ```bash
 cd remote/mobile
 flutter analyze                 # Dart static analysis (0 issues)
-flutter test                    # Run all 135 Flutter unit & widget tests
+flutter test --exclude-tags=live # Run all 215 Flutter unit & widget tests (excludes @Tags(['live']))
 flutter run -d <device-id>      # Run on connected phone (e.g. Galaxy S21 FE)
 ```
 
 **Verification order:**
-- **Proxy**: `npm run lint && npm run build && npm test` (1459 tests)
-- **Daemon**: `go test ./...` in `remote/daemon`
-- **Mobile**: `flutter analyze && flutter test` in `remote/mobile` (135 tests)
+- **Proxy**: `npm run lint && npm run build && npm test` (1469 tests)
+- **Daemon**: `go test ./...` in `remote/daemon` (243 tests)
+- **Mobile**: `flutter analyze && flutter test --exclude-tags=live` in `remote/mobile` (215 tests)
 
 ---
 

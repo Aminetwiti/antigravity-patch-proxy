@@ -481,3 +481,164 @@ func BuildRetrieveUserQuotaSummary(apiKey, sessionID string) []byte {
 	return w.b
 }
 
+// --- RPC Git officiels (exa.language_server_pb) ---
+
+// BuildGetVersionControlState construit un GetVersionControlStateRequest :
+// {1: workspace_path} — schéma language_server.proto (ligne 2942).
+// Le LS travaille en chemins natifs (pas d'URI) pour le VCS.
+func BuildGetVersionControlState(workspacePath string) []byte {
+	w := &writer{}
+	w.stringField(1, workspacePath)
+	return w.b
+}
+
+// BuildGitStage construit un GitStageRequest :
+// {1: workspace_uri, 2: repeated uris} — schéma language_server.proto (ligne 3089).
+func BuildGitStage(workspaceURI string, uris []string) []byte {
+	w := &writer{}
+	w.stringField(1, workspaceURI)
+	for _, u := range uris {
+		w.stringField(2, u)
+	}
+	return w.b
+}
+
+// BuildGitUnstage construit un GitUnstageRequest (même schéma que Stage).
+func BuildGitUnstage(workspaceURI string, uris []string) []byte {
+	return BuildGitStage(workspaceURI, uris)
+}
+
+// BuildGitCommit construit un GitCommitRequest :
+// {1: workspace_uri, 2: message} — schéma language_server.proto (ligne 3110).
+func BuildGitCommit(workspaceURI, message string) []byte {
+	w := &writer{}
+	w.stringField(1, workspaceURI)
+	w.stringField(2, message)
+	return w.b
+}
+
+// BuildGitDiscard construit un GitDiscardRequest (même schéma que Stage).
+func BuildGitDiscard(workspaceURI string, uris []string) []byte {
+	return BuildGitStage(workspaceURI, uris)
+}
+
+// BuildGetCommitDetails construit un GetCommitDetailsRequest :
+// {1: workspace_uri, 2: commit_id} — schéma language_server.proto (ligne 3030).
+func BuildGetCommitDetails(workspaceURI, commitID string) []byte {
+	w := &writer{}
+	w.stringField(1, workspaceURI)
+	w.stringField(2, commitID)
+	return w.b
+}
+
+// --- RPC Sidecar officiels (exa.cascade_plugins_pb) ---
+
+// BuildListSidecarLogFiles construit un ListSidecarLogFilesRequest :
+// {1: sidecar_id} — schéma cascade_plugins.proto.
+func BuildListSidecarLogFiles(sidecarID string) []byte {
+	w := &writer{}
+	w.stringField(1, sidecarID)
+	return w.b
+}
+
+// BuildGetSidecarLogs construit un GetSidecarLogsRequest :
+// {1: sidecar_id, 2: log_file_name} — schéma cascade_plugins.proto.
+func BuildGetSidecarLogs(sidecarID, logFileName string) []byte {
+	w := &writer{}
+	w.stringField(1, sidecarID)
+	w.stringField(2, logFileName)
+	return w.b
+}
+
+// BuildManageSidecar construit un ManageSidecarRequest :
+// {1: sidecar_id, 2: action, 3: error_message} — schéma cascade_plugins.proto.
+// action : 1=start, 2=stop, 3=restart, 4=remove.
+func BuildManageSidecar(sidecarID string, action uint64) []byte {
+	w := &writer{}
+	w.stringField(1, sidecarID)
+	w.varintField(2, action)
+	return w.b
+}
+
+// --- RPC Colosseum / Battle Mode (exa.language_server_pb) ---
+
+// BuildStartBattleMode construit un StartBattleModeRequest :
+// {1: workspace_uri, 2: prompt, 3: model_uid_a, 4: model_enum_a, 5: model_uid_b, 6: model_enum_b}.
+func BuildStartBattleMode(workspaceURI, prompt, modelUIDA string, modelEnumA uint64, modelUIDB string, modelEnumB uint64) []byte {
+	w := &writer{}
+	w.stringField(1, workspaceURI)
+	w.stringField(2, prompt)
+	if modelUIDA != "" {
+		w.stringField(3, modelUIDA)
+	}
+	if modelEnumA > 0 {
+		w.varintField(4, modelEnumA)
+	}
+	if modelUIDB != "" {
+		w.stringField(5, modelUIDB)
+	}
+	if modelEnumB > 0 {
+		w.varintField(6, modelEnumB)
+	}
+	return w.b
+}
+
+// BuildGetBattleWorktreeDiff construit un GetBattleWorktreeDiffRequest :
+// {1: workspace_uri}.
+func BuildGetBattleWorktreeDiff(workspaceURI string) []byte {
+	w := &writer{}
+	w.stringField(1, workspaceURI)
+	return w.b
+}
+
+// BuildEliminateBattleModeArm construit un EliminateBattleModeArmRequest :
+// {1: arm_id}.
+func BuildEliminateBattleModeArm(armID string) []byte {
+	w := &writer{}
+	w.stringField(1, armID)
+	return w.b
+}
+
+// BuildEndBattleMode construit un EndBattleModeRequest :
+// {1: winning_arm_id, 2: merge_strategy}.
+// mergeStrategy : 1=OVERWRITE, 2=SAFE_MERGE, 3=MERGE_WITH_CONFLICTS.
+func BuildEndBattleMode(winningArmID string, mergeStrategy uint64) []byte {
+	w := &writer{}
+	w.stringField(1, winningArmID)
+	if mergeStrategy > 0 {
+		w.varintField(2, mergeStrategy)
+	}
+	return w.b
+}
+
+// --- RPC Diagnostics & FlightRecorder ---
+
+// BuildDumpFlightRecorder construit un DumpFlightRecorderRequest (vide {}).
+func BuildDumpFlightRecorder() []byte {
+	return []byte{}
+}
+
+// --- RPC MCP Lifecycle & OAuth (exa.language_server_pb) ---
+
+// BuildRefreshMcpServers construit un RefreshMcpServersRequest (vide {}).
+func BuildRefreshMcpServers() []byte {
+	return []byte{}
+}
+
+// BuildCompleteMcpOAuth construit un CompleteMcpOAuthRequest :
+// {1: server_id, 2: auth_code}.
+func BuildCompleteMcpOAuth(serverID, authCode string) []byte {
+	w := &writer{}
+	w.stringField(1, serverID)
+	w.stringField(2, authCode)
+	return w.b
+}
+
+// BuildDisconnectMcpOAuth construit un DisconnectMcpOAuthRequest :
+// {1: server_id}.
+func BuildDisconnectMcpOAuth(serverID string) []byte {
+	w := &writer{}
+	w.stringField(1, serverID)
+	return w.b
+}
+

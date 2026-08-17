@@ -155,3 +155,104 @@ func (c *Client) GetCodeValidationStates(uri string) ([]byte, error) {
 	return c.CallJSON("GetCodeValidationStates", payload)
 }
 
+// --- RPC Git officiels (exa.language_server_pb) ---
+
+// GetVersionControlState récupère l'état VCS complet d'un workspace :
+// branche courante, commits, changements working directory / staged,
+// conflits de merge — via GetVersionControlState (champ 1 = workspace_path,
+// pas une URI ; le LS fait sa propre résolution de chemin).
+func (c *Client) GetVersionControlState(workspacePath string) ([]byte, error) {
+	return c.Call("GetVersionControlState", BuildGetVersionControlState(workspacePath))
+}
+
+// GitStage indexe une liste de fichiers (URIs file:///) dans le staging area.
+func (c *Client) GitStage(workspaceURI string, uris []string) ([]byte, error) {
+	return c.Call("GitStage", BuildGitStage(workspaceURI, uris))
+}
+
+// GitUnstage retire des fichiers du staging area.
+func (c *Client) GitUnstage(workspaceURI string, uris []string) ([]byte, error) {
+	return c.Call("GitUnstage", BuildGitUnstage(workspaceURI, uris))
+}
+
+// GitCommit crée un commit avec le message fourni. Retourne l'ID du commit
+// (champ 1 de GitCommitResponse).
+func (c *Client) GitCommit(workspaceURI, message string) ([]byte, error) {
+	return c.Call("GitCommit", BuildGitCommit(workspaceURI, message))
+}
+
+// GitDiscard annule les modifications non indexées des fichiers donnés.
+// Destructif : l'appelant DOIT confirmer côté client avant d'invoquer.
+func (c *Client) GitDiscard(workspaceURI string, uris []string) ([]byte, error) {
+	return c.Call("GitDiscard", BuildGitDiscard(workspaceURI, uris))
+}
+
+// GetCommitDetails récupère les fichiers changés et les parents d'un commit
+// (GetCommitDetailsResponse).
+func (c *Client) GetCommitDetails(workspaceURI, commitID string) ([]byte, error) {
+	return c.Call("GetCommitDetails", BuildGetCommitDetails(workspaceURI, commitID))
+}
+
+// --- RPC Sidecar officiels (exa.cascade_plugins_pb) ---
+
+// ListSidecarLogFiles liste les fichiers de log disponibles pour un sidecar.
+func (c *Client) ListSidecarLogFiles(sidecarID string) ([]byte, error) {
+	return c.Call("ListSidecarLogFiles", BuildListSidecarLogFiles(sidecarID))
+}
+
+// GetSidecarLogs récupère le contenu d'un fichier de log d'un sidecar.
+func (c *Client) GetSidecarLogs(sidecarID, logFileName string) ([]byte, error) {
+	return c.Call("GetSidecarLogs", BuildGetSidecarLogs(sidecarID, logFileName))
+}
+
+// ManageSidecar contrôle un sidecar (action : 1=start, 2=stop, 3=restart, 4=remove).
+func (c *Client) ManageSidecar(sidecarID string, action uint64) ([]byte, error) {
+	return c.Call("ManageSidecar", BuildManageSidecar(sidecarID, action))
+}
+
+// --- RPC Colosseum / Battle Mode (exa.language_server_pb) ---
+
+// StartBattleMode initialise une session de duel multi-modèles sur deux worktrees.
+func (c *Client) StartBattleMode(workspaceURI, prompt, modelUIDA string, modelEnumA uint64, modelUIDB string, modelEnumB uint64) ([]byte, error) {
+	return c.Call("StartBattleMode", BuildStartBattleMode(workspaceURI, prompt, modelUIDA, modelEnumA, modelUIDB, modelEnumB))
+}
+
+// GetBattleWorktreeDiff récupère le diff unifié comparatif entre les deux worktrees Battle Mode.
+func (c *Client) GetBattleWorktreeDiff(workspaceURI string) ([]byte, error) {
+	return c.Call("GetBattleWorktreeDiff", BuildGetBattleWorktreeDiff(workspaceURI))
+}
+
+// EliminateBattleArm supprime un worktree perdant du mode Battle.
+func (c *Client) EliminateBattleArm(armID string) ([]byte, error) {
+	return c.Call("EliminateBattleModeArm", BuildEliminateBattleModeArm(armID))
+}
+
+// EndBattleMode termine le mode Battle et applique la solution victorieuse via la stratégie SafeMerge choisie.
+func (c *Client) EndBattleMode(winningArmID string, mergeStrategy uint64) ([]byte, error) {
+	return c.Call("EndBattleMode", BuildEndBattleMode(winningArmID, mergeStrategy))
+}
+
+// --- RPC Diagnostics & FlightRecorder ---
+
+// DumpFlightRecorder extrait la trace binaire d'exécution Go (runtime/trace).
+func (c *Client) DumpFlightRecorder() ([]byte, error) {
+	return c.Call("DumpFlightRecorder", BuildDumpFlightRecorder())
+}
+
+// --- RPC MCP Lifecycle & OAuth ---
+
+// RefreshMcpServers recharge à chaud la configuration des serveurs MCP.
+func (c *Client) RefreshMcpServers() ([]byte, error) {
+	return c.Call("RefreshMcpServers", BuildRefreshMcpServers())
+}
+
+// CompleteMcpOAuth valide un flux OAuth pour un serveur MCP tiers.
+func (c *Client) CompleteMcpOAuth(serverID, authCode string) ([]byte, error) {
+	return c.Call("CompleteMcpOAuth", BuildCompleteMcpOAuth(serverID, authCode))
+}
+
+// DisconnectMcpOAuth révoque les identifiants OAuth d'un serveur MCP.
+func (c *Client) DisconnectMcpOAuth(serverID string) ([]byte, error) {
+	return c.Call("DisconnectMcpOAuth", BuildDisconnectMcpOAuth(serverID))
+}
+

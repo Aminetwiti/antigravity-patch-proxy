@@ -1,24 +1,25 @@
-package gateway
+﻿package gateway
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// Scheduler est un moteur cron minimaliste, stdlib-only (aucune dépendance
-// externe — règle AGENTS.md). Il parcourt les ScheduledTask enregistrées par
-// le daemon toutes les tickInterval et déclenche celles dont l'expression
-// cron correspond à l'instant courant.
+// Scheduler est un moteur cron minimaliste, stdlib-only (aucune dÃ©pendance
+// externe â€” rÃ¨gle AGENTS.md). Il parcourt les ScheduledTask enregistrÃ©es par
+// le daemon toutes les tickInterval et dÃ©clenche celles dont l'expression
+// cron correspond Ã  l'instant courant.
 //
-// ponytail: horizon borné volontairement — pas de rattrapage de runs manqués
-// pendant que le daemon était éteint (un daemon qui redémarre ne rejoue pas
-// les crons passés, il repart sur le prochain tick). Upgrade path: persister
-// lastRunAt + timezone par tâche si le rattrapage devient un besoin réel.
+// ponytail: horizon bornÃ© volontairement â€” pas de rattrapage de runs manquÃ©s
+// pendant que le daemon Ã©tait Ã©teint (un daemon qui redÃ©marre ne rejoue pas
+// les crons passÃ©s, il repart sur le prochain tick). Upgrade path: persister
+// lastRunAt + timezone par tÃ¢che si le rattrapage devient un besoin rÃ©el.
 // quotaPushInterval : cadence de push des quotas vers les clients mobiles.
-// Aligné sur l'ancien timer mobile de 60 s — le daemon pousse désormais à la
-// place du polling (1 appel LS/min max, et seulement si des clients sont là).
+// AlignÃ© sur l'ancien timer mobile de 60 s â€” le daemon pousse dÃ©sormais Ã  la
+// place du polling (1 appel LS/min max, et seulement si des clients sont lÃ ).
 type Scheduler struct {
 	server        *Server
 	tickInterval  time.Duration
@@ -27,8 +28,8 @@ type Scheduler struct {
 	doneCh        chan struct{}
 }
 
-// NewScheduler crée un scheduler lié au serveur. Ne démarre rien tant que
-// Start() n'est pas appelé.
+// NewScheduler crÃ©e un scheduler liÃ© au serveur. Ne dÃ©marre rien tant que
+// Start() n'est pas appelÃ©.
 func NewScheduler(server *Server) *Scheduler {
 	return &Scheduler{
 		server:       server,
@@ -38,7 +39,7 @@ func NewScheduler(server *Server) *Scheduler {
 	}
 }
 
-// Start lance la boucle de tick en arrière-plan.
+// Start lance la boucle de tick en arriÃ¨re-plan.
 func (sc *Scheduler) Start() {
 	go func() {
 		defer close(sc.doneCh)
@@ -55,15 +56,15 @@ func (sc *Scheduler) Start() {
 	}()
 }
 
-// Stop arrête la boucle de tick (bloquant jusqu'à la sortie de la goroutine).
+// Stop arrÃªte la boucle de tick (bloquant jusqu'Ã  la sortie de la goroutine).
 func (sc *Scheduler) Stop() {
 	close(sc.stopCh)
 	<-sc.doneCh
 }
 
-// tick examine toutes les tâches une fois par tick. Les tâches désactivées ou
-// invalides sont ignorées silencieusement ; une tâche éligible est exécutée en
-// arrière-plan (goroutine) pour ne jamais bloquer le tick suivant.
+// tick examine toutes les tÃ¢ches une fois par tick. Les tÃ¢ches dÃ©sactivÃ©es ou
+// invalides sont ignorÃ©es silencieusement ; une tÃ¢che Ã©ligible est exÃ©cutÃ©e en
+// arriÃ¨re-plan (goroutine) pour ne jamais bloquer le tick suivant.
 func (sc *Scheduler) tick(now time.Time) {
 	sc.maybePushQuota(now)
 
@@ -86,9 +87,9 @@ func (sc *Scheduler) tick(now time.Time) {
 	}
 }
 
-// maybePushQuota diffuse les quotas aux clients connectés au plus toutes les
-// quotaPushInterval. Sans client, on ne martèle pas le LS. tick est appelé
-// depuis la goroutine unique du scheduler → pas de course sur lastQuotaPush.
+// maybePushQuota diffuse les quotas aux clients connectÃ©s au plus toutes les
+// quotaPushInterval. Sans client, on ne martÃ¨le pas le LS. tick est appelÃ©
+// depuis la goroutine unique du scheduler â†’ pas de course sur lastQuotaPush.
 func (sc *Scheduler) maybePushQuota(now time.Time) {
 	if now.Sub(sc.lastQuotaPush) < quotaPushInterval {
 		return
@@ -103,9 +104,9 @@ func (sc *Scheduler) maybePushQuota(now time.Time) {
 	go sc.server.pushQuotaUpdate()
 }
 
-// cronMatches évalue une expression cron 5 champs (minute heure jour-mois
-// mois jour-semaine) à l'instant donné, UTC. `?` est accepté comme alias de
-// `*` (compatibilité Quartz, très répandue dans les UI de cron).
+// cronMatches Ã©value une expression cron 5 champs (minute heure jour-mois
+// mois jour-semaine) Ã  l'instant donnÃ©, UTC. `?` est acceptÃ© comme alias de
+// `*` (compatibilitÃ© Quartz, trÃ¨s rÃ©pandue dans les UI de cron).
 func cronMatches(expr string, now time.Time) bool {
 	fields := strings.Fields(expr)
 	if len(fields) != 5 {
@@ -168,11 +169,11 @@ func cronPart(part string, v, min, max int) bool {
 	return (v-lo)%step == 0
 }
 
-// runScheduledTask exécute une tâche : crée une cascade sur le workspace de la
-// tâche, y envoie le prompt (streaming best-effort), puis journalise un
-// événement scheduled_task_event diffusé à tous les clients (le mobile met à
-// jour son historique). Le prompt est exécuté avec l'auto-approbation de la
-// tâche quand celle-ci le demande — voir runScheduledTaskApproval.
+// runScheduledTask exÃ©cute une tÃ¢che : crÃ©e une cascade sur le workspace de la
+// tÃ¢che, y envoie le prompt (streaming best-effort), puis journalise un
+// Ã©vÃ©nement scheduled_task_event diffusÃ© Ã  tous les clients (le mobile met Ã 
+// jour son historique). Le prompt est exÃ©cutÃ© avec l'auto-approbation de la
+// tÃ¢che quand celle-ci le demande â€” voir runScheduledTaskApproval.
 func (s *Server) runScheduledTask(taskID string) {
 	s.mu.Lock()
 	task, exists := s.scheduledTasks[taskID]
@@ -188,14 +189,14 @@ func (s *Server) runScheduledTask(taskID string) {
 		ID:        fmt.Sprintf("evt_%d", time.Now().UnixMilli()),
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
-	// ponytail: les tâches headless (IsDaemon=true, exécutées par le cron
-	// sans client) ne peuvent pas attendre une approbation — on les auto-approuve.
+	// ponytail: les tÃ¢ches headless (IsDaemon=true, exÃ©cutÃ©es par le cron
+	// sans client) ne peuvent pas attendre une approbation â€” on les auto-approuve.
 	if err := s.executeTaskPrompt(taskCopy); err != nil {
 		event.Outcome = "error"
 		event.Message = err.Error()
 	} else {
 		event.Outcome = "done"
-		event.Message = "exécuté par le scheduler"
+		event.Message = "exÃ©cutÃ© par le scheduler"
 	}
 	event.DurationMs = int(time.Since(start).Milliseconds())
 
@@ -208,11 +209,17 @@ func (s *Server) runScheduledTask(taskID string) {
 	}
 	taskRef := s.scheduledTasks[taskID]
 	s.mu.Unlock()
+	// Persistance best-effort : sans ce Save, IterationsRun/NextRunAt/Events
+	// restent en mÃ©moire seule et l'historique disparaÃ®t au redÃ©marrage du
+	// daemon (le mobile afficherait 0 exÃ©cution aprÃ¨s reboot).
+	if err := s.SaveScheduledTasks(); err != nil {
+		logJSON.Warn("scheduled_tasks_save_failed", "taskId", taskID, "error", err.Error())
+	}
 	if taskRef != nil {
 		data := map[string]interface{}{"task": taskRef, "event": event}
-		// P1 : le mobile notifie « Tâche démarrée » pour les exécutions
-		// planifiées — le taskStarted=true permet au mobile de ne notifier que
-		// les événements réellement déclenchés par le cron/trigger.
+		// P1 : le mobile notifie Â« TÃ¢che dÃ©marrÃ©e Â» pour les exÃ©cutions
+		// planifiÃ©es â€” le taskStarted=true permet au mobile de ne notifier que
+		// les Ã©vÃ©nements rÃ©ellement dÃ©clenchÃ©s par le cron/trigger.
 		data["taskStarted"] = true
 		s.broadcast(OutgoingMessage{
 			Type: "scheduled_task_event",
@@ -221,8 +228,13 @@ func (s *Server) runScheduledTask(taskID string) {
 	}
 }
 
-// executeTaskPrompt crée la cascade et envoie le prompt (best-effort). En cas
-// d'échec de création de cascade, l'événement porte l'erreur.
+// executeTaskPrompt crÃ©e la cascade et envoie le prompt (best-effort). En cas
+// d'Ã©chec de crÃ©ation de cascade, l'Ã©vÃ©nement porte l'erreur.
+//
+// La cascade crÃ©Ã©e est enregistrÃ©e dans activeCancels : une suppression de
+// cascade (delete_cascade â†’ purgeCascadeState) ou un CancelGeneration doit
+// pouvoir interrompre le stream de la tÃ¢che, sinon la goroutine reste bloquÃ©e
+// jusqu'au timeout rÃ©seau (120 s) â€” goroutine fantÃ´me.
 func (s *Server) executeTaskPrompt(task ScheduledTask) error {
 	uri := toWorkspaceURI(task.WorkspaceName)
 	projectID, _ := s.cachedProjectID(uri)
@@ -232,9 +244,32 @@ func (s *Server) executeTaskPrompt(task ScheduledTask) error {
 	}
 	cascadeID := extractCascadeID(raw)
 	if cascadeID == "" {
-		return fmt.Errorf("cascadeID vide dans la réponse CreateCascade")
+		return fmt.Errorf("cascadeID vide dans la rÃ©ponse CreateCascade")
 	}
-	err = s.RPCClient.SendMessageStream(cascadeID, task.Prompt, func([]byte) error { return nil })
+
+	// ctx annulable : purgeCascadeState / CancelGeneration / daemon stop
+	// peuvent couper le stream headless immÃ©diatement au lieu d'attendre 120 s.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.mu.Lock()
+	s.activeCancels[cascadeID] = cancel
+	s.activeRequestIDs[cascadeID] = "scheduled:" + task.ID
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.activeCancels, cascadeID)
+		delete(s.activeRequestIDs, cascadeID)
+		s.mu.Unlock()
+	}()
+
+	err = s.RPCClient.SendMessageStream(cascadeID, task.Prompt, func([]byte) error {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("generation cancelled")
+		default:
+			return nil
+		}
+	})
 	if err != nil {
 		return err
 	}
@@ -242,7 +277,7 @@ func (s *Server) executeTaskPrompt(task ScheduledTask) error {
 }
 
 // nextRunAt calcule la prochaine occurrence de l'expression cron dans les 48h
-// (borné — on ne simule jamais un an de ticks). Vide si l'expression est
+// (bornÃ© â€” on ne simule jamais un an de ticks). Vide si l'expression est
 // invalide ou sans occurrence dans l'horizon.
 func nextRunAt(expr string) string {
 	now := time.Now().UTC().Truncate(time.Minute).Add(time.Minute)
@@ -255,7 +290,7 @@ func nextRunAt(expr string) string {
 	return ""
 }
 
-// extractCascadeID décode l'ID de cascade depuis la réponse protobuf brute de
+// extractCascadeID dÃ©code l'ID de cascade depuis la rÃ©ponse protobuf brute de
 // CreateCascade. Best-effort : champ #1 length-delimited = l'ID textuel.
 func extractCascadeID(raw []byte) string {
 	if len(raw) == 0 {
@@ -263,7 +298,7 @@ func extractCascadeID(raw []byte) string {
 	}
 	body := raw
 	// Frame gRPC-Web : 1 octet de flags + 4 octets de longueur big-endian.
-	// Le champ #1 du protobuf (0x0A) suit immédiatement.
+	// Le champ #1 du protobuf (0x0A) suit immÃ©diatement.
 	if len(body) > 5 && body[0] == 0 {
 		body = body[5:]
 	} else if len(body) > 5 && body[0]&0x80 != 0 {
@@ -281,9 +316,9 @@ func extractCascadeID(raw []byte) string {
 	return ""
 }
 
-// connectrpcDefaultModelEnum est le repli du modèle par défaut quand le
-// scheduler exécute une tâche sans sélection explicite de modèle.
+// connectrpcDefaultModelEnum est le repli du modÃ¨le par dÃ©faut quand le
+// scheduler exÃ©cute une tÃ¢che sans sÃ©lection explicite de modÃ¨le.
 func connectrpcDefaultModelEnum() uint64 {
-	// Défini dans pkg/connectrpc (DefaultModelEnum) — importé indirectement.
+	// DÃ©fini dans pkg/connectrpc (DefaultModelEnum) â€” importÃ© indirectement.
 	return 1
 }

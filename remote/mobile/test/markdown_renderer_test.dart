@@ -58,5 +58,47 @@ void main() {
       expect(spans.length, 1);
       expect((spans[0] as TextSpan).text, 'a * b * c');
     });
+
+    test('file:/// link is tappable and reports the host path', () {
+      const base = TextStyle(fontSize: 14);
+      String? tapped;
+      final spans = MarkdownRenderer.inlineSpans(
+        '[plan](file:///C:/projet/implementation_plan.md)',
+        base,
+        scheme: scheme,
+        onLocalFile: (p) => tapped = p,
+      );
+      expect(spans.length, 1);
+      final span = spans[0] as WidgetSpan;
+      final tooltip = span.child as Tooltip;
+      final detector = tooltip.child as GestureDetector;
+      detector.onTap!();
+      expect(tapped, 'C:/projet/implementation_plan.md');
+    });
+
+    test('non-file links keep the tooltip (no tap handler)', () {
+      const base = TextStyle(fontSize: 14);
+      final spans = MarkdownRenderer.inlineSpans(
+        '[site](https://example.com)',
+        base,
+        scheme: scheme,
+        onLocalFile: (_) => fail('should not fire'),
+      );
+      final span = spans[0] as WidgetSpan;
+      expect(span.child, isA<Tooltip>());
+      expect((span.child as Tooltip).message, 'Chemin complet : https://example.com');
+    });
+
+    test('percent-encoded file URI is decoded', () {
+      final spans = MarkdownRenderer.inlineSpans(
+        '[a](file:///C:/projet/mon%20fichier.md)',
+        const TextStyle(fontSize: 14),
+        scheme: scheme,
+        onLocalFile: (p) => expect(p, 'C:/projet/mon fichier.md'),
+      );
+      final span = spans[0] as WidgetSpan;
+      final tooltip = span.child as Tooltip;
+      (tooltip.child as GestureDetector).onTap!();
+    });
   });
 }

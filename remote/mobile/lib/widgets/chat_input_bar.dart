@@ -104,6 +104,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   bool _mentionOrActionOpen = false;
   bool _isSending = false;
   Timer? _sendDebounceTimer;
+  String _lastDraftText = '';
 
   @override
   void initState() {
@@ -111,6 +112,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
     if (widget.initialText.isNotEmpty) {
       // P6 : restaure le brouillon persisté avant d'écouter les frappes.
       _controller.text = widget.initialText;
+      _lastDraftText = widget.initialText;
       _controller.selection = TextSelection.collapsed(
         offset: _controller.text.length,
       );
@@ -159,13 +161,16 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   void _onTextChanged() {
-    // P6 : chaque frappe met à jour le brouillon persisté côté parent.
-    widget.onDraftChanged?.call(_controller.text);
     final text = _controller.text;
+    // P6 : notifier le parent uniquement si le contenu textuel a réellement changé
+    // (évite d'écrire sur disque à chaque déplacement de curseur ou sélection).
+    if (text != _lastDraftText) {
+      _lastDraftText = text;
+      widget.onDraftChanged?.call(text);
+    }
+
     final selection = _controller.selection;
     if (!selection.isValid || selection.isCollapsed == false) {
-      // Don't close if they just clicked inside the model dropdown
-      // Actually, we'll just let the dropdown manage its own state when clicking away
       return;
     }
     final textBeforeCursor = text.substring(0, selection.start);
@@ -239,6 +244,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
       modelEnum: _selectedModelEnum,
     );
     _controller.clear();
+    _lastDraftText = '';
     // P6 : le message a été envoyé → purge le brouillon persisté.
     widget.onDraftChanged?.call('');
     FocusScope.of(
@@ -1059,12 +1065,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
               decoration: BoxDecoration(
                 color: scheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(20),
-                border:
-                    isQueued
-                        ? Border.all(
-                          color: scheme.primary.withValues(alpha: 0.5),
-                        )
-                        : null,
+                border: Border.all(
+                  color: isQueued
+                      ? scheme.primary.withValues(alpha: 0.6)
+                      : scheme.outlineVariant.withValues(alpha: 0.4),
+                ),
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1340,11 +1345,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
                                   height: 28,
                                   decoration: BoxDecoration(
                                     color: widget.hasActiveStream
-                                        ? AppColors.danger
+                                        ? scheme.error
                                         : (_controller.text.trim().isNotEmpty &&
                                                 widget.isConnected
-                                            ? AppColors.accentBlue
-                                            : AppColors.surfaceInput),
+                                            ? scheme.primary
+                                            : scheme.surfaceContainerHighest),
                                     shape: BoxShape.circle,
                                   ),
                                   child: Icon(
@@ -1358,7 +1363,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                                                 widget.isConnected) ||
                                             widget.hasActiveStream
                                         ? AppColors.onAccent
-                                        : AppColors.inkMuted,
+                                        : scheme.onSurfaceVariant.withValues(alpha: 0.7),
                                   ),
                                 ),
                               ),

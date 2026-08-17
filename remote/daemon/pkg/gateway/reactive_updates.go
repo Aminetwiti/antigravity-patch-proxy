@@ -1,0 +1,121 @@
+package gateway
+
+import (
+	"time"
+
+	"github.com/antigravity/remote-daemon/pkg/connectrpc"
+)
+
+// Flux réactif StreamReactiveUpdates — source secondaire de fiabilité (P1,
+// cf. implémentation plan §4.5) : le LS pousse l'état des cascades au fil de
+// l'eau. Le chemin principal (parsing des frames de réponse dans le send_prompt)
+// reste inchangé ; ce flux ne fait que :
+//  1. marquer la cascade "waiting for input" (statut IDLE + interaction
+//     demandée) — détection instantanée que le parseur de frames rate parfois ;
+//  2. poser l'approbation en attente (MarkApprovalPending) quand une demande
+//     d'interaction arrive — même mécanique que l'événement approval_required
+//     du flux binaire, donc expiration fonctionne aussi sur ce chemin.
+//
+// Les frames sont purement informatives : aucune donnée mobile n'en dépend
+// directement, et le flux ne réordonne JAMAIS les stream_delta (sync_session /
+// StepRecovery restent alimentés uniquement par le chemin principal).
+
+// reactiveBackoff plafonne le délai de reconnexion après un échec du stream
+// réactif (le LS peut être en cours de redémarrage — même logique que jetbox).
+const reactiveBackoff = 30 * time.Second
+
+// ReactiveStreamer est la portion minimale du client LS nécessaire au flux
+// réactif. Interface étroite : les tests injectent un faux sans réimplémenter
+// RPCClient (même pattern que JetboxStreamer).
+type ReactiveStreamer interface {
+	RunReactiveSubscription(onUpdate func(updates map[string]connectrpc.ReactiveUpdate)) error
+}
+
+// RunReactiveSubscription démarre la boucle long-vivante du stream
+// StreamReactiveUpdates. Reconnecte en boucle avec backoff — goroutine
+// autonome, ne bloque jamais le démarrage du serveur. Une seule goroutine
+// pour tout le daemon (le stream est global, pas par client).
+func (s *Server) RunReactiveSubscription(rpc ReactiveStreamer) {
+	go func() {
+		backoff := 2 * time.Second
+		for {
+			err := rpc.RunReactiveSubscription(s.reactiveSyncUpdates)
+			logJSON.Warn("reactive_stream_end", "err", err, "retry_in", backoff)
+			time.Sleep(backoff)
+			if backoff < reactiveBackoff {
+				backoff *= 2
+			}
+		}
+	}()
+}
+
+// reactiveSyncUpdates est le callback du flux : chaque frame d'état est
+// traduite en actions concrètes (approbation en attente + broadcast).
+// Ne panique jamais : une frame inattendue est ignorée.
+func (s *Server) reactiveSyncUpdates(updates map[string]connectrpc.ReactiveUpdate) {
+	for id, u := range updates {
+		if u.WaitingForInput && u.RequestedInteraction != connectrpc.InteractionNone {
+			// Demande d'interaction détectée : même mécanique que l'événement
+			// approval_required du flux binaire (expiration incluse). Seules
+			// les demandes d'approbation outil posent une carte mobile : les
+			// autres types (ask_question, select…) restent gérés par le
+			// chemin principal.
+			switch u.RequestedInteraction {
+			case connectrpc.InteractionApproval,
+				connectrpc.InteractionRunCommand,
+				connectrpc.InteractionFilePermission,
+				connectrpc.InteractionPermission,
+				connectrpc.InteractionOpenBrowserURL:
+				tool := interactionToolName(u.RequestedInteraction)
+				// Même garde que le chemin binaire (websocket.go) : une
+				// auto-approbation de session déjà traitée ne doit ni poser
+				// de carte ni diffuser. L'auto-accept read-only n'est PAS
+				// vérifié ici : aucun type d'interaction réactif ne mappe
+				// vers un outil read-only (interactionToolName ne produit
+				// que run_command/file_permission/permission/approval/
+				// open_browser_url), la garde serait du code mort. Le chemin
+				// binaire soumet l'auto-approbation read-only avec le détail
+				// de la commande que le flux réactif ne porte pas.
+				if s.hasSessionApproval(id, tool) {
+					continue
+				}
+				ev := connectrpc.StreamEvent{
+					CallID:       u.CallID,
+					TrajectoryID: u.TrajectoryID,
+					StepIndex:    u.StepIndex,
+					Tool:         tool,
+				}
+				s.MarkApprovalPending(id, ev)
+				// C7-B : idle détection hôte — même champ que le push
+				// approval_pending du flux binaire.
+				pending := s.pendingApprovalInfo(id)
+				if pending == nil {
+					continue
+				}
+				pending["hostActive"] = hostActiveSince(hostActiveWindow)
+				s.broadcast(OutgoingMessage{
+					Type: "approval_pending",
+					Data: pending,
+				})
+			}
+		}
+	}
+}
+
+// interactionToolName mappe le type d'interaction réactif vers le nom d'outil
+// historique du daemon (utilisé par buildApprovalPayload pour choisir le
+// oneof member exact — champ 56, verrou critique du plan).
+func interactionToolName(t int) string {
+	switch t {
+	case connectrpc.InteractionRunCommand:
+		return "run_command"
+	case connectrpc.InteractionFilePermission:
+		return "file_permission"
+	case connectrpc.InteractionPermission:
+		return "permission"
+	case connectrpc.InteractionOpenBrowserURL:
+		return "open_browser_url"
+	default:
+		return "approval"
+	}
+}

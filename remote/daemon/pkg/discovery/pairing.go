@@ -28,6 +28,12 @@ type SessionInfo struct {
 	AllowedProjects []string  `json:"allowedProjects,omitempty"`
 	CreatedAt       time.Time `json:"createdAt"`
 	ExpiresAt       time.Time `json:"expiresAt"`
+	// Admin : appareil administrateur (r�vocation des autres devices).
+	// Seul le premier appairage d'un device (ou un appel explicite) peut
+	// l'activer : un device ne peut jamais se promouvoir via /pair.
+	Admin bool `json:"admin,omitempty"`
+	// IP : adresse d'origine du device (extractIP(remoteAddr) au pairing).
+	IP string `json:"ip,omitempty"`
 }
 
 type attemptRecord struct {
@@ -163,6 +169,8 @@ func (pm *PairingManager) VerifyPIN(remoteAddr, pin, deviceID string, allowedPro
 		AllowedProjects: allowed,
 		CreatedAt:       now,
 		ExpiresAt:       expiresAt,
+		Admin:           pm.hasSessionLocked(deviceID),
+		IP:              ip,
 	}
 
 	// Régénérer un nouveau PIN immédiatement après un appairage réussi
@@ -209,7 +217,22 @@ func (pm *PairingManager) RevokeDevice(deviceID string) bool {
 	return revoked
 }
 
-// ListSessions retourne la liste des sessions actives (pour un futur /admin/devices).
+// hasSessionLocked rapporte si un device poss�de d�j� une session active
+// (lock d�tenu). Le premier appairage d'un device devient administrateur.
+func (pm *PairingManager) hasSessionLocked(deviceID string) bool {
+	if deviceID == "" {
+		return false
+	}
+	now := time.Now()
+	for _, sess := range pm.sessions {
+		if sess.DeviceID == deviceID && now.Before(sess.ExpiresAt) {
+			return true
+		}
+	}
+	return false
+}
+
+// ListSessions retourne la liste des sessions actives (pour /admin/devices).
 func (pm *PairingManager) ListSessions() []SessionInfo {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()

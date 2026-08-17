@@ -62,8 +62,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // poussé au daemon via le message WS set_auto_accept. Désactivé par défaut
   // (toute action non read-only reste soumise à approbation).
   bool _autoAcceptEnabled = false;
+  String _autoAcceptMode = 'readonly';
   bool _mcpAllowlistStrict = true;
   bool _isGeminiEnterprise = true;
+  // Appareils pairés (3.4, admin) : liste brute des sessions renvoyée par
+  // admin.list_devices (deviceId, name, ip, admin, allowedProjects...).
+  List<Map<String, dynamic>> _devices = [];
+  bool _devicesLoading = false;
+  bool _devicesError = false;
   final List<String> _models = [
     'Gemini 3.7 Flash Medium',
     'Gemini 3.6 Flash Medium',
@@ -105,12 +111,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _approvalTimeoutController =
         TextEditingController(text: '$_approvalTimeoutMinutes');
     _autoAcceptEnabled = (s['autoAcceptEnabled'] as bool?) ?? false;
+    _autoAcceptMode = (s['autoAcceptMode'] as String?) ?? 'readonly';
     // Applique le réglage persisté dès l'ouverture (le notifier est un
     // singleton : il faut re-synchroniser son état global).
     widget.notifier?.setEnabled(_toolNotifications);
     _fetchCustomModels();
     _applyApprovalTimeoutToDaemon();
     _fetchBranches();
+    _fetchDevices();
   }
 
   Future<void> _fetchBranches() async {
@@ -155,6 +163,92 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _csrfController.dispose();
     _approvalTimeoutController.dispose();
     super.dispose();
+  }
+
+  /// Charge la liste des appareils pairés (3.4, admin.list_devices). Best-effort :
+  /// sans daemon connecté ou sans droit admin, on affiche un état vide/erreur
+  /// discret au lieu de faire planter l'écran de réglages.
+  Future<void> _fetchDevices() async {
+    if (widget.api == null) return;
+    setState(() {
+      _devicesLoading = true;
+      _devicesError = false;
+    });
+    try {
+      final devices = await widget.api!.listDevices();
+      if (mounted) {
+        setState(() {
+          _devices = devices;
+          _devicesLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('listDevices failed: ');
+      if (mounted) {
+        setState(() {
+          _devicesError = true;
+          _devicesLoading = false;
+        });
+      }
+    }
+  }
+
+  /// Révoque un appareil pairé (3.4, admin.revoke_device) après confirmation.
+  /// Sur succès, on retire l'appareil de la liste locale (le daemon broadcast
+  /// aussi devices_updated, mais on ne l'écoute pas ici).
+  Future<void> _revokeDevice(Map<String, dynamic> device) async {
+    final deviceId = device['deviceId']?.toString() ?? '';
+    final name = device['name']?.toString() ?? deviceId;
+    if (deviceId.isEmpty || widget.api == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Révoquer cet appareil ?'),
+        content: Text(
+          '« $name » perdra immédiatement l\'accès au daemon. '
+          'Cette action est irréversible.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Annuler'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Révoquer'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      final ok = await widget.api!.revokeDevice(deviceId);
+      if (!mounted) return;
+      if (ok) {
+        setState(() => _devices.removeWhere((d) => d['deviceId'] == deviceId));
+        AppToast.show(
+          context,
+          message: 'Appareil « $name » révoqué.',
+          icon: Icons.devices_other_outlined,
+        );
+      } else {
+        AppToast.show(
+          context,
+          message: 'Appareil introuvable (déjà révoqué ?).',
+          type: ToastType.warning,
+        );
+        _fetchDevices();
+      }
+    } catch (e) {
+      debugPrint('revokeDevice failed: $e');
+      if (mounted) {
+        AppToast.show(
+          context,
+          message: 'Échec de la révocation (droits admin requis).',
+          type: ToastType.error,
+        );
+      }
+    }
   }
 
   /// Persiste le délai d'auto-refus et l'applique au daemon (set_approval_timeout).
@@ -624,7 +718,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface),
                     ),
                     subtitle: Text(
-                      'Lire des fichiers, lister, chercher… passe sans confirmation. Écritures et commandes restent approuvées manuellement.',
+                      _autoAcceptMode == 'full'
+                          ? 'Accès total : toutes les commandes et écritures passent automatiquement (sauf questions interactives).'
+                          : 'Lecture seule : fichiers et recherches passent sans confirmation. Écritures et commandes requièrent accord.',
                       style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                     value: _autoAcceptEnabled,
@@ -632,15 +728,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     contentPadding: EdgeInsets.zero,
                     onChanged: (val) async {
                       setState(() => _autoAcceptEnabled = val);
-                      await SettingsStore.save({'autoAcceptEnabled': val});
-                      // Envoi non bloquant : sans daemon connecté, le RPC
-                      // expire silencieusement et le réglage sera réappliqué
-                      // à la prochaine connexion.
+                      await SettingsStore.save({'autoAcceptEnabled': val, 'autoAcceptMode': _autoAcceptMode});
                       try {
-                        await widget.api?.setAutoAccept(enabled: val);
+                        await widget.api?.setAutoAccept(enabled: val, mode: _autoAcceptMode);
                       } catch (_) {}
                     },
                   ),
+                  if (_autoAcceptEnabled) ...[
+                    const SizedBox(height: 8),
+                    SegmentedButton<String>(
+                      segments: const [
+                        ButtonSegment(
+                          value: 'readonly',
+                          label: Text('Lecture seule', style: TextStyle(fontSize: 12)),
+                          icon: Icon(Icons.visibility_outlined, size: 14),
+                        ),
+                        ButtonSegment(
+                          value: 'full',
+                          label: Text('Accès total', style: TextStyle(fontSize: 12)),
+                          icon: Icon(Icons.flash_on_outlined, size: 14),
+                        ),
+                      ],
+                      selected: {_autoAcceptMode},
+                      onSelectionChanged: (newSelection) async {
+                        final newMode = newSelection.first;
+                        setState(() => _autoAcceptMode = newMode);
+                        await SettingsStore.save({'autoAcceptMode': newMode});
+                        try {
+                          await widget.api?.setAutoAccept(enabled: _autoAcceptEnabled, mode: newMode);
+                        } catch (_) {}
+                      },
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -692,6 +811,107 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       SettingsStore.save({'mcpAllowlistStrict': val});
                     },
                   ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // ── PAIRED DEVICES (3.4, admin)
+          const _SectionTitle(title: 'APPAREILS PAIRÉS'),
+          const SizedBox(height: 8),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Appareils connectés au daemon',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Actualiser',
+                        icon: const Icon(Icons.refresh, size: 18),
+                        onPressed: _devicesLoading ? null : _fetchDevices,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  if (_devicesLoading)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Center(
+                        child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                    )
+                  else if (_devicesError)
+                    Text(
+                      'Liste indisponible (daemon déconnecté ou droits admin requis).',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    )
+                  else if (_devices.isEmpty)
+                    Text(
+                      'Aucun autre appareil pairé. Le premier appareil appairé est administrateur.',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    )
+                  else
+                    ..._devices.map(
+                      (d) => ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(
+                          Icons.smartphone_outlined,
+                          size: 18,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                        title: Text(
+                          d['name']?.toString() ?? 'Appareil',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                        ),
+                        subtitle: Text(
+                          [
+                            if (d['ip']?.toString().isNotEmpty == true)
+                              d['ip'].toString(),
+                            if (d['admin'] == true) 'admin',
+                          ].join(' · '),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        trailing: IconButton(
+                          tooltip: 'Révoquer l\'accès',
+                          icon: Icon(
+                            Icons.link_off_outlined,
+                            size: 18,
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                          onPressed: () => _revokeDevice(d),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),

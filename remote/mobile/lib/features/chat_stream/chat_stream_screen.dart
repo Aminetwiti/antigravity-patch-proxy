@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/network/websocket_client.dart';
 import '../../core/notifications/approval_notifier.dart';
 import '../../core/protocol/daemon_api.dart';
+import '../../core/protocol/markdown_renderer.dart';
 import '../../core/protocol/messages.dart';
 import '../../core/protocol/stream_parser.dart';
 import '../../widgets/ask_question_choice_card.dart';
@@ -21,6 +22,7 @@ import '../../widgets/side_question_card.dart';
 import '../../widgets/background_tasks_bar.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/unified_diff_viewer.dart';
+import '../../widgets/artifact_viewer_modal.dart';
 import 'widgets/overview_panel_view.dart';
 import 'widgets/session_review_view.dart';
 import 'package:mobile/theme/app_colors.dart';
@@ -1658,6 +1660,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                       message: msg,
                       api: widget.api,
                       workspacePath: widget.activeProjectName,
+                      onLocalFile: _openLocalFile,
                       isThoughtExpanded: _expandedThoughts.contains(msg.id),
                       onToggleThought: () => setState(() {
                         if (_expandedThoughts.contains(msg.id)) {
@@ -1863,6 +1866,23 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     );
   }
 
+  /// P5 : tap sur un lien markdown file:/// (ex. implémentation_plan.md)
+  /// → lit le fichier via le RPC officiel ReadFile du LS (le daemon gère
+  /// l'URI file:/// telle quelle) et l'affiche dans ArtifactViewerModal.
+  /// Ponytail : pas de workspacePath — les liens IDE sont des chemins
+  /// absolus hôte, la voie RPC les accepte directement.
+  void _openLocalFile(String filePath) {
+    final api = widget.api;
+    if (api == null) return;
+    final name = filePath.split('/').last.split('\\').last;
+    ArtifactViewerModal.show(
+      context,
+      api: api,
+      artifactPath: filePath,
+      artifactName: name.isEmpty ? 'fichier' : name,
+    );
+  }
+
   Widget _buildPlanTabContent() {
     if (_latestPlanText == null) {
       return Center(
@@ -1931,6 +1951,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           text: _latestPlanText!,
           api: widget.api,
           workspacePath: widget.activeProjectName,
+          onLocalFile: _openLocalFile,
         ),
       ],
     );
@@ -2010,10 +2031,14 @@ class _MessageBubble extends StatelessWidget {
   final VoidCallback? onViewReview;
   final ValueChanged<ChatMessage>? onResend;
 
+  /// P5 : tap sur un lien markdown file:/// → ouvre le fichier distant.
+  final LocalFileTap? onLocalFile;
+
   const _MessageBubble({
     required this.message,
     this.api,
     this.workspacePath = '',
+    this.onLocalFile,
     this.isThoughtExpanded = false,
     this.onToggleThought,
     this.onProceedPlan,
@@ -2220,6 +2245,7 @@ class _MessageBubble extends StatelessWidget {
                 isStreaming: message.isStreaming,
                 api: api,
                 workspacePath: workspacePath,
+                onLocalFile: onLocalFile,
               ),
             if (!message.isStreaming &&
                 (message.text.contains('Implementation Plan') ||

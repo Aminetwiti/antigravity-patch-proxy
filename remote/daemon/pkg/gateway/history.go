@@ -828,11 +828,11 @@ func readSQLiteSteps(dbPath, cascadeID string) ([]HistoryMessage, string, error)
 	title := ""
 	for rows.Next() {
 		var (
-			idx       int
-			stepType  int
-			status    int
-			metadata  []byte
-			payload   []byte
+			idx      int
+			stepType int
+			status   int
+			metadata []byte
+			payload  []byte
 		)
 		if err := rows.Scan(&idx, &stepType, &status, &metadata, &payload); err != nil {
 			continue
@@ -1156,7 +1156,6 @@ func ExtractSubagents(cascadeID string) []SubagentSummary {
 	return results
 }
 
-
 // filePathsIn extrait les chemins absolus (Windows, POSIX et file:///) d'un
 // texte ÔÇö ils identifient fichiers, artefacts et uploads dans les transcripts.
 func filePathsIn(s string) []string {
@@ -1326,4 +1325,58 @@ func GetUniqueWorkspaces() []string {
 		}
 	}
 	return list
+}
+
+// listWorkspaces construit le sélecteur de workspace (G4) : le registre
+// officiel ~/.gemini/config/projects d'abord, complété par un scan borné
+// (niveau 1 uniquement) du home directory. Les dossiers cachés, AppData,
+// Library et les noms système sont exclus. Toujours non-fatal : un scan qui
+// échoue ne renvoie que le registre.
+func listWorkspaces() []map[string]interface{} {
+	seen := make(map[string]bool)
+	var out []map[string]interface{}
+	add := func(name, path, source string) {
+		if name == "" || path == "" || seen[path] {
+			return
+		}
+		seen[path] = true
+		rel := ""
+		if home, err := os.UserHomeDir(); err == nil {
+			if r, err := filepath.Rel(home, path); err == nil && !strings.HasPrefix(r, "..") {
+				rel = filepath.ToSlash(r)
+			}
+		}
+		out = append(out, map[string]interface{}{
+			"name":         name,
+			"path":         filepath.ToSlash(path),
+			"relativePath": rel,
+			"source":       source,
+		})
+	}
+
+	for _, p := range ListOfficialProjects() {
+		add(p.Name, p.Path, "registry")
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return out
+	}
+	entries, err := os.ReadDir(home)
+	if err != nil {
+		return out
+	}
+	skip := map[string]bool{
+		"AppData": true, "Library": true, "Applications": true,
+		"Desktop": true, "Documents": true, "Downloads": true,
+		"Pictures": true, "Music": true, "Videos": true, "Public": true,
+		".git": true, ".gemini": true, "node_modules": true,
+	}
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") || skip[e.Name()] {
+			continue
+		}
+		add(e.Name(), filepath.Join(home, e.Name()), "home")
+	}
+	return out
 }

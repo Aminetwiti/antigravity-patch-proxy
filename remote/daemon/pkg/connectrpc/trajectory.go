@@ -18,9 +18,9 @@ type TrajectorySummary struct {
 	Status       string    `json:"status"`
 	UpdatedAt    time.Time `json:"updatedAt,omitempty"`
 	Size         int       `json:"size"`
-	Archived     bool      `json:"archived,omitempty"`  // annotations.archived (field 15→4)
-	Killed       bool      `json:"killed,omitempty"`    // field 23
-	Source       int       `json:"source,omitempty"`    // field 20 (1=CASCADE_CLIENT, 16=SUBAGENT)
+	Archived     bool      `json:"archived,omitempty"` // annotations.archived (field 15→4)
+	Killed       bool      `json:"killed,omitempty"`   // field 23
+	Source       int       `json:"source,omitempty"`   // field 20 (1=CASCADE_CLIENT, 16=SUBAGENT)
 }
 
 var (

@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"context"
@@ -102,11 +102,18 @@ func main() {
 	// Variante enrichie (3.3) : le gateway r├®cup├¿re deviceId + allowedProjects
 	// au handshake pour le filtrage par projet (send_prompt / list_sessions).
 	server.SetSessionValidator(pairingMgr.ValidateSession)
+	// 3.4 : branche le PairingManager pour list_devices / revoke_device
+	// (gestion administrative des appareils pairÃ©s depuis le mobile admin).
+	server.SetPairingManager(pairingMgr)
 	server.SetApprovalTimeout(time.Duration(approvalTimeoutMin) * time.Minute)
 	// Flux temps r├®el Jetbox : la sidebar mobile est aliment├®e par le stream
 	// JetboxSubscribeToSummaries (snapshot initial + updates incr├®mentaux) au
 	// lieu de GetAllCascades (~9,5 s). Reconnecte automatiquement en boucle.
 	server.RunJetboxSubscription(rpcClient)
+	// Flux r├®actif StreamReactiveUpdates : source secondaire de fiabilit├®
+	// (approbations + d├®tection instantan├®e "waiting for input") — le parsing
+	// des frames de r├®ponse reste le chemin principal. Goroutine autonome.
+	server.RunReactiveSubscription(rpcClient)
 	sched := gateway.NewScheduler(server)
 	sched.Start()
 

@@ -91,6 +91,12 @@ type fakeRPCClient struct {
 	// par zz_p1_trajectory_test.go).
 	lastTrajectory *trajectoryCall
 	lastTurnDiff   *turnDiffCall
+	// vcsStateRaw : réponse GetVersionControlState simulée (nil = défaut).
+	vcsStateRaw []byte
+	// lastGitOp : dernier RPC git reçu (vérifié par les tests P2).
+	lastGitOp *gitOpCall
+	// lastSidecar : dernier RPC sidecar reçu (vérifié par les tests P2).
+	lastSidecar *sidecarCall
 }
 
 // trajectoryCall capture les arguments du dernier GetCascadeTrajectory.
@@ -103,6 +109,23 @@ type trajectoryCall struct {
 type turnDiffCall struct {
 	conversationID string
 	stepIndex      int64
+}
+
+// gitOpCall capture les arguments du dernier RPC git (P2).
+type gitOpCall struct {
+	op           string
+	workspaceURI string
+	uris         []string
+	message      string
+	commitID     string
+}
+
+// sidecarCall capture les arguments du dernier RPC sidecar (P2).
+type sidecarCall struct {
+	op          string
+	sidecarID   string
+	logFileName string
+	action      uint64
 }
 
 // writeFileCall capture les arguments du dernier WriteFile.
@@ -336,6 +359,96 @@ func (f *fakeRPCClient) CreateWorktree(branch, path string) ([]byte, error) {
 	return []byte(`{"status":"created","branch":"` + branch + `"}`), nil
 }
 
+// --- Fakes RPC Git + Sidecar (P2) ---
+
+// vcsStateRaw : réponse GetVersionControlState simulée (nil = défaut).
+// Défaut : branche "main", 2 changements, pas de conflit.
+func (f *fakeRPCClient) GetVersionControlState(workspacePath string) ([]byte, error) {
+	if f.vcsStateRaw != nil {
+		return f.vcsStateRaw, nil
+	}
+	st := &protoWriter{}
+	st.string(2, "main")                                   // current_ref
+	commit := &protoWriter{}
+	commit.string(1, "abc123")
+	author := &protoWriter{}
+	author.string(1, "Test User")
+	commit.bytes(4, author.buf)
+	commit.varint(5, 1700000000000)
+	msg := &protoWriter{}
+	msg.string(1, "feat: test commit")
+	commit.bytes(6, msg.buf)
+	st.bytes(4, commit.buf)                                 // commits
+	wd := &protoWriter{}
+	wd.string(1, "file:///C:/repo/main.go")                // uri
+	wd.varint(2, 2)                                        // MODIFIED
+	st.bytes(5, wd.buf)
+	wd2 := &protoWriter{}
+	wd2.string(1, "file:///C:/repo/new.go")
+	wd2.varint(2, 1)                                       // ADDED
+	st.bytes(5, wd2.buf)
+	stage := &protoWriter{}
+	stage.string(1, "file:///C:/repo/staged.go")
+	stage.varint(2, 1)
+	st.bytes(7, stage.buf)
+	conf := &protoWriter{}
+	conf.varint(1, 0)                                      // pas de conflit
+	st.bytes(6, conf.buf)
+	st.varint(1, 4)                                        // vcs_type = GIT
+	return connectrpc.Frame(st.buf), nil
+}
+
+func (f *fakeRPCClient) GitStage(workspaceURI string, uris []string) ([]byte, error) {
+	f.lastGitOp = &gitOpCall{op: "stage", workspaceURI: workspaceURI, uris: uris}
+	return connectrpc.Frame(pbTextFrame("staged")), nil
+}
+
+func (f *fakeRPCClient) GitUnstage(workspaceURI string, uris []string) ([]byte, error) {
+	f.lastGitOp = &gitOpCall{op: "unstage", workspaceURI: workspaceURI, uris: uris}
+	return connectrpc.Frame(pbTextFrame("unstaged")), nil
+}
+
+func (f *fakeRPCClient) GitCommit(workspaceURI, message string) ([]byte, error) {
+	f.lastGitOp = &gitOpCall{op: "commit", workspaceURI: workspaceURI, message: message}
+	commitResp := &protoWriter{}
+	commitResp.string(1, "abc123")
+	return connectrpc.Frame(commitResp.buf), nil
+}
+
+func (f *fakeRPCClient) GitDiscard(workspaceURI string, uris []string) ([]byte, error) {
+	f.lastGitOp = &gitOpCall{op: "discard", workspaceURI: workspaceURI, uris: uris}
+	return connectrpc.Frame(pbTextFrame("discarded")), nil
+}
+
+func (f *fakeRPCClient) GetCommitDetails(workspaceURI, commitID string) ([]byte, error) {
+	f.lastGitOp = &gitOpCall{op: "commit_details", workspaceURI: workspaceURI, commitID: commitID}
+	details := &protoWriter{}
+	details.string(1, commitID)
+	file := &protoWriter{}
+	file.string(1, "file:///C:/repo/main.go")
+	file.varint(2, 2)
+	details.bytes(2, file.buf)
+	return connectrpc.Frame(details.buf), nil
+}
+
+func (f *fakeRPCClient) ListSidecarLogFiles(sidecarID string) ([]byte, error) {
+	f.lastSidecar = &sidecarCall{op: "list_logs", sidecarID: sidecarID}
+	list := &protoWriter{}
+	list.string(1, "server.log")
+	list.string(1, "agent.log")
+	return connectrpc.Frame(list.buf), nil
+}
+
+func (f *fakeRPCClient) GetSidecarLogs(sidecarID, logFileName string) ([]byte, error) {
+	f.lastSidecar = &sidecarCall{op: "get_logs", sidecarID: sidecarID, logFileName: logFileName}
+	return connectrpc.Frame(pbTextFrame("log-content-line-1\nlog-content-line-2")), nil
+}
+
+func (f *fakeRPCClient) ManageSidecar(sidecarID string, action uint64) ([]byte, error) {
+	f.lastSidecar = &sidecarCall{op: "manage", sidecarID: sidecarID, action: action}
+	return connectrpc.Frame(pbTextFrame("managed")), nil
+}
+
 func (f *fakeRPCClient) GetLintErrors(uri string) ([]byte, error) {
 	return []byte(`{"diagnostics":[{"uri":"` + uri + `","severity":1,"message":"unused variable"}]}`), nil
 }
@@ -347,6 +460,39 @@ func (f *fakeRPCClient) GetDefinition(uri string, line, character int) ([]byte, 
 func (f *fakeRPCClient) GetCodeValidationStates(uri string) ([]byte, error) {
 	return []byte(`{"validations":[{"uri":"` + uri + `","state":"valid"}]}`), nil
 }
+
+func (f *fakeRPCClient) StartBattleMode(workspaceURI, prompt, modelUIDA string, modelEnumA uint64, modelUIDB string, modelEnumB uint64) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("battle-started")), nil
+}
+
+func (f *fakeRPCClient) GetBattleWorktreeDiff(workspaceURI string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("battle-diff")), nil
+}
+
+func (f *fakeRPCClient) EliminateBattleArm(armID string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("arm-eliminated")), nil
+}
+
+func (f *fakeRPCClient) EndBattleMode(winningArmID string, mergeStrategy uint64) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("battle-ended")), nil
+}
+
+func (f *fakeRPCClient) DumpFlightRecorder() ([]byte, error) {
+	return connectrpc.Frame([]byte("fake-trace-data")), nil
+}
+
+func (f *fakeRPCClient) RefreshMcpServers() ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("mcp-refreshed")), nil
+}
+
+func (f *fakeRPCClient) CompleteMcpOAuth(serverID, authCode string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("oauth-completed")), nil
+}
+
+func (f *fakeRPCClient) DisconnectMcpOAuth(serverID string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("oauth-disconnected")), nil
+}
+
 
 
 
@@ -393,6 +539,21 @@ func (c *wsTestClient) recv(t *testing.T) map[string]interface{} {
 		t.Fatalf("JSON invalide: %v (%s)", err, string(b))
 	}
 	return out
+}
+
+// recvSafe lit un message SANS faire échouer le test si la deadline expire
+// (deadline non lue) : utilisé pour observer des broadcasts asynchrones
+// (devices_updated) sans introduire de course dans le test.
+func (c *wsTestClient) recvSafe() (map[string]interface{}, error) {
+	_, b, err := c.conn.ReadMessage()
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]interface{}
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func newTestServer(client RPCClient) *httptest.Server {

@@ -275,6 +275,60 @@ func (l *loadRPCClient) UntrackWorkspace(workspacePath string) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("untracked")), nil
 }
 
+// --- Stubs RPC Git + Sidecar (P2) pour loadRPCClient ---
+func (l *loadRPCClient) GetVersionControlState(workspacePath string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("vcs")), nil
+}
+func (l *loadRPCClient) GitStage(workspaceURI string, uris []string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("staged")), nil
+}
+func (l *loadRPCClient) GitUnstage(workspaceURI string, uris []string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("unstaged")), nil
+}
+func (l *loadRPCClient) GitDiscard(workspaceURI string, uris []string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("discarded")), nil
+}
+func (l *loadRPCClient) GitCommit(workspaceURI, message string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("committed")), nil
+}
+func (l *loadRPCClient) GetCommitDetails(workspaceURI, commitID string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("details")), nil
+}
+func (l *loadRPCClient) ListSidecarLogFiles(sidecarID string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("logs")), nil
+}
+func (l *loadRPCClient) GetSidecarLogs(sidecarID, logFileName string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("log-content")), nil
+}
+func (l *loadRPCClient) ManageSidecar(sidecarID string, action uint64) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("managed")), nil
+}
+func (l *loadRPCClient) StartBattleMode(workspaceURI, prompt, modelUIDA string, modelEnumA uint64, modelUIDB string, modelEnumB uint64) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("battle-started")), nil
+}
+func (l *loadRPCClient) GetBattleWorktreeDiff(workspaceURI string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("battle-diff")), nil
+}
+func (l *loadRPCClient) EliminateBattleArm(armID string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("arm-eliminated")), nil
+}
+func (l *loadRPCClient) EndBattleMode(winningArmID string, mergeStrategy uint64) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("battle-ended")), nil
+}
+func (l *loadRPCClient) DumpFlightRecorder() ([]byte, error) {
+	return connectrpc.Frame([]byte("fake-trace")), nil
+}
+func (l *loadRPCClient) RefreshMcpServers() ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("mcp-refreshed")), nil
+}
+func (l *loadRPCClient) CompleteMcpOAuth(serverID, authCode string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("oauth-completed")), nil
+}
+func (l *loadRPCClient) DisconnectMcpOAuth(serverID string) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("oauth-disconnected")), nil
+}
+
+
 
 // TestWebSocketConcurrentClients — 20 clients en parallèle, 30 messages chacun :
 // aucun message ne doit être perdu ni mélangé (chaque réponse doit porter

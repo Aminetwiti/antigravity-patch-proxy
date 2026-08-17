@@ -47,6 +47,11 @@ class MarkdownBlock {
         isListItem = false;
 }
 
+/// Callback invoked when a markdown link pointing to a local file
+/// (file:/// URI) is tapped. Absent → the link renders as a plain tooltip
+/// (existing behavior for callers without a daemon handle).
+typedef LocalFileTap = void Function(String filePath);
+
 class MarkdownRenderer {
   /// Splits raw markdown text into display blocks.
   static List<MarkdownBlock> blocksOf(String text) {
@@ -134,10 +139,14 @@ class MarkdownRenderer {
   }
 
   /// Builds inline [TextSpan]s for a paragraph, resolving bold/italic/code.
+  /// [onLocalFile] (P5) est appelé quand l'utilisateur tape un lien markdown
+  /// vers un fichier local (file:///...) — le caller ouvre le fichier (ex.
+  /// ArtifactViewerModal). Sans callback, le lien reste un simple tooltip.
   static List<InlineSpan> inlineSpans(
     String text,
     TextStyle base, {
     required ColorScheme scheme,
+    LocalFileTap? onLocalFile,
   }) {
     final spans = <InlineSpan>[];
     final codeRe = RegExp(r'`([^`]+)`');
@@ -166,25 +175,51 @@ class MarkdownRenderer {
       }
 
       // 2. Link with tooltip showing full target path/URL on hover.
+      // P5 : un lien file:/// devient tappable (ouvre le fichier côté hôte)
+      // quand onLocalFile est fourni ; sinon comportement historique.
       final linkMatch = linkRe.firstMatch(remaining);
       if (linkMatch != null && linkMatch.start == 0) {
         final label = linkMatch.group(1) ?? '';
         final url = linkMatch.group(2) ?? '';
-        spans.add(WidgetSpan(
-          alignment: PlaceholderAlignment.baseline,
-          baseline: TextBaseline.alphabetic,
-          child: Tooltip(
-            waitDuration: const Duration(milliseconds: 100),
-            message: 'Chemin complet : $url',
-            child: Text(
-              label,
-              style: base.copyWith(
-                color: scheme.primary,
-                decoration: TextDecoration.underline,
+        final isLocalFile = url.startsWith('file://');
+        if (isLocalFile) {
+          final filePath = _filePathOf(url);
+          spans.add(WidgetSpan(
+            alignment: PlaceholderAlignment.baseline,
+            baseline: TextBaseline.alphabetic,
+            child: Tooltip(
+              waitDuration: const Duration(milliseconds: 100),
+              message: 'Ouvrir : $filePath',
+              child: GestureDetector(
+                onTap: onLocalFile == null ? null : () => onLocalFile(filePath),
+                child: Text(
+                  label,
+                  style: base.copyWith(
+                    color: scheme.primary,
+                    decoration: TextDecoration.underline,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
               ),
             ),
-          ),
-        ));
+          ));
+        } else {
+          spans.add(WidgetSpan(
+            alignment: PlaceholderAlignment.baseline,
+            baseline: TextBaseline.alphabetic,
+            child: Tooltip(
+              waitDuration: const Duration(milliseconds: 100),
+              message: 'Chemin complet : $url',
+              child: Text(
+                label,
+                style: base.copyWith(
+                  color: scheme.primary,
+                  decoration: TextDecoration.underline,
+                ),
+              ),
+            ),
+          ));
+        }
         remaining = remaining.substring(linkMatch.end);
         continue;
       }
@@ -226,5 +261,21 @@ class MarkdownRenderer {
       remaining = remaining.substring(nextIndex);
     }
     return spans;
+  }
+
+  /// Normalise une URI file:/// en chemin hôte (décode %XX, gère les
+  /// variantes file:// et file:///). Best-effort : une URI mal encodée est
+  /// renvoyée telle quelle plutôt que de faire planter le rendu.
+  static String _filePathOf(String url) {
+    var p = url;
+    if (p.startsWith('file:///')) {
+      p = p.substring(8);
+    } else if (p.startsWith('file://')) {
+      p = p.substring(7);
+    }
+    try {
+      p = Uri.decodeComponent(p);
+    } catch (_) {}
+    return p;
   }
 }

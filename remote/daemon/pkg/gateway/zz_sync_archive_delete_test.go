@@ -1,0 +1,204 @@
+package gateway
+
+// Tests de la synchronisation temps réel archive/suppression (P0) :
+// 1. delete_cascade purge la carte Jetbox + invalide le cache cold-path
+//    → la session supprimée ne réapparaît PLUS dans list_sessions (même
+//    avec le cache encore chaud), et le broadcast sessions_updated part.
+// 2. une frame Jetbox avec annotations.archived=true (archive depuis le PC)
+//    est broadcastée en sessions_updated et la session archivée est exclue
+//    de la payload.
+// 3. la chaîne de filtrage des sessions locales (fallback) ignore les
+//    sessions archivées (annotations .pbtxt).
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/antigravity/remote-daemon/pkg/connectrpc"
+)
+
+// TestDeleteCascadePurgesSessionFromList — après un delete_cascade réussi :
+// la session a disparu de la carte Jetbox ET du cache cold-path. Un
+// list_sessions immédiat (servi depuis le cache) ne doit plus la contenir.
+func TestDeleteCascadePurgesSessionFromList(t *testing.T) {
+	backend := &fakeRPCClient{}
+	ts, gw := newTestServerWithGW(backend)
+	defer ts.Close()
+
+	// Carte Jetbox chaude avec 2 sessions.
+	gw.mu.Lock()
+	gw.jetboxSummaries = map[string]connectrpc.JetboxSummary{
+		"casc-keep": {CascadeID: "casc-keep", Title: "gardée", Status: "CASCADE_STATUS_READY"},
+		"casc-del":  {CascadeID: "casc-del", Title: "à supprimer", Status: "CASCADE_STATUS_READY"},
+	}
+	gw.mu.Unlock()
+
+	// Cache cold-path volontairement chaud (TTL 5 s) : il ne doit pas
+	// ressusciter la session supprimée.
+	gw.mu.Lock()
+	gw.sessionsCache = []byte(`{"request":{"casc-del":"stale"}}`)
+	gw.sessionsCachedAt = time.Now()
+	gw.mu.Unlock()
+
+	client := dialWS(t, "ws"+strings.TrimPrefix(ts.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	// Suppression confirmée.
+	client.send(t, map[string]string{"type": "delete_cascade", "requestId": "rD", "cascadeId": "casc-del", "confirm": "true"})
+	if msg := client.recv(t); msg["type"] != "response" || msg["error"] != nil {
+		t.Fatalf("réponse delete inattendue: %v", msg)
+	}
+
+	// Le broadcast sessions_updated suit la réponse.
+	msg := client.recv(t)
+	if msg["type"] != "sessions_updated" {
+		t.Fatalf("attendu broadcast sessions_updated, reçu %v", msg)
+	}
+	data, _ := msg["data"].(map[string]interface{})
+	sessions, _ := data["sessions"].([]interface{})
+	if len(sessions) != 1 {
+		t.Fatalf("attendu 1 session après delete, reçu %d (%v)", len(sessions), sessions)
+	}
+	if first := sessions[0].(map[string]interface{}); first["cascadeId"] != "casc-keep" {
+		t.Fatalf("session restante inattendue: %v", first)
+	}
+
+	// Assertions internes directes : la purge doit être effective côté serveur.
+	gw.mu.Lock()
+	if _, stillThere := gw.jetboxSummaries["casc-del"]; stillThere {
+		gw.mu.Unlock()
+		t.Fatal("carte Jetbox : la session supprimée est toujours présente")
+	}
+	cacheNil := gw.sessionsCache == nil
+	gw.mu.Unlock()
+	if !cacheNil {
+		t.Fatal("cache cold-path : sessionsCache n'a pas été invalidé après delete")
+	}
+
+	// list_sessions immédiat : servi depuis la carte Jetbox (chaud) — la
+	// session supprimée ne doit pas réapparaître.
+	client.send(t, map[string]string{"type": "list_sessions", "requestId": "rL"})
+	msg = client.recv(t)
+	if msg["type"] != "response" || msg["requestId"] != "rL" {
+		t.Fatalf("réponse list_sessions inattendue: %v", msg)
+	}
+	data, _ = msg["data"].(map[string]interface{})
+	sessions, _ = data["sessions"].([]interface{})
+	for _, s := range sessions {
+		if sm, ok := s.(map[string]interface{}); ok && sm["cascadeId"] == "casc-del" {
+			t.Fatalf("session supprimée réapparue dans list_sessions: %v", sm)
+		}
+	}
+}
+
+// TestJetboxArchiveBroadcastExcludesArchived — une frame Jetbox portant
+// annotations.archived=true (archive déclenchée depuis Antigravity 2.0) est
+// broadcastée en sessions_updated et la session archivée est exclue de la
+// payload : le mobile la fait disparaître de la sidebar.
+func TestJetboxArchiveBroadcastExcludesArchived(t *testing.T) {
+	ts, gw := newTestServerWithGW(&fakeRPCClient{})
+	defer ts.Close()
+
+	jetbox := newFakeJetboxStreamer()
+	defer jetbox.closeStream()
+	gw.RunJetboxSubscription(jetbox)
+
+	client := dialWS(t, "ws"+strings.TrimPrefix(ts.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	// Snapshot initial : 2 sessions actives.
+	jetbox.push(map[string]connectrpc.JetboxSummary{
+		"casc-a": {CascadeID: "casc-a", Title: "active", Status: "CASCADE_STATUS_READY"},
+		"casc-b": {CascadeID: "casc-b", Title: "à archiver", Status: "CASCADE_STATUS_READY"},
+	}, nil)
+	if msg := client.recv(t); msg["type"] != "sessions_updated" {
+		t.Fatalf("attendu sessions_updated (snapshot), reçu %v", msg)
+	}
+
+	// L'utilisateur archive casc-b depuis le PC → le LS pousse une frame
+	// avec annotations.archived=true (le streamer la convertit en
+	// Archived=true + Status=CASCADE_STATUS_ARCHIVED).
+	jetbox.push(map[string]connectrpc.JetboxSummary{
+		"casc-b": {CascadeID: "casc-b", Title: "à archiver", Status: "CASCADE_STATUS_ARCHIVED", Archived: true},
+	}, nil)
+
+	msg := client.recv(t)
+	if msg["type"] != "sessions_updated" {
+		t.Fatalf("attendu sessions_updated (archive), reçu %v", msg)
+	}
+	data, _ := msg["data"].(map[string]interface{})
+	sessions, _ := data["sessions"].([]interface{})
+	if len(sessions) != 1 {
+		t.Fatalf("attendu 1 session (archivée exclue), reçu %d (%v)", len(sessions), sessions)
+	}
+	if first := sessions[0].(map[string]interface{}); first["cascadeId"] != "casc-a" {
+		t.Fatalf("session restante inattendue: %v", first)
+	}
+}
+
+// TestJetboxArchiveExcludedFromListSessions — la carte Jetbox alimente
+// list_sessions (hot path) : une session archivée n'y figure plus.
+func TestJetboxArchiveExcludedFromListSessions(t *testing.T) {
+	backend := &fakeRPCClient{}
+	ts, gw := newTestServerWithGW(backend)
+	defer ts.Close()
+
+	gw.mu.Lock()
+	gw.jetboxSummaries = map[string]connectrpc.JetboxSummary{
+		"casc-a": {CascadeID: "casc-a", Title: "active", Status: "CASCADE_STATUS_READY"},
+		"casc-z": {CascadeID: "casc-z", Title: "archivée", Status: "CASCADE_STATUS_ARCHIVED", Archived: true},
+	}
+	gw.mu.Unlock()
+
+	// La payload list_sessions dérivée de la carte doit exclure l'archivée
+	// SANS toucher au fallback local (sinon 19 vrais dossiers brain locaux
+	// polluent le test) : on passe par le même chemin que le handler, mais
+	// à travers le parseur de carte (source de vérité temps réel).
+	out := sessionsFromSummaries(gw.jetboxSummaries)
+	sessions, _ := out["sessions"].([]map[string]interface{})
+	if len(sessions) != 1 {
+		t.Fatalf("attendu 1 session (archivée exclue), reçu %d (%v)", len(sessions), out)
+	}
+	if sessions[0]["cascadeId"] != "casc-a" {
+		t.Fatalf("session restante inattendue: %v", sessions[0])
+	}
+}
+
+// TestListLocalSessionsSkipsArchived — le fallback local (hub vide) ignore
+// les sessions archivées : un fichier annotations/<cascadeId>.pbtxt avec
+// archived: true suffit à les exclure.
+func TestListLocalSessionsSkipsArchived(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir: %v", err)
+	}
+	annoDir := filepath.Join(home, ".gemini", "antigravity", "annotations")
+	if err := os.MkdirAll(annoDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll annotations: %v", err)
+	}
+	// Ne pas écraser une vraie annotation de l'utilisateur : ID de test unique.
+	testID := "deadbeef-0000-4000-8000-00000000dead"
+	annoPath := filepath.Join(annoDir, testID+".pbtxt")
+	if _, err := os.Stat(annoPath); err == nil {
+		t.Skipf("annotation existante %s — test ignoré (fichier réel)", annoPath)
+	}
+	if err := os.WriteFile(annoPath, []byte("cascade_id: \""+testID+"\"\narchived: true\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile annotation: %v", err)
+	}
+	defer os.Remove(annoPath)
+
+	if !isSessionArchived(home, testID) {
+		t.Fatalf("isSessionArchived(%s) = false, attendu true", testID)
+	}
+
+	// Et les sessions locales listées n'incluent pas la session archivée.
+	sessions := ListLocalSessions()
+	for _, s := range sessions {
+		if id, _ := s["cascadeId"].(string); id == testID {
+			t.Fatalf("session archivée %s listée par ListLocalSessions", testID)
+		}
+	}
+}

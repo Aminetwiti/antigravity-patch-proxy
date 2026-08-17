@@ -18,12 +18,17 @@ class MarkdownBubble extends StatelessWidget {
   /// P3 : chemin du workspace hôte (utilisé pour créer le PTY).
   final String workspacePath;
 
+  /// P5 : callback quand l'utilisateur tape un lien markdown file:/// —
+  /// le parent ouvre le fichier (ArtifactViewerModal). Null → tooltip seul.
+  final LocalFileTap? onLocalFile;
+
   const MarkdownBubble({
     super.key,
     required this.text,
     this.isStreaming = false,
     this.api,
     this.workspacePath = '',
+    this.onLocalFile,
   });
 
   @override
@@ -39,7 +44,7 @@ class MarkdownBubble extends StatelessWidget {
           else if (block.toolCall != null)
             _ToolCallPill(call: block.toolCall!)
           else
-            _ParagraphView(block: block),
+            _ParagraphView(block: block, onLocalFile: onLocalFile),
           const SizedBox(height: 10),
         ],
         if (isStreaming) const _StreamingCursor(),
@@ -50,8 +55,9 @@ class MarkdownBubble extends StatelessWidget {
 
 class _ParagraphView extends StatelessWidget {
   final MarkdownBlock block;
+  final LocalFileTap? onLocalFile;
 
-  const _ParagraphView({required this.block});
+  const _ParagraphView({required this.block, this.onLocalFile});
 
   @override
   Widget build(BuildContext context) {
@@ -61,7 +67,12 @@ class _ParagraphView extends StatelessWidget {
       height: 1.45,
       color: scheme.onSurface,
     );
-    final spans = MarkdownRenderer.inlineSpans(block.paragraph ?? '', base, scheme: scheme);
+    final spans = MarkdownRenderer.inlineSpans(
+      block.paragraph ?? '',
+      base,
+      scheme: scheme,
+      onLocalFile: onLocalFile,
+    );
 
     if (block.isListItem) {
       return Row(

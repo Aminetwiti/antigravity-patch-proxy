@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -23,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/antigravity/remote-daemon/pkg/adb"
 	"github.com/antigravity/remote-daemon/pkg/connectrpc"
 	"github.com/antigravity/remote-daemon/pkg/discovery"
 	"github.com/gorilla/websocket"
@@ -97,9 +99,36 @@ type RPCClient interface {
 	GetLintErrors(uri string) ([]byte, error)
 	// GetDefinition r├®sout la d├®finition du symbole ├á une position (LSP).
 	GetDefinition(uri string, line, character int) ([]byte, error)
-	// GetCodeValidationStates r├®cup├¿re l'├®tat de validation du code (LSP).
+	// GetCodeValidationStates récupère l'état de validation du code (LSP).
 	GetCodeValidationStates(uri string) ([]byte, error)
+	// GetVersionControlState récupère l'état VCS complet d'un workspace
+	// (branche, commits, changements, conflits) — GetVersionControlState.
+	GetVersionControlState(workspacePath string) ([]byte, error)
+	// GitStage / GitUnstage / GitDiscard modifient le staging area git.
+	GitStage(workspaceURI string, uris []string) ([]byte, error)
+	GitUnstage(workspaceURI string, uris []string) ([]byte, error)
+	GitDiscard(workspaceURI string, uris []string) ([]byte, error)
+	// GitCommit crée un commit git (retourne son ID).
+	GitCommit(workspaceURI, message string) ([]byte, error)
+	// GetCommitDetails récupère les fichiers changés et parents d'un commit.
+	GetCommitDetails(workspaceURI, commitID string) ([]byte, error)
+	// RPC Sidecar : listes/logs/contrôle des sidecars (cascade_plugins).
+	ListSidecarLogFiles(sidecarID string) ([]byte, error)
+	GetSidecarLogs(sidecarID, logFileName string) ([]byte, error)
+	ManageSidecar(sidecarID string, action uint64) ([]byte, error)
+	// RPC Colosseum / Battle Mode : duel multi-modèles et arbitrage de branches.
+	StartBattleMode(workspaceURI, prompt, modelUIDA string, modelEnumA uint64, modelUIDB string, modelEnumB uint64) ([]byte, error)
+	GetBattleWorktreeDiff(workspaceURI string) ([]byte, error)
+	EliminateBattleArm(armID string) ([]byte, error)
+	EndBattleMode(winningArmID string, mergeStrategy uint64) ([]byte, error)
+	// RPC Diagnostics & FlightRecorder.
+	DumpFlightRecorder() ([]byte, error)
+	// RPC MCP Lifecycle & OAuth.
+	RefreshMcpServers() ([]byte, error)
+	CompleteMcpOAuth(serverID, authCode string) ([]byte, error)
+	DisconnectMcpOAuth(serverID string) ([]byte, error)
 }
+
 
 // JetboxStreamer est la portion minimale du client LS n├®cessaire au flux
 // temps r├®el des r├®sum├®s de sessions (JetboxSubscribeToSummaries). Interface
@@ -158,6 +187,19 @@ type pendingApproval struct {
 	expired bool
 }
 
+// uploadChunkState garde l'état d'un transfert de fichier par morceaux (G2).
+type uploadChunkState struct {
+	id          string
+	cascadeID   string
+	fileName    string
+	totalBytes  int64
+	received    int64
+	chunks      map[int][]byte
+	totalChunks int
+	targetPath  string
+	createdAt   time.Time
+}
+
 type Server struct {
 	RPCClient RPCClient
 	AuthToken string
@@ -175,21 +217,24 @@ type Server struct {
 	// approvalTimeout : d├®lai avant auto-refus d'une approbation sans r├®ponse
 	// (s├®curit├® : t├®l├®phone perdu). 0 = d├®sactiv├®. D├®faut 5 minutes.
 	approvalTimeout time.Duration
-	// sessionApprovals : cascadeId+approvalType ÔåÆ l'utilisateur a choisi
-	// ┬½ toujours autoriser pour cette session ┬╗ (B3). Les demandes suivantes
-	// du m├¬me type sont auto-approuv├®es sans repasser par le t├®l├®phone.
+	// sessionApprovals : cascadeId+approvalType — l'utilisateur a choisi
+	// « toujours autoriser pour cette session » (B3). Les demandes suivantes
+	// du même type sont auto-approuvées sans repasser par le téléphone.
 	sessionApprovals map[string]bool
-	// autoAcceptEnabled : auto-approbation des actions read-only (toggle des
-	// r├®glages mobile, message WS set_auto_accept). R├¿gles volontairement
-	// conservatrices : lecture seule ÔåÆ approuv├®e ; ├®criture hors workspace et
-	// commandes ÔåÆ jamais auto-approuv├®es (l'utilisateur d├®cide). L'├®tat vit en
-	// m├®moire : le mobile le re-synchronise ├á chaque reconnexion.
-	// ponytail: plafond = perte d'├®tat au red├®marrage du daemon ; upgrade =
-	// persistance via SettingsService si le besoin appara├«t.
+	// autoAcceptEnabled : auto-approbation des actions (toggle des réglages mobile).
 	autoAcceptEnabled bool
-	// noToolsEnabled : mode global ┬½ r├®pondre sans outils ┬╗ ÔÇö les send_prompt
-	// qui ne portent pas leur propre flag noTools h├®ritent de ce d├®faut
-	// (toggle des r├®glages mobile). L'├®tat vit en m├®moire comme autoAccept.
+	// autoAcceptMode : "readonly" (défaut) ou "full" (auto-approuve tout sauf questions interactives).
+	autoAcceptMode string
+	// modelsCache : cache TTL 30s des modèles disponibles (GetAvailableModels).
+	modelsCache []connectrpc.ModelInfo
+	modelsCachedAt time.Time
+	// uploadChunks : uploadId -> assemblage de fichier par morceaux (G2).
+	uploadChunks map[string]*uploadChunkState
+	// adbService : client ADB sécurisé sans shell injection (G3).
+	adbService *adb.Service
+	// noToolsEnabled : mode global « répondre sans outils » — les send_prompt
+	// qui ne portent pas leur propre flag noTools héritent de ce défaut
+	// (toggle des réglages mobile). L'état vit en mémoire comme autoAccept.
 	noToolsEnabled bool
 	// activeCascades : cascadeId ÔåÆ le daemon est en train de streamer un tour
 	// pour cette cascade (C5 : compteur d'activit├® expos├® au /health).
@@ -235,7 +280,9 @@ type Server struct {
 	// Invalidation : si le stream ├®choue durablement, une liste vide remplace
 	// la carte pour retomber sur le chemin GetAllCascades + fallback local.
 	jetboxSummaries map[string]connectrpc.JetboxSummary
-	// terminals : sessions shell interactives (P3), nettoy├®es ├á la d├®connexion.
+	// terminals : sessions shell interactives (P3). Chaque session appartient
+	// au client qui l'a cr├®├®e ; ├á la d├®connexion on ne tue que SES sessions
+	// (un autre t├®l├®phone connect├® garde les siennes).
 	terminals *terminalPtyManager
 	// tokenValidator : validateur dynamique de jetons de session (P4 pairing PIN).
 	tokenValidator func(token string) bool
@@ -247,6 +294,13 @@ type Server struct {
 	// clientSessions : connexion ÔåÆ infos de session (scope projet 3.3). Rempli
 	// au handshake, lu ├á chaque message pour filtrer send_prompt/list_sessions.
 	clientSessions map[*websocket.Conn]discovery.SessionInfo
+	// pairHandler : PairingManager (3.4) pour list_devices / revoke_device.
+	// BranchÃ© par SetPairingManager au dÃ©marrage (main.go). Interface locale
+	// minimale : le gateway ne dÃ©pend pas du type concret du discovery.
+	pairHandler interface {
+		ListSessions() []discovery.SessionInfo
+		RevokeDevice(deviceID string) bool
+	}
 }
 
 // ScheduledTask repr├®sente une t├óche planifi├®e / cron job g├®r├®e par le daemon.
@@ -294,6 +348,9 @@ func NewServer(client RPCClient, authToken string) *Server {
 		approvals:        make(map[string]*pendingApproval),
 		approvalTimeout:  5 * time.Minute,
 		sessionApprovals: make(map[string]bool),
+		autoAcceptMode:   "readonly",
+		uploadChunks:     make(map[string]*uploadChunkState),
+		adbService:       adb.NewService(nil),
 		activeCascades:   make(map[string]bool),
 		startedAt:        time.Now(),
 		sentRequestIDs:   make(map[string]bool),
@@ -495,19 +552,117 @@ func (s *Server) SetApprovalTimeout(d time.Duration) {
 	s.approvalTimeout = d
 }
 
-// SetAutoAccept active/d├®sactive l'auto-approbation des actions read-only
-// (toggle des r├®glages mobile, message WS set_auto_accept).
+// SetAutoAccept active/désactive l'auto-approbation des actions (toggle des
+// réglages mobile, message WS set_auto_accept). Rétro-compatibilité : enabled=true
+// active le mode "readonly" par défaut.
 func (s *Server) SetAutoAccept(enabled bool) {
+	s.SetAutoAcceptWithMode(enabled, "readonly")
+}
+
+// SetAutoAcceptWithMode configure l'auto-approbation avec son mode ("readonly" ou "full").
+func (s *Server) SetAutoAcceptWithMode(enabled bool, mode string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.autoAcceptEnabled = enabled
+	if mode == "" {
+		mode = "readonly"
+	}
+	s.autoAcceptMode = mode
 }
 
-// autoAccept rapporte si l'auto-approbation read-only est active.
+// autoAccept rapporte si l'auto-approbation est active.
 func (s *Server) autoAccept() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.autoAcceptEnabled
+}
+
+// autoAcceptCurrentMode rapporte le mode actif ("readonly", "full" ou "off").
+func (s *Server) autoAcceptCurrentMode() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.autoAcceptEnabled {
+		return "off"
+	}
+	if s.autoAcceptMode != "" {
+		return s.autoAcceptMode
+	}
+	return "readonly"
+}
+
+// shouldAutoApprove détermine si un outil doit être auto-approuvé selon le mode actif.
+// En mode "full", tout outil est auto-approuvé SAUF les questions interactives.
+// En mode "readonly", seuls les outils read-only sont auto-approuvés.
+func (s *Server) shouldAutoApprove(tool string) bool {
+	mode := s.autoAcceptCurrentMode()
+	switch mode {
+	case "full":
+		return !isInteractiveQuestionTool(tool)
+	case "readonly":
+		return isReadOnlyTool(tool)
+	default:
+		return false
+	}
+}
+
+// isInteractiveQuestionTool identifie les outils de question utilisateur qui
+// requièrent toujours une réponse humaine et ne peuvent jamais être auto-approuvés.
+func isInteractiveQuestionTool(tool string) bool {
+	switch strings.ToLower(tool) {
+	case "ask_question", "ask_user", "ask_choice", "question":
+		return true
+	default:
+		return false
+	}
+}
+
+// cachedModels récupère les modèles disponibles depuis le cache (TTL 30s) ou le Language Server (G7).
+func (s *Server) cachedModels() ([]connectrpc.ModelInfo, error) {
+	s.mu.Lock()
+	if len(s.modelsCache) > 0 && time.Since(s.modelsCachedAt) < 30*time.Second {
+		models := make([]connectrpc.ModelInfo, len(s.modelsCache))
+		copy(models, s.modelsCache)
+		s.mu.Unlock()
+		return models, nil
+	}
+	s.mu.Unlock()
+
+	raw, err := s.RPCClient.ListModels()
+	if err != nil {
+		return nil, err
+	}
+	models, ok := connectrpc.ParseModels(raw)
+	if !ok || len(models) == 0 {
+		return nil, nil
+	}
+
+	s.mu.Lock()
+	s.modelsCache = models
+	s.modelsCachedAt = time.Now()
+	s.mu.Unlock()
+
+	return models, nil
+}
+
+// resolveModelID résout un nom de modèle (ou displayName ou alias) vers son ModelID officiel (G7).
+func (s *Server) resolveModelID(nameOrID string) string {
+	if nameOrID == "" {
+		return ""
+	}
+	models, err := s.cachedModels()
+	if err != nil || len(models) == 0 {
+		return nameOrID
+	}
+	lower := strings.ToLower(strings.TrimSpace(nameOrID))
+	for _, m := range models {
+		if strings.EqualFold(m.ModelID, nameOrID) {
+			return m.ModelID
+		}
+		if strings.EqualFold(m.DisplayName, nameOrID) || strings.ToLower(m.DisplayName) == lower {
+			return m.ModelID
+		}
+	}
+	return nameOrID
 }
 
 // SetNoTools active/d├®sactive le mode global ┬½ r├®pondre sans outils ┬╗
@@ -662,6 +817,18 @@ func (s *Server) SetSessionValidator(v func(token string) (discovery.SessionInfo
 	s.sessionValidator = v
 }
 
+// SetPairingManager branche le PairingManager (3.4) pour les opÃ©rations
+// d'administration (list_devices / revoke_device). Facultatif : sans lui,
+// handleAdmin rÃ©pond "gestion des appareils indisponible".
+func (s *Server) SetPairingManager(pm interface {
+	ListSessions() []discovery.SessionInfo
+	RevokeDevice(deviceID string) bool
+}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pairHandler = pm
+}
+
 // sessionFor retourne les infos de session de la connexion (vide si aucune).
 func (s *Server) sessionFor(conn *websocket.Conn) discovery.SessionInfo {
 	s.mu.Lock()
@@ -687,6 +854,25 @@ func (s *Server) allowProject(conn *websocket.Conn, uri string) bool {
 		}
 	}
 	return false
+}
+
+// requireAdmin est la garde d'accès des opérations d'administration (3.4) :
+// seul un appareil pairé avec la session Admin=true (premier appairage du
+// device) peut lister/révoquer les devices. Sans session (client non pairé
+// / ancien token) ou sans Admin, refus explicite — jamais de fail-open.
+func (s *Server) requireAdmin(conn *websocket.Conn) bool {
+	return s.sessionFor(conn).Admin
+}
+
+// requireProject restreint les actions sensibles au périmètre projet : un
+// device scoped (allowedProjects non vide) ne peut agir que sur SES projets.
+// Les clients non pairés / sans scope gardent le comportement historique
+// (tout autorisé).
+func (s *Server) requireProject(conn *websocket.Conn, uri string) bool {
+	if s.sessionFor(conn).DeviceID == "" {
+		return true
+	}
+	return s.allowProject(conn, uri)
 }
 
 // filterByScope restreint la payload list_sessions (sessions + projects) aux
@@ -1009,7 +1195,7 @@ type IncomingMessage struct {
 	// Confirm : confirmation explicite exig├®e pour les actions destructives
 	// (delete_cascade) ÔÇö le mobile DOIT l'envoyer ├á true apr├¿s dialog natif.
 	Confirm bool `json:"confirm,omitempty"`
-	// Content : contenu du fichier pour write_file (encodage base64 JSON ÔåÆ bytes).
+	// Content : contenu du fichier pour write_file (encodage base64 JSON ÔÇÆ bytes).
 	Content string `json:"content,omitempty"`
 	// Overwrite : autorise l'├®crasement pour write_file (sinon erreur si existe).
 	Overwrite      bool    `json:"overwrite,omitempty"`
@@ -1025,13 +1211,47 @@ type IncomingMessage struct {
 	// TerminalID + Input : session shell interactive (P3). terminal_create
 	// cr├®e la session, terminal_write injecte l'entr├®e clavier, terminal_kill
 	// la ferme. La sortie est pouss├®e en broadcast terminal_output.
-	TerminalID string `json:"terminalId,omitempty"`
-	Input      string `json:"input,omitempty"`
+	// TerminalIDAlt : le mobile envoie historiquement la cl├® `id` ÔÇö les deux
+	// sont accept├®es (backward-compat apps d├®j├á install├®es).
+	TerminalID    string `json:"terminalId,omitempty"`
+	TerminalIDAlt string `json:"id,omitempty"`
+	Input         string `json:"input,omitempty"`
 	// NoTools : mode ┬½ r├®ponse directe sans boucle d'outils ┬╗ (planner_mode 3
 	// = NO_TOOL c├┤t├® LS). Port├® par le message send_prompt ÔÇö le mobile d├®cide
 	// par prompt si l'agent peut utiliser des outils (toggle d├®di├®).
 	NoTools bool `json:"noTools,omitempty"`
+	// CommitID : identifiant de commit pour git_commit_details / vcs.get_commit_details.
+	CommitID string `json:"commitId,omitempty"`
+	// SidecarID : identifiant de sidecar pour les RPC sidecar.* (logs, gestion).
+	SidecarID string `json:"sidecarId,omitempty"`
+	// LogFileName : nom du fichier de log pour get_sidecar_logs / sidecar.get_logs.
+	LogFileName string `json:"logFileName,omitempty"`
+	// Champs Colosseum / Battle Mode :
+	ModelUIDA     string `json:"modelUIDA,omitempty"`
+	ModelEnumA    uint64 `json:"modelEnumA,omitempty"`
+	ModelUIDB     string `json:"modelUIDB,omitempty"`
+	ModelEnumB    uint64 `json:"modelEnumB,omitempty"`
+	ArmID         string `json:"armId,omitempty"`
+	WinningArmID  string `json:"winningArmId,omitempty"`
+	MergeStrategy uint64 `json:"mergeStrategy,omitempty"`
+	// Champs MCP Lifecycle & OAuth :
+	ServerID string `json:"serverId,omitempty"`
+	AuthCode string `json:"authCode,omitempty"`
+	// DeviceID : identifiant de session pour les opérations admin (list/revoke) ou appareil ADB.
+	DeviceID string `json:"deviceId,omitempty"`
+	// Champs Upload Chunking (G2) :
+	UploadID    string `json:"uploadId,omitempty"`
+	ChunkIndex  int    `json:"chunkIndex,omitempty"`
+	TotalChunks int    `json:"totalChunks,omitempty"`
+	TotalBytes  int64  `json:"totalBytes,omitempty"`
+	TargetPath  string `json:"targetPath,omitempty"`
+	// Champs ADB / Phone drive (G3) :
+	RemotePath string `json:"remotePath,omitempty"`
+	LocalPath  string `json:"localPath,omitempty"`
+	Pattern    string `json:"pattern,omitempty"`
+	MaxDepth   int    `json:"maxDepth,omitempty"`
 }
+
 
 func (m *IncomingMessage) UnmarshalJSON(data []byte) error {
 	type Alias IncomingMessage
@@ -1065,13 +1285,13 @@ func (m *IncomingMessage) UnmarshalJSON(data []byte) error {
 
 // hasPendingApproval rapporte si une approbation est en attente pour cette
 // cascade (pos├®e par MarkApprovalPending, retir├®e ├á la d├®cision ou ├á
-// l'expiration). Sans marquage, la valeur de repli est false ÔåÆ le stream est
+// l'expiration). Sans marquage, la valeur de repli est false ÔÇÆ le stream est
 // class├® "done" (comportement h├®rit├®, tests inchang├®s).
 func (s *Server) hasPendingApproval(cascadeID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, ok := s.approvals[cascadeID]
-	// Expir├®e ÔåÆ plus ┬½ en attente ┬╗ (auto-refus parti, stream class├® done).
+	// Expir├®e ÔÇÆ plus ┬½ en attente ┬╗ (auto-refus parti, stream class├® done).
 	return ok && !p.expired
 }
 
@@ -1151,7 +1371,7 @@ func (s *Server) purgeCascadeState(cascadeID string) {
 		}
 		delete(s.approvals, cascadeID)
 	}
-	// sessionApprovals : cl├®s "cascadeID|type" ÔÇö purge par pr├®fixe.
+	// sessionApprovals : cl├®s "cascadeID|type" ÔÇÆ purge par pr├®fixe.
 	prefix := cascadeID + "|"
 	for k := range s.sessionApprovals {
 		if strings.HasPrefix(k, prefix) {
@@ -1168,14 +1388,14 @@ func (s *Server) purgeCascadeState(cascadeID string) {
 }
 
 // expireApproval est le callback du timer : l'approbation n'a pas re├ºu de
-// r├®ponse ├á temps ÔåÆ auto-refus (s├®curit├® : t├®l├®phone perdu) puis broadcast
+// r├®ponse ├á temps ÔÇÆ auto-refus (s├®curit├® : t├®l├®phone perdu) puis broadcast
 // approval_expired pour que toutes les surfaces nettoient la carte.
 func (s *Server) expireApproval(cascadeID string) {
 	s.mu.Lock()
 	p, ok := s.approvals[cascadeID]
 	if !ok || p.expired {
 		s.mu.Unlock()
-		return // d├®j├á trait├®e (submit) ou d├®j├á expir├®e ÔÇö timer obsol├¿te
+		return // d├®j├á trait├®e (submit) ou d├®j├á expir├®e ÔÇÆ timer obsol├¿te
 	}
 	p.expired = true
 	p.timer = nil
@@ -1213,7 +1433,7 @@ func (s *Server) approvalFor(cascadeID string) (pendingApproval, bool) {
 }
 
 // commandLineRe extrait la commande propos├®e du d├®tail d'approbation
-// run_command ÔÇö accepte "command_line" (format r├®el) et "run_command"
+// run_command ÔÇÆ accepte "command_line" (format r├®el) et "run_command"
 // (format du blob de corr├®lation), comme le fallback mobile (stream_parser.dart).
 var commandLineRe = regexp.MustCompile(`"(?:command_line|commandline|run_command)"\s*:\s*"((?:[^"\\]|\\.)*)"`)
 
@@ -1224,15 +1444,15 @@ func extractCommand(detail string) string {
 	return ""
 }
 
-// isReadOnlyTool d├®termine si un outil est read-only (lecture/recherche) ÔÇö la
+// isReadOnlyTool d├®termine si un outil est read-only (lecture/recherche) ÔÇÆ la
 // seule cat├®gorie auto-approuvable par l'auto-accept. Tout le reste (├®critures,
 // commandes, appels MCP) reste soumis ├á l'approbation utilisateur.
 //
 // Liste EXACTE volontairement : ce sont les seuls noms que extractToolName
 // (event_parser.go) peut produire pour le flux d'approbation. Un test par
 // pr├®fixe (strings.HasPrefix) auto-approuverait tout futur outil "get_*" /
-// "view_*" sans revue ÔÇö faux positif de s├®curit├®. generic_tool et les
-// inconnus retombent dans le default ÔåÆ jamais auto-approuv├®s.
+// "view_*" sans revue ÔÇÆ faux positif de s├®curit├®. generic_tool et les
+// inconnus retombent dans le default ÔÇÆ jamais auto-approuv├®s.
 func isReadOnlyTool(tool string) bool {
 	switch strings.ToLower(tool) {
 	case "read_file", "list_files", "search_files", "grep", "glob", "fetch":
@@ -1240,6 +1460,374 @@ func isReadOnlyTool(tool string) bool {
 	default:
 		return false
 	}
+}
+
+// adminCases regroupe les gestionnaires d'administration multi-devices (3.4) :
+// list_devices retourne les sessions actives (deviceId, name, ip, createdAt,
+// expiresAt, admin, allowedProjects) ; revoke_device révoque une session cible
+// (seul un admin, et jamais lui-même). Le PairingManager est branché via
+// SetPairingManager au démarrage (main.go).
+func (s *Server) handleAdmin(conn *websocket.Conn, msg IncomingMessage) bool {
+	if msg.Type != "admin.list_devices" && msg.Type != "admin.revoke_device" {
+		return false
+	}
+	if !s.requireAdmin(conn) {
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "action réservée à l'administrateur"})
+		return true
+	}
+	if s.pairHandler == nil {
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "gestion des appareils indisponible (pairing non branchÃ©)"})
+		return true
+	}
+	switch msg.Type {
+	case "admin.list_devices":
+		devices := s.pairHandler.ListSessions()
+		if devices == nil {
+			devices = []discovery.SessionInfo{}
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"devices": devices}})
+	case "admin.revoke_device":
+		deviceID := msg.DeviceID
+		if msg.Data != nil {
+			if d, ok := msg.Data["deviceId"].(string); ok && deviceID == "" {
+				deviceID = d
+			}
+		}
+		if deviceID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "deviceId requis"})
+			return true
+		}
+		// Un admin ne peut pas se révoquer lui-même (garde de dernier recours :
+		// le premier appairage reste toujours admin).
+		if deviceID == s.sessionFor(conn).DeviceID {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "impossible de révoquer l'appareil administrateur courant"})
+			return true
+		}
+		revoked := s.pairHandler.RevokeDevice(deviceID)
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": map[bool]string{true: "revoked", false: "not_found"}[revoked], "deviceId": deviceID}})
+		if revoked {
+			s.broadcast(OutgoingMessage{Type: "devices_updated", Data: map[string]interface{}{"devices": s.pairHandler.ListSessions()}})
+		}
+	}
+	return true
+}
+
+// handleUploadChunk traite les morceaux de transferts de fichiers avec progression (G2).
+func (s *Server) handleUploadChunk(conn *websocket.Conn, msg IncomingMessage) {
+	uploadID := msg.UploadID
+	if uploadID == "" && msg.Data != nil {
+		if u, ok := msg.Data["uploadId"].(string); ok {
+			uploadID = u
+		}
+	}
+	if uploadID == "" {
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "uploadId requis"})
+		return
+	}
+
+	chunkIdx := msg.ChunkIndex
+	totalChunks := msg.TotalChunks
+	totalBytes := msg.TotalBytes
+	fileName := msg.FileName
+	cascadeID := msg.CascadeID
+	b64 := msg.Base64Data
+	targetPath := msg.TargetPath
+
+	if msg.Data != nil {
+		if ci, ok := msg.Data["chunkIndex"].(float64); ok {
+			chunkIdx = int(ci)
+		}
+		if tc, ok := msg.Data["totalChunks"].(float64); ok {
+			totalChunks = int(tc)
+		}
+		if tb, ok := msg.Data["totalBytes"].(float64); ok {
+			totalBytes = int64(tb)
+		}
+		if fn, ok := msg.Data["fileName"].(string); ok && fileName == "" {
+			fileName = fn
+		}
+		if cid, ok := msg.Data["cascadeId"].(string); ok && cascadeID == "" {
+			cascadeID = cid
+		}
+		if b, ok := msg.Data["base64Data"].(string); ok && b64 == "" {
+			b64 = b
+		}
+		if tp, ok := msg.Data["targetPath"].(string); ok && targetPath == "" {
+			targetPath = tp
+		}
+	}
+
+	if b64 == "" {
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "base64Data requis"})
+		return
+	}
+	if idx := strings.Index(b64, ","); idx != -1 {
+		b64 = b64[idx+1:]
+	}
+	chunkBytes, errDec := base64.StdEncoding.DecodeString(b64)
+	if errDec != nil {
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: fmt.Sprintf("base64 invalide: %v", errDec)})
+		return
+	}
+
+	s.mu.Lock()
+	state, exists := s.uploadChunks[uploadID]
+	if !exists {
+		if totalChunks <= 0 {
+			totalChunks = 1
+		}
+		state = &uploadChunkState{
+			id:          uploadID,
+			cascadeID:   cascadeID,
+			fileName:    fileName,
+			totalBytes:  totalBytes,
+			totalChunks: totalChunks,
+			targetPath:  targetPath,
+			chunks:      make(map[int][]byte),
+			createdAt:   time.Now(),
+		}
+		s.uploadChunks[uploadID] = state
+	}
+	state.chunks[chunkIdx] = chunkBytes
+	state.received += int64(len(chunkBytes))
+	receivedBytes := state.received
+	totBytes := state.totalBytes
+	chunksCount := len(state.chunks)
+	neededChunks := state.totalChunks
+	s.mu.Unlock()
+
+	percent := float64(0)
+	if totBytes > 0 {
+		percent = (float64(receivedBytes) / float64(totBytes)) * 100
+		if percent > 100 {
+			percent = 100
+		}
+	} else if neededChunks > 0 {
+		percent = (float64(chunksCount) / float64(neededChunks)) * 100
+	}
+
+	// Broadcast du progrès temps réel (P0 G2)
+	s.broadcast(OutgoingMessage{
+		Type: "upload_progress",
+		Data: map[string]interface{}{
+			"uploadId":       uploadID,
+			"cascadeId":      cascadeID,
+			"fileName":       fileName,
+			"receivedBytes":  receivedBytes,
+			"totalBytes":     totBytes,
+			"percent":        math.Round(percent*10) / 10,
+			"chunksReceived": chunksCount,
+			"totalChunks":    neededChunks,
+			"done":           chunksCount >= neededChunks,
+		},
+	})
+
+	// Si tous les morceaux sont arrivés, assembler et enregistrer
+	if chunksCount >= neededChunks {
+		s.mu.Lock()
+		delete(s.uploadChunks, uploadID)
+		s.mu.Unlock()
+
+		var fullBuf bytes.Buffer
+		for i := 0; i < neededChunks; i++ {
+			c, ok := state.chunks[i]
+			if !ok {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: fmt.Sprintf("morceau manquant #%d", i)})
+				return
+			}
+			fullBuf.Write(c)
+		}
+
+		destFile := state.targetPath
+		if destFile == "" {
+			home, _ := os.UserHomeDir()
+			if state.cascadeID != "" && uuidRe.MatchString(state.cascadeID) {
+				destDir := filepath.Join(home, ".gemini", "antigravity", "brain", state.cascadeID, "scratch")
+				_ = os.MkdirAll(destDir, 0755)
+				cleanName := filepath.Base(filepath.Clean(state.fileName))
+				if cleanName == "" || cleanName == "." {
+					cleanName = fmt.Sprintf("upload_%s.bin", uploadID)
+				}
+				destFile = filepath.Join(destDir, cleanName)
+			} else {
+				destDir := filepath.Join(home, ".gemini", "antigravity", "uploads")
+				_ = os.MkdirAll(destDir, 0755)
+				cleanName := filepath.Base(filepath.Clean(state.fileName))
+				if cleanName == "" || cleanName == "." {
+					cleanName = fmt.Sprintf("upload_%s.bin", uploadID)
+				}
+				destFile = filepath.Join(destDir, cleanName)
+			}
+		} else {
+			destFile = homeRoot(destFile)
+			_ = os.MkdirAll(filepath.Dir(destFile), 0755)
+		}
+
+		if errWrite := os.WriteFile(destFile, fullBuf.Bytes(), 0644); errWrite != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: fmt.Sprintf("écriture échouée: %v", errWrite)})
+			return
+		}
+
+		s.broadcast(OutgoingMessage{
+			Type: "upload_done",
+			Data: map[string]interface{}{
+				"uploadId":  uploadID,
+				"cascadeId": cascadeID,
+				"fileName":  state.fileName,
+				"filePath":  destFile,
+				"size":      fullBuf.Len(),
+			},
+		})
+
+		s.writeJSON(conn, OutgoingMessage{
+			Type:      "response",
+			RequestID: msg.RequestID,
+			Data: map[string]interface{}{
+				"status":   "completed",
+				"uploadId": uploadID,
+				"filePath": destFile,
+				"size":     fullBuf.Len(),
+			},
+		})
+		return
+	}
+
+	// Réponse intermédiaire pour ce morceau
+	s.writeJSON(conn, OutgoingMessage{
+		Type:      "response",
+		RequestID: msg.RequestID,
+		Data: map[string]interface{}{
+			"status":     "chunk_received",
+			"uploadId":   uploadID,
+			"chunkIndex": chunkIdx,
+			"percent":    math.Round(percent*10) / 10,
+		},
+	})
+}
+
+// handleADB traite les requêtes vers le pont Android ADB sans injection shell (G3).
+func (s *Server) handleADB(conn *websocket.Conn, msg IncomingMessage) bool {
+	if !strings.HasPrefix(msg.Type, "adb.") {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	deviceID := msg.DeviceID
+	if msg.Data != nil {
+		if d, ok := msg.Data["deviceId"].(string); ok && deviceID == "" {
+			deviceID = d
+		}
+	}
+
+	switch msg.Type {
+	case "adb.list_devices":
+		devs, err := s.adbService.ListDevices(ctx)
+		if err != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
+			return true
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"devices": devs}})
+		return true
+
+	case "adb.list_files":
+		rPath := msg.RemotePath
+		if rPath == "" && msg.Data != nil {
+			if r, ok := msg.Data["remotePath"].(string); ok {
+				rPath = r
+			}
+		}
+		if rPath == "" {
+			rPath = "/sdcard"
+		}
+		entries, err := s.adbService.ListDirectory(ctx, deviceID, rPath)
+		if err != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
+			return true
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"files": entries, "path": rPath}})
+		return true
+
+	case "adb.search_files":
+		rPath := msg.RemotePath
+		pattern := msg.Pattern
+		maxDepth := msg.MaxDepth
+		if msg.Data != nil {
+			if r, ok := msg.Data["remotePath"].(string); ok && rPath == "" {
+				rPath = r
+			}
+			if p, ok := msg.Data["pattern"].(string); ok && pattern == "" {
+				pattern = p
+			}
+			if md, ok := msg.Data["maxDepth"].(float64); ok && maxDepth == 0 {
+				maxDepth = int(md)
+			}
+		}
+		if rPath == "" {
+			rPath = "/sdcard"
+		}
+		results, err := s.adbService.SearchFiles(ctx, deviceID, rPath, pattern, maxDepth)
+		if err != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
+			return true
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"results": results}})
+		return true
+
+	case "adb.pull_file":
+		rPath := msg.RemotePath
+		lPath := msg.LocalPath
+		if msg.Data != nil {
+			if r, ok := msg.Data["remotePath"].(string); ok && rPath == "" {
+				rPath = r
+			}
+			if l, ok := msg.Data["localPath"].(string); ok && lPath == "" {
+				lPath = l
+			}
+		}
+		if rPath == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "remotePath requis"})
+			return true
+		}
+		if lPath == "" {
+			home, _ := os.UserHomeDir()
+			cleanName := filepath.Base(filepath.Clean(rPath))
+			lPath = filepath.Join(home, ".gemini", "antigravity", "downloads", cleanName)
+		} else {
+			lPath = homeRoot(lPath)
+		}
+		_ = os.MkdirAll(filepath.Dir(lPath), 0755)
+		if err := s.adbService.PullFile(ctx, deviceID, rPath, lPath); err != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
+			return true
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "ok", "localPath": lPath, "remotePath": rPath}})
+		return true
+
+	case "adb.push_file":
+		rPath := msg.RemotePath
+		lPath := msg.LocalPath
+		if msg.Data != nil {
+			if r, ok := msg.Data["remotePath"].(string); ok && rPath == "" {
+				rPath = r
+			}
+			if l, ok := msg.Data["localPath"].(string); ok && lPath == "" {
+				lPath = l
+			}
+		}
+		if rPath == "" || lPath == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "remotePath + localPath requis"})
+			return true
+		}
+		lPath = homeRoot(lPath)
+		if err := s.adbService.PushFile(ctx, deviceID, lPath, rPath); err != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
+			return true
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "ok", "localPath": lPath, "remotePath": rPath}})
+		return true
+	}
+	return false
 }
 
 // buildApprovalPayload construit le oneof + payload HandleCascadeUserInteraction
@@ -1301,6 +1889,28 @@ func toWorkspaceURI(path string) string {
 		return path
 	}
 	return "file:///" + strings.ReplaceAll(path, "\\", "/")
+}
+
+// stringList extrait une liste de chaînes d'un champ map[string]interface{}
+// (ex. data.uris pour git_stage / git_unstage / git_discard). Accepte
+// []interface{} de strings et []string. Retourne nil si absent/invalide.
+func stringList(data map[string]interface{}, key string) []string {
+	if data == nil {
+		return nil
+	}
+	switch v := data[key].(type) {
+	case []interface{}:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case []string:
+		return v
+	}
+	return nil
 }
 
 // TrajectoryVerbosityFull est la verbosit├® par d├®faut de get_trajectory
@@ -1386,7 +1996,17 @@ func trajectoryOut(raw []byte) interface{} {
 	// t├®l├®phone. Le diff d'un tour pr├®cis reste accessible via get_turn_diff.
 	// numTotalSteps reste fid├¿le ÔÇö le mobile sait qu'il n'a qu'une fen├¬tre.
 	if steps, _ := out["steps"].([]interface{}); len(steps) > maxTrajectorySteps {
-		out["steps"] = steps[len(steps)-maxTrajectorySteps:]
+		// Fenêtre glissante sur la FIN de session : chaque step garde son index
+		// d'origine dans la trajectoire complète (G1) pour que le mobile puisse
+		// demander le diff exact via get_turn_diff même après troncature.
+		start := len(steps) - maxTrajectorySteps
+		window := steps[start:]
+		for i, st := range window {
+			if m, ok := st.(map[string]interface{}); ok {
+				m["bridgeOriginalStepIndex"] = uint64(start + i)
+			}
+		}
+		out["steps"] = window
 		out["truncated"] = true
 	}
 	return out
@@ -1407,15 +2027,52 @@ func stepSummary(blob []byte) map[string]interface{} {
 			if f.WireType == 0 {
 				s["status"] = f.Varint
 			}
-		case 5, 28, 140, 12: // metadata, run_command, generic, finish
+		case 5, 140, 12: // metadata, generic, finish
 			if f.WireType == 2 {
 				if text := firstReadable(f.Bytes); text != "" && s["text"] == nil {
+					s["text"] = text
+				}
+			}
+		case 28: // run_command : préférer la commande (f2), puis la sortie (f4),
+			// enfin le cwd (f1) — firstReadable renvoyait le cwd, inutile au mobile.
+			if f.WireType == 2 && s["text"] == nil {
+				if text := runCommandText(f.Bytes); text != "" {
 					s["text"] = text
 				}
 			}
 		}
 	}
 	return s
+}
+
+// runCommandText extrait la commande exécutée d'un blob run_command (f28).
+// Layout confirmé : {1: cwd, 2: commande, 3: shell, 4: sortie, 5: status}.
+func runCommandText(b []byte) string {
+	var f1, f2, f4 string
+	for _, f := range connectrpc.DecodeFields(b) {
+		if f.WireType != 2 {
+			continue
+		}
+		s := strings.TrimSpace(string(f.Bytes))
+		if !connectrpc.IsPrintable(s) || len(s) >= 300 {
+			continue
+		}
+		switch f.Num {
+		case 2:
+			f2 = s
+		case 4:
+			f4 = s
+		case 1:
+			f1 = s
+		}
+	}
+	if f2 != "" {
+		return f2
+	}
+	if f4 != "" {
+		return f4
+	}
+	return f1
 }
 
 // firstReadable cherche la premi├¿re cha├«ne UTF-8 lisible (Ôëñ300 octets) dans
@@ -1758,9 +2415,10 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		clients := len(s.clients)
 		s.mu.Unlock()
 		s.releaseWriteLock(conn)
-		// Nettoyage terminal : si ce client est le dernier ├á partir, on ferme
-		// les sessions PTY qu'il avait ouvertes.
-		s.terminals.killAll()
+		// Nettoyage terminal : on ferme les sessions PTY OUVERTES PAR CE
+		// CLIENT. Multi-surface : un autre t├®l├®phone connect├® garde les
+		// siennes (l'ancien killAll() global les tuait toutes).
+		s.terminals.killAllFor(conn)
 		logJSON.Info("client_disconnected", "remote", conn.RemoteAddr().String(), "clients", clients)
 		conn.Close()
 	}()
@@ -1874,6 +2532,18 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 	}
 
 	switch msg.Type {
+	// Administration multi-devices (3.4) : list_devices / revoke_device sont
+	// routÃ©s AVANT les RPC unary pour ne pas passer par la deadline 15 s et
+	// pour garder un chemin court (rÃ©ponse locale, aucun appel LS).
+	case "admin.list_devices", "admin.revoke_device":
+		s.handleAdmin(conn, msg)
+		return
+	case "upload_chunk", "upload_file_chunk":
+		s.handleUploadChunk(conn, msg)
+		return
+	case "adb.list_devices", "adb.list_files", "adb.search_files", "adb.pull_file", "adb.push_file":
+		s.handleADB(conn, msg)
+		return
 	// Keep-alive applicatif : le mobile envoie {"type":"ping"} toutes les
 	// 20 s quand il est en arri├¿re-plan. M├¬me sans r├®ponse, toute frame
 	// re├ºue reset le read deadline (pongWait) ÔÇö le ping seul suffit ├á
@@ -1915,25 +2585,25 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				logJSON.Info("cascade_created_orphan")
 			}
 
-			// Le mod├¿le vient du mobile (ModelUID) ; en l'absence de s├®lection
-			// explicite on garde le repli commun (DefaultModelEnum, cf.
-			// protobuf.go ÔÇö m├¬me valeur que plan_model de BuildCascadeConfig).
+			// Le modèle vient du mobile (ModelUID) ; en l'absence de sélection
+			// explicite on garde le repli commun (DefaultModelEnum). Résolution du nom via cache (G7).
+			modelUID := s.resolveModelID(msg.ModelUID)
 			modelEnum := msg.ModelEnum
-			if modelEnum == 0 && msg.ModelUID == "" {
+			if modelEnum == 0 && modelUID == "" {
 				modelEnum = connectrpc.DefaultModelEnum
 			}
-			raw, err = s.RPCClient.CreateCascade(uri, projectID, msg.ModelUID, modelEnum)
-			// Orphelin sans projectID ÔåÆ r├®ponse LS vide (payload 0 octet) :
-			// le mobile ne peut rien cr├®er avec ├ºa. On rechauffe le cache
+			raw, err = s.RPCClient.CreateCascade(uri, projectID, modelUID, modelEnum)
+			// Orphelin sans projectID → réponse LS vide (payload 0 octet) :
+			// le mobile ne peut rien créer avec ça. On réchauffe le cache
 			// list_sessions UNE fois (single-flight, 15 s max) puis on
-			// retente avec le projectID r├®solu. Si le cache ne contient
-			// pas encore le workspace, on renvoie la r├®ponse vide brute.
+			// retente avec le projectID résolu. Si le cache ne contient
+			// pas encore le workspace, on renvoie la réponse vide brute.
 			if len(raw) == 0 {
 				logJSON.Info("create_cascade_retry_warm_cache")
 				s.fetchSessionsSingleFlight()
 				projectID, _ = s.cachedProjectID(uri)
 				if projectID != "" {
-					raw, err = s.RPCClient.CreateCascade(uri, projectID, msg.ModelUID, modelEnum)
+					raw, err = s.RPCClient.CreateCascade(uri, projectID, modelUID, modelEnum)
 				}
 			}
 		}
@@ -1948,13 +2618,68 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		raw, err = s.RPCClient.SendCommand(msg.Command)
 
 	case "terminal_create":
-		id, errTerm := s.terminals.create(homeRoot(msg.WorkspacePath))
+		// La session appartient ├á CE client (owner-scoping) : les autres
+		// devices ne peuvent ni ├®crire ni tuer dedans, et sa d├®connexion ne
+		// nettoie que ses sessions.
+		id, errTerm := s.terminals.create(conn, homeRoot(msg.WorkspacePath))
 		if errTerm != nil {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "terminal_create: " + errTerm.Error()})
 			return
 		}
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"id": id}})
-	return
+		return
+
+	case "terminal_write":
+		// BUG fix : le mobile envoie terminal_write/terminal_kill mais aucun
+		// handler ne les traitait ÔÇö le shell recevait une erreur
+		// "Unknown action type" et AUCUNE commande ne s'ex├®cutait.
+		tid := msg.TerminalID
+		if tid == "" {
+			tid = msg.TerminalIDAlt
+		}
+		if tid == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "terminalId requis"})
+			return
+		}
+		if errTerm := s.terminals.write(conn, tid, msg.Input); errTerm != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errTerm.Error()})
+			return
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "ok"}})
+		return
+
+	case "terminal_kill":
+		tid := msg.TerminalID
+		if tid == "" {
+			tid = msg.TerminalIDAlt
+		}
+		if tid == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "terminalId requis"})
+			return
+		}
+		if errTerm := s.terminals.kill(conn, tid); errTerm != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errTerm.Error()})
+			return
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "killed"}})
+		return
+
+	case "list_workspaces":
+		// G4 — sélecteur de workspace : le mobile propose des dossiers au lieu
+		// de demander un chemin tapé. Sources : registre officiel
+		// (~/.gemini/config/projects, déjà exploité par list_sessions) + scan
+		// borné du home (répertoires de niveau 1, dossiers cachés exclus).
+		// Toujours additif : si le scan échoue, le registre seul suffit.
+		ws := map[string]interface{}{"workspaces": listWorkspaces()}
+		writeScoped := func(data interface{}) {
+			m, _ := data.(map[string]interface{})
+			if m != nil {
+				m = s.filterByScope(conn, m)
+			}
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: m})
+		}
+		writeScoped(ws)
+		return
 
 	case "list_sessions":
 		// C4 : borne l'appel au LS (60 s max c├┤t├® hub, on n'attend pas plus de
@@ -2207,10 +2932,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 						); errSubmit != nil {
 							logJSON.Error("auto_approve_failed", "cascadeId", msg.CascadeID, "tool", ev.Tool, "err", errSubmit)
 						}
-					} else if s.autoAccept() && isReadOnlyTool(ev.Tool) {
-						// Auto-accept read-only : les lectures/recherches passent
-						// sans confirmation (toggle des r├®glages mobile). Les
-						// ├®critures et commandes ne sont jamais auto-approuv├®es.
+					} else if s.shouldAutoApprove(ev.Tool) {
+						// Auto-accept (mode readonly ou full) :
+						// En mode full, tout passe sauf questions interactives.
+						// En mode readonly, seules les lectures passent sans confirmation.
 						oneofField, oneofPayload := buildApprovalPayload(ev.Tool, true, extractCommand(ev.Detail), "", "")
 						if _, errSubmit := s.RPCClient.SubmitToolApproval(
 							msg.CascadeID, ev.TrajectoryID, ev.StepIndex,
@@ -2223,21 +2948,21 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 					}
 				}
 			}
-			// B2 : push d├®di├® approval_pending (avec contexte) en plus du
-			// stream_delta ÔÇö le mobile s'en sert au tap-notification pour
-			// r├®-ouvrir l'approbation m├¬me si le delta a ├®t├® perdu.
+			// B2 : push dédié approval_pending (avec contexte) en plus du
+			// stream_delta — le mobile s'en sert au tap-notification pour
+			// ré-ouvrir l'approbation même si le delta a été perdu.
 			if len(events) > 0 {
 				for _, ev := range events {
-					// Pas de push si l'auto-approbation (session ou read-only) a
-					// d├®j├á r├®pondu ÔÇö le mobile ne doit pas afficher une carte
-					// pour une action d├®j├á trait├®e.
+					// Pas de push si l'auto-approbation (session ou autoAccept) a
+					// déjà répondu — le mobile ne doit pas afficher une carte
+					// pour une action déjà traitée.
 					if ev.Kind == connectrpc.EventKindApprovalRequired &&
 						!s.hasSessionApproval(msg.CascadeID, ev.Tool) &&
-						!(s.autoAccept() && isReadOnlyTool(ev.Tool)) {
+						!s.shouldAutoApprove(ev.Tool) {
 						pending := s.pendingApprovalInfo(msg.CascadeID)
-						// C7-B : idle detection h├┤te ÔÇö si l'utilisateur est actif sur
-						// le PC, le mobile ne sonne pas (la bo├«te de dialogue
-						// d'approbation est d├®j├á sous ses yeux).
+						// C7-B : idle detection hôte — si l'utilisateur est actif sur
+						// le PC, le mobile ne sonne pas (la boîte de dialogue
+						// d'approbation est déjà sous ses yeux).
 						pending["hostActive"] = hostActiveSince(hostActiveWindow)
 						s.broadcast(OutgoingMessage{
 							Type: "approval_pending",
@@ -2251,8 +2976,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				"events":     events,
 				"raw":        toOutgoing(frame),
 				// C7-B : hostActive=true quand l'utilisateur interagit avec le
-				// PC h├┤te ÔåÆ le mobile supprime ses notifications d'approbation
-				// (le dialogue d'approbation est visible sur l'├®cran du PC).
+				// PC hôte → le mobile supprime ses notifications d'approbation
+				// (le dialogue d'approbation est visible sur l'écran du PC).
 				"hostActive": hostActiveSince(hostActiveWindow),
 			}
 			deltaMsg := OutgoingMessage{
@@ -2266,11 +2991,12 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return nil
 		}
 
-		// Mode sans-outils : le prompt porte son propre flag (d├®cision par
-		// prompt) sinon le d├®faut global des r├®glages mobile (toggle).
-		// planner_mode 3 = NO_TOOL : pas de boucle d'outils, r├®ponse directe.
+		// Mode sans-outils : le prompt porte son propre flag (décision par
+		// prompt) sinon le défaut global des réglages mobile (toggle).
+		// planner_mode 3 = NO_TOOL : pas de boucle d'outils, réponse directe.
 		noTools := msg.NoTools || s.noTools()
-		err = s.RPCClient.SendMessageStreamModel(msg.CascadeID, promptText, msg.ModelUID, msg.ModelEnum, onFrameHandler, noTools)
+		modelUID := s.resolveModelID(msg.ModelUID)
+		err = s.RPCClient.SendMessageStreamModel(msg.CascadeID, promptText, modelUID, msg.ModelEnum, onFrameHandler, noTools)
 
 		// 3. Force l'IDE à ouvrir cette nouvelle session (best-effort, cf. ci-dessus).
 		if _, errSet := s.RPCClient.SetBrowserOpenConversation(msg.CascadeID); errSet != nil {
@@ -2542,7 +3268,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		if targetPath == "" {
 			targetPath = "."
 		}
-		branches, errBranches := discovery.ListGitBranches(targetPath)
+		// Même résolution que git_state : le mobile envoie des chemins relatifs
+		// (.gemini/...) — sans homeRoot, git s'exécuterait dans le CWD du daemon.
+		branches, errBranches := discovery.ListGitBranches(homeRoot(targetPath))
 		if errBranches != nil {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errBranches.Error()})
 			return
@@ -2555,7 +3283,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		if targetPath == "" {
 			targetPath = "."
 		}
-		wts, errWts := discovery.ListGitWorktrees(targetPath)
+		// homeRoot : cohérence avec git_state/list_git_branches.
+		wts, errWts := discovery.ListGitWorktrees(homeRoot(targetPath))
 		if errWts != nil {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errWts.Error()})
 			return
@@ -2563,18 +3292,6 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"worktrees": wts}})
 		return
 
-	case "list_models":
-		raw, err = s.RPCClient.ListModels()
-		if err == nil {
-			models, ok := connectrpc.ParseModels(raw)
-			if !ok {
-				// D├®gradation gracieuse : sch├®ma inconnu ÔåÆ liste vide + warning.
-				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"models": []interface{}{}, "warning": "sch├®ma GetAvailableModels non d├®codable"}})
-				return
-			}
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"models": models}})
-			return
-		}
 
 	case "delete_cascade":
 		if msg.CascadeID == "" {
@@ -2607,6 +3324,146 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				Type: "sessions_updated",
 				Data: sessionsFromSummaries(s.snapshotSummaries()),
 			})
+			return
+		}
+
+	case "git_state", "vcs.get_state":
+		if msg.WorkspacePath == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "workspacePath requis"})
+			return
+		}
+		raw, err = s.RPCClient.GetVersionControlState(homeRoot(msg.WorkspacePath))
+		if err == nil {
+			if st := connectrpc.VcsStateToJSON(raw); st != nil {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: st})
+				return
+			}
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+			return
+		}
+
+	case "git_stage", "vcs.stage":
+		if msg.WorkspacePath == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "workspacePath requis"})
+			return
+		}
+		uris := stringList(msg.Data, "uris")
+		if len(uris) == 0 {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "uris requis"})
+			return
+		}
+		raw, err = s.RPCClient.GitStage(toWorkspaceURI(msg.WorkspacePath), uris)
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "staged"}})
+			return
+		}
+
+	case "git_unstage", "vcs.unstage":
+		if msg.WorkspacePath == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "workspacePath requis"})
+			return
+		}
+		uris := stringList(msg.Data, "uris")
+		if len(uris) == 0 {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "uris requis"})
+			return
+		}
+		raw, err = s.RPCClient.GitUnstage(toWorkspaceURI(msg.WorkspacePath), uris)
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "unstaged"}})
+			return
+		}
+
+	case "git_discard", "vcs.discard":
+		if msg.WorkspacePath == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "workspacePath requis"})
+			return
+		}
+		// Destructif et irréversible : confirmation explicite obligatoire
+		// (même garde que delete_cascade).
+		if !msg.Confirm {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "confirmation requise (champ confirm=true)"})
+			return
+		}
+		uris := stringList(msg.Data, "uris")
+		if len(uris) == 0 {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "uris requis"})
+			return
+		}
+		raw, err = s.RPCClient.GitDiscard(toWorkspaceURI(msg.WorkspacePath), uris)
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "discarded"}})
+			return
+		}
+
+	case "git_commit", "vcs.commit":
+		if msg.WorkspacePath == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "workspacePath requis"})
+			return
+		}
+		message := msg.Command
+		if msg.Data != nil {
+			if m, ok := msg.Data["message"].(string); ok && m != "" {
+				message = m
+			}
+		}
+		if message == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "message requis"})
+			return
+		}
+		raw, err = s.RPCClient.GitCommit(toWorkspaceURI(msg.WorkspacePath), message)
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "committed", "message": message}})
+			return
+		}
+
+	case "git_commit_details", "vcs.get_commit_details":
+		if msg.WorkspacePath == "" || msg.CommitID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "workspacePath + commitId requis"})
+			return
+		}
+		raw, err = s.RPCClient.GetCommitDetails(toWorkspaceURI(msg.WorkspacePath), msg.CommitID)
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+			return
+		}
+
+	case "list_sidecar_log_files", "sidecar.list_log_files":
+		if msg.SidecarID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "sidecarId requis"})
+			return
+		}
+		raw, err = s.RPCClient.ListSidecarLogFiles(msg.SidecarID)
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+			return
+		}
+
+	case "get_sidecar_logs", "sidecar.get_logs":
+		if msg.SidecarID == "" || msg.LogFileName == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "sidecarId + logFileName requis"})
+			return
+		}
+		raw, err = s.RPCClient.GetSidecarLogs(msg.SidecarID, msg.LogFileName)
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+			return
+		}
+
+	case "manage_sidecar", "sidecar.manage":
+		if msg.SidecarID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "sidecarId requis"})
+			return
+		}
+		action := uint64(2) // stop par défaut (démarrage/removal = risque)
+		if msg.Data != nil {
+			if a, ok := msg.Data["action"].(float64); ok && a > 0 {
+				action = uint64(a)
+			}
+		}
+		raw, err = s.RPCClient.ManageSidecar(msg.SidecarID, action)
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "managed", "action": action}})
 			return
 		}
 
@@ -2897,17 +3754,27 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 
 	case "set_auto_accept":
 		enabled := false
+		mode := "readonly"
 		if msg.Data != nil {
 			if b, ok := msg.Data["enabled"].(bool); ok {
 				enabled = b
 			}
+			if m, ok := msg.Data["mode"].(string); ok && m != "" {
+				mode = m
+				if mode != "off" && mode != "none" {
+					enabled = true
+				} else {
+					enabled = false
+				}
+			}
 		}
-		s.SetAutoAccept(enabled)
+		s.SetAutoAcceptWithMode(enabled, mode)
 		s.writeJSON(conn, OutgoingMessage{
 			Type:      "response",
 			RequestID: msg.RequestID,
 			Data: map[string]interface{}{
 				"autoAcceptEnabled": enabled,
+				"mode":              mode,
 			},
 		})
 		return
@@ -3067,6 +3934,26 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 
+	case "get_available_models", "models.get_available_models", "list_models":
+		models, errModels := s.cachedModels()
+		if errModels == nil && len(models) > 0 {
+			s.writeJSON(conn, OutgoingMessage{
+				Type:      "response",
+				RequestID: msg.RequestID,
+				Data:      map[string]interface{}{"models": models},
+			})
+			return
+		}
+		raw, err = s.RPCClient.ListModels()
+		if err == nil {
+			if parsedModels, ok := connectrpc.ParseModels(raw); ok {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"models": parsedModels}})
+				return
+			}
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+			return
+		}
+
 	case "get_model_statuses", "models.get_statuses":
 		raw, err = s.RPCClient.GetModelStatuses()
 		if err == nil {
@@ -3208,15 +4095,100 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 	case "call_mcp_tool", "connect_mcp_server", "refresh_mcp_oauth_token", "list_mcp_servers":
 		// Route les actions MCP vers le proxy Antigravity desktop
 		// (127.0.0.1:50999). Le mobile n'a pas les identifiants MCP :
-		// la session du PC est le seul d├®tenteur des jetons OAuth et de
-		// l'allowlist stricte. R├®ponse unary relay├®e telle quelle.
+		// la session du PC est le seul détenteur des jetons OAuth et de
+		// l'allowlist stricte. Réponse unary relayée telle quelle.
 		s.handleMcpAction(conn, msg)
 		return
+
+	case "start_battle_mode", "colosseum.start":
+		targetURI := toWorkspaceURI(msg.WorkspaceURI)
+		if targetURI == "" {
+			targetURI = toWorkspaceURI(msg.WorkspacePath)
+		}
+		raw, err = s.RPCClient.StartBattleMode(targetURI, msg.Prompt, msg.ModelUIDA, msg.ModelEnumA, msg.ModelUIDB, msg.ModelEnumB)
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+			return
+		}
+
+	case "get_battle_diff", "colosseum.get_diff":
+		targetURI := toWorkspaceURI(msg.WorkspaceURI)
+		if targetURI == "" {
+			targetURI = toWorkspaceURI(msg.WorkspacePath)
+		}
+		raw, err = s.RPCClient.GetBattleWorktreeDiff(targetURI)
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+			return
+		}
+
+	case "eliminate_battle_arm", "colosseum.eliminate_arm":
+		if msg.ArmID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "armId requis"})
+			return
+		}
+		raw, err = s.RPCClient.EliminateBattleArm(msg.ArmID)
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+			return
+		}
+
+	case "end_battle_mode", "colosseum.end":
+		if msg.WinningArmID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "winningArmId requis"})
+			return
+		}
+		raw, err = s.RPCClient.EndBattleMode(msg.WinningArmID, msg.MergeStrategy)
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+			return
+		}
+
+	case "dump_flight_recorder", "diagnostics.dump_flight_recorder":
+		raw, err = s.RPCClient.DumpFlightRecorder()
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{
+				"status": "ok",
+				"size":   len(raw),
+				"trace":  toOutgoing(raw),
+			}})
+			return
+		}
+
+	case "refresh_mcp_servers", "mcp.refresh_servers":
+		raw, err = s.RPCClient.RefreshMcpServers()
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+			return
+		}
+
+	case "complete_mcp_oauth", "mcp.complete_oauth":
+		if msg.ServerID == "" || msg.AuthCode == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "serverId + authCode requis"})
+			return
+		}
+		raw, err = s.RPCClient.CompleteMcpOAuth(msg.ServerID, msg.AuthCode)
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+			return
+		}
+
+	case "disconnect_mcp_oauth", "mcp.disconnect_oauth":
+		if msg.ServerID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "serverId requis"})
+			return
+		}
+		raw, err = s.RPCClient.DisconnectMcpOAuth(msg.ServerID)
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+			return
+		}
 
 	default:
 		s.writeJSON(conn, OutgoingMessage{Type: "error", RequestID: msg.RequestID, Error: "Unknown action type: " + msg.Type})
 		return
 	}
+
 
 	if err != nil {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
@@ -3411,10 +4383,13 @@ func isIgnoredDir(name string) bool {
 // terminalSession : une session shell interactive. La sortie du processus
 // est lue par une goroutine qui broadcast terminal_output.
 type terminalSession struct {
-	id      string
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	mu      sync.Mutex
+	id    string
+	owner *websocket.Conn // client qui a cr├®├® la session (owner-scoping)
+	cmd   *exec.Cmd
+	stdin io.WriteCloser
+	mu    sync.Mutex
+	// closed : kill() explicite a d├®j├á eu lieu ; closing : le processus est
+	// en cours de terminaison (les pump cessent de broadcast la sortie).
 	closed  bool
 	closing bool
 }
@@ -3442,8 +4417,10 @@ func newTerminalPtyManager() *terminalPtyManager {
 	}
 }
 
-// create lance un shell interactif dans dir et retourne son id.
-func (m *terminalPtyManager) create(dir string) (string, error) {
+// create lance un shell interactif dans dir pour le client owner et retourne
+// son id. La session est retir├®e de la map quand le shell sort tout seul
+// (commande exit) ÔÇö pas seulement via kill().
+func (m *terminalPtyManager) create(owner *websocket.Conn, dir string) (string, error) {
 	if dir == "" {
 		dir = "."
 	}
@@ -3472,7 +4449,7 @@ func (m *terminalPtyManager) create(dir string) (string, error) {
 	m.mu.Lock()
 	m.nextID++
 	id := fmt.Sprintf("pty-%d", m.nextID)
-	sess := &terminalSession{id: id, cmd: cmd, stdin: stdin}
+	sess := &terminalSession{id: id, owner: owner, cmd: cmd, stdin: stdin}
 	m.sessions[id] = sess
 	m.mu.Unlock()
 
@@ -3484,6 +4461,11 @@ func (m *terminalPtyManager) create(dir string) (string, error) {
 		_ = cmd.Wait()
 		m.mu.Lock()
 		still := m.sessions[sess.id] == sess
+		if still {
+			// Sortie spontan├®e (exit) : retire la session de la map ÔÇö sinon
+			// elle resterait zombie jusqu'au killAllFor de la d├®connexion.
+			delete(m.sessions, sess.id)
+		}
 		m.mu.Unlock()
 		if still {
 			m.broadcastExit(sess)
@@ -3539,13 +4521,17 @@ func (m *terminalPtyManager) broadcastExit(sess *terminalSession) {
 	}
 }
 
-// write injecte l'entr├®e clavier dans la session.
-func (m *terminalPtyManager) write(id, input string) error {
+// write injecte l'entr├®e clavier dans la session (owner-scoped : un client
+// ne peut ├®crire que dans SES sessions ÔÇö c'est un shell sur le PC h├┤te).
+func (m *terminalPtyManager) write(owner *websocket.Conn, id, input string) error {
 	m.mu.Lock()
 	sess := m.sessions[id]
 	m.mu.Unlock()
 	if sess == nil {
 		return fmt.Errorf("terminal %q inconnu", id)
+	}
+	if sess.owner != owner {
+		return fmt.Errorf("terminal %q non poss├®d├® par ce client", id)
 	}
 	sess.mu.Lock()
 	closed := sess.closed
@@ -3558,10 +4544,15 @@ func (m *terminalPtyManager) write(id, input string) error {
 }
 
 // kill termine la session (le processus et la goroutine de lecture).
-func (m *terminalPtyManager) kill(id string) error {
+// Owner-scoped : seul le client qui a cr├®├® la session peut la tuer.
+func (m *terminalPtyManager) kill(owner *websocket.Conn, id string) error {
 	m.mu.Lock()
 	sess := m.sessions[id]
 	if sess != nil {
+		if sess.owner != owner {
+			m.mu.Unlock()
+			return fmt.Errorf("terminal %q non poss├®d├® par ce client", id)
+		}
 		delete(m.sessions, id)
 	}
 	m.mu.Unlock()
@@ -3581,15 +4572,19 @@ func (m *terminalPtyManager) kill(id string) error {
 	return nil
 }
 
-// killAll ferme toutes les sessions (appel├® ├á la d├®connexion du client).
-func (m *terminalPtyManager) killAll() {
+// killAllFor ferme les sessions du client owner uniquement (appel├® ├á la
+// d├®connexion de CE client). Les sessions des autres clients connect├®s
+// survivent ÔÇö sinon un t├®l├®phone qui se d├®connecte tuerait le shell d'un autre.
+func (m *terminalPtyManager) killAllFor(owner *websocket.Conn) {
 	m.mu.Lock()
 	ids := make([]string, 0, len(m.sessions))
-	for id := range m.sessions {
-		ids = append(ids, id)
+	for id, sess := range m.sessions {
+		if sess.owner == owner {
+			ids = append(ids, id)
+		}
 	}
 	m.mu.Unlock()
 	for _, id := range ids {
-		_ = m.kill(id)
+		_ = m.kill(owner, id)
 	}
 }

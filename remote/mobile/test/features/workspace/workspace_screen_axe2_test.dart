@@ -60,6 +60,14 @@ void main() {
                 'branches': ['* main', 'feature/axe2'],
               },
             }));
+          default:
+            if (map['requestId'] != null) {
+              ctrl.add(jsonEncode({
+                'type': 'response',
+                'requestId': map['requestId'],
+                'data': {},
+              }));
+            }
         }
       },
     );

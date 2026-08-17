@@ -27,7 +27,11 @@ class OverviewPanelView extends StatelessWidget {
   });
 
   @override
+  @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       children: [
@@ -35,19 +39,19 @@ class OverviewPanelView extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: AppColors.surfaceRaised,
+            color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
             borderRadius: BorderRadius.circular(AppRadius.lg),
-            border: Border.all(color: AppColors.borderSubtle),
+            border: Border.all(color: scheme.outlineVariant),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 sessionTitle.isNotEmpty ? sessionTitle : 'Nouvelle session',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.inkPrimary,
+                  color: scheme.onSurface,
                   letterSpacing: -0.2,
                 ),
               ),
@@ -55,14 +59,14 @@ class OverviewPanelView extends StatelessWidget {
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    const Icon(Icons.folder_outlined, size: 12, color: AppColors.inkFaint),
+                    Icon(Icons.folder_outlined, size: 12, color: scheme.onSurfaceVariant.withValues(alpha: 0.7)),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
                         workspacePath,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 11,
-                          color: AppColors.inkMuted,
+                          color: scheme.onSurfaceVariant,
                           fontFamily: 'monospace',
                         ),
                         overflow: TextOverflow.ellipsis,
@@ -81,17 +85,17 @@ class OverviewPanelView extends StatelessWidget {
         _SectionCard(
           title: 'Subagents ($subagentsCount)',
           icon: Icons.hub_outlined,
-          iconColor: AppColors.warning,
+          iconColor: isDark ? AppColors.warning : const Color(0xFF9A6700),
           actionText: 'Voir',
           onAction: onOpenSubagents,
           child: subagentsCount == 0
-              ? const Text(
+              ? Text(
                   'Aucun sous-agent actif dans cette session.',
-                  style: TextStyle(fontSize: 12, color: AppColors.inkMuted),
+                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                 )
               : Text(
                   '$subagentsCount sous-agent(s) en cours ou terminés.',
-                  style: const TextStyle(fontSize: 12, color: AppColors.inkSecondary),
+                  style: TextStyle(fontSize: 12, color: scheme.onSurface),
                 ),
         ),
 
@@ -101,13 +105,13 @@ class OverviewPanelView extends StatelessWidget {
         _SectionCard(
           title: 'Fichiers modifiés (${modifiedFiles.length})',
           icon: Icons.rate_review_outlined,
-          iconColor: AppColors.positive,
+          iconColor: isDark ? AppColors.positive : const Color(0xFF1A7F37),
           actionText: modifiedFiles.isNotEmpty ? 'Revoir' : null,
           onAction: onOpenReview,
           child: modifiedFiles.isEmpty
-              ? const Text(
+              ? Text(
                   'Aucun fichier modifié pour le moment.',
-                  style: TextStyle(fontSize: 12, color: AppColors.inkMuted),
+                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                 )
               : Column(
                   children: modifiedFiles.take(5).map((f) {
@@ -116,14 +120,14 @@ class OverviewPanelView extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(vertical: 3),
                       child: Row(
                         children: [
-                          const Icon(Icons.insert_drive_file_outlined, size: 12, color: AppColors.inkMuted),
+                          Icon(Icons.insert_drive_file_outlined, size: 12, color: scheme.onSurfaceVariant),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               name,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 12,
-                                color: AppColors.inkPrimary,
+                                color: scheme.onSurface,
                                 fontFamily: 'monospace',
                               ),
                               overflow: TextOverflow.ellipsis,
@@ -142,13 +146,13 @@ class OverviewPanelView extends StatelessWidget {
         _SectionCard(
           title: 'Artéfacts (${artifacts.length})',
           icon: Icons.article_outlined,
-          iconColor: AppColors.accentBlue,
+          iconColor: scheme.primary,
           actionText: artifacts.isNotEmpty ? 'Plan' : null,
           onAction: onOpenPlan,
           child: artifacts.isEmpty
-              ? const Text(
+              ? Text(
                   'Aucun artéfact généré.',
-                  style: TextStyle(fontSize: 12, color: AppColors.inkMuted),
+                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                 )
               : Column(
                   children: artifacts.take(4).map((a) {
@@ -156,12 +160,12 @@ class OverviewPanelView extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(vertical: 3),
                       child: Row(
                         children: [
-                          const Icon(Icons.description_outlined, size: 12, color: AppColors.accentBlueBright),
+                          Icon(Icons.description_outlined, size: 12, color: scheme.primary),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               a,
-                              style: const TextStyle(fontSize: 12, color: AppColors.inkPrimary),
+                              style: TextStyle(fontSize: 12, color: scheme.onSurface),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -178,11 +182,11 @@ class OverviewPanelView extends StatelessWidget {
         _SectionCard(
           title: 'Tâches d\'arrière-plan (${backgroundTasks.length})',
           icon: Icons.terminal_outlined,
-          iconColor: AppColors.info,
+          iconColor: scheme.secondary,
           child: backgroundTasks.isEmpty
-              ? const Text(
+              ? Text(
                   'Aucun processus ou serveur actif.',
-                  style: TextStyle(fontSize: 12, color: AppColors.inkMuted),
+                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                 )
               : Column(
                   children: backgroundTasks.map((t) {
@@ -190,23 +194,23 @@ class OverviewPanelView extends StatelessWidget {
                       margin: const EdgeInsets.symmetric(vertical: 3),
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        color: AppColors.surfaceInput,
+                        color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
                         borderRadius: BorderRadius.circular(AppRadius.sm),
                       ),
                       child: Row(
                         children: [
-                          const SizedBox(
+                          SizedBox(
                             width: 10,
                             height: 10,
-                            child: CircularProgressIndicator(strokeWidth: 1.5, color: AppColors.accentBlue),
+                            child: CircularProgressIndicator(strokeWidth: 1.5, color: scheme.primary),
                           ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
                               t,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 11.5,
-                                color: AppColors.inkPrimary,
+                                color: scheme.onSurface,
                                 fontFamily: 'monospace',
                               ),
                             ),
@@ -243,12 +247,15 @@ class _SectionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.surfaceRaised,
+        color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
         borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: AppColors.borderSubtle),
+        border: Border.all(color: scheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -260,10 +267,10 @@ class _SectionCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color: AppColors.inkPrimary,
+                    color: scheme.onSurface,
                   ),
                 ),
               ),
@@ -276,16 +283,16 @@ class _SectionCard extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: AppColors.surfaceInput,
+                      color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(AppRadius.sm),
-                      border: Border.all(color: AppColors.borderSubtle),
+                      border: Border.all(color: scheme.outlineVariant),
                     ),
                     child: Text(
                       actionText!,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
-                        color: AppColors.accentBlueBright,
+                        color: scheme.primary,
                       ),
                     ),
                   ),

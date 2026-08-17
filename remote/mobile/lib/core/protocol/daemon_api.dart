@@ -190,6 +190,15 @@ class DaemonApi {
   ValueListenable<List<Map<String, dynamic>>> get pendingMessages =>
       _pendingMessagesNotifier;
 
+  /// Retire [requestId] des prompts non confirmés : le daemon l'a accepté
+  /// (stream_start/stream_end/réponse). Appelé sur tous les chemins d'acquittement.
+  void _ackPending(String requestId) {
+    if (requestId.isEmpty) return;
+    _pendingMessages.removeWhere((m) => m['requestId'] == requestId);
+    _pendingMessagesNotifier.value =
+        List<Map<String, dynamic>>.from(_pendingMessages);
+  }
+
   /// Retransmet un prompt non confirmé avec le MÊME requestId (le daemon
   /// déduplique). Marque [requestId] comme re-soumis pour ne pas le re-proposer
   /// à l'UI au prochain sync_catchup.
@@ -522,13 +531,194 @@ class DaemonApi {
     return list?.map((e) => (e as Map).cast<String, dynamic>()).toList() ?? [];
   }
 
-  /// Active/désactive l'auto-approbation des actions read-only côté daemon
-  /// (message WS set_auto_accept). Retourne true si le daemon a confirmé.
-  Future<bool> setAutoAccept({required bool enabled}) async {
-    return sendWithResult('set_auto_accept', {
-      'data': {'enabled': enabled},
+  /// Récupère l'état complet du contrôle de version (VCS / Git) du workspace.
+  Future<Map<String, dynamic>> getGitState({String? workspacePath}) async {
+    return rpc('git_state', {
+      if (workspacePath != null) 'workspacePath': workspacePath,
     });
   }
+
+  /// Alias pour getGitState.
+  Future<Map<String, dynamic>> getVcsState({String? workspacePath}) =>
+      getGitState(workspacePath: workspacePath);
+
+  /// Ajoute des fichiers modifiés à l'index Git (stage).
+  Future<bool> gitStage(
+    List<String> uris, {
+    String? workspacePath,
+  }) async {
+    final res = await rpc('git_stage', {
+      if (workspacePath != null) 'workspacePath': workspacePath,
+      'data': {'uris': uris},
+    });
+    return res['status'] == 'staged';
+  }
+
+  /// Retire des fichiers modifiés de l'index Git (unstage).
+  Future<bool> gitUnstage(
+    List<String> uris, {
+    String? workspacePath,
+  }) async {
+    final res = await rpc('git_unstage', {
+      if (workspacePath != null) 'workspacePath': workspacePath,
+      'data': {'uris': uris},
+    });
+    return res['status'] == 'unstaged';
+  }
+
+  /// Annule les modifications d'un ou plusieurs fichiers (irréversible, confirm obligatoire).
+  Future<bool> gitDiscard(
+    List<String> uris, {
+    required bool confirm,
+    String? workspacePath,
+  }) async {
+    final res = await rpc('git_discard', {
+      if (workspacePath != null) 'workspacePath': workspacePath,
+      'confirm': confirm,
+      'data': {'uris': uris},
+    });
+    return res['status'] == 'discarded';
+  }
+
+  /// Crée un commit Git dans le workspace.
+  Future<Map<String, dynamic>> gitCommit(
+    String message, {
+    String? workspacePath,
+  }) async {
+    return rpc('git_commit', {
+      if (workspacePath != null) 'workspacePath': workspacePath,
+      'data': {'message': message},
+    });
+  }
+
+  /// Récupère les détails d'un commit spécifique.
+  Future<Map<String, dynamic>> getCommitDetails(
+    String commitId, {
+    String? workspacePath,
+  }) async {
+    return rpc('git_commit_details', {
+      if (workspacePath != null) 'workspacePath': workspacePath,
+      'commitId': commitId,
+    });
+  }
+
+  /// Active/désactive l'auto-approbation côté daemon avec mode ("readonly" ou "full")
+  /// (message WS set_auto_accept). Retourne true si le daemon a confirmé.
+  Future<bool> setAutoAccept({
+    required bool enabled,
+    String mode = 'readonly',
+  }) async {
+    return sendWithResult('set_auto_accept', {
+      'data': {
+        'enabled': enabled,
+        'mode': mode,
+      },
+    });
+  }
+
+  /// G7 — Récupère la liste dynamique des modèles disponibles (GetAvailableModels).
+  Future<List<Map<String, dynamic>>> getAvailableModels() async {
+    final res = await rpc('get_available_models', {});
+    final list = res['models'] as List?;
+    return list?.map((e) => (e as Map).cast<String, dynamic>()).toList() ?? [];
+  }
+
+  /// G7 — Récupère les statuts et disponibilités des modèles.
+  Future<Map<String, dynamic>> getModelStatuses() async {
+    return rpc('get_model_statuses', {});
+  }
+
+  /// G2 — Upload d'un fichier par morceaux avec notification de progression.
+  Stream<double> uploadChunkedFile({
+    required String fileName,
+    required List<int> bytes,
+    String? cascadeId,
+    String? targetPath,
+    int chunkSize = 64 * 1024,
+  }) async* {
+    final uploadId = 'up_${DateTime.now().millisecondsSinceEpoch}';
+    final totalBytes = bytes.length;
+    final totalChunks = (totalBytes + chunkSize - 1) ~/ chunkSize;
+
+    for (int i = 0; i < totalChunks; i++) {
+      final start = i * chunkSize;
+      final end = (start + chunkSize > totalBytes) ? totalBytes : start + chunkSize;
+      final chunkData = base64Encode(bytes.sublist(start, end));
+
+      await rpc('upload_chunk', {
+        'uploadId': uploadId,
+        'fileName': fileName,
+        'chunkIndex': i,
+        'totalChunks': totalChunks,
+        'totalBytes': totalBytes,
+        'base64Data': chunkData,
+        if (cascadeId != null) 'cascadeId': cascadeId,
+        if (targetPath != null) 'targetPath': targetPath,
+      });
+
+      final progress = (end / totalBytes);
+      yield progress;
+    }
+  }
+
+  /// G3 — Liste les appareils Android connectés via ADB.
+  Future<List<Map<String, dynamic>>> listAdbDevices() async {
+    final res = await rpc('adb.list_devices', {});
+    final list = res['devices'] as List?;
+    return list?.map((e) => (e as Map).cast<String, dynamic>()).toList() ?? [];
+  }
+
+  /// G3 — Liste les fichiers d'un dossier distant sur l'appareil Android.
+  Future<List<Map<String, dynamic>>> listAdbFiles({
+    String? deviceId,
+    String remotePath = '/sdcard',
+  }) async {
+    final res = await rpc('adb.list_files', {
+      if (deviceId != null) 'deviceId': deviceId,
+      'remotePath': remotePath,
+    });
+    final list = res['files'] as List?;
+    return list?.map((e) => (e as Map).cast<String, dynamic>()).toList() ?? [];
+  }
+
+  /// G3 — Recherche de fichiers sur l'appareil Android.
+  Future<List<String>> searchAdbFiles({
+    String? deviceId,
+    String remotePath = '/sdcard',
+    String pattern = '*',
+    int maxDepth = 3,
+  }) async {
+    final res = await rpc('adb.search_files', {
+      if (deviceId != null) 'deviceId': deviceId,
+      'remotePath': remotePath,
+      'pattern': pattern,
+      'maxDepth': maxDepth,
+    });
+    final list = res['results'] as List?;
+    return list?.cast<String>() ?? [];
+  }
+
+  /// G3 — Télécharge un fichier depuis l'appareil Android vers le PC hôte.
+  Future<Map<String, dynamic>> pullAdbFile({
+    String? deviceId,
+    required String remotePath,
+    String? localPath,
+  }) => rpc('adb.pull_file', {
+    if (deviceId != null) 'deviceId': deviceId,
+    'remotePath': remotePath,
+    if (localPath != null) 'localPath': localPath,
+  });
+
+  /// G3 — Envoie un fichier du PC hôte vers l'appareil Android.
+  Future<Map<String, dynamic>> pushAdbFile({
+    String? deviceId,
+    required String localPath,
+    required String remotePath,
+  }) => rpc('adb.push_file', {
+    if (deviceId != null) 'deviceId': deviceId,
+    'localPath': localPath,
+    'remotePath': remotePath,
+  });
 
   /// Streaming call: emits each decoded message (`stream_start`,
   /// `stream_delta`, ...) until `stream_end` closes the stream.
@@ -779,11 +969,6 @@ class DaemonApi {
     return await rpc('get_user_status', {});
   }
 
-  /// Récupère la disponibilité et dégradation des modèles IA.
-  Future<Map<String, dynamic>> getModelStatuses() async {
-    return await rpc('get_model_statuses', {});
-  }
-
   /// Génère un message de commit IA conventionnel basé sur le staging git.
   Future<String> generateCommitMessage() async {
     final res = await rpc('generate_commit_message', {});
@@ -820,6 +1005,149 @@ class DaemonApi {
     return res['status'] == 'created';
   }
 
+  /// Démarre un duel multi-modèles (Colosseum) sur deux worktrees.
+  Future<Map<String, dynamic>> startBattleMode(
+    String workspaceUri,
+    String prompt, {
+    String? modelUIDA,
+    int? modelEnumA,
+    String? modelUIDB,
+    int? modelEnumB,
+  }) async {
+    return await rpc('start_battle_mode', {
+      'workspaceUri': workspaceUri,
+      'prompt': prompt,
+      if (modelUIDA != null) 'modelUIDA': modelUIDA,
+      if (modelEnumA != null) 'modelEnumA': modelEnumA,
+      if (modelUIDB != null) 'modelUIDB': modelUIDB,
+      if (modelEnumB != null) 'modelEnumB': modelEnumB,
+    });
+  }
+
+  /// Récupère le diff comparatif unifié entre les deux branches du mode Battle.
+  Future<Map<String, dynamic>> getBattleDiff(String workspaceUri) async {
+    return await rpc('get_battle_diff', {
+      'workspaceUri': workspaceUri,
+    });
+  }
+
+  /// Élimine une branche (Arm) perdante du mode Battle.
+  Future<Map<String, dynamic>> eliminateBattleArm(String armId) async {
+    return await rpc('eliminate_battle_arm', {
+      'armId': armId,
+    });
+  }
+
+  /// Termine le mode Battle et applique la solution victorieuse via SafeMerge.
+  Future<Map<String, dynamic>> endBattleMode(
+    String winningArmId, {
+    int mergeStrategy = 2, // 2 = SAFE_MERGE
+  }) async {
+    return await rpc('end_battle_mode', {
+      'winningArmId': winningArmId,
+      'mergeStrategy': mergeStrategy,
+    });
+  }
+
+  /// Extrait la trace binaire FlightRecorder (runtime/trace Go).
+  Future<Map<String, dynamic>> dumpFlightRecorder() async {
+    return await rpc('dump_flight_recorder', {});
+  }
+
+  /// Recharge à chaud la configuration des serveurs MCP.
+  Future<Map<String, dynamic>> refreshMcpServers() async {
+    return await rpc('refresh_mcp_servers', {});
+  }
+
+  /// Valide un jeton OAuth pour un serveur MCP tiers.
+  Future<Map<String, dynamic>> completeMcpOAuth(
+    String serverId,
+    String authCode,
+  ) async {
+    return await rpc('complete_mcp_oauth', {
+      'serverId': serverId,
+      'authCode': authCode,
+    });
+  }
+
+  /// Révoque les accès OAuth d'un serveur MCP.
+  Future<Map<String, dynamic>> disconnectMcpOAuth(String serverId) async {
+    return await rpc('disconnect_mcp_oauth', {
+      'serverId': serverId,
+    });
+  }
+
+  /// Liste les fichiers de logs disponibles pour un sidecar.
+  Future<List<String>> listSidecarLogFiles(String sidecarId) async {
+    final res = await rpc('list_sidecar_log_files', {'sidecarId': sidecarId});
+    if (res['logFiles'] is List) {
+      return (res['logFiles'] as List).map((e) => e.toString()).toList();
+    }
+    if (res['files'] is List) {
+      return (res['files'] as List).map((e) => e.toString()).toList();
+    }
+    if (res['fields'] is List) {
+      final list = <String>[];
+      for (final f in res['fields'] as List) {
+        if (f is Map && f['text'] != null && (f['text'] as String).isNotEmpty) {
+          list.add(f['text'] as String);
+        }
+      }
+      if (list.isNotEmpty) return list;
+    }
+    return [];
+  }
+
+  /// Récupère le contenu des logs d'un sidecar pour un fichier spécifique.
+  Future<String> getSidecarLogs(String sidecarId, String logFileName) async {
+    final res = await rpc('get_sidecar_logs', {
+      'sidecarId': sidecarId,
+      'logFileName': logFileName,
+    });
+    if (res['logs'] != null) return res['logs'].toString();
+    if (res['content'] != null) return res['content'].toString();
+    if (res['text'] != null) return res['text'].toString();
+    if (res['fields'] is List) {
+      for (final f in res['fields'] as List) {
+        if (f is Map && f['text'] != null) {
+          return f['text'] as String;
+        }
+      }
+    }
+    return '';
+  }
+
+  /// Contrôle le cycle de vie d'un sidecar (1=start, 2=stop, 3=restart, 4=remove).
+  Future<Map<String, dynamic>> manageSidecar(
+    String sidecarId, {
+    int action = 2,
+  }) async {
+    return rpc('manage_sidecar', {
+      'sidecarId': sidecarId,
+      'data': {'action': action},
+    });
+  }
+
+  /// Liste les appareils pairés (3.4, admin seulement). Retourne la liste
+  /// brute des sessions : deviceId, name, ip, createdAt, expiresAt, admin,
+  /// allowedProjects. Vide si le mobile n'est pas admin (le daemon répond
+  /// "action réservée à l'administrateur" → erreur).
+  Future<List<Map<String, dynamic>>> listDevices() async {
+    final res = await rpc('admin.list_devices', {});
+    final list = res['devices'] as List? ?? [];
+    return list
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  /// Révoque un appareil pairé (3.4, admin seulement). Retourne true si le
+  /// daemon a révoqué la session (false = deviceId inconnu).
+  Future<bool> revokeDevice(String deviceId) async {
+    final res = await rpc('admin.revoke_device', {'deviceId': deviceId});
+    return res['status'] == 'revoked';
+  }
+
+
   void _onMessage(dynamic raw) {
     if (raw is! String) return; // daemon sends JSON text only
     Map<String, dynamic> msg;
@@ -850,6 +1178,10 @@ class DaemonApi {
 
     if (type == 'stream_start' || type == 'stream_delta') {
       _outbox?.remove(requestId);
+      // Prompt en file (3.2) : stream_start = le daemon l'a accepté, on le
+      // retire des non confirmés (sinon il serait re-proposé à l'UI au
+      // prochain sync_catchup).
+      _ackPending(requestId);
       final stepIdx = (msg['data'] is Map ? (msg['data'] as Map)['stepIndex'] : null) as num?;
       final cascadeId = (msg['data'] is Map ? (msg['data'] as Map)['cascadeId'] : null) as String? ?? msg['cascadeId'] as String?;
       if (stepIdx != null && cascadeId != null && cascadeId.isNotEmpty) {
@@ -917,6 +1249,10 @@ class DaemonApi {
     // Drain même si le completer a expiré (timeout) : la réponse est arrivée,
     // rejouer ce message à la reconnexion créerait un doublon.
     _outbox?.remove(requestId);
+    // Prompt en file (3.2) : quand le daemon l'accepte enfin (stream_start ou
+    // réponse à la retransmission), on le retire de la liste des « non
+    // confirmés » pour ne pas le re-proposer à l'UI au prochain sync_catchup.
+    _ackPending(requestId);
     if (completer == null) {
       // Événement poussé par le serveur sans requête locale (approval_expired,
       // …) : re-marqué broadcast pour que les écouteurs de session le voient.

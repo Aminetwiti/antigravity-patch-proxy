@@ -13,12 +13,19 @@ import (
 	"time"
 )
 
+// execCommand et execLookPath sont injectables pour les tests (faux binaires
+// cloudflared/ssh) — voir fake_bin_test.go. Valeurs réelles en production.
+var (
+	execCommand  = exec.Command
+	execLookPath = exec.LookPath
+)
+
 // Regexes d'extraction d'URL (package-level pour testabilité sans binaire réel).
 var (
 	cloudflareURLRe = regexp.MustCompile(`https://[a-zA-Z0-9-]+\.trycloudflare\.com`)
 	// https?://[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.pinggy\.link — couvre aussi
 	// "a.pinggy.link" (sous-domaine à label unique) et le préfixe ssh://.
-	pinggyURLRe     = regexp.MustCompile(`(?:https?|ssh)://[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.pinggy\.link`)
+	pinggyURLRe = regexp.MustCompile(`(?:https?|ssh)://[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.pinggy\.link`)
 )
 
 type Manager struct {
@@ -72,7 +79,7 @@ func (m *Manager) tryCloudflare(localPort int) (string, error) {
 		path = "./cloudflared"
 	} else {
 		var err error
-		path, err = exec.LookPath("cloudflared")
+		path, err = execLookPath("cloudflared")
 		if err != nil {
 			return "", fmt.Errorf("cloudflared introuvable")
 		}
@@ -90,7 +97,7 @@ func (m *Manager) tryCloudflare(localPort int) (string, error) {
 }
 
 func (m *Manager) tryPinggy(localPort int) (string, error) {
-	path, err := exec.LookPath("ssh")
+	path, err := execLookPath("ssh")
 	if err != nil {
 		return "", fmt.Errorf("ssh introuvable")
 	}
@@ -108,7 +115,7 @@ func (m *Manager) tryPinggy(localPort int) (string, error) {
 
 func (m *Manager) startCloudflare(binPath string, localPort int) (string, error) {
 	targetURL := fmt.Sprintf("http://127.0.0.1:%d", localPort)
-	cmd := exec.Command(binPath, "tunnel", "--url", targetURL)
+	cmd := execCommand(binPath, "tunnel", "--url", targetURL)
 	m.cmd = cmd
 
 	stderr, err := cmd.StderrPipe()
@@ -153,7 +160,7 @@ func (m *Manager) startPinggy(binPath string, localPort int) (string, error) {
 		"-R", fmt.Sprintf("0:127.0.0.1:%d", localPort),
 		"a.pinggy.io",
 	}
-	cmd := exec.Command(binPath, args...)
+	cmd := execCommand(binPath, args...)
 	m.cmd = cmd
 
 	stdout, err := cmd.StdoutPipe()
@@ -217,10 +224,9 @@ func (m *Manager) Stop() {
 		// (groupe de processus créé dans startCloudflare). Sur les autres
 		// plateformes, le kill simple suffit.
 		if runtime.GOOS == "windows" {
-			exec.Command("taskkill", "/T", "/F", "/PID", fmt.Sprintf("%d", m.cmd.Process.Pid)).Run()
+			execCommand("taskkill", "/T", "/F", "/PID", fmt.Sprintf("%d", m.cmd.Process.Pid)).Run()
 		} else {
 			m.cmd.Process.Kill()
 		}
 	}
 }
-

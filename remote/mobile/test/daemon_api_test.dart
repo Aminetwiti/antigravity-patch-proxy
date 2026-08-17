@@ -618,6 +618,141 @@ void main() {
       await controller.close();
       api.dispose();
     });
+
+    test('sync_catchup pendingMessages are tracked and cleared on ack', () async {
+      final controller = StreamController<dynamic>();
+      final api = DaemonApi(
+        incoming: controller.stream,
+        send: (_) {},
+      );
+
+      // Daemon signale un prompt non confirmé → visible via pendingMessages.
+      controller.add(
+        jsonEncode({
+          'type': 'sync_catchup',
+          'data': {
+            'pendingMessages': [
+              {'requestId': 'p-1', 'cascadeId': 'casc', 'prompt': 'hello'},
+            ],
+          },
+        }),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(api.pendingMessages.value, hasLength(1));
+      expect(api.pendingMessages.value.first['requestId'], 'p-1');
+
+      // Le daemon accepte enfin le prompt (stream_start avec le même id) →
+      // plus proposé à l'UI au prochain sync_catchup.
+      controller.add(
+        jsonEncode({
+          'type': 'stream_start',
+          'requestId': 'p-1',
+          'data': {},
+        }),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(api.pendingMessages.value, isEmpty);
+
+      await controller.close();
+      api.dispose();
+    });
+
+    test('resendPending resends with same requestId and clears the entry', () async {
+      final outgoing = <Map<String, dynamic>>[];
+      final controller = StreamController<dynamic>();
+      final api = DaemonApi(
+        incoming: controller.stream,
+        send: (data) => outgoing.add(data as Map<String, dynamic>),
+      );
+
+      controller.add(
+        jsonEncode({
+          'type': 'sync_catchup',
+          'data': {
+            'pendingMessages': [
+              {'requestId': 'p-2', 'cascadeId': 'casc', 'prompt': 'retry me'},
+            ],
+          },
+        }),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(api.pendingMessages.value, hasLength(1));
+
+      api.resendPending({
+        'requestId': 'p-2',
+        'cascadeId': 'casc',
+        'prompt': 'retry me',
+      });
+      expect(outgoing.last['type'], 'send_prompt');
+      expect(outgoing.last['requestId'], 'p-2');
+      expect(outgoing.last['prompt'], 'retry me');
+      expect(api.pendingMessages.value, isEmpty);
+
+      await controller.close();
+      api.dispose();
+    });
+
+    test('listDevices maps admin.list_devices response devices', () async {
+      final outgoing = <Map<String, dynamic>>[];
+      final controller = StreamController<dynamic>();
+      final api = DaemonApi(
+        incoming: controller.stream,
+        send: (data) => outgoing.add(data as Map<String, dynamic>),
+      );
+
+      final future = api.listDevices();
+      await Future<void>.delayed(Duration.zero);
+      expect(outgoing.first['type'], 'admin.list_devices');
+      final requestId = outgoing.first['requestId'] as String;
+
+      controller.add(
+        jsonEncode({
+          'type': 'response',
+          'requestId': requestId,
+          'data': {
+            'devices': [
+              {'deviceId': 'd-1', 'name': 'Pixel', 'admin': true},
+            ],
+          },
+        }),
+      );
+
+      final devices = await future;
+      expect(devices, hasLength(1));
+      expect(devices.first['deviceId'], 'd-1');
+      expect(devices.first['admin'], isTrue);
+
+      await controller.close();
+      api.dispose();
+    });
+
+    test('revokeDevice returns true only on revoked status', () async {
+      final outgoing = <Map<String, dynamic>>[];
+      final controller = StreamController<dynamic>();
+      final api = DaemonApi(
+        incoming: controller.stream,
+        send: (data) => outgoing.add(data as Map<String, dynamic>),
+      );
+
+      final future = api.revokeDevice('d-1');
+      await Future<void>.delayed(Duration.zero);
+      expect(outgoing.first['type'], 'admin.revoke_device');
+      expect(outgoing.first['deviceId'], 'd-1');
+      final requestId = outgoing.first['requestId'] as String;
+
+      controller.add(
+        jsonEncode({
+          'type': 'response',
+          'requestId': requestId,
+          'data': {'status': 'revoked', 'deviceId': 'd-1'},
+        }),
+      );
+
+      expect(await future, isTrue);
+
+      await controller.close();
+      api.dispose();
+    });
   });
 }
 

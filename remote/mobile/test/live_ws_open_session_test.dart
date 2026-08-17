@@ -1,3 +1,6 @@
+@Tags(['live'])
+library;
+
 // Test d'intégration Flutter RÉEL : branche la vraie pile réseau Dart
 // (DaemonWebSocketClient + DaemonApi) sur le daemon en cours (port 8090),
 // ouvre la session 8849c879-2e81-4871-998e-5fbf3eb0a5b6 et envoie "je suis là".
@@ -15,8 +18,9 @@ import 'package:mobile/core/protocol/daemon_api.dart';
 const _cascadeId = '8849c879-2e81-4871-998e-5fbf3eb0a5b6';
 
 void main() {
-  test('WS réel : ouvre la session et envoie "je suis là" via DaemonApi',
-      () async {
+  test(
+    'WS réel : ouvre la session et envoie "je suis là" via DaemonApi',
+    () async {
     // 1) Vraie connexion WebSocket (dart:io) vers le daemon local.
     final ws = DaemonWebSocketClient();
     await ws.connect(authToken: EnvConfig.authToken);
@@ -86,5 +90,5 @@ void main() {
     } finally {
       ws.disconnect();
     }
-  }, timeout: const Timeout(Duration(seconds: 60)));
+  }, tags: 'live', timeout: const Timeout(Duration(seconds: 60)));
 }

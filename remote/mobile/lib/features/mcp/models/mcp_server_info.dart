@@ -4,6 +4,7 @@ class McpServerInfo {
   final int toolCount;
   final List<String> tools;
   final String? description;
+  final String? sidecarId;
 
   const McpServerInfo({
     required this.name,
@@ -11,6 +12,7 @@ class McpServerInfo {
     required this.toolCount,
     required this.tools,
     this.description,
+    this.sidecarId,
   });
 
   factory McpServerInfo.fromJson(Map<String, dynamic> json) {
@@ -22,6 +24,7 @@ class McpServerInfo {
       toolCount: count ?? toolsList.length,
       tools: toolsList,
       description: json['description'] as String?,
+      sidecarId: json['sidecarId'] as String? ?? json['id'] as String?,
     );
   }
 
@@ -31,5 +34,6 @@ class McpServerInfo {
         'toolCount': toolCount,
         'tools': tools,
         if (description != null) 'description': description,
+        if (sidecarId != null) 'sidecarId': sidecarId,
       };
 }

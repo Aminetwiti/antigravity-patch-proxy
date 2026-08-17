@@ -205,6 +205,18 @@ func TestTrajectoryOutStepCap(t *testing.T) {
 	if out["numTotalSteps"].(uint64) != uint64(maxTrajectorySteps+5) {
 		t.Fatalf("numTotalSteps falsifié: %v", out["numTotalSteps"])
 	}
+	// G1 : chaque step conservé garde son index d'origine dans la session.
+	// Fenêtre = 5 derniers..(5+maxTrajectorySteps-1) → premier index = 5.
+	for i, st := range steps {
+		m := st.(map[string]interface{})
+		idx, ok := m["bridgeOriginalStepIndex"].(uint64)
+		if !ok {
+			t.Fatalf("bridgeOriginalStepIndex absent au step %d", i)
+		}
+		if int(idx) != 5+i {
+			t.Fatalf("bridgeOriginalStepIndex step %d = %d, attendu %d", i, idx, 5+i)
+		}
+	}
 
 	// Sous le plafond : aucun flag, tous les steps conservés.
 	trajSmall := &protoWriter{}
