@@ -445,30 +445,57 @@ func (s *Server) snapshotSummaries() map[string]connectrpc.JetboxSummary {
 	return cp
 }
 
-// sessionsFromSummaries applique le filtre Antigravity 2.0 (archiv├®es, killed,
-// subagents) et produit la payload list_sessions partag├®e par sessionsOut et
-// le broadcast sessions_updated. Les sessions locales servent de fallback si
-// la carte est vide (hub fra├«chement d├®marr├®, stream pas encore chaud).
 func sessionsFromSummaries(jetbox map[string]connectrpc.JetboxSummary) map[string]interface{} {
+	return (&Server{}).sessionsFromSummaries(jetbox)
+}
+
+// sessionsFromSummaries applique le filtre Antigravity 2.0 (archivées, killed,
+// subagents), enrichit les statuts d'exécution dynamiques et produit la
+// payload list_sessions partagée par sessionsOut et le broadcast sessions_updated.
+func (s *Server) sessionsFromSummaries(jetbox map[string]connectrpc.JetboxSummary) map[string]interface{} {
 	projects := ListOfficialProjects()
+	enrichStatus := func(cascadeID, origStatus string) string {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.activeCascades != nil && s.activeCascades[cascadeID] {
+			return "CASCADE_STATUS_RUNNING"
+		}
+		if s.approvals != nil {
+			if p, ok := s.approvals[cascadeID]; ok && !p.expired {
+				return "CASCADE_STATUS_WAITING_FOR_USER_ACTION"
+			}
+		}
+		if origStatus != "" && origStatus != "idle" {
+			return origStatus
+		}
+		return "CASCADE_STATUS_READY"
+	}
+
 	items := make([]map[string]interface{}, 0, len(jetbox))
-	for _, s := range jetbox {
-		if s.Archived || s.Killed || s.Source == 16 {
+	for _, sum := range jetbox {
+		if sum.Archived || sum.Killed || sum.Source == 16 {
 			continue
 		}
 		items = append(items, map[string]interface{}{
-			"cascadeId": s.CascadeID,
-			"title":     s.Title,
-			"workspace": s.Workspace,
-			"projectId": s.ProjectID,
-			"status":    s.Status,
-			"updatedAt": s.UpdatedAt,
+			"cascadeId": sum.CascadeID,
+			"title":     sum.Title,
+			"workspace": sum.Workspace,
+			"projectId": sum.ProjectID,
+			"status":    enrichStatus(sum.CascadeID, sum.Status),
+			"updatedAt": sum.UpdatedAt,
 		})
 	}
 	if len(items) == 0 {
+		local := ListLocalSessions()
+		for _, loc := range local {
+			if cid, ok := loc["cascadeId"].(string); ok {
+				st, _ := loc["status"].(string)
+				loc["status"] = enrichStatus(cid, st)
+			}
+		}
 		return map[string]interface{}{
 			"projects": projects,
-			"sessions": ListLocalSessions(),
+			"sessions": local,
 		}
 	}
 	return map[string]interface{}{
@@ -763,10 +790,14 @@ func (s *Server) CancelGeneration(cascadeID string) {
 	}
 }
 
-// MarkCascadeActive marque une cascade comme ┬½ en cours de stream ┬╗ (pos├® ├á
-// l'entr├®e de send_prompt, retir├® ├á la sortie). Servi au /health.
+// MarkCascadeActive marque une cascade comme « en cours de stream » (posé à
+// l'entrée de send_prompt, retiré à la sortie). Servi au /health et enrichi
+// dans list_sessions / sessionsFromSummaries.
 func (s *Server) MarkCascadeActive(cascadeID string) {
 	s.mu.Lock()
+	if s.activeCascades == nil {
+		s.activeCascades = make(map[string]bool)
+	}
 	s.activeCascades[cascadeID] = true
 	s.mu.Unlock()
 }

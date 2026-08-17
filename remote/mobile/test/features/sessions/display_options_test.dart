@@ -218,7 +218,7 @@ void main() {
       // Verify title & running spinner
       expect(find.text('Streaming Session'), findsOneWidget);
       expect(find.text('Idle Session'), findsOneWidget);
-      expect(find.byType(CircularProgressIndicator), findsWidgets);
+      expect(find.byKey(const ValueKey('running')), findsOneWidget);
     });
   });
 }

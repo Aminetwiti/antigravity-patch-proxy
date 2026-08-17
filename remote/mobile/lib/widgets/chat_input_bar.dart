@@ -1043,12 +1043,14 @@ class _ChatInputBarState extends State<ChatInputBar> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final isQueued = _sendMode == SendMode.queued;
+    final viewInsets = MediaQuery.of(context).viewInsets;
+    final hasKeyboard = viewInsets.bottom > 0;
 
     return SafeArea(
       top: false,
-      bottom: true,
+      bottom: !hasKeyboard,
       child: Container(
-        margin: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+        margin: EdgeInsets.fromLTRB(12, 4, 12, hasKeyboard ? 4 : 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

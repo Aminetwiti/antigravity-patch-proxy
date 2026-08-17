@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/protocol/daemon_api.dart';
 import '../core/protocol/markdown_renderer.dart';
+import '../theme/app_colors.dart';
 import 'remote_terminal_sheet.dart';
 import 'unified_diff_viewer.dart';
 
@@ -111,6 +114,14 @@ class _CodeBlockView extends StatefulWidget {
 
 class _CodeBlockViewState extends State<_CodeBlockView> {
   bool _expanded = false;
+  bool _copied = false;
+  Timer? _copyTimer;
+
+  @override
+  void dispose() {
+    _copyTimer?.cancel();
+    super.dispose();
+  }
 
   bool get _isDiff {
     final lang = widget.code.language.toLowerCase();
@@ -241,6 +252,11 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
                   onTap: () {
                     HapticFeedback.lightImpact();
                     Clipboard.setData(ClipboardData(text: widget.code.code));
+                    setState(() => _copied = true);
+                    _copyTimer?.cancel();
+                    _copyTimer = Timer(const Duration(milliseconds: 1500), () {
+                      if (mounted) setState(() => _copied = false);
+                    });
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text('Code copié dans le presse-papiers'),
@@ -251,7 +267,24 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
                   borderRadius: BorderRadius.circular(4),
                   child: Padding(
                     padding: const EdgeInsets.all(4),
-                    child: Icon(Icons.copy_outlined, size: 14, color: scheme.onSurfaceVariant),
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 180),
+                      transitionBuilder: (child, anim) =>
+                          ScaleTransition(scale: anim, child: child),
+                      child: _copied
+                          ? const Icon(
+                              Icons.check_rounded,
+                              key: ValueKey('copied'),
+                              size: 14,
+                              color: AppColors.positive,
+                            )
+                          : Icon(
+                              Icons.copy_outlined,
+                              key: const ValueKey('copy'),
+                              size: 14,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                    ),
                   ),
                 ),
               ],

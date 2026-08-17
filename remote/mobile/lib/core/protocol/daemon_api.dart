@@ -845,9 +845,9 @@ class DaemonApi {
   /// Récupère la liste des tâches planifiées gérées par le daemon.
   Future<List<ScheduledTaskItem>> listScheduledTasks() async {
     final res = await rpc('list_scheduled_tasks');
-    final list = res['tasks'] as List?;
-    if (list == null) return [];
-    return list
+    final rawList = res['tasks'] ?? (res['data'] is Map ? res['data']['tasks'] : null);
+    if (rawList is! List) return [];
+    return rawList
         .whereType<Map>()
         .map((e) => ScheduledTaskItem.fromJson(e.cast<String, dynamic>()))
         .toList();
@@ -867,7 +867,7 @@ class DaemonApi {
         'isEnabled': task.isEnabled,
       },
     });
-    final rawTask = res['task'];
+    final rawTask = res['task'] ?? (res['data'] is Map ? res['data']['task'] : null);
     if (rawTask is Map) {
       return ScheduledTaskItem.fromJson(rawTask.cast<String, dynamic>());
     }
@@ -888,17 +888,34 @@ class DaemonApi {
         'status': task.status,
       },
     });
-    final rawTask = res['task'];
+    final rawTask = res['task'] ?? (res['data'] is Map ? res['data']['task'] : null);
     if (rawTask is Map) {
       return ScheduledTaskItem.fromJson(rawTask.cast<String, dynamic>());
     }
     return task;
   }
 
+  /// Active ou met en pause une tâche planifiée.
+  Future<ScheduledTaskItem?> toggleScheduledTask(String taskId, bool isEnabled) async {
+    final res = await rpc('update_scheduled_task', {
+      'taskId': taskId,
+      'data': {
+        'id': taskId,
+        'isEnabled': isEnabled,
+        'status': isEnabled ? 'Running' : 'Paused',
+      },
+    });
+    final rawTask = res['task'] ?? (res['data'] is Map ? res['data']['task'] : null);
+    if (rawTask is Map) {
+      return ScheduledTaskItem.fromJson(rawTask.cast<String, dynamic>());
+    }
+    return null;
+  }
+
   /// Déclenche l'exécution immédiate d'une tâche planifiée.
   Future<ScheduledTaskItem?> triggerScheduledTask(String taskId) async {
     final res = await rpc('trigger_scheduled_task', {'taskId': taskId});
-    final rawTask = res['task'];
+    final rawTask = res['task'] ?? (res['data'] is Map ? res['data']['task'] : null);
     if (rawTask is Map) {
       return ScheduledTaskItem.fromJson(rawTask.cast<String, dynamic>());
     }
@@ -908,7 +925,9 @@ class DaemonApi {
   /// Annule / supprime une tâche planifiée.
   Future<bool> cancelScheduledTask(String taskId) async {
     final res = await rpc('cancel_scheduled_task', {'taskId': taskId});
-    return res['status'] == 'cancelled';
+    final status = res['status'] ?? (res['data'] is Map ? res['data']['status'] : null);
+    final id = res['taskId'] ?? (res['data'] is Map ? res['data']['taskId'] : null);
+    return status == 'cancelled' || id == taskId;
   }
 
   /// Demande la prévisualisation du rollback d'une cascade (GetRevertPreview).

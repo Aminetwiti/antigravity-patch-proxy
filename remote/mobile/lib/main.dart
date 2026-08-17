@@ -759,7 +759,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           workspaces: workspaces.isNotEmpty ? workspaces : ['antigravity-add-model-main'],
           onTriggerNow: (id) => _api?.triggerScheduledTask(id),
           onCancelTask: (id) => _api?.cancelScheduledTask(id),
-          onToggleTask: (id, enabled) {},
+          onToggleTask: (id, enabled) => _api?.toggleScheduledTask(id, enabled),
           onAddTask: (task) => _api?.scheduleTask(task),
         ),
       ),

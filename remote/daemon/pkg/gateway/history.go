@@ -952,19 +952,21 @@ func CoalesceHistoryMessages(raw []HistoryMessage) []HistoryMessage {
 		prev := &out[len(out)-1]
 		if prev.Sender == "assistant" && m.Sender == "assistant" {
 			// Fusion des pensées (Thought)
-			if m.Thought != "" {
-				if prev.Thought == "" {
-					prev.Thought = m.Thought
-				} else if !strings.Contains(prev.Thought, m.Thought) {
-					prev.Thought = prev.Thought + "\n\n" + m.Thought
+			mThought := strings.TrimSpace(m.Thought)
+			if mThought != "" {
+				if strings.TrimSpace(prev.Thought) == "" {
+					prev.Thought = mThought
+				} else if !strings.Contains(prev.Thought, mThought) {
+					prev.Thought = strings.TrimSpace(prev.Thought) + "\n\n" + mThought
 				}
 			}
 			// Fusion des textes
-			if m.Text != "" {
-				if prev.Text == "" {
-					prev.Text = m.Text
-				} else if !strings.Contains(prev.Text, m.Text) {
-					prev.Text = prev.Text + "\n\n" + m.Text
+			mText := strings.TrimSpace(m.Text)
+			if mText != "" {
+				if strings.TrimSpace(prev.Text) == "" {
+					prev.Text = mText
+				} else if !strings.Contains(prev.Text, mText) {
+					prev.Text = strings.TrimSpace(prev.Text) + "\n\n" + mText
 				}
 			}
 			if m.IsError {

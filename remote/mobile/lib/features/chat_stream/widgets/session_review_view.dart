@@ -340,26 +340,33 @@ class _SessionReviewViewState extends State<SessionReviewView> {
         // ── Liste des fichiers modifiés
         Expanded(
           child: filtered.isEmpty
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          _searchQuery.isNotEmpty ? Icons.search_off_rounded : Icons.check_circle_outline_rounded,
-                          size: 36,
-                          color: const Color(0xFF5E606A),
+              ? LayoutBuilder(
+                  builder: (context, constraints) => SingleChildScrollView(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                      child: Center(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _searchQuery.isNotEmpty ? Icons.search_off_rounded : Icons.check_circle_outline_rounded,
+                                size: 32,
+                                color: const Color(0xFF5E606A),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                _searchQuery.isNotEmpty
+                                    ? 'Aucun fichier pour "$_searchQuery"'
+                                    : 'Aucun fichier modifié dans cette session',
+                                style: const TextStyle(fontSize: 13, color: AppColors.inkMuted),
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
+                          ),
                         ),
-                        const SizedBox(height: 10),
-                        Text(
-                          _searchQuery.isNotEmpty
-                              ? 'Aucun fichier pour "$_searchQuery"'
-                              : 'Aucun fichier modifié dans cette session',
-                          style: const TextStyle(fontSize: 13, color: AppColors.inkMuted),
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
+                      ),
                     ),
                   ),
                 )

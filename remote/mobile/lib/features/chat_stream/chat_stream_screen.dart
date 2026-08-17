@@ -23,6 +23,7 @@ import '../../widgets/background_tasks_bar.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/unified_diff_viewer.dart';
 import '../../widgets/artifact_viewer_modal.dart';
+import 'widgets/execution_progress_view.dart';
 import 'widgets/overview_panel_view.dart';
 import 'widgets/session_review_view.dart';
 import 'package:mobile/theme/app_colors.dart';
@@ -301,19 +302,26 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     } catch (_) {}
   }
 
-  void _scrollToBottomSettled({int maxAttempts = 3}) {
+  void _scrollToBottomSettled({int maxAttempts = 4}) {
     if (!mounted) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scrollController.hasClients) return;
       _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
       if (maxAttempts > 1) {
-        Future.delayed(const Duration(milliseconds: 80), () {
+        Future.delayed(const Duration(milliseconds: 60), () {
           if (mounted && _scrollController.hasClients) {
             _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
             if (maxAttempts > 2) {
-              Future.delayed(const Duration(milliseconds: 120), () {
+              Future.delayed(const Duration(milliseconds: 150), () {
                 if (mounted && _scrollController.hasClients) {
                   _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+                  if (maxAttempts > 3) {
+                    Future.delayed(const Duration(milliseconds: 250), () {
+                      if (mounted && _scrollController.hasClients) {
+                        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+                      }
+                    });
+                  }
                 }
               });
             }
@@ -908,7 +916,23 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         final thoughtDelta = StreamDeltaParser.thinkingOf(msg);
         final approval = StreamDeltaParser.approvalOf(msg);
 
-        final idx = _messages.indexWhere((m) => m.id == 'ext-$requestId');
+        var idx = _messages.indexWhere((m) => m.id == 'ext-$requestId');
+        if (idx < 0) {
+          final lastStreamingIdx = _messages.lastIndexWhere((m) => m.isStreaming);
+          if (lastStreamingIdx >= 0) {
+            idx = lastStreamingIdx;
+          } else if (textDelta.isNotEmpty || thoughtDelta.isNotEmpty) {
+            _onStreamStarted();
+            _messages.add(ChatMessage(
+              id: 'ext-$requestId',
+              sender: 'assistant',
+              text: '',
+              timestamp: _timestamp(),
+              isStreaming: true,
+            ));
+            idx = _messages.length - 1;
+          }
+        }
         if (idx >= 0) {
           final current = _messages[idx];
           _externalThoughts[thKey] =
@@ -950,10 +974,15 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           final idx = _messages.indexWhere((m) => m.id == 'ext-$requestId');
           if (idx >= 0) {
             _messages[idx] = _messages[idx].copyWith(isStreaming: false);
+          } else {
+            final lastStreamingIdx = _messages.lastIndexWhere((m) => m.isStreaming);
+            if (lastStreamingIdx >= 0) {
+              _messages[lastStreamingIdx] = _messages[lastStreamingIdx].copyWith(isStreaming: false);
+            }
           }
           _externalThoughts.remove(thKey);
         });
-        _scrollToBottom();
+        _scrollToBottomSettled();
       } else if (type == 'approval_expired') {
         // Phase 6 : le daemon a auto-refusé l'approbation (timeout) — la carte
         // reste visible en lecture seule pour expliquer la disparition, et la
@@ -2133,12 +2162,6 @@ class _MessageBubble extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    final cleanThought = message.thought != null
-        ? message.thought!
-            .replaceAll(RegExp(r'\*{1,3}|`{1,3}|#{1,6}\s?|_'), '')
-            .trim()
-        : '';
-
     // isCompact = thought-only message (no body text, no error, not streaming)
     // → hide timestamp/action row, tighten margin
     final isCompact = !hasContent && !isError && !message.isStreaming;
@@ -2180,80 +2203,15 @@ class _MessageBubble extends StatelessWidget {
                 ),
               ),
             ),
-          if (hasThought) ...[
-            Container(
-              margin: const EdgeInsets.only(bottom: 6),
-              decoration: BoxDecoration(
-                color: isThoughtExpanded
-                    ? (isDark ? const Color(0xFF16181D) : scheme.surfaceContainerHighest.withValues(alpha: 0.5))
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(AppRadius.md),
-                border: isThoughtExpanded
-                    ? Border.all(color: isDark ? const Color(0xFF2C2F38) : scheme.outlineVariant.withValues(alpha: 0.6), width: 0.8)
-                    : null,
-              ),
-              child: InkWell(
-                key: Key('thought-toggle-${message.id}'),
-                onTap: () {
-                  HapticFeedback.lightImpact();
-                  onToggleThought?.call();
-                },
-                borderRadius: BorderRadius.circular(AppRadius.md),
-                child: Padding(
-                  padding: EdgeInsets.symmetric(
-                    vertical: isThoughtExpanded ? 8 : 4,
-                    horizontal: isThoughtExpanded ? 10 : 2,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            message.isStreaming && !hasContent
-                                ? Icons.auto_awesome
-                                : Icons.psychology_outlined,
-                            size: 13,
-                            color: message.isStreaming && !hasContent
-                                ? AppColors.accentBlueBright
-                                : scheme.onSurfaceVariant,
-                          ),
-                          const SizedBox(width: 6),
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 260),
-                            child: Text(
-                              isThoughtExpanded ? message.thought! : cleanThought,
-                              key: Key('thought-${message.id}'),
-                              maxLines: isThoughtExpanded ? null : 1,
-                              overflow: isThoughtExpanded
-                                  ? TextOverflow.visible
-                                  : TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: scheme.onSurfaceVariant,
-                                fontWeight: isThoughtExpanded ? FontWeight.w400 : FontWeight.w500,
-                                fontStyle: FontStyle.italic,
-                                height: isThoughtExpanded ? 1.4 : 1.2,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          Icon(
-                            isThoughtExpanded
-                                ? Icons.expand_less
-                                : Icons.expand_more,
-                            size: 16,
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+          if (hasThought || (message.isStreaming && !hasContent)) ...[
+            ExecutionProgressView(
+              messageId: message.id,
+              thoughtText: message.thought,
+              isStreaming: message.isStreaming,
+              modelLabel: message.modelLabel,
+              initiallyExpanded: isThoughtExpanded,
+              onToggleExpand: onToggleThought,
             ),
-            const SizedBox(height: 2),
           ],
           if (isError)
             Container(
@@ -2282,33 +2240,7 @@ class _MessageBubble extends StatelessWidget {
               ),
             )
           else ...[
-            if (message.isStreaming && !hasContent)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: scheme.primary,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Génération en cours...',
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        fontStyle: FontStyle.italic,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              )
-            else if (hasContent || message.isStreaming)
+            if (hasContent || (message.isStreaming && message.text.isNotEmpty))
               MarkdownBubble(
                 text: message.text,
                 isStreaming: message.isStreaming,

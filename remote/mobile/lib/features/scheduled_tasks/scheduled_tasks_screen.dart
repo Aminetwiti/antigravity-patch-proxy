@@ -67,14 +67,7 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
       final remoteTasks = await widget.api!.listScheduledTasks();
       if (mounted) {
         setState(() {
-          final merged = List<ScheduledTaskItem>.from(remoteTasks);
-          final existingIds = merged.map((t) => t.id).toSet();
-          for (final t in _localTasks) {
-            if (!existingIds.contains(t.id)) {
-              merged.add(t);
-            }
-          }
-          _localTasks = merged;
+          _localTasks = List<ScheduledTaskItem>.from(remoteTasks);
           _isLoading = false;
         });
       }
@@ -161,7 +154,11 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
           setState(() {
             _localTasks.insert(0, newTask);
           });
-          widget.onAddTask?.call(newTask);
+          if (widget.onAddTask != null) {
+            widget.onAddTask?.call(newTask);
+          } else {
+            widget.api?.scheduleTask(newTask);
+          }
         },
       ),
     );
@@ -181,59 +178,37 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: scheme.surface,
+      backgroundColor: isDark ? const Color(0xFF0F1117) : scheme.surface,
       appBar: AppBar(
-        backgroundColor: scheme.surface,
+        backgroundColor: isDark ? const Color(0xFF13151B) : scheme.surfaceContainerLow,
         elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: scheme.onSurface),
+          icon: Icon(Icons.arrow_back_rounded, size: 20, color: scheme.onSurface),
           onPressed: () => Navigator.of(context).pop(),
-          tooltip: 'Retour',
         ),
         title: Text(
           'Scheduled Tasks (${_localTasks.length})',
           style: TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.w600,
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
             color: scheme.onSurface,
             letterSpacing: -0.2,
           ),
         ),
         actions: [
-          if (_isLoading)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: scheme.onSurfaceVariant),
-                ),
-              ),
-            )
-          else if (widget.onRefresh != null)
-            IconButton(
-              icon: Icon(Icons.refresh_rounded, size: 20, color: scheme.onSurfaceVariant),
-              onPressed: () {
-                HapticFeedback.selectionClick();
-                widget.onRefresh!();
-              },
-              tooltip: 'Actualiser',
-            ),
-          // Bouton "+ New" (Style Antigravity 2.0)
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+            padding: const EdgeInsets.only(right: 12),
             child: Material(
               color: Colors.transparent,
               child: InkWell(
                 onTap: _openNewTaskModal,
                 borderRadius: BorderRadius.circular(AppRadius.md),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1E2025) : scheme.surfaceContainerHighest,
+                    color: scheme.primaryContainer.withValues(alpha: 0.25),
                     borderRadius: BorderRadius.circular(AppRadius.md),
-                    border: Border.all(color: scheme.outlineVariant, width: 1),
+                    border: Border.all(color: scheme.primary.withValues(alpha: 0.4), width: 1),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -296,67 +271,104 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
 
             // ── Tasks List or Empty State ─────────────────────────────
             Expanded(
-              child: filtered.isEmpty
-                  ? _buildEmptyState(scheme)
-                  : ListView.separated(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                      itemCount: filtered.length,
-                      separatorBuilder: (context, index) => Divider(
-                        height: 1,
-                        color: scheme.outlineVariant,
-                        indent: 12,
-                        endIndent: 12,
-                      ),
-                      itemBuilder: (context, index) {
-                        final task = filtered[index];
-                        return _ScheduledTaskRow(
-                          task: task,
-                          onTap: () {
-                            HapticFeedback.selectionClick();
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (context) => ScheduledTaskDetailScreen(
-                                  task: task,
-                                  onUpdateTask: (updated) {
-                                    setState(() {
-                                      final idx = _localTasks.indexWhere((t) => t.id == updated.id);
-                                      if (idx >= 0) {
-                                        _localTasks[idx] = updated;
+              child: RefreshIndicator(
+                onRefresh: widget.onRefresh ?? _loadFromApi,
+                color: scheme.primary,
+                child: filtered.isEmpty
+                    ? SingleChildScrollView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        child: SizedBox(
+                          height: MediaQuery.of(context).size.height * 0.6,
+                          child: _buildEmptyState(scheme),
+                        ),
+                      )
+                    : ListView.separated(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        itemCount: filtered.length,
+                        separatorBuilder: (context, index) => Divider(
+                          height: 1,
+                          color: scheme.outlineVariant,
+                          indent: 12,
+                          endIndent: 12,
+                        ),
+                        itemBuilder: (context, index) {
+                          final task = filtered[index];
+                          return _ScheduledTaskRow(
+                            task: task,
+                            onTap: () {
+                              HapticFeedback.selectionClick();
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (context) => ScheduledTaskDetailScreen(
+                                    task: task,
+                                    onUpdateTask: (updated) {
+                                      setState(() {
+                                        final idx = _localTasks.indexWhere((t) => t.id == updated.id);
+                                        if (idx >= 0) {
+                                          _localTasks[idx] = updated;
+                                        }
+                                      });
+                                      widget.api?.updateScheduledTask(updated);
+                                    },
+                                    onTriggerNow: (id) {
+                                      if (widget.onTriggerNow != null) {
+                                        widget.onTriggerNow?.call(id);
+                                      } else {
+                                        widget.api?.triggerScheduledTask(id);
                                       }
-                                    });
-                                  },
-                                  onTriggerNow: widget.onTriggerNow,
-                                  onDeleteTask: (id) {
-                                    setState(() {
-                                      _localTasks.removeWhere((t) => t.id == id);
-                                    });
-                                    widget.onCancelTask?.call(id);
-                                  },
+                                    },
+                                    onDeleteTask: (id) {
+                                      setState(() {
+                                        _localTasks.removeWhere((t) => t.id == id);
+                                      });
+                                      if (widget.onCancelTask != null) {
+                                        widget.onCancelTask?.call(id);
+                                      } else {
+                                        widget.api?.cancelScheduledTask(id);
+                                      }
+                                    },
+                                  ),
                                 ),
-                              ),
-                            );
-                          },
-                          onToggle: (enabled) {
-                            setState(() {
-                              final idx = _localTasks.indexWhere((t) => t.id == task.id);
-                              if (idx >= 0) {
-                                _localTasks[idx] = _localTasks[idx].copyWith(isEnabled: enabled);
+                              );
+                            },
+                            onToggle: (enabled) {
+                              setState(() {
+                                final idx = _localTasks.indexWhere((t) => t.id == task.id);
+                                if (idx >= 0) {
+                                  _localTasks[idx] = _localTasks[idx].copyWith(
+                                    isEnabled: enabled,
+                                    status: enabled ? 'Running' : 'Paused',
+                                  );
+                                }
+                              });
+                              if (widget.onToggleTask != null) {
+                                widget.onToggleTask?.call(task.id, enabled);
+                              } else {
+                                widget.api?.toggleScheduledTask(task.id, enabled);
                               }
-                            });
-                            widget.onToggleTask?.call(task.id, enabled);
-                          },
-                          onRestart: () {
-                            widget.onTriggerNow?.call(task.id);
-                          },
-                          onDelete: () {
-                            setState(() {
-                              _localTasks.removeWhere((t) => t.id == task.id);
-                            });
-                            widget.onCancelTask?.call(task.id);
-                          },
-                        );
-                      },
-                    ),
+                            },
+                            onRestart: () {
+                              if (widget.onTriggerNow != null) {
+                                widget.onTriggerNow?.call(task.id);
+                              } else {
+                                widget.api?.triggerScheduledTask(task.id);
+                              }
+                            },
+                            onDelete: () {
+                              setState(() {
+                                _localTasks.removeWhere((t) => t.id == task.id);
+                              });
+                              if (widget.onCancelTask != null) {
+                                widget.onCancelTask?.call(task.id);
+                              } else {
+                                widget.api?.cancelScheduledTask(task.id);
+                              }
+                            },
+                          );
+                        },
+                      ),
+              ),
             ),
           ],
         ),

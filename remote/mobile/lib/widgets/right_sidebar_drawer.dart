@@ -328,6 +328,8 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
                             api: widget.api,
                             onCancelTask: (id) => widget.api?.cancelScheduledTask(id),
                             onTriggerNow: (id) => widget.api?.triggerScheduledTask(id),
+                            onToggleTask: (id, enabled) => widget.api?.toggleScheduledTask(id, enabled),
+                            onAddTask: (task) => widget.api?.scheduleTask(task),
                           ),
                         ),
                       );
@@ -355,6 +357,8 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
                             api: widget.api,
                             onCancelTask: (id) => widget.api?.cancelScheduledTask(id),
                             onTriggerNow: (id) => widget.api?.triggerScheduledTask(id),
+                            onToggleTask: (id, enabled) => widget.api?.toggleScheduledTask(id, enabled),
+                            onAddTask: (task) => widget.api?.scheduleTask(task),
                           ),
                         ),
                       );

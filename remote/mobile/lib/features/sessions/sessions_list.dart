@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -611,7 +612,7 @@ class _WorkspaceFolderSectionState extends State<_WorkspaceFolderSection> {
                   const Icon(
                     Icons.folder_outlined,
                     size: 15,
-                    color: Color(0xFF8F909A),
+                    color: Color(0xFF7E8B9B),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
@@ -620,7 +621,7 @@ class _WorkspaceFolderSectionState extends State<_WorkspaceFolderSection> {
                       style: const TextStyle(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w500,
-                        color: Color(0xFFA1A1AA),
+                        color: Color(0xFF7097C2),
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1048,7 +1049,7 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                             fontSize: 10.5,
                             color: isSelected
                                 ? const Color(0xFF8F909A)
-                                : const Color(0xFF6E707A),
+                                : const Color(0xFF8E909D),
                             fontWeight: FontWeight.w400,
                           ),
                           overflow: TextOverflow.ellipsis,
@@ -1059,130 +1060,61 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                 ),
               ),
               const SizedBox(width: 8),
-              if (isRunning)
-                Tooltip(
-                  message: 'En cours d\'exécution',
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: AppColors.positive.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(AppRadius.pill),
-                      border: Border.all(
-                        color: AppColors.positive.withValues(alpha: 0.4),
-                        width: 0.8,
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        SizedBox(
-                          width: 8,
-                          height: 8,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 1.5,
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              isSelected ? const Color(0xFFFFFFFF) : AppColors.positive,
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeOutCubic,
+                child: isRunning
+                    ? Tooltip(
+                        key: const ValueKey('running'),
+                        message: 'En cours d\'exécution',
+                        child: _AntigravitySpinningArc(
+                          size: 13.5,
+                          color: isSelected
+                              ? const Color(0xFFB4B8C5)
+                              : const Color(0xFF8E929E),
+                        ),
+                      )
+                    : widget.session.isWaitingAction
+                        ? Tooltip(
+                            key: const ValueKey('waiting'),
+                            message: 'Action requise',
+                            child: Container(
+                              width: 5,
+                              height: 5,
+                              decoration: const BoxDecoration(
+                                color: Color(0xFFE5A93C),
+                                shape: BoxShape.circle,
+                              ),
                             ),
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Running',
-                          style: TextStyle(
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.w600,
-                            color: isSelected ? const Color(0xFFFFFFFF) : AppColors.positive,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              else if (widget.session.isWaitingAction)
-                Tooltip(
-                  message: 'Action requise / En attente',
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: AppColors.warning.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(AppRadius.pill),
-                      border: Border.all(
-                        color: AppColors.warning.withValues(alpha: 0.4),
-                        width: 0.8,
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 5,
-                          height: 5,
-                          decoration: const BoxDecoration(
-                            color: AppColors.warning,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        const Text(
-                          'Action',
-                          style: TextStyle(
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.warning,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              else if (widget.session.isError)
-                Tooltip(
-                  message: 'Erreur pendant la génération',
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: AppColors.danger.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(AppRadius.pill),
-                      border: Border.all(
-                        color: AppColors.danger.withValues(alpha: 0.4),
-                        width: 0.8,
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 5,
-                          height: 5,
-                          decoration: const BoxDecoration(
-                            color: AppColors.danger,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        const Text(
-                          'Erreur',
-                          style: TextStyle(
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.danger,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              else if (widget.session.time.isNotEmpty)
-                Text(
-                  widget.session.time,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: isSelected
-                        ? const Color(0xFF9E9FA9)
-                        : const Color(0xFF5E606A),
-                    fontWeight: FontWeight.w400,
-                  ),
-                ),
+                          )
+                        : widget.session.isError
+                            ? Tooltip(
+                                key: const ValueKey('error'),
+                                message: 'Erreur',
+                                child: Container(
+                                  width: 5,
+                                  height: 5,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFFE5534B),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              )
+                            : widget.session.time.isNotEmpty
+                                ? Text(
+                                    widget.session.time,
+                                    key: ValueKey('time_${widget.session.time}'),
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      color: isSelected
+                                          ? const Color(0xFF9E9FA9)
+                                          : const Color(0xFF7E818D),
+                                      fontWeight: FontWeight.w400,
+                                    ),
+                                  )
+                                : const SizedBox.shrink(key: ValueKey('empty')),
+              ),
               if (widget.isPinned)
                 Padding(
                   padding: const EdgeInsets.only(left: 4),
@@ -1417,4 +1349,85 @@ class _ConnectionRowState extends State<_ConnectionRow> {
       ),
     );
   }
+}
+
+/// Indicateur de chargement minimaliste et élégant (arc fin en rotation)
+/// identique à l'interface officielle Antigravity 2.0 Desktop IDE.
+class _AntigravitySpinningArc extends StatefulWidget {
+  final Color color;
+  final double size;
+
+  const _AntigravitySpinningArc({
+    this.color = const Color(0xFF9AA0AD),
+    this.size = 13.5,
+  });
+
+  @override
+  State<_AntigravitySpinningArc> createState() => _AntigravitySpinningArcState();
+}
+
+class _AntigravitySpinningArcState extends State<_AntigravitySpinningArc>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 950),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (_, __) => Transform.rotate(
+        angle: _controller.value * 2 * math.pi,
+        child: SizedBox(
+          width: widget.size,
+          height: widget.size,
+          child: CustomPaint(
+            painter: _ArcPainter(color: widget.color),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ArcPainter extends CustomPainter {
+  final Color color;
+  const _ArcPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1.3
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = (size.width - 1.3) / 2;
+    // Arc circulaire de ~270 degrés identique à la capture Antigravity 2.0
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      0,
+      4.8,
+      false,
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _ArcPainter oldDelegate) =>
+      oldDelegate.color != color;
 }
