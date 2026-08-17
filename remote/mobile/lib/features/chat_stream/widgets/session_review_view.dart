@@ -118,6 +118,8 @@ class _SessionReviewViewState extends State<SessionReviewView> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final filtered = widget.files.where((f) {
       if (_searchQuery.isEmpty) return true;
       return f.path.toLowerCase().contains(_searchQuery);

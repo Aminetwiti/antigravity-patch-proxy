@@ -130,7 +130,13 @@ func (o *DaemonOutbox) Pending(cascadeID string) []map[string]interface{} {
 		out = append(out, m)
 	}
 	if len(stale) > 0 {
-		_ = o.rewriteLocked(path, nil) // purge des lignes obsolètes
+		var remaining []string
+		for _, m := range out {
+			if b, err := json.Marshal(m); err == nil {
+				remaining = append(remaining, string(b))
+			}
+		}
+		_ = o.rewriteLocked(path, remaining) // purge des lignes obsolètes en préservant les récentes
 	}
 	return out
 }

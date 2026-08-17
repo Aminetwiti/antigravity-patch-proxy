@@ -205,8 +205,13 @@ func (m *Manager) startPinggy(binPath string, localPort int) (string, error) {
 	}
 }
 
+// WebSocketURL convertit l'URL HTTPS publique d'un tunnel en endpoint WebSocket WSS.
+func WebSocketURL(publicURL string) string {
+	return strings.Replace(publicURL, "https://", "wss://", 1) + "/ws"
+}
+
 func (m *Manager) printBanner(publicURL string) {
-	wsURL := strings.Replace(publicURL, "https://", "wss://", 1) + "/ws"
+	wsURL := WebSocketURL(publicURL)
 	fmt.Println("\n========================================================")
 	fmt.Println("🌐 TUNNEL DISTANT 4G/5G ET ACCÈS HORS DOMICILE ACTIF !")
 	fmt.Printf("   Fournisseur : %s\n", strings.ToUpper(m.Provider))

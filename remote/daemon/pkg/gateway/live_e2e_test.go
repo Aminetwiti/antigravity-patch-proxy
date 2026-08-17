@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,10 @@ import (
 )
 
 func TestLiveAntigravityE2E(t *testing.T) {
+	if os.Getenv("DAEMON_LIVE_E2E") != "1" {
+		t.Skip("Live E2E désactivé par défaut (définir DAEMON_LIVE_E2E=1 pour exécuter)")
+		return
+	}
 	// 1. Discovery de l'instance réelle Antigravity 2.0
 	info, err := discovery.Discover()
 	if err != nil {
@@ -111,7 +116,7 @@ func TestLiveAntigravityE2E(t *testing.T) {
 	sendReq(map[string]interface{}{
 		"type":          "create_cascade",
 		"requestId":     "req-create-1",
-		"workspacePath": "C:\\Users\\amine\\Downloads\\antigravity-add-model-main\\antigravity-add-model-main",
+		"workspacePath": t.TempDir(),
 		"modelUID":      "gemini-3.7-flash",
 		"modelEnum":     312,
 	})

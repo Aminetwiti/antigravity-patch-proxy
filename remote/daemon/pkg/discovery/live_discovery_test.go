@@ -1,30 +1,30 @@
 package discovery
 
 import (
-	"fmt"
+	"os"
 	"testing"
 )
 
 func TestLiveDiscovery(t *testing.T) {
-	info, err := Discover()
-	if err != nil {
-		t.Logf("Discovery failed (maybe IDE not open?): %v", err)
+	if os.Getenv("DAEMON_LIVE_E2E") != "1" {
+		t.Skip("Live Discovery désactivé par défaut (définir DAEMON_LIVE_E2E=1 pour exécuter)")
 		return
 	}
-	fmt.Printf("\n=== DISCOVERY SUCCESS ===\n")
-	fmt.Printf("PID: %d\n", info.PID)
-	fmt.Printf("ProcessName: %s\n", info.ProcessName)
-	fmt.Printf("ConnectRPCPort: %d\n", info.ConnectRPCPort)
-	fmt.Printf("SubclientType: %s\n", info.SubclientType)
-	fmt.Printf("WorkspaceID: %s\n", info.WorkspaceID)
+	info, err := Discover()
+	if err != nil {
+		t.Fatalf("Discovery failed: %v", err)
+	}
+	if info.PID <= 0 {
+		t.Errorf("PID invalide: %d", info.PID)
+	}
+	if info.ConnectRPCPort <= 0 {
+		t.Errorf("Port invalide: %d", info.ConnectRPCPort)
+	}
 	token := info.ExtensionCSRF
 	if token == "" {
 		token = info.CSRFToken
 	}
-	if len(token) > 8 {
-		fmt.Printf("CSRF Token: %s... (length %d)\n", token[:8], len(token))
-	} else {
-		fmt.Printf("CSRF Token: %s\n", token)
+	if token == "" {
+		t.Errorf("CSRF token vide")
 	}
-	fmt.Printf("=========================\n\n")
 }

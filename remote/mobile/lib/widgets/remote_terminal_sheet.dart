@@ -362,10 +362,10 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
                 Expanded(
                   child: Text(
                     'Terminal — ${widget.projectName}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: AppColors.inkPrimary,
+                      color: scheme.onSurface,
                       fontFamily: 'monospace',
                     ),
                     overflow: TextOverflow.ellipsis,
@@ -504,10 +504,10 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
                                     Expanded(
                                       child: SelectableText(
                                         entry.command,
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontSize: 12,
                                           fontWeight: FontWeight.w600,
-                                          color: AppColors.inkPrimary,
+                                          color: scheme.onSurface,
                                           fontFamily: 'monospace',
                                         ),
                                       ),
@@ -626,17 +626,17 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
                   child: TextField(
                     controller: _inputController,
                     autofocus: false,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12.5,
                       fontFamily: 'monospace',
-                      color: AppColors.inkPrimary,
+                      color: scheme.onSurface,
                     ),
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText:
                           'Taper une commande CLI (ex: git pull, npm test)...',
                       hintStyle: TextStyle(
                         fontSize: 12,
-                        color: AppColors.inkMuted,
+                        color: scheme.onSurfaceVariant,
                       ),
                       border: InputBorder.none,
                       isDense: true,

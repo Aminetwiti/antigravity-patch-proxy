@@ -267,8 +267,9 @@ func extractSessionMetadata(transcriptPath, cascadeID string) (title string, wor
 	convTitlesMu.RUnlock()
 
 	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 10*1024*1024)
+	hBuf := AcquireHistoryBuffer()
+	defer ReleaseHistoryBuffer(hBuf)
+	scanner.Buffer(*hBuf, len(*hBuf))
 
 	lineCount := 0
 	hasOfficialTitle := false
@@ -1022,9 +1023,10 @@ func GetSessionHistory(cascadeID string) ([]HistoryMessage, error) {
 	var messages []HistoryMessage
 	scanner := bufio.NewScanner(f)
 
-	// Allow up to 10MB per line to handle very large text blocks in JSONL
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 10*1024*1024)
+	// Allow up to 10MB per line to handle very large text blocks in JSONL via sync.Pool
+	hBuf := AcquireHistoryBuffer()
+	defer ReleaseHistoryBuffer(hBuf)
+	scanner.Buffer(*hBuf, len(*hBuf))
 
 	for scanner.Scan() {
 		if msg := parseTranscriptLine(scanner.Bytes()); msg != nil {
@@ -1080,8 +1082,9 @@ func countTranscriptActivity(cascadeID string) map[string]int {
 	seenTasks := make(map[string]bool)
 
 	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 10*1024*1024)
+	hBuf := AcquireHistoryBuffer()
+	defer ReleaseHistoryBuffer(hBuf)
+	scanner.Buffer(*hBuf, len(*hBuf))
 
 	for scanner.Scan() {
 		var entry struct {
@@ -1166,8 +1169,9 @@ func ExtractSubagents(cascadeID string) []SubagentSummary {
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 10*1024*1024)
+	hBuf := AcquireHistoryBuffer()
+	defer ReleaseHistoryBuffer(hBuf)
+	scanner.Buffer(*hBuf, len(*hBuf))
 
 	seen := make(map[string]int) // id -> index in results
 

@@ -135,8 +135,23 @@ func ParseDevicesOutput(out []byte) []DeviceInfo {
 	return devices
 }
 
+var validDeviceIDRe = regexp.MustCompile(`^[a-zA-Z0-9_.:-]+$`)
+
+func validateDeviceID(deviceID string) error {
+	if deviceID == "" {
+		return nil
+	}
+	if !validDeviceIDRe.MatchString(deviceID) {
+		return fmt.Errorf("identifiant d'appareil invalide: %q", deviceID)
+	}
+	return nil
+}
+
 // ListDirectory liste les fichiers d'un dossier distant sur l'appareil.
 func (s *Service) ListDirectory(ctx context.Context, deviceID, remotePath string) ([]FileEntry, error) {
+	if err := validateDeviceID(deviceID); err != nil {
+		return nil, err
+	}
 	cleanPath, err := sanitizePath(remotePath)
 	if err != nil {
 		return nil, err
@@ -207,6 +222,9 @@ func ParseLsOutput(parentPath string, out []byte) []FileEntry {
 
 // SearchFiles recherche récursivement des fichiers sur l'appareil.
 func (s *Service) SearchFiles(ctx context.Context, deviceID, remotePath, pattern string, maxDepth int) ([]string, error) {
+	if err := validateDeviceID(deviceID); err != nil {
+		return nil, err
+	}
 	cleanPath, err := sanitizePath(remotePath)
 	if err != nil {
 		return nil, err
@@ -249,6 +267,9 @@ func (s *Service) SearchFiles(ctx context.Context, deviceID, remotePath, pattern
 
 // PullFile transfère un fichier depuis l'appareil Android vers le poste hôte local.
 func (s *Service) PullFile(ctx context.Context, deviceID, remotePath, localDestPath string) error {
+	if err := validateDeviceID(deviceID); err != nil {
+		return err
+	}
 	cleanRemote, err := sanitizePath(remotePath)
 	if err != nil {
 		return err
@@ -265,6 +286,9 @@ func (s *Service) PullFile(ctx context.Context, deviceID, remotePath, localDestP
 
 // PushFile transfère un fichier depuis le poste hôte vers l'appareil Android.
 func (s *Service) PushFile(ctx context.Context, deviceID, localSrcPath, remoteDestPath string) error {
+	if err := validateDeviceID(deviceID); err != nil {
+		return err
+	}
 	cleanRemote, err := sanitizePath(remoteDestPath)
 	if err != nil {
 		return err

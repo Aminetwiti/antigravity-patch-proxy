@@ -86,19 +86,13 @@ func TestPairingManager_HTTPHandler(t *testing.T) {
 	pm := NewPairingManager()
 	handler := pm.HTTPHandler()
 
-	// 1. GET /pair -> affiche PIN et expiresIn
+	// 1. GET /pair -> interdit (sécurité anti-fuite de PIN)
 	reqGet := httptest.NewRequest(http.MethodGet, "/pair", nil)
 	rrGet := httptest.NewRecorder()
 	handler.ServeHTTP(rrGet, reqGet)
 
-	if rrGet.Code != http.StatusOK {
-		t.Fatalf("GET /pair statut %d != 200", rrGet.Code)
-	}
-	var getResp map[string]interface{}
-	json.NewDecoder(rrGet.Body).Decode(&getResp)
-	pin := getResp["pin"].(string)
-	if len(pin) != 6 {
-		t.Fatalf("PIN invalide: %v", pin)
+	if rrGet.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET /pair statut %d != 405 MethodNotAllowed", rrGet.Code)
 	}
 
 	// 2. POST /pair avec mauvais PIN

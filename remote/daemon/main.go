@@ -13,13 +13,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/antigravity/remote-daemon/pkg/auth"
+	"github.com/antigravity/remote-daemon/pkg/config"
 	"github.com/antigravity/remote-daemon/pkg/connectrpc"
 	"github.com/antigravity/remote-daemon/pkg/discovery"
 	"github.com/antigravity/remote-daemon/pkg/gateway"
 	"github.com/antigravity/remote-daemon/pkg/tunnel"
 )
 
-// maskToken affiche un pr├®fixe du jeton sans paniquer sur les jetons courts.
+// maskToken affiche un préfixe du jeton sans paniquer sur les jetons courts.
 func maskToken(token string) string {
 	if len(token) > 10 {
 		return token[:10]
@@ -28,34 +30,31 @@ func maskToken(token string) string {
 }
 
 func main() {
+	cfg := config.LoadConfig()
+
 	var listenPort int
 	var host string
 	var tunnelFlag string
 	var authToken string
 	var approvalTimeoutMin int
 
-	defaultPort := 8090
-	if envPort := os.Getenv("AG_DAEMON_PORT"); envPort != "" {
-		if p, err := strconv.Atoi(envPort); err == nil {
-			defaultPort = p
-		}
-	}
-	defaultHost := "0.0.0.0"
-	if envHost := os.Getenv("AG_DAEMON_HOST"); envHost != "" {
-		defaultHost = envHost
-	}
-	defaultAuthToken := os.Getenv("AG_DAEMON_AUTH_TOKEN")
-
-	flag.IntVar(&listenPort, "port", defaultPort, "Port for the WebSocket server")
-	flag.StringVar(&host, "host", defaultHost, "Host for the WebSocket server")
-	flag.StringVar(&tunnelFlag, "tunnel", "", "Tunnel provider (ngrok, cloudflare, pinggy)")
-	flag.StringVar(&authToken, "auth-token", defaultAuthToken, "Authentication token for Mobile App")
-	flag.IntVar(&approvalTimeoutMin, "approval-timeout", 5, "Auto-deny timeout for pending approvals in minutes (0 = disabled)")
+	flag.IntVar(&listenPort, "port", cfg.Port, "Port for the WebSocket server")
+	flag.StringVar(&host, "host", cfg.Host, "Host for the WebSocket server")
+	flag.StringVar(&tunnelFlag, "tunnel", cfg.TunnelProvider, "Tunnel provider (ngrok, cloudflare, pinggy)")
+	flag.StringVar(&authToken, "auth-token", "", "Authentication token for Mobile App (generates dynamic CSPRNG if omitted)")
+	flag.IntVar(&approvalTimeoutMin, "approval-timeout", int(cfg.ApprovalTimeout.Minutes()), "Auto-deny timeout for pending approvals in minutes (0 = disabled)")
 	flag.Parse()
 
-	fmt.Printf("­ƒÜÇ Starting Antigravity Remote Daemon Bridge on %s:%d...\n", host, listenPort)
-	if authToken != "" {
-		fmt.Println("­ƒöÆ Authentication is ENABLED")
+	authMgr, resolvedToken, err := auth.NewTokenManager(authToken)
+	if err != nil {
+		log.Fatalf("❌ Failed to initialize auth manager: %v", err)
+	}
+
+	fmt.Printf("🚀 Starting Antigravity Remote Daemon Bridge on %s:%d...\n", host, listenPort)
+	if authMgr.IsGenerated() {
+		fmt.Printf("🔒 Dynamic CSPRNG Auth Token generated: %s\n", resolvedToken)
+	} else {
+		fmt.Println("🔒 Authentication is ENABLED with configured token")
 	}
 
 	info, err := discovery.Discover()
@@ -109,8 +108,10 @@ func main() {
 	pin, _ := pairingMgr.CurrentPIN()
 	fmt.Printf("­ƒöæ Code PIN d'appairage mobile : %s (valable 60s ÔÇö saisissez ce code sur votre t├®l├®phone)\n", pin)
 
-	server := gateway.NewServer(rpcClient, authToken)
-	server.SetTokenValidator(pairingMgr.ValidateToken)
+	server := gateway.NewServer(rpcClient, resolvedToken)
+	server.SetTokenValidator(func(t string) bool {
+		return authMgr.Validate(t) || pairingMgr.ValidateToken(t)
+	})
 	// Variante enrichie (3.3) : le gateway r├®cup├¿re deviceId + allowedProjects
 	// au handshake pour le filtrage par projet (send_prompt / list_sessions).
 	server.SetSessionValidator(pairingMgr.ValidateSession)

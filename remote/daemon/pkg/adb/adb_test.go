@@ -103,8 +103,9 @@ func TestServiceOperations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PullFile failed: %v", err)
 	}
-	if strings.Join(mock.lastArgs, " ") != "-s RFCT123456X pull /sdcard/DCIM/photo.jpg C:\\tmp\\photo.jpg" &&
-		strings.Join(mock.lastArgs, " ") != "-s RFCT123456X pull /sdcard/DCIM/photo.jpg C:/tmp/photo.jpg" {
-		t.Logf("Last args: %v", mock.lastArgs)
+	joinedArgs := strings.Join(mock.lastArgs, " ")
+	if joinedArgs != "-s RFCT123456X pull /sdcard/DCIM/photo.jpg C:\\tmp\\photo.jpg" &&
+		joinedArgs != "-s RFCT123456X pull /sdcard/DCIM/photo.jpg C:/tmp/photo.jpg" {
+		t.Errorf("Last args mismatch: got %q", joinedArgs)
 	}
 }

@@ -1,4 +1,4 @@
-﻿package gateway
+package gateway
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/antigravity/remote-daemon/pkg/connectrpc"
 )
 
 // Scheduler est un moteur cron minimaliste, stdlib-only (aucune dÃ©pendance
@@ -68,6 +70,7 @@ func (sc *Scheduler) Stop() {
 func (sc *Scheduler) tick(now time.Time) {
 	sc.maybePushQuota(now)
 
+	nowMinute := now.Unix() / 60
 	sc.server.mu.Lock()
 	tasks := make([]*ScheduledTask, 0, len(sc.server.scheduledTasks))
 	for _, t := range sc.server.scheduledTasks {
@@ -79,9 +82,13 @@ func (sc *Scheduler) tick(now time.Time) {
 		if task == nil || !task.IsEnabled {
 			continue
 		}
+		if task.LastRunMinute == nowMinute {
+			continue
+		}
 		if !cronMatches(task.CronExpression, now) {
 			continue
 		}
+		task.LastRunMinute = nowMinute
 		logJSON.Info("scheduled_task_fire", "taskId", task.ID, "cron", task.CronExpression)
 		go sc.server.runScheduledTask(task.ID)
 	}
@@ -290,7 +297,7 @@ func nextRunAt(expr string) string {
 	return ""
 }
 
-// extractCascadeID dÃ©code l'ID de cascade depuis la rÃ©ponse protobuf brute de
+// extractCascadeID décode l'ID de cascade depuis la réponse protobuf brute de
 // CreateCascade. Best-effort : champ #1 length-delimited = l'ID textuel.
 func extractCascadeID(raw []byte) string {
 	if len(raw) == 0 {
@@ -298,19 +305,13 @@ func extractCascadeID(raw []byte) string {
 	}
 	body := raw
 	// Frame gRPC-Web : 1 octet de flags + 4 octets de longueur big-endian.
-	// Le champ #1 du protobuf (0x0A) suit immÃ©diatement.
-	if len(body) > 5 && body[0] == 0 {
-		body = body[5:]
-	} else if len(body) > 5 && body[0]&0x80 != 0 {
+	if len(body) > 5 && (body[0] == 0 || body[0]&0x80 != 0) {
 		body = body[5:]
 	}
-	if len(body) > 2 && body[0] == 0x0A {
-		ln := int(body[1])
-		if ln <= 0 || ln > 128 {
-			return ""
-		}
-		if len(body) >= 2+ln {
-			return string(body[2 : 2+ln])
+	fields := connectrpc.DecodeFields(body)
+	for _, f := range fields {
+		if f.Num == 1 && f.WireType == 2 && len(f.Bytes) > 0 {
+			return string(f.Bytes)
 		}
 	}
 	return ""

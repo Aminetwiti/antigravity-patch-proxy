@@ -86,7 +86,9 @@ func ParseFrameEvents(raw []byte, cascadeID string) []StreamEvent {
 		if IsPrintable(s) && len(s) > 0 {
 			trimmed := strings.TrimSpace(s)
 			isJSONApproval := strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") &&
-				(strings.Contains(trimmed, `"tool"`) || strings.Contains(trimmed, `"callId"`) || strings.Contains(trimmed, `"requestedInteraction"`) || strings.Contains(trimmed, `"command"`))
+				((strings.Contains(trimmed, `"tool"`) && (strings.Contains(trimmed, `"callId"`) || strings.Contains(trimmed, `"name"`))) ||
+					strings.Contains(trimmed, `"requestedInteraction"`) ||
+					(strings.Contains(trimmed, `"command"`) && strings.Contains(trimmed, `"callId"`)))
 
 			if isJSONApproval {
 				events = append(events, StreamEvent{
@@ -176,7 +178,9 @@ func ParseFrameEvents(raw []byte, cascadeID string) []StreamEvent {
 				if sub.WireType == 2 && len(sub.Bytes) > 0 && sub.Num != 1 {
 					st := strings.TrimSpace(string(sub.Bytes))
 					if IsPrintable(st) && len(st) > 0 {
-						if strings.Contains(st, "run_command") || strings.Contains(st, "write_to_file") || strings.Contains(st, "read_file") || strings.Contains(st, "edit_file") || strings.Contains(st, "list_files") || strings.Contains(st, "search_files") || strings.Contains(st, "ask_question") || strings.Contains(st, "ask_user") {
+						isSubJSONTool := strings.HasPrefix(st, "{") && strings.HasSuffix(st, "}") &&
+							(strings.Contains(st, `"tool"`) || strings.Contains(st, `"command"`) || strings.Contains(st, `"questions"`))
+						if isSubJSONTool {
 							events = append(events, StreamEvent{
 								Kind:         EventKindApprovalRequired,
 								CascadeID:    cascadeID,

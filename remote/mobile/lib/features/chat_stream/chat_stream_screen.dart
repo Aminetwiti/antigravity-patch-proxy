@@ -1872,25 +1872,27 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     required String confirmLabel,
     required String command,
   }) async {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1B1D22),
-        title: Text(title, style: const TextStyle(fontSize: 15, color: AppColors.inkPrimary)),
+        backgroundColor: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainer,
+        title: Text(title, style: TextStyle(fontSize: 15, color: scheme.onSurface)),
         content: Text(
           message,
-          style: const TextStyle(fontSize: 13, color: AppColors.inkSecondary),
+          style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Annuler', style: TextStyle(color: AppColors.inkMuted)),
+            child: Text('Annuler', style: TextStyle(color: scheme.onSurfaceVariant)),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: confirmLabel == 'Tout rejeter'
                   ? AppColors.danger
-                  : null,
+                  : scheme.primary,
             ),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: Text(confirmLabel),
@@ -2001,31 +2003,33 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   Widget _buildArtifactTabContent(String artifactName) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
         Row(
           children: [
-            const Icon(Icons.description_outlined, size: 20, color: AppColors.accentBlue),
+            Icon(Icons.description_outlined, size: 20, color: scheme.primary),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
                 artifactName,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w700,
-                  color: AppColors.inkPrimary,
+                  color: scheme.onSurface,
                 ),
               ),
             ),
           ],
         ),
         const SizedBox(height: 12),
-        const Divider(color: Color(0xFF2C2F36)),
+        Divider(color: isDark ? const Color(0xFF2C2F36) : scheme.outlineVariant),
         const SizedBox(height: 12),
         Text(
           'Contenu de l\'artefact "$artifactName" généré pour cette session.',
-          style: const TextStyle(fontSize: 13, color: AppColors.inkSecondary, height: 1.5),
+          style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant, height: 1.5),
         ),
       ],
     );

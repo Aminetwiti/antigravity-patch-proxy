@@ -1,4 +1,4 @@
-﻿package tunnel
+package tunnel
 
 import (
 	"strings"
@@ -9,9 +9,9 @@ func TestWebsocketURLConversion(t *testing.T) {
 	httpsURL := "https://random123.trycloudflare.com"
 	expectedWSS := "wss://random123.trycloudflare.com/ws"
 
-	wsURL := strings.Replace(httpsURL, "https://", "wss://", 1) + "/ws"
+	wsURL := WebSocketURL(httpsURL)
 	if wsURL != expectedWSS {
-		t.Errorf("Attendu %s, reÃ§u %s", expectedWSS, wsURL)
+		t.Errorf("Attendu %s, reçu %s", expectedWSS, wsURL)
 	}
 }
 

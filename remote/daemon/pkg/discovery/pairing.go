@@ -268,17 +268,13 @@ func (pm *PairingManager) HTTPHandler() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 
 		if r.Method == http.MethodGet {
-			// Visualisation du statut/PIN pour la console hôte
-			pin, remaining := pm.CurrentPIN()
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"pin":       pin,
-				"expiresIn": int(remaining.Seconds()),
-			})
+			// Sécurité : le PIN ne doit jamais être exposé via HTTP (uniquement console hôte)
+			http.Error(w, `{"error":"Méthode non autorisée"}`, http.StatusMethodNotAllowed)
 			return
 		}
 
 		if r.Method == http.MethodDelete {
-			// Revocation d'un device : DELETE /pair?deviceId=xxx (admin hôte).
+			// Révocation d'un device : DELETE /pair?deviceId=xxx (admin hôte).
 			deviceID := r.URL.Query().Get("deviceId")
 			if deviceID == "" {
 				http.Error(w, `{"error":"deviceId requis"}`, http.StatusBadRequest)

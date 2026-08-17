@@ -322,6 +322,7 @@ type ScheduledTask struct {
 	DurationSeconds int                  `json:"durationSeconds,omitempty"`
 	IsDaemon        bool                 `json:"isDaemon"`
 	IterationsRun   int                  `json:"iterationsRun"`
+	LastRunMinute   int64                `json:"lastRunMinute,omitempty"`
 	NextRunAt       string               `json:"nextRunAt,omitempty"`
 	IsEnabled       bool                 `json:"isEnabled"`
 	Status          string               `json:"status"`
@@ -1619,7 +1620,7 @@ func extractCommand(detail string) string {
 // inconnus retombent dans le default ÔÇÆ jamais auto-approuv├®s.
 func isReadOnlyTool(tool string) bool {
 	switch strings.ToLower(tool) {
-	case "read_file", "list_files", "search_files", "grep", "glob", "fetch":
+	case "view_file", "read_file", "list_dir", "list_files", "grep_search", "search_files", "read_resource", "list_resources", "grep", "glob", "fetch", "read_url_content":
 		return true
 	default:
 		return false
@@ -4667,7 +4668,7 @@ func resolvePath(root, requested string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// Le chemin demand├® peut ├¬tre relatif au workspace, ou absolu mais
+	// Le chemin demandé peut être relatif au workspace, ou absolu mais
 	// sous la racine (le mobile envoie des fullPath issus du tree).
 	requested = filepath.Clean(requested)
 	var candidate string
@@ -4678,7 +4679,14 @@ func resolvePath(root, requested string) (string, error) {
 	}
 	candidate = filepath.Clean(candidate)
 
-	rel, err := filepath.Rel(rootAbs, candidate)
+	targetRoot := rootAbs
+	targetCandidate := candidate
+	if runtime.GOOS == "windows" {
+		targetRoot = strings.ToLower(targetRoot)
+		targetCandidate = strings.ToLower(targetCandidate)
+	}
+
+	rel, err := filepath.Rel(targetRoot, targetCandidate)
 	if err != nil {
 		return "", err
 	}

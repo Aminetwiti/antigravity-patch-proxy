@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/protocol/messages.dart';
 import '../features/chat_stream/models/question_choice.dart';
+import '../theme/app_spacing.dart';
 
 /// Carte interactive permettant de répondre aux questions posées par l'agent (AskQuestion).
 /// Inspiré des fonctionnalités de choix interactifs d'AG2R.
@@ -161,11 +162,11 @@ class _AskQuestionChoiceCardState extends State<AskQuestionChoiceCard> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.symmetric(vertical: AppSpacing.space12, horizontal: AppSpacing.space4),
+      padding: AppSpacing.edgeInsetsA16,
       decoration: BoxDecoration(
         color: scheme.surfaceContainer,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppSpacing.borderRadiusLg,
         border: Border.all(
           color: scheme.primary.withValues(alpha: 0.4),
           width: 1.2,
@@ -186,10 +187,10 @@ class _AskQuestionChoiceCardState extends State<AskQuestionChoiceCard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                padding: const EdgeInsets.all(6),
+                padding: AppSpacing.edgeInsetsA4,
                 decoration: BoxDecoration(
                   color: scheme.primary.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: AppSpacing.borderRadiusMd,
                 ),
                 child: Icon(
                   Icons.help_outline_rounded,
@@ -197,7 +198,7 @@ class _AskQuestionChoiceCardState extends State<AskQuestionChoiceCard> {
                   size: 20,
                 ),
               ),
-              const SizedBox(width: 10),
+              AppSpacing.hGap10,
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -211,7 +212,7 @@ class _AskQuestionChoiceCardState extends State<AskQuestionChoiceCard> {
                         letterSpacing: 0.8,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    AppSpacing.vGap4,
                     Text(
                       _question,
                       style: TextStyle(
@@ -226,7 +227,7 @@ class _AskQuestionChoiceCardState extends State<AskQuestionChoiceCard> {
               ),
             ],
           ),
-          const SizedBox(height: 14),
+          AppSpacing.vGap14,
 
           // Liste des options sous forme de cartes/chips cliquables
           if (_options.isNotEmpty) ...[

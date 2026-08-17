@@ -327,14 +327,14 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
                             padding: const EdgeInsets.fromLTRB(8, 14, 8, 6),
                             child: Row(
                               children: [
-                                const Icon(Icons.folder_outlined, size: 13, color: AppColors.inkMuted),
+                                Icon(Icons.folder_outlined, size: 13, color: scheme.onSurfaceVariant),
                                 const SizedBox(width: 6),
                                 Text(
                                   item,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w600,
-                                    color: AppColors.inkMuted,
+                                    color: scheme.onSurfaceVariant,
                                     letterSpacing: 0.2,
                                   ),
                                 ),
@@ -373,31 +373,32 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
   }
 
   Widget _buildEmptyState() {
+    final scheme = Theme.of(context).colorScheme;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.search_off_rounded, size: 42, color: AppColors.inkMuted),
+            Icon(Icons.search_off_rounded, size: 42, color: scheme.onSurfaceVariant),
             const SizedBox(height: 14),
             Text(
               _searchQuery.isNotEmpty
                   ? 'Aucune conversation pour "$_searchQuery"'
                   : 'Aucune conversation disponible',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
-                color: AppColors.inkPrimary,
+                color: scheme.onSurface,
               ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 6),
-            const Text(
+            Text(
               'Les sessions archivées ou supprimées sont automatiquement filtrées.',
               style: TextStyle(
                 fontSize: 12,
-                color: AppColors.inkMuted,
+                color: scheme.onSurfaceVariant,
                 height: 1.4,
               ),
               textAlign: TextAlign.center,
@@ -411,10 +412,10 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
                     _selectedWorkspaceFilter = null;
                   });
                 },
-                icon: const Icon(Icons.refresh_rounded, size: 14, color: AppColors.accentBlue),
-                label: const Text('Effacer les filtres', style: TextStyle(fontSize: 12, color: AppColors.accentBlue)),
+                icon: Icon(Icons.refresh_rounded, size: 14, color: scheme.primary),
+                label: Text('Effacer les filtres', style: TextStyle(fontSize: 12, color: scheme.primary)),
                 style: OutlinedButton.styleFrom(
-                  side: const BorderSide(color: AppColors.accentBlue),
+                  side: BorderSide(color: scheme.primary),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
                 ),
               ),

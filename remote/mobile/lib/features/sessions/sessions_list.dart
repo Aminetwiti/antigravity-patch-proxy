@@ -99,6 +99,8 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final allSessions = widget.sessions ?? [];
     final availableSessions = allSessions
         .where((s) => s.isAvailable && s.id.isNotEmpty)
@@ -599,6 +601,8 @@ class _WorkspaceFolderSectionState extends State<_WorkspaceFolderSection> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final hasMore = widget.sessions.length > 5;
     final visibleSessions = (_showAll || !hasMore)
         ? widget.sessions
@@ -616,19 +620,19 @@ class _WorkspaceFolderSectionState extends State<_WorkspaceFolderSection> {
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               child: Row(
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.folder_outlined,
                     size: 15,
-                    color: Color(0xFF7E8B9B),
+                    color: scheme.onSurfaceVariant,
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       widget.folderName,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w500,
-                        color: Color(0xFF7097C2),
+                        color: scheme.primary,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -636,17 +640,17 @@ class _WorkspaceFolderSectionState extends State<_WorkspaceFolderSection> {
                   // ── Project Options Context Menu (:)
                   PopupMenuButton<String>(
                     tooltip: 'Options du projet',
-                    color: const Color(0xFF1B1D22),
+                    color: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainer,
                     surfaceTintColor: Colors.transparent,
                     elevation: 8,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(AppRadius.md),
-                      side: const BorderSide(color: Color(0xFF2C2F36), width: 1),
+                      side: BorderSide(color: isDark ? const Color(0xFF2C2F36) : scheme.outlineVariant, width: 1),
                     ),
-                    icon: const Icon(
+                    icon: Icon(
                       Icons.more_vert_rounded,
                       size: 15,
-                      color: Color(0xFF8F909A),
+                      color: scheme.onSurfaceVariant,
                     ),
                     padding: EdgeInsets.zero,
                     onSelected: (val) {
@@ -663,30 +667,33 @@ class _WorkspaceFolderSectionState extends State<_WorkspaceFolderSection> {
                         widget.onOpenSettings?.call();
                       }
                     },
-                    itemBuilder: (context) => [
-                      PopupMenuItem<String>(
-                        value: 'copy_name',
-                        height: 32,
-                        child: Row(
-                          children: [
-                            Icon(Icons.copy_rounded, size: 14, color: scheme.onSurface),
-                            const SizedBox(width: 8),
-                            Text('Copy Project Name', style: TextStyle(fontSize: 12.5, color: scheme.onSurface)),
-                          ],
+                    itemBuilder: (ctx) {
+                      final itemScheme = Theme.of(ctx).colorScheme;
+                      return [
+                        PopupMenuItem<String>(
+                          value: 'copy_name',
+                          height: 32,
+                          child: Row(
+                            children: [
+                              Icon(Icons.copy_rounded, size: 14, color: itemScheme.onSurface),
+                              const SizedBox(width: 8),
+                              Text('Copy Project Name', style: TextStyle(fontSize: 12.5, color: itemScheme.onSurface)),
+                            ],
+                          ),
                         ),
-                      ),
-                      PopupMenuItem<String>(
-                        value: 'settings',
-                        height: 32,
-                        child: Row(
-                          children: [
-                            Icon(Icons.settings_outlined, size: 14, color: scheme.onSurface),
-                            const SizedBox(width: 8),
-                            Text('Project Settings', style: TextStyle(fontSize: 12.5, color: scheme.onSurface)),
-                          ],
+                        PopupMenuItem<String>(
+                          value: 'settings',
+                          height: 32,
+                          child: Row(
+                            children: [
+                              Icon(Icons.settings_outlined, size: 14, color: itemScheme.onSurface),
+                              const SizedBox(width: 8),
+                              Text('Project Settings', style: TextStyle(fontSize: 12.5, color: itemScheme.onSurface)),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
+                      ];
+                    },
                   ),
                   const SizedBox(width: 2),
                   // ── New Session in Project (+)
