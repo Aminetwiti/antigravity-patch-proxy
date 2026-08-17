@@ -10,8 +10,8 @@ void main() {
     // (pas de daemon en test) — la panne déclenche le banner + le backoff.
     await tester.pump();
 
-    // Verify session title render
-    expect(find.textContaining('Poème Sur La Gravité'), findsOneWidget);
+    // Verify main screen renders
+    expect(find.byType(AntigravityMainScreen), findsOneWidget);
 
     // Unmount : dispose() du State annule les timers de reconnexion du WS,
     // sinon la vérification « no pending timers » du binding échoue.

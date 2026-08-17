@@ -40,7 +40,10 @@ class ChatStreamScreen extends StatefulWidget {
   final DaemonWebSocketClient? wsClient;
 
   /// Notifie le parent (main.dart) du changement d'état de streaming pour
-  /// mettre à jour les indicateurs de statut en direct dans la barre latérale.
+  /// une session spécifique afin de mettre à jour son statut dans la barre latérale.
+  final void Function(String sessionId, bool isStreaming)? onStreamingSessionChanged;
+
+  /// Notifie le parent (main.dart) du changement d'état de streaming global.
   final ValueChanged<bool>? onStreamingStateChanged;
 
   /// Crée une nouvelle conversation (bouton « + » des tabs). Laissé au parent
@@ -58,6 +61,7 @@ class ChatStreamScreen extends StatefulWidget {
     this.workspacePath,
     this.isConnected = true,
     this.wsClient,
+    this.onStreamingSessionChanged,
     this.onStreamingStateChanged,
     this.onNewConversation,
   });
@@ -724,6 +728,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   void _onStreamStarted(String sessionId) {
     final wasEmpty = _activeStreamingSessions.isEmpty;
     _activeStreamingSessions.add(sessionId);
+    widget.onStreamingSessionChanged?.call(sessionId, true);
     if (wasEmpty) {
       widget.onStreamingStateChanged?.call(true);
     }
@@ -739,6 +744,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
   void _onStreamEnded(String sessionId) {
     _activeStreamingSessions.remove(sessionId);
+    widget.onStreamingSessionChanged?.call(sessionId, false);
     if (_activeStreamingSessions.isEmpty) {
       widget.onStreamingStateChanged?.call(false);
     }
@@ -860,7 +866,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     });
   }
 
-  void _removeQuestion(String requestId, [String? targetSessionId]) {
+  void _removeQuestion(String requestId) {
     setState(() {
       _sessionQuestions.forEach((cid, list) {
         list.removeWhere((item) => item.requestId == requestId);
@@ -1284,12 +1290,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         setState(() {
           final idx = buf.indexWhere((m) => m.id == assistantId);
           if (idx >= 0) {
-            String? error =
-                localEnd?['error'] as String? ??
-                (localEnd?['data'] is Map
-                    ? (localEnd!['data'] as Map)['outcome'] == 'error'
-                        ? (localEnd!['data'] as Map)['message'] as String? ?? 'Erreur'
-                        : null
+            final localData = localEnd?['data'];
+            String? error = localEnd?['error'] as String? ??
+                (localData is Map
+                    ? (localData['outcome'] == 'error'
+                        ? localData['message'] as String? ?? 'Erreur'
+                        : null)
                     : null);
             if (error != null && (error.contains('MODEL_CAPACITY_EXHAUSTED') || error.contains('No capacity available') || error.contains('503'))) {
               error = '⚠️ Capacité du modèle saturée sur les serveurs (HTTP 503 / MODEL_CAPACITY_EXHAUSTED).\nVeuillez basculer vers Gemini 3.7 Flash, Claude ou un modèle custom via le sélecteur ci-dessous.';
@@ -1786,6 +1792,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         }
       }
     });
+    widget.onStreamingSessionChanged?.call(targetSession, false);
     if (_activeStreamingSessions.isEmpty) {
       widget.onStreamingStateChanged?.call(false);
     }
@@ -2012,33 +2019,56 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       final ws = widget.workspacePath?.isNotEmpty == true
           ? widget.workspacePath
           : (widget.activeProjectName.isNotEmpty ? widget.activeProjectName : null);
-      final res = await api.getVcsState(workspacePath: ws);
+
+      // Priorité 1 : get_context.modifiedFiles (parsés du transcript) —
+      // même source que le badge filesChangedCount. Toujours cohérent.
+      final ctx = await api.getContext(
+        cascadeId: widget.activeSessionId.isNotEmpty ? widget.activeSessionId : null,
+        workspacePath: ws,
+      );
+      final ctxFiles = ctx['modifiedFiles'];
       final list = <SessionModifiedFile>[];
-      for (final key in const ['workingDirectoryChanges', 'stagedChanges']) {
-        final entries = res[key];
-        if (entries is List) {
-          for (final item in entries) {
-            String path = '';
-            if (item is String && item.isNotEmpty) {
-              path = item;
-            } else if (item is Map && item['uri'] is String) {
-              path = item['uri'] as String;
-            }
-            if (path.isNotEmpty) {
-              var clean = path.replaceAll('\\', '/');
-              if (clean.startsWith('file:///')) clean = clean.substring(8);
-              if (clean.startsWith('file://')) clean = clean.substring(7);
-              if (!_modifiedFiles.contains(clean)) {
-                _modifiedFiles.add(clean);
+      if (ctxFiles is List && ctxFiles.isNotEmpty) {
+        for (final item in ctxFiles) {
+          if (item is! String || item.isEmpty) continue;
+          var clean = item.replaceAll('\\', '/');
+          if (clean.startsWith('file:///')) clean = clean.substring(8);
+          if (clean.startsWith('file://')) clean = clean.substring(7);
+          if (!_modifiedFiles.contains(clean)) _modifiedFiles.add(clean);
+          if (!list.any((f) => f.path == clean)) {
+            list.add(SessionModifiedFile(path: clean, additions: 1, deletions: 0));
+          }
+        }
+      }
+
+      // Fallback : git status (staged + working tree)
+      if (list.isEmpty) {
+        final res = await api.getVcsState(workspacePath: ws);
+        for (final key in const ['workingDirectoryChanges', 'stagedChanges']) {
+          final entries = res[key];
+          if (entries is List) {
+            for (final item in entries) {
+              String path = '';
+              if (item is String && item.isNotEmpty) {
+                path = item;
+              } else if (item is Map && item['uri'] is String) {
+                path = item['uri'] as String;
               }
-              if (!list.any((f) => f.path == clean)) {
-                list.add(SessionModifiedFile(path: clean, additions: 1, deletions: 0));
+              if (path.isNotEmpty) {
+                var clean = path.replaceAll('\\', '/');
+                if (clean.startsWith('file:///')) clean = clean.substring(8);
+                if (clean.startsWith('file://')) clean = clean.substring(7);
+                if (!_modifiedFiles.contains(clean)) _modifiedFiles.add(clean);
+                if (!list.any((f) => f.path == clean)) {
+                  list.add(SessionModifiedFile(path: clean, additions: 1, deletions: 0));
+                }
               }
             }
           }
         }
       }
-      if (mounted && list.isNotEmpty) {
+
+      if (mounted) {
         setState(() {
           _modifiedFileList
             ..clear()
@@ -2162,6 +2192,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       api: api,
       artifactPath: filePath,
       artifactName: name.isEmpty ? 'fichier' : name,
+      cascadeId: widget.activeSessionId,
+      workspacePath: widget.workspacePath,
     );
   }
 

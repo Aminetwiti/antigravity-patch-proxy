@@ -116,9 +116,9 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final DaemonWebSocketClient _wsClient = DaemonWebSocketClient();
 
-  String _activeSessionId = 's3';
+  String _activeSessionId = '';
   final String _activeProjectName = 'antigravity-add-model-main';
-  String _activeSessionTitle = 'Poème Sur La Gravité';
+  String _activeSessionTitle = '';
 
   DaemonApi? _api;
   Map<String, dynamic> _contextStats = {};
@@ -316,20 +316,20 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     }
   }
 
-  /// Arrimage automatique instantané (Pilier 3) : au connect, synchronise
-  /// immédiatement l'application mobile sur la session active de l'IDE PC.
+  /// Arrimage initial : au connect, synchronise l'application mobile sur la
+  /// session active de l'IDE PC UNIQUEMENT si aucune session n'est encore
+  /// active/sélectionnée sur le mobile. Si une session est déjà active,
+  /// elle ne doit JAMAIS être écrasée (Règle fondamentale).
   Future<void> _autoDockActiveSession() async {
     final api = _api;
     if (api == null) return;
     try {
-      final s = await SettingsStore.load();
-      final autoFollow = (s['autoFollowEnabled'] as bool?) ?? true;
-      if (!autoFollow) return;
+      if (_activeSessionId.isNotEmpty) return;
       final active = await api.getActiveSession();
-      if (active != null && mounted) {
+      if (active != null && mounted && _activeSessionId.isEmpty) {
         final cid = active['cascadeId'] as String? ?? '';
         final title = active['title'] as String? ?? '';
-        if (cid.isNotEmpty && cid != _activeSessionId) {
+        if (cid.isNotEmpty) {
           setState(() {
             _activeSessionId = cid;
             if (title.isNotEmpty) _activeSessionTitle = title;
@@ -494,10 +494,10 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
               _sessions = [newSess, ...sessions.where((s) => s.id != _activeSessionId)];
             } else {
               _sessions = sessions;
-              if (!stillActive || _activeSessionId == 's3') {
+              if (_activeSessionId.isEmpty || (!stillActive && _activeSessionTitle != 'Nouvelle conversation')) {
                 _activeSessionId = sessions.first.id;
                 _activeSessionTitle = sessions.first.title;
-              } else {
+              } else if (stillActive) {
                 final cur = sessions.firstWhere((s) => s.id == _activeSessionId);
                 _activeSessionTitle = cur.title;
               }
@@ -619,25 +619,24 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         return;
       }
 
-      // session_focus_changed : push instantané du daemon (arrimage automatique bidirectionnel)
-      // dès que l'utilisateur bascule de session ou démarre une requête sur le PC.
+      // session_focus_changed : un événement distant ne doit JAMAIS changer
+      // automatiquement la session active de l'UI Flutter (Règle fondamentale).
+      // On met à jour les métadonnées de la session dans _sessions si présente,
+      // sans toucher à _activeSessionId.
       if (type == 'session_focus_changed') {
         final data = msg['data'];
         if (data is Map) {
           final cid = (data['cascadeId'] ?? data['focusedCascadeId']) as String? ?? '';
           final title = data['title'] as String? ?? '';
-          final autoFollow = (_savedSettings['autoFollowEnabled'] as bool?) ?? true;
-          if (cid.isNotEmpty && autoFollow && cid != _activeSessionId) {
+          if (cid.isNotEmpty && title.isNotEmpty) {
             setState(() {
-              _activeSessionId = cid;
-              if (title.isNotEmpty) _activeSessionTitle = title;
+              _sessions = _sessions.map((s) {
+                if (s.id == cid) {
+                  return s.copyWith(title: title);
+                }
+                return s;
+              }).toList();
             });
-            _refreshContext();
-            SettingsStore.saveSession(
-              wsUrl: _wsClient.targetUrl,
-              token: _wsClient.authToken ?? '',
-              sessionId: _activeSessionId,
-            );
           }
         }
         return;
@@ -645,7 +644,8 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
 
       // sessions_updated : push réactif du daemon (flux Jetbox) — payload
       // complet au format list_sessions. Évite le rechargement réseau complet
-      // (et la latence GetAllCascades) ; met à jour la sidebar en place.
+      // (et la latence GetAllCascades) ; met à jour la sidebar en place
+      // SANS changer la session active sélectionnée dans l'UI.
       if (type == 'sessions_updated') {
         final data = msg['data'];
         if (data is Map) {
@@ -672,13 +672,13 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                 _sessions = [newSess, ...parsed.where((s) => s.id != _activeSessionId)];
               } else {
                 _sessions = parsed;
-                // Si la session active a disparu (supprimée depuis le PC),
-                // bascule proprement sur la plus récente.
-                if (_activeSessionId.isNotEmpty && !stillActive) {
+                // Si aucune session n'était active (lancement initial), initialise avec la première.
+                // Si la session active a été supprimée sur le PC, bascule proprement.
+                if (_activeSessionId.isEmpty || (!stillActive && _activeSessionTitle != 'Nouvelle conversation')) {
                   _activeSessionId = parsed.first.id;
                   _activeSessionTitle = parsed.first.title;
                   _refreshContext();
-                } else if (_activeSessionId.isNotEmpty) {
+                } else if (stillActive) {
                   final current = parsed.firstWhere((s) => s.id == _activeSessionId);
                   _activeSessionTitle = current.title;
                 }
@@ -687,10 +687,8 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
             return;
           }
         }
-        // Payload vide (hub vide) : on laisse le chemin de repli recharger.
+        return;
       }
-
-      _refreshSessions();
     });
   }
 
@@ -1058,11 +1056,11 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       workspacePath: activeWs,
       isConnected: isConnected,
       wsClient: _wsClient,
-      onStreamingStateChanged: (isStreaming) {
+      onStreamingSessionChanged: (sessionId, isStreaming) {
         if (!mounted) return;
         setState(() {
           _sessions = _sessions.map((s) {
-            if (s.id == _activeSessionId) {
+            if (s.id == sessionId) {
               return s.copyWith(status: isStreaming ? 'CASCADE_STATUS_RUNNING' : 'CASCADE_STATUS_READY');
             }
             return s;
@@ -1103,7 +1101,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           children: [
             Expanded(
               child: Text(
-                '$_activeProjectName / $_activeSessionTitle',
+                '$_activeProjectName${_activeSessionTitle.isNotEmpty ? ' / $_activeSessionTitle' : ''}',
                 style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
                 overflow: TextOverflow.ellipsis,
               ),

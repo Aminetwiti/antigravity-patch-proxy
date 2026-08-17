@@ -258,14 +258,25 @@ func (s *Server) executeTaskPrompt(task ScheduledTask) error {
 	// peuvent couper le stream headless immÃ©diatement au lieu d'attendre 120 s.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	schedReqID := "scheduled:" + task.ID
 	s.mu.Lock()
-	s.activeCancels[cascadeID] = cancel
-	s.activeRequestIDs[cascadeID] = "scheduled:" + task.ID
+	if s.activeCancels[cascadeID] == nil {
+		s.activeCancels[cascadeID] = make(map[string]context.CancelFunc)
+	}
+	s.activeCancels[cascadeID][schedReqID] = cancel
+	s.activeRequestIDs[cascadeID] = schedReqID
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
-		delete(s.activeCancels, cascadeID)
-		delete(s.activeRequestIDs, cascadeID)
+		if m, ok := s.activeCancels[cascadeID]; ok {
+			delete(m, schedReqID)
+			if len(m) == 0 {
+				delete(s.activeCancels, cascadeID)
+			}
+		}
+		if s.activeRequestIDs[cascadeID] == schedReqID {
+			delete(s.activeRequestIDs, cascadeID)
+		}
 		s.mu.Unlock()
 	}()
 

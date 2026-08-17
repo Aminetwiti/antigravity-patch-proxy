@@ -271,8 +271,8 @@ type Server struct {
 	// outbox : persistance disque des send_prompt non confirm├®s (offline
 	// buffering 3.2) ÔÇö le mobile les r├®-affiche via sync_session.
 	outbox *DaemonOutbox
-	// activeCancels : cascadeId ÔåÆ fonction d'annulation active
-	activeCancels map[string]context.CancelFunc
+	// activeCancels : cascadeId → requestId → fonction d'annulation active
+	activeCancels map[string]map[string]context.CancelFunc
 	// activeRequestIDs : cascadeId ÔåÆ requestId en cours
 	activeRequestIDs map[string]string
 	// scheduledTasks : taskId ÔåÆ t├óche planifi├®e g├®r├®e par le daemon
@@ -374,7 +374,7 @@ func NewServer(client RPCClient, authToken string) *Server {
 		writeLocks:       make(map[*websocket.Conn]*sync.Mutex),
 		streamBuffer:     NewSessionStreamBuffer(200),
 		outbox:           NewDaemonOutbox(),
-		activeCancels:    make(map[string]context.CancelFunc),
+		activeCancels:    make(map[string]map[string]context.CancelFunc),
 		activeRequestIDs: make(map[string]string),
 		scheduledTasks:   make(map[string]*ScheduledTask),
 		terminals:        newTerminalPtyManager(),
@@ -913,20 +913,20 @@ const mcpProxyBase = "http://127.0.0.1:50999"
 // CancelGeneration interrompt une cascade active et diffuse stream_end(cancelled).
 func (s *Server) CancelGeneration(cascadeID string) {
 	s.mu.Lock()
-	cancel, hasCancel := s.activeCancels[cascadeID]
-	reqID := s.activeRequestIDs[cascadeID]
-	// Un stream_end(cancelled) d├®j├á ├®mis (par la goroutine du send_prompt)
-	// puis retransmis ici cr├®erait une course de d├®duplication : si le
-	// requestId actif a d├®j├á ├®t├® confirm├® ├á l'outbox, ce cancel tardif est un
-	// no-op. Sinon on diffuse un stream_end(cancelled) avec un requestId de
-	// repli (le mobile n'a pas besoin de corr├®ler une annulation).
-	if hasCancel {
+	cancels := make([]context.CancelFunc, 0)
+	if m, ok := s.activeCancels[cascadeID]; ok {
+		for _, c := range m {
+			if c != nil {
+				cancels = append(cancels, c)
+			}
+		}
 		delete(s.activeCancels, cascadeID)
-		delete(s.activeRequestIDs, cascadeID)
 	}
+	reqID := s.activeRequestIDs[cascadeID]
+	delete(s.activeRequestIDs, cascadeID)
 	s.mu.Unlock()
 
-	if cancel != nil {
+	for _, cancel := range cancels {
 		cancel()
 	}
 	s.clearApproval(cascadeID)
@@ -1580,10 +1580,14 @@ func (s *Server) purgeCascadeState(cascadeID string) {
 		}
 	}
 	delete(s.activeCascades, cascadeID)
-	if cancel, ok := s.activeCancels[cascadeID]; ok && cancel != nil {
-		cancel()
+	if m, ok := s.activeCancels[cascadeID]; ok {
+		for _, cancel := range m {
+			if cancel != nil {
+				cancel()
+			}
+		}
+		delete(s.activeCancels, cascadeID)
 	}
-	delete(s.activeCancels, cascadeID)
 	delete(s.activeRequestIDs, cascadeID)
 	s.mu.Unlock()
 }
@@ -3218,7 +3222,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		s.mu.Lock()
-		s.activeCancels[msg.CascadeID] = cancel
+		if s.activeCancels[msg.CascadeID] == nil {
+			s.activeCancels[msg.CascadeID] = make(map[string]context.CancelFunc)
+		}
+		s.activeCancels[msg.CascadeID][msg.RequestID] = cancel
 		s.activeRequestIDs[msg.CascadeID] = msg.RequestID
 		s.mu.Unlock()
 
@@ -3227,8 +3234,15 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.ClearCascadeActive(msg.CascadeID)
 			s.mu.Lock()
 			cancel()
-			delete(s.activeCancels, msg.CascadeID)
-			delete(s.activeRequestIDs, msg.CascadeID)
+			if m, ok := s.activeCancels[msg.CascadeID]; ok {
+				delete(m, msg.RequestID)
+				if len(m) == 0 {
+					delete(s.activeCancels, msg.CascadeID)
+				}
+			}
+			if s.activeRequestIDs[msg.CascadeID] == msg.RequestID {
+				delete(s.activeRequestIDs, msg.CascadeID)
+			}
 			s.clientInFlight[conn]--
 			s.mu.Unlock()
 		}()
@@ -3238,14 +3252,6 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		startData["hostActive"] = hostActiveSince(hostActiveWindow)
 		s.broadcast(OutgoingMessage{Type: "stream_start", RequestID: msg.RequestID, CascadeID: msg.CascadeID, Data: startData})
 		logJSON.Info("stream_start", "requestId", msg.RequestID, "cascadeId", msg.CascadeID)
-
-		// 1. Force l'IDE à afficher la conversation avant de lancer le prompt
-		// (best-effort : le LS 2.5+ répond 200 sans frame de données pour
-		// SetBrowserOpenConversation — l'échec est attendu et n'affecte pas
-		// le stream ; le mobile re-synchronise la session lui-même).
-		if _, errSet := s.RPCClient.SetBrowserOpenConversation(msg.CascadeID); errSet != nil {
-			logJSON.Debug("open_conversation_failed", "cascadeId", msg.CascadeID, "err", errSet)
-		}
 
 		promptText := msg.Prompt
 		if msg.Base64Data != "" {
@@ -3360,72 +3366,46 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		noTools := msg.NoTools || s.noTools()
 		modelUID := s.resolveModelID(msg.ModelUID)
 
+		doneChan := make(chan struct{})
 		watcherCtx, cancelWatcher := context.WithCancel(ctx)
 		defer cancelWatcher()
-		s.startLiveStepWatcher(watcherCtx, msg.CascadeID, msg.RequestID, &frameIndex)
+
+		// Démarre le streaming temps réel (transcript.jsonl + trajectoire)
+		go s.runLiveTurnStreamer(watcherCtx, msg.CascadeID, msg.RequestID, &frameIndex, &hasTextDelivered, doneChan)
 
 		err = s.RPCClient.SendMessageStreamModel(msg.CascadeID, promptText, modelUID, msg.ModelEnum, onFrameHandler, noTools)
-		cancelWatcher()
 
-		// 3. Force l'IDE à ouvrir cette nouvelle session (best-effort, cf. ci-dessus).
-		if _, errSet := s.RPCClient.SetBrowserOpenConversation(msg.CascadeID); errSet != nil {
-			logJSON.Debug("open_conversation_failed", "cascadeId", msg.CascadeID, "err", errSet)
-		}
-
-		// Si le flux gRPC-Web n'a pas émis de texte (génération asynchrone LS 2.5+),
-		// on sonde la trajectoire pour extraire la réponse générée et la diffuser au mobile.
-		if !hasTextDelivered && !s.hasPendingApproval(msg.CascadeID) && err == nil && s.RPCClient != nil {
-		pollLoop:
-			for i := 0; i < 15; i++ {
+		if err != nil {
+			cancelWatcher()
+		} else {
+			if hasTextDelivered || s.hasPendingApproval(msg.CascadeID) {
 				select {
-				case <-ctx.Done():
-					break pollLoop
-				case <-time.After(500 * time.Millisecond):
+				case <-doneChan:
+				case <-time.After(50 * time.Millisecond):
 				}
-				if rawTraj, errTraj := s.RPCClient.GetCascadeTrajectory(msg.CascadeID, 0); errTraj == nil && len(rawTraj) > 0 {
-					msgs := ExtractHistoryFromTrajectory(rawTraj)
-					if len(msgs) > 0 && msgs[len(msgs)-1].Sender == "assistant" {
-						lastMsg := msgs[len(msgs)-1]
-						deltaData := map[string]interface{}{
-							"frameIndex": 1,
-							"events": []map[string]interface{}{
-								{
-									"kind":  "text",
-									"delta": lastMsg.Text,
-								},
-							},
-							"cascadeId":  msg.CascadeID,
-							"hostActive": hostActiveSince(hostActiveWindow),
-						}
-						stepIdx := s.streamBuffer.RecordEvent(msg.CascadeID, OutgoingMessage{
-							Type:      "stream_delta",
-							RequestID: msg.RequestID,
-							CascadeID: msg.CascadeID,
-							Data:      deltaData,
-						})
-						deltaData["stepIndex"] = stepIdx
-						s.broadcast(OutgoingMessage{
-							Type:      "stream_delta",
-							RequestID: msg.RequestID,
-							CascadeID: msg.CascadeID,
-							Data:      deltaData,
-						})
-						break pollLoop
-					}
+			} else {
+				select {
+				case <-doneChan:
+				case <-ctx.Done():
+				case <-time.After(2 * time.Second):
 				}
 			}
+			cancelWatcher()
 		}
 
 		if ctx.Err() != nil {
-			// stream_end(cancelled) garanti : CancelGeneration supprime la
-			// cascade de activeCancels AVANT de diffuser — si elle y est
-			// encore, aucun stream_end(cancelled) n'est parti (la goroutine
-			// sort sur ctx.Err() sans broadcast, l'ancien chemin). On le
-			// diffuse ici, sinon le mobile resterait sur « en cours ».
 			s.mu.Lock()
-			_, stillActive := s.activeCancels[msg.CascadeID]
-			if stillActive {
-				delete(s.activeCancels, msg.CascadeID)
+			stillActive := false
+			if m, ok := s.activeCancels[msg.CascadeID]; ok {
+				if _, exists := m[msg.RequestID]; exists {
+					stillActive = true
+					delete(m, msg.RequestID)
+					if len(m) == 0 {
+						delete(s.activeCancels, msg.CascadeID)
+					}
+				}
+			}
+			if s.activeRequestIDs[msg.CascadeID] == msg.RequestID {
 				delete(s.activeRequestIDs, msg.CascadeID)
 			}
 			s.mu.Unlock()
@@ -3435,8 +3415,6 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				endData["outcome"] = "cancelled"
 				endData["message"] = "Generation stopped by user"
 				s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, CascadeID: msg.CascadeID, Data: endData})
-				// Même confirmation outbox que CancelGeneration : le prompt
-				// annulé ne doit pas être re-proposé par sync_session.
 				if errOut := s.outbox.Confirm(msg.CascadeID, msg.RequestID); errOut != nil {
 					logJSON.Warn("outbox_confirm_failed", "cascadeId", msg.CascadeID, "err", errOut.Error())
 				}
@@ -3468,9 +3446,6 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, CascadeID: msg.CascadeID, Data: endData})
 		}
 		logJSON.Info("stream_end", "requestId", msg.RequestID, "cascadeId", msg.CascadeID, "outcome", endData["outcome"])
-		// stream_end broadcast├® ÔåÆ le mobile a tout re├ºu : le prompt est confirm├®,
-		// on le retire de l'outbox (best-effort ÔÇö un ├®chec d'├®criture n'est pas
-		// fatal, le prochain sync_session le re-proposera).
 		if errOut := s.outbox.Confirm(msg.CascadeID, msg.RequestID); errOut != nil {
 			logJSON.Warn("outbox_confirm_failed", "cascadeId", msg.CascadeID, "err", errOut.Error())
 		}
@@ -3624,8 +3599,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				strings.HasSuffix(lower, ".mp3")
 
 			data := map[string]interface{}{
-				"content":  string(content),
+				"content":  "",
 				"isBinary": isImg,
+			}
+			if !isImg && utf8.Valid(content) {
+				data["content"] = string(content)
 			}
 			if isImg || !utf8.Valid(content) {
 				data["base64Data"] = base64.StdEncoding.EncodeToString(content)
@@ -3664,6 +3642,37 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 					if content, errRead := os.ReadFile(cand); errRead == nil {
 						respondWithFileContent(content)
 						return
+					}
+				}
+			}
+		} else {
+			// Scan active sessions or brain directories if cascadeID was not specified
+			if home, errHome := os.UserHomeDir(); errHome == nil {
+				brainRoots := []string{
+					filepath.Join(home, ".gemini", "antigravity", "brain"),
+					filepath.Join(home, ".gemini", "antigravity-ide", "brain"),
+				}
+				for _, bRoot := range brainRoots {
+					entries, errEntries := os.ReadDir(bRoot)
+					if errEntries != nil {
+						continue
+					}
+					for _, e := range entries {
+						if !e.IsDir() {
+							continue
+						}
+						bDir := filepath.Join(bRoot, e.Name())
+						cands := []string{
+							filepath.Join(bDir, cleanPath),
+							filepath.Join(bDir, ".user_uploaded", cleanPath),
+							filepath.Join(bDir, "scratch", cleanPath),
+						}
+						for _, cand := range cands {
+							if content, errRead := os.ReadFile(cand); errRead == nil {
+								respondWithFileContent(content)
+								return
+							}
+						}
 					}
 				}
 			}
@@ -4263,6 +4272,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 
 	case "list_scheduled_tasks":
 		s.mu.Lock()
+		s.syncSidecarsLocked()
 		tasksList := make([]*ScheduledTask, 0, len(s.scheduledTasks))
 		for _, t := range s.scheduledTasks {
 			tasksList = append(tasksList, t)
@@ -4467,6 +4477,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.mu.Lock()
 		delete(s.scheduledTasks, taskId)
 		s.mu.Unlock()
+		removeSidecarSync(taskId)
 		if err := s.SaveScheduledTasks(); err != nil {
 			logJSON.Warn("scheduled_tasks_save_failed", "error", err.Error())
 		}
@@ -5245,8 +5256,10 @@ type terminalPtyManager struct {
 }
 
 func newTerminalPtyManager() *terminalPtyManager {
-	sh := "cmd.exe"
-	if _, err := exec.LookPath("bash"); err == nil {
+	sh := "sh"
+	if runtime.GOOS == "windows" {
+		sh = "cmd.exe"
+	} else if _, err := exec.LookPath("bash"); err == nil {
 		sh = "bash"
 	}
 	return &terminalPtyManager{
@@ -5496,7 +5509,19 @@ func executeShellCommand(dir, cmdStr string) (string, error) {
 // (toutes les 30 ms) l'apparition de nouvelles étapes (tool calls, commandes exécutées,
 // lectures/écritures de fichiers, recherches, thinking, nouveaux tokens) dans le transcript
 // de la session active et les diffuse immédiatement au mobile via stream_delta.
-func (s *Server) startLiveStepWatcher(ctx context.Context, cascadeID, requestID string, frameIndex *int64) {
+// runLiveTurnStreamer surveille en temps réel (toutes les 30 ms) l'apparition de
+// nouvelles étapes (tool calls, commandes exécutées, lectures/écritures de fichiers,
+// recherches, thinking, tokens de texte) et les diffuse immédiatement au mobile via stream_delta.
+// Il signale doneChan lorsque la génération est complètement terminée ou nécessite une approbation.
+func (s *Server) runLiveTurnStreamer(ctx context.Context, cascadeID, requestID string, frameIndex *int64, hasTextDelivered *bool, doneChan chan struct{}) {
+	var closeOnce sync.Once
+	signalDone := func() {
+		closeOnce.Do(func() {
+			close(doneChan)
+		})
+	}
+	defer signalDone()
+
 	transcriptPath := findTranscriptPath(cascadeID)
 	var lastOffset int64
 	if transcriptPath != "" {
@@ -5505,156 +5530,211 @@ func (s *Server) startLiveStepWatcher(ctx context.Context, cascadeID, requestID 
 		}
 	}
 
-	go func() {
-		ticker := time.NewTicker(30 * time.Millisecond)
-		defer ticker.Stop()
+	ticker := time.NewTicker(30 * time.Millisecond)
+	defer ticker.Stop()
 
-		var deliveredThoughtLen int
-		var deliveredTextLen int
+	var deliveredTextLen int
+	var turnCompleted bool
+	lastActivityTime := time.Now()
 
-		for {
-			select {
-			case <-ctx.Done():
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// 1. Détection d'approbation en attente → fin immédiate du flux avec outcome=approval
+			if s.hasPendingApproval(cascadeID) {
 				return
-			case <-ticker.C:
-				if transcriptPath == "" {
-					transcriptPath = findTranscriptPath(cascadeID)
-				}
-				if transcriptPath == "" {
-					continue
-				}
-				fi, errStat := os.Stat(transcriptPath)
-				if errStat != nil || fi.Size() <= lastOffset {
-					continue
-				}
+			}
 
-				f, errOpen := os.Open(transcriptPath)
-				if errOpen != nil {
-					continue
-				}
-
-				_, errSeek := f.Seek(lastOffset, 0)
-				if errSeek != nil {
-					f.Close()
-					continue
-				}
-
-				scanner := bufio.NewScanner(f)
-				hBuf := AcquireHistoryBuffer()
-				scanner.Buffer(*hBuf, len(*hBuf))
-
-				for scanner.Scan() {
-					lineBytes := scanner.Bytes()
-					lastOffset += int64(len(lineBytes)) + 1 // newline
-					if len(lineBytes) == 0 {
-						continue
+			if transcriptPath == "" {
+				transcriptPath = findTranscriptPath(cascadeID)
+				if transcriptPath != "" && lastOffset == 0 {
+					if fi, err := os.Stat(transcriptPath); err == nil {
+						lastOffset = fi.Size()
 					}
+				}
+			}
 
-					var entry struct {
-						StepIndex int             `json:"step_index"`
-						Type      string          `json:"type"`
-						Source    string          `json:"source"`
-						Content   string          `json:"content"`
-						Thinking  string          `json:"thinking"`
-						Status    string          `json:"status"`
-						ToolCalls json.RawMessage `json:"tool_calls"`
-					}
-					if err := json.Unmarshal(lineBytes, &entry); err != nil {
-						continue
-					}
+			// 2. Lecture incrémentale du fichier transcript.jsonl
+			if transcriptPath != "" {
+				if fi, errStat := os.Stat(transcriptPath); errStat == nil && fi.Size() > lastOffset {
+					f, errOpen := os.Open(transcriptPath)
+					if errOpen == nil {
+						if _, errSeek := f.Seek(lastOffset, 0); errSeek == nil {
+							scanner := bufio.NewScanner(f)
+							hBuf := AcquireHistoryBuffer()
+							scanner.Buffer(*hBuf, len(*hBuf))
 
-					var events []map[string]interface{}
-
-					// 1. Tool calls
-					if len(entry.ToolCalls) > 0 {
-						var toolCalls []struct {
-							Name      string          `json:"name"`
-							Arguments json.RawMessage `json:"args"`
-							Function  struct {
-								Name      string          `json:"name"`
-								Arguments json.RawMessage `json:"arguments"`
-							} `json:"function"`
-						}
-						if json.Unmarshal(entry.ToolCalls, &toolCalls) == nil {
-							for _, tc := range toolCalls {
-								toolName := tc.Name
-								if toolName == "" {
-									toolName = tc.Function.Name
+							for scanner.Scan() {
+								lineBytes := scanner.Bytes()
+								lastOffset += int64(len(lineBytes)) + 1 // newline
+								if len(lineBytes) == 0 {
+									continue
 								}
-								args := tc.Arguments
-								if len(args) == 0 {
-									args = tc.Function.Arguments
+
+								var entry struct {
+									StepIndex int             `json:"step_index"`
+									Type      string          `json:"type"`
+									Source    string          `json:"source"`
+									Content   string          `json:"content"`
+									Thinking  string          `json:"thinking"`
+									Status    string          `json:"status"`
+									ToolCalls json.RawMessage `json:"tool_calls"`
 								}
-								if toolName != "" && toolName != "ask_question" && toolName != "ask_user" {
+								if err := json.Unmarshal(lineBytes, &entry); err != nil {
+									continue
+								}
+
+								var events []map[string]interface{}
+
+								// 2a. Tool calls
+								if len(entry.ToolCalls) > 0 {
+									var toolCalls []struct {
+										Name      string          `json:"name"`
+										Arguments json.RawMessage `json:"args"`
+										Function  struct {
+											Name      string          `json:"name"`
+											Arguments json.RawMessage `json:"arguments"`
+										} `json:"function"`
+									}
+									if json.Unmarshal(entry.ToolCalls, &toolCalls) == nil {
+										for _, tc := range toolCalls {
+											toolName := tc.Name
+											if toolName == "" {
+												toolName = tc.Function.Name
+											}
+											args := tc.Arguments
+											if len(args) == 0 {
+												args = tc.Function.Arguments
+											}
+											if toolName != "" && toolName != "ask_question" && toolName != "ask_user" {
+												events = append(events, map[string]interface{}{
+													"kind":   "tool_start",
+													"tool":   toolName,
+													"detail": string(args),
+												})
+											}
+										}
+									}
+								}
+
+								// 2b. Tool Results
+								if entry.Type == "VIEW_FILE" || entry.Type == "RUN_COMMAND" || entry.Type == "GREP_SEARCH" || entry.Type == "WRITE_TO_FILE" || entry.Type == "TOOL_RESULT" {
+									preview := entry.Content
+									if len(preview) > 200 {
+										preview = preview[:197] + "…"
+									}
 									events = append(events, map[string]interface{}{
-										"kind":   "tool_start",
-										"tool":   toolName,
-										"detail": string(args),
+										"kind":   "tool_output",
+										"tool":   strings.ToLower(entry.Type),
+										"detail": preview,
+										"status": entry.Status,
 									})
 								}
+
+								// 2c. Thinking
+								if len(entry.Thinking) > 0 {
+									events = append(events, map[string]interface{}{
+										"kind":  "thinking",
+										"delta": entry.Thinking,
+									})
+								}
+
+								// 2d. Texte de l'assistant (PLANNER_RESPONSE)
+								if entry.Type == "PLANNER_RESPONSE" && len(entry.Content) > 0 {
+									events = append(events, map[string]interface{}{
+										"kind":  "text",
+										"delta": entry.Content,
+									})
+									*hasTextDelivered = true
+									deliveredTextLen += len(entry.Content)
+									if len(entry.ToolCalls) == 0 && entry.Status == "DONE" {
+										turnCompleted = true
+									}
+								}
+
+								if len(events) > 0 {
+									lastActivityTime = time.Now()
+									fIdx := atomic.AddInt64(frameIndex, 1)
+									deltaData := map[string]interface{}{
+										"frameIndex": fIdx,
+										"cascadeId":  cascadeID,
+										"hostActive": hostActiveSince(hostActiveWindow),
+										"events":     events,
+									}
+									deltaMsg := OutgoingMessage{
+										Type:      "stream_delta",
+										RequestID: requestID,
+										CascadeID: cascadeID,
+										Data:      deltaData,
+									}
+									stepIdx := s.streamBuffer.RecordEvent(cascadeID, deltaMsg)
+									deltaData["stepIndex"] = stepIdx
+									s.broadcast(deltaMsg)
+								}
 							}
+							ReleaseHistoryBuffer(hBuf)
 						}
-					}
-
-					// 2. Tool Results (ex: VIEW_FILE, RUN_COMMAND, TOOL_RESULT, etc.)
-					if entry.Type == "VIEW_FILE" || entry.Type == "RUN_COMMAND" || entry.Type == "GREP_SEARCH" || entry.Type == "WRITE_TO_FILE" || entry.Type == "TOOL_RESULT" {
-						preview := entry.Content
-						if len(preview) > 200 {
-							preview = preview[:197] + "…"
-						}
-						events = append(events, map[string]interface{}{
-							"kind":   "tool_output",
-							"tool":   strings.ToLower(entry.Type),
-							"detail": preview,
-							"status": entry.Status,
-						})
-					}
-
-					// 3. Raisonnement progressif (Thinking)
-					if len(entry.Thinking) > deliveredThoughtLen {
-						chunk := entry.Thinking[deliveredThoughtLen:]
-						deliveredThoughtLen = len(entry.Thinking)
-						events = append(events, map[string]interface{}{
-							"kind":  "thinking",
-							"delta": chunk,
-						})
-					}
-
-					// 4. Texte progressif de l'assistant (PLANNER_RESPONSE)
-					if entry.Type == "PLANNER_RESPONSE" && len(entry.Content) > deliveredTextLen {
-						chunk := entry.Content[deliveredTextLen:]
-						deliveredTextLen = len(entry.Content)
-						events = append(events, map[string]interface{}{
-							"kind":  "text",
-							"delta": chunk,
-						})
-					}
-
-					if len(events) > 0 {
-						fIdx := atomic.AddInt64(frameIndex, 1)
-						deltaData := map[string]interface{}{
-							"frameIndex": fIdx,
-							"cascadeId":  cascadeID,
-							"hostActive": hostActiveSince(hostActiveWindow),
-							"events":     events,
-						}
-						deltaMsg := OutgoingMessage{
-							Type:      "stream_delta",
-							RequestID: requestID,
-							CascadeID: cascadeID,
-							Data:      deltaData,
-						}
-						stepIdx := s.streamBuffer.RecordEvent(cascadeID, deltaMsg)
-						deltaData["stepIndex"] = stepIdx
-						s.broadcast(deltaMsg)
+						f.Close()
 					}
 				}
+			}
 
-				ReleaseHistoryBuffer(hBuf)
-				f.Close()
+			// 3. Fallback / Synchronisation de trajectoire (si pas de nouveaux tokens via fichier sous 300ms)
+			if s.RPCClient != nil && time.Since(lastActivityTime) >= 300*time.Millisecond {
+				if rawTraj, errTraj := s.RPCClient.GetCascadeTrajectory(cascadeID, 0); errTraj == nil && len(rawTraj) > 0 {
+					msgs := ExtractHistoryFromTrajectory(rawTraj)
+					if len(msgs) > 0 && msgs[len(msgs)-1].Sender == "assistant" {
+						lastMsg := msgs[len(msgs)-1]
+						if len(lastMsg.Text) > deliveredTextLen {
+							newChunk := lastMsg.Text[deliveredTextLen:]
+							deliveredTextLen = len(lastMsg.Text)
+							*hasTextDelivered = true
+							lastActivityTime = time.Now()
+							fIdx := atomic.AddInt64(frameIndex, 1)
+							deltaData := map[string]interface{}{
+								"frameIndex": fIdx,
+								"events": []map[string]interface{}{
+									{
+										"kind":  "text",
+										"delta": newChunk,
+									},
+								},
+								"cascadeId":  cascadeID,
+								"hostActive": hostActiveSince(hostActiveWindow),
+							}
+							deltaMsg := OutgoingMessage{
+								Type:      "stream_delta",
+								RequestID: requestID,
+								CascadeID: cascadeID,
+								Data:      deltaData,
+							}
+							stepIdx := s.streamBuffer.RecordEvent(cascadeID, deltaMsg)
+							deltaData["stepIndex"] = stepIdx
+							s.broadcast(deltaMsg)
+							turnCompleted = true
+						}
+					}
+				}
+			}
+
+			// 4. Clôture propre dès que le tour est stabilisé ou si aucun fichier transcript n'est disponible
+			if turnCompleted && time.Since(lastActivityTime) >= 100*time.Millisecond {
+				return
+			}
+			if transcriptPath == "" && time.Since(lastActivityTime) >= 100*time.Millisecond {
+				return
 			}
 		}
-	}()
+	}
+}
+
+// startLiveStepWatcher compatibilité pour les tests existants.
+func (s *Server) startLiveStepWatcher(ctx context.Context, cascadeID, requestID string, frameIndex *int64) {
+	var delivered bool
+	doneChan := make(chan struct{})
+	go s.runLiveTurnStreamer(ctx, cascadeID, requestID, frameIndex, &delivered, doneChan)
 }
 
 

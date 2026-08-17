@@ -111,9 +111,19 @@ class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
             imgBytes = base64Decode(b64);
           } catch (_) {}
         }
+        final contentStr = res['content'] as String? ?? '';
+        if (imgBytes == null && _isImage && contentStr.isNotEmpty) {
+          try {
+            imgBytes = base64Decode(contentStr);
+          } catch (_) {
+            try {
+              imgBytes = Uint8List.fromList(contentStr.codeUnits);
+            } catch (_) {}
+          }
+        }
         setState(() {
           _imageBytes = imgBytes;
-          _content = res['content'] as String? ?? 'Contenu vide';
+          _content = contentStr.isEmpty ? 'Contenu vide' : contentStr;
           _isLoading = false;
         });
       }
@@ -201,29 +211,50 @@ class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
                             ),
                           ),
                         )
-                      : _imageBytes != null
-                          ? Center(
-                              child: Padding(
-                                padding: const EdgeInsets.all(16.0),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(AppRadius.md),
-                                  child: InteractiveViewer(
-                                    minScale: 0.5,
-                                    maxScale: 4.0,
-                                    child: Image.memory(
-                                      _imageBytes!,
-                                      fit: BoxFit.contain,
-                                      errorBuilder: (ctx, err, stack) => Center(
-                                        child: Text(
-                                          'Format d\'image non reconnu',
-                                          style: TextStyle(color: scheme.error),
+                      : _isImage
+                          ? (_imageBytes != null
+                              ? Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(16.0),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(AppRadius.md),
+                                      child: InteractiveViewer(
+                                        minScale: 0.5,
+                                        maxScale: 4.0,
+                                        child: Image.memory(
+                                          _imageBytes!,
+                                          fit: BoxFit.contain,
+                                          errorBuilder: (ctx, err, stack) => Center(
+                                            child: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(Icons.broken_image_outlined, size: 48, color: scheme.error),
+                                                const SizedBox(height: 8),
+                                                Text(
+                                                  'Format d\'image non reconnu',
+                                                  style: TextStyle(color: scheme.error),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
                                         ),
                                       ),
                                     ),
                                   ),
-                                ),
-                              ),
-                            )
+                                )
+                              : Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.broken_image_outlined, size: 48, color: scheme.onSurfaceVariant),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        'Impossible d\'afficher l\'image',
+                                        style: TextStyle(color: scheme.onSurfaceVariant),
+                                      ),
+                                    ],
+                                  ),
+                                ))
                           : SingleChildScrollView(
                               padding: const EdgeInsets.all(16),
                               child: MarkdownBody(content: _content),

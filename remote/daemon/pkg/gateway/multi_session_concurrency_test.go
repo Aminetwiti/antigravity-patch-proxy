@@ -237,7 +237,7 @@ func TestThreeSimultaneousCascadesParallelStreaming(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(3)
 
-	runCascade := func(client *testClient, cid, reqId string) {
+	runCascade := func(client *wsTestClient, cid, reqId string) {
 		defer wg.Done()
 		client.sendJSON(t, map[string]interface{}{
 			"type":      "send_prompt",

@@ -187,7 +187,7 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Text(
-          'Scheduled Tasks (${_localTasks.length})',
+          'Scheduled Tasks',
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.w700,
@@ -213,8 +213,6 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.add, size: 14, color: scheme.onSurface),
-                      const SizedBox(width: 4),
                       Text(
                         '+ New',
                         style: TextStyle(
@@ -447,7 +445,7 @@ class _ScheduledTaskRow extends StatelessWidget {
     final schedule = task.formattedSchedule;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Row(
         children: [
           // Titre et Subtitle (Daily around 9:00 AM) - Tappable pour ouvrir les détails
@@ -481,57 +479,73 @@ class _ScheduledTaskRow extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    if (task.cronExpression != null && task.cronExpression!.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        task.cronExpression!,
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: scheme.outline,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),
             ),
           ),
 
-          const SizedBox(width: 8),
+          const SizedBox(width: 4),
 
-          // Bouton Trigger Now (pour tests et accès direct)
-          TextButton(
-            onPressed: () {
-              HapticFeedback.selectionClick();
-              onRestart();
-            },
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              minimumSize: const Size(0, 0),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            child: Text(
-              'Trigger Now',
-              style: TextStyle(
-                fontSize: 11,
-                color: scheme.primary,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-
-          // Bouton Annuler / Supprimer
-          IconButton(
-            icon: Icon(Icons.close_rounded, size: 16, color: scheme.onSurfaceVariant),
-            tooltip: 'Annuler la tâche',
-            onPressed: () {
-              HapticFeedback.mediumImpact();
-              onDelete();
-            },
-            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+          // Menu d'actions contextuelles (3 points verticaux ⋮ comme sur le Desktop IDE)
+          PopupMenuButton<String>(
+            icon: Icon(Icons.more_vert, size: 18, color: scheme.onSurfaceVariant),
+            tooltip: 'Actions',
             padding: EdgeInsets.zero,
-            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            color: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              side: BorderSide(color: scheme.outlineVariant, width: 1),
+            ),
+            onSelected: (value) {
+              if (value == 'trigger') {
+                HapticFeedback.selectionClick();
+                onRestart();
+              } else if (value == 'edit') {
+                HapticFeedback.selectionClick();
+                onTap();
+              } else if (value == 'delete') {
+                HapticFeedback.mediumImpact();
+                onDelete();
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'trigger',
+                height: 38,
+                child: Row(
+                  children: [
+                    Icon(Icons.play_arrow_rounded, size: 16, color: scheme.primary),
+                    const SizedBox(width: 8),
+                    Text('Trigger Now', style: TextStyle(fontSize: 12.5, color: scheme.onSurface)),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'edit',
+                height: 38,
+                child: Row(
+                  children: [
+                    Icon(Icons.edit_outlined, size: 15, color: scheme.onSurfaceVariant),
+                    const SizedBox(width: 8),
+                    Text('Edit', style: TextStyle(fontSize: 12.5, color: scheme.onSurface)),
+                  ],
+                ),
+              ),
+              const PopupMenuDivider(height: 1),
+              PopupMenuItem(
+                value: 'delete',
+                height: 38,
+                child: Row(
+                  children: [
+                    Icon(Icons.delete_outline_rounded, size: 16, color: scheme.error),
+                    const SizedBox(width: 8),
+                    Text('Delete', style: TextStyle(fontSize: 12.5, color: scheme.error)),
+                  ],
+                ),
+              ),
+            ],
           ),
 
           const SizedBox(width: 4),

@@ -379,6 +379,17 @@ func BuildReadFileRequest(uri string) []byte {
 	return w.b
 }
 
+// ParseReadFileResponse extrait le contenu du fichier (champ 1, bytes) d'un
+// ReadFileResponse protobuf retourné par le Language Server.
+func ParseReadFileResponse(buf []byte) []byte {
+	for _, f := range DecodeFields(buf) {
+		if f.Num == 1 && f.WireType == 2 {
+			return f.Bytes
+		}
+	}
+	return buf
+}
+
 // BuildWriteFileRequest construit un WriteFileRequest :
 // {1: uri, 2: content (bytes), 3: overwrite (bool)} — schéma vérifié dans
 // antigravity-client (ligne 15631).

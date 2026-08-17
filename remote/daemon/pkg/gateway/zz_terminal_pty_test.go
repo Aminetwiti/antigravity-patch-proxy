@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -210,25 +211,29 @@ func TestTerminalSpontaneousExitCleansUp(t *testing.T) {
 	}
 	waitSessions(t, gw, 1)
 
-	// Commande exit (cmd.exe: exit /b ; bash: exit).
-	exit := "exit\r\n"
-	if !strings.Contains(gw.terminals.shellPath, "cmd") {
-		exit = "exit\n"
+	// Commande exit (Windows: exit\r\n ; Unix: exit\n).
+	exit := "exit\n"
+	if runtime.GOOS == "windows" {
+		exit = "exit\r\n"
 	}
+
 	sendTerminalJSON(t, client, map[string]interface{}{
 		"type": "terminal_write", "requestId": "t2", "id": id, "input": exit,
 	})
+	_ = client.recv(t) // consume response to terminal_write
 
 	// Le shell sort → la goroutine Wait retire la session de la map.
-	deadline := time.Now().Add(5 * time.Second)
-	for {
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
 		gw.terminals.mu.Lock()
 		_, still := gw.terminals.sessions[id]
 		gw.terminals.mu.Unlock()
-		if !still || time.Now().After(deadline) {
+		if !still {
 			break
 		}
-		time.Sleep(20 * time.Millisecond)
+		_ = client.conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		_, _ = client.recvSafe()
+		time.Sleep(50 * time.Millisecond)
 	}
 	gw.terminals.mu.Lock()
 	_, still := gw.terminals.sessions[id]

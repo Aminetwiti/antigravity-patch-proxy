@@ -170,3 +170,20 @@ func TestParseModelsNeverPanics(t *testing.T) {
 		}()
 	}
 }
+
+func TestParseReadFileResponse(t *testing.T) {
+	fileContent := []byte("PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+	w := &writer{}
+	w.bytesField(1, fileContent)
+	parsed := ParseReadFileResponse(w.b)
+	if !bytes.Equal(parsed, fileContent) {
+		t.Fatalf("ParseReadFileResponse = %x, attendu %x", parsed, fileContent)
+	}
+
+	// Raw content without protobuf tags fallback
+	raw := []byte("raw plain text")
+	if !bytes.Equal(ParseReadFileResponse(raw), raw) {
+		t.Fatalf("ParseReadFileResponse fallback attendu %s", string(raw))
+	}
+}
+

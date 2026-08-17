@@ -54,6 +54,7 @@ import {
   translatedToolCalls,
   stateTimestamps,
   touchStateTimestamp,
+  getSessionModelKey,
   startCleanupInterval,
   stopCleanupInterval,
 } from './proxy/shared';
@@ -789,8 +790,12 @@ function handleNonStreamResponse(apiRes: http.IncomingMessage, ctx: StreamReques
         (parsed as { choices?: { message?: { reasoning_content?: string; reasoning?: string } }[] }).choices?.[0]
           ?.message?.reasoning;
       if (reasoning) {
-        modelReasoningContent.set(model.name, reasoning);
-        touchStateTimestamp(stateTimestamps.reasoning, model.name);
+        const modelKey = getSessionModelKey(model.name, (ctx.geminiBody as any)?.sessionId || (ctx.geminiBody as any)?.conversationId);
+        modelReasoningContent.set(modelKey, reasoning);
+        if (modelKey !== model.name) {
+          modelReasoningContent.set(model.name, reasoning);
+        }
+        touchStateTimestamp(stateTimestamps.reasoning, modelKey);
       }
 
       const providerForResponse =

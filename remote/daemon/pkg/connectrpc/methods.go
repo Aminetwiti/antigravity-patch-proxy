@@ -73,7 +73,11 @@ func (c *Client) DeleteCascade(cascadeID string) ([]byte, error) {
 // ReadFile lit un fichier via le RPC officiel ReadFile du Language Server
 // (URI file:/// — gère l'encodage et le workspace tracking du LS).
 func (c *Client) ReadFile(uri string) ([]byte, error) {
-	return c.Call("ReadFile", BuildReadFileRequest(uri))
+	raw, err := c.Call("ReadFile", BuildReadFileRequest(uri))
+	if err != nil {
+		return nil, err
+	}
+	return ParseReadFileResponse(raw), nil
 }
 
 // TrackWorkspace déclare un dossier au hub via AddTrackedWorkspace — le LS

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,19 @@ import (
 )
 
 func TestScheduledTasks_RPCAndWSFlow(t *testing.T) {
+	dir := t.TempDir()
+	old := scheduledTasksPath
+	oldSidecars := sidecarsDirPath
+	oldConfig := mainConfigFilePath
+	scheduledTasksPath = filepath.Join(dir, "scheduled_tasks.json")
+	sidecarsDirPath = filepath.Join(dir, "sidecars")
+	mainConfigFilePath = filepath.Join(dir, "config.json")
+	defer func() {
+		scheduledTasksPath = old
+		sidecarsDirPath = oldSidecars
+		mainConfigFilePath = oldConfig
+	}()
+
 	backend := &fakeRPCClient{}
 	server := NewServer(backend, "")
 	mux := http.NewServeMux()

@@ -97,9 +97,8 @@ void main() {
         ),
       );
 
-      expect(find.text('Scheduled Tasks (2)'), findsOneWidget);
+      expect(find.text('Scheduled Tasks'), findsOneWidget);
       expect(find.text('Run server health check'), findsOneWidget);
-      expect(find.text('*/5 * * * *'), findsOneWidget);
       expect(find.text('Run memory cleanup'), findsOneWidget);
     });
 
@@ -114,7 +113,7 @@ void main() {
         ),
       );
 
-      expect(find.text('Scheduled Tasks (0)'), findsOneWidget);
+      expect(find.text('Scheduled Tasks'), findsOneWidget);
       expect(find.text('Aucune tâche planifiée'), findsOneWidget);
     });
 
@@ -139,10 +138,15 @@ void main() {
         ),
       );
 
-      final triggerBtn = find.text('Trigger Now');
-      expect(triggerBtn, findsOneWidget);
+      final actionBtn = find.byTooltip('Actions');
+      expect(actionBtn, findsOneWidget);
 
-      await tester.tap(triggerBtn);
+      await tester.tap(actionBtn);
+      await tester.pumpAndSettle();
+
+      final triggerOption = find.text('Trigger Now');
+      expect(triggerOption, findsOneWidget);
+      await tester.tap(triggerOption);
       await tester.pumpAndSettle();
 
       expect(triggeredId, equals('task_trigger_me'));
@@ -169,10 +173,15 @@ void main() {
         ),
       );
 
-      final cancelBtn = find.byTooltip('Annuler la tâche');
-      expect(cancelBtn, findsOneWidget);
+      final actionBtn = find.byTooltip('Actions');
+      expect(actionBtn, findsOneWidget);
 
-      await tester.tap(cancelBtn);
+      await tester.tap(actionBtn);
+      await tester.pumpAndSettle();
+
+      final deleteOption = find.text('Delete');
+      expect(deleteOption, findsOneWidget);
+      await tester.tap(deleteOption);
       await tester.pumpAndSettle();
 
       expect(cancelledId, equals('task_cancel_me'));

@@ -202,6 +202,9 @@ func (f *fakeRPCClient) streamLoop(onFrame func([]byte) error) error {
 // le texte "run_command" et les sous-champs de corrélation DANS LE MÊME champ —
 // c'est ainsi qu'il retrouve la cible de HandleCascadeUserInteraction.
 func (f *fakeRPCClient) approvalFrame(delta string) []byte {
+	if !strings.HasPrefix(strings.TrimSpace(delta), "{") {
+		return pbTextFrame(delta)
+	}
 	blob := &protoWriter{}
 	blob.string(1, "123e4567-e89b-12d3-a456-426614174000") // trajectory_id
 	blob.varint(2, 1)                                      // step_index

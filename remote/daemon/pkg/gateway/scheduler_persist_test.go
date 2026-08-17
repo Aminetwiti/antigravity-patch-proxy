@@ -8,8 +8,16 @@ import (
 func TestScheduledTasksPersistRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	old := scheduledTasksPath
+	oldSidecars := sidecarsDirPath
+	oldConfig := mainConfigFilePath
 	scheduledTasksPath = filepath.Join(dir, "scheduled_tasks.json")
-	defer func() { scheduledTasksPath = old }()
+	sidecarsDirPath = filepath.Join(dir, "sidecars")
+	mainConfigFilePath = filepath.Join(dir, "config.json")
+	defer func() {
+		scheduledTasksPath = old
+		sidecarsDirPath = oldSidecars
+		mainConfigFilePath = oldConfig
+	}()
 
 	_, s := newTestServerWithGW(&fakeRPCClient{})
 	s.mu.Lock()
@@ -52,10 +60,21 @@ func TestScheduledTasksPersistRoundTrip(t *testing.T) {
 func TestLoadScheduledTasksMissingFileIsNotFatal(t *testing.T) {
 	dir := t.TempDir()
 	old := scheduledTasksPath
+	oldSidecars := sidecarsDirPath
+	oldConfig := mainConfigFilePath
 	scheduledTasksPath = filepath.Join(dir, "does_not_exist.json")
-	defer func() { scheduledTasksPath = old }()
+	sidecarsDirPath = filepath.Join(dir, "sidecars")
+	mainConfigFilePath = filepath.Join(dir, "config.json")
+	defer func() {
+		scheduledTasksPath = old
+		sidecarsDirPath = oldSidecars
+		mainConfigFilePath = oldConfig
+	}()
 
 	_, s := newTestServerWithGW(&fakeRPCClient{})
+	s.mu.Lock()
+	s.scheduledTasks = map[string]*ScheduledTask{}
+	s.mu.Unlock()
 	if err := s.LoadScheduledTasks(); err != nil {
 		t.Fatalf("LoadScheduledTasks sur fichier absent doit être non-fatal, got: %v", err)
 	}

@@ -187,7 +187,7 @@ func (l *loadRPCClient) SendMessageStreamModel(cascadeID, text, modelUID string,
 }
 func (l *loadRPCClient) streamLoop(onFrame func([]byte) error) error {
 	if len(l.streamDeltas) == 0 {
-		return onFrame(connectrpc.Frame(pbTextFrame("ok")))
+		return onFrame(pbTextFrame("ok"))
 	}
 	for _, delta := range l.streamDeltas {
 		if err := onFrame((&fakeRPCClient{}).approvalFrame(delta)); err != nil {

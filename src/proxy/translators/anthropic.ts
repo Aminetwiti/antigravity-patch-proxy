@@ -18,6 +18,7 @@ import {
   translatedToolCalls,
   stateTimestamps,
   touchStateTimestamp,
+  getSessionModelKey,
   StreamContext,
 } from '../shared';
 import { detectModelCapabilitiesByName } from '../modelUtils';
@@ -225,7 +226,8 @@ export function mapGeminiToAnthropic(geminiBody: GeminiRequestBody, modelName: s
           for (const p of item.parts) {
             if (p.functionResponse) {
               const funcName = p.functionResponse.name || '';
-              const modelTCIds = modelToolCallIds.get(modelName) || {};
+              const modelKey = getSessionModelKey(modelName, (geminiBody as any)?.sessionId || (geminiBody as any)?.conversationId);
+              const modelTCIds = modelToolCallIds.get(modelKey) || modelToolCallIds.get(modelName) || {};
               const toolCallId = p.functionResponse.id || modelTCIds[funcName] || 'call_' + funcName;
               const responseData = p.functionResponse.response;
               let contentStr = '';
@@ -305,10 +307,16 @@ export function mapAnthropicToGemini(anthRes: AnthropicResponse, modelName: stri
     } else if (block.type === 'thinking' && block.thinking) {
       parts.push({ text: block.thinking, thought: true });
     } else if (block.type === 'tool_use') {
-      const modelTCIds = modelToolCallIds.get(modelName) || {};
+      const modelKey = getSessionModelKey(modelName, (anthRes as any)?._sessionId || (anthRes as any)?.sessionId);
+      const modelTCIds = modelToolCallIds.get(modelKey) || {};
       modelTCIds[block.name || ''] = block.id || '';
-      modelToolCallIds.set(modelName, modelTCIds);
-      touchStateTimestamp(stateTimestamps.toolCallIds, modelName);
+      modelToolCallIds.set(modelKey, modelTCIds);
+      if (modelKey !== modelName) {
+        const fallbackTCIds = modelToolCallIds.get(modelName) || {};
+        fallbackTCIds[block.name || ''] = block.id || '';
+        modelToolCallIds.set(modelName, fallbackTCIds);
+      }
+      touchStateTimestamp(stateTimestamps.toolCallIds, modelKey);
 
       const normalizedInput = normalizeToolArgs(block.name || '', block.input || {});
       const translated = translateToolCallToNative(block.name || '', normalizedInput);
@@ -409,10 +417,16 @@ export function mapAnthropicChunkToGemini(chunk: AnthropicResponse, modelName: s
           args = {};
         }
         args = normalizeToolArgs(tc.name, args) as ToolCallArgs;
-        const modelTCIds = modelToolCallIds.get(modelName) || {};
+        const modelKey = getSessionModelKey(modelName, (chunk as any)?._sessionId || (chunk as any)?.sessionId);
+        const modelTCIds = modelToolCallIds.get(modelKey) || {};
         modelTCIds[tc.name] = tc.id;
-        modelToolCallIds.set(modelName, modelTCIds);
-        touchStateTimestamp(stateTimestamps.toolCallIds, modelName);
+        modelToolCallIds.set(modelKey, modelTCIds);
+        if (modelKey !== modelName) {
+          const fallbackTCIds = modelToolCallIds.get(modelName) || {};
+          fallbackTCIds[tc.name] = tc.id;
+          modelToolCallIds.set(modelName, fallbackTCIds);
+        }
+        touchStateTimestamp(stateTimestamps.toolCallIds, modelKey);
         const translated = translateToolCallToNative(tc.name, args);
         if (translated.name !== tc.name) {
           translatedToolCalls.set(tc.id, {

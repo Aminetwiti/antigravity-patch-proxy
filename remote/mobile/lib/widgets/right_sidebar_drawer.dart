@@ -50,29 +50,53 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
   List<Map<String, dynamic>> _uploads = [];
   bool _uploadsExpanded = false;
 
+  @override
+  void didUpdateWidget(covariant RightSidebarDrawer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.activeSessionId != widget.activeSessionId) {
+      setState(() {
+        _artifacts.clear();
+        _uploads.clear();
+        _filesChanged.clear();
+        _artifactsExpanded = false;
+        _uploadsExpanded = false;
+        _filesChangedExpanded = false;
+      });
+    }
+  }
+
   Future<void> _fetchFilesChanged() async {
     if (widget.api == null) return;
     setState(() => _isLoadingFilesChanged = true);
     try {
-      final res = await widget.api!.getVcsState(
+      // Priorité 1 : get_context retourne modifiedFiles (fichiers écrits par
+      // l'agent dans la session, parsés du transcript) — cohérent avec le badge.
+      // Priorité 2 : getVcsState (git status) en fallback si get_context vide.
+      final ctx = await widget.api!.getContext(
+        cascadeId: widget.activeSessionId.isNotEmpty ? widget.activeSessionId : null,
         workspacePath: widget.workspacePath.isEmpty ? null : widget.workspacePath,
       );
+      final ctxFiles = ctx['modifiedFiles'];
       final files = <String>{};
-      // Contrat réel du daemon (VcsWorkspaceState, vcs.go) : les clés JSON
-      // sont workingDirectoryChanges / stagedChanges, chaque élément étant un
-      // VcsFileChange { uri, operation, originalUri }. On résout le chemin
-      // relatif du workspace et on déduplique (un fichier peut être à la fois
-      // staged et modifié).
-      for (final key in const ['workingDirectoryChanges', 'stagedChanges']) {
-        final list = res[key];
-        if (list is List) {
-          for (final item in list) {
-            if (item is String && item.isNotEmpty) {
-              files.add(item);
-            } else if (item is Map) {
-              final uri = item['uri'];
-              if (uri is String && uri.isNotEmpty) {
-                files.add(_relPath(uri));
+      if (ctxFiles is List && ctxFiles.isNotEmpty) {
+        for (final item in ctxFiles) {
+          if (item is String && item.isNotEmpty) files.add(_relPath(item));
+        }
+      }
+      if (files.isEmpty) {
+        // Fallback : git status (staged + working tree)
+        final res = await widget.api!.getVcsState(
+          workspacePath: widget.workspacePath.isEmpty ? null : widget.workspacePath,
+        );
+        for (final key in const ['workingDirectoryChanges', 'stagedChanges']) {
+          final list = res[key];
+          if (list is List) {
+            for (final item in list) {
+              if (item is String && item.isNotEmpty) {
+                files.add(item);
+              } else if (item is Map) {
+                final uri = item['uri'];
+                if (uri is String && uri.isNotEmpty) files.add(_relPath(uri));
               }
             }
           }
@@ -231,6 +255,7 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
       artifactPath: artifact['path'] ?? artifact['name'] ?? '',
       artifactName: artifact['name'] ?? 'Document',
       cascadeId: widget.activeSessionId,
+      workspacePath: widget.workspacePath,
     );
   }
 
@@ -352,7 +377,7 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
                     children: [
                       _ContextItemRow(
                         title: 'Artifacts',
-                        badgeCount: widget.artifactsCount,
+                        badgeCount: widget.artifactsCount > 0 ? widget.artifactsCount : _artifacts.length,
                         onTap: () {
                           setState(() {
                             _artifactsExpanded = !_artifactsExpanded;
