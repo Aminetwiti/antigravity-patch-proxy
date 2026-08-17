@@ -108,15 +108,18 @@ class _SidecarsDashboardScreenState extends State<SidecarsDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
-      backgroundColor: AppColors.surfaceBase,
+      backgroundColor: isDark ? AppColors.surfaceBase : scheme.surface,
       appBar: AppBar(
-        backgroundColor: AppColors.surfaceRaised,
-        title: const Text('Conteneurs & Sidecars 📦', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        backgroundColor: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
+        title: Text('Conteneurs & Sidecars 📦', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: scheme.onSurface)),
         actions: [
           if (_selectedSidecar != null && _selectedLogFile != null)
             IconButton(
-              icon: const Icon(Icons.refresh, color: AppColors.accentBlue),
+              icon: Icon(Icons.refresh, color: scheme.primary),
               onPressed: () => _fetchLogs(_selectedSidecar!, _selectedLogFile!),
             ),
         ],
@@ -126,23 +129,23 @@ class _SidecarsDashboardScreenState extends State<SidecarsDashboardScreen> {
           // Sélecteur de Sidecar
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            color: AppColors.surfaceRaised,
+            color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
             child: Row(
               children: [
                 const Icon(Icons.dns, size: 18, color: AppColors.codeGold),
                 const SizedBox(width: 10),
-                const Text('Sidecar :', style: TextStyle(color: AppColors.inkSecondary, fontSize: 13)),
+                Text('Sidecar :', style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13)),
                 const SizedBox(width: 10),
                 Expanded(
                   child: DropdownButton<String>(
                     value: _selectedSidecar,
                     isExpanded: true,
-                    dropdownColor: AppColors.surfaceRaised,
+                    dropdownColor: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
                     underline: const SizedBox(),
                     items: _knownSidecars.map((id) {
                       return DropdownMenuItem<String>(
                         value: id,
-                        child: Text(id, style: const TextStyle(color: AppColors.inkPrimary, fontSize: 12, fontWeight: FontWeight.bold)),
+                        child: Text(id, style: TextStyle(color: scheme.onSurface, fontSize: 12, fontWeight: FontWeight.bold)),
                       );
                     }).toList(),
                     onChanged: (val) {
@@ -157,9 +160,9 @@ class _SidecarsDashboardScreenState extends State<SidecarsDashboardScreen> {
           // Boutons de contrôle du cycle de vie
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: const BoxDecoration(
-              color: AppColors.surfaceBase,
-              border: Border(bottom: BorderSide(color: AppColors.borderSubtle)),
+            decoration: BoxDecoration(
+              color: isDark ? AppColors.surfaceBase : scheme.surface,
+              border: Border(bottom: BorderSide(color: isDark ? AppColors.borderSubtle : scheme.outlineVariant)),
             ),
             child: Row(
               children: [
@@ -183,9 +186,9 @@ class _SidecarsDashboardScreenState extends State<SidecarsDashboardScreen> {
                 const SizedBox(width: 6),
                 Expanded(
                   child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(side: const BorderSide(color: AppColors.accentBlue)),
-                    icon: const Icon(Icons.restart_alt, size: 14, color: AppColors.accentBlue),
-                    label: const Text('Restart', style: TextStyle(color: AppColors.accentBlue, fontSize: 11)),
+                    style: OutlinedButton.styleFrom(side: BorderSide(color: scheme.primary)),
+                    icon: Icon(Icons.restart_alt, size: 14, color: scheme.primary),
+                    label: Text('Restart', style: TextStyle(color: scheme.primary, fontSize: 11)),
                     onPressed: () => _sendSidecarAction(3, 'Restart'),
                   ),
                 ),
@@ -198,7 +201,7 @@ class _SidecarsDashboardScreenState extends State<SidecarsDashboardScreen> {
             Container(
               height: 38,
               padding: const EdgeInsets.symmetric(horizontal: 12),
-              color: AppColors.surfaceInput,
+              color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
               child: ListView.builder(
                 scrollDirection: Axis.horizontal,
                 itemCount: _logFiles.length,
@@ -208,10 +211,10 @@ class _SidecarsDashboardScreenState extends State<SidecarsDashboardScreen> {
                   return Padding(
                     padding: const EdgeInsets.only(right: 6),
                     child: ChoiceChip(
-                      label: Text(file, style: TextStyle(fontSize: 11, color: isSelected ? Colors.white : AppColors.inkMuted)),
+                      label: Text(file, style: TextStyle(fontSize: 11, color: isSelected ? Colors.white : scheme.onSurfaceVariant)),
                       selected: isSelected,
-                      selectedColor: AppColors.buttonBackground,
-                      backgroundColor: AppColors.surfaceRaised,
+                      selectedColor: scheme.primary,
+                      backgroundColor: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
                       onSelected: (_) {
                         if (_selectedSidecar != null) {
                           _fetchLogs(_selectedSidecar!, file);
@@ -226,7 +229,7 @@ class _SidecarsDashboardScreenState extends State<SidecarsDashboardScreen> {
           if (_statusMessage != null)
             Padding(
               padding: const EdgeInsets.all(10),
-              child: Text(_statusMessage!, style: const TextStyle(color: AppColors.inkMuted, fontSize: 11)),
+              child: Text(_statusMessage!, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 11)),
             ),
 
           // Rendu des logs
@@ -237,17 +240,18 @@ class _SidecarsDashboardScreenState extends State<SidecarsDashboardScreen> {
                     margin: const EdgeInsets.all(12),
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: AppColors.surfaceInput,
+                      color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppColors.borderSubtle),
+                      border: Border.all(color: isDark ? AppColors.borderSubtle : scheme.outlineVariant),
                     ),
                     child: SingleChildScrollView(
                       child: Text(
                         _logContent,
-                        style: const TextStyle(
-                          color: AppColors.inkPrimary,
+                        style: TextStyle(
+                          color: scheme.onSurface,
                           fontSize: 11,
                           fontFamily: 'monospace',
+                          height: 1.4,
                         ),
                       ),
                     ),

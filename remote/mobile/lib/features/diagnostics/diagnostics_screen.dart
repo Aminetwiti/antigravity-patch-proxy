@@ -43,11 +43,17 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
-      backgroundColor: AppColors.surfaceBase,
+      backgroundColor: isDark ? AppColors.surfaceBase : scheme.surface,
       appBar: AppBar(
-        backgroundColor: AppColors.surfaceRaised,
-        title: const Text('Diagnostics & Profiling 📊', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        backgroundColor: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
+        title: Text(
+          'Diagnostics & Profiling 📊',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: scheme.onSurface),
+        ),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -58,31 +64,34 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: AppColors.surfaceRaised,
+                color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.borderStrong),
+                border: Border.all(color: isDark ? AppColors.borderStrong : scheme.outlineVariant),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Row(
+                  Row(
                     children: [
-                      Icon(Icons.monitor_heart, color: AppColors.positive, size: 20),
-                      SizedBox(width: 8),
-                      Text('Go FlightRecorder Engine', style: TextStyle(color: AppColors.inkPrimary, fontWeight: FontWeight.bold, fontSize: 14)),
+                      const Icon(Icons.monitor_heart, color: AppColors.positive, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Go FlightRecorder Engine',
+                        style: TextStyle(color: scheme.onSurface, fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 8),
-                  const Text(
+                  Text(
                     'Capture en direct les goroutines, syscalls, contention des mutex et allocations heap du Language Server Go.',
-                    style: TextStyle(color: AppColors.inkSecondary, fontSize: 12),
+                    style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
                   ),
                   const SizedBox(height: 14),
                   ElevatedButton.icon(
                     onPressed: _isDumping ? null : _dumpTrace,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.buttonBackground,
-                      foregroundColor: Colors.white,
+                      backgroundColor: scheme.primary,
+                      foregroundColor: AppColors.onAccent,
                     ),
                     icon: const Icon(Icons.download, size: 16),
                     label: Text(_isDumping ? 'Extraction en cours...' : 'Extraire un Dump FlightRecorder (.trace)'),
@@ -96,13 +105,13 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: AppColors.surfaceInput,
+                  color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.borderSubtle),
+                  border: Border.all(color: isDark ? AppColors.borderSubtle : scheme.outlineVariant),
                 ),
                 child: Text(
                   _statusMessage!,
-                  style: const TextStyle(color: AppColors.inkPrimary, fontSize: 12, fontFamily: 'monospace'),
+                  style: TextStyle(color: scheme.onSurface, fontSize: 12, fontFamily: 'monospace'),
                 ),
               ),
               const SizedBox(height: 16),
@@ -112,7 +121,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: AppColors.surfaceInput,
+                  color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: AppColors.positive),
                 ),
@@ -121,33 +130,37 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                   children: [
                     const Text('Détails de la Trace Go Profiling', style: TextStyle(color: AppColors.positive, fontWeight: FontWeight.bold, fontSize: 12)),
                     const SizedBox(height: 4),
-                    Text('Taille: ${_lastTraceResult!['size'] ?? 0} octets | Statut: ${_lastTraceResult!['status'] ?? 'ok'}', style: const TextStyle(color: AppColors.inkPrimary, fontSize: 11)),
+                    Text(
+                      'Taille: ${_lastTraceResult!['size'] ?? 0} octets | Statut: ${_lastTraceResult!['status'] ?? 'ok'}',
+                      style: TextStyle(color: scheme.onSurface, fontSize: 11),
+                    ),
                   ],
                 ),
               ),
               const SizedBox(height: 16),
             ],
 
-
-
             // Section Métriques Système
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: AppColors.surfaceRaised,
+                color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.borderSubtle),
+                border: Border.all(color: isDark ? AppColors.borderSubtle : scheme.outlineVariant),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Métriques d\'Exécution', style: TextStyle(color: AppColors.inkPrimary, fontWeight: FontWeight.bold, fontSize: 13)),
+                  Text(
+                    'Métriques d\'Exécution',
+                    style: TextStyle(color: scheme.onSurface, fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
                   const SizedBox(height: 12),
-                  _buildMetricRow('Statut Language Server', 'Connecté (Hub :62103)', AppColors.positive),
-                  const Divider(color: AppColors.borderSubtle),
-                  _buildMetricRow('Protocole Wire', 'ConnectRPC / gRPC-Web', AppColors.info),
-                  const Divider(color: AppColors.borderSubtle),
-                  _buildMetricRow('Framing Protobuf', 'Manuel Zéro-Allocation', AppColors.codeGold),
+                  _buildMetricRow('Statut Language Server', 'Connecté (Hub :62103)', AppColors.positive, scheme),
+                  Divider(color: isDark ? AppColors.borderSubtle : scheme.outlineVariant),
+                  _buildMetricRow('Protocole Wire', 'ConnectRPC / gRPC-Web', AppColors.info, scheme),
+                  Divider(color: isDark ? AppColors.borderSubtle : scheme.outlineVariant),
+                  _buildMetricRow('Framing Protobuf', 'Manuel Zéro-Allocation', AppColors.codeGold, scheme),
                 ],
               ),
             ),
@@ -157,13 +170,13 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
     );
   }
 
-  Widget _buildMetricRow(String label, String value, Color valueColor) {
+  Widget _buildMetricRow(String label, String value, Color valueColor, ColorScheme scheme) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: const TextStyle(color: AppColors.inkMuted, fontSize: 12)),
+          Text(label, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
           Text(value, style: TextStyle(color: valueColor, fontWeight: FontWeight.bold, fontSize: 12)),
         ],
       ),

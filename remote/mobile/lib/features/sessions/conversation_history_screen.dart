@@ -102,29 +102,32 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
       }
     }
 
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
-      backgroundColor: const Color(0xFF0F1012),
+      backgroundColor: isDark ? const Color(0xFF0F1012) : scheme.surface,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0F1012),
+        backgroundColor: isDark ? const Color(0xFF0F1012) : scheme.surfaceContainer,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: AppColors.inkPrimary),
+          icon: Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: scheme.onSurface),
           onPressed: () => Navigator.of(context).pop(),
           tooltip: 'Retour',
         ),
-        title: const Text(
+        title: Text(
           'Conversation History',
           style: TextStyle(
             fontSize: 17,
             fontWeight: FontWeight.w600,
-            color: AppColors.inkPrimary,
+            color: scheme.onSurface,
             letterSpacing: -0.2,
           ),
         ),
         actions: [
           if (widget.onRefresh != null)
             IconButton(
-              icon: const Icon(Icons.refresh_rounded, size: 20, color: AppColors.inkSecondary),
+              icon: Icon(Icons.refresh_rounded, size: 20, color: scheme.onSurfaceVariant),
               onPressed: () {
                 HapticFeedback.selectionClick();
                 widget.onRefresh!();
@@ -163,21 +166,21 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
                     child: Container(
                       height: 40,
                       decoration: BoxDecoration(
-                        color: const Color(0xFF1B1D22),
+                        color: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest,
                         borderRadius: BorderRadius.circular(AppRadius.lg),
-                        border: Border.all(color: const Color(0xFF2C2F36), width: 1),
+                        border: Border.all(color: isDark ? const Color(0xFF2C2F36) : scheme.outlineVariant, width: 1),
                       ),
                       child: TextField(
                         controller: _searchController,
-                        style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
-                        cursorColor: AppColors.accentBlue,
+                        style: TextStyle(fontSize: 13, color: scheme.onSurface),
+                        cursorColor: scheme.primary,
                         decoration: InputDecoration(
                           hintText: 'Search conversations...',
-                          hintStyle: const TextStyle(fontSize: 13, color: Color(0xFF636D83)),
-                          prefixIcon: const Icon(Icons.search_rounded, size: 18, color: Color(0xFF636D83)),
+                          hintStyle: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
+                          prefixIcon: Icon(Icons.search_rounded, size: 18, color: scheme.onSurfaceVariant),
                           suffixIcon: _searchQuery.isNotEmpty
                               ? IconButton(
-                                  icon: const Icon(Icons.close_rounded, size: 16, color: Color(0xFF636D83)),
+                                  icon: Icon(Icons.close_rounded, size: 16, color: scheme.onSurfaceVariant),
                                   tooltip: 'Effacer la recherche',
                                   onPressed: () {
                                     _searchController.clear();
@@ -195,23 +198,23 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
                   // Bouton Filtre par projet
                   PopupMenuButton<String>(
                     tooltip: 'Filtrer par projet',
-                    color: AppColors.surfaceRaised,
+                    color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(AppRadius.md),
-                      side: const BorderSide(color: AppColors.borderStrong),
+                      side: BorderSide(color: isDark ? AppColors.borderStrong : scheme.outlineVariant),
                     ),
                     icon: Container(
                       width: 40,
                       height: 40,
                       decoration: BoxDecoration(
                         color: _selectedWorkspaceFilter != null
-                            ? AppColors.accentBlue.withValues(alpha: 0.15)
-                            : const Color(0xFF1B1D22),
+                            ? scheme.primary.withValues(alpha: 0.15)
+                            : (isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest),
                         borderRadius: BorderRadius.circular(AppRadius.lg),
                         border: Border.all(
                           color: _selectedWorkspaceFilter != null
-                              ? AppColors.accentBlue
-                              : const Color(0xFF2C2F36),
+                              ? scheme.primary
+                              : (isDark ? const Color(0xFF2C2F36) : scheme.outlineVariant),
                           width: 1,
                         ),
                       ),
@@ -219,8 +222,8 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
                         Icons.filter_list_rounded,
                         size: 18,
                         color: _selectedWorkspaceFilter != null
-                            ? AppColors.accentBlue
-                            : AppColors.inkSecondary,
+                            ? scheme.primary
+                            : scheme.onSurfaceVariant,
                       ),
                     ),
                     onSelected: (ws) {
@@ -229,11 +232,11 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
                       });
                     },
                     itemBuilder: (context) => [
-                      const PopupMenuItem<String>(
+                      PopupMenuItem<String>(
                         value: '',
                         child: Text(
                           'Tous les projets',
-                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.inkPrimary),
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: scheme.onSurface),
                         ),
                       ),
                       const PopupMenuDivider(),
@@ -242,7 +245,7 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
                           value: ws,
                           child: Row(
                             children: [
-                              const Icon(Icons.folder_outlined, size: 14, color: AppColors.inkMuted),
+                              Icon(Icons.folder_outlined, size: 14, color: scheme.onSurfaceVariant),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
@@ -250,8 +253,8 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
                                   style: TextStyle(
                                     fontSize: 13,
                                     color: _selectedWorkspaceFilter == ws
-                                        ? AppColors.accentBlue
-                                        : AppColors.inkPrimary,
+                                        ? scheme.primary
+                                        : scheme.onSurface,
                                     fontWeight: _selectedWorkspaceFilter == ws
                                         ? FontWeight.w600
                                         : FontWeight.w400,
@@ -260,7 +263,7 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
                                 ),
                               ),
                               if (_selectedWorkspaceFilter == ws)
-                                const Icon(Icons.check_rounded, size: 16, color: AppColors.accentBlue),
+                                Icon(Icons.check_rounded, size: 16, color: scheme.primary),
                             ],
                           ),
                         ),
@@ -443,10 +446,12 @@ class _ConversationHistoryRow extends StatelessWidget {
   });
 
   void _showContextMenu(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     HapticFeedback.mediumImpact();
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF1B1D22),
+      backgroundColor: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainer,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
       ),
@@ -461,7 +466,7 @@ class _ConversationHistoryRow extends StatelessWidget {
                 height: 4,
                 margin: const EdgeInsets.only(bottom: 12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF3B3E47),
+                  color: isDark ? const Color(0xFF3B3E47) : scheme.outlineVariant,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -472,10 +477,10 @@ class _ConversationHistoryRow extends StatelessWidget {
                     Expanded(
                       child: Text(
                         session.title,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13.5,
                           fontWeight: FontWeight.w600,
-                          color: AppColors.inkPrimary,
+                          color: scheme.onSurface,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -483,10 +488,10 @@ class _ConversationHistoryRow extends StatelessWidget {
                   ],
                 ),
               ),
-              const Divider(color: Color(0xFF2C2F36)),
+              Divider(color: isDark ? const Color(0xFF2C2F36) : scheme.outlineVariant),
               ListTile(
-                leading: const Icon(Icons.copy_rounded, size: 18, color: AppColors.inkPrimary),
-                title: const Text('Copy Title', style: TextStyle(fontSize: 13, color: AppColors.inkPrimary)),
+                leading: Icon(Icons.copy_rounded, size: 18, color: scheme.onSurface),
+                title: Text('Copy Title', style: TextStyle(fontSize: 13, color: scheme.onSurface)),
                 onTap: () {
                   Navigator.of(ctx).pop();
                   Clipboard.setData(ClipboardData(text: session.title));
@@ -496,8 +501,8 @@ class _ConversationHistoryRow extends StatelessWidget {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.tag_rounded, size: 18, color: AppColors.inkPrimary),
-                title: const Text('Copy Session ID', style: TextStyle(fontSize: 13, color: AppColors.inkPrimary)),
+                leading: Icon(Icons.tag_rounded, size: 18, color: scheme.onSurface),
+                title: Text('Copy Session ID', style: TextStyle(fontSize: 13, color: scheme.onSurface)),
                 onTap: () {
                   Navigator.of(ctx).pop();
                   Clipboard.setData(ClipboardData(text: session.id));
@@ -523,19 +528,21 @@ class _ConversationHistoryRow extends StatelessWidget {
   }
 
   void _confirmDelete(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1B1D22),
-        title: const Text('Supprimer la conversation ?', style: TextStyle(fontSize: 15, color: AppColors.inkPrimary)),
+        backgroundColor: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainer,
+        title: Text('Supprimer la conversation ?', style: TextStyle(fontSize: 15, color: scheme.onSurface)),
         content: Text(
           'Voulez-vous supprimer définitivement "${session.title}" ?',
-          style: const TextStyle(fontSize: 13, color: AppColors.inkSecondary),
+          style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Annuler', style: TextStyle(color: AppColors.inkMuted)),
+            child: Text('Annuler', style: TextStyle(color: scheme.onSurfaceVariant)),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
@@ -552,6 +559,9 @@ class _ConversationHistoryRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -559,8 +569,8 @@ class _ConversationHistoryRow extends StatelessWidget {
         onLongPress: () => _showContextMenu(context),
         onSecondaryTap: () => _showContextMenu(context),
         borderRadius: BorderRadius.circular(AppRadius.md),
-        hoverColor: const Color(0xFF1E2127),
-        splashColor: AppColors.accentBlue.withValues(alpha: 0.1),
+        hoverColor: isDark ? const Color(0xFF1E2127) : scheme.surfaceContainerHighest,
+        splashColor: scheme.primary.withValues(alpha: 0.1),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Row(
@@ -575,7 +585,7 @@ class _ConversationHistoryRow extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 13.5,
                         fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
-                        color: isActive ? AppColors.inkPrimary : const Color(0xFFE4E4E7),
+                        color: isActive ? scheme.primary : (isDark ? const Color(0xFFE4E4E7) : scheme.onSurface),
                         letterSpacing: -0.1,
                       ),
                       maxLines: 1,
@@ -585,18 +595,18 @@ class _ConversationHistoryRow extends StatelessWidget {
                       const SizedBox(height: 3),
                       Row(
                         children: [
-                          const Icon(
+                          Icon(
                             Icons.folder_outlined,
                             size: 12,
-                            color: Color(0xFF6B7280),
+                            color: scheme.onSurfaceVariant,
                           ),
                           const SizedBox(width: 5),
                           Expanded(
                             child: Text(
                               workspaceName,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 11.5,
-                                color: Color(0xFF8F909A),
+                                color: scheme.onSurfaceVariant,
                               ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -619,7 +629,7 @@ class _ConversationHistoryRow extends StatelessWidget {
                   child: CircularProgressIndicator(
                     strokeWidth: 1.5,
                     valueColor: AlwaysStoppedAnimation<Color>(
-                      isActive ? AppColors.accentBlue : const Color(0xFF9E9FA9),
+                      isActive ? scheme.primary : scheme.onSurfaceVariant,
                     ),
                   ),
                 )
@@ -627,12 +637,12 @@ class _ConversationHistoryRow extends StatelessWidget {
                 Container(
                   width: 7,
                   height: 7,
-                  decoration: const BoxDecoration(
-                    color: AppColors.accentBlue,
+                  decoration: BoxDecoration(
+                    color: scheme.primary,
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: AppColors.accentBlue,
+                        color: scheme.primary,
                         blurRadius: 4,
                         spreadRadius: 1,
                       ),
@@ -642,17 +652,17 @@ class _ConversationHistoryRow extends StatelessWidget {
               else if (session.time.isNotEmpty)
                 Text(
                   session.time,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
-                    color: Color(0xFF6B7280),
+                    color: scheme.onSurfaceVariant,
                     fontWeight: FontWeight.w400,
                   ),
                 )
               else
-                const Icon(
+                Icon(
                   Icons.arrow_forward_ios_rounded,
                   size: 11,
-                  color: Color(0xFF3F424E),
+                  color: isDark ? const Color(0xFF3F424E) : scheme.outlineVariant,
                 ),
             ],
           ),

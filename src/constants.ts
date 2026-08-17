@@ -158,6 +158,9 @@ export const DEFAULT_TOP_K = 40;
 
 // ─── Model Placeholder ID Generation ──────────────────────────────────────
 
+/** Initial seed for DJB2 hashing algorithm used in deterministic model ID generation. */
+export const DJB2_SEED = 5381;
+
 /** Base number for placeholder IDs (e.g., MODEL_PLACEHOLDER_M400). */
 export const PLACEHOLDER_ID_BASE = 400;
 

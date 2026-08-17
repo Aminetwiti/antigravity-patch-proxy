@@ -410,13 +410,16 @@ class _ChangedFileRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return InkWell(
       onTap: () {
         HapticFeedback.selectionClick();
         onTap();
       },
-      hoverColor: const Color(0xFF1E2127),
-      splashColor: AppColors.accentBlue.withValues(alpha: 0.1),
+      hoverColor: isDark ? const Color(0xFF1E2127) : scheme.surfaceContainerHighest,
+      splashColor: scheme.primary.withValues(alpha: 0.1),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         child: Row(
@@ -436,10 +439,10 @@ class _ChangedFileRow extends StatelessWidget {
                     Flexible(
                       child: Text(
                         file.fileName,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
-                          color: Color(0xFFE4E4E7),
+                          color: isDark ? const Color(0xFFE4E4E7) : scheme.onSurface,
                           letterSpacing: -0.1,
                         ),
                         overflow: TextOverflow.ellipsis,
@@ -450,9 +453,9 @@ class _ChangedFileRow extends StatelessWidget {
                       Flexible(
                         child: Text(
                           file.directoryPath,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 11.5,
-                            color: Color(0xFF6B7280),
+                            color: isDark ? const Color(0xFF8F909A) : scheme.onSurfaceVariant,
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),

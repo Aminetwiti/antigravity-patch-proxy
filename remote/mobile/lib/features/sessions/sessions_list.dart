@@ -819,10 +819,12 @@ class _SessionRowItemState extends State<_SessionRowItem> {
   bool _hovered = false;
 
   void _showSessionContextMenu(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     HapticFeedback.mediumImpact();
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF1B1D22),
+      backgroundColor: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainer,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
       ),
@@ -837,7 +839,7 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                 height: 4,
                 margin: const EdgeInsets.only(bottom: 12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF3B3E47),
+                  color: isDark ? const Color(0xFF3B3E47) : scheme.outlineVariant,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -848,10 +850,10 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                     Expanded(
                       child: Text(
                         widget.session.title,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13.5,
                           fontWeight: FontWeight.w600,
-                          color: AppColors.inkPrimary,
+                          color: scheme.onSurface,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -859,10 +861,10 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                   ],
                 ),
               ),
-              const Divider(color: Color(0xFF2C2F36)),
+              Divider(color: isDark ? const Color(0xFF2C2F36) : scheme.outlineVariant),
               ListTile(
-                leading: const Icon(Icons.edit_outlined, size: 18, color: AppColors.inkPrimary),
-                title: const Text('Renommer la conversation', style: TextStyle(fontSize: 13, color: AppColors.inkPrimary)),
+                leading: Icon(Icons.edit_outlined, size: 18, color: scheme.onSurface),
+                title: Text('Renommer la conversation', style: TextStyle(fontSize: 13, color: scheme.onSurface)),
                 onTap: () {
                   Navigator.of(ctx).pop();
                   _promptRename(context);
@@ -873,11 +875,11 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                   leading: Icon(
                     widget.isPinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
                     size: 18,
-                    color: AppColors.inkPrimary,
+                    color: scheme.onSurface,
                   ),
                   title: Text(
                     widget.isPinned ? 'Désépingler la conversation' : 'Épingler la conversation',
-                    style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
+                    style: TextStyle(fontSize: 13, color: scheme.onSurface),
                   ),
                   onTap: () {
                     Navigator.of(ctx).pop();
@@ -886,16 +888,16 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                 ),
               if (widget.onExport != null)
                 ListTile(
-                  leading: const Icon(Icons.download_rounded, size: 18, color: AppColors.inkPrimary),
-                  title: const Text('Exporter en Markdown', style: TextStyle(fontSize: 13, color: AppColors.inkPrimary)),
+                  leading: Icon(Icons.download_rounded, size: 18, color: scheme.onSurface),
+                  title: Text('Exporter en Markdown', style: TextStyle(fontSize: 13, color: scheme.onSurface)),
                   onTap: () {
                     Navigator.of(ctx).pop();
                     widget.onExport?.call();
                   },
                 ),
               ListTile(
-                leading: const Icon(Icons.copy_rounded, size: 18, color: AppColors.inkPrimary),
-                title: const Text('Copy Title', style: TextStyle(fontSize: 13, color: AppColors.inkPrimary)),
+                leading: Icon(Icons.copy_rounded, size: 18, color: scheme.onSurface),
+                title: Text('Copy Title', style: TextStyle(fontSize: 13, color: scheme.onSurface)),
                 onTap: () {
                   Navigator.of(ctx).pop();
                   Clipboard.setData(ClipboardData(text: widget.session.title));
@@ -905,8 +907,8 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.tag_rounded, size: 18, color: AppColors.inkPrimary),
-                title: const Text('Copy Session ID', style: TextStyle(fontSize: 13, color: AppColors.inkPrimary)),
+                leading: Icon(Icons.tag_rounded, size: 18, color: scheme.onSurface),
+                title: Text('Copy Session ID', style: TextStyle(fontSize: 13, color: scheme.onSurface)),
                 onTap: () {
                   Navigator.of(ctx).pop();
                   Clipboard.setData(ClipboardData(text: widget.session.id));
@@ -932,21 +934,23 @@ class _SessionRowItemState extends State<_SessionRowItem> {
   }
 
   void _promptRename(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final controller = TextEditingController(text: widget.session.title);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1B1D22),
-        title: const Text('Renommer la conversation', style: TextStyle(fontSize: 15, color: AppColors.inkPrimary)),
+        backgroundColor: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainer,
+        title: Text('Renommer la conversation', style: TextStyle(fontSize: 15, color: scheme.onSurface)),
         content: TextField(
           controller: controller,
           autofocus: true,
-          style: const TextStyle(fontSize: 13, color: AppColors.inkPrimary),
+          style: TextStyle(fontSize: 13, color: scheme.onSurface),
           decoration: InputDecoration(
             hintText: 'Nouveau titre...',
-            hintStyle: const TextStyle(color: AppColors.inkMuted),
+            hintStyle: TextStyle(color: scheme.onSurfaceVariant),
             filled: true,
-            fillColor: const Color(0xFF22252B),
+            fillColor: isDark ? const Color(0xFF22252B) : scheme.surfaceContainerHighest,
             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
           ),
@@ -954,7 +958,7 @@ class _SessionRowItemState extends State<_SessionRowItem> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Annuler', style: TextStyle(color: AppColors.inkMuted)),
+            child: Text('Annuler', style: TextStyle(color: scheme.onSurfaceVariant)),
           ),
           FilledButton(
             onPressed: () {
@@ -972,19 +976,21 @@ class _SessionRowItemState extends State<_SessionRowItem> {
   }
 
   void _confirmDelete(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1B1D22),
-        title: const Text('Supprimer la conversation ?', style: TextStyle(fontSize: 15, color: AppColors.inkPrimary)),
+        backgroundColor: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainer,
+        title: Text('Supprimer la conversation ?', style: TextStyle(fontSize: 15, color: scheme.onSurface)),
         content: Text(
           'Voulez-vous supprimer définitivement "${widget.session.title}" ?',
-          style: const TextStyle(fontSize: 13, color: AppColors.inkSecondary),
+          style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Annuler', style: TextStyle(color: AppColors.inkMuted)),
+            child: Text('Annuler', style: TextStyle(color: scheme.onSurfaceVariant)),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: AppColors.danger),

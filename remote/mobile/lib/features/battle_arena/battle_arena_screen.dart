@@ -131,15 +131,21 @@ class _BattleArenaScreenState extends State<BattleArenaScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
-      backgroundColor: AppColors.surfaceBase,
+      backgroundColor: isDark ? AppColors.surfaceBase : scheme.surface,
       appBar: AppBar(
-        backgroundColor: AppColors.surfaceRaised,
-        title: const Text('Colosseum Battle Arena ⚔️', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        backgroundColor: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
+        title: Text(
+          'Colosseum Battle Arena ⚔️',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: scheme.onSurface),
+        ),
         actions: [
           if (_isRunning)
             IconButton(
-              icon: const Icon(Icons.refresh, color: AppColors.accentBlue),
+              icon: Icon(Icons.refresh, color: scheme.primary),
               onPressed: _refreshDiff,
             ),
         ],
@@ -157,6 +163,8 @@ class _BattleArenaScreenState extends State<BattleArenaScreen> {
                     title: 'Arm A (Modèle 1)',
                     selectedUID: _modelA,
                     color: AppColors.providerAnthropic,
+                    scheme: scheme,
+                    isDark: isDark,
                     onChanged: (uid) => setState(() => _modelA = uid),
                   ),
                 ),
@@ -169,6 +177,8 @@ class _BattleArenaScreenState extends State<BattleArenaScreen> {
                     title: 'Arm B (Modèle 2)',
                     selectedUID: _modelB,
                     color: AppColors.providerGoogle,
+                    scheme: scheme,
+                    isDark: isDark,
                     onChanged: (uid) => setState(() => _modelB = uid),
                   ),
                 ),
@@ -180,12 +190,12 @@ class _BattleArenaScreenState extends State<BattleArenaScreen> {
             TextField(
               controller: _promptController,
               maxLines: 3,
-              style: const TextStyle(color: AppColors.inkPrimary, fontSize: 13),
+              style: TextStyle(color: scheme.onSurface, fontSize: 13),
               decoration: InputDecoration(
                 hintText: 'Entrez la tâche à mettre en compétition (ex: Refactor du tokenizer en zéro-allocation)...',
-                hintStyle: const TextStyle(color: AppColors.inkMuted, fontSize: 12),
+                hintStyle: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
                 filled: true,
-                fillColor: AppColors.surfaceInput,
+                fillColor: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
               ),
             ),
@@ -195,7 +205,7 @@ class _BattleArenaScreenState extends State<BattleArenaScreen> {
             ElevatedButton.icon(
               onPressed: _isRunning ? null : _startBattle,
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.accentBlue,
+                backgroundColor: scheme.primary,
                 foregroundColor: AppColors.onAccent,
                 padding: const EdgeInsets.symmetric(vertical: 12),
               ),
@@ -208,18 +218,21 @@ class _BattleArenaScreenState extends State<BattleArenaScreen> {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: AppColors.surfaceRaised,
+                  color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
                   borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: AppColors.borderSubtle),
+                  border: Border.all(color: isDark ? AppColors.borderSubtle : scheme.outlineVariant),
                 ),
-                child: Text(_statusMessage!, style: const TextStyle(color: AppColors.inkSecondary, fontSize: 12)),
+                child: Text(_statusMessage!, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
               ),
             ],
 
             const SizedBox(height: 20),
             // Actions d'arbitrage
             if (_isRunning) ...[
-              const Text('Arbitrage & SafeMerge', style: TextStyle(color: AppColors.inkPrimary, fontWeight: FontWeight.bold, fontSize: 14)),
+              Text(
+                'Arbitrage & SafeMerge',
+                style: TextStyle(color: scheme.onSurface, fontWeight: FontWeight.bold, fontSize: 14),
+              ),
               const SizedBox(height: 8),
               Row(
                 children: [
@@ -267,16 +280,16 @@ class _BattleArenaScreenState extends State<BattleArenaScreen> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: AppColors.surfaceInput,
+                  color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.borderSubtle),
+                  border: Border.all(color: isDark ? AppColors.borderSubtle : scheme.outlineVariant),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text('Diff Comparatif Live', style: TextStyle(color: AppColors.codeGold, fontWeight: FontWeight.bold, fontSize: 12)),
                     const SizedBox(height: 4),
-                    Text('${_battleDiff!}', style: const TextStyle(color: AppColors.inkPrimary, fontSize: 11, fontFamily: 'monospace')),
+                    Text('${_battleDiff!}', style: TextStyle(color: scheme.onSurface, fontSize: 11, fontFamily: 'monospace')),
                   ],
                 ),
               ),
@@ -304,16 +317,17 @@ class _BattleArenaScreenState extends State<BattleArenaScreen> {
     required String title,
     required String selectedUID,
     required Color color,
+    required ColorScheme scheme,
+    required bool isDark,
     required ValueChanged<String> onChanged,
   }) {
     return Container(
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: AppColors.surfaceRaised,
+        color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: color.withAlpha(100)),
       ),
-
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -322,12 +336,12 @@ class _BattleArenaScreenState extends State<BattleArenaScreen> {
           DropdownButton<String>(
             value: selectedUID,
             isExpanded: true,
-            dropdownColor: AppColors.surfaceRaised,
+            dropdownColor: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
             underline: const SizedBox(),
             items: _availableModels.map((m) {
               return DropdownMenuItem<String>(
                 value: m['uid'] as String,
-                child: Text(m['name'] as String, style: const TextStyle(color: AppColors.inkPrimary, fontSize: 12)),
+                child: Text(m['name'] as String, style: TextStyle(color: scheme.onSurface, fontSize: 12)),
               );
             }).toList(),
             onChanged: (val) {
