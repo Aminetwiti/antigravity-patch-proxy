@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/protocol/daemon_api.dart';
@@ -10,6 +11,7 @@ class ArtifactViewerModal extends StatefulWidget {
   final String artifactPath;
   final String artifactName;
   final String? workspacePath;
+  final String? cascadeId;
   final bool requestFeedback;
   final VoidCallback? onProceed;
   final VoidCallback? onRequestFeedback;
@@ -20,6 +22,7 @@ class ArtifactViewerModal extends StatefulWidget {
     required this.artifactPath,
     required this.artifactName,
     this.workspacePath,
+    this.cascadeId,
     this.requestFeedback = false,
     this.onProceed,
     this.onRequestFeedback,
@@ -31,6 +34,7 @@ class ArtifactViewerModal extends StatefulWidget {
     required String artifactPath,
     required String artifactName,
     String? workspacePath,
+    String? cascadeId,
     bool requestFeedback = false,
     VoidCallback? onProceed,
     VoidCallback? onRequestFeedback,
@@ -45,6 +49,7 @@ class ArtifactViewerModal extends StatefulWidget {
         artifactPath: artifactPath,
         artifactName: artifactName,
         workspacePath: workspacePath,
+        cascadeId: cascadeId,
         requestFeedback: requestFeedback,
         onProceed: onProceed,
         onRequestFeedback: onRequestFeedback,
@@ -59,7 +64,23 @@ class ArtifactViewerModal extends StatefulWidget {
 class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
   bool _isLoading = true;
   String _content = '';
+  Uint8List? _imageBytes;
   String? _error;
+
+  bool get _isImage {
+    final lowerName = widget.artifactName.toLowerCase();
+    final lowerPath = widget.artifactPath.toLowerCase();
+    return lowerName.endsWith('.png') ||
+        lowerName.endsWith('.jpg') ||
+        lowerName.endsWith('.jpeg') ||
+        lowerName.endsWith('.gif') ||
+        lowerName.endsWith('.webp') ||
+        lowerPath.endsWith('.png') ||
+        lowerPath.endsWith('.jpg') ||
+        lowerPath.endsWith('.jpeg') ||
+        lowerPath.endsWith('.gif') ||
+        lowerPath.endsWith('.webp');
+  }
 
   @override
   void initState() {
@@ -74,12 +95,24 @@ class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
         res = await widget.api.readFile(
           widget.artifactPath,
           workspacePath: widget.workspacePath,
+          cascadeId: widget.cascadeId,
         );
       } catch (_) {
-        res = await widget.api.readFile(widget.artifactPath);
+        res = await widget.api.readFile(
+          widget.artifactPath,
+          cascadeId: widget.cascadeId,
+        );
       }
       if (mounted) {
+        Uint8List? imgBytes;
+        final b64 = res['base64Data'] as String?;
+        if (b64 != null && b64.isNotEmpty) {
+          try {
+            imgBytes = base64Decode(b64);
+          } catch (_) {}
+        }
         setState(() {
+          _imageBytes = imgBytes;
           _content = res['content'] as String? ?? 'Contenu vide';
           _isLoading = false;
         });
@@ -127,7 +160,11 @@ class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.article_outlined, size: 20, color: scheme.primary),
+                  Icon(
+                    _isImage ? Icons.image_outlined : Icons.article_outlined,
+                    size: 20,
+                    color: scheme.primary,
+                  ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
@@ -164,10 +201,33 @@ class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
                             ),
                           ),
                         )
-                      : SingleChildScrollView(
-                          padding: const EdgeInsets.all(16),
-                          child: MarkdownBody(content: _content),
-                        ),
+                      : _imageBytes != null
+                          ? Center(
+                              child: Padding(
+                                padding: const EdgeInsets.all(16.0),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(AppRadius.md),
+                                  child: InteractiveViewer(
+                                    minScale: 0.5,
+                                    maxScale: 4.0,
+                                    child: Image.memory(
+                                      _imageBytes!,
+                                      fit: BoxFit.contain,
+                                      errorBuilder: (ctx, err, stack) => Center(
+                                        child: Text(
+                                          'Format d\'image non reconnu',
+                                          style: TextStyle(color: scheme.error),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            )
+                          : SingleChildScrollView(
+                              padding: const EdgeInsets.all(16),
+                              child: MarkdownBody(content: _content),
+                            ),
             ),
             if (widget.requestFeedback)
               ArtifactActionBar(

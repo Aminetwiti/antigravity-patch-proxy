@@ -152,32 +152,62 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
     if (widget.api == null || widget.activeSessionId.isEmpty) return;
     setState(() => _isLoadingUploads = true);
     try {
+      // 1. Try dedicated daemon listUploads RPC
+      try {
+        final res = await widget.api!.listUploads(widget.activeSessionId);
+        final list = res['uploads'] as List<dynamic>? ?? [];
+        if (list.isNotEmpty) {
+          final ups = <Map<String, dynamic>>[];
+          final seen = <String>{};
+          for (final u in list) {
+            if (u is Map && u['name'] != null) {
+              final name = u['name'].toString();
+              if (seen.add(name)) {
+                ups.add({
+                  'name': name,
+                  'path': u['path']?.toString() ?? name,
+                });
+              }
+            }
+          }
+          if (mounted && ups.isNotEmpty) {
+            setState(() => _uploads = ups);
+            return;
+          }
+        }
+      } catch (_) {}
+
+      // 2. Fallback via listFiles with deduplication
       final brainBases = [
         '.gemini/antigravity/brain/${widget.activeSessionId}',
         '.gemini/antigravity-ide/brain/${widget.activeSessionId}',
       ];
       final ups = <Map<String, dynamic>>[];
+      final seen = <String>{};
 
       for (final base in brainBases) {
-        final pathsToTry = ['$base/scratch/', '$base/.user_uploaded/', '$base/'];
+        final pathsToTry = ['$base/scratch/', '$base/.user_uploaded/'];
         for (final p in pathsToTry) {
           try {
             final res = await widget.api!.listFiles(p);
             final files = res['files'] as List<dynamic>? ?? [];
             for (final f in files) {
               if (f is Map && f['name'] != null) {
-                final name = f['name'].toString().toLowerCase();
-                if (name.endsWith('.png') ||
-                    name.endsWith('.jpg') ||
-                    name.endsWith('.jpeg') ||
-                    name.endsWith('.gif') ||
-                    name.endsWith('.webp') ||
-                    name.endsWith('.pdf') ||
-                    name.endsWith('.mp4')) {
-                  ups.add({
-                    'name': f['name'],
-                    'path': f['path'] ?? '$p${f['name']}',
-                  });
+                final name = f['name'].toString();
+                final lower = name.toLowerCase();
+                if (lower.endsWith('.png') ||
+                    lower.endsWith('.jpg') ||
+                    lower.endsWith('.jpeg') ||
+                    lower.endsWith('.gif') ||
+                    lower.endsWith('.webp') ||
+                    lower.endsWith('.pdf') ||
+                    lower.endsWith('.mp4')) {
+                  if (seen.add(name)) {
+                    ups.add({
+                      'name': name,
+                      'path': '$p$name',
+                    });
+                  }
                 }
               }
             }
@@ -200,6 +230,7 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
       api: widget.api!,
       artifactPath: artifact['path'] ?? artifact['name'] ?? '',
       artifactName: artifact['name'] ?? 'Document',
+      cascadeId: widget.activeSessionId,
     );
   }
 

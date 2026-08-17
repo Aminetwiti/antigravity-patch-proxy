@@ -131,6 +131,7 @@ func TestJetboxSyncBroadcasts(t *testing.T) {
 
 	client := dialWS(t, "ws"+strings.TrimPrefix(ts.URL, "http")+"/ws")
 	defer client.conn.Close()
+	time.Sleep(50 * time.Millisecond)
 
 	recvSessionsUpdated := func() map[string]interface{} {
 		for {

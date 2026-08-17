@@ -802,6 +802,8 @@ func TestWebSocketCheckOrigin(t *testing.T) {
 // UNE trajectoire structurée (champ 1 : cascade_id UUID de 36 octets + status).
 func trajectoryFrame(uuid string) []byte {
 	inner := append([]byte{0x0a, 0x24}, []byte(uuid)...) // field 1: cascade_id
+	inner = append(inner, 0x12, 0x0c)                     // field 2: title (length 12)
+	inner = append(inner, []byte("Test Session")...)
 	inner = append(inner, 0xb0, 0x01, 0x04)              // field 22: varint 4 (READY)
 	outer := append([]byte{0x0a, byte(len(inner))}, inner...)
 	return connectrpc.Frame(outer)

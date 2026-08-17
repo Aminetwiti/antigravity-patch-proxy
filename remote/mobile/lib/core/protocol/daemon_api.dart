@@ -409,9 +409,11 @@ class DaemonApi {
   Future<Map<String, dynamic>> readFile(
     String filePath, {
     String? workspacePath,
+    String? cascadeId,
   }) => rpc('read_file', {
     'filePath': filePath,
     if (workspacePath != null) 'workspacePath': workspacePath,
+    if (cascadeId != null) 'cascadeId': cascadeId,
   });
 
   Future<Map<String, dynamic>> getContext({String? cascadeId, String? workspacePath}) =>

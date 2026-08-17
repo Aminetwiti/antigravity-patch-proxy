@@ -1038,10 +1038,24 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     final isWideScreen = screenWidth >= 840;
     final sidebar = _buildSidebar(isConnected);
 
+    // Workspace racine de la session active : git_state / list_git_branches
+    // exigent un workspacePath côté daemon (sinon "workspacePath requis").
+    final activeWs = _sessions
+            .where((s) => s.id == _activeSessionId)
+            .map((s) => s.workspacePath)
+            .firstWhere((p) => p.isNotEmpty, orElse: () => '')
+        .isNotEmpty
+        ? _sessions
+            .where((s) => s.id == _activeSessionId)
+            .first
+            .workspacePath
+        : (_projects.isNotEmpty ? _projects.first.path : '');
+
     final chatStream = ChatStreamScreen(
       api: _api,
       activeSessionId: _activeSessionId,
       activeProjectName: _activeProjectName,
+      workspacePath: activeWs,
       isConnected: isConnected,
       wsClient: _wsClient,
       onStreamingStateChanged: (isStreaming) {
@@ -1056,19 +1070,6 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         });
       },
     );
-
-    // Workspace racine de la session active : git_state / list_git_branches
-    // exigent un workspacePath côté daemon (sinon "workspacePath requis").
-    final activeWs = _sessions
-            .where((s) => s.id == _activeSessionId)
-            .map((s) => s.workspacePath)
-            .firstWhere((p) => p.isNotEmpty, orElse: () => '')
-        .isNotEmpty
-        ? _sessions
-            .where((s) => s.id == _activeSessionId)
-            .first
-            .workspacePath
-        : (_projects.isNotEmpty ? _projects.first.path : '');
 
     final contextDrawer = RightSidebarDrawer(
       api: _api,

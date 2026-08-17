@@ -3697,6 +3697,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			counts := countTranscriptActivity(targetCascadeID)
 			artifacts := ListSessionArtifacts(targetCascadeID)
 			uploads := ListSessionUploads(targetCascadeID)
+			modifiedFiles := ListSessionModifiedFiles(targetCascadeID)
+			filesChangedCount := len(modifiedFiles)
+			if filesChangedCount < counts["files"] {
+				filesChangedCount = counts["files"]
+			}
 			artifactsCount := len(artifacts)
 			if artifactsCount < counts["artifacts"] {
 				artifactsCount = counts["artifacts"]
@@ -3708,12 +3713,13 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			stats := map[string]interface{}{
 				"cascadeId":            targetCascadeID,
 				"subagentsCount":       counts["subagents"],
-				"filesChangedCount":    counts["files"],
+				"filesChangedCount":    filesChangedCount,
 				"artifactsCount":       artifactsCount,
 				"uploadsCount":         uploadsCount,
 				"backgroundTasksCount": counts["tasks"],
 				"artifacts":            artifacts,
 				"uploads":              uploads,
+				"modifiedFiles":        modifiedFiles,
 			}
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: stats})
 			return
@@ -4034,11 +4040,19 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		return
 
 	case "git_state", "vcs.get_state":
-		if msg.WorkspacePath == "" {
+		targetWs := msg.WorkspacePath
+		if targetWs == "" && msg.Data != nil {
+			targetWs, _ = msg.Data["workspacePath"].(string)
+		}
+		if targetWs == "" && msg.CascadeID != "" {
+			targetWs = extractWorkspace(findBrainDir(msg.CascadeID), msg.CascadeID)
+		}
+		if targetWs == "" {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "workspacePath requis"})
 			return
 		}
-		raw, err = s.RPCClient.GetVersionControlState(homeRoot(msg.WorkspacePath))
+		resolvedDir := homeRoot(targetWs)
+		raw, err = s.RPCClient.GetVersionControlState(resolvedDir)
 		if err == nil {
 			if st := connectrpc.VcsStateToJSON(raw); st != nil {
 				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: st})
@@ -4047,6 +4061,26 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
 			return
 		}
+		// Fallback local git status si le Language Server ne répond pas
+		if wdFiles, stFiles, errGit := discovery.ListGitChanges(resolvedDir); errGit == nil {
+			wdList := make([]map[string]interface{}, 0, len(wdFiles))
+			for _, f := range wdFiles {
+				wdList = append(wdList, map[string]interface{}{"uri": f, "operation": "MODIFIED"})
+			}
+			stList := make([]map[string]interface{}, 0, len(stFiles))
+			for _, f := range stFiles {
+				stList = append(stList, map[string]interface{}{"uri": f, "operation": "STAGED"})
+			}
+			data := map[string]interface{}{
+				"vcsType":                 "GIT",
+				"workingDirectoryChanges": wdList,
+				"stagedChanges":           stList,
+			}
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: data})
+			return
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
+		return
 
 	case "git_stage", "vcs.stage":
 		if msg.WorkspacePath == "" {

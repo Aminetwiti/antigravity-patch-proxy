@@ -1317,10 +1317,10 @@ type transcriptCounts struct {
 }
 
 // countTranscriptActivity parcourt le transcript.jsonl d'une cascade et
-// compte les ├®v├®nements r├®els (subagents, fichiers modifi├®s, artefacts,
-// uploads, t├óches de fond). Chaque type d'├®v├®nement est d├®dupliqu├® par ID
-// (les appels d'outils produisent plusieurs lignes pour le m├¬me fichier).
-// Source unique de v├®rit├® pour get_context.
+// compte les événements réels (subagents, fichiers modifiés, artefacts,
+// uploads, tâches de fond). Chaque type d'événement est dédupliqué par ID
+// (les appels d'outils produisent plusieurs lignes pour le même fichier).
+// Source unique de vérité pour get_context.
 func countTranscriptActivity(cascadeID string) map[string]int {
 	out := map[string]int{
 		"subagents": 0,
@@ -1329,6 +1329,9 @@ func countTranscriptActivity(cascadeID string) map[string]int {
 		"uploads":   0,
 		"tasks":     0,
 	}
+	modFiles := ListSessionModifiedFiles(cascadeID)
+	out["files"] = len(modFiles)
+
 	transcriptPath := findTranscriptPath(cascadeID)
 	if transcriptPath == "" {
 		return out
@@ -1339,7 +1342,6 @@ func countTranscriptActivity(cascadeID string) map[string]int {
 	}
 	defer f.Close()
 
-	seenFiles := make(map[string]bool)
 	seenArtifacts := make(map[string]bool)
 	seenUploads := make(map[string]bool)
 	seenTasks := make(map[string]bool)
@@ -1350,17 +1352,30 @@ func countTranscriptActivity(cascadeID string) map[string]int {
 	scanner.Buffer(*hBuf, len(*hBuf))
 
 	for scanner.Scan() {
+		line := scanner.Bytes()
 		var entry struct {
-			Type    string `json:"type"`
-			Source  string `json:"source"`
-			Content string `json:"content"`
+			Type      string          `json:"type"`
+			Source    string          `json:"source"`
+			Content   string          `json:"content"`
+			ToolCalls json.RawMessage `json:"tool_calls"`
 		}
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+		if err := json.Unmarshal(line, &entry); err != nil {
 			continue
 		}
 
-		// Subagents : lignes de type TOOL_CALL dont le nom d'outil est un
-		// lancement de sous-agent (invoke_subagent / dispatching-parallel-agents).
+		// Subagents : comptage depuis tool_calls ou entry.Content
+		if len(entry.ToolCalls) > 0 {
+			var calls []struct {
+				Name string `json:"name"`
+			}
+			if json.Unmarshal(entry.ToolCalls, &calls) == nil {
+				for _, c := range calls {
+					if c.Name == "invoke_subagent" || c.Name == "define_subagent" {
+						out["subagents"]++
+					}
+				}
+			}
+		}
 		if entry.Type == "TOOL_CALL" {
 			var tc struct {
 				Name string `json:"name"`
@@ -1370,11 +1385,9 @@ func countTranscriptActivity(cascadeID string) map[string]int {
 					out["subagents"]++
 				}
 			}
-			continue
 		}
 
-		// Artefacts / uploads / fichiers : identifi├®s par les chemins
-		// absolus pr├®sents dans le contenu de la ligne.
+		// Artefacts / uploads
 		for _, p := range filePathsIn(entry.Content) {
 			switch {
 			case isUploadPath(p):
@@ -1387,11 +1400,6 @@ func countTranscriptActivity(cascadeID string) map[string]int {
 					seenArtifacts[p] = true
 					out["artifacts"]++
 				}
-			default:
-				if !seenFiles[p] {
-					seenFiles[p] = true
-					out["files"]++
-				}
 			}
 		}
 		if strings.Contains(entry.Content, "background") && strings.Contains(entry.Content, "task") {
@@ -1403,6 +1411,128 @@ func countTranscriptActivity(cascadeID string) map[string]int {
 		}
 	}
 	return out
+}
+
+// ListSessionModifiedFiles parcourt le transcript d'une cascade et extrait la liste
+// des chemins de fichiers modifiés par l'agent ou l'utilisateur (write_to_file,
+// replace_file_content, multi_replace_file_content, edit_file, apply_diff, etc.).
+func ListSessionModifiedFiles(cascadeID string) []string {
+	var results []string
+	transcriptPath := findTranscriptPath(cascadeID)
+	if transcriptPath == "" {
+		return results
+	}
+	f, err := os.Open(transcriptPath)
+	if err != nil {
+		return results
+	}
+	defer f.Close()
+
+	seen := make(map[string]bool)
+	scanner := bufio.NewScanner(f)
+	hBuf := AcquireHistoryBuffer()
+	defer ReleaseHistoryBuffer(hBuf)
+	scanner.Buffer(*hBuf, len(*hBuf))
+
+	isModTool := func(name string) bool {
+		switch name {
+		case "write_to_file", "replace_file_content", "multi_replace_file_content", "edit_file", "apply_diff", "patch":
+			return true
+		default:
+			return false
+		}
+	}
+
+	cleanFilePath := func(p string) string {
+		p = strings.TrimSpace(p)
+		p = strings.Trim(p, "\"'`")
+		p = strings.ReplaceAll(p, "\\\\", "/")
+		p = strings.ReplaceAll(p, "\\", "/")
+		if strings.HasPrefix(p, "file:///") {
+			p = p[8:]
+		} else if strings.HasPrefix(p, "file://") {
+			p = p[7:]
+		}
+		return strings.TrimSpace(p)
+	}
+
+	isIgnoredPath := func(p string) bool {
+		if p == "" {
+			return true
+		}
+		pLower := strings.ToLower(p)
+		if strings.Contains(pLower, "/brain/") || strings.Contains(pLower, "\\brain\\") || strings.Contains(pLower, "scratch") {
+			return true
+		}
+		return false
+	}
+
+	addFile := func(rawPath string) {
+		p := cleanFilePath(rawPath)
+		if p != "" && !isIgnoredPath(p) && !seen[p] {
+			seen[p] = true
+			results = append(results, p)
+		}
+	}
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		var entry struct {
+			Type      string          `json:"type"`
+			Content   string          `json:"content"`
+			ToolCalls json.RawMessage `json:"tool_calls"`
+		}
+		if err := json.Unmarshal(line, &entry); err != nil {
+			continue
+		}
+
+		// 1. Parsing depuis tool_calls (format standard Antigravity)
+		if len(entry.ToolCalls) > 0 {
+			var calls []struct {
+				Name      string                 `json:"name"`
+				Args      map[string]interface{} `json:"args"`
+				Arguments map[string]interface{} `json:"arguments"`
+			}
+			if json.Unmarshal(entry.ToolCalls, &calls) == nil {
+				for _, c := range calls {
+					if isModTool(c.Name) {
+						m := c.Args
+						if len(m) == 0 {
+							m = c.Arguments
+						}
+						for _, k := range []string{"TargetFile", "AbsolutePath", "file_path", "filePath", "path", "file"} {
+							if val, ok := m[k].(string); ok && val != "" {
+								addFile(val)
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// 2. Parsing depuis entry.Content (si TOOL_CALL direct)
+		if entry.Type == "TOOL_CALL" || strings.Contains(entry.Content, "replace_file_content") || strings.Contains(entry.Content, "write_to_file") {
+			var tc struct {
+				Name      string                 `json:"name"`
+				Args      map[string]interface{} `json:"args"`
+				Arguments map[string]interface{} `json:"arguments"`
+			}
+			if json.Unmarshal([]byte(entry.Content), &tc) == nil && isModTool(tc.Name) {
+				m := tc.Args
+				if len(m) == 0 {
+					m = tc.Arguments
+				}
+				for _, k := range []string{"TargetFile", "AbsolutePath", "file_path", "filePath", "path", "file"} {
+					if val, ok := m[k].(string); ok && val != "" {
+						addFile(val)
+						break
+					}
+				}
+			}
+		}
+	}
+	return results
 }
 
 // SubagentSummary repr├®sente un sous-agent d├®couvert dans l'arbre d'ex├®cution (DAG).
@@ -1532,14 +1662,15 @@ func ExtractSubagents(cascadeID string) []SubagentSummary {
 }
 
 // filePathsIn extrait les chemins absolus (Windows, POSIX et file:///) d'un
-// texte ÔÇö ils identifient fichiers, artefacts et uploads dans les transcripts.
+// texte — ils identifient fichiers, artefacts et uploads dans les transcripts.
 func filePathsIn(s string) []string {
 	var out []string
-	// Regex POSIX (/c:/ÔÇª, /home/ÔÇª, /Users/ÔÇª) et Windows (C:\ÔÇª, C:/ÔÇª).
-	re := regexp.MustCompile(`(?:file:///|/)?[A-Za-z]:/(?:[^"\s\\]|\\)+`)
+	// Regex POSIX (/c:/…, /home/…, /Users/…) et Windows (C:\…, C:/…, c:\…).
+	re := regexp.MustCompile(`(?:file:///)?(?:[A-Za-z]:[/\\]|/)(?:[^"'\s\t\r\n\(\)<>]+)`)
 	for _, m := range re.FindAllString(s, -1) {
-		clean := strings.TrimRight(m, "\"',.;)")
-		if len(clean) > 12 { // ignore les fragments trop courts
+		clean := strings.TrimRight(m, "\"',.;:)")
+		clean = strings.ReplaceAll(clean, "\\\\", "\\")
+		if len(clean) > 8 { // ignore les fragments trop courts
 			out = append(out, clean)
 		}
 	}

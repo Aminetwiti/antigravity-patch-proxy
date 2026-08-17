@@ -353,3 +353,41 @@ Voici le résultat attendu.`
 		t.Errorf("cleanAssistantText(rawAssistant) = %q", cleaned)
 	}
 }
+
+func TestListSessionModifiedFiles(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("impossible de lire UserHomeDir")
+	}
+	testCascadeID := "test-cascade-modified-files-xyz"
+	brainLogsDir := filepath.Join(home, ".gemini", "antigravity", "brain", testCascadeID, ".system_generated", "logs")
+	if err := os.MkdirAll(brainLogsDir, 0755); err != nil {
+		t.Fatalf("mkdir failed: %v", err)
+	}
+	defer os.RemoveAll(filepath.Join(home, ".gemini", "antigravity", "brain", testCascadeID))
+
+	transcriptContent := `{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","content":"please fix file"}
+{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","content":"","tool_calls":[{"name":"replace_file_content","args":{"TargetFile":"C:\\Users\\amine\\Downloads\\project\\src\\main.ts"}}]}
+{"step_index":2,"source":"MODEL","type":"PLANNER_RESPONSE","content":"","tool_calls":[{"name":"write_to_file","args":{"TargetFile":"/Users/amine/Downloads/project/src/new_file.ts"}}]}
+{"step_index":3,"source":"MODEL","type":"PLANNER_RESPONSE","content":"","tool_calls":[{"name":"write_to_file","args":{"TargetFile":"C:\\Users\\amine\\.gemini\\antigravity\\brain\\test-cascade-modified-files-xyz\\implementation_plan.md"}}]}
+`
+	if err := os.WriteFile(filepath.Join(brainLogsDir, "transcript.jsonl"), []byte(transcriptContent), 0644); err != nil {
+		t.Fatalf("write transcript failed: %v", err)
+	}
+
+	files := ListSessionModifiedFiles(testCascadeID)
+	if len(files) != 2 {
+		t.Fatalf("ListSessionModifiedFiles: attendu 2 fichiers modifiés (excluant l'artefact plan.md), reçu %d: %v", len(files), files)
+	}
+	if files[0] != "C:/Users/amine/Downloads/project/src/main.ts" {
+		t.Errorf("files[0] = %q, attendu C:/Users/amine/Downloads/project/src/main.ts", files[0])
+	}
+	if files[1] != "/Users/amine/Downloads/project/src/new_file.ts" {
+		t.Errorf("files[1] = %q, attendu /Users/amine/Downloads/project/src/new_file.ts", files[1])
+	}
+
+	counts := countTranscriptActivity(testCascadeID)
+	if counts["files"] != 2 {
+		t.Errorf("countTranscriptActivity files = %d, want 2", counts["files"])
+	}
+}

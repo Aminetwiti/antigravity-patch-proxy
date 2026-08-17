@@ -47,11 +47,15 @@ class ChatStreamScreen extends StatefulWidget {
   /// (main.dart) : il connaît la liste des sessions et le workspace actif.
   final VoidCallback? onNewConversation;
 
+  /// Workspace racine pour la détection VCS et fichiers modifiés.
+  final String? workspacePath;
+
   const ChatStreamScreen({
     super.key,
     required this.api,
     required this.activeSessionId,
     required this.activeProjectName,
+    this.workspacePath,
     this.isConnected = true,
     this.wsClient,
     this.onStreamingStateChanged,
@@ -88,23 +92,28 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         '$_draftPrefsPrefix${widget.activeSessionId}', draft));
   }
 
-  // File d'attente des approbations (audit UX P0-1) : une 2ᵉ demande ne doit
-  // PLUS écraser la 1ʳᵉ — chaque carte reste approvable via ◀ ▶.
+  // File d'attente des approbations : isolée par session
   final List<ToolApprovalRequest> _pendingApprovals = [];
   int _approvalIndex = -1;
-  // Questions interactives à choix multiples (AskQuestion)
+  // Questions interactives à choix multiples (AskQuestion) : isolée par session
   final List<AskQuestionChoiceRequest> _pendingQuestions = [];
   // callIds dont le daemon a broadcasté approval_expired : la carte reste
   // affichée (pourquoi elle a disparu) mais passe en lecture seule.
   final Set<String> _expiredCallIds = {};
 
+  List<AskQuestionChoiceRequest> get _currentSessionQuestions =>
+      _pendingQuestions.where((q) => q.cascadeId.isEmpty || q.cascadeId == widget.activeSessionId).toList();
+
+  List<ToolApprovalRequest> get _currentSessionApprovals =>
+      _pendingApprovals.where((a) => a.cascadeId.isEmpty || a.cascadeId == widget.activeSessionId).toList();
+
   ToolApprovalRequest? get _currentApproval {
-    if (_pendingApprovals.isEmpty ||
-        _approvalIndex < 0 ||
-        _approvalIndex >= _pendingApprovals.length) {
-      return null;
+    final list = _currentSessionApprovals;
+    if (list.isEmpty) return null;
+    if (_approvalIndex < 0 || _approvalIndex >= list.length) {
+      return list.first;
     }
-    return _pendingApprovals[_approvalIndex];
+    return list[_approvalIndex];
   }
 
   StreamSubscription<Map<String, dynamic>>? _streamSub;
@@ -115,7 +124,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   final Set<String> _pendingApprovalCallIds = {};
   final Set<String> _processedCallIds = {};
   Timer? _stillWorkingTimer;
-  int _activeStreamCount = 0;
+  
+  // Streaming multi-session : ensemble des sessions actuellement en train de streamer
+  final Set<String> _activeStreamingSessions = {};
+  int get _activeStreamCount => _activeStreamingSessions.length;
+  bool get _hasCurrentActiveStream => _activeStreamingSessions.contains(widget.activeSessionId);
+  
   bool _showStillWorking = false;
   Map<String, dynamic>? _lastLocalStreamEnd;
   final Map<String, String> _externalThoughts = {};
@@ -142,29 +156,33 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   bool _showJumpToBottom = false;
   int _hiddenNewCount = 0;
 
-  // ── Session Top Tabs & Artifact state ──────────────────────────────
-  SessionTabType _currentTab = SessionTabType.chat;
+  // ── Session Top Tabs & Artifact state (isolé par session) ───────────
+  final Map<String, SessionTabType> _sessionTabs = {};
+  SessionTabType get _currentTab => _sessionTabs[widget.activeSessionId] ?? SessionTabType.chat;
+  set _currentTab(SessionTabType tab) => _sessionTabs[widget.activeSessionId] = tab;
 
-  // P6 : ordre des onglets pour la navigation horizontale — miroir des pills
-  // visibles (Plan/Tasks conditionnels). Tasks n'a pas de pill (hasTasks:false
-  // côté SessionTopTabs) mais est atteignable via BackgroundTasksBar : on le
-  // garde dans l'ordre pour ne pas y rester bloqué.
-  // ponytail: liste dérivée simple, pas de TabController/PageView — les pages
-  // sont lourdes (chat ListView + scroll controllers), un swipe instantané par
-  // setState suffit et évite de tout garder vivant en mémoire.
+  final Map<String, Set<String>> _sessionModifiedFiles = {};
+  final Map<String, List<SessionModifiedFile>> _sessionModifiedFileList = {};
+  final Map<String, List<String>> _sessionArtifacts = {};
+  final Map<String, int> _sessionSubagentCounts = {};
+  final Map<String, String?> _sessionActiveArtifacts = {};
+  final Map<String, String?> _sessionPlanTexts = {};
+
+  Set<String> get _modifiedFiles => _sessionModifiedFiles.putIfAbsent(widget.activeSessionId, () => {});
+  List<SessionModifiedFile> get _modifiedFileList => _sessionModifiedFileList.putIfAbsent(widget.activeSessionId, () => []);
+  List<String> get _artifacts => _sessionArtifacts.putIfAbsent(widget.activeSessionId, () => []);
+  int get _subagentsCount => _sessionSubagentCounts[widget.activeSessionId] ?? 0;
+  String? get _activeArtifact => _sessionActiveArtifacts[widget.activeSessionId];
+  set _activeArtifact(String? art) => _sessionActiveArtifacts[widget.activeSessionId] = art;
+  String? get _latestPlanText => _sessionPlanTexts[widget.activeSessionId];
+
   List<SessionTabType> get _swipeableTabs => [
         SessionTabType.chat,
         SessionTabType.review,
         SessionTabType.overview,
         if (_latestPlanText != null) SessionTabType.plan,
-        if (_activeStreamCount > 0) SessionTabType.tasks,
+        if (_hasCurrentActiveStream) SessionTabType.tasks,
       ];
-  final Set<String> _modifiedFiles = {};
-  final List<SessionModifiedFile> _modifiedFileList = [];
-  final List<String> _artifacts = [];
-  int _subagentsCount = 0;
-  String? _activeArtifact;
-  String? _latestPlanText;
 
   // ── Side Question (/btw) & Background Tasks state ───────────────────
   String? _sideQuestion;
@@ -353,11 +371,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     });
   }
 
-  void _loadHistoryIfEmpty() {
-    _loadSessionContextAndArtifacts();
+  void _loadHistoryIfEmpty([String? targetSessionId]) {
+    final targetSession = targetSessionId ?? widget.activeSessionId;
+    _loadSessionContextAndArtifacts(targetSession);
     _fetchVcsChanges();
-    if (widget.activeSessionId.isNotEmpty) {
-      widget.api?.getSessionHistory(widget.activeSessionId).then((data) {
+    if (targetSession.isNotEmpty) {
+      widget.api?.getSessionHistory(targetSession).then((data) {
         if (!mounted) return;
         final rawMessages = data['messages'] as List?;
         final parsed = <ChatMessage>[];
@@ -390,26 +409,32 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           ));
         }
 
-        setState(() {
-          _messages
-            ..clear()
-            ..addAll(parsed);
-          if (isStreaming) {
-            _activeStreamCount = math.max(_activeStreamCount, 1);
-          }
-        });
-        _scrollToBottomSettled();
+        final buf = _sessionMessages.putIfAbsent(targetSession, () => []);
+        buf
+          ..clear()
+          ..addAll(parsed);
+        if (isStreaming) {
+          _activeStreamingSessions.add(targetSession);
+        } else {
+          _activeStreamingSessions.remove(targetSession);
+        }
+
+        if (widget.activeSessionId == targetSession) {
+          setState(() {});
+          _scrollToBottomSettled();
+        }
       }).catchError((_) {
         // Ignorer l'erreur
       });
     }
   }
 
-  Future<void> _loadSessionContextAndArtifacts() async {
+  Future<void> _loadSessionContextAndArtifacts([String? targetSessionId]) async {
+    final targetSession = targetSessionId ?? widget.activeSessionId;
     final api = widget.api;
-    if (widget.activeSessionId.isEmpty || api == null) return;
+    if (targetSession.isEmpty || api == null) return;
     try {
-      final res = await api.getContext(cascadeId: widget.activeSessionId);
+      final res = await api.getContext(cascadeId: targetSession);
       final rawArts = res['artifacts'] as List<dynamic>? ?? [];
       final artNames = <String>[];
       for (final a in rawArts) {
@@ -420,15 +445,39 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         }
       }
       final subCount = (res['subagentsCount'] as int?) ?? 0;
+      final plan = res['plan']?.toString() ?? res['latestPlanText']?.toString();
+      final rawModFiles = res['modifiedFiles'] as List<dynamic>? ?? [];
+      final modFiles = <String>[];
+      for (final f in rawModFiles) {
+        if (f is String && f.isNotEmpty) {
+          modFiles.add(f);
+        } else if (f is Map && f['path'] != null) {
+          modFiles.add(f['path'].toString());
+        }
+      }
+
       if (mounted) {
-        setState(() {
-          if (artNames.isNotEmpty) {
-            _artifacts
-              ..clear()
-              ..addAll(artNames);
+        if (artNames.isNotEmpty) {
+          _sessionArtifacts[targetSession] = artNames;
+        }
+        _sessionSubagentCounts[targetSession] = subCount;
+        if (plan != null && plan.isNotEmpty) {
+          _sessionPlanTexts[targetSession] = plan;
+        }
+        for (final p in modFiles) {
+          var clean = p.replaceAll('\\', '/');
+          if (clean.startsWith('file:///')) clean = clean.substring(8);
+          if (clean.startsWith('file://')) clean = clean.substring(7);
+          if (!_modifiedFiles.contains(clean)) {
+            _modifiedFiles.add(clean);
           }
-          _subagentsCount = subCount;
-        });
+          if (!_modifiedFileList.any((f) => f.path == clean)) {
+            _modifiedFileList.add(SessionModifiedFile(path: clean, additions: 1, deletions: 0));
+          }
+        }
+        if (widget.activeSessionId == targetSession) {
+          setState(() {});
+        }
       }
     } catch (_) {}
   }
@@ -605,32 +654,22 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   void didUpdateWidget(covariant ChatStreamScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.activeSessionId != widget.activeSessionId) {
-      // Bug #9 : ne vider que si aucun stream actif pour cette session.
-      // Les messages sont préservés dans _sessionMessages par session.
-      if (_activeStreamCount == 0) {
-        _pendingApprovals.clear();
-        _approvalIndex = -1;
-        _expiredCallIds.clear();
-        _pendingApprovalCallIds.clear();
-        _visibleCounts[widget.activeSessionId] = _pageSize;
-        setState(() {
-          _messages.clear();
-          _modifiedFiles.clear();
-          _modifiedFileList.clear();
-          _artifacts.clear();
-          _activeArtifact = null;
-          _latestPlanText = null;
-        });
+      _approvalIndex = -1;
+      _visibleCounts[widget.activeSessionId] = _pageSize;
+      if (!_activeStreamingSessions.contains(widget.activeSessionId)) {
+        _stillWorkingTimer?.cancel();
+        _stillWorkingTimer = null;
+        if (_showStillWorking) {
+          _showStillWorking = false;
+        }
       }
       _loadHistoryIfEmpty();
       _loadPersistedDraft();
       _scrollToBottomSettled();
     }
     if (oldWidget.api != widget.api) {
-      // Bug agent bloqué : réinitialiser le compteur de streams actifs à la
-      // reconnexion pour ne pas rester bloqué si des stream_end ont été perdus
-      // pendant la coupure réseau.
-      _activeStreamCount = 0;
+      // Reconnexion : réinitialiser l'état
+      _activeStreamingSessions.clear();
       _stillWorkingTimer?.cancel();
       if (mounted && _showStillWorking) setState(() => _showStillWorking = false);
       _watchBroadcastStreams();
@@ -659,30 +698,36 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     return '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
   }
 
-  void _onStreamStarted() {
-    _activeStreamCount++;
-    if (_activeStreamCount == 1) {
+  void _onStreamStarted(String sessionId) {
+    final wasEmpty = _activeStreamingSessions.isEmpty;
+    _activeStreamingSessions.add(sessionId);
+    if (wasEmpty) {
       widget.onStreamingStateChanged?.call(true);
+    }
+    if (sessionId == widget.activeSessionId) {
       _stillWorkingTimer?.cancel();
       _stillWorkingTimer = Timer(_stillWorkingDelay, () {
-        if (mounted && _activeStreamCount > 0) {
+        if (mounted && _activeStreamingSessions.contains(widget.activeSessionId)) {
           setState(() => _showStillWorking = true);
         }
       });
     }
   }
 
-  void _onStreamEnded() {
-    if (_activeStreamCount > 0) _activeStreamCount--;
-    if (_activeStreamCount == 0) {
+  void _onStreamEnded(String sessionId) {
+    _activeStreamingSessions.remove(sessionId);
+    if (_activeStreamingSessions.isEmpty) {
       widget.onStreamingStateChanged?.call(false);
+    }
+    if (!_activeStreamingSessions.contains(widget.activeSessionId)) {
       _stillWorkingTimer?.cancel();
       _stillWorkingTimer = null;
       if (_showStillWorking && mounted) {
         setState(() => _showStillWorking = false);
       }
+    }
+    if (sessionId == widget.activeSessionId) {
       final outcome = _lastLocalStreamEnd?['data']?['outcome'] as String? ?? 'done';
-      // Ne pas vider automatiquement la file si l'étape a été annulée ou s'est terminée par une erreur
       if (outcome == 'cancelled' || outcome == 'error') {
         _messageQueue.clear();
       } else if (_messageQueue.isNotEmpty) {
@@ -695,16 +740,15 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     }
   }
 
-  void _handleStreamEnded(Map<String, dynamic> msg) {
+  void _handleStreamEnded(Map<String, dynamic> msg, [String? targetSessionId]) {
     final data = msg['data'];
     if (data is! Map<String, dynamic>) return;
     if (msg['data']?['hostActive'] == true) return;
     final outcome = data['outcome'] as String? ?? 'done';
-    final cascadeId = data['cascadeId'] as String? ?? widget.activeSessionId;
+    final cascadeId = targetSessionId ?? data['cascadeId'] as String? ?? widget.activeSessionId;
     final message = data['message'] as String? ?? '';
 
-    // Si une étape a été annulée, vider la file d'attente pour éviter les envois auto
-    if (outcome == 'cancelled') {
+    if (outcome == 'cancelled' && cascadeId == widget.activeSessionId) {
       _messageQueue.clear();
     }
 
@@ -713,12 +757,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       outcome: outcome,
       message: message,
     );
-    // Micro-retour : vibration discrète quand une tâche se termine
-    // (le daemon peut tourner en arrière-plan sur le PC distant).
     if (outcome == 'done' || outcome == 'cancelled') {
       HapticFeedback.lightImpact();
     }
   }
+
 
   void _addApproval(ToolApprovalRequest approval,
       {bool hostActive = false, bool fromTap = false}) {
@@ -841,20 +884,22 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
       // Bug tâches arrière-plan : si l'évènement concerne une autre session,
       // on le bufferise dans _sessionMessages[sessionId] au lieu de le jeter.
-      // L'utilisateur verra les messages à jour quand il reviendra sur la session.
       final targetSessionId = sessionId ?? widget.activeSessionId;
       final thKey = '${targetSessionId}_$requestId';
-      final isActiveSession = sessionId == null || sessionId == widget.activeSessionId;
-      if (!isActiveSession) {
-        // sessionId is non-null here (isActiveSession=false implies sessionId != null)
-        final buf = _sessionMessages.putIfAbsent(sessionId, () => []);
-        if (type == 'stream_start') {
-          if (buf.isNotEmpty && buf.last.sender == 'assistant') {
-            _streamRequestToMessageId[thKey] = buf.last.id;
-            buf.last = buf.last.copyWith(isStreaming: true);
-          } else {
-            final msgId = 'ext-$requestId';
-            _streamRequestToMessageId[thKey] = msgId;
+      final isActiveSession = targetSessionId == widget.activeSessionId;
+      final buf = _sessionMessages.putIfAbsent(targetSessionId, () => []);
+
+      if (type == 'stream_start') {
+        _onStreamStarted(targetSessionId);
+        if (isActiveSession && _showJumpToBottom) _hiddenNewCount++;
+
+        if (buf.isNotEmpty && buf.last.sender == 'assistant') {
+          _streamRequestToMessageId[thKey] = buf.last.id;
+          buf.last = buf.last.copyWith(isStreaming: true);
+        } else {
+          final msgId = 'ext-$requestId';
+          _streamRequestToMessageId[thKey] = msgId;
+          if (!buf.any((m) => m.id == msgId)) {
             buf.add(ChatMessage(
               id: msgId,
               sender: 'assistant',
@@ -863,60 +908,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               isStreaming: true,
             ));
           }
-        } else if (type == 'stream_delta') {
-          final targetId = _streamRequestToMessageId[thKey] ?? 'ext-$requestId';
-          var idx = buf.indexWhere((m) => m.id == targetId);
-          if (idx < 0 && buf.isNotEmpty && buf.last.sender == 'assistant') {
-            idx = buf.length - 1;
-            _streamRequestToMessageId[thKey] = buf.last.id;
-          }
-          if (idx >= 0) {
-            final textDelta = StreamDeltaParser.textOf(msg);
-            final thoughtDelta = StreamDeltaParser.thinkingOf(msg);
-            _externalThoughts[thKey] =
-                (_externalThoughts[thKey] ?? '') + thoughtDelta;
-            buf[idx] = buf[idx].copyWith(
-              text: buf[idx].text + textDelta,
-              thought: _externalThoughts[thKey]!.isNotEmpty
-                  ? _externalThoughts[thKey]!.trim()
-                  : buf[idx].thought,
-            );
-          }
-        } else if (type == 'stream_end') {
-          final targetId = _streamRequestToMessageId[thKey] ?? 'ext-$requestId';
-          final idx = buf.indexWhere((m) => m.id == targetId);
-          if (idx >= 0) buf[idx] = buf[idx].copyWith(isStreaming: false);
-          _externalThoughts.remove(thKey);
-          _streamRequestToMessageId.remove(thKey);
         }
-        return; // ne pas toucher l'état UI de la session active
-      }
-
-      if (type == 'stream_start') {
-        _onStreamStarted();
-        // P1 : nouveau message arrivé pendant que l'utilisateur lit plus
-        // haut → le badge « ↓ N » s'incrémente.
-        if (_showJumpToBottom) _hiddenNewCount++;
-        setState(() {
-          // Unifier le flux de l'assistant : si le dernier message est déjà de l'assistant
-          // dans le même tour, on coalesce dedans plutôt que de créer une bulle séparée.
-          if (_messages.isNotEmpty && _messages.last.sender == 'assistant') {
-            _streamRequestToMessageId[requestId] = _messages.last.id;
-            _messages.last = _messages.last.copyWith(isStreaming: true);
-          } else {
-            final msgId = 'ext-$requestId';
-            _streamRequestToMessageId[requestId] = msgId;
-            if (!_messages.any((m) => m.id == msgId)) {
-              _messages.add(ChatMessage(
-                id: msgId,
-                sender: 'assistant',
-                text: '',
-                timestamp: _timestamp(),
-                isStreaming: true,
-              ));
-            }
-          }
-        });
+        if (isActiveSession && mounted) {
+          setState(() {});
+        }
       } else if (type == 'sync_catchup') {
         setState(() => _isSyncing = true);
         _syncTimer?.cancel();
@@ -932,14 +927,14 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               final reqId = evMap['requestId'] as String? ?? '';
               final textDelta = StreamDeltaParser.textOf(evMap);
               final thoughtDelta = StreamDeltaParser.thinkingOf(evMap);
-              final key = '${widget.activeSessionId}_$reqId';
-              final idx = _messages.indexWhere((m) =>
+              final key = '${targetSessionId}_$reqId';
+              final idx = buf.indexWhere((m) =>
                   m.id == 'ext-$reqId' ||
-                  (_messages.isNotEmpty && m == _messages.last && m.isStreaming));
+                  (buf.isNotEmpty && m == buf.last && m.isStreaming));
               if (idx >= 0) {
-                final current = _messages[idx];
+                final current = buf[idx];
                 _externalThoughts[key] = (_externalThoughts[key] ?? '') + thoughtDelta;
-                _messages[idx] = current.copyWith(
+                buf[idx] = current.copyWith(
                   text: current.text + textDelta,
                   thought: _externalThoughts[key]!.isNotEmpty
                       ? _externalThoughts[key]!.trim()
@@ -948,36 +943,33 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               }
             }
           }
-          _scheduleThrottledUpdate();
+          if (isActiveSession) {
+            _scheduleThrottledUpdate();
+          }
         }
-        // Offline buffering (3.2) : prompts non confirmés côté daemon
-        // (sync_catchup.pendingMessages). On les ré-affiche en file avec un
-        // bouton de retransmission (dédupliqués par requestId côté hub).
         final pending = (data['pendingMessages'] as List<dynamic>? ?? const [])
             .whereType<Map>()
             .map((e) => e.cast<String, dynamic>())
             .toList();
         if (pending.isNotEmpty) {
-          setState(() {
-            for (final p in pending) {
-              final reqId = p['requestId'] as String? ?? '';
-              if (reqId.isEmpty) continue;
-              final id = 'pending-$reqId';
-              if (_messages.any((m) => m.id == id)) continue;
-              _messages.add(ChatMessage(
-                id: id,
-                sender: 'user',
-                text: p['prompt']?.toString() ?? '',
-                timestamp: _timestamp(),
-                isQueued: true,
-              ));
-            }
-          });
+          for (final p in pending) {
+            final reqId = p['requestId'] as String? ?? '';
+            if (reqId.isEmpty) continue;
+            final id = 'pending-$reqId';
+            if (buf.any((m) => m.id == id)) continue;
+            buf.add(ChatMessage(
+              id: id,
+              sender: 'user',
+              text: p['prompt']?.toString() ?? '',
+              timestamp: _timestamp(),
+              isQueued: true,
+            ));
+          }
+          if (isActiveSession && mounted) {
+            setState(() {});
+          }
         }
       } else if (type == 'quota_update') {
-        // Push scheduler daemon (60 s) : remplace le polling mobile. La map
-        // data porte les 4 clés weeklyPercent/fiveHourPercent/… — on garde le
-        // timer 60 s en secours pour les daemons qui ne poussent pas encore.
         final data = msg['data'] as Map<String, dynamic>?;
         if (data != null && data.isNotEmpty && mounted) {
           setState(() => _quotaSummary = data);
@@ -987,35 +979,35 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         final thoughtDelta = StreamDeltaParser.thinkingOf(msg);
         final approval = StreamDeltaParser.approvalOf(msg);
 
-        final targetId = _streamRequestToMessageId[requestId] ?? 'ext-$requestId';
-        var idx = _messages.indexWhere((m) => m.id == targetId);
+        final targetId = _streamRequestToMessageId[thKey] ?? 'ext-$requestId';
+        var idx = buf.indexWhere((m) => m.id == targetId);
         if (idx < 0) {
-          final lastStreamingIdx = _messages.lastIndexWhere((m) => m.isStreaming);
+          final lastStreamingIdx = buf.lastIndexWhere((m) => m.isStreaming);
           if (lastStreamingIdx >= 0) {
             idx = lastStreamingIdx;
-            _streamRequestToMessageId[requestId] = _messages[idx].id;
-          } else if (_messages.isNotEmpty && _messages.last.sender == 'assistant') {
-            idx = _messages.length - 1;
-            _streamRequestToMessageId[requestId] = _messages.last.id;
+            _streamRequestToMessageId[thKey] = buf[idx].id;
+          } else if (buf.isNotEmpty && buf.last.sender == 'assistant') {
+            idx = buf.length - 1;
+            _streamRequestToMessageId[thKey] = buf.last.id;
           } else if (textDelta.isNotEmpty || thoughtDelta.isNotEmpty) {
-            _onStreamStarted();
+            _onStreamStarted(targetSessionId);
             final msgId = 'ext-$requestId';
-            _streamRequestToMessageId[requestId] = msgId;
-            _messages.add(ChatMessage(
+            _streamRequestToMessageId[thKey] = msgId;
+            buf.add(ChatMessage(
               id: msgId,
               sender: 'assistant',
               text: '',
               timestamp: _timestamp(),
               isStreaming: true,
             ));
-            idx = _messages.length - 1;
+            idx = buf.length - 1;
           }
         }
         if (idx >= 0) {
-          final current = _messages[idx];
+          final current = buf[idx];
           _externalThoughts[thKey] =
               (_externalThoughts[thKey] ?? '') + thoughtDelta;
-          _messages[idx] = current.copyWith(
+          buf[idx] = current.copyWith(
             text: current.text + textDelta,
             thought: _externalThoughts[thKey]!.isNotEmpty
                 ? _externalThoughts[thKey]!.trim()
@@ -1031,7 +1023,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               toolName: approval.tool,
               command: approval.command,
               description: 'Tool execution requires your confirmation',
-              cascadeId: approval.cascadeId,
+              cascadeId: approval.cascadeId.isNotEmpty ? approval.cascadeId : targetSessionId,
               trajectoryId: approval.trajectoryId,
               stepIndex: approval.stepIndex,
               approvalType: approval.approvalType,
@@ -1045,36 +1037,34 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           _addQuestion(question);
         }
 
-        _scheduleThrottledUpdate();
+        if (isActiveSession && mounted) {
+          _scheduleThrottledUpdate();
+        }
       } else if (type == 'stream_end') {
-        _onStreamEnded();
-        _handleStreamEnded(msg);
-        setState(() {
-          final targetId = _streamRequestToMessageId[requestId] ?? 'ext-$requestId';
-          final idx = _messages.indexWhere((m) => m.id == targetId);
-          if (idx >= 0) {
-            _messages[idx] = _messages[idx].copyWith(isStreaming: false);
-          } else {
-            final lastStreamingIdx = _messages.lastIndexWhere((m) => m.isStreaming);
-            if (lastStreamingIdx >= 0) {
-              _messages[lastStreamingIdx] = _messages[lastStreamingIdx].copyWith(isStreaming: false);
-            }
+        _onStreamEnded(targetSessionId);
+        _handleStreamEnded(msg, targetSessionId);
+        final targetId = _streamRequestToMessageId[thKey] ?? 'ext-$requestId';
+        final idx = buf.indexWhere((m) => m.id == targetId);
+        if (idx >= 0) {
+          buf[idx] = buf[idx].copyWith(isStreaming: false);
+        } else {
+          final lastStreamingIdx = buf.lastIndexWhere((m) => m.isStreaming);
+          if (lastStreamingIdx >= 0) {
+            buf[lastStreamingIdx] = buf[lastStreamingIdx].copyWith(isStreaming: false);
           }
-          _externalThoughts.remove(thKey);
-          _streamRequestToMessageId.remove(requestId);
-        });
-        _scrollToBottomSettled();
+        }
+        _externalThoughts.remove(thKey);
+        _streamRequestToMessageId.remove(thKey);
+
+        if (isActiveSession && mounted) {
+          setState(() {});
+          _scrollToBottomSettled();
+        }
       } else if (type == 'approval_expired') {
-        // Phase 6 : le daemon a auto-refusé l'approbation (timeout) — la carte
-        // reste visible en lecture seule pour expliquer la disparition, et la
-        // notification locale est annulée.
         final data = msg['data'] as Map<String, dynamic>? ?? const {};
         final callId = data['callId'] as String? ??
             data['approvalId'] as String? ??
             '';
-        // Phase 3 : le daemon peut n'envoyer que cascadeId — la notification
-        // d'approbation est taguée par cascade (id = cascadeId.hashCode), on
-        // peut donc l'annuler même sans connaître le callId.
         final cascadeId = data['cascadeId'] as String? ?? '';
         if (callId.isNotEmpty && _pendingApprovalCallIds.contains(callId)) {
           setState(() => _expiredCallIds.add(callId));
@@ -1090,13 +1080,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         final cascadeId = data['cascadeId'] as String? ?? '';
         if (callId.isNotEmpty && _pendingApprovalCallIds.contains(callId)) {
           _removeApproval(callId);
-        } else if (cascadeId.isEmpty || cascadeId == widget.activeSessionId) {
+        } else if (cascadeId.isNotEmpty) {
           setState(() {
-            _pendingApprovals.clear();
-            _approvalIndex = -1;
-            _pendingApprovalCallIds.clear();
+            _pendingApprovals.removeWhere((a) => a.cascadeId == cascadeId);
+            _approvalIndex = _pendingApprovals.isEmpty ? -1 : math.min(_approvalIndex, _pendingApprovals.length - 1);
           });
-          ApprovalNotifier.instance.cancelApprovalByCascadeId(widget.activeSessionId);
+          ApprovalNotifier.instance.cancelApprovalByCascadeId(cascadeId);
         }
       }
     });
@@ -1128,9 +1117,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       return;
     }
 
-    final api = widget.api;
+    final targetSession = widget.activeSessionId;
+    final buf = _sessionMessages.putIfAbsent(targetSession, () => []);
     setState(() {
-      _messages.add(ChatMessage(
+      buf.add(ChatMessage(
         id: 'm${++_messageCounter}',
         sender: 'user',
         text: text + (queued ? ' (File d\'attente)' : ''),
@@ -1138,12 +1128,13 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       ));
     });
 
+    final api = widget.api;
     if (api == null) return;
 
-    if (queued && _activeStreamCount > 0) {
+    if (queued && _activeStreamingSessions.contains(targetSession)) {
       _messageQueue.add({
         'text': text,
-        'activeSessionId': widget.activeSessionId,
+        'activeSessionId': targetSession,
         'modelUID': modelUID,
         'modelEnum': modelEnum,
       });
@@ -1157,14 +1148,16 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final api = widget.api;
     if (api == null) return;
 
-    _onStreamEnded();
+    final targetSession = widget.activeSessionId;
     final assistantId = 'a${++_messageCounter}';
     _lastLocalStreamEnd = null;
     final modelLabel = modelUID != null && modelUID.isNotEmpty
         ? modelUID
         : 'Gemini 3.7 Flash';
+
+    final buf = _sessionMessages.putIfAbsent(targetSession, () => []);
     setState(() {
-      _messages.add(ChatMessage(
+      buf.add(ChatMessage(
         id: assistantId,
         sender: 'assistant',
         text: '',
@@ -1172,13 +1165,14 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         isStreaming: true,
         modelLabel: modelLabel,
       ));
+      _activeStreamingSessions.add(targetSession);
     });
     _scrollToBottom();
 
     var thoughtBuffer = StringBuffer();
-    _onStreamStarted();
+    _onStreamStarted(targetSession);
     api.sendPrompt(
-      widget.activeSessionId,
+      targetSession,
       text,
       modelUID: modelUID,
       modelEnum: modelEnum,
@@ -1193,11 +1187,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         if (!mounted) return;
 
         if (textDelta.isNotEmpty || thoughtDelta.isNotEmpty) {
-          final idx = _messages.indexWhere((m) => m.id == assistantId);
+          final idx = buf.indexWhere((m) => m.id == assistantId);
           if (idx >= 0) {
-            final current = _messages[idx];
+            final current = buf[idx];
             thoughtBuffer.write(thoughtDelta);
-            _messages[idx] = current.copyWith(
+            buf[idx] = current.copyWith(
               text: current.text + textDelta,
               thought: thoughtBuffer.isNotEmpty
                   ? thoughtBuffer.toString().trim()
@@ -1213,7 +1207,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               toolName: approval.tool,
               command: approval.command,
               description: 'Tool execution requires your confirmation',
-              cascadeId: approval.cascadeId,
+              cascadeId: approval.cascadeId.isNotEmpty ? approval.cascadeId : targetSession,
               trajectoryId: approval.trajectoryId,
               stepIndex: approval.stepIndex,
               approvalType: approval.approvalType,
@@ -1222,17 +1216,17 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           );
         }
 
-        _scheduleThrottledUpdate();
+        if (mounted && widget.activeSessionId == targetSession) {
+          _scheduleThrottledUpdate();
+        }
       },
       onDone: () {
         if (!mounted) return;
-        _onStreamEnded();
-        _handleStreamEnded(_lastLocalStreamEnd ?? const {});
+        _onStreamEnded(targetSession);
+        _handleStreamEnded(_lastLocalStreamEnd ?? const {}, targetSession);
         setState(() {
-          final idx = _messages.indexWhere((m) => m.id == assistantId);
+          final idx = buf.indexWhere((m) => m.id == assistantId);
           if (idx >= 0) {
-            // Audit UX P2-9 : un stream_end avec error/outcome error doit
-            // afficher la bulle d'erreur dédiée (fond danger), pas une bulle
             String? error =
                 _lastLocalStreamEnd?['error'] as String? ??
                 (_lastLocalStreamEnd?['data'] is Map
@@ -1243,32 +1237,26 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             if (error != null && (error.contains('MODEL_CAPACITY_EXHAUSTED') || error.contains('No capacity available') || error.contains('503'))) {
               error = '⚠️ Capacité du modèle saturée sur les serveurs (HTTP 503 / MODEL_CAPACITY_EXHAUSTED).\nVeuillez basculer vers Gemini 3.7 Flash, Claude ou un modèle custom via le sélecteur ci-dessous.';
             }
-            final hasRealText = _messages[idx].text.trim().isNotEmpty;
-            final isTrueError = error != null && !hasRealText;
-            _messages[idx] = _messages[idx].copyWith(
+            buf[idx] = buf[idx].copyWith(
               isStreaming: false,
-              isError: isTrueError,
-              text: isTrueError ? error : _messages[idx].text,
+              isError: error != null,
+              text: error != null
+                  ? (buf[idx].text.isEmpty ? error : buf[idx].text)
+                  : buf[idx].text,
             );
           }
         });
-        _scrollToBottom();
       },
-      onError: (e) {
+      onError: (err) {
         if (!mounted) return;
-        _onStreamEnded();
-        ApprovalNotifier.instance.notifyTaskEnded(
-          cascadeId: widget.activeSessionId,
-          outcome: 'error',
-          message: e.toString(),
-        );
+        _onStreamEnded(targetSession);
         setState(() {
-          final idx = _messages.indexWhere((m) => m.id == assistantId);
+          final idx = buf.indexWhere((m) => m.id == assistantId);
           if (idx >= 0) {
-            _messages[idx] = _messages[idx].copyWith(
-              text: _messages[idx].text.isEmpty ? 'Erreur : $e' : _messages[idx].text,
+            buf[idx] = buf[idx].copyWith(
               isStreaming: false,
-              isError: _messages[idx].text.isEmpty,
+              isError: true,
+              text: 'Erreur: $err',
             );
           }
         });
@@ -1373,8 +1361,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   /// P0-2) : toujours visible, même en fin de longue conversation. Navigable
   /// ◀ ▶ quand plusieurs demandes sont empilées.
   Widget _buildApprovalArea() {
-    if (_pendingQuestions.isNotEmpty) {
-      final q = _pendingQuestions.first;
+    final questions = _currentSessionQuestions;
+    if (questions.isNotEmpty) {
+      final q = questions.first;
       return Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
         child: AskQuestionChoiceCard(
@@ -1387,7 +1376,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
     final approval = _currentApproval;
     if (approval == null) return const SizedBox.shrink();
-    final total = _pendingApprovals.length;
+    final total = _currentSessionApprovals.length;
     final expired = _expiredCallIds.contains(approval.callId);
 
     return Padding(
@@ -1710,7 +1699,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         ChatInputBar(
           onSend: _handleSendMessage,
           isConnected: isConnected,
-          hasActiveStream: _activeStreamCount > 0,
+          hasActiveStream: _hasCurrentActiveStream,
           onStop: _handleStopGeneration,
           api: widget.api,
           cascadeId: widget.activeSessionId,
@@ -1722,18 +1711,24 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   void _handleStopGeneration() {
-    widget.api?.stopGeneration(cascadeId: widget.activeSessionId);
+    final targetSession = widget.activeSessionId;
+    widget.api?.stopGeneration(cascadeId: targetSession);
     setState(() {
-      _activeStreamCount = 0;
+      _activeStreamingSessions.remove(targetSession);
       _showStillWorking = false;
       _stillWorkingTimer?.cancel();
       _stillWorkingTimer = null;
-      final idx = _messages.lastIndexWhere((m) => m.isStreaming);
-      if (idx >= 0) {
-        _messages[idx] = _messages[idx].copyWith(isStreaming: false);
+      final buf = _sessionMessages[targetSession];
+      if (buf != null) {
+        final idx = buf.lastIndexWhere((m) => m.isStreaming);
+        if (idx >= 0) {
+          buf[idx] = buf[idx].copyWith(isStreaming: false);
+        }
       }
     });
-    widget.onStreamingStateChanged?.call(false);
+    if (_activeStreamingSessions.isEmpty) {
+      widget.onStreamingStateChanged?.call(false);
+    }
   }
 
   Widget _buildActiveTabContent(ColorScheme scheme, bool isConnected) {
@@ -1954,7 +1949,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final api = widget.api;
     if (api == null) return;
     try {
-      final res = await api.getVcsState();
+      final ws = widget.workspacePath?.isNotEmpty == true
+          ? widget.workspacePath
+          : (widget.activeProjectName.isNotEmpty ? widget.activeProjectName : null);
+      final res = await api.getVcsState(workspacePath: ws);
       final list = <SessionModifiedFile>[];
       for (final key in const ['workingDirectoryChanges', 'stagedChanges']) {
         final entries = res[key];
