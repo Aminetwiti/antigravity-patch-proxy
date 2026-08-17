@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -27,11 +28,15 @@ type HistoryMessage struct {
 }
 
 var (
-	wsMappingRe    = regexp.MustCompile(`(?i)([a-zA-Z]:(?:\\\\|/|\\)[^"\r\n\t<>]+?)\s*->`)
-	wsFileURIRe    = regexp.MustCompile(`file:///[^\s"'\r\n]+`)
-	convTitleRe    = regexp.MustCompile(`##\s*Conversation\s+([0-9a-fA-F-]+):\s*([^\r\n]+)`)
-	rawWsMappingRe = regexp.MustCompile(`(?i)(?:\[|\b)([a-zA-Z]:(?:\\\\|[\\/])[^"\r\n\t<>]+?)(?:\]|\b)\s*->`)
-	rawWsToolArgRe = regexp.MustCompile(`(?i)"(?:Cwd|cwd|DirectoryPath|SearchPath|AbsolutePath|TargetFile)":\s*"([a-zA-Z]:(?:\\\\|[\\/])[^"\r\n]+?)"`)
+	wsMappingRe     = regexp.MustCompile(`(?i)([a-zA-Z]:(?:\\\\|/|\\)[^"\r\n\t<>]+?)\s*->`)
+	wsFileURIRe     = regexp.MustCompile(`file:///[^\s"'\r\n]+`)
+	convTitleRe     = regexp.MustCompile(`##\s*Conversation\s+([0-9a-fA-F-]+):\s*([^"\r\n\\]+?)(?:\\[nrt]|\r|\n|"|$)`)
+	userObjectiveRe = regexp.MustCompile(`(?i)###\s*USER Objective:\s*([^"\r\n\\]+?)(?:\\[nrt]|\r|\n|"|$)`)
+	rawWsMappingRe  = regexp.MustCompile(`(?i)(?:\[|\b)([a-zA-Z]:(?:\\\\|[\\/])[^"\r\n\t<>]+?)(?:\]|\b)\s*->`)
+	rawWsToolArgRe  = regexp.MustCompile(`(?i)"(?:Cwd|cwd|DirectoryPath|SearchPath|AbsolutePath|TargetFile)":\s*"([a-zA-Z]:(?:\\\\|[\\/])[^"\r\n]+?)"`)
+
+	globalConvTitles = make(map[string]string)
+	convTitlesMu     sync.RWMutex
 )
 
 // stepTypeUser/stepTypeAssistant/stepTypeTitle sont les step_type observ├®s
@@ -213,12 +218,22 @@ func ListLocalSessions() []map[string]interface{} {
 		}
 	}
 
-	// Tri d├®croissant par date de mise ├á jour (plus r├®centes d'abord)
+	// 2ème passe : réassigner les titres officiels découverts globalement dans les résumés
+	convTitlesMu.RLock()
+	for _, it := range items {
+		cid, _ := it.data["cascadeId"].(string)
+		if offTitle, ok := globalConvTitles[strings.ToLower(cid)]; ok && offTitle != "" {
+			it.data["title"] = offTitle
+		}
+	}
+	convTitlesMu.RUnlock()
+
+	// Tri décroissant par date de mise à jour (plus récentes d'abord)
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].updatedAt.After(items[j].updatedAt)
 	})
 
-	// Limite ├á 6 sessions r├®centes par projet pour correspondre exactement ├á l'affichage IDE 2.0
+	// Limite à 6 sessions récentes par projet pour correspondre exactement à l'affichage IDE 2.0
 	projectCounts := make(map[string]int)
 	sessions := make([]map[string]interface{}, 0, len(items))
 	for _, it := range items {
@@ -244,6 +259,13 @@ func extractSessionMetadata(transcriptPath, cascadeID string) (title string, wor
 	}
 	defer f.Close()
 
+	// Vérifie si le titre officiel est déjà indexé globalement
+	convTitlesMu.RLock()
+	if off, ok := globalConvTitles[strings.ToLower(cascadeID)]; ok && off != "" {
+		title = off
+	}
+	convTitlesMu.RUnlock()
+
 	scanner := bufio.NewScanner(f)
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 10*1024*1024)
@@ -253,10 +275,40 @@ func extractSessionMetadata(transcriptPath, cascadeID string) (title string, wor
 		lineCount++
 		text := scanner.Text()
 
-		// 1. Cherche le titre dans CONVERSATION_HISTORY
+		// 1. Indexe tous les titres de conversations trouvés dans les conversation_summaries
+		if matches := convTitleRe.FindAllStringSubmatch(text, -1); len(matches) > 0 {
+			convTitlesMu.Lock()
+			for _, m := range matches {
+				if len(m) >= 3 && m[1] != "" && m[2] != "" {
+					cleanTitle := strings.TrimSpace(m[2])
+					cleanTitle = strings.Split(cleanTitle, "\\n")[0]
+					cleanTitle = strings.Split(cleanTitle, "\n")[0]
+					cleanTitle = strings.Trim(cleanTitle, "\"': \t\r\n")
+					if cleanTitle != "" {
+						globalConvTitles[strings.ToLower(m[1])] = cleanTitle
+					}
+				}
+			}
+			convTitlesMu.Unlock()
+		}
+
 		if title == "" {
-			if m := convTitleRe.FindStringSubmatch(text); m != nil && strings.EqualFold(m[1], cascadeID) {
-				title = strings.TrimSpace(m[2])
+			convTitlesMu.RLock()
+			if off, ok := globalConvTitles[strings.ToLower(cascadeID)]; ok && off != "" {
+				title = off
+			}
+			convTitlesMu.RUnlock()
+		}
+
+		if title == "" {
+			if m := userObjectiveRe.FindStringSubmatch(text); m != nil {
+				cand := strings.TrimSpace(m[1])
+				cand = strings.Split(cand, "\\n")[0]
+				cand = strings.Split(cand, "\n")[0]
+				cand = strings.Trim(cand, "\"': \t\r\n")
+				if cand != "" && !strings.EqualFold(cand, "None") {
+					title = cand
+				}
 			}
 		}
 
@@ -334,11 +386,7 @@ func extractSessionMetadata(transcriptPath, cascadeID string) (title string, wor
 			if title == "" && entry.Type == "USER_INPUT" && entry.Content != "" {
 				clean := extractUserRequest(entry.Content)
 				if !strings.HasPrefix(clean, "<identity>") && !strings.HasPrefix(clean, "<user_information>") && clean != "" {
-					clean = strings.TrimSpace(clean)
-					if len(clean) > 60 {
-						clean = clean[:60] + "..."
-					}
-					title = clean
+					title = cleanPromptTitle(clean)
 				}
 			}
 		}
@@ -887,15 +935,60 @@ func readSQLiteSteps(dbPath, cascadeID string) ([]HistoryMessage, string, error)
 	return messages, title, nil
 }
 
+// CoalesceHistoryMessages regroupe les étapes consécutives de l'assistant
+// appartenant au même tour de réponse en un seul HistoryMessage unifié
+// (fusion des pensées et concaténation propre du texte), évitant le
+// découpage en bulles isolées sur mobile.
+func CoalesceHistoryMessages(raw []HistoryMessage) []HistoryMessage {
+	if len(raw) <= 1 {
+		return raw
+	}
+	var out []HistoryMessage
+	for _, m := range raw {
+		if len(out) == 0 {
+			out = append(out, m)
+			continue
+		}
+		prev := &out[len(out)-1]
+		if prev.Sender == "assistant" && m.Sender == "assistant" {
+			// Fusion des pensées (Thought)
+			if m.Thought != "" {
+				if prev.Thought == "" {
+					prev.Thought = m.Thought
+				} else if !strings.Contains(prev.Thought, m.Thought) {
+					prev.Thought = prev.Thought + "\n\n" + m.Thought
+				}
+			}
+			// Fusion des textes
+			if m.Text != "" {
+				if prev.Text == "" {
+					prev.Text = m.Text
+				} else if !strings.Contains(prev.Text, m.Text) {
+					prev.Text = prev.Text + "\n\n" + m.Text
+				}
+			}
+			if m.IsError {
+				prev.IsError = true
+			}
+			if m.Timestamp != "" {
+				prev.Timestamp = m.Timestamp
+			}
+		} else {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // GetSessionHistory lit l'historique d'une cascade : SQLite d'abord (source
-// de v├®rit├® Antigravity 2.0, `conversations/<id>.db`), puis repli sur
+// de vérité Antigravity 2.0, `conversations/<id>.db`), puis repli sur
 // transcript.jsonl pour les anciennes sessions. Les deux sources peuvent
-// coexister (migration) ÔÇö on garde celle qui contient le plus de messages.
+// coexister (migration) — on garde celle qui contient le plus de messages.
 func GetSessionHistory(cascadeID string) ([]HistoryMessage, error) {
 	if dbPath := findHistoryDB(cascadeID); dbPath != "" {
 		if messages, _, err := readSQLiteSteps(dbPath, cascadeID); err == nil && len(messages) > 0 {
 			logJSON.Debug("history_from_sqlite", "cascade", cascadeID, "messages", len(messages))
-			return messages, nil
+			return CoalesceHistoryMessages(messages), nil
 		}
 	}
 
@@ -931,7 +1024,7 @@ func GetSessionHistory(cascadeID string) ([]HistoryMessage, error) {
 	if messages == nil {
 		messages = []HistoryMessage{}
 	}
-	return messages, nil
+	return CoalesceHistoryMessages(messages), nil
 }
 
 // transcriptCounts regroupe les compteurs d'activit├® extraits d'un transcript.
@@ -1188,6 +1281,25 @@ func extractUserRequest(content string) string {
 		}
 	}
 	return strings.TrimSpace(content)
+}
+
+func cleanPromptTitle(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	// Remplacer les longs chemins absolus Windows par leur dossier de base
+	pathRe := regexp.MustCompile(`[a-zA-Z]:\\[^ \t\r\n]+`)
+	s = pathRe.ReplaceAllStringFunc(s, func(p string) string {
+		base := filepath.Base(p)
+		if base != "" && base != "." && base != "/" && base != "\\" {
+			return base
+		}
+		return p
+	})
+	if len(s) > 60 {
+		return s[:60] + "..."
+	}
+	return s
 }
 
 // ProjectSummary represents an official Antigravity 2.0 project from ~/.gemini/config/projects/

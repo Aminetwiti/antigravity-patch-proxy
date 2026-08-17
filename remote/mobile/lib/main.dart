@@ -365,28 +365,49 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         final cur = _sessions.where((s) => s.id == _activeSessionId);
         if (cur.isNotEmpty) ws = cur.first.workspacePath;
       }
+      if (ws.isEmpty && _projects.isNotEmpty) {
+        ws = _projects.first.path;
+      }
       final res = await api.createCascade(ws);
+      final data = (res['data'] is Map<String, dynamic>)
+          ? (res['data'] as Map<String, dynamic>)
+          : (res['data'] is Map ? Map<String, dynamic>.from(res['data'] as Map) : res);
+
       String newId = '';
-      if (res['cascadeId'] is String) {
-        newId = res['cascadeId'] as String;
-      } else if (res['id'] is String) {
-        newId = res['id'] as String;
-      } else if (res['fields'] is List) {
-        for (final f in res['fields']) {
+      if (data['cascadeId'] is String && (data['cascadeId'] as String).isNotEmpty) {
+        newId = data['cascadeId'] as String;
+      } else if (data['id'] is String && (data['id'] as String).isNotEmpty) {
+        newId = data['id'] as String;
+      } else if (data['fields'] is List) {
+        for (final f in data['fields']) {
           if (f is Map && f['text'] is String && (f['text'] as String).isNotEmpty) {
             newId = f['text'] as String;
             break;
           }
         }
       }
+      if (newId.isEmpty && res['cascadeId'] is String) {
+        newId = res['cascadeId'] as String;
+      }
+
       if (newId.isNotEmpty && mounted) {
+        final newSession = CascadeSession(
+          id: newId,
+          workspacePath: ws,
+          title: 'Nouvelle conversation',
+          status: 'CASCADE_STATUS_READY',
+          time: 'Maintenant',
+        );
         setState(() {
           _activeSessionId = newId;
           _activeSessionTitle = 'Nouvelle conversation';
+          _sessions = [newSession, ..._sessions.where((s) => s.id != newId)];
         });
         await _refreshSessions();
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('createCascade failed: $e');
+    }
   }
 
   Future<void> _refreshSessions() async {
@@ -413,13 +434,28 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           }
           if (sessions.isNotEmpty) {
             final stillActive = sessions.any((s) => s.id == _activeSessionId);
-            _sessions = sessions;
-            if (!stillActive || _activeSessionId == 's3') {
-              _activeSessionId = sessions.first.id;
-              _activeSessionTitle = sessions.first.title;
+            // Si la session active est une nouvelle conversation pas encore enregistrée sur disque,
+            // on la préserve en tête de liste sans écraser _activeSessionId.
+            if (!stillActive &&
+                _activeSessionId.isNotEmpty &&
+                _activeSessionTitle == 'Nouvelle conversation') {
+              final newSess = CascadeSession(
+                id: _activeSessionId,
+                workspacePath: _sessions.isNotEmpty ? _sessions.first.workspacePath : '',
+                title: 'Nouvelle conversation',
+                status: 'CASCADE_STATUS_READY',
+                time: 'Maintenant',
+              );
+              _sessions = [newSess, ...sessions.where((s) => s.id != _activeSessionId)];
             } else {
-              final cur = sessions.firstWhere((s) => s.id == _activeSessionId);
-              _activeSessionTitle = cur.title;
+              _sessions = sessions;
+              if (!stillActive || _activeSessionId == 's3') {
+                _activeSessionId = sessions.first.id;
+                _activeSessionTitle = sessions.first.title;
+              } else {
+                final cur = sessions.firstWhere((s) => s.id == _activeSessionId);
+                _activeSessionTitle = cur.title;
+              }
             }
           }
         });
@@ -456,6 +492,48 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
             _sessions = _sessions.map((s) {
               if (s.id == cascadeId) {
                 return s.copyWith(status: 'CASCADE_STATUS_RUNNING');
+              }
+              return s;
+            }).toList();
+          });
+        }
+        return;
+      }
+
+      if (type == 'approval_pending' || type == 'approval_required') {
+        if (cascadeId.isNotEmpty) {
+          setState(() {
+            _sessions = _sessions.map((s) {
+              if (s.id == cascadeId) {
+                return s.copyWith(status: 'CASCADE_STATUS_WAITING_FOR_USER_ACTION');
+              }
+              return s;
+            }).toList();
+          });
+        }
+        return;
+      }
+
+      if (type == 'approval_expired' || type == 'approval_resolved') {
+        if (cascadeId.isNotEmpty) {
+          setState(() {
+            _sessions = _sessions.map((s) {
+              if (s.id == cascadeId) {
+                return s.copyWith(status: 'CASCADE_STATUS_READY');
+              }
+              return s;
+            }).toList();
+          });
+        }
+        return;
+      }
+
+      if (type == 'stream_error') {
+        if (cascadeId.isNotEmpty) {
+          setState(() {
+            _sessions = _sessions.map((s) {
+              if (s.id == cascadeId) {
+                return s.copyWith(status: 'CASCADE_STATUS_ERROR');
               }
               return s;
             }).toList();

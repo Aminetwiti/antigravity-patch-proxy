@@ -22,6 +22,27 @@ func TestParseFrameEvents(t *testing.T) {
 	}
 }
 
+func TestParseFrameStructuredInteraction(t *testing.T) {
+	// Construction d'une interaction structurée via BuildHandleCascadeUserInteraction
+	payload := BuildRunCommandInteraction(true, "npm test", "")
+	rawInteraction := BuildHandleCascadeUserInteraction("cascade-abc", "11112222-3333-4444-5555-666677778888", 42, InteractionRunCommand, payload)
+	
+	events := ParseFrameEvents(rawInteraction, "cascade-abc")
+	if len(events) == 0 {
+		t.Fatalf("Attendu au moins 1 événement d'interaction structurée, reçu 0")
+	}
+
+	if events[0].Kind != EventKindApprovalRequired {
+		t.Errorf("Attendu Kind=%s, reçu=%s", EventKindApprovalRequired, events[0].Kind)
+	}
+	if events[0].StepIndex != 42 {
+		t.Errorf("Attendu StepIndex=42, reçu=%d", events[0].StepIndex)
+	}
+	if events[0].TrajectoryID != "11112222-3333-4444-5555-666677778888" {
+		t.Errorf("Attendu TrajectoryID=11112222-3333-4444-5555-666677778888, reçu=%s", events[0].TrajectoryID)
+	}
+}
+
 func TestIsPrintable(t *testing.T) {
 	if !IsPrintable("Hello World 123!\n") {
 		t.Errorf("IsPrintable devrait être true pour du texte imprimable")

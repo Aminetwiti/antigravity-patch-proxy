@@ -2,6 +2,7 @@ package connectrpc
 
 import (
 	"fmt"
+	"sync"
 )
 
 // Encodage protobuf manuel — pas de bibliothèque (règle AGENTS.md).
@@ -11,6 +12,25 @@ import (
 type writer struct {
 	b []byte
 }
+
+var writerPool = sync.Pool{
+	New: func() interface{} {
+		return &writer{b: make([]byte, 0, 256)}
+	},
+}
+
+func getWriter() *writer {
+	w := writerPool.Get().(*writer)
+	w.b = w.b[:0]
+	return w
+}
+
+func putWriter(w *writer) {
+	if cap(w.b) <= 65536 {
+		writerPool.Put(w)
+	}
+}
+
 
 func (w *writer) varint(v uint64) {
 	for v >= 0x80 {

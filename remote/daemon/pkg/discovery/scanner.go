@@ -48,33 +48,28 @@ func Discover() (*LocalHarnessInfo, error) {
 	// sur ces méthodes → list_sessions renvoyait « aucune frame gRPC-Web
 	// dans la réponse (0 octets) » et send_prompt ne streamait rien.
 	// Voir PROTOCOL.md §3.2 : « Cibler l'instance hub ».
-	var sortedProcs []procEntry
+	var hubs []procEntry
+	var ideActive []procEntry
+	var ideOther []procEntry
+	var fallback []procEntry
+
 	for _, p := range procs {
-		if strings.Contains(p.commandLine, "--subclient_type hub") {
-			sortedProcs = append(sortedProcs, p)
-		}
-	}
-	// Ensuite l'instance IDE active du workspace (--workspace_id / --enable_lsp),
-	// puis les autres instances IDE — repli si aucun hub standalone ne tourne.
-	for _, p := range procs {
-		if strings.Contains(p.commandLine, "--subclient_type hub") {
-			continue
-		}
-		if strings.Contains(p.commandLine, "--workspace_id") || strings.Contains(p.commandLine, "--enable_lsp") {
-			sortedProcs = append([]procEntry{p}, sortedProcs...)
+		if strings.Contains(p.commandLine, "--subclient_type hub") || (strings.Contains(p.commandLine, "--standalone") && !strings.Contains(p.commandLine, "--subclient_type ide")) {
+			hubs = append(hubs, p)
+		} else if strings.Contains(p.commandLine, "--workspace_id") || strings.Contains(p.commandLine, "--enable_lsp") {
+			ideActive = append(ideActive, p)
 		} else if strings.Contains(p.commandLine, "--subclient_type ide") {
-			sortedProcs = append(sortedProcs, p)
+			ideOther = append(ideOther, p)
+		} else {
+			fallback = append(fallback, p)
 		}
 	}
-	for _, p := range procs {
-		if strings.Contains(p.commandLine, "--subclient_type hub") ||
-			strings.Contains(p.commandLine, "--subclient_type ide") ||
-			strings.Contains(p.commandLine, "--workspace_id") ||
-			strings.Contains(p.commandLine, "--enable_lsp") {
-			continue
-		}
-		sortedProcs = append(sortedProcs, p)
-	}
+
+	var sortedProcs []procEntry
+	sortedProcs = append(sortedProcs, hubs...)
+	sortedProcs = append(sortedProcs, ideActive...)
+	sortedProcs = append(sortedProcs, ideOther...)
+	sortedProcs = append(sortedProcs, fallback...)
 	if len(sortedProcs) == 0 {
 		sortedProcs = procs
 	}
@@ -314,15 +309,12 @@ func splitJsonObjects(s string) []string {
 	}
 	parts := strings.Split(trimmed, "},{")
 	out := make([]string, 0, len(parts))
-	for i, p := range parts {
+	for _, p := range parts {
 		if !strings.HasPrefix(p, "{") {
 			p = "{" + p
 		}
 		if !strings.HasSuffix(p, "}") {
 			p = p + "}"
-		}
-		if i > 0 {
-			p = "{" + p
 		}
 		out = append(out, p)
 	}

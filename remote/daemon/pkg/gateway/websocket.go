@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -356,7 +357,7 @@ func NewServer(client RPCClient, authToken string) *Server {
 		sentRequestIDs:   make(map[string]bool),
 		clientInFlight:   make(map[*websocket.Conn]int),
 		writeLocks:       make(map[*websocket.Conn]*sync.Mutex),
-		streamBuffer:     NewSessionStreamBuffer(100),
+		streamBuffer:     NewSessionStreamBuffer(200),
 		outbox:           NewDaemonOutbox(),
 		activeCancels:    make(map[string]context.CancelFunc),
 		activeRequestIDs: make(map[string]string),
@@ -2298,11 +2299,38 @@ func toOutgoing(raw []byte) interface{} {
 }
 
 func sessionsOut(raw []byte) interface{} {
+	return (&Server{}).sessionsOut(raw)
+}
+
+func (s *Server) sessionsOut(raw []byte) interface{} {
 	projects := ListOfficialProjects()
 	summaries := connectrpc.ParseTrajectories(raw)
 
+	enrichStatus := func(cascadeID, origStatus string) string {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.activeCascades != nil && s.activeCascades[cascadeID] {
+			return "CASCADE_STATUS_RUNNING"
+		}
+		if s.approvals != nil {
+			if p, ok := s.approvals[cascadeID]; ok && !p.expired {
+				return "CASCADE_STATUS_WAITING_FOR_USER_ACTION"
+			}
+		}
+		if origStatus != "" && origStatus != "idle" {
+			return origStatus
+		}
+		return "CASCADE_STATUS_READY"
+	}
+
 	if len(summaries) == 0 {
 		local := ListLocalSessions()
+		for _, loc := range local {
+			if cid, ok := loc["cascadeId"].(string); ok {
+				st, _ := loc["status"].(string)
+				loc["status"] = enrichStatus(cid, st)
+			}
+		}
 		return map[string]interface{}{
 			"projects": projects,
 			"sessions": local,
@@ -2310,22 +2338,28 @@ func sessionsOut(raw []byte) interface{} {
 	}
 
 	items := make([]map[string]interface{}, 0, len(summaries))
-	for _, s := range summaries {
-		if s.Archived || s.Killed || s.Source == 16 {
+	for _, sum := range summaries {
+		if sum.Archived || sum.Killed || sum.Source == 16 {
 			continue
 		}
 
 		items = append(items, map[string]interface{}{
-			"cascadeId": s.CascadeID,
-			"title":     s.Title,
-			"workspace": s.Workspace,
-			"projectId": s.ProjectID,
-			"status":    s.Status,
-			"updatedAt": s.UpdatedAt,
+			"cascadeId": sum.CascadeID,
+			"title":     sum.Title,
+			"workspace": sum.Workspace,
+			"projectId": sum.ProjectID,
+			"status":    enrichStatus(sum.CascadeID, sum.Status),
+			"updatedAt": sum.UpdatedAt,
 		})
 	}
 	if len(items) == 0 {
 		local := ListLocalSessions()
+		for _, loc := range local {
+			if cid, ok := loc["cascadeId"].(string); ok {
+				st, _ := loc["status"].(string)
+				loc["status"] = enrichStatus(cid, st)
+			}
+		}
 		return map[string]interface{}{
 			"projects": projects,
 			"sessions": local,
@@ -2606,20 +2640,68 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 					raw, err = s.RPCClient.CreateCascade(uri, projectID, modelUID, modelEnum)
 				}
 			}
+			if len(raw) > 0 && err == nil {
+				fields := connectrpc.DecodeFields(raw)
+				extractedID := ""
+				for _, f := range fields {
+					if f.WireType == 2 {
+						cid := strings.TrimSpace(string(f.Bytes))
+						if cid != "" && (f.Num == 1 || (len(cid) >= 16 && strings.Contains(cid, "-"))) {
+							extractedID = cid
+							break
+						}
+					}
+				}
+				if extractedID != "" {
+					s.writeJSON(conn, OutgoingMessage{
+						Type:      "response",
+						RequestID: msg.RequestID,
+						Data: map[string]interface{}{
+							"cascadeId": extractedID,
+							"id":        extractedID,
+							"rawBytes":  len(raw),
+							"fields":    toOutgoing(raw),
+						},
+					})
+					return
+				}
+			}
 		}
 
 	case "send_command":
 		if msg.Command == "" {
-			err = fmt.Errorf("command requis (ex: /model, /compact)")
+			err = fmt.Errorf("command requis (ex: /model, /compact, git status)")
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
 			return
 		}
-		logJSON.Info("slash_command", "command", msg.Command)
-		raw, err = s.RPCClient.SendCommand(msg.Command)
+		trimmedCmd := strings.TrimSpace(msg.Command)
+		if strings.HasPrefix(trimmedCmd, "/") {
+			logJSON.Info("slash_command", "command", trimmedCmd)
+			raw, err = s.RPCClient.SendCommand(trimmedCmd)
+		} else {
+			// Commande Shell / CLI directe sur le PC hôte (ex: git diff, git status, flutter analyze)
+			logJSON.Info("shell_command", "command", trimmedCmd)
+			wsDir := homeRoot(msg.WorkspacePath)
+			out, execErr := executeShellCommand(wsDir, trimmedCmd)
+			if execErr != nil {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: execErr.Error()})
+				return
+			}
+			s.writeJSON(conn, OutgoingMessage{
+				Type:      "response",
+				RequestID: msg.RequestID,
+				Data: map[string]interface{}{
+					"output": out,
+					"stdout": out,
+					"status": "ok",
+				},
+			})
+			return
+		}
 
 	case "terminal_create":
-		// La session appartient ├á CE client (owner-scoping) : les autres
-		// devices ne peuvent ni ├®crire ni tuer dedans, et sa d├®connexion ne
+		// La session appartient à CE client (owner-scoping) : les autres
+		// devices ne peuvent ni écrire ni tuer dedans, et sa déconnexion ne
 		// nettoie que ses sessions.
 		id, errTerm := s.terminals.create(conn, homeRoot(msg.WorkspacePath))
 		if errTerm != nil {
@@ -2631,8 +2713,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 
 	case "terminal_write":
 		// BUG fix : le mobile envoie terminal_write/terminal_kill mais aucun
-		// handler ne les traitait ÔÇö le shell recevait une erreur
-		// "Unknown action type" et AUCUNE commande ne s'ex├®cutait.
+		// handler ne les traitait — le shell recevait une erreur
+		// "Unknown action type" et AUCUNE commande ne s'exécutait.
 		tid := msg.TerminalID
 		if tid == "" {
 			tid = msg.TerminalIDAlt
@@ -2682,14 +2764,14 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		return
 
 	case "list_sessions":
-		// C4 : borne l'appel au LS (60 s max c├┤t├® hub, on n'attend pas plus de
-		// 15 s ici) ÔÇö sinon un hub lent laisse la r├®ponse unary arriver trop
-		// tard : le mobile a d├®j├á timeout├® (10 s) et s'est d├®connect├® ÔåÆ boucle
-		// connect/disconnect. Timeout local + r├®ponse d'erreur explicite.
+		// C4 : borne l'appel au LS (60 s max côté hub, on n'attend pas plus de
+		// 15 s ici) — sinon un hub lent laisse la réponse unary arriver trop
+		// tard : le mobile a déjà timeouté (10 s) et s'est déconnecté → boucle
+		// connect/disconnect. Timeout local + réponse d'erreur explicite.
 		// Cache single-flight : les reconnexions en rafale du mobile partagent
 		// un SEUL appel GetAllCascades (~9,5 s) au lieu de le multiplier.
-		// Scope projet (3.3) : un device pair├® avec allowedProjects ne voit que
-		// ses projets autoris├®s (sessions + projets list├®s).
+		// Scope projet (3.3) : un device pairé avec allowedProjects ne voit que
+		// ses projets autorisés (sessions + projets listés).
 		writeScoped := func(data interface{}) {
 			m, _ := data.(map[string]interface{})
 			if m != nil {
@@ -2698,7 +2780,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: m})
 		}
 		if raw, ok := s.cachedSessions(); ok {
-			writeScoped(sessionsOut(raw))
+			writeScoped(s.sessionsOut(raw))
 			return
 		}
 		raw = s.fetchSessionsSingleFlight()
@@ -2707,9 +2789,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 		if len(raw) > 0 {
-			// sessionsOut applique le filtre Antigravity 2.0 (archiv├®es,
+			// sessionsOut applique le filtre Antigravity 2.0 (archivées,
 			// killed, subagents) + fallback sessions locales si vide.
-			writeScoped(sessionsOut(raw))
+			writeScoped(s.sessionsOut(raw))
 			return
 		}
 		local := ListLocalSessions()
@@ -2727,7 +2809,24 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
 			return
 		}
-		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"messages": history}})
+		respData := map[string]interface{}{"messages": history}
+		s.mu.Lock()
+		reqID, isActive := s.activeRequestIDs[msg.CascadeID]
+		hasApproval := false
+		if s.approvals != nil {
+			if p, ok := s.approvals[msg.CascadeID]; ok && !p.expired {
+				hasApproval = true
+			}
+		}
+		s.mu.Unlock()
+		if isActive {
+			respData["isStreaming"] = true
+			respData["activeRequestId"] = reqID
+		}
+		if hasApproval {
+			respData["hasPendingApproval"] = true
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: respData})
 		return
 
 	case "sync_session":
@@ -4588,3 +4687,58 @@ func (m *terminalPtyManager) killAllFor(owner *websocket.Conn) {
 		_ = m.kill(owner, id)
 	}
 }
+
+// executeShellCommand exécute une commande shell locale dans un répertoire de travail
+// avec un timeout de protection de 10s.
+func executeShellCommand(dir, cmdStr string) (string, error) {
+	if dir == "" || dir == "." {
+		if projs := ListOfficialProjects(); len(projs) > 0 && projs[0].Path != "" {
+			dir = projs[0].Path
+		} else if wd, err := os.Getwd(); err == nil {
+			dir = wd
+		}
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		absDir = dir
+	}
+
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd.exe", "/c", cmdStr)
+	} else {
+		cmd = exec.Command("sh", "-c", cmdStr)
+	}
+	cmd.Dir = absDir
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var outBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &outBuf
+
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	select {
+	case <-ctx.Done():
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		return "", fmt.Errorf("exécution expirée après 10s")
+	case err := <-done:
+		out := outBuf.String()
+		if err != nil && out == "" {
+			return "", err
+		}
+		return out, nil
+	}
+}
+

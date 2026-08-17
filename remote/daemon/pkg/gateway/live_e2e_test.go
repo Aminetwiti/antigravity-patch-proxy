@@ -73,6 +73,18 @@ func TestLiveAntigravityE2E(t *testing.T) {
 		return msg
 	}
 
+	recvMatching := func(reqID string, timeout time.Duration) map[string]interface{} {
+		deadline := time.Now().Add(timeout)
+		for time.Now().Before(deadline) {
+			msg := recvMsg(time.Until(deadline))
+			if msg["requestId"] == reqID || msg["type"] == "error" {
+				return msg
+			}
+		}
+		t.Fatalf("Timeout en attente de la réponse requestId=%s", reqID)
+		return nil
+	}
+
 	// 6. Test Heartbeat via WebSocket
 	sendReq(map[string]interface{}{
 		"type":      "heartbeat",
@@ -178,7 +190,7 @@ func TestLiveAntigravityE2E(t *testing.T) {
 		"requestId":     "req-files-1",
 		"workspacePath": "C:\\Users\\amine\\Downloads\\antigravity-add-model-main\\antigravity-add-model-main",
 	})
-	filesResp := recvMsg(30 * time.Second)
+	filesResp := recvMatching("req-files-1", 30*time.Second)
 	if filesResp["type"] != "response" || filesResp["requestId"] != "req-files-1" {
 		t.Fatalf("Réponse list_files invalide: %v", filesResp)
 	}
@@ -192,7 +204,7 @@ func TestLiveAntigravityE2E(t *testing.T) {
 			"minutes": 10,
 		},
 	})
-	timeoutResp := recvMsg(3 * time.Second)
+	timeoutResp := recvMatching("req-timeout-1", 3*time.Second)
 	if timeoutResp["type"] != "response" || timeoutResp["requestId"] != "req-timeout-1" {
 		t.Fatalf("Réponse set_approval_timeout invalide: %v", timeoutResp)
 	}

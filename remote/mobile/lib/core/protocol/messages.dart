@@ -61,6 +61,16 @@ class CascadeSession {
     return st.contains('RUNNING');
   }
 
+  bool get isWaitingAction {
+    final st = status.toUpperCase();
+    return st.contains('WAIT') || st.contains('APPROVAL') || st.contains('QUESTION');
+  }
+
+  bool get isError {
+    final st = status.toUpperCase();
+    return st.contains('ERROR') || st.contains('FAIL');
+  }
+
   CascadeSession copyWith({
     String? id,
     String? workspacePath,

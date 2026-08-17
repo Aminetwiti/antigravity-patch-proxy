@@ -301,13 +301,35 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     } catch (_) {}
   }
 
+  void _scrollToBottomSettled({int maxAttempts = 3}) {
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+      if (maxAttempts > 1) {
+        Future.delayed(const Duration(milliseconds: 80), () {
+          if (mounted && _scrollController.hasClients) {
+            _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+            if (maxAttempts > 2) {
+              Future.delayed(const Duration(milliseconds: 120), () {
+                if (mounted && _scrollController.hasClients) {
+                  _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+                }
+              });
+            }
+          }
+        });
+      }
+    });
+  }
+
   void _loadHistoryIfEmpty() {
-    if (_messages.isEmpty && widget.activeSessionId.isNotEmpty) {
+    if (widget.activeSessionId.isNotEmpty) {
       widget.api?.getSessionHistory(widget.activeSessionId).then((data) {
         if (!mounted) return;
         final rawMessages = data['messages'] as List?;
+        final parsed = <ChatMessage>[];
         if (rawMessages != null && rawMessages.isNotEmpty) {
-          final parsed = <ChatMessage>[];
           for (final m in rawMessages) {
             if (m is Map) {
               parsed.add(ChatMessage(
@@ -320,21 +342,31 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               ));
             }
           }
-          // Stocker tous les messages en mémoire, n'afficher que les _pageSize
-          // derniers via _visibleMessages. Le scroll est positionné en bas
-          // instantanément (sans animation) pour un rendu 60 FPS immédiat.
-          setState(() {
-            _messages
-              ..clear()
-              ..addAll(parsed);
-          });
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted || !_scrollController.hasClients) return;
-            _scrollController.jumpTo(
-              _scrollController.position.maxScrollExtent,
-            );
-          });
         }
+
+        final isStreaming = data['isStreaming'] == true;
+        final activeReqId = data['activeRequestId']?.toString() ?? '';
+        if (isStreaming &&
+            activeReqId.isNotEmpty &&
+            !parsed.any((m) => m.id == 'ext-$activeReqId')) {
+          parsed.add(ChatMessage(
+            id: 'ext-$activeReqId',
+            sender: 'assistant',
+            text: '',
+            timestamp: _timestamp(),
+            isStreaming: true,
+          ));
+        }
+
+        setState(() {
+          _messages
+            ..clear()
+            ..addAll(parsed);
+          if (isStreaming) {
+            _activeStreamCount = math.max(_activeStreamCount, 1);
+          }
+        });
+        _scrollToBottomSettled();
       }).catchError((_) {
         // Ignorer l'erreur
       });
@@ -505,7 +537,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     // évite toute surconsommation CPU en fond.
     if (state == AppLifecycleState.resumed && mounted) {
       setState(() {});
-      _scrollToBottom();
+      _scrollToBottomSettled();
     }
   }
 
@@ -521,9 +553,18 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         _expiredCallIds.clear();
         _pendingApprovalCallIds.clear();
         _visibleCounts[widget.activeSessionId] = _pageSize;
+        setState(() {
+          _messages.clear();
+          _modifiedFiles.clear();
+          _modifiedFileList.clear();
+          _artifacts.clear();
+          _activeArtifact = null;
+          _latestPlanText = null;
+        });
       }
       _loadHistoryIfEmpty();
       _loadPersistedDraft();
+      _scrollToBottomSettled();
     }
     if (oldWidget.api != widget.api) {
       // Bug agent bloqué : réinitialiser le compteur de streams actifs à la
@@ -2140,51 +2181,79 @@ class _MessageBubble extends StatelessWidget {
               ),
             ),
           if (hasThought) ...[
-            InkWell(
-              key: Key('thought-toggle-${message.id}'),
-              onTap: () {
-                HapticFeedback.selectionClick();
-                onToggleThought?.call();
-              },
-              borderRadius: BorderRadius.circular(6),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.psychology_outlined,
-                        size: 13, color: scheme.onSurfaceVariant),
-                    const SizedBox(width: 6),
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 260),
-                      child: Text(
-                        isThoughtExpanded ? message.thought! : cleanThought,
-                        key: Key('thought-${message.id}'),
-                        maxLines: isThoughtExpanded ? null : 1,
-                        overflow: isThoughtExpanded
-                            ? TextOverflow.visible
-                            : TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: scheme.onSurfaceVariant,
-                          fontWeight: FontWeight.w500,
-                          fontStyle: FontStyle.italic,
-                        ),
+            Container(
+              margin: const EdgeInsets.only(bottom: 6),
+              decoration: BoxDecoration(
+                color: isThoughtExpanded
+                    ? (isDark ? const Color(0xFF16181D) : scheme.surfaceContainerHighest.withValues(alpha: 0.5))
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                border: isThoughtExpanded
+                    ? Border.all(color: isDark ? const Color(0xFF2C2F38) : scheme.outlineVariant.withValues(alpha: 0.6), width: 0.8)
+                    : null,
+              ),
+              child: InkWell(
+                key: Key('thought-toggle-${message.id}'),
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  onToggleThought?.call();
+                },
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                    vertical: isThoughtExpanded ? 8 : 4,
+                    horizontal: isThoughtExpanded ? 10 : 2,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            message.isStreaming && !hasContent
+                                ? Icons.auto_awesome
+                                : Icons.psychology_outlined,
+                            size: 13,
+                            color: message.isStreaming && !hasContent
+                                ? AppColors.accentBlueBright
+                                : scheme.onSurfaceVariant,
+                          ),
+                          const SizedBox(width: 6),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 260),
+                            child: Text(
+                              isThoughtExpanded ? message.thought! : cleanThought,
+                              key: Key('thought-${message.id}'),
+                              maxLines: isThoughtExpanded ? null : 1,
+                              overflow: isThoughtExpanded
+                                  ? TextOverflow.visible
+                                  : TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: scheme.onSurfaceVariant,
+                                fontWeight: isThoughtExpanded ? FontWeight.w400 : FontWeight.w500,
+                                fontStyle: FontStyle.italic,
+                                height: isThoughtExpanded ? 1.4 : 1.2,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(
+                            isThoughtExpanded
+                                ? Icons.expand_less
+                                : Icons.expand_more,
+                            size: 16,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(width: 4),
-                    Icon(
-                      isThoughtExpanded
-                          ? Icons.expand_less
-                          : Icons.expand_more,
-                      size: 16,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 2),
           ],
           if (isError)
             Container(

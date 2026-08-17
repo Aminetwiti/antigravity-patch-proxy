@@ -282,3 +282,38 @@ func TestExtractSubagentsEmpty(t *testing.T) {
 		t.Fatalf("expected empty slice for non-existent session, got %d", len(subs))
 	}
 }
+
+func TestCoalesceHistoryMessages(t *testing.T) {
+	raw := []HistoryMessage{
+		{ID: "h-0", Sender: "user", Text: "Hello", Timestamp: "10:00"},
+		{ID: "h-1", Sender: "assistant", Text: "", Thought: "Thinking 1", Timestamp: "10:01"},
+		{ID: "h-2", Sender: "assistant", Text: "First part", Thought: "Thinking 2", Timestamp: "10:02"},
+		{ID: "h-3", Sender: "assistant", Text: "Second part", Thought: "", Timestamp: "10:03"},
+		{ID: "h-4", Sender: "user", Text: "Next question", Timestamp: "10:04"},
+		{ID: "h-5", Sender: "assistant", Text: "Answer", Thought: "Quick thought", Timestamp: "10:05"},
+	}
+
+	coalesced := CoalesceHistoryMessages(raw)
+	if len(coalesced) != 4 {
+		t.Fatalf("expected 4 coalesced messages, got %d", len(coalesced))
+	}
+
+	if coalesced[0].Sender != "user" || coalesced[0].Text != "Hello" {
+		t.Errorf("coalesced[0] unexpected: %+v", coalesced[0])
+	}
+	if coalesced[1].Sender != "assistant" {
+		t.Errorf("coalesced[1] should be assistant, got %+v", coalesced[1])
+	}
+	if coalesced[1].Text != "First part\n\nSecond part" {
+		t.Errorf("coalesced[1].Text = %q, want %q", coalesced[1].Text, "First part\n\nSecond part")
+	}
+	if coalesced[1].Thought != "Thinking 1\n\nThinking 2" {
+		t.Errorf("coalesced[1].Thought = %q, want %q", coalesced[1].Thought, "Thinking 1\n\nThinking 2")
+	}
+	if coalesced[2].Sender != "user" || coalesced[2].Text != "Next question" {
+		t.Errorf("coalesced[2] unexpected: %+v", coalesced[2])
+	}
+	if coalesced[3].Sender != "assistant" || coalesced[3].Text != "Answer" {
+		t.Errorf("coalesced[3] unexpected: %+v", coalesced[3])
+	}
+}

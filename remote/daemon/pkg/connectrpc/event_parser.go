@@ -30,6 +30,50 @@ func ParseFrameEvents(raw []byte, cascadeID string) []StreamEvent {
 	var events []StreamEvent
 	fields := DecodeFields(raw)
 
+	// 1. Vérification pour les frames d'interaction directe (HandleCascadeUserInteraction: field 1 = cascadeID, field 2 = interaction {1: trajectoryId, 2: stepIndex, 5..23: payload})
+	for _, f := range fields {
+		if f.Num == 2 && f.WireType == 2 {
+			subFields := DecodeFields(f.Bytes)
+			var trajectoryID string
+			var stepIndex uint32
+			var isInteraction bool
+			var detectedTool string
+			var detail string
+
+			for _, sub := range subFields {
+				if sub.WireType == 0 && sub.Num == 2 {
+					stepIndex = uint32(sub.Varint)
+				}
+				if sub.WireType == 2 && sub.Num == 1 && len(sub.Bytes) == 36 {
+					trajectoryID = string(sub.Bytes)
+				}
+				if sub.Num == InteractionRunCommand || sub.Num == InteractionOpenBrowserURL ||
+					sub.Num == InteractionFilePermission || sub.Num == InteractionPermission ||
+					sub.Num == InteractionApproval {
+					isInteraction = true
+					if sub.Num == InteractionRunCommand {
+						detectedTool = "run_command"
+					} else if sub.Num == InteractionFilePermission {
+						detectedTool = "write_to_file"
+					}
+					if len(sub.Bytes) > 0 {
+						detail = string(sub.Bytes)
+					}
+				}
+			}
+			if isInteraction {
+				return []StreamEvent{{
+					Kind:         EventKindApprovalRequired,
+					CascadeID:    cascadeID,
+					TrajectoryID: trajectoryID,
+					StepIndex:    stepIndex,
+					Tool:         detectedTool,
+					Detail:       detail,
+				}}
+			}
+		}
+	}
+
 	for _, f := range fields {
 		if f.WireType != 2 || len(f.Bytes) == 0 {
 			continue
@@ -39,45 +83,119 @@ func ParseFrameEvents(raw []byte, cascadeID string) []StreamEvent {
 			continue
 		}
 
-		// Détection empirique des blocs d'approbation ou de texte. Les blobs
-		// d'approbation d'outils (run_command, write_to_file, read_file, ...)
-		// contiennent le nom de l'outil (clé JSON) ; les blobs de questions
-		// contiennent ask_question/ask_user. Ailleurs → texte.
-		if strings.Contains(s, "run_command") || strings.Contains(s, "write_to_file") || strings.Contains(s, "read_file") || strings.Contains(s, "edit_file") || strings.Contains(s, "list_files") || strings.Contains(s, "search_files") || strings.Contains(s, "ask_question") || strings.Contains(s, "ask_user") {
-			ev := StreamEvent{
-				Kind:      EventKindApprovalRequired,
-				CascadeID: cascadeID,
-				Tool:      extractToolName(s),
-				Detail:    s,
-			}
-			// Corrélation (Bloc A) : step_index (varint #2) + trajectory_id (UUID #1)
-			// sont indispensables pour répondre via HandleCascadeUserInteraction.
-			for _, sub := range DecodeFields(f.Bytes) {
-				if sub.WireType == 0 && sub.Num == 2 {
-					ev.StepIndex = uint32(sub.Varint)
-				}
-				if sub.WireType == 2 && sub.Num == 1 && len(sub.Bytes) == 36 {
-					ev.TrajectoryID = string(sub.Bytes)
-				}
-			}
-			if ev.TrajectoryID == "" {
-				// Fallback : le premier UUID du blob d'approbation.
-				ev.TrajectoryID = firstUUID(s)
-			}
-			events = append(events, ev)
-		} else if IsPrintable(s) && len(s) > 1 {
-			if strings.Contains(s, "<thought>") || strings.Contains(s, "Thinking...") {
+		if IsPrintable(s) && len(s) > 0 {
+			if strings.Contains(s, "run_command") || strings.Contains(s, "write_to_file") || strings.Contains(s, "read_file") || strings.Contains(s, "edit_file") || strings.Contains(s, "list_files") || strings.Contains(s, "search_files") || strings.Contains(s, "ask_question") || strings.Contains(s, "ask_user") {
+				events = append(events, StreamEvent{
+					Kind:         EventKindApprovalRequired,
+					CascadeID:    cascadeID,
+					TrajectoryID: firstUUID(s),
+					Tool:         extractToolName(s),
+					Detail:       s,
+				})
+			} else if strings.Contains(s, "<thought>") || strings.Contains(s, "Thinking...") {
 				events = append(events, StreamEvent{
 					Kind:      EventKindThinking,
 					Delta:     s,
 					CascadeID: cascadeID,
 				})
-			} else {
+			} else if len(s) > 1 {
 				events = append(events, StreamEvent{
 					Kind:      EventKindText,
 					Delta:     s,
 					CascadeID: cascadeID,
 				})
+			}
+			continue
+		}
+
+		// Si f.Bytes n'est pas du texte brut imprimable, c'est un sous-message protobuf binaire
+		subFields := DecodeFields(f.Bytes)
+		var trajectoryID string
+		var stepIndex uint32
+		var isInteraction bool
+		var detectedTool string
+
+		for _, sub := range subFields {
+			if sub.WireType == 0 && sub.Num == 2 {
+				stepIndex = uint32(sub.Varint)
+			}
+			if sub.WireType == 2 && sub.Num == 1 && len(sub.Bytes) == 36 {
+				trajectoryID = string(sub.Bytes)
+			}
+			if sub.Num == InteractionRunCommand || sub.Num == InteractionOpenBrowserURL ||
+				sub.Num == InteractionFilePermission || sub.Num == InteractionPermission ||
+				sub.Num == InteractionApproval {
+				isInteraction = true
+				if sub.Num == InteractionRunCommand {
+					detectedTool = "run_command"
+				} else if sub.Num == InteractionFilePermission {
+					detectedTool = "write_to_file"
+				}
+			}
+			if sub.WireType == 2 && sub.Num == 2 && len(sub.Bytes) > 0 {
+				nested := DecodeFields(sub.Bytes)
+				for _, nf := range nested {
+					if nf.WireType == 0 && nf.Num == 2 {
+						stepIndex = uint32(nf.Varint)
+					}
+					if nf.WireType == 2 && nf.Num == 1 && len(nf.Bytes) == 36 {
+						trajectoryID = string(nf.Bytes)
+					}
+					if nf.Num == InteractionRunCommand || nf.Num == InteractionOpenBrowserURL ||
+						nf.Num == InteractionFilePermission || nf.Num == InteractionPermission ||
+						nf.Num == InteractionApproval {
+						isInteraction = true
+						if nf.Num == InteractionRunCommand {
+							detectedTool = "run_command"
+						} else if nf.Num == InteractionFilePermission {
+							detectedTool = "write_to_file"
+						}
+					}
+				}
+			}
+		}
+
+		if isInteraction {
+			if detectedTool == "" {
+				detectedTool = extractToolName(s)
+			}
+			events = append(events, StreamEvent{
+				Kind:         EventKindApprovalRequired,
+				CascadeID:    cascadeID,
+				TrajectoryID: trajectoryID,
+				StepIndex:    stepIndex,
+				Tool:         detectedTool,
+				Detail:       s,
+			})
+		} else {
+			for _, sub := range subFields {
+				if sub.WireType == 2 && len(sub.Bytes) > 0 && sub.Num != 1 {
+					st := strings.TrimSpace(string(sub.Bytes))
+					if IsPrintable(st) && len(st) > 0 {
+						if strings.Contains(st, "run_command") || strings.Contains(st, "write_to_file") || strings.Contains(st, "read_file") || strings.Contains(st, "edit_file") || strings.Contains(st, "list_files") || strings.Contains(st, "search_files") || strings.Contains(st, "ask_question") || strings.Contains(st, "ask_user") {
+							events = append(events, StreamEvent{
+								Kind:         EventKindApprovalRequired,
+								CascadeID:    cascadeID,
+								TrajectoryID: trajectoryID,
+								StepIndex:    stepIndex,
+								Tool:         extractToolName(st),
+								Detail:       st,
+							})
+						} else if strings.Contains(st, "<thought>") || strings.Contains(st, "Thinking...") {
+							events = append(events, StreamEvent{
+								Kind:      EventKindThinking,
+								Delta:     st,
+								CascadeID: cascadeID,
+							})
+						} else {
+							events = append(events, StreamEvent{
+								Kind:      EventKindText,
+								Delta:     st,
+								CascadeID: cascadeID,
+							})
+						}
+					}
+				}
 			}
 		}
 	}
