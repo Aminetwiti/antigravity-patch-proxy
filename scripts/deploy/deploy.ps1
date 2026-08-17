@@ -103,7 +103,8 @@ Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host "[6/7] Language Server binary patch uygulaniyor..." -ForegroundColor Yellow
 $LsBinary = "$env:LOCALAPPDATA\Programs\antigravity\resources\bin\language_server.exe"
 $OriginalUrl = "https://daily-cloudcode-pa.googleapis.com"
-$PatchedUrl = "http://localhost:50999/v1internal/xxxxxxx"
+$proxyPort = if ($env:AG_PROXY_PORT) { $env:AG_PROXY_PORT } else { '51074' }
+$PatchedUrl = "http://localhost:${proxyPort}/v1internal/xxxxxxx"
 
 if (Test-Path $LsBinary) {
     $content = [System.IO.File]::ReadAllText($LsBinary, [System.Text.Encoding]::ASCII)

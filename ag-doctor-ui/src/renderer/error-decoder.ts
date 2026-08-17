@@ -93,7 +93,7 @@ const KNOWN_ERROR_PATTERNS: ErrorPattern[] = [
   },
   {
     pattern: 'Port already in use (EADDRINUSE)',
-    hint: 'A local port (e.g. 50999 / 443 / 8443) is already taken by another process. Close the application using that port (often a leftover Antigravity instance) and retry.',
+    hint: 'A local port (e.g. the configured proxy port / 443 / 8443) is already taken by another process. Close the application using that port (often a leftover Antigravity instance) and retry.',
     action: 'run-doctor',
     matcher: (s) => /EADDRINUSE|address already in use|bind:.*already in use|listen.*already in use/i.test(s),
   },

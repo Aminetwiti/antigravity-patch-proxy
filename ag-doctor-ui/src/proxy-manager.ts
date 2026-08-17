@@ -21,7 +21,7 @@ export interface ProxyServerStatus {
 
 class ProxyManager {
   private proxyProcess: ChildProcess | null = null;
-  private port: number = 50999;
+  private port: number = parseInt(process.env.AG_MITM_PORT || '443', 10);
   private host: string = '127.0.0.1';
   private scriptPath: string;
   
@@ -95,11 +95,12 @@ class ProxyManager {
         console.log(`[ProxyManager] Spawning: node "${this.scriptPath}"`);
         
         // Environment variables for the proxy script
+        const proxyTargetPort = parseInt(process.env.AG_PROXY_PORT || '51074', 10);
         const env = {
           ...process.env,
           AG_MITM_PORT: String(this.port),
           AG_MITM_HOST: this.host,
-          AG_PROXY_TARGET: 'http://127.0.0.1:50999', // Forward to main Antigravity proxy
+          AG_PROXY_TARGET: `http://127.0.0.1:${proxyTargetPort}`,
         };
 
         // Spawn the proxy server process

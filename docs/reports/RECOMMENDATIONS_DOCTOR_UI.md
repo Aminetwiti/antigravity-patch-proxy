@@ -63,7 +63,7 @@ interface PatchState {
   antigravityVersion: string;          // "2.2.1"
   asarBackedUp: boolean;
   asarIntact: boolean;                 // sha match expectations
-  proxyListening: boolean;             // 50999 LISTEN
+  proxyListening: boolean;             // ${AG_PROXY_PORT:-51074} LISTEN
   proxyResponding: boolean;            // /health 200
   mitmListening: boolean;              // 443 LISTEN sur 127.0.0.1
   mitmCaInstalled: boolean;            // Cert:\LocalMachine\Root contient CA

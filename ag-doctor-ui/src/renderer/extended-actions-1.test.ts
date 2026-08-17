@@ -161,7 +161,7 @@ describe('Provider Specs & Endpoint URL Sanitizer (50 Tests)', () => {
   });
 
   it('allows http for local development ports', () => {
-    expect(sanitizeEndpointUrl('http://127.0.0.1:50999').valid).toBe(true);
+    expect(sanitizeEndpointUrl('http://127.0.0.1:9999').valid).toBe(true);
     expect(sanitizeEndpointUrl('http://localhost:8080').valid).toBe(true);
   });
 
@@ -209,7 +209,7 @@ describe('IPC Bridge Response Parser & Error Handling (25 Tests)', () => {
   });
 
   const failureCases = [
-    { ok: false, error: 'Port 50999 bound by another process', desc: 'Port collision' },
+    { ok: false, error: 'Proxy port bound by another process', desc: 'Port collision' },
     { ok: false, error: 'EACCES: privilege elevation required', desc: 'UAC required' },
     { ok: false, code: 1, desc: 'Exit code 1' },
     { ok: false, code: 127, desc: 'Command not found' },

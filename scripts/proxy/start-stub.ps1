@@ -1,4 +1,4 @@
-﻿# start-stub.ps1 - Start the minimal proxy stub on port 50999
+﻿# start-stub.ps1 - Start the minimal proxy stub on the configured proxy port
 #
 # WARNING: This stub does NOT inject custom models. It only returns empty 200s
 # so the patched language_server.exe can initialise without ECONNREFUSED errors.
@@ -6,7 +6,7 @@
 # Only use the stub when Antigravity is NOT running.
 param([switch]$NoPause)
 
-$PORT = 50999
+$PORT = if ($env:AG_PROXY_STUB_PORT) { [int]$env:AG_PROXY_STUB_PORT } else { 51999 }
 $StubScript = Join-Path $PSScriptRoot 'proxy-stub.js'
 
 $busy = Get-NetTCPConnection -LocalPort $PORT -ErrorAction SilentlyContinue

@@ -1,10 +1,8 @@
-// Minimal HTTP stub on 127.0.0.1:50999 — emergency fallback when the real
-// proxy crashes (see docs/troubleshooting/mitm-443.md). Returns valid empty JSON so
-// the Go language server stops logging ECONNREFUSED, and exposes /health
-// with an X-Proxy-Stub: 1 marker so ag-doctor can detect the fallback.
+// Minimal HTTP stub — emergency fallback when the real proxy crashes.
+// Default port comes from STUB_PORT_DEFAULT; override with AG_PROXY_STUB_PORT.
 //
 // Usage:  node proxy-stub.js [port]
-// Env:    AG_PROXY_STUB_PORT (default 50999)
+// Env:    AG_PROXY_STUB_PORT (default STUB_PORT_DEFAULT)
 //         AG_PROXY_STUB_HOST (default 127.0.0.1)
 //         AG_PROXY_STUB_LOG  (default os.tmpdir()/ag-proxy-stub.log)
 
@@ -20,7 +18,7 @@ const dns   = require('dns');
 dns.setDefaultResultOrder('ipv4first');
 
 const LOG  = process.env.AG_PROXY_STUB_LOG  || path.join(os.tmpdir(), 'ag-proxy-stub.log');
-const PORT = parseInt(process.argv[2] || process.env.AG_PROXY_STUB_PORT || '50999', 10);
+const PORT = parseInt(process.argv[2] || process.env.AG_PROXY_STUB_PORT || '51999', 10);
 const HOST = process.env.AG_PROXY_STUB_HOST || '127.0.0.1';
 
 function log(line) {

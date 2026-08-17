@@ -9,7 +9,7 @@
  *   restart     Stop + start
  *
  * Fixes scenarios:
- *   - #15: Port 50999 refused (real proxy crashes silently)
+ *   - #15: Port refused (real proxy crashes silently)
  *   - #14: Port already in use (kill stale instance)
  *   - #21: IPv4/IPv6 mismatch (forced IPv4 in stub)
  */
@@ -102,7 +102,7 @@ async function runStart(ctx: CommandContext, scriptName: string, port: number, n
     if (status.isStub) {
       // A leftover stub holds the port (e.g. auto-started by `ag-doctor doctor`).
       // If we returned here, the real proxy would hit EADDRINUSE and fall back to
-      // another port while the patched language server still dials 50999 —
+      // another port while the patched language server still dials the default proxy port —
       // silently losing model injection. Kill the stub and start the real proxy.
       if (!ctx.json) warn('Port is held by a proxy stub — replacing it with the real proxy');
       const killed = await killPid(status.pid);

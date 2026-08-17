@@ -24,7 +24,7 @@ describe('classifyError', () => {
   });
 
   it('classifies ECONNREFUSED', () => {
-    const e = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:50999'), { code: 'ECONNREFUSED' });
+    const e = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:9999'), { code: 'ECONNREFUSED' });
     expect(classifyError(e)).toBe('refused');
   });
 

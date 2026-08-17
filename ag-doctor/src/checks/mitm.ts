@@ -3,7 +3,7 @@
  * Added to the `doctor` command output.
  *
  * Special handling: if the system proxy is set but on the wrong port
- * (e.g. 443 instead of 50999), we report it as an explicit error with a
+ * (e.g. 443 instead of the configured MITM port), we report it as an explicit error with a
  * remediation hint, since this is the most common cause of
  * `ERR_HTTP_HEADERS_SENT` in the bundled proxy.
  */
@@ -43,8 +43,8 @@ export async function checkMitm(): Promise<CheckResult> {
     // interception. The system proxy (and its port) is therefore bypassed, so
     // the interception test result is irrelevant — report the system as healthy
     // regardless of whether the test passed, failed, or was never run. This
-    // must be checked first so a spurious "interception FAILED" (the 50999
-    // proxy is a plain HTTP translator and does not speak CONNECT/TLS) never
+    // must be checked first so a spurious "interception FAILED" (the proxy on
+    // DEFAULT_MITM_PORT is a plain HTTP translator and does not speak CONNECT/TLS) never
     // produces a false warning.
     if (isPatched) {
       const portNote = portMismatch

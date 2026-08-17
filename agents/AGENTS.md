@@ -87,7 +87,7 @@ antigravity-add-model-main/
 ## 2. Architecture
 
 ```
-IDE Chat UI ↔ Language Server (Go Binary, patched) ↔ Local Proxy :50999
+IDE Chat UI ↔ Language Server (Go Binary, patched) ↔ Local Proxy :${AG_PROXY_PORT:-51074}
                                                            │
                                               ┌────────────┴────────────┐
                                          Translator Registry   Protobuf Injector
@@ -97,7 +97,7 @@ IDE Chat UI ↔ Language Server (Go Binary, patched) ↔ Local Proxy :50999
 ```
 
 **Three core mechanisms:**
-1. **Binary Patching** — Go binary string tables: `daily-cloudcode-pa.googleapis.com` → `127.0.0.1:50999`
+1. **Binary Patching** — Go binary string tables: `daily-cloudcode-pa.googleapis.com` → `127.0.0.1:${AG_PROXY_PORT:-51074}`
 2. **HTTP Interception** — `session.defaultSession.webRequest.onBeforeRequest` + proxy server
 3. **Protobuf Injection** — Parse gRPC-Web `GetAvailableModels` response → append custom models → re-encode
 

@@ -26,7 +26,7 @@ exports.LS_CERT_FINGERPRINT = 'sha256/sTZpQemOWEytaZqa7P/y/dNXbHMdOAzMvzHEhUwHZX
  * use, the proxy will try the FALLBACK_PROXY_PORTS in order, then bind to a
  * random dynamic port as a last resort.
  */
-exports.DEFAULT_PROXY_PORT = 50999;
+exports.DEFAULT_PROXY_PORT = 51074;
 /** Fallback ports tried in order when DEFAULT_PROXY_PORT is in use. */
 exports.FALLBACK_PROXY_PORTS = [51000, 51001, 51002, 51003, 51004, 51005, 51006, 51007, 51008, 51009, 51010];
 /**

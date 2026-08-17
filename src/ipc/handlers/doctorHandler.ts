@@ -3,18 +3,19 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import * as customModelStore from '../../services/modelStore';
+import { DEFAULT_PROXY_PORT } from '../../constants';
 
 export function registerDoctorIpcHandlers(): void {
   ipcMain.handle('storage:get-doctor-diagnostics', async () => {
     try {
       const providers = await customModelStore.loadProviders();
       const customModels = await customModelStore.loadCustomModels();
-      let activePort = 50999;
+      let activePort = DEFAULT_PROXY_PORT;
       try {
         const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
         const portFile = path.join(home, '.gemini', 'antigravity', '.proxy_port');
         const content = await fs.readFile(portFile, 'utf-8');
-        activePort = parseInt(content.trim(), 10) || 50999;
+        activePort = parseInt(content.trim(), 10) || DEFAULT_PROXY_PORT;
       } catch {
         /* default port fallback */
       }

@@ -20,6 +20,10 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 const activeStreams = new Map<string, ChildProcess>();
 
+// Ports are env-driven so the UI never hardcodes a local bind address.
+const MAIN_PROXY_PORT = parseInt(process.env.AG_PROXY_PORT || '51074', 10);
+const STUB_PORT = parseInt(process.env.AG_PROXY_STUB_PORT || '51999', 10);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // F-28 FIX — Single-instance lock: prevents two ag-doctor-ui windows from
 // running simultaneously (which causes CliWorkerPool race conditions).
@@ -1340,18 +1344,18 @@ ipcMain.handle('ag:detect-installation', async () => {
     } catch { /* best effort */ }
   }
 
-  // Check port 50999 ownership
+  // Check main proxy port ownership
   try {
-    const inUse = await isPortInUse(50999);
+    const inUse = await isPortInUse(MAIN_PROXY_PORT);
     if (inUse) {
       const { execSync } = require('child_process') as typeof import('child_process');
-      const out = execSync(`netstat -ano | findstr :50999`, { encoding: 'utf-8' });
+      const out = execSync(`netstat -ano | findstr :${MAIN_PROXY_PORT}`, { encoding: 'utf-8' });
       const line = out.trim().split('\n')[0] || '';
       const m = line.match(/\s(\d+)\s*$/);
       const pid = m ? m[1] : 'unknown';
       // Attach to first candidate that has a process, or create a generic note
       const target = candidates.find((c) => c.process) || candidates[0];
-      if (target) target.portInUse = { port: 50999, by: `PID ${pid}` };
+      if (target) target.portInUse = { port: MAIN_PROXY_PORT, by: `PID ${pid}` };
     }
   } catch { /* best effort */ }
 
@@ -1442,14 +1446,14 @@ ipcMain.handle('ag:test-model', async (_evt, name: string) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Proxy stub lifecycle — portable emergency proxy on 127.0.0.1:51999
-// (Separate from main Antigravity proxy on 50999 to avoid port conflicts)
+// Proxy stub lifecycle — portable emergency proxy on 127.0.0.1:<STUB_PORT>
+// (Separate from main Antigravity proxy on <MAIN_PROXY_PORT> to avoid port conflicts)
 // ───────────────────────────────────────────────────────────────────────��─────
 
-const STUB_PORT = 51999;
+const STUB_PORT = parseInt(process.env.AG_PROXY_STUB_PORT || '51999', 10);
 
 /**
- * Check if port 50999 (main Antigravity proxy) is already in use.
+ * Check if the main Antigravity proxy port is already in use.
  * Used to warn the user when ag-doctor-ui stub might conflict.
  */
 async function isPortInUse(port: number, host = '127.0.0.1'): Promise<boolean> {
@@ -1505,52 +1509,49 @@ ipcMain.handle('ag:proxy:start-stub', async () => {
 
 // NOTE: 'ag:proxy:status' handler is already registered above (line ~591) via proxyManager.getStatus().
 
-/**
- * Check if the main Antigravity proxy port (50999) is occupied.
+ * Check if the main Antigravity proxy port is occupied.
  * Useful to detect conflicts when launching Antigravity.
  */
 ipcMain.handle('ag:proxy:check-main-port', async () => {
   try {
-    const MAIN_PORT = 50999;
-    const inUse = await isPortInUse(MAIN_PORT);
+    const inUse = await isPortInUse(MAIN_PROXY_PORT);
     if (inUse) {
       // Try to identify which process is using the port
       let processInfo = 'unknown';
       try {
         if (process.platform === 'win32') {
           const { execSync } = require('child_process') as typeof import('child_process');
-          const out = execSync(`netstat -ano | findstr :${MAIN_PORT}`, { encoding: 'utf-8' });
+          const out = execSync(`netstat -ano | findstr :${MAIN_PROXY_PORT}`, { encoding: 'utf-8' });
           processInfo = out.trim().split('\n')[0] || 'unknown';
         } else {
           const { execSync } = require('child_process') as typeof import('child_process');
-          const out = execSync(`lsof -i :${MAIN_PORT} -P -n 2>/dev/null | tail -n +2 | head -n 1`, { encoding: 'utf-8' });
+          const out = execSync(`lsof -i :${MAIN_PROXY_PORT} -P -n 2>/dev/null | tail -n +2 | head -n 1`, { encoding: 'utf-8' });
           processInfo = out.trim() || 'unknown';
         }
       } catch {
         /* best effort */
       }
-      return { ok: true, inUse: true, port: MAIN_PORT, process: processInfo };
+      return { ok: true, inUse: true, port: MAIN_PROXY_PORT, process: processInfo };
     }
-    return { ok: true, inUse: false, port: MAIN_PORT };
+    return { ok: true, inUse: false, port: MAIN_PROXY_PORT };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
 });
 
 /**
- * Kill the process occupying port 50999 (main Antigravity proxy).
+ * Kill the process occupying the main Antigravity proxy port.
  * Use with caution — only kills processes we believe are conflicting.
  */
 ipcMain.handle('ag:proxy:kill-main-port', async () => {
   try {
-    const MAIN_PORT = 50999;
     const { exec } = require('child_process') as typeof import('child_process');
     return await new Promise<{ ok: boolean; killed?: string; error?: string }>((resolve) => {
       let cmd: string;
       if (process.platform === 'win32') {
-        cmd = `for /f "tokens=5" %a in ('netstat -ano ^| findstr :${MAIN_PORT}') do taskkill /F /PID %a`;
+        cmd = `for /f "tokens=5" %a in ('netstat -ano ^| findstr :${MAIN_PROXY_PORT}') do taskkill /F /PID %a`;
       } else {
-        cmd = `lsof -ti :${MAIN_PORT} | xargs -r kill -9`;
+        cmd = `lsof -ti :${MAIN_PROXY_PORT} | xargs -r kill -9`;
       }
       exec(cmd, (err: Error | null, stdout: string) => {
         if (err) {

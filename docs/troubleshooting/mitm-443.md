@@ -6,7 +6,7 @@
 
 ### 10.1 Pourquoi c'est obligatoire
 
-Le proxy sur 50999 est en **HTTP plain** (pas HTTPS). Il ne peut pas
+Le proxy sur ${AG_PROXY_PORT:-51074} est en **HTTP plain** (pas HTTPS). Il ne peut pas
 intercepter les appels HTTPS que le language server fait directement à
 `daily-cloudcode-pa.googleapis.com` (que le `hosts` file redirige vers
 `127.0.0.1`).
@@ -14,7 +14,7 @@ intercepter les appels HTTPS que le language server fait directement à
 Le MITM (`scripts/mitm/mitm_443.js`) est un **terminateur TLS** qui :
 1. Écoute sur `127.0.0.1:443` avec un certificat auto-signé.
 2. Décrypte le trafic HTTPS entrant.
-3. Forwarde la requête HTTP déchiffrée vers `http://127.0.0.1:50999` (le proxy).
+3. Forwarde la requête HTTP déchiffrée vers `http://127.0.0.1:${AG_PROXY_PORT:-51074}` (le proxy).
 4. Récupère la réponse, la renvoie cryptée au client.
 
 Le CA (`certs/ca-cert.pem`) doit être trusted dans le Windows cert store
@@ -24,7 +24,7 @@ accepte le certificat.
 ### 10.2 Pourquoi il ne démarre pas automatiquement
 
 Le patch (v2.2.x et antérieur) :
-- Démarre automatiquement le proxy sur 50999 (via `proxy-runner.js` chargé
+- Démarre automatiquement le proxy sur ${AG_PROXY_PORT:-51074} (via `proxy-runner.js` chargé
   par `dist/main.js`).
 - **Ne démarre PAS le MITM sur 443** parce que :
   - Le MITM a besoin des droits **administrateur** (port 443 < 1024 réservé,
@@ -134,7 +134,7 @@ sleep 20
 # ───────────────────────────────────────────────────────────────────
 LOG="/mnt/c/Users/amine/AppData/Roaming/Antigravity/logs/main.log"
 echo "=== ports ==="
-powershell.exe -Command "Get-NetTCPConnection -LocalPort 50999,443 -State Listen | Where-Object { \$_.LocalAddress -match '127.0.0.1' } | Format-Table LocalAddress,LocalPort,OwningProcess,State"
+powershell.exe -Command "Get-NetTCPConnection -LocalPort ${AG_PROXY_PORT:-51074},443 -State Listen | Where-Object { \$_.LocalAddress -match '127.0.0.1' } | Format-Table LocalAddress,LocalPort,OwningProcess,State"
 echo "=== dernier log ==="
 tail -10 "$LOG"
 echo "=== modèles custom chargés ==="

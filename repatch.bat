@@ -6,12 +6,12 @@ REM  Auto-detects the installed product and applies the correct
 REM  patch:
 REM
 REM    A) Antigravity IDE (v1.107.0+, VS Code-based)
-REM         - settings override: jetski.cloudCodeUrl -> localhost:50999
+REM         - settings override: jetski.cloudCodeUrl -> localhost:%AG_PROXY_PORT%
 REM         - starts the local proxy (real proxy via bundled Electron)
 REM
 REM    B) Classic Antigravity (2.x shell)
 REM         - version-aware asar surgery (2.2.x / 2.3.x / ...)
-REM         - binary patch: language_server URL -> localhost:50999
+REM         - binary patch: language_server URL -> localhost:%AG_PROXY_PORT%
 REM         - optional MITM 443 (admin)
 REM
 REM  Pipeline:
@@ -29,6 +29,8 @@ set "AG_IDE=%LOCALAPPDATA%\Programs\Antigravity IDE"
 set "AG_CLASSIC=%LOCALAPPDATA%\Programs\Antigravity"
 set "AG_IDE_EXE=%AG_IDE%\Antigravity IDE.exe"
 set "AG_CLASSIC_EXE=%AG_CLASSIC%\Antigravity.exe"
+set "PROXY_PORT=%AG_PROXY_PORT%"
+if "!PROXY_PORT!"=="" set "PROXY_PORT=51074"
 
 cd /d "%SCRIPT_DIR%"
 
@@ -116,7 +118,7 @@ if errorlevel 1 (
 )
 
 REM -- 5. Start the local proxy (real proxy via bundled Electron; stub fallback)
-echo [5/5] Starting local proxy on port 50999...
+echo [5/5] Starting local proxy on port %PROXY_PORT%...
 node "%SCRIPT_DIR%ag-doctor\bin\ag-doctor.js" proxy start
 if errorlevel 1 (
   echo   [WARN] Proxy did not start cleanly -- models may not be injected.
@@ -134,7 +136,7 @@ if "%TARGET%"=="IDE" (
 )
 echo.
 echo  Patch complete!
-echo  - Custom models now route through the local proxy (port 50999)
+echo  - Custom models now route through the local proxy (port %PROXY_PORT%)
 echo  - Verify with:  ag-doctor doctor
 echo ============================================================
 echo.

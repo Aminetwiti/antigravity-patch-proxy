@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Continue'
 # Portable paths — derived from $PSScriptRoot, never hardcoded.
 $ScriptDir = $PSScriptRoot
 $AgDoctor = Join-Path $ScriptDir 'ag-doctor\bin\ag-doctor.js'
+$PROXY_PORT = if ($env:AG_PROXY_PORT) { $env:AG_PROXY_PORT } else { '51074' }
 
 Write-Host '== [1] Kill Antigravity processes ==' -ForegroundColor Cyan
 Get-Process | Where-Object { $_.Name -like 'Antigravity*' -or $_.Name -like 'language_server*' } | ForEach-Object {
@@ -12,9 +13,9 @@ Get-Process | Where-Object { $_.Name -like 'Antigravity*' -or $_.Name -like 'lan
 Start-Sleep -Seconds 2
 
 Write-Host ''
-Write-Host '== [2] Confirm port 50999 free ==' -ForegroundColor Cyan
-$conn = Get-NetTCPConnection -LocalPort 50999 -ErrorAction SilentlyContinue
-if ($conn) { Write-Host "  Port 50999 still in use by PID $($conn.OwningProcess)" -ForegroundColor Yellow } else { Write-Host '  Port 50999 is free' -ForegroundColor Green }
+Write-Host "== [2] Confirm port $PROXY_PORT free ==" -ForegroundColor Cyan
+$conn = Get-NetTCPConnection -LocalPort $PROXY_PORT -ErrorAction SilentlyContinue
+if ($conn) { Write-Host "  Port $PROXY_PORT still in use by PID $($conn.OwningProcess)" -ForegroundColor Yellow } else { Write-Host "  Port $PROXY_PORT is free" -ForegroundColor Green }
 
 Write-Host ''
 Write-Host '== [3] Truncate main.log to capture fresh startup ==' -ForegroundColor Cyan
@@ -36,28 +37,28 @@ if (Test-Path $exe) {
 }
 
 Write-Host ''
-Write-Host '== [5] Poll port 50999 (up to 45s) + scan new log for Proxy ==' -ForegroundColor Cyan
+Write-Host "== [5] Poll port $PROXY_PORT (up to 45s) + scan new log for Proxy ==" -ForegroundColor Cyan
 $ready = $false
 for ($i = 1; $i -le 45; $i++) {
   $tcp = $null
   try {
     $tcp = New-Object System.Net.Sockets.TcpClient
-    $iar = $tcp.BeginConnect('127.0.0.1', 50999, $null, $null)
+    $iar = $tcp.BeginConnect('127.0.0.1', [int]$PROXY_PORT, $null, $null)
     if ($iar.AsyncWaitHandle.WaitOne(1000, $false)) {
       $tcp.EndConnect($iar)
-      Write-Host ("  Port 50999 OPEN after {0}s" -f $i) -ForegroundColor Green
+      Write-Host ("  Port $PROXY_PORT OPEN after {0}s" -f $i) -ForegroundColor Green
       $ready = $true
       break
     }
   } catch {} finally { if ($tcp) { $tcp.Close() } }
   Start-Sleep -Seconds 1
 }
-if (-not $ready) { Write-Host '  Port 50999 NOT reachable after 45s' -ForegroundColor Red }
+if (-not $ready) { Write-Host "  Port $PROXY_PORT NOT reachable after 45s" -ForegroundColor Red }
 
 Write-Host ''
 Write-Host '== [6] Grep new main.log for proxy activity ==' -ForegroundColor Cyan
 if (Test-Path $logPath) {
-  Select-String -Path $logPath -Pattern 'Proxy|50999|listening|EADDRINUSE|patched' | Select-Object -Last 40 | ForEach-Object { Write-Host ("  {0}" -f $_.Line) }
+  Select-String -Path $logPath -Pattern "Proxy|${PROXY_PORT}|listening|EADDRINUSE|patched" | Select-Object -Last 40 | ForEach-Object { Write-Host ("  {0}" -f $_.Line) }
 } else {
   Write-Host '  No new main.log yet'
 }

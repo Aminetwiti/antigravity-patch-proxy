@@ -50,7 +50,7 @@
 
 ## Overview
 
-**Google Antigravity Custom Model Enabler** is an advanced proxy patch for Google Antigravity. It intercepts internal communication between the IDE's Language Server (Go binary) and Google's internal Cloud Code infrastructure. By injecting a local reverse proxy (`127.0.0.1:50999`), it translates Google Cloud Code API requests into compatible payloads for 19+ LLM providers, while maintaining native UI dropdowns, streaming tokens, and tool calls.
+**Google Antigravity Custom Model Enabler** is an advanced proxy patch for Google Antigravity. It intercepts internal communication between the IDE's Language Server (Go binary) and Google's internal Cloud Code infrastructure. By injecting a local reverse proxy (`127.0.0.1:${AG_PROXY_PORT:-51074}`), it translates Google Cloud Code API requests into compatible payloads for 19+ LLM providers, while maintaining native UI dropdowns, streaming tokens, and tool calls.
 
 ---
 
@@ -95,7 +95,7 @@ The local proxy intercepts these calls, extracts `request`, translates roles, sy
 
 Recent Google Antigravity releases hardcode `daily-cloudcode-pa.googleapis.com` inside the Language Server Go binary. To prevent the IDE from bypassing the local proxy:
 
-1. **Binary Patching**: Build scripts patch the compiled binary string tables, replacing Google's hostname with `127.0.0.1:50999`.
+1. **Binary Patching**: Build scripts patch the compiled binary string tables, replacing Google's hostname with `127.0.0.1:${AG_PROXY_PORT:-51074}`.
 2. **Frontend Interception**: `src/main.ts` intercepts and blocks `SetCloudCodeURL` IPC requests from overriding the endpoint dynamically.
 3. **URL Padding Handler**: `src/proxy/urlBuilder.ts` strips null/space binary padding from incoming URLs.
 
@@ -113,7 +113,7 @@ sequenceDiagram
     autonumber
     participant IDE as Antigravity IDE (UI)
     participant LS as Language Server (Go Binary)
-    participant Proxy as Local Proxy (127.0.0.1:50999)
+    participant Proxy as Local Proxy (127.0.0.1:${AG_PROXY_PORT:-51074})
     participant Registry as Translator Registry
     participant Ext as External Provider API (OpenAI/Claude/Ollama)
 
@@ -289,12 +289,12 @@ Since mid-2026 the desktop client ships as **Antigravity IDE**, a VS Code-based
 Electron app, in addition to the classic 2.x shell. `ag-doctor` handles both:
 
 - **IDE patch**: the IDE resolves its Cloud Code endpoint from the standard VS
-  Code setting `jetski.cloudCodeUrl`. `ag-doctor patch apply` writes
-  `http://localhost:50999` there (with a `.bak` backup), so the IDE's language
-  server routes through the local proxy — no binary surgery needed.
+Code setting `jetski.cloudCodeUrl`. `ag-doctor patch apply` writes
+`http://localhost:${AG_PROXY_PORT:-51074}` there (with a `.bak` backup), so the IDE's language
+server routes through the local proxy — no binary surgery needed.
 - **Standalone proxy**: `ag-doctor proxy start` runs the real proxy under the
-  bundled Electron (so DPAPI-encrypted keys decrypt), replacing any leftover
-  stub on port 50999. `proxy stub` / `proxy stop` manage the emergency stub.
+bundled Electron (so DPAPI-encrypted keys decrypt), replacing any leftover
+-  stub on port ${AG_PROXY_PORT:-51074}. `proxy stub` / `proxy stop` manage the emergency stub.
 - **`models rekey`**: the language server stores API keys in its own `v10`
   format that the local proxy cannot decrypt. `ag-doctor models rekey` walks
   each affected model and re-enters the key in the proxy-compatible format
@@ -314,7 +314,7 @@ Electron app, in addition to the classic 2.x shell. `ag-doctor` handles both:
 ### Visual Diagnostic Dashboard (`ag-doctor-ui`)
 
 In addition to the terminal CLI, this repository includes **`ag-doctor-ui`**, a dedicated Electron UI renderer application:
-- **Visual Health Monitors**: Real-time status indicators for port `50999` binding, Language Server binary patches, and SSL certificate validity.
+- **Visual Health Monitors**: Real-time status indicators for port `${AG_PROXY_PORT:-51074}` binding, Language Server binary patches, and SSL certificate validity.
 - **One-Click Auto-Repair**: Single button repair flow to un-stick ports, restore corrupt `app.asar` backups, and re-apply version patches.
 - **Live Log Inspector**: Integrated log tailing window with real-time severity filters (`INFO`, `WARN`, `ERROR`) and automatic API key masking.
 
@@ -332,7 +332,7 @@ In addition to the terminal CLI, this repository includes **`ag-doctor-ui`**, a 
 
 - **Multi-Version Binary Patching**: `ag-doctor` automatically detects installed Antigravity releases (v2.0.x through v2.6.x) and performs binary string replacement without corrupting Go executable alignment.
 - **Backup & Rollback Safety**: Creates timestamped `.bak` copies of `app.asar` before modifying binary payloads, allowing instant 1-command rollbacks (`npm run doctor:repair`).
-- **Auto-Healing Diagnostics**: the doctor check starts the emergency proxy stub when port 50999 is closed (so the patched language server can initialise), and `proxy start` replaces a stub with the real proxy. Provider probes use a 15s timeout with a retry on timeouts to avoid false "down" alarms.
+- **Auto-Healing Diagnostics**: the doctor check starts the emergency proxy stub when port ${AG_PROXY_PORT:-51074} is closed (so the patched language server can initialise), and `proxy start` replaces a stub with the real proxy. Provider probes use a 15s timeout with a retry on timeouts to avoid false "down" alarms.
 
 
 
@@ -450,7 +450,7 @@ To add support for a new LLM provider format:
 |---|---|---|
 | Models missing from chat dropdown | IDE update overwrote `app.asar` | Run `npm run doctor:repair` or `repatch.bat` |
 | Connection test failed (401/403) | Invalid or expired API Key | Check key in Settings or `npm run doctor:models` |
-| Port 50999 in use | Another proxy instance active | `ag-doctor` automatically picks fallback port |
+| `${AG_PROXY_PORT:-51074}` in use | Another proxy instance active | `ag-doctor` automatically picks fallback port |
 | `ERR_HTTP_HEADERS_SENT` in logs | Upstream response race condition | Handled automatically by `safeWriteHead` helpers |
 | SSL / Certificate error | Corporate proxy SSL interception | Enable MITM mode via `"Start Antigravity MITM.bat"` |
 

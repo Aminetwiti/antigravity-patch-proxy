@@ -295,7 +295,7 @@ const OBJECTIVE_LABELS: Record<ObjectiveKey, string> = {
   doctor: "Run system diagnostic (Doctor)",
   patch: "Apply repair patch",
   logs: "View & follow system logs",
-  proxy: "Start/stop proxy stub on 50999",
+  proxy: "Start/stop proxy stub",
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -920,7 +920,7 @@ $('#repairBtn').addEventListener('click', () => void handleRepair());
 // Fix All: full auto-repair with admin elevation (UAC prompt will appear)
 $('#fixAllBtn')?.addEventListener('click', () => void runFixAll());
 
-// Start Stub: emergency proxy stub on port 50999 (no admin needed)
+// Start Stub: emergency proxy stub (no admin needed)
 $('#startStubBtn')?.addEventListener('click', () => void runStartStub());
 
 async function runRepair(): Promise<void> {
@@ -955,7 +955,7 @@ async function runFixAll(): Promise<void> {
   const ok = await confirmModal(
     'Run full auto-repair?',
     'This will launch <code>ag-doctor repair --yes --auto-elevate</code> with admin elevation (UAC). ' +
-    'All repair actions will run: patch, port 50999, proxy, CA certificate.',
+    'All repair actions will run: patch, proxy, CA certificate.',
     { confirmLabel: 'Run full repair', danger: true },
   );
   if (!ok) return;
@@ -986,8 +986,8 @@ async function runStartStub(): Promise<void> {
   try {
     const r = await window.ag.proxyStartStub();
     if (r?.ok) {
-      toast(`Proxy stub started (pid=${r.pid ?? '?'}) on port 50999`, 'ok', 5000);
-      setObjective('proxy', 'ok', 'Proxy stub active on 50999');
+      toast(`Proxy stub started (pid=${r.pid ?? '?'}) on port ${r.port}`, 'ok', 5000);
+      setObjective('proxy', 'ok', `Proxy stub active on ${r.port}`);
     } else {
       toast(`Proxy stub failed: ${r?.error ?? 'unknown'}`, 'err', 6000);
       setObjective('proxy', 'error', 'Proxy stub failed');
@@ -3389,7 +3389,7 @@ const PALETTE_COMMANDS: Array<{ id: string; label: string; view: string; action?
   { id: 'models', label: 'Go to Custom Models', view: 'models' },
   { id: 'mitm', label: 'Go to MITM Proxy Manager', view: 'mitm' },
   { id: 'patch', label: 'Go to Binary Patch Manager', view: 'patch' },
-  { id: 'proxy-stub', label: 'Start Emergency Proxy Stub (Port 50999)', view: 'mitm', action: () => void runStartStub() },
+  { id: 'proxy-stub', label: 'Start Emergency Proxy Stub', view: 'mitm', action: () => void runStartStub() },
   { id: 'logs', label: 'Go to System Logs', view: 'logs' },
   { id: 'settings', label: 'Go to Settings', view: 'settings' },
   { id: 'theme', label: 'Toggle Light / Dark Theme', view: 'settings', action: () => {

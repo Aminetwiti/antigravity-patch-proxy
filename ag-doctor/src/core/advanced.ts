@@ -21,6 +21,7 @@ import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { getPlatform } from './platform';
 import { getAppAsarPath, getLanguageServerBinary, getLanguageServerBackup } from './paths';
+import { DEFAULT_MITM_PORT } from './config';
 
 const execFileAsync = promisify(execFile);
 
@@ -91,7 +92,7 @@ export async function getProcessStats(pid: number): Promise<MemoryStats | null> 
       const heap = await new Promise<{ used: number; total: number }>((resolve, reject) => {
         const req = http.request({
           hostname: '127.0.0.1',
-          port: 50999,
+          port: DEFAULT_MITM_PORT,
           path: '/health',
           method: 'GET',
           timeout: 1000,
@@ -396,10 +397,10 @@ export async function detectProtocolRisks(): Promise<ProtocolRisk[]> {
 // Scenario 5: Windows Firewall Rule Management
 // ─────────────────────────────────────────────────────────────────────────────
 
-const FIREWALL_RULE_NAME = 'Antigravity MITM Proxy (50999)';
+const FIREWALL_RULE_NAME = `Antigravity MITM Proxy (${DEFAULT_MITM_PORT})`;
 
 /** Add Windows Firewall exception for the proxy port. */
-export async function addFirewallRule(port = 50999): Promise<{ ok: boolean; error?: string }> {
+export async function addFirewallRule(port = DEFAULT_MITM_PORT): Promise<{ ok: boolean; error?: string }> {
   if (getPlatform() !== 'win32') {
     return { ok: true }; // No-op on non-Windows
   }

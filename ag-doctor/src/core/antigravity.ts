@@ -277,7 +277,7 @@ async function findLanguageServerProcesses(): Promise<Array<{ pid: number; comma
 }
 
 /** Get the full status of Antigravity: install, version, running PIDs, proxy, paths, system info. */
-export async function getAntigravityStatus(proxyPort = 50999): Promise<AntigravityStatus> {
+export async function getAntigravityStatus(proxyPort = DEFAULT_MITM_PORT): Promise<AntigravityStatus> {
   const installDir = findAntigravityInstallDir();
   const appAsar = getAppAsarPath();
   const version = detectAntigravityVersion();

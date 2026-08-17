@@ -14,11 +14,11 @@ OS="$(uname -s)"
 CA_CERT="$HOME/.gemini/antigravity/certs/ca-cert.pem"
 
 if [ "$OS" = "Darwin" ]; then
-  # macOS (port 51999 for ag-doctor-ui stub, NOT 50999 which is reserved for main Antigravity proxy)
+  # macOS (port ${AG_STUB_PORT:-51999} for ag-doctor-ui stub, NOT ${AG_PROXY_PORT:-51074} which is reserved for main Antigravity proxy)
   echo "Setting system proxy (macOS)..."
   networksetup -listallnetworkservices | grep -v '*' | while read -r svc; do
-    networksetup -setwebproxy "$svc" 127.0.0.1 51999
-    networksetup -setsecurewebproxy "$svc" 127.0.0.1 51999
+    networksetup -setwebproxy "$svc" 127.0.0.1 ${AG_STUB_PORT:-51999}
+    networksetup -setsecurewebproxy "$svc" 127.0.0.1 ${AG_STUB_PORT:-51999}
     networksetup -setwebproxystate "$svc" on
     networksetup -setsecurewebproxystate "$svc" on
   done
@@ -36,9 +36,9 @@ else
   if command -v gsettings &> /dev/null; then
     gsettings set org.gnome.system.proxy mode manual
     gsettings set org.gnome.system.proxy.http host 127.0.0.1
-    gsettings set org.gnome.system.proxy.http port 50999
+    gsettings set org.gnome.system.proxy.http port ${AG_PROXY_PORT:-51074}
     gsettings set org.gnome.system.proxy.https host 127.0.0.1
-    gsettings set org.gnome.system.proxy.https port 50999
+    gsettings set org.gnome.system.proxy.https port ${AG_PROXY_PORT:-51074}
   fi
   
   if [ -f "$CA_CERT" ]; then

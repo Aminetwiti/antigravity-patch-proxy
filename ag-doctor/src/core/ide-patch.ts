@@ -11,10 +11,10 @@
  * (read via `workspace.getConfiguration("jetski").get("cloudCodeUrl")` in the
  * bundled extension). No binary/asar surgery is needed: writing
  *
- *   "jetski.cloudCodeUrl": "http://localhost:50999"
- *
- * into the IDE's User settings.json makes the extension spawn the language
- * server with `--cloud_code_endpoint http://localhost:50999`, routing all
+  *   "jetski.cloudCodeUrl": "http://localhost:<DEFAULT_MITM_PORT>"
+  *
+  * into the IDE's User settings.json makes the extension spawn the language
+  * server with `--cloud_code_endpoint http://localhost:<DEFAULT_MITM_PORT>`, routing all
  * Cloud Code traffic through the local proxy — the same effect the classic
  * binary patch had for the 2.x shell.
  *
@@ -26,6 +26,7 @@
 import fs from 'fs';
 import path from 'path';
 import { findAntigravityIdeInstallDir, getIdeSettingsJson } from './paths';
+import { DEFAULT_MITM_PORT } from './config';
 
 /** Read the IDE product version from resources/app/package.json (best-effort). */
 export function getIdeVersion(installDir?: string): string | null {
@@ -44,7 +45,7 @@ export function getIdeVersion(installDir?: string): string | null {
 /** The VS Code setting key that overrides the Cloud Code endpoint. */
 export const IDE_ENDPOINT_SETTING = 'jetski.cloudCodeUrl';
 /** The value the patch writes (the local proxy). */
-export const IDE_PATCHED_ENDPOINT = 'http://localhost:50999';
+export const IDE_PATCHED_ENDPOINT = `http://localhost:${DEFAULT_MITM_PORT}`;
 
 export interface IdePatchStatus {
   /** IDE install directory, or null if the IDE is not installed. */

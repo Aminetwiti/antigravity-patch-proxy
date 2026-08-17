@@ -69,7 +69,7 @@ describe('Diagnostic Report Parser & Health Scoring (25 Tests)', () => {
       timestamp: Date.now(),
       version: '2.2.0',
       checks: [
-        { id: '1', name: 'Proxy Port', category: 'network', status: 'pass', message: 'Port 50999 open' },
+        { id: '1', name: 'Proxy Port', category: 'network', status: 'pass', message: 'Proxy port open' },
         { id: '2', name: 'MITM Port', category: 'network', status: 'pass', message: 'Port 443 listening' },
         { id: '3', name: 'ASAR Integrity', category: 'patch', status: 'pass', message: 'ASAR clean' },
         { id: '4', name: 'CA Certificate', category: 'cert', status: 'pass', message: 'CA in store' },

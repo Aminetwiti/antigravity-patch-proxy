@@ -3,7 +3,7 @@
  *
  * Currently supports:
  *  - Re-applying the binary patch (when not applied)
- *  - Killing Antigravity processes holding port 50999
+ *  - Killing Antigravity processes holding the proxy port
  *  - Starting the local proxy (real or stub fallback) — fixes #15
  *  - Auto-generating CA cert if missing — fixes #23
  *  - Rebuilding dist/ if missing (requires the patch repo on disk)
@@ -23,6 +23,7 @@ import { Spinner } from '../cli/spinner';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
+import { DEFAULT_MITM_PORT } from '../core/config';
 
 export async function runRepair(ctx: CommandContext): Promise<number> {
   header('ag-doctor — repair');
@@ -34,14 +35,14 @@ export async function runRepair(ctx: CommandContext): Promise<number> {
     actions.push('apply binary patch');
   }
   // 2. Port
-  const portBusy = await isPortInUse(50999);
+  const portBusy = await isPortInUse(DEFAULT_MITM_PORT);
   if (portBusy) {
-    actions.push('free port 50999 (kill Antigravity)');
+    actions.push('free proxy port (kill Antigravity)');
   }
   // 3. Proxy not running — start it (real or stub)
-  const proxyStatus = await getProxyStatus(50999);
+  const proxyStatus = await getProxyStatus(DEFAULT_MITM_PORT);
   if (!proxyStatus.reachable) {
-    actions.push('start local proxy on port 50999');
+    actions.push('start local proxy');
   }
   // 4. CA cert missing — auto-generate (no install, that's a separate step)
   const caPath = path.join(process.env.HOME || process.env.USERPROFILE || '', '.gemini', 'antigravity', 'ca.crt');
@@ -88,11 +89,11 @@ export async function runRepair(ctx: CommandContext): Promise<number> {
           return 2;
         }
         sp.succeed(r.message);
-      } else if (a.startsWith('free port 50999')) {
+      } else if (a.startsWith(`free port ${DEFAULT_MITM_PORT}`)) {
         const r = await killAntigravityProcesses();
         sp.succeed(`Killed ${r.killed} process(es)`);
       } else if (a.startsWith('start local proxy')) {
-        const started = await startProxyWithFallback(50999);
+        const started = await startProxyWithFallback(DEFAULT_MITM_PORT);
         if (started) {
           sp.succeed('Local proxy started (real or stub)');
         } else {

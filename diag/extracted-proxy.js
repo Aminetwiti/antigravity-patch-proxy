@@ -1274,13 +1274,13 @@ function startProxy() {
             // P2: Make port/host configurable via env vars so the proxy can be
             // tuned per-machine without recompiling. Defaults preserve legacy behavior.
             const envPort = parseInt(process.env.AG_PROXY_PORT || '', 10);
-            const defaultPort = Number.isFinite(envPort) && envPort > 0 ? envPort : 50999;
+            const defaultPort = Number.isFinite(envPort) && envPort > 0 ? envPort : 51074;
             const defaultHost = process.env.AG_PROXY_HOST || '127.0.0.1';
             let primaryPort = defaultPort;
             let primaryHost = defaultHost;
             // Build the ordered list of ports to try: env override → default → fallbacks → dynamic
             const portCandidates = [defaultPort];
-            if (defaultPort === 50999) {
+            if (defaultPort === 51074) {
                 // Only add fallbacks if the user did not override the port via env
                 portCandidates.push(...constants_1.FALLBACK_PROXY_PORTS);
             }

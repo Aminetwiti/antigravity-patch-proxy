@@ -1,17 +1,9 @@
-/**
- * Proxy check — verifies the local proxy is reachable on port 50999.
- *
- * Improvements over original:
- *  - Detects whether the proxy is the real proxy or an emergency stub
- *    (by reading the X-Proxy-Stub response header set by proxy-stub.js).
- *  - Reports stub mode as a warning with guidance to run repack.ps1.
- *  - Separates ECONNREFUSED (port closed) from other errors.
- */
 import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
 import type { CheckResult } from '../types';
 import { probe } from '../core/probe';
+import { DEFAULT_MITM_PORT } from '../core/config';
 
 /**
  * Locate the standalone proxy stub shipped with this repo.
@@ -29,7 +21,7 @@ function findProxyStubScript(): string | null {
 /**
  * Start the emergency proxy stub (proxy-stub.js) as a detached process.
  * This is the documented fallback when Antigravity is not running — it makes
- * port 50999 answer so the patched language server can initialise. The real
+ * the configured proxy port answer so the patched language server can initialise. The real
  * proxy (inside the repacked app.asar) takes over when Antigravity launches.
  */
 function startProxyStub(port: number): boolean {
@@ -53,7 +45,7 @@ function isRefusedError(error: string | undefined): boolean {
   return e.includes('econnrefused') || e.includes('actively refused') || e.includes('connection refused');
 }
 
-export async function checkProxy(port = 50999): Promise<CheckResult> {
+export async function checkProxy(port = DEFAULT_MITM_PORT): Promise<CheckResult> {
   const health = `http://127.0.0.1:${port}/health`;
   const result = await probe(health, 2000);
 
@@ -75,9 +67,9 @@ export async function checkProxy(port = 50999): Promise<CheckResult> {
             message: `Reachable on http://127.0.0.1:${port} (${retry.latencyMs}ms) — stub auto-started by ag-doctor`,
             details: [
               'Antigravity is not running, so ag-doctor started the emergency proxy stub.',
-              'The stub keeps port 50999 answering so the patched language server can initialise.',
-              'NOTE: the stub does not inject custom models, and it will block the real proxy',
-              'from binding 50999. Before launching Antigravity, replace it with the real proxy:',
+              `The stub keeps port ${DEFAULT_MITM_PORT} answering so the patched language server can initialise.`,
+              `NOTE: the stub does not inject custom models, and it will block the real proxy`,
+              `from binding ${DEFAULT_MITM_PORT}. Before launching Antigravity, replace it with the real proxy:`,
               '  ag-doctor proxy start   (kills the stub and starts the real proxy)',
             ].join('\n'),
             fixable: false,
@@ -110,7 +102,7 @@ export async function checkProxy(port = 50999): Promise<CheckResult> {
       status: 'ok',
       message: `Reachable on http://127.0.0.1:${port} (${result.latencyMs}ms) — stub fallback active`,
       details: [
-        'The proxy stub is serving on port 50999 (emergency fallback; no model injection).',
+        `The proxy stub is serving on port ${DEFAULT_MITM_PORT} (emergency fallback; no model injection).`,
         'To enable full proxy support, run repack.ps1 to update the bundled app.asar:',
         '  .\\repack.ps1',
         'Then restart Antigravity. The stub can remain running as a fallback.',

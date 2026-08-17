@@ -25,7 +25,7 @@ import {
   GOOGLE_PROXY_TIMEOUT_MS,
   FILE_DOWNLOAD_TIMEOUT_MS,
   STREAM_IDLE_TIMEOUT_MS,
-  FALLBACK_PROXY_PORTS,
+  DEFAULT_PROXY_PORT,
   ACTIVE_PORT_FILE,
 } from './constants';
 
@@ -1884,18 +1884,13 @@ export function startProxy(): Promise<number> {
       // P2: Make port/host configurable via env vars so the proxy can be
       // tuned per-machine without recompiling. Defaults preserve legacy behavior.
       const envPort = parseInt(process.env.AG_PROXY_PORT || '', 10);
-      const defaultPort = Number.isFinite(envPort) && envPort > 0 ? envPort : 50999;
+      const defaultPort = Number.isFinite(envPort) && envPort > 0 ? envPort : DEFAULT_PROXY_PORT;
       const defaultHost = process.env.AG_PROXY_HOST || '127.0.0.1';
 
       let primaryPort = defaultPort;
       let primaryHost = defaultHost;
 
-      // Build the ordered list of ports to try: env override → default → fallbacks → dynamic
       const portCandidates: number[] = [defaultPort];
-      if (defaultPort === 50999) {
-        // Only add fallbacks if the user did not override the port via env
-        portCandidates.push(...FALLBACK_PROXY_PORTS);
-      }
       portCandidates.push(0); // 0 = OS-assigned dynamic port (last resort)
 
       let attemptIdx = 0;
@@ -1949,9 +1944,17 @@ export function startProxy(): Promise<number> {
           attemptIdx += 1;
           tryListen(nextPort, primaryHost);
         } else if (err.code === 'EACCES') {
-          // P2: Surface permission errors clearly instead of silently failing.
-          log.error(`[Proxy] Permission denied binding to ${primaryHost}:${primaryPort}. Try a different port (AG_PROXY_PORT) or run with sufficient privileges.`);
-          reject(err);
+          log.warn(`[Proxy] Permission denied binding to ${primaryHost}:${primaryPort}. Trying fallback ports...`);
+          if (attemptIdx + 1 < portCandidates.length) {
+            const triedPort = portCandidates[attemptIdx];
+            const nextPort = portCandidates[attemptIdx + 1];
+            log.warn(`[Proxy] Port ${triedPort} access denied. Trying ${nextPort === 0 ? 'OS-assigned dynamic port' : 'port ' + nextPort}...`);
+            attemptIdx += 1;
+            tryListen(nextPort, primaryHost);
+          } else {
+            log.error(`[Proxy] Permission denied binding to ${primaryHost}:${primaryPort}. Try a different port (AG_PROXY_PORT) or run with sufficient privileges.`);
+            reject(err);
+          }
         } else {
           log.error('[Proxy] Startup failed:', err);
           reject(err);

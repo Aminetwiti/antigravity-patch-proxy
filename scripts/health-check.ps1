@@ -30,12 +30,13 @@ foreach ($domain in $domains) {
 }
 
 # 2. Verification du proxy local
-Write-Host "`n[2/4] Verification du proxy local (Port 50999)..." -ForegroundColor Yellow
-$proxy = Test-NetConnection -ComputerName localhost -Port 50999 -WarningAction SilentlyContinue
+$proxyPort = $env:AG_PROXY_PORT; if (-not $proxyPort) { $proxyPort = '51074' }
+Write-Host "`n[2/4] Verification du proxy local (Port $proxyPort)..." -ForegroundColor Yellow
+$proxy = Test-NetConnection -ComputerName localhost -Port $proxyPort -WarningAction SilentlyContinue
 if ($proxy.TcpTestSucceeded) {
-    Write-Host "  OK Proxy local (Port 50999) actif et ecoute." -ForegroundColor Green
+    Write-Host "  OK Proxy local (Port $proxyPort) actif et ecoute." -ForegroundColor Green
 } else {
-    Write-Host "  FAIL Proxy local (Port 50999) inactif ou bloque." -ForegroundColor Red
+    Write-Host "  FAIL Proxy local (Port $proxyPort) inactif ou bloque." -ForegroundColor Red
 }
 
 # 3. Verification de l'espace disque

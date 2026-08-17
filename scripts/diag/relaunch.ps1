@@ -5,6 +5,7 @@ $AG_INSTALL = Join-Path $env:LOCALAPPDATA 'Programs\Antigravity'
 $AG_EXE     = Join-Path $AG_INSTALL 'Antigravity.exe'
 $LOG_DIR    = Join-Path $env:USERPROFILE 'AppData\Roaming\Antigravity\logs'
 $STAMP      = (Get-Date).ToString('yyyyMMdd-HHmmss')
+$PROXY_PORT = if ($env:AG_PROXY_PORT) { $env:AG_PROXY_PORT } else { '51074' }
 
 Write-Host '=== Step 1: Kill all Antigravity-related processes ===' -ForegroundColor Cyan
 foreach ($n in @('Antigravity.exe', 'language_server.exe')) {
@@ -37,19 +38,19 @@ foreach ($f in @('main.log', 'renderer.log', 'language_server.log')) {
 }
 
 Write-Host ''
-Write-Host '=== Step 3: Free port 50999 ===' -ForegroundColor Cyan
+Write-Host "=== Step 3: Free port $PROXY_PORT ===" -ForegroundColor Cyan
 try {
-    $busy = Get-NetTCPConnection -LocalPort 50999 -ErrorAction SilentlyContinue
+    $busy = Get-NetTCPConnection -LocalPort $PROXY_PORT -ErrorAction SilentlyContinue
     if ($busy) {
         foreach ($c in $busy) {
-            Write-Host "  killing PID $($c.OwningProcess) on port 50999"
+            Write-Host "  killing PID $($c.OwningProcess) on port $PROXY_PORT"
             try { & taskkill /F /PID $c.OwningProcess /T 2>&1 | Out-Null } catch { }
         }
         Start-Sleep -Seconds 1
     }
-    $busy2 = Get-NetTCPConnection -LocalPort 50999 -ErrorAction SilentlyContinue
-    if ($busy2) { Write-Host "  WARNING: port 50999 still busy" }
-    else { Write-Host '  port 50999 free' }
+    $busy2 = Get-NetTCPConnection -LocalPort $PROXY_PORT -ErrorAction SilentlyContinue
+    if ($busy2) { Write-Host "  WARNING: port $PROXY_PORT still busy" }
+    else { Write-Host "  port $PROXY_PORT free" }
 } catch { Write-Host '  port check skipped' }
 
 Write-Host ''
@@ -94,9 +95,9 @@ if (Test-Path $ls) {
 } else { Write-Host '  (missing)' }
 
 Write-Host ''
-Write-Host '--- port 50999 ---' -ForegroundColor Yellow
+Write-Host "--- port $PROXY_PORT ---" -ForegroundColor Yellow
 try {
-    Get-NetTCPConnection -LocalPort 50999 -ErrorAction SilentlyContinue |
+    Get-NetTCPConnection -LocalPort $PROXY_PORT -ErrorAction SilentlyContinue |
         Format-Table -AutoSize | Out-String | Write-Host
 } catch { Write-Host '  no listener' }
 

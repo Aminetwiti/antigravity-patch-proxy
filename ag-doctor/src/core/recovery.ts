@@ -78,7 +78,7 @@ const DEFAULT_CONFIG: RecoveryConfig = {
       checkId: 'proxy',
       status: 'error',
       title: 'Restart local proxy',
-      description: 'Restart the local proxy on port 50999 when it is unreachable',
+      description: 'Restart the local proxy when it is unreachable',
       cooldownMs: 60_000,
       requiresConfirm: false,
       timeoutMs: 10_000,
@@ -210,7 +210,7 @@ async function restartProxy(rule: RecoveryRule): Promise<RecoveryActionResult> {
   try {
     // The proxy is started by the parent process (Antigravity). We can ping it
     // and try to trigger a restart by sending a signal to the parent PID.
-    const port = 50999;
+    const port = DEFAULT_MITM_PORT;
     const pingRes = await fetch(`http://127.0.0.1:${port}/health`, {
       signal: AbortSignal.timeout(2000),
     }).catch(() => null);
@@ -356,7 +356,7 @@ async function cleanupDisk(rule: RecoveryRule): Promise<RecoveryActionResult> {
 /** Operator-facing advice for each probe error category. */
 const ERROR_ADVICE: Record<string, string> = {
   dns: 'DNS failure — check network connectivity, /etc/resolv.conf, or DNS-over-HTTPS settings',
-  refused: 'Connection refused — likely the local proxy (port 50999) is down. Restart Antigravity.',
+  refused: 'Connection refused — likely the local proxy is down. Restart Antigravity.',
   timeout: 'Timeout — host is slow or blocked by a firewall. Check upstream status page.',
   tls: 'TLS error — MITM CA cert missing/untrusted, or upstream uses an invalid certificate.',
   reset: 'Connection reset — usually transient. If persistent, check upstream rate limits.',
@@ -386,7 +386,7 @@ function buildCategoryAdvice(byCategory: Map<string, string[]>): string {
  *
  * Also reads each failure's `errorCategory` so the user can distinguish:
  *   - dns      → check DNS / network connectivity
- *   - refused  → check whether the local proxy (port 50999) is running
+ *   - refused  → check whether the local proxy is running
  *   - timeout  → check firewall / upstream latency
  *   - tls      → check MITM CA trust / certificate chain
  *   - reset    → transient; usually self-resolves on next retry

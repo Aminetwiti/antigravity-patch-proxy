@@ -18,6 +18,7 @@ import {
   getConfigValue,
   getConfigPath,
   DEFAULT_CONFIG,
+  DEFAULT_MITM_PORT,
 } from '../core/config';
 import { c, header, ok, error, info, table } from '../cli/output';
 
@@ -31,7 +32,7 @@ Usage:
   ag-doctor config path                 Print config file path
 
 Examples:
-  ag-doctor config set mitmPort 50999
+  ag-doctor config set mitmPort ${DEFAULT_MITM_PORT}
   ag-doctor config set ui.theme light
   ag-doctor config set snapshot.enabled false
   ag-doctor config get doctorInterval

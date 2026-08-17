@@ -30,6 +30,6 @@ node ag-doctor/bin/ag-doctor.js proxy start
 
 echo ""
 echo "============================================"
-echo "  SUCCESS! Proxy is running on port 50999"
+echo "  SUCCESS! Proxy is running on port ${AG_PROXY_PORT:-51074}"
 echo "  Check status: node ag-doctor/bin/ag-doctor.js proxy status"
 echo "============================================"

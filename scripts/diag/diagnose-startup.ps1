@@ -81,7 +81,8 @@ Add-Report "[5] Language server binary patch status"
 if (Test-Path $LsBinary) {
     $content = [System.IO.File]::ReadAllText($LsBinary, [System.Text.Encoding]::ASCII)
     $originalUrl = "https://daily-cloudcode-pa.googleapis.com"
-    $patchedUrl = "http://localhost:50999/v1internal/xxxxxxx"
+    $proxyPort = if ($env:AG_PROXY_PORT) { $env:AG_PROXY_PORT } else { '51074' }
+    $patchedUrl = "http://localhost:${proxyPort}/v1internal/xxxxxxx"
     if ($content.Contains($patchedUrl)) {
         Add-Report "  Binary is patched with $patchedUrl"
     } elseif ($content.Contains($originalUrl)) {
