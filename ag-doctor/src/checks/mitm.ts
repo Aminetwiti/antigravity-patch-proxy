@@ -8,7 +8,8 @@
  * `ERR_HTTP_HEADERS_SENT` in the bundled proxy.
  */
 import type { CheckResult } from '../types';
-import { getMitmStatus, DEFAULT_MITM_PORT, MITM_FORWARDER_PORTS } from '../core/mitm';
+import { getMitmStatus, MITM_FORWARDER_PORTS } from '../core/mitm';
+import { DEFAULT_MITM_PORT } from '../core/config';
 import { getPatchStatus } from '../core/binary-patch';
 
 export async function checkMitm(): Promise<CheckResult> {

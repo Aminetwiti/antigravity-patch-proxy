@@ -7,6 +7,7 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import type { CheckResult } from '../types';
 import { getNodeMajor, getSystemInfo } from '../core/platform';
+import { DEFAULT_MITM_PORT } from '../core/config';
 
 /** Detect if running inside WSL2 (Linux process, Windows host). */
 function isWsl(): boolean {

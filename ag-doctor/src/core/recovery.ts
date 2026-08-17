@@ -36,6 +36,7 @@ import fs from 'fs';
 import path from 'path';
 import { getAntigravityDataDir } from './paths';
 import { getProfilePath } from './profile';
+import { DEFAULT_MITM_PORT } from './config';
 import type { CheckResult } from '../types';
 
 export interface RecoveryRule {

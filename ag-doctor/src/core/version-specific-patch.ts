@@ -60,6 +60,14 @@ export interface PatchDefinition {
  */
 export const PATCH_REGISTRY: PatchDefinition[] = [
   {
+    versionRange: '2.6.0+',
+    minVersion: '2.6.0',
+    maxVersion: null,
+    originalUrl: 'https://cloudcode-pa.googleapis.com',
+    patchedUrl: `http://localhost:${DEFAULT_MITM_PORT}/v1internal/x`,
+    description: 'Patch for Antigravity 2.6.0+ (35 bytes; binary URL shortened)',
+  },
+  {
     versionRange: '2.3.0+',
     minVersion: '2.3.0',
     maxVersion: null,

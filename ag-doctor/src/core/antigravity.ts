@@ -23,6 +23,7 @@ import {
 } from './paths';
 import { isWsl } from './platform';
 import { findAntigravityProcesses, killAntigravityProcesses } from './process';
+import { DEFAULT_MITM_PORT } from './config';
 
 const execFileAsync = promisify(execFile);
 
