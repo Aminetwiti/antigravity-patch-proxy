@@ -73,3 +73,32 @@ func ListGitWorktrees(workspacePath string) ([]GitWorktree, error) {
 	}
 	return worktrees, nil
 }
+
+// ListGitChanges extrait les fichiers modifiés dans le workspace via `git status --porcelain`.
+func ListGitChanges(workspacePath string) (workingDir []string, staged []string, err error) {
+	out, err := gitCmd(workspacePath, "status", "--porcelain")
+	if err != nil {
+		return nil, nil, err
+	}
+	lines := strings.Split(strings.ReplaceAll(string(out), "\r\n", "\n"), "\n")
+	for _, l := range lines {
+		if len(l) < 4 {
+			continue
+		}
+		indexStatus := l[0]
+		workTreeStatus := l[1]
+		filePath := strings.TrimSpace(l[3:])
+		// Handle rename format: orig -> new
+		if parts := strings.Split(filePath, " -> "); len(parts) == 2 {
+			filePath = parts[1]
+		}
+		if indexStatus == 'M' || indexStatus == 'A' || indexStatus == 'D' || indexStatus == 'R' || indexStatus == 'C' {
+			staged = append(staged, filePath)
+		}
+		if workTreeStatus == 'M' || workTreeStatus == 'D' || workTreeStatus == '?' || workTreeStatus == 'U' || l[:2] == "??" {
+			workingDir = append(workingDir, filePath)
+		}
+	}
+	return workingDir, staged, nil
+}
+

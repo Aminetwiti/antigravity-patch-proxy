@@ -879,6 +879,17 @@ func TestWebSocketGetContextReal(t *testing.T) {
 	if !ok || dataArt["cascadeId"] != cascadeID {
 		t.Fatalf("dataArt invalide: %v", respArt)
 	}
+
+	// Test list_uploads for the session
+	client.send(t, map[string]string{"type": "list_uploads", "requestId": "up1", "cascadeId": cascadeID})
+	respUp := client.recv(t)
+	if respUp["error"] != nil {
+		t.Fatalf("list_uploads a renvoyé une erreur: %v", respUp["error"])
+	}
+	dataUp, ok := respUp["data"].(map[string]interface{})
+	if !ok || dataUp["cascadeId"] != cascadeID {
+		t.Fatalf("dataUp invalide: %v", respUp)
+	}
 }
 func TestWebSocketStreamBroadcastMultiClient(t *testing.T) {
 	srv := newTestServer(&fakeRPCClient{streamDeltas: []string{"hello", " world"}})

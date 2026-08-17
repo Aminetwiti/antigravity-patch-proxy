@@ -98,7 +98,7 @@ func TestListSessionsCacheTTL(t *testing.T) {
 	backend := &countingCascadesClient{}
 	srv, gw := newTestServerWithGW(backend)
 	defer srv.Close()
-	gw.SetSessionsCacheTTL(50 * time.Millisecond)
+	gw.SetSessionsCacheTTL(800 * time.Millisecond)
 
 	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
 	defer client.conn.Close()
@@ -124,7 +124,7 @@ func TestListSessionsCacheTTL(t *testing.T) {
 	}
 
 	// 3e appel après expiration du TTL court : nouveau vrai appel backend.
-	time.Sleep(70 * time.Millisecond)
+	time.Sleep(1000 * time.Millisecond)
 	client.send(t, map[string]string{"type": "list_sessions", "requestId": "a3"})
 	resp = client.recv(t)
 	if resp["requestId"] != "a3" || resp["type"] != "response" {

@@ -317,3 +317,39 @@ func TestCoalesceHistoryMessages(t *testing.T) {
 		t.Errorf("coalesced[3] unexpected: %+v", coalesced[3])
 	}
 }
+
+func TestCleanSystemMessages(t *testing.T) {
+	rawUser := `<SYSTEM_MESSAGE>
+[Message] timestamp=2026-08-17T16:13:24Z
+sender=task-146
+content=Wait for go test to complete
+</SYSTEM_MESSAGE>`
+	if got := extractUserRequest(rawUser); got != "" {
+		t.Errorf("extractUserRequest(rawUser) = %q, want empty string", got)
+	}
+
+	validUser := `<USER_REQUEST>
+corrige affiche de session ui ux remote sera comme antigravity desktop
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-08-17T17:05:14+01:00.
+</ADDITIONAL_METADATA>`
+	if got := extractUserRequest(validUser); got != "corrige affiche de session ui ux remote sera comme antigravity desktop" {
+		t.Errorf("extractUserRequest(validUser) = %q", got)
+	}
+
+	rawAssistant := `<SYSTEM_MESSAGE>
+[Message] timestamp=2026-08-17T16:13:24Z
+sender=task-146
+content=Wait for go test to complete
+</SYSTEM_MESSAGE>
+
+The following is a <SYSTEM_MESSAGE> not actually sent by the user. It is provided by the system as important information to pay attention to.
+
+## Amélioration terminée
+Voici le résultat attendu.`
+	cleaned := cleanAssistantText(rawAssistant)
+	if cleaned != "## Amélioration terminée\nVoici le résultat attendu." {
+		t.Errorf("cleanAssistantText(rawAssistant) = %q", cleaned)
+	}
+}

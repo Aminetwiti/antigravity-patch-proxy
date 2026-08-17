@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/subtle"
@@ -24,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/antigravity/remote-daemon/pkg/adb"
 	"github.com/antigravity/remote-daemon/pkg/connectrpc"
@@ -2091,6 +2093,7 @@ func (s *Server) markSessionApproval(cascadeID, approvalType string) {
 type OutgoingMessage struct {
 	Type      string      `json:"type"`
 	RequestID string      `json:"requestId,omitempty"`
+	CascadeID string      `json:"cascadeId,omitempty"`
 	Data      interface{} `json:"data,omitempty"`
 	Error     string      `json:"error,omitempty"`
 }
@@ -3174,30 +3177,30 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
 			return
 		}
-		// Scope projet (3.3) : un device pair├® avec allowedProjects ne peut
-		// envoyer de prompt que sur ses projets autoris├®s.
+		// Scope projet (3.3) : un device pairé avec allowedProjects ne peut
+		// envoyer de prompt que sur ses projets autorisés.
 		if !s.allowProject(conn, uri) {
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "projet non autoris├® pour cet appareil"})
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "projet non autorisé pour cet appareil"})
 			return
 		}
-		// C1 ÔÇö idempotence : un requestId d├®j├á trait├® ne rejoue PAS le tour
-		// (retransmission apr├¿s coupure Wi-Fi). R├®ponse d├®dupliqu├®e.
+		// C1 — idempotence : un requestId déjà traité ne rejoue PAS le tour
+		// (retransmission après coupure Wi-Fi). Réponse dédupliquée.
 		s.mu.Lock()
 		if s.sentRequestIDs[msg.RequestID] {
 			s.mu.Unlock()
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"deduplicated": true}})
 			return
 		}
-		// C3 ÔÇö plafond de streams simultan├®s PAR CLIENT (anti-saturation hub).
-		// V├®rifi├® AVANT le marquage idempotent : un requestId refus├® ici doit
-		// pouvoir ├¬tre retransmis une fois un slot lib├®r├®.
+		// C3 — plafond de streams simultanés PAR CLIENT (anti-saturation hub).
+		// Vérifié AVANT le marquage idempotent : un requestId refusé ici doit
+		// pouvoir être retransmis une fois un slot libéré.
 		if s.clientInFlight[conn] >= maxConcurrentStreams {
 			s.mu.Unlock()
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "trop de streams simultan├®s (max " + itoa(maxConcurrentStreams) + ")"})
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "trop de streams simultanés (max " + itoa(maxConcurrentStreams) + ")"})
 			return
 		}
 		s.sentRequestIDs[msg.RequestID] = true
-		// C1 ÔÇö borne m├®moire : la map d'idempotence ne doit pas grossir sans
+		// C1 — borne mémoire : la map d'idempotence ne doit pas grossir sans
 		// limite (un mobile qui spamme des requestId uniques). Purge FIFO simple.
 		if len(s.sentRequestIDs) > 10000 {
 			oldest := ""
@@ -3228,16 +3231,16 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.mu.Unlock()
 		}()
 		startData := map[string]interface{}{"cascadeId": msg.CascadeID}
-		// P1 : le mobile notifie ┬½ T├óche d├®marr├®e ┬╗ quand personne n'est actif
-		// sur le PC (idle detection) ÔÇö m├¬me champ que stream_delta/stream_end.
+		// P1 : le mobile notifie « Tâche démarrée » quand personne n'est actif
+		// sur le PC (idle detection) — même champ que stream_delta/stream_end.
 		startData["hostActive"] = hostActiveSince(hostActiveWindow)
-		s.broadcast(OutgoingMessage{Type: "stream_start", RequestID: msg.RequestID, Data: startData})
+		s.broadcast(OutgoingMessage{Type: "stream_start", RequestID: msg.RequestID, CascadeID: msg.CascadeID, Data: startData})
 		logJSON.Info("stream_start", "requestId", msg.RequestID, "cascadeId", msg.CascadeID)
 
-		// 1. Force l'IDE ├á afficher la conversation avant de lancer le prompt
-		// (best-effort : le LS 2.5+ r├®pond 200 sans frame de donn├®es pour
-		// SetBrowserOpenConversation ÔÇö l'├®chec est attendu et n'affecte pas
-		// le stream ; le mobile re-synchronise la session lui-m├¬me).
+		// 1. Force l'IDE à afficher la conversation avant de lancer le prompt
+		// (best-effort : le LS 2.5+ répond 200 sans frame de données pour
+		// SetBrowserOpenConversation — l'échec est attendu et n'affecte pas
+		// le stream ; le mobile re-synchronise la session lui-même).
 		if _, errSet := s.RPCClient.SetBrowserOpenConversation(msg.CascadeID); errSet != nil {
 			logJSON.Debug("open_conversation_failed", "cascadeId", msg.CascadeID, "err", errSet)
 		}
@@ -3254,10 +3257,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 		}
 
-		// Offline buffering (3.2) : le prompt part vers le hub ÔåÆ on le persiste
-		// tant qu'il n'est pas confirm├® (stream_end re├ºu). En cas de coupure
+		// Offline buffering (3.2) : le prompt part vers le hub → on le persiste
+		// tant qu'il n'est pas confirmé (stream_end reçu). En cas de coupure
 		// avant stream_end, le mobile le retrouvera via sync_session.pendingMessages
-		// et d├®cidera de le retransmettre (d├®dupliqu├® par requestId).
+		// et décidera de le retransmettre (dédupliqué par requestId).
 		if errOut := s.outbox.Append(msg.CascadeID, msg.RequestID, promptText); errOut != nil {
 			logJSON.Warn("outbox_append_failed", "cascadeId", msg.CascadeID, "err", errOut.Error())
 		}
@@ -3277,6 +3280,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 					hasTextDelivered = true
 				}
 				if ev.Kind == connectrpc.EventKindApprovalRequired {
+					hasTextDelivered = true
 					// B3 : auto-approbation si l'utilisateur a choisi
 					// « toujours autoriser ce type pour la session ».
 					if s.hasSessionApproval(msg.CascadeID, ev.Tool) {
@@ -3320,8 +3324,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 						// d'approbation est déjà sous ses yeux).
 						pending["hostActive"] = hostActiveSince(hostActiveWindow)
 						s.broadcast(OutgoingMessage{
-							Type: "approval_pending",
-							Data: pending,
+							Type:      "approval_pending",
+							CascadeID: msg.CascadeID,
+							Data:      pending,
 						})
 					}
 				}
@@ -3338,6 +3343,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			deltaMsg := OutgoingMessage{
 				Type:      "stream_delta",
 				RequestID: msg.RequestID,
+				CascadeID: msg.CascadeID,
 				Data:      data,
 			}
 			stepIdx := s.streamBuffer.RecordEvent(msg.CascadeID, deltaMsg)
@@ -3351,7 +3357,13 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		// planner_mode 3 = NO_TOOL : pas de boucle d'outils, réponse directe.
 		noTools := msg.NoTools || s.noTools()
 		modelUID := s.resolveModelID(msg.ModelUID)
+
+		watcherCtx, cancelWatcher := context.WithCancel(ctx)
+		defer cancelWatcher()
+		s.startLiveStepWatcher(watcherCtx, msg.CascadeID, msg.RequestID, &frameIndex)
+
 		err = s.RPCClient.SendMessageStreamModel(msg.CascadeID, promptText, modelUID, msg.ModelEnum, onFrameHandler, noTools)
+		cancelWatcher()
 
 		// 3. Force l'IDE à ouvrir cette nouvelle session (best-effort, cf. ci-dessus).
 		if _, errSet := s.RPCClient.SetBrowserOpenConversation(msg.CascadeID); errSet != nil {
@@ -3360,7 +3372,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 
 		// Si le flux gRPC-Web n'a pas émis de texte (génération asynchrone LS 2.5+),
 		// on sonde la trajectoire pour extraire la réponse générée et la diffuser au mobile.
-		if !hasTextDelivered && err == nil && s.RPCClient != nil {
+		if !hasTextDelivered && !s.hasPendingApproval(msg.CascadeID) && err == nil && s.RPCClient != nil {
 		pollLoop:
 			for i := 0; i < 15; i++ {
 				select {
@@ -3386,12 +3398,14 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 						stepIdx := s.streamBuffer.RecordEvent(msg.CascadeID, OutgoingMessage{
 							Type:      "stream_delta",
 							RequestID: msg.RequestID,
+							CascadeID: msg.CascadeID,
 							Data:      deltaData,
 						})
 						deltaData["stepIndex"] = stepIdx
 						s.broadcast(OutgoingMessage{
 							Type:      "stream_delta",
 							RequestID: msg.RequestID,
+							CascadeID: msg.CascadeID,
 							Data:      deltaData,
 						})
 						break pollLoop
@@ -3418,7 +3432,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				endData["hostActive"] = hostActiveSince(hostActiveWindow)
 				endData["outcome"] = "cancelled"
 				endData["message"] = "Generation stopped by user"
-				s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, Data: endData})
+				s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, CascadeID: msg.CascadeID, Data: endData})
 				// Même confirmation outbox que CancelGeneration : le prompt
 				// annulé ne doit pas être re-proposé par sync_session.
 				if errOut := s.outbox.Confirm(msg.CascadeID, msg.RequestID); errOut != nil {
@@ -3434,22 +3448,22 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		case err != nil && strings.Contains(err.Error(), "cancelled"):
 			endData["outcome"] = "cancelled"
 			endData["message"] = "Generation stopped by user"
-			s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, Data: endData})
+			s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, CascadeID: msg.CascadeID, Data: endData})
 		case err != nil:
 			endData["outcome"] = "error"
 			endData["message"] = err.Error()
 			s.mu.Lock()
 			s.lastError = err.Error()
 			s.mu.Unlock()
-			s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, Data: endData, Error: err.Error()})
+			s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, CascadeID: msg.CascadeID, Data: endData, Error: err.Error()})
 		case s.hasPendingApproval(msg.CascadeID):
 			endData["outcome"] = "approval"
 			endData["message"] = "Action requise"
-			s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, Data: endData})
+			s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, CascadeID: msg.CascadeID, Data: endData})
 		default:
 			endData["outcome"] = "done"
 			endData["message"] = ""
-			s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, Data: endData})
+			s.broadcast(OutgoingMessage{Type: "stream_end", RequestID: msg.RequestID, CascadeID: msg.CascadeID, Data: endData})
 		}
 		logJSON.Info("stream_end", "requestId", msg.RequestID, "cascadeId", msg.CascadeID, "outcome", endData["outcome"])
 		// stream_end broadcast├® ÔåÆ le mobile a tout re├ºu : le prompt est confirm├®,
@@ -3590,33 +3604,82 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		// 1. Direct local file check (e.g. brain artifacts, absolute file paths, file:// URIs)
 		cleanPath := strings.TrimPrefix(msg.FilePath, "file:///")
 		cleanPath = strings.TrimPrefix(cleanPath, "file://")
+		if len(cleanPath) >= 3 && cleanPath[0] == '/' && cleanPath[2] == ':' {
+			cleanPath = cleanPath[1:]
+		}
+		cleanPath = filepath.Clean(cleanPath)
+
+		respondWithFileContent := func(content []byte) {
+			lower := strings.ToLower(cleanPath)
+			isImg := strings.HasSuffix(lower, ".png") ||
+				strings.HasSuffix(lower, ".jpg") ||
+				strings.HasSuffix(lower, ".jpeg") ||
+				strings.HasSuffix(lower, ".gif") ||
+				strings.HasSuffix(lower, ".webp") ||
+				strings.HasSuffix(lower, ".pdf") ||
+				strings.HasSuffix(lower, ".mp4") ||
+				strings.HasSuffix(lower, ".mp3")
+
+			data := map[string]interface{}{
+				"content":  string(content),
+				"isBinary": isImg,
+			}
+			if isImg || !utf8.Valid(content) {
+				data["base64Data"] = base64.StdEncoding.EncodeToString(content)
+				data["isBinary"] = true
+			}
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: data})
+		}
+
 		if filepath.IsAbs(cleanPath) {
 			if content, errRead := os.ReadFile(cleanPath); errRead == nil {
-				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"content": string(content)}})
+				respondWithFileContent(content)
 				return
 			}
 		}
 		if strings.HasPrefix(msg.FilePath, ".gemini") || strings.HasPrefix(cleanPath, ".gemini") {
 			abs := homeRoot(cleanPath)
 			if content, errRead := os.ReadFile(abs); errRead == nil {
-				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"content": string(content)}})
+				respondWithFileContent(content)
 				return
 			}
 		}
-		// 2. Workspace confinement check if workspacePath is provided
+
+		// 2. Session brain lookup if relative filename (e.g. media_*.jpg, implementation_plan.md)
+		cascadeID := msg.CascadeID
+		if cascadeID == "" && msg.Data != nil {
+			cascadeID, _ = msg.Data["cascadeId"].(string)
+		}
+		if cascadeID != "" {
+			if bDir := findBrainDir(cascadeID); bDir != "" {
+				candidates := []string{
+					filepath.Join(bDir, cleanPath),
+					filepath.Join(bDir, ".user_uploaded", cleanPath),
+					filepath.Join(bDir, "scratch", cleanPath),
+				}
+				for _, cand := range candidates {
+					if content, errRead := os.ReadFile(cand); errRead == nil {
+						respondWithFileContent(content)
+						return
+					}
+				}
+			}
+		}
+
+		// 3. Workspace confinement check if workspacePath is provided
 		if msg.WorkspacePath != "" {
 			abs, errRes := resolvePath(homeRoot(msg.WorkspacePath), msg.FilePath)
 			if errRes == nil {
 				if content, errRead := os.ReadFile(abs); errRead == nil {
-					s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"content": string(content)}})
+					respondWithFileContent(content)
 					return
 				}
 			}
 		}
-		// 3. Language Server RPC fallback
+		// 4. Language Server RPC fallback
 		raw, err = s.RPCClient.ReadFile(toWorkspaceURI(msg.FilePath))
 		if err == nil {
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"content": string(raw)}})
+			respondWithFileContent(raw)
 			return
 		}
 		if err != nil {
@@ -3722,6 +3785,26 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			Data: map[string]interface{}{
 				"cascadeId": cascadeID,
 				"artifacts": artifacts,
+			},
+		})
+		return
+
+	case "list_uploads":
+		cascadeID := msg.CascadeID
+		if cascadeID == "" && msg.Data != nil {
+			cascadeID, _ = msg.Data["cascadeId"].(string)
+		}
+		if cascadeID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
+			return
+		}
+		uploads := ListSessionUploads(cascadeID)
+		s.writeJSON(conn, OutgoingMessage{
+			Type:      "response",
+			RequestID: msg.RequestID,
+			Data: map[string]interface{}{
+				"cascadeId": cascadeID,
+				"uploads":   uploads,
 			},
 		})
 		return
@@ -5371,4 +5454,169 @@ func executeShellCommand(dir, cmdStr string) (string, error) {
 	}
 	return outBuf.String(), nil
 }
+
+// startLiveStepWatcher démarre une goroutine ultra-réactive qui surveille en temps réel
+// (toutes les 30 ms) l'apparition de nouvelles étapes (tool calls, commandes exécutées,
+// lectures/écritures de fichiers, recherches, thinking, nouveaux tokens) dans le transcript
+// de la session active et les diffuse immédiatement au mobile via stream_delta.
+func (s *Server) startLiveStepWatcher(ctx context.Context, cascadeID, requestID string, frameIndex *int) {
+	transcriptPath := findTranscriptPath(cascadeID)
+	var lastOffset int64
+	if transcriptPath != "" {
+		if fi, err := os.Stat(transcriptPath); err == nil {
+			lastOffset = fi.Size()
+		}
+	}
+
+	go func() {
+		ticker := time.NewTicker(30 * time.Millisecond)
+		defer ticker.Stop()
+
+		var deliveredThoughtLen int
+		var deliveredTextLen int
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if transcriptPath == "" {
+					transcriptPath = findTranscriptPath(cascadeID)
+				}
+				if transcriptPath == "" {
+					continue
+				}
+				fi, errStat := os.Stat(transcriptPath)
+				if errStat != nil || fi.Size() <= lastOffset {
+					continue
+				}
+
+				f, errOpen := os.Open(transcriptPath)
+				if errOpen != nil {
+					continue
+				}
+
+				_, errSeek := f.Seek(lastOffset, 0)
+				if errSeek != nil {
+					f.Close()
+					continue
+				}
+
+				scanner := bufio.NewScanner(f)
+				hBuf := AcquireHistoryBuffer()
+				scanner.Buffer(*hBuf, len(*hBuf))
+
+				for scanner.Scan() {
+					lineBytes := scanner.Bytes()
+					lastOffset += int64(len(lineBytes)) + 1 // newline
+					if len(lineBytes) == 0 {
+						continue
+					}
+
+					var entry struct {
+						StepIndex int             `json:"step_index"`
+						Type      string          `json:"type"`
+						Source    string          `json:"source"`
+						Content   string          `json:"content"`
+						Thinking  string          `json:"thinking"`
+						Status    string          `json:"status"`
+						ToolCalls json.RawMessage `json:"tool_calls"`
+					}
+					if err := json.Unmarshal(lineBytes, &entry); err != nil {
+						continue
+					}
+
+					var events []map[string]interface{}
+
+					// 1. Tool calls
+					if len(entry.ToolCalls) > 0 {
+						var toolCalls []struct {
+							Name      string          `json:"name"`
+							Arguments json.RawMessage `json:"args"`
+							Function  struct {
+								Name      string          `json:"name"`
+								Arguments json.RawMessage `json:"arguments"`
+							} `json:"function"`
+						}
+						if json.Unmarshal(entry.ToolCalls, &toolCalls) == nil {
+							for _, tc := range toolCalls {
+								toolName := tc.Name
+								if toolName == "" {
+									toolName = tc.Function.Name
+								}
+								args := tc.Arguments
+								if len(args) == 0 {
+									args = tc.Function.Arguments
+								}
+								if toolName != "" && toolName != "ask_question" && toolName != "ask_user" {
+									events = append(events, map[string]interface{}{
+										"kind":   "tool_start",
+										"tool":   toolName,
+										"detail": string(args),
+									})
+								}
+							}
+						}
+					}
+
+					// 2. Tool Results (ex: VIEW_FILE, RUN_COMMAND, TOOL_RESULT, etc.)
+					if entry.Type == "VIEW_FILE" || entry.Type == "RUN_COMMAND" || entry.Type == "GREP_SEARCH" || entry.Type == "WRITE_TO_FILE" || entry.Type == "TOOL_RESULT" {
+						preview := entry.Content
+						if len(preview) > 200 {
+							preview = preview[:197] + "…"
+						}
+						events = append(events, map[string]interface{}{
+							"kind":   "tool_output",
+							"tool":   strings.ToLower(entry.Type),
+							"detail": preview,
+							"status": entry.Status,
+						})
+					}
+
+					// 3. Raisonnement progressif (Thinking)
+					if len(entry.Thinking) > deliveredThoughtLen {
+						chunk := entry.Thinking[deliveredThoughtLen:]
+						deliveredThoughtLen = len(entry.Thinking)
+						events = append(events, map[string]interface{}{
+							"kind":  "thinking",
+							"delta": chunk,
+						})
+					}
+
+					// 4. Texte progressif de l'assistant (PLANNER_RESPONSE)
+					if entry.Type == "PLANNER_RESPONSE" && len(entry.Content) > deliveredTextLen {
+						chunk := entry.Content[deliveredTextLen:]
+						deliveredTextLen = len(entry.Content)
+						events = append(events, map[string]interface{}{
+							"kind":  "text",
+							"delta": chunk,
+						})
+					}
+
+					if len(events) > 0 {
+						*frameIndex++
+						deltaData := map[string]interface{}{
+							"frameIndex": *frameIndex,
+							"cascadeId":  cascadeID,
+							"hostActive": hostActiveSince(hostActiveWindow),
+							"events":     events,
+						}
+						deltaMsg := OutgoingMessage{
+							Type:      "stream_delta",
+							RequestID: requestID,
+							Data:      deltaData,
+						}
+						stepIdx := s.streamBuffer.RecordEvent(cascadeID, deltaMsg)
+						deltaData["stepIndex"] = stepIdx
+						s.broadcast(deltaMsg)
+					}
+				}
+
+				ReleaseHistoryBuffer(hBuf)
+				f.Close()
+			}
+		}
+	}()
+}
+
 

@@ -35,10 +35,18 @@ var (
 	convTitleRe     = regexp.MustCompile(`##\s*Conversation\s+([0-9a-fA-F-]+):\s*([^"\r\n\\]+?)(?:\\[nrt]|\r|\n|"|$)`)
 	userObjectiveRe = regexp.MustCompile(`(?i)###\s*USER Objective:\s*([^"\r\n\\]+?)(?:\\[nrt]|\r|\n|"|$)`)
 	rawWsMappingRe  = regexp.MustCompile(`(?i)(?:\[|\b)([a-zA-Z]:(?:\\\\|[\\/])[^"\r\n\t<>]+?)(?:\]|\b)\s*->`)
-	rawWsToolArgRe  = regexp.MustCompile(`(?i)"(?:Cwd|cwd|DirectoryPath|SearchPath|AbsolutePath|TargetFile)":\s*"([a-zA-Z]:(?:\\\\|[\\/])[^"\r\n]+?)"`)
-
+	rawWsToolArgRe  = regexp.MustCompile(`(?i)"(?:filePath|file_path|targetFile|TargetFile|AbsolutePath|DirectoryPath|Cwd)"\s*:\s*"([a-zA-Z]:(?:\\\\|[\\/])[^"\r\n\t<>]+?)"`)
 	globalConvTitles = make(map[string]string)
 	convTitlesMu     sync.RWMutex
+
+	systemMessageBlockRe   = regexp.MustCompile(`(?s)<SYSTEM_MESSAGE>.*?</SYSTEM_MESSAGE>`)
+	systemPromptBlockRe    = regexp.MustCompile(`(?s)<SYSTEM_PROMPT>.*?</SYSTEM_PROMPT>`)
+	additionalMetaBlockRe  = regexp.MustCompile(`(?s)<ADDITIONAL_METADATA>.*?</ADDITIONAL_METADATA>`)
+	userSettingsBlockRe    = regexp.MustCompile(`(?s)<USER_SETTINGS_CHANGE>.*?</USER_SETTINGS_CHANGE>`)
+	systemGeneratedBlockRe = regexp.MustCompile(`(?s)<system_generated>.*?</system_generated>`)
+	contextBlockRe         = regexp.MustCompile(`(?s)<context.*?>.*?</context>`)
+	bgMessageBlockRe       = regexp.MustCompile(`(?s)\[Message\]\s*timestamp=[^\r\n]+\r?\n+sender=[^\r\n]+\r?\n+priority=[^\r\n]+\r?\n+content=[^\r\n]+`)
+	systemNoticeRe         = regexp.MustCompile(`(?s)The following is a <SYSTEM_MESSAGE> not actually sent by the user.*?(?:pay attention to\.|$)`)
 )
 
 // stepTypeUser/stepTypeAssistant/stepTypeTitle sont les step_type observés
@@ -245,6 +253,7 @@ func ListSessionUploads(cascadeID string) []map[string]interface{} {
 	if brainDir == "" {
 		return results
 	}
+	seen := make(map[string]bool)
 	for _, sub := range []string{"scratch", ".user_uploaded", ""} {
 		subDir := filepath.Join(brainDir, sub)
 		entries, err := os.ReadDir(subDir)
@@ -256,6 +265,9 @@ func ListSessionUploads(cascadeID string) []map[string]interface{} {
 				continue
 			}
 			name := entry.Name()
+			if seen[name] {
+				continue
+			}
 			lower := strings.ToLower(name)
 			if strings.HasSuffix(lower, ".png") ||
 				strings.HasSuffix(lower, ".jpg") ||
@@ -264,6 +276,7 @@ func ListSessionUploads(cascadeID string) []map[string]interface{} {
 				strings.HasSuffix(lower, ".webp") ||
 				strings.HasSuffix(lower, ".pdf") ||
 				strings.HasSuffix(lower, ".mp4") {
+				seen[name] = true
 				fullPath := filepath.Join(subDir, name)
 				info, _ := entry.Info()
 				var size int64
@@ -718,10 +731,14 @@ func parseTranscriptLine(line []byte) *HistoryMessage {
 	msgID := fmt.Sprintf("h-%d", entry.StepIndex)
 
 	if entry.Type == "USER_INPUT" {
+		cleaned := extractUserRequest(entry.Content)
+		if cleaned == "" {
+			return nil
+		}
 		return &HistoryMessage{
 			ID:        msgID,
 			Sender:    "user",
-			Text:      extractUserRequest(entry.Content),
+			Text:      cleaned,
 			Timestamp: ts,
 		}
 	}
@@ -730,14 +747,14 @@ func parseTranscriptLine(line []byte) *HistoryMessage {
 		return nil // events d'outils : invisibles dans le chat mobile
 	}
 
-	// R├®ponse visible du mod├¿le : PLANNER_RESPONSE place la r├®ponse finale
-	// dans `content`, et le raisonnement interm├®diaire (quand le mod├¿le a
-	// encha├«n├® des appels d'outils) dans `thinking` ÔÇö `content` est alors
-	// absent. Les lignes vides (mod├¿le n'a produit ni texte ni raisonnement,
-	// ex. encha├«nement d'outils purs) sont ignor├®es pour ne pas polluer le chat.
+	// Réponse visible du modèle : PLANNER_RESPONSE place la réponse finale
+	// dans `content`, et le raisonnement intermédiaire (quand le modèle a
+	// enchaîné des appels d'outils) dans `thinking` — `content` est alors
+	// absent. Les lignes vides (modèle n'a produit ni texte ni raisonnement,
+	// ex. enchaînement d'outils purs) sont ignorées pour ne pas polluer le chat.
 	if entry.Type == "PLANNER_RESPONSE" {
-		text := entry.Content
-		thought := entry.Thinking
+		text := cleanAssistantText(entry.Content)
+		thought := cleanRawContent(entry.Thinking)
 		if text == "" && thought == "" {
 			return nil
 		}
@@ -1090,7 +1107,7 @@ func readSQLiteSteps(dbPath, cascadeID string) ([]HistoryMessage, string, error)
 
 		switch stepType {
 		case stepTypeUser:
-			text := userTextFromPayload(payload)
+			text := extractUserRequest(userTextFromPayload(payload))
 			if text == "" {
 				continue
 			}
@@ -1102,6 +1119,8 @@ func readSQLiteSteps(dbPath, cascadeID string) ([]HistoryMessage, string, error)
 			})
 		case stepTypeAssistant:
 			text, thought := assistantTextFromPayload(payload)
+			text = cleanAssistantText(text)
+			thought = cleanRawContent(thought)
 			if text == "" && thought == "" {
 				continue
 			}
@@ -1532,6 +1551,35 @@ func isUploadPath(p string) bool {
 	return strings.Contains(p, "scratch") && strings.Contains(p, "upload_")
 }
 
+func cleanRawContent(s string) string {
+	if s == "" {
+		return ""
+	}
+	s = systemMessageBlockRe.ReplaceAllString(s, "")
+	s = systemPromptBlockRe.ReplaceAllString(s, "")
+	s = additionalMetaBlockRe.ReplaceAllString(s, "")
+	s = userSettingsBlockRe.ReplaceAllString(s, "")
+	s = systemGeneratedBlockRe.ReplaceAllString(s, "")
+	s = contextBlockRe.ReplaceAllString(s, "")
+	s = bgMessageBlockRe.ReplaceAllString(s, "")
+	s = systemNoticeRe.ReplaceAllString(s, "")
+	return strings.TrimSpace(s)
+}
+
+func cleanAssistantText(s string) string {
+	s = cleanRawContent(s)
+	if s == "" {
+		return ""
+	}
+	trimmed := strings.TrimSpace(s)
+	if strings.HasPrefix(trimmed, "<SYSTEM_MESSAGE>") ||
+		strings.HasPrefix(trimmed, "<system_message>") ||
+		strings.HasPrefix(trimmed, "[Message] timestamp=") {
+		return ""
+	}
+	return trimmed
+}
+
 func extractUserRequest(content string) string {
 	startTag := "<USER_REQUEST>"
 	endTag := "</USER_REQUEST>"
@@ -1540,10 +1588,29 @@ func extractUserRequest(content string) string {
 	if startIdx >= 0 {
 		endIdx := strings.Index(content, endTag)
 		if endIdx > startIdx {
-			return strings.TrimSpace(content[startIdx+len(startTag) : endIdx])
+			return cleanRawContent(content[startIdx+len(startTag) : endIdx])
 		}
 	}
-	return strings.TrimSpace(content)
+
+	trimmed := strings.TrimSpace(content)
+	if strings.HasPrefix(trimmed, "<SYSTEM_MESSAGE>") ||
+		strings.HasPrefix(trimmed, "<system_message>") ||
+		strings.HasPrefix(trimmed, "<identity>") ||
+		strings.HasPrefix(trimmed, "<user_information>") ||
+		strings.HasPrefix(trimmed, "<skills>") ||
+		strings.HasPrefix(trimmed, "<subagents>") ||
+		strings.HasPrefix(trimmed, "<messaging>") ||
+		strings.HasPrefix(trimmed, "<artifacts>") ||
+		strings.HasPrefix(trimmed, "<slash_commands>") ||
+		strings.HasPrefix(trimmed, "<planning_mode>") ||
+		strings.HasPrefix(trimmed, "<guidelines>") ||
+		strings.HasPrefix(trimmed, "<communication_style>") ||
+		strings.HasPrefix(trimmed, "<conversation_transcript>") ||
+		strings.HasPrefix(trimmed, "[Message] timestamp=") {
+		return ""
+	}
+
+	return cleanRawContent(trimmed)
 }
 
 func cleanPromptTitle(s string) string {

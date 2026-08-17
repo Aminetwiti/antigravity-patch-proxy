@@ -49,6 +49,23 @@ void main() {
       expect(blocks[1].isQuote, isTrue);
       expect(blocks[1].paragraph, 'Note importante');
     });
+
+    test('strips SYSTEM_MESSAGE tags and background notifications', () {
+      final raw = '''<SYSTEM_MESSAGE>
+[Message] timestamp=2026-08-17T16:13:24Z
+sender=cd7ffa3c/task-146
+priority=MESSAGE_PRIORITY_HIGH
+content=Wait for go test to complete
+</SYSTEM_MESSAGE>
+
+Hello user, here is your result:
+# All tests passed!''';
+      final blocks = MarkdownRenderer.blocksOf(raw);
+      expect(blocks.length, 2);
+      expect(blocks[0].paragraph, 'Hello user, here is your result:');
+      expect(blocks[1].headerLevel, 1);
+      expect(blocks[1].paragraph, 'All tests passed!');
+    });
   });
 
   group('MarkdownRenderer.inlineSpans', () {

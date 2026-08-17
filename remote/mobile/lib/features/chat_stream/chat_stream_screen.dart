@@ -2374,26 +2374,35 @@ class _MessageBubble extends StatelessWidget {
                 onToggleExpand: onToggleThought,
               ),
             ],
-            if (isError)
+            if (isError && (message.text.length < 120 && !message.text.contains('\n') && !message.text.startsWith('#')))
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: scheme.error.withValues(alpha: 0.10),
+                  color: isDark ? const Color(0xFF1E1214) : scheme.errorContainer.withValues(alpha: 0.25),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: scheme.error.withValues(alpha: 0.3)),
+                  border: Border.all(
+                    color: isDark ? const Color(0xFF5C1D24) : scheme.error.withValues(alpha: 0.4),
+                    width: 0.8,
+                  ),
                 ),
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.error_outline, size: 16, color: scheme.error),
+                    Icon(
+                      Icons.error_outline,
+                      size: 16,
+                      color: isDark ? AppColors.danger : scheme.error,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         message.text,
                         style: TextStyle(
-                          fontSize: 13,
-                          color: scheme.error,
+                          fontSize: 12.5,
                           height: 1.4,
+                          color: isDark ? const Color(0xFFFCA5A5) : scheme.onErrorContainer,
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
                     ),

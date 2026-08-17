@@ -211,3 +211,68 @@ func TestListLocalSessionsSkipsArchived(t *testing.T) {
 		}
 	}
 }
+
+// TestArchiveAndUnarchiveCascadeActions — vérifie que les messages WebSocket
+// archive_cascade et unarchive_cascade écrivent sur disque, mettent à jour la
+// carte Jetbox et diffusent sessions_updated.
+func TestArchiveAndUnarchiveCascadeActions(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir: %v", err)
+	}
+	annoDir := filepath.Join(home, ".gemini", "antigravity", "annotations")
+	_ = os.MkdirAll(annoDir, 0o755)
+
+	testID := "feedface-0000-4000-8000-00000000face"
+	annoPath := filepath.Join(annoDir, testID+".pbtxt")
+	defer os.Remove(annoPath)
+
+	ts, gw := newTestServerWithGW(&fakeRPCClient{})
+	defer ts.Close()
+
+	gw.mu.Lock()
+	gw.jetboxSummaries = map[string]connectrpc.JetboxSummary{
+		testID: {CascadeID: testID, Title: "test archive", Status: "CASCADE_STATUS_READY"},
+	}
+	gw.mu.Unlock()
+
+	client := dialWS(t, "ws"+strings.TrimPrefix(ts.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	// 1. Archiver via WebSocket
+	client.send(t, map[string]string{"type": "archive_cascade", "requestId": "rA1", "cascadeId": testID})
+	msg := client.recv(t)
+	if msg["type"] != "response" || msg["error"] != nil {
+		t.Fatalf("réponse archive inattendue: %v", msg)
+	}
+
+	// Réception du broadcast sessions_updated
+	msg = client.recv(t)
+	if msg["type"] != "sessions_updated" {
+		t.Fatalf("attendu broadcast sessions_updated, reçu %v", msg)
+	}
+
+	// Vérifie sur disque
+	if !isSessionArchived(home, testID) {
+		content, _ := os.ReadFile(annoPath)
+		t.Fatalf("isSessionArchived(%s) = false après archive_cascade, attendu true (msg=%v, file=%q)", testID, msg, string(content))
+	}
+
+	// 2. Désarchiver via WebSocket
+	client.send(t, map[string]string{"type": "unarchive_cascade", "requestId": "rU1", "cascadeId": testID})
+	msg = client.recv(t)
+	if msg["type"] != "response" || msg["error"] != nil {
+		t.Fatalf("réponse unarchive inattendue: %v", msg)
+	}
+
+	// Réception du broadcast sessions_updated
+	msg = client.recv(t)
+	if msg["type"] != "sessions_updated" {
+		t.Fatalf("attendu broadcast sessions_updated, reçu %v", msg)
+	}
+
+	// Vérifie sur disque
+	if isSessionArchived(home, testID) {
+		t.Fatalf("isSessionArchived(%s) = true après unarchive_cascade, attendu false", testID)
+	}
+}

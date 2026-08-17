@@ -423,6 +423,9 @@ class DaemonApi {
   Future<Map<String, dynamic>> listArtifacts(String cascadeId) =>
       rpc('list_artifacts', {'cascadeId': cascadeId});
 
+  Future<Map<String, dynamic>> listUploads(String cascadeId) =>
+      rpc('list_uploads', {'cascadeId': cascadeId});
+
   Future<Map<String, dynamic>> submitApproval({
     required String cascadeId,
     required String callId,

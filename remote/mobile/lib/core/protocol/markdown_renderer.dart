@@ -69,6 +69,11 @@ class MarkdownBlock {
 typedef LocalFileTap = void Function(String filePath);
 
 class MarkdownRenderer {
+  static final Map<String, List<MarkdownBlock>> _blocksCache = {};
+  static const int _maxCacheEntries = 100;
+  static final _toolArgRe = RegExp(r'"(command|query|file|path|TargetFile|AbsolutePath)"\s*:\s*"([^"]+)"');
+  static final _whitespaceRe = RegExp(r'\s+');
+
   // Pre-compiled regular expressions for high-performance timeline streaming
   static final _toolCallRe = RegExp(
     r'<function_call>|<function_results>|"tool(_name)?"\s*:|(\{|\[)\s*"name"\s*:\s*"[a-zA-Z_]+"\s*,\s*"arguments"',
@@ -79,16 +84,21 @@ class MarkdownRenderer {
   static final _bulletListRe = RegExp(r'^\s*[-*+]\s+');
   static final _numberedListRe = RegExp(r'^\s*\d+[.)]\s+');
   static final _toolNameRe = RegExp(r'"(name|tool|tool_name)"\s*:\s*"([^"]+)"');
-  static final _toolArgRe = RegExp(r'"(command|query|pattern|path|file_path)"\s*:\s*"([^"]+)"');
-  static final _whitespaceRe = RegExp(r'\s+');
+  static final _systemTagsRe = RegExp(
+    r'<SYSTEM_MESSAGE>[\s\S]*?</SYSTEM_MESSAGE>|<SYSTEM_PROMPT>[\s\S]*?</SYSTEM_PROMPT>|<ADDITIONAL_METADATA>[\s\S]*?</ADDITIONAL_METADATA>|<USER_SETTINGS_CHANGE>[\s\S]*?</USER_SETTINGS_CHANGE>|<system_generated>[\s\S]*?</system_generated>|<context[\s\S]*?</context>|The following is a <SYSTEM_MESSAGE> not actually sent by the user[\s\S]*?(?:pay attention to\.|$)|\<identity\>[\s\S]*?\</identity\>|\<user_information\>[\s\S]*?\</user_information\>|\<skills\>[\s\S]*?\</skills\>|\<subagents\>[\s\S]*?\</subagents\>|\<messaging\>[\s\S]*?\</messaging\>|\<artifacts\>[\s\S]*?\</artifacts\>|\<slash_commands\>[\s\S]*?\</slash_commands\>|\<planning_mode\>[\s\S]*?\</planning_mode\>|\<guidelines\>[\s\S]*?\</guidelines\>|\<communication_style\>[\s\S]*?\</communication_style\>|\<conversation_transcript\>[\s\S]*?\</conversation_transcript\>',
+    caseSensitive: false,
+  );
+  static final _bgTaskMsgRe = RegExp(
+    r'\[Message\]\s*timestamp=[^\n]+\n+sender=[^\n]+\n+priority=[^\n]+\n+content=[^\n]+',
+    caseSensitive: false,
+  );
 
-  // Cache mémoire des blocs Markdown pour éliminer le re-parsing lors des builds 120 FPS
-  static final _blocksCache = <String, List<MarkdownBlock>>{};
-  static const int _maxCacheEntries = 512;
-
-  /// Vide le cache des blocs (utile lors des réinitialisations de session).
-  static void clearCache() {
-    _blocksCache.clear();
+  /// Nettoie les balises internes et les messages systèmes résiduels
+  static String cleanContent(String text) {
+    if (text.isEmpty) return text;
+    var cleaned = text.replaceAll(_systemTagsRe, '').trim();
+    cleaned = cleaned.replaceAll(_bgTaskMsgRe, '').trim();
+    return cleaned;
   }
 
   /// Splits raw markdown text into display blocks.
@@ -96,7 +106,10 @@ class MarkdownRenderer {
     final cached = _blocksCache[text];
     if (cached != null) return cached;
 
-    final lines = text.replaceAll('\r\n', '\n').split('\n');
+    final cleanText = cleanContent(text);
+    if (cleanText.isEmpty) return const [];
+
+    final lines = cleanText.replaceAll('\r\n', '\n').split('\n');
     final blocks = <MarkdownBlock>[];
     final buffer = <String>[];
     var inFence = false;

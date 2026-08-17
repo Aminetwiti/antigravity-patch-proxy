@@ -112,9 +112,12 @@ class StreamDeltaParser {
       case 'search_files':
       case 'grep':
       case 'grep_search':
+        return arg.isNotEmpty ? 'Explored $arg' : 'Explored codebase';
       case 'list_files':
       case 'list_dir':
-        return arg.isNotEmpty ? 'Explored $arg' : 'Explored workspace';
+        return arg.isNotEmpty ? 'Explored $arg' : 'Explored directory';
+      case 'tool_output':
+        return arg.isNotEmpty ? '✓ $arg' : '✓ completed';
       default:
         final cleanTool = tool.replaceAll('_', ' ');
         return arg.isNotEmpty ? 'Task $cleanTool ($arg)' : 'Task $cleanTool';
