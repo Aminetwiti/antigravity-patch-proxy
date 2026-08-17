@@ -841,12 +841,15 @@ func (s *Server) RunJetboxSubscription(rpc JetboxStreamer) {
 		for {
 			err := rpc.RunJetboxSubscription(s.jetboxSyncUpdates)
 			if err == nil {
-				// Stream ferm├® proprement par le LS (restart) : on invalide
-				// la carte pour ne pas servir un ├®tat p├®rim├® pendant la
+				// Stream fermé proprement par le LS (restart) : on invalide
+				// la carte pour ne pas servir un état périmé pendant la
 				// reconnexion, puis on retente.
 				s.mu.Lock()
 				s.jetboxSummaries = nil
 				s.mu.Unlock()
+			}
+			if err != nil && strings.Contains(err.Error(), "closed") {
+				return
 			}
 			logJSON.Warn("jetbox_stream_end", "err", err, "retry_in", backoff)
 			time.Sleep(backoff)

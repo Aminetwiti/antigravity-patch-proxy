@@ -1005,30 +1005,34 @@ class _SessionRowItemState extends State<_SessionRowItem> {
     final isRunning = widget.session.isRunning;
     final subtitleText = widget.session.worktree ?? WorkspacePath.displayName(widget.session.workspacePath);
 
-    Widget item = MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        onTap: () {
-          HapticFeedback.selectionClick();
-          widget.onTap();
-        },
-        onLongPress: () => _showSessionContextMenu(context),
-        onSecondaryTap: () => _showSessionContextMenu(context),
-        child: AnimatedContainer(
-          duration: AppMotion.fast,
-          curve: AppMotion.easeOut,
-          margin: const EdgeInsets.only(left: 14, right: 6, top: 1, bottom: 1),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-          decoration: BoxDecoration(
-            color: isSelected
-                ? const Color(0xFF26282E)
-                : _hovered
-                    ? const Color(0xFF1E2025)
-                    : Colors.transparent,
-            borderRadius: BorderRadius.circular(AppRadius.md),
-          ),
-          child: Row(
+    Widget item = Semantics(
+      button: true,
+      selected: isSelected,
+      label: '${widget.session.title}, ${widget.session.time.isNotEmpty ? widget.session.time : "récent"}',
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          onTap: () {
+            HapticFeedback.selectionClick();
+            widget.onTap();
+          },
+          onLongPress: () => _showSessionContextMenu(context),
+          onSecondaryTap: () => _showSessionContextMenu(context),
+          child: AnimatedContainer(
+            duration: AppMotion.fast,
+            curve: AppMotion.easeOut,
+            margin: const EdgeInsets.only(left: 14, right: 6, top: 1, bottom: 1),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? const Color(0xFF26282E)
+                  : _hovered
+                      ? const Color(0xFF1E2025)
+                      : Colors.transparent,
+              borderRadius: BorderRadius.circular(AppRadius.md),
+            ),
+            child: Row(
             children: [
               Expanded(
                 child: Column(
@@ -1135,7 +1139,8 @@ class _SessionRowItemState extends State<_SessionRowItem> {
           ),
         ),
       ),
-    );
+    ),
+  );
 
     // P4 : swipe gauche = supprimer (endToStart), swipe droite = épingler
     // (startToEnd). Un seul Dismissible horizontal, chaque direction branchée

@@ -180,8 +180,8 @@ func TestGapSubmitQuestionResponseWithApproval(t *testing.T) {
 		if msg["requestId"] == "q2" {
 			break
 		}
-		// stream_end(approval) et approval_pending sont attendus ici.
-		if msg["type"] != "stream_end" && msg["type"] != "approval_pending" {
+		// stream_end(approval), approval_pending, approval_resolved et sessions_updated sont attendus ici.
+		if msg["type"] != "stream_end" && msg["type"] != "approval_pending" && msg["type"] != "approval_resolved" && msg["type"] != "sessions_updated" {
 			t.Fatalf("message inattendu avant réponse q2: %v", msg)
 		}
 	}

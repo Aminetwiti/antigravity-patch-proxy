@@ -249,11 +249,25 @@ func (w *protoWriter) bytes(n int, b []byte) {
 }
 
 func (f *fakeRPCClient) SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error) {
+	fields := connectrpc.DecodeFields(oneofPayload)
+	confirm := false
+	if len(fields) > 0 {
+		if fields[0].WireType == 0 {
+			confirm = fields[0].Varint == 1
+		} else if fields[0].WireType == 2 {
+			confirm = true
+			for _, fld := range fields {
+				if fld.Num == 2 && fld.Varint == 1 {
+					confirm = false
+				}
+			}
+		}
+	}
 	f.lastApproval = &submitApprovalCall{
 		cascadeID:    cascadeID,
 		trajectoryID: trajectoryID,
 		stepIndex:    stepIndex,
-		confirm:      connectrpc.DecodeFields(oneofPayload)[0].Varint == 1,
+		confirm:      confirm,
 	}
 	return connectrpc.Frame(pbTextFrame("ok")), nil
 }
@@ -357,10 +371,6 @@ func (f *fakeRPCClient) ConvertTrajectoryToMarkdown(trajectoryID string) ([]byte
 
 func (f *fakeRPCClient) CreateWorktree(branch, path string) ([]byte, error) {
 	return []byte(`{"status":"created","branch":"` + branch + `"}`), nil
-}
-
-func (f *fakeRPCClient) CheckoutWorktree(worktreeDirURI, targetWorkspaceURI string, deleteAfterCheckout bool, mergeStrategy uint64) ([]byte, error) {
-	return []byte(`{"status":"checked_out"}`), nil
 }
 
 // --- Fakes RPC Git + Sidecar (P2) ---

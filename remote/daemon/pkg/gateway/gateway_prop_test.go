@@ -197,11 +197,25 @@ func (l *loadRPCClient) streamLoop(onFrame func([]byte) error) error {
 	return nil
 }
 func (l *loadRPCClient) SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error) {
+	fields := connectrpc.DecodeFields(oneofPayload)
+	confirm := false
+	if len(fields) > 0 {
+		if fields[0].WireType == 0 {
+			confirm = fields[0].Varint == 1
+		} else if fields[0].WireType == 2 {
+			confirm = true
+			for _, fld := range fields {
+				if fld.Num == 2 && fld.Varint == 1 {
+					confirm = false
+				}
+			}
+		}
+	}
 	l.lastApproval = &submitApprovalCall{
 		cascadeID:    cascadeID,
 		trajectoryID: trajectoryID,
 		stepIndex:    stepIndex,
-		confirm:      len(oneofPayload) > 0 && connectrpc.DecodeFields(oneofPayload)[0].Varint == 1,
+		confirm:      confirm,
 	}
 	return connectrpc.Frame(pbTextFrame("ok")), nil
 }
@@ -329,6 +343,12 @@ func (l *loadRPCClient) DisconnectMcpOAuth(serverID string) ([]byte, error) {
 }
 func (l *loadRPCClient) HybridSearch(query, workspaceURI string, limit uint32) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("search-results")), nil
+}
+func (l *loadRPCClient) SearchCode(query, workspaceURI string, maxResults, linesContext int32) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("code-search")), nil
+}
+func (l *loadRPCClient) CheckoutWorktree(worktreeDirURI, targetWorkspaceURI string, deleteAfterCheckout bool, mergeStrategy uint64) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("worktree-checked-out")), nil
 }
 
 

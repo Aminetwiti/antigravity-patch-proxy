@@ -242,6 +242,14 @@ func (f *failingRPC) HybridSearch(query, workspaceURI string, limit uint32) ([]b
 	return nil, errFailing
 }
 
+func (f *failingRPC) SearchCode(query, workspaceURI string, maxResults, linesContext int32) ([]byte, error) {
+	return nil, errFailing
+}
+
+func (f *failingRPC) CheckoutWorktree(worktreeDirURI, targetWorkspaceURI string, deleteAfterCheckout bool, mergeStrategy uint64) ([]byte, error) {
+	return nil, errFailing
+}
+
 // errFailing : erreur sentinelle.
 var errFailing = &failingError{}
 

@@ -1308,72 +1308,89 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
                       const Spacer(),
 
-                      // Voice (placeholder — pas de backend audio : tooltip
-                      // honnête au lieu d'un contrôle mort silencieux)
+                      // Voice (placeholder — pas de backend audio : retour haptique
+                      // et notification claire au lieu d'un contrôle silencieux)
                       IconButton(
                         icon: Icon(
                           Icons.mic_none,
                           size: 20,
-                          color: scheme.onSurfaceVariant,
+                          color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
                         ),
-                        onPressed: () {},
+                        onPressed: () {
+                          HapticFeedback.lightImpact();
+                          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Saisie vocale — bientôt disponible dans Antigravity Remote'),
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                        },
                         tooltip: 'Saisie vocale — bientôt disponible',
                       ),
-                      // Send / Stop button (unified primary action)
-                      Tooltip(
-                        message: widget.hasActiveStream
-                            ? 'Arrêter la génération (Emergency Stop)'
-                            : 'Envoyer',
-                        child: GestureDetector(
-                          key: widget.hasActiveStream
-                              ? const Key('stop-generation-button')
-                              : const Key('send-message-button'),
-                          onTapDown: (_) => setState(() => _isSendPressed = true),
-                          onTapUp: (_) {
-                            setState(() => _isSendPressed = false);
-                            if (widget.hasActiveStream) {
-                              if (widget.onStop != null) {
-                                HapticFeedback.heavyImpact();
-                                widget.onStop!();
+                      // Send / Stop button (unified primary action with accessible 48x48 touch target)
+                      Semantics(
+                        button: true,
+                        label: widget.hasActiveStream
+                            ? 'Arrêter la génération'
+                            : (isQueued ? 'Ajouter à la file d\'attente' : 'Envoyer le message'),
+                        child: Tooltip(
+                          message: widget.hasActiveStream
+                              ? 'Arrêter la génération (Emergency Stop)'
+                              : 'Envoyer',
+                          child: GestureDetector(
+                            key: widget.hasActiveStream
+                                ? const Key('stop-generation-button')
+                                : const Key('send-message-button'),
+                            onTapDown: (_) => setState(() => _isSendPressed = true),
+                            onTapUp: (_) {
+                              setState(() => _isSendPressed = false);
+                              if (widget.hasActiveStream) {
+                                if (widget.onStop != null) {
+                                  HapticFeedback.heavyImpact();
+                                  widget.onStop!();
+                                }
+                              } else {
+                                _handleSend();
                               }
-                            } else {
-                              _handleSend();
-                            }
-                          },
-                          onTapCancel:
-                              () => setState(() => _isSendPressed = false),
-                          child: AnimatedScale(
-                            scale: _isSendPressed ? 0.85 : 1.0,
-                            duration: const Duration(milliseconds: 100),
-                            curve: Curves.easeOutQuart,
-                            child: Padding(
-                              padding: const EdgeInsets.all(6),
-                              child: GestureDetector(
-                                onLongPress: () => _showQueueSettings(context),
-                                child: Container(
-                                  width: 28,
-                                  height: 28,
-                                  decoration: BoxDecoration(
-                                    color: widget.hasActiveStream
-                                        ? scheme.error
-                                        : (_controller.text.trim().isNotEmpty &&
-                                                widget.isConnected
-                                            ? scheme.primary
-                                            : scheme.surfaceContainerHighest),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: Icon(
-                                    isQueued
-                                        ? Icons.playlist_add_check
-                                        : (widget.hasActiveStream
-                                            ? Icons.stop_rounded
-                                            : Icons.arrow_forward),
-                                    size: 15,
-                                    color: (_controller.text.trim().isNotEmpty &&
-                                                widget.isConnected) ||
-                                            widget.hasActiveStream
-                                        ? AppColors.onAccent
-                                        : scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                            },
+                            onTapCancel:
+                                () => setState(() => _isSendPressed = false),
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                              child: Center(
+                                child: AnimatedScale(
+                                  scale: _isSendPressed ? 0.85 : 1.0,
+                                  duration: const Duration(milliseconds: 100),
+                                  curve: Curves.easeOutQuart,
+                                  child: GestureDetector(
+                                    onLongPress: () => _showQueueSettings(context),
+                                    child: Container(
+                                      width: 28,
+                                      height: 28,
+                                      decoration: BoxDecoration(
+                                        color: widget.hasActiveStream
+                                            ? scheme.error
+                                            : (_controller.text.trim().isNotEmpty &&
+                                                    widget.isConnected
+                                                ? scheme.primary
+                                                : scheme.surfaceContainerHighest),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Icon(
+                                        isQueued
+                                            ? Icons.playlist_add_check
+                                            : (widget.hasActiveStream
+                                                ? Icons.stop_rounded
+                                                : Icons.arrow_forward),
+                                        size: 15,
+                                        color: (_controller.text.trim().isNotEmpty &&
+                                                    widget.isConnected) ||
+                                                widget.hasActiveStream
+                                            ? AppColors.onAccent
+                                            : scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),

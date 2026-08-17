@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -31,6 +32,11 @@ func newFakeJetboxStreamer() *fakeJetboxStreamer {
 }
 
 func (f *fakeJetboxStreamer) RunJetboxSubscription(onSummary func(updates map[string]connectrpc.JetboxSummary, deletes []string)) error {
+	select {
+	case <-f.closed:
+		return errors.New("stream closed")
+	default:
+	}
 	f.mu.Lock()
 	f.onF = onSummary
 	pending := f.pending
@@ -41,7 +47,7 @@ func (f *fakeJetboxStreamer) RunJetboxSubscription(onSummary func(updates map[st
 	}
 	// Le vrai stream est long-vivant ; on bloque jusqu'à closeStream.
 	<-f.closed
-	return nil
+	return errors.New("stream closed")
 }
 
 func (f *fakeJetboxStreamer) closeStream() {

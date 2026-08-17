@@ -46,5 +46,15 @@ void main() {
       final s = await SettingsStore.loadSession();
       expect(s, isEmpty);
     });
+
+    test('autoFollowEnabled default is true and persists', () async {
+      SharedPreferences.setMockInitialValues({});
+      final defaults = await SettingsStore.load();
+      expect(defaults['autoFollowEnabled'], isTrue);
+
+      await SettingsStore.save({'autoFollowEnabled': false});
+      final updated = await SettingsStore.load();
+      expect(updated['autoFollowEnabled'], isFalse);
+    });
   });
 }
