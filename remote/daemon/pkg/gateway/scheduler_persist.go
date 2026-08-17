@@ -21,9 +21,16 @@ var scheduledTasksPath = func() string {
 // upgrade = écriture atomique + fsync si les tâches deviennent fréquentes.
 func (s *Server) SaveScheduledTasks() error {
 	s.mu.Lock()
-	tasks := make([]*ScheduledTask, 0, len(s.scheduledTasks))
+	tasks := make([]ScheduledTask, 0, len(s.scheduledTasks))
 	for _, t := range s.scheduledTasks {
-		tasks = append(tasks, t)
+		if t != nil {
+			taskCopy := *t
+			if len(t.Events) > 0 {
+				taskCopy.Events = make([]ScheduledTaskEvent, len(t.Events))
+				copy(taskCopy.Events, t.Events)
+			}
+			tasks = append(tasks, taskCopy)
+		}
 	}
 	s.mu.Unlock()
 

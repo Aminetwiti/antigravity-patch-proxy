@@ -231,8 +231,10 @@ type Server struct {
 	// autoAcceptMode : "readonly" (défaut) ou "full" (auto-approuve tout sauf questions interactives).
 	autoAcceptMode string
 	// modelsCache : cache TTL 30s des modèles disponibles (GetAvailableModels).
-	modelsCache []connectrpc.ModelInfo
+	modelsCache    []connectrpc.ModelInfo
 	modelsCachedAt time.Time
+	// sessionsCacheTTL : durée de validité du cache de sessions (défaut 5s).
+	sessionsCacheTTL time.Duration
 	// uploadChunks : uploadId -> assemblage de fichier par morceaux (G2).
 	uploadChunks map[string]*uploadChunkState
 	// adbService : client ADB sécurisé sans shell injection (G3).
@@ -397,13 +399,24 @@ func (s *Server) cachedSessions() ([]byte, bool) {
 	return s.cachedSessionsLocked()
 }
 
+// SetSessionsCacheTTL permet de configurer le TTL du cache de sessions (ex: tests rapides).
+func (s *Server) SetSessionsCacheTTL(ttl time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessionsCacheTTL = ttl
+}
+
 func (s *Server) cachedSessionsLocked() ([]byte, bool) {
-	// Jetbox chaud (stream actif) : la carte est la source de v├®rit├® temps
-	// r├®el ÔÇö toujours servie, jamais de GetAllCascades (~9,5 s).
+	// Jetbox chaud (stream actif) : la carte est la source de vérité temps
+	// réel — toujours servie, jamais de GetAllCascades (~9,5 s).
 	if s.jetboxSummaries != nil {
 		return s.jetboxSessionsLocked(), true
 	}
-	if len(s.sessionsCache) > 0 && time.Since(s.sessionsCachedAt) < sessionsCacheTTL {
+	ttl := s.sessionsCacheTTL
+	if ttl <= 0 {
+		ttl = sessionsCacheTTL
+	}
+	if len(s.sessionsCache) > 0 && time.Since(s.sessionsCachedAt) < ttl {
 		return s.sessionsCache, true
 	}
 	return nil, false

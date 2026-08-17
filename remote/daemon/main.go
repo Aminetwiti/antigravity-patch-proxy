@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -130,10 +132,11 @@ func main() {
 	sched := gateway.NewScheduler(server)
 	sched.Start()
 
-	http.HandleFunc("/ws", server.HandleWebSocket)
-	http.HandleFunc("/pair", pairingMgr.HTTPHandler())
-	http.HandleFunc("/health", server.HTTPHandler)
-	http.HandleFunc("/health/diagnostic", func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", server.HandleWebSocket)
+	mux.HandleFunc("/pair", pairingMgr.HTTPHandler())
+	mux.HandleFunc("/health", server.HTTPHandler)
+	mux.HandleFunc("/health/diagnostic", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		hbErr := ""
 		if _, err := rpcClient.Heartbeat(); err != nil {
@@ -145,23 +148,44 @@ func main() {
 		}
 		w.WriteHeader(http.StatusOK)
 		port, _ := rpcClient.Endpoint()
-		fmt.Fprintf(w, `{"status":"%s","rpcPort":%d,"pid":%d,"heartbeatOk":%t,"tunnelProvider":"%s","publicUrl":"%s","error":"%s"}`, status, port, info.PID, hbErr == "", tunnelMgr.Provider, tunnelMgr.PublicURL, hbErr)
+		provider := tunnelMgr.GetProvider()
+		pubURL := tunnelMgr.GetPublicURL()
+		data, _ := json.Marshal(map[string]interface{}{
+			"status":         status,
+			"rpcPort":        port,
+			"pid":            info.PID,
+			"heartbeatOk":    hbErr == "",
+			"tunnelProvider": provider,
+			"publicUrl":      pubURL,
+			"error":          hbErr,
+		})
+		w.Write(data)
 	})
 
-	// Arr├¬t propre sur Ctrl+C / SIGTERM : ferme le tunnel (cloudflared/ssh) et le beacon.
+	srv := &http.Server{
+		Addr:              net.JoinHostPort(host, strconv.Itoa(listenPort)),
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
+	// Arrêt propre sur Ctrl+C / SIGTERM : ferme le tunnel, le beacon, le watchdog, le scheduler et le serveur HTTP.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go func() {
 		<-ctx.Done()
-		log.Println("­ƒøæ Arr├¬t du daemon, fermeture du tunnelÔÇª")
+		log.Println("🛑 Arrêt du daemon, fermeture du tunnel et des services…")
 		tunnelMgr.Stop()
 		beacon.Stop()
 		watchdog.Stop()
 		sched.Stop()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
 	}()
 
-	fmt.Printf("­ƒîÉ Daemon listening on ws://%s:%d/ws\n", host, listenPort)
-	if err := http.ListenAndServe(net.JoinHostPort(host, strconv.Itoa(listenPort)), nil); err != nil {
-		log.Fatalf("ÔØî Server error: %v", err)
+	fmt.Printf("🌐 Daemon listening on ws://%s:%d/ws\n", host, listenPort)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("❌ Server error: %v", err)
 	}
 }

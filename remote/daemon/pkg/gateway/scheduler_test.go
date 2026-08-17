@@ -231,3 +231,40 @@ func TestTriggerScheduledTaskEndToEnd(t *testing.T) {
 		t.Fatalf("events = %+v, want 1 done event", task.Events)
 	}
 }
+
+func TestScheduler_TickDeduplicatesSameMinute(t *testing.T) {
+	backend := &fakeRPCClient{}
+	_, server := newTestServerWithGW(backend)
+	sc := NewScheduler(server)
+
+	server.mu.Lock()
+	server.scheduledTasks["t1"] = &ScheduledTask{
+		ID:             "t1",
+		CronExpression: "* * * * *",
+		IsEnabled:      true,
+	}
+	server.mu.Unlock()
+
+	t0 := time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)
+	t30 := time.Date(2026, 8, 17, 10, 0, 30, 0, time.UTC)
+
+	sc.tick(t0)
+	server.mu.Lock()
+	task := server.scheduledTasks["t1"]
+	firstRunMinute := task.LastRunMinute
+	server.mu.Unlock()
+
+	if firstRunMinute != t0.Unix()/60 {
+		t.Fatalf("LastRunMinute = %d, want %d", firstRunMinute, t0.Unix()/60)
+	}
+
+	// 2e tick à T+30s dans la même minute -> ne doit pas redéclencher
+	sc.tick(t30)
+	server.mu.Lock()
+	secondRunMinute := server.scheduledTasks["t1"].LastRunMinute
+	server.mu.Unlock()
+
+	if secondRunMinute != firstRunMinute {
+		t.Fatalf("LastRunMinute a changé à T+30s: %d != %d", secondRunMinute, firstRunMinute)
+	}
+}

@@ -317,9 +317,8 @@ func extractCascadeID(raw []byte) string {
 	return ""
 }
 
-// connectrpcDefaultModelEnum est le repli du modÃ¨le par dÃ©faut quand le
-// scheduler exÃ©cute une tÃ¢che sans sÃ©lection explicite de modÃ¨le.
+// connectrpcDefaultModelEnum est le repli du modèle par défaut quand le
+// scheduler exécute une tâche sans sélection explicite de modèle.
 func connectrpcDefaultModelEnum() uint64 {
-	// DÃ©fini dans pkg/connectrpc (DefaultModelEnum) â€” importÃ© indirectement.
-	return 1
+	return connectrpc.DefaultModelEnum
 }

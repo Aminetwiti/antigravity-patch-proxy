@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"log"
+	"sync"
 	"time"
 
 	"github.com/antigravity/remote-daemon/pkg/connectrpc"
@@ -11,6 +12,7 @@ type Watchdog struct {
 	Client   *connectrpc.Client
 	Interval time.Duration
 	stopChan chan struct{}
+	stopOnce sync.Once
 	discover func() (*LocalHarnessInfo, error)
 }
 
@@ -51,5 +53,7 @@ func (w *Watchdog) Start() {
 }
 
 func (w *Watchdog) Stop() {
-	close(w.stopChan)
+	w.stopOnce.Do(func() {
+		close(w.stopChan)
+	})
 }

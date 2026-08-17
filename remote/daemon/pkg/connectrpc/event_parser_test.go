@@ -29,6 +29,14 @@ func TestParseFrameEvents(t *testing.T) {
 	if len(textEvents) == 0 || textEvents[0].Kind != EventKindText {
 		t.Errorf("Attendu Kind=%s pour texte normal, reçu=%v", EventKindText, textEvents)
 	}
+
+	// Test explanatory text mentioning tool names
+	explText := "Pour analyser le code, vous pouvez utiliser run_command ou read_file."
+	rawExpl := append([]byte{0x0a, byte(len(explText))}, []byte(explText)...)
+	explEvents := ParseFrameEvents(rawExpl, "cascade-123")
+	if len(explEvents) == 0 || explEvents[0].Kind != EventKindText {
+		t.Errorf("Attendu Kind=%s pour texte explicatif, reçu=%v", EventKindText, explEvents)
+	}
 }
 
 func TestParseFrameStructuredInteraction(t *testing.T) {

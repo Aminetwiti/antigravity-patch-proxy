@@ -221,6 +221,18 @@ func (m *Manager) printBanner(publicURL string) {
 	PrintQRCode(wsURL)
 }
 
+func (m *Manager) GetPublicURL() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.PublicURL
+}
+
+func (m *Manager) GetProvider() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.Provider
+}
+
 func (m *Manager) Stop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -84,6 +84,7 @@ func TestPairingManager_AntiBruteForceLockout(t *testing.T) {
 
 func TestPairingManager_HTTPHandler(t *testing.T) {
 	pm := NewPairingManager()
+	pin, _ := pm.CurrentPIN()
 	handler := pm.HTTPHandler()
 
 	// 1. GET /pair -> interdit (sécurité anti-fuite de PIN)

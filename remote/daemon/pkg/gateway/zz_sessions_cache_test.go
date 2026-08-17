@@ -96,8 +96,9 @@ func TestListSessionsSingleFlight(t *testing.T) {
 // appel après expiration du TTL refait un vrai appel.
 func TestListSessionsCacheTTL(t *testing.T) {
 	backend := &countingCascadesClient{}
-	srv := newTestServer(backend)
+	srv, gw := newTestServerWithGW(backend)
 	defer srv.Close()
+	gw.SetSessionsCacheTTL(50 * time.Millisecond)
 
 	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
 	defer client.conn.Close()
@@ -122,8 +123,8 @@ func TestListSessionsCacheTTL(t *testing.T) {
 		t.Fatalf("cache: attendu 1 appel backend après 2e appel, reçu %d", backend.callCount())
 	}
 
-	// 3e appel après expiration du TTL : nouveau vrai appel backend.
-	time.Sleep(sessionsCacheTTL + 100*time.Millisecond)
+	// 3e appel après expiration du TTL court : nouveau vrai appel backend.
+	time.Sleep(70 * time.Millisecond)
 	client.send(t, map[string]string{"type": "list_sessions", "requestId": "a3"})
 	resp = client.recv(t)
 	if resp["requestId"] != "a3" || resp["type"] != "response" {
