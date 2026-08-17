@@ -1,6 +1,8 @@
 package gateway
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -25,22 +27,56 @@ func ExportSessionJSONL(cascadeID string) (string, error) {
 	if src == "" {
 		return "", fmt.Errorf("aucun transcript trouvé pour %s", cascadeID)
 	}
-	raw, err := os.ReadFile(src)
+	f, err := os.Open(src)
 	if err != nil {
 		return "", err
 	}
-	lines, err := convertTranscriptToJSONL(raw)
-	if err != nil {
-		return "", err
-	}
+	defer f.Close()
+
 	if err := os.MkdirAll(jsonlExportDir, 0755); err != nil {
 		return "", err
 	}
-	out := filepath.Join(jsonlExportDir, cascadeID+".jsonl")
-	if err := os.WriteFile(out, []byte(lines), 0644); err != nil {
+	outPath := filepath.Join(jsonlExportDir, cascadeID+".jsonl")
+	outFile, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
 		return "", err
 	}
-	return out, nil
+	defer outFile.Close()
+
+	writer := bufio.NewWriter(outFile)
+	defer writer.Flush()
+
+	scanner := bufio.NewScanner(f)
+	hBuf := AcquireHistoryBuffer()
+	defer ReleaseHistoryBuffer(hBuf)
+	scanner.Buffer(*hBuf, len(*hBuf))
+
+	index := 0
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var step map[string]interface{}
+		if err := json.Unmarshal(line, &step); err != nil {
+			continue
+		}
+		entry := map[string]interface{}{"index": index, "step": step}
+		b, err := json.Marshal(entry)
+		if err != nil {
+			continue
+		}
+		writer.Write(b)
+		writer.WriteByte('\n')
+		index++
+	}
+
+	done := map[string]interface{}{"type": "done", "session_id": "", "exit_code": 0}
+	b, _ := json.Marshal(done)
+	writer.Write(b)
+	writer.WriteByte('\n')
+
+	return outPath, nil
 }
 
 // convertTranscriptToJSONL transforme les lignes JSON brutes du transcript en
@@ -48,14 +84,19 @@ func ExportSessionJSONL(cascadeID string) (string, error) {
 // final {"type":"done"} (contrat du format Claude Code).
 func convertTranscriptToJSONL(raw []byte) (string, error) {
 	var out strings.Builder
+	scanner := bufio.NewScanner(bytes.NewReader(raw))
+	hBuf := AcquireHistoryBuffer()
+	defer ReleaseHistoryBuffer(hBuf)
+	scanner.Buffer(*hBuf, len(*hBuf))
+
 	index := 0
-	for _, line := range strings.Split(string(raw), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
 			continue
 		}
 		var step map[string]interface{}
-		if err := json.Unmarshal([]byte(line), &step); err != nil {
+		if err := json.Unmarshal(line, &step); err != nil {
 			continue // ligne invalide — on saute, on ne casse pas l'export
 		}
 		entry := map[string]interface{}{"index": index, "step": step}

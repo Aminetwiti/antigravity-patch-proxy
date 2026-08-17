@@ -14,6 +14,8 @@
 // Type definitions for the preload bridge
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { getRendererDefaultUrl } from './providers-config';
+
 // (See globals.d.ts for the window.ag interface)
 
 // (ErrorAction type is declared in error-decoder.ts)
@@ -3927,11 +3929,7 @@ if (pmFormBack2) pmFormBack2.addEventListener('click', () => showPmView('list'))
 
 pmFormType.addEventListener('change', () => {
   const t = pmFormType.value;
-  if (!pmFormUrl.value || pmFormUrl.value.includes('api.openai.com') || pmFormUrl.value.includes('api.anthropic.com')) {
-    if (t === 'openai') pmFormUrl.value = 'https://api.openai.com/v1';
-    else if (t === 'anthropic') pmFormUrl.value = 'https://api.anthropic.com/v1';
-    else if (t === 'ollama') pmFormUrl.value = 'http://localhost:11434';
-  }
+  pmFormUrl.value = getRendererDefaultUrl(t);
 });
 
 pmFormSave.addEventListener('click', async () => {

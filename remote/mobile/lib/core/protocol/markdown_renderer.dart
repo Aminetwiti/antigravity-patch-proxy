@@ -63,8 +63,20 @@ class MarkdownRenderer {
   static final _toolArgRe = RegExp(r'"(command|query|pattern|path|file_path)"\s*:\s*"([^"]+)"');
   static final _whitespaceRe = RegExp(r'\s+');
 
+  // Cache mémoire des blocs Markdown pour éliminer le re-parsing lors des builds 120 FPS
+  static final _blocksCache = <String, List<MarkdownBlock>>{};
+  static const int _maxCacheEntries = 512;
+
+  /// Vide le cache des blocs (utile lors des réinitialisations de session).
+  static void clearCache() {
+    _blocksCache.clear();
+  }
+
   /// Splits raw markdown text into display blocks.
   static List<MarkdownBlock> blocksOf(String text) {
+    final cached = _blocksCache[text];
+    if (cached != null) return cached;
+
     final lines = text.replaceAll('\r\n', '\n').split('\n');
     final blocks = <MarkdownBlock>[];
     final buffer = <String>[];
@@ -128,6 +140,11 @@ class MarkdownRenderer {
       buffer.clear();
     }
     flushParagraph();
+
+    if (_blocksCache.length >= _maxCacheEntries) {
+      _blocksCache.remove(_blocksCache.keys.first);
+    }
+    _blocksCache[text] = List<MarkdownBlock>.unmodifiable(blocks);
     return blocks;
   }
 

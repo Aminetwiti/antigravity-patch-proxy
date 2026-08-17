@@ -32,7 +32,8 @@ import (
 )
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: checkOrigin,
+	CheckOrigin:       checkOrigin,
+	EnableCompression: true,
 }
 
 // logJSON : logger structur├® du gateway (JSON, niveau configurable).
@@ -2630,6 +2631,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		logJSON.Error("upgrade_error", "err", err)
 		return
 	}
+	conn.EnableWriteCompression(true)
 	// Scope projet de cette connexion : stock├® AVANT la boucle de lecture.
 	if hasSession {
 		s.mu.Lock()
@@ -4621,17 +4623,36 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 	case "get_active_session", "session.get_active":
 		// Cache Jetbox chaud : O(1), pas de scan disque.
 		s.mu.Lock()
-		jetboxHot := s.jetboxSummaries != nil
+		jetboxHot := len(s.jetboxSummaries) > 0
 		focusedID := s.focusedCascadeID
-		focusSum := s.jetboxSummaries[focusedID]
+		focusSum, hasFocus := s.jetboxSummaries[focusedID]
+		var latestSum *connectrpc.JetboxSummary
+		if jetboxHot && (!hasFocus || focusSum.CascadeID == "") {
+			for _, sum := range s.jetboxSummaries {
+				if sum.Archived || sum.Killed || sum.Source == 16 {
+					continue
+				}
+				if latestSum == nil || sum.UpdatedAt.After(latestSum.UpdatedAt) {
+					sCopy := sum
+					latestSum = &sCopy
+				}
+			}
+		}
 		s.mu.Unlock()
 		var session map[string]interface{}
-		if jetboxHot && focusedID != "" {
+		if jetboxHot && hasFocus && focusSum.CascadeID != "" {
 			session = map[string]interface{}{
 				"cascadeId":     focusSum.CascadeID,
 				"title":         focusSum.Title,
 				"workspacePath": focusSum.Workspace,
 				"status":        focusSum.Status,
+			}
+		} else if latestSum != nil {
+			session = map[string]interface{}{
+				"cascadeId":     latestSum.CascadeID,
+				"title":         latestSum.Title,
+				"workspacePath": latestSum.Workspace,
+				"status":        latestSum.Status,
 			}
 		} else {
 			var errActive error

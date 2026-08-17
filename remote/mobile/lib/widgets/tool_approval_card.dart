@@ -109,8 +109,9 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
   Widget build(BuildContext context) {
     final request = widget.request;
     final scheme = Theme.of(context).colorScheme;
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
+    return RepaintBoundary(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
       curve: Curves.easeOutExpo,
       margin: const EdgeInsets.symmetric(vertical: 10),
       padding: const EdgeInsets.all(14),
@@ -417,6 +418,7 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
           ),
         ],
       ),
+    ),
     );
   }
 }

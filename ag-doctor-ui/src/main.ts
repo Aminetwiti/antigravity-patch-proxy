@@ -11,35 +11,27 @@
  */
 import { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, Notification, type NativeImage } from 'electron';
 import path from 'path';
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, ChildProcess, execFile, execSync } from 'child_process';
 import fs from 'fs';
 import { getProxyManager } from './proxy-manager';
+import { DOCTOR_IPC_CHANNELS } from './ipc/channels';
+import { EnvironmentConfig } from './config/environment';
+import {
+  WORKER_CMD_TIMEOUT_MS,
+  PROXY_STATS_MAX,
+  PROXY_ERROR_HISTORY_MAX,
+  TOOLTIP_TITLE_MAX,
+  TOOLTIP_MSG_MAX,
+  MAX_CLI_WORKERS,
+  NOTIFY_DEDUP_MS,
+  DEFAULT_STUB_PORT,
+} from './constants';
+import { detectAntigravityInstallations } from './services/installationDetector';
 
 const isDev = !app.isPackaged;
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 const activeStreams = new Map<string, ChildProcess>();
-
-// ─────────────────────────────────────────────────────────────────────────────
-// F-28 FIX — Single-instance lock: prevents two ag-doctor-ui windows from
-// running simultaneously (which causes CliWorkerPool race conditions).
-// ─────────────────────────────────────────────────────────────────────────────
-// TEMPORARILY DISABLED FOR DEVELOPMENT
-/*
-const gotLock = app.requestSingleInstanceLock();
-if (!gotLock) {
-  // Another instance is already running — focus it and quit this one.
-  app.quit();
-} else {
-  app.on('second-instance', () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.focus();
-    }
-  });
-}
-*/
 
 // Disable GPU sandbox in packaged builds to avoid startup crashes on some Windows setups
 app.commandLine.appendSwitch('disable-gpu');
@@ -66,8 +58,6 @@ function getAssetsPath(): string {
 function getCliPath(): string {
   if (_cliPath === null) {
     if (app.isPackaged) {
-      // In a packaged portable build, the CLI is bundled in extraResources
-      // at <resources>/ag-doctor/bin/ag-doctor.js
       _cliPath = path.join(process.resourcesPath, 'ag-doctor', 'bin', 'ag-doctor.js');
     } else {
       _cliPath = path.join(__dirname, '..', '..', 'ag-doctor', 'bin', 'ag-doctor.js');
@@ -108,7 +98,6 @@ function getTrayIcon(status: 'ok' | 'warn' | 'err'): NativeImage {
   return img;
 }
 
-// `info` is static for the session lifetime (platform/versions/CLI path don't change)
 const infoCache = {
   platform: process.platform,
   arch: process.arch,
@@ -127,7 +116,6 @@ function getInfoPayload() {
   return infoCache;
 }
 
-// `config` is read from disk every call. Cache it; invalidate on theme change.
 let configCache: Record<string, unknown> | null = null;
 function getConfigPayload(): Record<string, unknown> {
   if (configCache) return configCache;
@@ -148,17 +136,8 @@ function invalidateConfigCache(): void {
 // Tray + proxy-error bridge
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Latest proxy error (most recent). Exposed to the tray menu and used to
-// build the dynamic tooltip. Capped to a few KB so a noisy provider can't
-// bloat the tooltip.
 let lastProxyError: { title: string; provider: string; message: string; at: number; traceId: string } | null = null;
-const TOOLTIP_TITLE_MAX = 60;
-const TOOLTIP_MSG_MAX = 80;
 
-// Ring buffer of the last N proxy errors. Lets the dashboard re-open an
-// older modal without having to re-trigger the upstream failure. Capacity
-// is small (50) so the in-memory footprint stays under a few KB.
-const PROXY_ERROR_HISTORY_MAX = 50;
 const proxyErrorHistory: Array<{
   traceId: string;
   provider: string;
@@ -179,10 +158,6 @@ function pushProxyErrorHistory(p: typeof proxyErrorHistory[number]): void {
   }
 }
 
-// Read the user preference for OS notifications. Default = true. The user
-// can flip this off from the Settings UI; the renderer persists it via
-// `ag:config:set-notify`. Returns false silently if the config file is
-// unreadable — that's safer than crashing the listener.
 function isNotifyEnabled(): boolean {
   try {
     const cfg = getConfigPayload();
@@ -194,16 +169,9 @@ function isNotifyEnabled(): boolean {
   return true;
 }
 
-// De-dup: the same proxy error payload (same traceId) firing repeatedly
-// shouldn't spam the OS with a notification each time. We remember the last
-// traceId+at combo we notified for. Reset on app boot.
 let lastNotifiedTraceId: string | null = null;
 let lastNotifiedAt = 0;
-const NOTIFY_DEDUP_MS = 2000; // within 2 s, same traceId is collapsed
 
-// Emit a native OS notification for an `err`-severity proxy error. Click
-// brings the dashboard forward and replays the cached payload into the
-// modal so the user sees the details without re-hitting the proxy.
 function notifyProxyError(p: {
   traceId: string;
   provider: string;
@@ -211,10 +179,7 @@ function notifyProxyError(p: {
   message: string;
 }): void {
   if (!Notification.isSupported()) return;
-  // Skip when the dashboard is already visible — the user already saw the
-  // modal. This keeps the tray+modal pair quiet when the window is open.
   if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && mainWindow.isFocused()) return;
-  // De-dup so a flapping provider doesn't blow up the notification center.
   if (p.traceId === lastNotifiedTraceId && Date.now() - lastNotifiedAt < NOTIFY_DEDUP_MS) return;
   lastNotifiedTraceId = p.traceId;
   lastNotifiedAt = Date.now();
@@ -229,7 +194,7 @@ function notifyProxyError(p: {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();
       mainWindow.focus();
-      mainWindow.webContents.send('proxy:error', {
+      mainWindow.webContents.send(DOCTOR_IPC_CHANNELS.PROXY_ERROR, {
         traceId: p.traceId || 'notify',
         provider: p.provider,
         errorType: 'notification-replay',
@@ -246,20 +211,14 @@ function notifyProxyError(p: {
 function updateTray(status: 'ok' | 'warn' | 'err'): void {
   if (!tray) return;
   tray.setImage(getTrayIcon(status));
-  // When the proxy has surfaced a real error, override the tooltip with the
-  // provider + title so the user can see why the tray turned red even when
-  // the dashboard is hidden.
   const tooltip = lastProxyError && status !== 'ok'
     ? `ag-doctor · ${status.toUpperCase()} · ${lastProxyError.provider}: ${lastProxyError.title.slice(0, TOOLTIP_TITLE_MAX)}`
     : `ag-doctor · ${status.toUpperCase()}`;
   tray.setToolTip(tooltip);
-  // Rebuild the menu so the "Latest provider error" entry stays in sync.
   tray.setContextMenu(buildTrayMenu());
 }
 
 function buildTrayMenu(): Menu {
-  // Dynamic "latest provider error" sub-entry. Always present so users have a
-  // visible "what just happened" affordance; disabled when no error is known.
   const items: Electron.MenuItemConstructorOptions[] = [
     {
       label: 'Open dashboard',
@@ -278,7 +237,7 @@ function buildTrayMenu(): Menu {
         if (mainWindow) {
           mainWindow.show();
           mainWindow.focus();
-          mainWindow.webContents.send('ag:run-doctor');
+          mainWindow.webContents.send(DOCTOR_IPC_CHANNELS.RUN_DOCTOR);
         }
       },
     },
@@ -296,8 +255,7 @@ function buildTrayMenu(): Menu {
         if (mainWindow) {
           mainWindow.show();
           mainWindow.focus();
-          // Surface the latest error to the dashboard so the modal renders.
-          mainWindow.webContents.send('proxy:error', {
+          mainWindow.webContents.send(DOCTOR_IPC_CHANNELS.PROXY_ERROR, {
             traceId: 'tray',
             provider: lastProxyError!.provider,
             errorType: 'tray-replay',
@@ -364,18 +322,12 @@ function createWindow(): void {
       nodeIntegration: false,
       sandbox: false,
       spellcheck: false,
-      // PERF: allow Chromium to throttle timers/rAF in backgrounded windows.
-      // Disabling this kept the proxy poller (1.5 s) and the uptime ticker
-      // (1 s) running at full cadence when the user minimized the window,
-      // burning ~10-30 % idle CPU on Windows.
       backgroundThrottling: true,
     },
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
-  // PERF: cancel the unconditional 2 s fallback when ready-to-show fires so
-  // we don't run a no-op show() check on every successful launch.
   const showFallback = setTimeout(() => {
     if (mainWindow && !mainWindow.isVisible()) {
       mainWindow.show();
@@ -394,7 +346,6 @@ function createWindow(): void {
     console.error(`[main] render-process-gone: ${JSON.stringify(details)}`);
   });
 
-  // Only forward console messages in dev mode (saves IPC overhead in prod)
   if (isDev) {
     mainWindow.webContents.on('console-message', (_e, _level, message) => {
       console.log(`[renderer] ${message}`);
@@ -419,9 +370,7 @@ function createWindow(): void {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CLI Worker Pool — keeps long-lived Node.js processes that handle commands
-// via JSON-over-stdin. Avoids the 150-300ms cost of spawning a new process
-// for every IPC call.
+// CLI Worker Pool
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface CliWorker {
@@ -431,34 +380,20 @@ interface CliWorker {
     resolve: (val: { code: number; stdout: string; stderr: string }) => void;
     reject: (err: Error) => void;
   } | null;
-  buffer: string;      // stdout buffer (JSON protocol)
-  errBuffer: string;   // stderr accumulator (diagnostics only)
+  buffer: string;
+  errBuffer: string;
 }
-
-// IPC command timeout — renderer-side should also have a fallback, but this
-// ensures no promise leaks even if the renderer is destroyed.
-//
-// 60s instead of the old 15s for two reasons:
-//   1. `ag-doctor repair --yes` orchestrates a binary patch, process kill,
-//      proxy start (5s + 3s polling) and CA generation — easily 10-15s on
-//      a healthy machine and much longer on slow disks.
-//   2. `ag-doctor mitm install` / `mitm proxy-on` may block on a UAC
-//      consent dialog waiting for the user to click "Yes".
-// Fast commands like `mitm status` and `patch status` are bounded by
-// renderer-side `withTimeout(..., 12_000)` wrappers, so the larger worker
-// timeout does not delay their perceived failure.
-const WORKER_CMD_TIMEOUT_MS = 60_000;
 
 class CliWorkerPool {
   private workers: CliWorker[] = [];
-  private readonly maxWorkers = 3;
+  private readonly maxWorkers = MAX_CLI_WORKERS;
   private readonly cliPath: string;
   private nextId = 1;
   private readonly waitQueue: Array<{
     args: string[];
     resolve: (val: { code: number; stdout: string; stderr: string }) => void;
     reject: (err: Error) => void;
-    timer: NodeJS.Timeout; // F-14: every queued command has a timeout
+    timer: NodeJS.Timeout;
   }> = [];
 
   constructor(cliPath: string) {
@@ -474,10 +409,8 @@ class CliWorkerPool {
     });
     const worker: CliWorker = { proc, busy: false, pending: null, buffer: '', errBuffer: '' };
     proc.stdout?.on('data', (chunk: Buffer) => this.handleData(worker, chunk));
-    // F-03/F-15: stderr goes to errBuffer only — never mixed into JSON protocol
     proc.stderr?.on('data', (chunk: Buffer) => {
       worker.errBuffer += chunk.toString();
-      // Surface non-empty stderr in development so silent crashes are visible
       if (isDev && worker.errBuffer.trim()) {
         console.warn(`[pool:worker-${worker.proc.pid}] stderr:`, worker.errBuffer.slice(-500));
       }
@@ -490,7 +423,6 @@ class CliWorkerPool {
 
   private handleData(worker: CliWorker, chunk: Buffer): void {
     worker.buffer += chunk.toString();
-    // Newline-delimited JSON protocol
     let idx: number;
     while ((idx = worker.buffer.indexOf('\n')) >= 0) {
       const line = worker.buffer.slice(0, idx);
@@ -523,9 +455,6 @@ class CliWorkerPool {
     const idx = this.workers.indexOf(worker);
     if (idx >= 0) this.workers.splice(idx, 1);
 
-    // F-14 FIX: if there are queued commands but no live workers left and we
-    // can't spawn more (e.g. cliPath gone), drain the queue with rejections
-    // so no promise hangs indefinitely.
     if (this.waitQueue.length > 0 && this.workers.length === 0 && !fs.existsSync(this.cliPath)) {
       const err = new Error('CLI worker pool exhausted — no workers available');
       for (const item of this.waitQueue) {
@@ -550,7 +479,6 @@ class CliWorkerPool {
     if (this.waitQueue.length === 0) return;
     const idle = this.workers.find((w) => !w.busy);
     if (!idle) {
-      // F-14 FIX: try to spawn a new worker for the queued item
       if (this.workers.length < this.maxWorkers) {
         const w = this.spawnWorker();
         if (w) {
@@ -572,14 +500,10 @@ class CliWorkerPool {
   ): Promise<{ code: number; stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
       worker.busy = true;
-
-      // F-14 FIX: per-command timeout — if worker stops responding (hung/zombie)
-      // the promise still resolves within WORKER_CMD_TIMEOUT_MS milliseconds.
       const timer = setTimeout(() => {
         if (worker.pending) {
           worker.pending = null;
           worker.busy = false;
-          // Kill the stuck worker so handleClose can respawn
           try { worker.proc.kill(); } catch { /* ignore */ }
           reject(new Error(`CLI worker timed out after ${WORKER_CMD_TIMEOUT_MS / 1000}s running: ${args.join(' ')}`));
         }
@@ -605,17 +529,14 @@ class CliWorkerPool {
     if (!fs.existsSync(this.cliPath)) {
       return { code: -1, stdout: '', stderr: `CLI not found: ${this.cliPath}` };
     }
-    // Try to find an idle worker
     const idle = this.workers.find((w) => !w.busy);
     if (idle) return this.runOn(idle, args);
 
-    // Spawn a new worker if under cap
     if (this.workers.length < this.maxWorkers) {
       const w = this.spawnWorker();
       if (w) return this.runOn(w, args);
     }
 
-    // F-14 FIX: queue the command with a hard timeout so it never hangs forever
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         const idx = this.waitQueue.findIndex((q) => q.timer === timer);
@@ -627,7 +548,6 @@ class CliWorkerPool {
   }
 
   shutdown(): void {
-    // F-14 FIX: drain queue with rejections before killing workers
     const shutdownErr = new Error('Worker pool is shutting down');
     for (const item of this.waitQueue) {
       clearTimeout(item.timer);
@@ -648,425 +568,400 @@ function getCliPool(): CliWorkerPool {
   return cliPool;
 }
 
-// ──────────────────────────────────────────────���──────────────────────────────
-// IPC handlers
+// ─────────────────────────────────────────────────────────────────────────────
+// IPC Handlers
 // ─────────────────────────────────────────────────────────────────────────────
 
+function getCustomModelsPath(): string {
+  return path.join(app.getPath('home'), '.gemini', 'antigravity', 'custom_models.json');
+}
 
-  function getCustomModelsPath(): string {
-    return path.join(app.getPath('home'), '.gemini', 'antigravity', 'custom_models.json');
+// Real-time File Watcher
+let watcherDebounce: NodeJS.Timeout | null = null;
+try {
+  const customModelsPath = getCustomModelsPath();
+  const customModelsDir = path.dirname(customModelsPath);
+  if (!fs.existsSync(customModelsDir)) {
+    fs.mkdirSync(customModelsDir, { recursive: true });
   }
+  fs.watch(customModelsDir, (_eventType, filename) => {
+    if (filename && filename.includes('custom_models.json')) {
+      if (watcherDebounce) clearTimeout(watcherDebounce);
+      watcherDebounce = setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send(DOCTOR_IPC_CHANNELS.PROVIDERS_CHANGED);
+        }
+      }, 300);
+    }
+  });
+} catch { /* ignore watcher errors */ }
 
-  // Real-time File Watcher: Synchronize Provider changes between Antigravity and Doctor UI
-  let watcherDebounce: NodeJS.Timeout | null = null;
+// Secure External Link & Network Handlers
+ipcMain.handle(DOCTOR_IPC_CHANNELS.NETWORK_GET_LOCAL_IP, async () => {
+  const os = require('os');
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]!) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return EnvironmentConfig.bindHost;
+});
+
+ipcMain.handle(DOCTOR_IPC_CHANNELS.NETWORK_GENERATE_QR, async (_event, text: string) => {
+  const qrcode = require('qrcode');
   try {
-    const customModelsPath = getCustomModelsPath();
-    const customModelsDir = path.dirname(customModelsPath);
-    if (!fs.existsSync(customModelsDir)) {
-      fs.mkdirSync(customModelsDir, { recursive: true });
-    }
-    fs.watch(customModelsDir, (_eventType, filename) => {
-      if (filename && filename.includes('custom_models.json')) {
-        if (watcherDebounce) clearTimeout(watcherDebounce);
-        watcherDebounce = setTimeout(() => {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('ag:providers:changed');
-          }
-        }, 300);
-      }
-    });
-  } catch { /* ignore watcher errors */ }
+    const dataUrl = await qrcode.toDataURL(text, { width: 256, margin: 2, color: { dark: '#000000FF', light: '#FFFFFFFF' } });
+    return dataUrl;
+  } catch (e: any) {
+    throw new Error('Failed to generate QR code: ' + e.message);
+  }
+});
 
-  // Secure External Link IPC Handler
-  ipcMain.handle('ag:network:getLocalIp', async () => {
-    const os = require('os');
-    const interfaces = os.networkInterfaces();
-    for (const name of Object.keys(interfaces)) {
-      for (const iface of interfaces[name]!) {
-        // Skip over internal (i.e. 127.0.0.1) and non-ipv4 addresses
-        if (iface.family === 'IPv4' && !iface.internal) {
-          return iface.address;
-        }
-      }
-    }
-    return '127.0.0.1';
-  });
+let daemonProcess: any = null;
 
-  ipcMain.handle('ag:network:generateQr', async (_event, text: string) => {
-    const qrcode = require('qrcode');
-    try {
-        const dataUrl = await qrcode.toDataURL(text, { width: 256, margin: 2, color: { dark: '#000000FF', light: '#FFFFFFFF' } });
-        return dataUrl;
-    } catch (e: any) {
-        throw new Error('Failed to generate QR code: ' + e.message);
-    }
-  });
+function killOrphanDaemonProcesses(): void {
+  try {
+    execSync('taskkill /F /IM daemon.exe /T 2>nul & taskkill /F /IM cloudflared.exe /T 2>nul', { stdio: 'ignore', windowsHide: true });
+  } catch { /* ignore */ }
+}
 
-  let daemonProcess: any = null;
-
-  // Windows : netstat PID de l'ancien daemon + taskkill des orphelins
-  // (daemon.exe ET cloudflared.exe) AVANT tout lancement. Un ancien
-  // daemon.exe resté accroché sur le port garde le port 8090 occupé :
-  // le nouveau daemon ne peut pas bind → le mobile boucle connect/déconnect
-  // (cause racine confirmée dans les logs de session).
-  function killOrphanDaemonProcesses(): void {
-    try {
-      const { execSync } = require('child_process') as typeof import('child_process');
-      execSync('taskkill /F /IM daemon.exe /T 2>nul & taskkill /F /IM cloudflared.exe /T 2>nul', { stdio: 'ignore', windowsHide: true });
-    } catch { /* aucun processus à tuer — pas une erreur */ }
+ipcMain.handle(DOCTOR_IPC_CHANNELS.NETWORK_START_DAEMON, async (event, options: { port: number; tunnel: string; token: string }) => {
+  if (daemonProcess) {
+    daemonProcess.kill();
+    daemonProcess = null;
   }
 
-  ipcMain.handle('ag:network:startDaemon', async (event, options: { port: number; tunnel: string; token: string }) => {
-    const { spawn } = require('child_process');
-    const path = require('path');
+  killOrphanDaemonProcesses();
+
+  const daemonExePath = path.join(__dirname, '..', '..', 'remote', 'daemon', 'daemon.exe');
+  const args = ['--port', (options.port || EnvironmentConfig.daemonPort).toString()];
+  if (options.tunnel && options.tunnel !== 'none') {
+    args.push('--tunnel', options.tunnel);
+  }
+  if (options.token) {
+    args.push('--auth-token', options.token);
+  }
+
+  event.sender.send(DOCTOR_IPC_CHANNELS.NETWORK_DAEMON_LOG, `> Lancement de daemon.exe ${args.join(' ')}\n`);
+
+  daemonProcess = spawn(daemonExePath, args, { cwd: path.dirname(daemonExePath) });
+
+  daemonProcess.stdout?.on('data', (data: Buffer) => {
+    event.sender.send(DOCTOR_IPC_CHANNELS.NETWORK_DAEMON_LOG, data.toString());
+  });
+
+  daemonProcess.stderr?.on('data', (data: Buffer) => {
+    event.sender.send(DOCTOR_IPC_CHANNELS.NETWORK_DAEMON_LOG, data.toString());
+  });
+
+  daemonProcess.on('close', (code: number) => {
+    event.sender.send(DOCTOR_IPC_CHANNELS.NETWORK_DAEMON_LOG, `[Daemon terminé avec le code ${code}]\n`);
+    daemonProcess = null;
+  });
+});
+
+ipcMain.handle(DOCTOR_IPC_CHANNELS.NETWORK_STOP_DAEMON, async (event) => {
+  if (daemonProcess) {
+    daemonProcess.kill();
+    daemonProcess = null;
+    event.sender.send(DOCTOR_IPC_CHANNELS.NETWORK_DAEMON_LOG, `> Daemon arrêté manuellement.\n`);
+  }
+});
+
+ipcMain.handle(DOCTOR_IPC_CHANNELS.OPEN_EXTERNAL, async (_event, url: string) => {
+  try {
+    if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
+      await shell.openExternal(url);
+    } else {
+      console.warn(`[IPC] Blocked unsafe external URL opening attempt: ${url}`);
+    }
+  } catch (err) {
+    console.error('[IPC] Failed to open external URL:', err);
+  }
+});
+
+// --- Provider Management IPCs ---
+ipcMain.handle(DOCTOR_IPC_CHANNELS.PROVIDERS_GET, async () => {
+  try {
+    const p = getCustomModelsPath();
+    const c = await fs.promises.readFile(p, 'utf8');
+    const parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
+    if (parsed.providers) return parsed.providers;
     
-    if (daemonProcess) {
-      daemonProcess.kill();
-      daemonProcess = null;
-    }
-
-    // Nettoyage des orphelins avant bind : garantit que le port n'est pas
-    // déjà occupé par une instance précédente (boucle connect/déconnect).
-    killOrphanDaemonProcesses();
-
-    // Resolve path to remote/daemon/daemon.exe (assuming ag-doctor-ui is in repo root's child dir)
-    const daemonExePath = path.join(__dirname, '..', '..', 'remote', 'daemon', 'daemon.exe');
-    
-    const args = ['--port', options.port.toString()];
-    if (options.tunnel && options.tunnel !== 'none') {
-      args.push('--tunnel', options.tunnel);
-    }
-    if (options.token) {
-      args.push('--auth-token', options.token);
-    }
-
-    event.sender.send('ag:network:daemonLog', `> Lancement de daemon.exe ${args.join(' ')}\n`);
-
-    daemonProcess = spawn(daemonExePath, args, { cwd: path.dirname(daemonExePath) });
-
-    daemonProcess.stdout.on('data', (data: Buffer) => {
-      event.sender.send('ag:network:daemonLog', data.toString());
-    });
-
-    daemonProcess.stderr.on('data', (data: Buffer) => {
-      event.sender.send('ag:network:daemonLog', data.toString());
-    });
-
-    daemonProcess.on('close', (code: number) => {
-      event.sender.send('ag:network:daemonLog', `[Daemon terminé avec le code ${code}]\n`);
-      daemonProcess = null;
-    });
-  });
-
-  ipcMain.handle('ag:network:stopDaemon', async (event) => {
-    if (daemonProcess) {
-      daemonProcess.kill();
-      daemonProcess = null;
-      event.sender.send('ag:network:daemonLog', `> Daemon arrêté manuellement.\n`);
-    }
-  });
-
-  ipcMain.handle('ag:open-external', async (_event, url: string) => {
-    try {
-      if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
-        await shell.openExternal(url);
-      } else {
-        console.warn(`[IPC] Blocked unsafe external URL opening attempt: ${url}`);
-      }
-    } catch (err) {
-      console.error('[IPC] Failed to open external URL:', err);
-    }
-  });
-
-  // --- Provider Management IPCs ---
-  ipcMain.handle('ag:providers:get', async () => {
-    try {
-      const p = getCustomModelsPath();
-      const c = await fs.promises.readFile(p, 'utf8');
-      const parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
-      if (parsed.providers) return parsed.providers;
-      
-      // Fallback for legacy models array
-      if (parsed.models && parsed.models.length > 0) {
-        const pm = new Map();
-        let pid = 1;
-        for (const m of parsed.models) {
-          const k = m.apiUrl + '|' + m.provider + '|' + m.apiKey;
-          if (!pm.has(k)) {
-            pm.set(k, {
-              id: 'provider-' + Date.now() + '-' + (pid++),
-              name: 'Legacy ' + m.provider,
-              provider: m.provider,
-              apiUrl: m.apiUrl,
-              apiKey: m.apiKey,
-              enabled: true,
-              models: []
-            });
-          }
-          pm.get(k).models.push({
-            id: m.externalModelName || m.name,
-            displayName: m.displayName || m.name,
-            enabled: m.enabled !== false
+    if (parsed.models && parsed.models.length > 0) {
+      const pm = new Map();
+      let pid = 1;
+      for (const m of parsed.models) {
+        const k = m.apiUrl + '|' + m.provider + '|' + m.apiKey;
+        if (!pm.has(k)) {
+          pm.set(k, {
+            id: 'provider-' + Date.now() + '-' + (pid++),
+            name: 'Legacy ' + m.provider,
+            provider: m.provider,
+            apiUrl: m.apiUrl,
+            apiKey: m.apiKey,
+            enabled: true,
+            models: []
           });
         }
-        return Array.from(pm.values());
-      }
-      return [];
-    } catch(e) {
-      return [];
-    }
-  });
-
-  ipcMain.handle('ag:providers:save', async (_, p) => {
-    try {
-      const fp = getCustomModelsPath();
-      let parsed: { providers: any[]; models: any[] } = { providers: [], models: [] };
-      try {
-        const c = await fs.promises.readFile(fp, 'utf8');
-        parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
-      } catch(e) {}
-
-      if (!parsed.providers) parsed.providers = [];
-      const idx = parsed.providers.findIndex((x: any) => x.id === p.id);
-      if (idx !== -1) parsed.providers[idx] = p;
-      else parsed.providers.push(p);
-
-      if (Array.isArray(parsed.models) && Array.isArray(p.models)) {
-        for (const pm of p.models) {
-          const pmId = pm.id || pm.displayName;
-          if (!pmId) continue;
-          const cleanId = pmId.startsWith('models/') ? pmId.slice(7) : pmId;
-          const mIdx = parsed.models.findIndex(m => {
-            const mClean = (m.name || '').startsWith('models/') ? (m.name || '').slice(7) : (m.name || '');
-            const urlMatch = !p.apiUrl || !m.apiUrl || p.apiUrl.toLowerCase() === m.apiUrl.toLowerCase();
-            return (m.name === pmId || m.name === `models/${pmId}` || mClean === cleanId) && urlMatch;
-          });
-          if (mIdx !== -1) {
-            parsed.models[mIdx].enabled = pm.enabled !== false && p.enabled !== false;
-          }
-        }
-      }
-
-      await fs.promises.writeFile(fp, JSON.stringify(parsed, null, 2), 'utf8');
-      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('ag:providers:changed');
-      return { success: true };
-    } catch(e) {
-      return { success: false, error: (e as Error).message };
-    }
-  });
-
-  ipcMain.handle('ag:providers:delete', async (_, id) => {
-    try {
-      const fp = getCustomModelsPath();
-      const c = await fs.promises.readFile(fp, 'utf8');
-      const parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
-      if (parsed.providers) {
-        parsed.providers = parsed.providers.filter((x: any) => x.id !== id);
-        await fs.promises.writeFile(fp, JSON.stringify(parsed, null, 2), 'utf8');
-        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('ag:providers:changed');
-      }
-      return { success: true };
-    } catch(e) {
-      return { success: false, error: (e as Error).message };
-    }
-  });
-
-  ipcMain.handle('ag:providers:fetch-models', async (_evt, params: { apiUrl: string; apiKey: string }) => {
-    try {
-      const { net } = require('electron') as typeof import('electron');
-      const baseUrl = params.apiUrl.replace(/\/+$/, '');
-      const url = baseUrl.endsWith('/models') ? baseUrl : `${baseUrl}/models`;
-
-      return new Promise((resolve) => {
-        const req = net.request({ url, method: 'GET' });
-        if (params.apiKey && !params.apiKey.startsWith('enc:')) {
-          req.setHeader('Authorization', 'Bearer ' + params.apiKey);
-        }
-        req.on('response', (res: Electron.IncomingMessage) => {
-          let data = '';
-          res.on('data', (chunk: Buffer) => { data += chunk.toString(); });
-          res.on('end', () => {
-            if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-              try {
-                const parsed = JSON.parse(data);
-                let rawList: any[] = [];
-                if (Array.isArray(parsed.data)) rawList = parsed.data;
-                else if (Array.isArray(parsed.models)) rawList = parsed.models;
-                else if (Array.isArray(parsed)) rawList = parsed;
-
-                const models = rawList.map((m: any) => {
-                  const id = typeof m === 'string' ? m : (m.id || m.name || 'unknown');
-                  const displayName = typeof m === 'string' ? m : (m.displayName || m.name || m.id || 'unknown');
-                  return { id, displayName, enabled: true };
-                });
-                resolve({ success: true, models });
-              } catch (e) {
-                resolve({ success: false, error: 'Invalid JSON response from /models endpoint' });
-              }
-            } else {
-              resolve({ success: false, error: `HTTP ${res.statusCode}: ${data ? data.slice(0, 150) : 'Failed to fetch models'}` });
-            }
-          });
+        pm.get(k).models.push({
+          id: m.externalModelName || m.name,
+          displayName: m.displayName || m.name,
+          enabled: m.enabled !== false
         });
-        req.on('error', (err: Error) => resolve({ success: false, error: err.message }));
-        req.end();
-      });
-    } catch(e) {
-      return { success: false, error: (e as Error).message };
+      }
+      return Array.from(pm.values());
     }
-  });
+    return [];
+  } catch {
+    return [];
+  }
+});
 
+ipcMain.handle(DOCTOR_IPC_CHANNELS.PROVIDERS_SAVE, async (_, p) => {
+  try {
+    const fp = getCustomModelsPath();
+    let parsed: { providers: any[]; models: any[] } = { providers: [], models: [] };
+    try {
+      const c = await fs.promises.readFile(fp, 'utf8');
+      parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
+    } catch {}
 
-  ipcMain.handle('ag:providers:test', async (_evt: Electron.IpcMainInvokeEvent, params: { apiUrl: string; apiKey: string; id?: string; modelId?: string }) => {
-     try {
-       const { net } = require('electron') as typeof import('electron');
-       const startTime = Date.now();
+    if (!parsed.providers) parsed.providers = [];
+    const idx = parsed.providers.findIndex((x: any) => x.id === p.id);
+    if (idx !== -1) parsed.providers[idx] = p;
+    else parsed.providers.push(p);
 
-       // Helper to perform an HTTP request via Electron's net module
-       const doRequest = (targetUrl: string, method: string, body?: string): Promise<{ statusCode: number; data: string; latencyMs: number }> => {
-         return new Promise((resolve, reject) => {
-           const req = net.request({ url: targetUrl, method });
-           if (params.apiKey && !params.apiKey.startsWith('enc:')) {
-             req.setHeader('Authorization', 'Bearer ' + params.apiKey);
-           }
-           if (body) {
-             req.setHeader('Content-Type', 'application/json');
-           }
-           req.on('response', (res: Electron.IncomingMessage) => {
-             let data = '';
-             res.on('data', (chunk: Buffer) => { data += chunk.toString(); });
-             res.on('end', () => {
-               resolve({ statusCode: res.statusCode ?? 500, data, latencyMs: Date.now() - startTime });
-             });
+    if (Array.isArray(parsed.models) && Array.isArray(p.models)) {
+      for (const pm of p.models) {
+        const pmId = pm.id || pm.displayName;
+        if (!pmId) continue;
+        const cleanId = pmId.startsWith('models/') ? pmId.slice(7) : pmId;
+        const mIdx = parsed.models.findIndex(m => {
+          const mClean = (m.name || '').startsWith('models/') ? (m.name || '').slice(7) : (m.name || '');
+          const urlMatch = !p.apiUrl || !m.apiUrl || p.apiUrl.toLowerCase() === m.apiUrl.toLowerCase();
+          return (m.name === pmId || m.name === `models/${pmId}` || mClean === cleanId) && urlMatch;
+        });
+        if (mIdx !== -1) {
+          parsed.models[mIdx].enabled = pm.enabled !== false && p.enabled !== false;
+        }
+      }
+    }
+
+    await fs.promises.writeFile(fp, JSON.stringify(parsed, null, 2), 'utf8');
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(DOCTOR_IPC_CHANNELS.PROVIDERS_CHANGED);
+    return { success: true };
+  } catch(e) {
+    return { success: false, error: (e as Error).message };
+  }
+});
+
+ipcMain.handle(DOCTOR_IPC_CHANNELS.PROVIDERS_DELETE, async (_, id) => {
+  try {
+    const fp = getCustomModelsPath();
+    const c = await fs.promises.readFile(fp, 'utf8');
+    const parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
+    if (parsed.providers) {
+      parsed.providers = parsed.providers.filter((x: any) => x.id !== id);
+      await fs.promises.writeFile(fp, JSON.stringify(parsed, null, 2), 'utf8');
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(DOCTOR_IPC_CHANNELS.PROVIDERS_CHANGED);
+    }
+    return { success: true };
+  } catch(e) {
+    return { success: false, error: (e as Error).message };
+  }
+});
+
+ipcMain.handle(DOCTOR_IPC_CHANNELS.PROVIDERS_FETCH_MODELS, async (_evt, params: { apiUrl: string; apiKey: string }) => {
+  try {
+    const { net } = require('electron') as typeof import('electron');
+    const baseUrl = params.apiUrl.replace(/\/+$/, '');
+    const url = baseUrl.endsWith('/models') ? baseUrl : `${baseUrl}/models`;
+
+    return new Promise((resolve) => {
+      const req = net.request({ url, method: 'GET' });
+      if (params.apiKey && !params.apiKey.startsWith('enc:')) {
+        req.setHeader('Authorization', 'Bearer ' + params.apiKey);
+      }
+      req.on('response', (res: Electron.IncomingMessage) => {
+        let data = '';
+        res.on('data', (chunk: Buffer) => { data += chunk.toString(); });
+        res.on('end', () => {
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            try {
+              const parsed = JSON.parse(data);
+              let rawList: any[] = [];
+              if (Array.isArray(parsed.data)) rawList = parsed.data;
+              else if (Array.isArray(parsed.models)) rawList = parsed.models;
+              else if (Array.isArray(parsed)) rawList = parsed;
+
+              const models = rawList.map((m: any) => {
+                const id = typeof m === 'string' ? m : (m.id || m.name || 'unknown');
+                const displayName = typeof m === 'string' ? m : (m.displayName || m.name || m.id || 'unknown');
+                return { id, displayName, enabled: true };
+              });
+              resolve({ success: true, models });
+            } catch {
+              resolve({ success: false, error: 'Invalid JSON response from /models endpoint' });
+            }
+          } else {
+            resolve({ success: false, error: `HTTP ${res.statusCode}: ${data ? data.slice(0, 150) : 'Failed to fetch models'}` });
+          }
+        });
+      });
+      req.on('error', (err: Error) => resolve({ success: false, error: err.message }));
+      req.end();
+    });
+  } catch(e) {
+    return { success: false, error: (e as Error).message };
+  }
+});
+
+ipcMain.handle(DOCTOR_IPC_CHANNELS.PROVIDERS_TEST, async (_evt: Electron.IpcMainInvokeEvent, params: { apiUrl: string; apiKey: string; id?: string; modelId?: string }) => {
+   try {
+     const { net } = require('electron') as typeof import('electron');
+     const startTime = Date.now();
+
+     const doRequest = (targetUrl: string, method: string, body?: string): Promise<{ statusCode: number; data: string; latencyMs: number }> => {
+       return new Promise((resolve, reject) => {
+         const req = net.request({ url: targetUrl, method });
+         if (params.apiKey && !params.apiKey.startsWith('enc:')) {
+           req.setHeader('Authorization', 'Bearer ' + params.apiKey);
+         }
+         if (body) {
+           req.setHeader('Content-Type', 'application/json');
+         }
+         req.on('response', (res: Electron.IncomingMessage) => {
+           let data = '';
+           res.on('data', (chunk: Buffer) => { data += chunk.toString(); });
+           res.on('end', () => {
+             resolve({ statusCode: res.statusCode ?? 500, data, latencyMs: Date.now() - startTime });
            });
-           req.on('error', (err: Error) => reject(err));
-           if (body) req.write(body);
-           req.end();
          });
-       };
+         req.on('error', (err: Error) => reject(err));
+         if (body) req.write(body);
+         req.end();
+       });
+     };
 
-       const baseUrl = params.apiUrl.replace(/\/+$/, '');
-       let statusCode = 500;
-       let responseData = '';
-       let latencyMs = 0;
+     const baseUrl = params.apiUrl.replace(/\/+$/, '');
+     let statusCode = 500;
+     let responseData = '';
+     let latencyMs = 0;
 
-       // If modelId is explicitly supplied, test that specific model directly via /chat/completions
-       if (params.modelId) {
+     if (params.modelId) {
+       try {
+         const postBody = JSON.stringify({
+           model: params.modelId,
+           messages: [{ role: 'user', content: 'ping' }],
+           max_tokens: 1
+         });
+         const postRes = await doRequest(`${baseUrl}/chat/completions`, 'POST', postBody);
+         statusCode = postRes.statusCode;
+         responseData = postRes.data;
+         latencyMs = postRes.latencyMs;
+       } catch (err) {
+         responseData = (err as Error).message;
+       }
+     } else {
+       try {
+         const res = await doRequest(`${baseUrl}/models`, 'GET');
+         statusCode = res.statusCode;
+         responseData = res.data;
+         latencyMs = res.latencyMs;
+       } catch (err) {
+         responseData = (err as Error).message;
+       }
+
+       if (statusCode < 200 || statusCode >= 300) {
+         let testModel: string | undefined = undefined;
+         if (params.id) {
+           try {
+             const fp = getCustomModelsPath();
+             const c = await fs.promises.readFile(fp, 'utf8');
+             const parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
+             const prov = (parsed.providers || []).find((x: any) => x.id === params.id);
+             if (prov && prov.models && prov.models.length > 0) {
+               testModel = prov.models[0].id || prov.models[0].name;
+             }
+           } catch { /* ignore */ }
+         }
+         if (!testModel) testModel = 'MiniMax-M3';
+
          try {
            const postBody = JSON.stringify({
-             model: params.modelId,
+             model: testModel,
              messages: [{ role: 'user', content: 'ping' }],
              max_tokens: 1
            });
            const postRes = await doRequest(`${baseUrl}/chat/completions`, 'POST', postBody);
-           statusCode = postRes.statusCode;
-           responseData = postRes.data;
-           latencyMs = postRes.latencyMs;
-         } catch (err) {
-           responseData = (err as Error).message;
-         }
-       } else {
-         // 1. Try GET /models first for general provider connectivity
-         try {
-           const res = await doRequest(`${baseUrl}/models`, 'GET');
-           statusCode = res.statusCode;
-           responseData = res.data;
-           latencyMs = res.latencyMs;
-         } catch (err) {
-           responseData = (err as Error).message;
-         }
-
-         // 2. Fallback to POST /chat/completions if GET /models failed or returned non-200
-         if (statusCode < 200 || statusCode >= 300) {
-           // Find a candidate model ID to test
-           let testModel: string | undefined = undefined;
-           if (params.id) {
-             try {
-               const fp = getCustomModelsPath();
-               const c = await fs.promises.readFile(fp, 'utf8');
-               const parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
-               const prov = (parsed.providers || []).find((x: any) => x.id === params.id);
-               if (prov && prov.models && prov.models.length > 0) {
-                 testModel = prov.models[0].id || prov.models[0].name;
-               }
-             } catch { /* ignore */ }
+           if (postRes.statusCode >= 200 && postRes.statusCode < 300) {
+             statusCode = postRes.statusCode;
+             responseData = postRes.data;
+             latencyMs = postRes.latencyMs;
+           } else if (postRes.statusCode === 401 || postRes.statusCode === 403) {
+             statusCode = postRes.statusCode;
+             responseData = postRes.data;
+             latencyMs = postRes.latencyMs;
            }
-           if (!testModel) testModel = 'MiniMax-M3';
-
-           try {
-             const postBody = JSON.stringify({
-               model: testModel,
-               messages: [{ role: 'user', content: 'ping' }],
-               max_tokens: 1
-             });
-             const postRes = await doRequest(`${baseUrl}/chat/completions`, 'POST', postBody);
-             // If POST returns 200, or a model parameter error (400), authentication worked!
-             if (postRes.statusCode >= 200 && postRes.statusCode < 300) {
-               statusCode = postRes.statusCode;
-               responseData = postRes.data;
-               latencyMs = postRes.latencyMs;
-             } else if (postRes.statusCode === 401 || postRes.statusCode === 403) {
-               // Auth failed on chat completions — report exact auth failure
-               statusCode = postRes.statusCode;
-               responseData = postRes.data;
-               latencyMs = postRes.latencyMs;
-             }
-           } catch { /* keep original GET result if POST fails completely */ }
-         }
+         } catch { /* keep original */ }
        }
-
-       const isSuccess = statusCode >= 200 && statusCode < 300;
-       const healthStatus = isSuccess
-         ? (latencyMs >= 1500 ? 'degraded' : 'healthy')
-         : (statusCode === 429 ? 'degraded' : 'offline');
-
-       const result = {
-         success: isSuccess,
-         status: statusCode,
-         latencyMs,
-         healthStatus,
-         error: isSuccess ? undefined : (responseData || `HTTP ${statusCode}`)
-       };
-
-       // Persist health metadata back to custom_models.json if provider ID is supplied
-       if (params.id) {
-         try {
-           const fp = getCustomModelsPath();
-           const c = await fs.promises.readFile(fp, 'utf8');
-           const parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
-           if (parsed.providers && Array.isArray(parsed.providers)) {
-             const idx = parsed.providers.findIndex((x: any) => x.id === params.id);
-             if (idx !== -1) {
-               parsed.providers[idx].status = result.healthStatus;
-               parsed.providers[idx].latencyMs = result.latencyMs;
-               parsed.providers[idx].lastTestedAt = new Date().toISOString();
-               parsed.providers[idx].lastError = result.error;
-               await fs.promises.writeFile(fp, JSON.stringify(parsed, null, 2), 'utf8');
-             }
-           }
-         } catch { /* ignore disk persist errors */ }
-       }
-
-       return result;
-     } catch(e) {
-       const err = e as Error;
-       return { success: false, healthStatus: 'offline' as const, error: err.message };
      }
-  });
-  
-ipcMain.handle('ag:run', async (_evt, args: string[]) => {
+
+     const isSuccess = statusCode >= 200 && statusCode < 300;
+     const healthStatus = isSuccess
+       ? (latencyMs >= 1500 ? 'degraded' : 'healthy')
+       : (statusCode === 429 ? 'degraded' : 'offline');
+
+     const result = {
+       success: isSuccess,
+       status: statusCode,
+       latencyMs,
+       healthStatus,
+       error: isSuccess ? undefined : (responseData || `HTTP ${statusCode}`)
+     };
+
+     if (params.id) {
+       try {
+         const fp = getCustomModelsPath();
+         const c = await fs.promises.readFile(fp, 'utf8');
+         const parsed = JSON.parse(c.replace(/^\uFEFF/, ''));
+         if (parsed.providers && Array.isArray(parsed.providers)) {
+           const idx = parsed.providers.findIndex((x: any) => x.id === params.id);
+           if (idx !== -1) {
+             parsed.providers[idx].status = result.healthStatus;
+             parsed.providers[idx].latencyMs = result.latencyMs;
+             parsed.providers[idx].lastTestedAt = new Date().toISOString();
+             parsed.providers[idx].lastError = result.error;
+             await fs.promises.writeFile(fp, JSON.stringify(parsed, null, 2), 'utf8');
+           }
+         }
+       } catch { /* ignore */ }
+     }
+
+     return result;
+   } catch(e) {
+     const err = e as Error;
+     return { success: false, healthStatus: 'offline' as const, error: err.message };
+   }
+});
+
+ipcMain.handle(DOCTOR_IPC_CHANNELS.RUN, async (_evt, args: string[]) => {
   return getCliPool().run(args);
 });
 
-ipcMain.handle('ag:info', async () => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.INFO, async () => {
   return getInfoPayload();
 });
 
-ipcMain.handle('ag:config', async () => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.CONFIG, async () => {
   return getConfigPayload();
 });
 
-ipcMain.handle('ag:config:set-theme', async (_evt, theme: 'dark' | 'light') => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.CONFIG_SET_THEME, async (_evt, theme: 'dark' | 'light') => {
   try {
     const cfgPath = getConfigPath();
     let cfg: Record<string, unknown> = {};
@@ -1076,18 +971,15 @@ ipcMain.handle('ag:config:set-theme', async (_evt, theme: 'dark' | 'light') => {
     cfg.ui = { ...(typeof cfg.ui === 'object' && cfg.ui !== null ? cfg.ui : {}), theme };
     fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
     fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n');
-    // Refresh cache so the next ag:config call returns the new theme immediately
     configCache = cfg;
-    mainWindow?.webContents.send('ag:theme-changed', theme);
+    mainWindow?.webContents.send(DOCTOR_IPC_CHANNELS.THEME_CHANGED, theme);
     return true;
   } catch {
     return false;
   }
 });
 
-// Persists the user's "Do not notify" preference. Mirrors set-theme so the
-// Settings UI toggle survives app restart.
-ipcMain.handle('ag:config:set-notify', async (_evt, enabled: boolean) => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.CONFIG_SET_NOTIFY, async (_evt, enabled: boolean) => {
   try {
     const cfgPath = getConfigPath();
     let cfg: Record<string, unknown> = {};
@@ -1104,15 +996,15 @@ ipcMain.handle('ag:config:set-notify', async (_evt, enabled: boolean) => {
   }
 });
 
-ipcMain.handle('ag:config:restore-backup', async () => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.CONFIG_RESTORE_BACKUP, async () => {
   try {
-    const customModelsPath = path.join(app.getPath('home'), '.gemini', 'antigravity', 'custom_models.json');
+    const customModelsPath = getCustomModelsPath();
     const bakPath = `${customModelsPath}.bak`;
     if (!fs.existsSync(bakPath)) {
       return { success: false, error: 'No backup file (.bak) found' };
     }
     const content = fs.readFileSync(bakPath, 'utf8');
-    JSON.parse(content); // Validate JSON before restoring
+    JSON.parse(content);
     fs.copyFileSync(bakPath, customModelsPath);
     invalidateConfigCache();
     return { success: true };
@@ -1121,18 +1013,11 @@ ipcMain.handle('ag:config:restore-backup', async () => {
   }
 });
 
-// Snapshot of the proxy-error ring buffer (read-only, most-recent first).
-ipcMain.handle('ag:proxy-error-history', async () => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.PROXY_ERROR_HISTORY, async () => {
   return proxyErrorHistory.slice().reverse();
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Proxy-error channel listener — turns the tray red and updates lastProxyError
-// (set by buildProxyErrorPayload() in src/proxy.ts and broadcast by
-// ipcHandlers.ts over the `proxy:error` IPC channel). We also re-broadcast
-// to every BrowserWindow in case the renderer was added after boot.
-// ─────────────────────────────────────────────────────────────────────────────
-ipcMain.on('proxy:error', (_evt, payload: {
+ipcMain.on(DOCTOR_IPC_CHANNELS.PROXY_ERROR, (_evt, payload: {
   traceId: string;
   provider: string;
   status?: number;
@@ -1144,7 +1029,6 @@ ipcMain.on('proxy:error', (_evt, payload: {
   actionUrl?: string;
 }) => {
   if (!payload || !payload.title) return;
-  // Severity: 4xx other than 429 is "warn"; 5xx/timeout/auth/quota are "err".
   const sev: 'warn' | 'err' = payload.status && payload.status >= 500
     || payload.errorType === 'auth_401' || payload.errorType === 'auth_403'
     || payload.errorType === 'quota_429' || payload.errorType === 'timeout'
@@ -1158,8 +1042,6 @@ ipcMain.on('proxy:error', (_evt, payload: {
     traceId: payload.traceId,
   };
   updateTray(sev);
-  // Push every payload into the ring buffer so the dashboard can re-open
-  // any historical error. Cap is enforced inside pushProxyErrorHistory.
   pushProxyErrorHistory({
     traceId: payload.traceId,
     provider: payload.provider,
@@ -1172,9 +1054,6 @@ ipcMain.on('proxy:error', (_evt, payload: {
     actionUrl: payload.actionUrl,
     at: Date.now(),
   });
-  // Fire a native OS notification for `err`-severity only. De-duped inside
-  // notifyProxyError() so flapping providers stay quiet. Honors the user's
-  // "Do not notify" preference from the Settings UI.
   if (sev === 'err' && isNotifyEnabled()) {
     notifyProxyError({
       traceId: payload.traceId,
@@ -1185,78 +1064,60 @@ ipcMain.on('proxy:error', (_evt, payload: {
   }
 });
 
-ipcMain.handle('ag:notify', async (_evt, title: string, body: string) => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.NOTIFY, async (_evt, title: string, body: string) => {
   if (Notification.isSupported()) {
     new Notification({ title, body }).show();
   }
 });
 
-ipcMain.handle('ag:tray-status', async (_evt, status: 'ok' | 'warn' | 'err') => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.TRAY_STATUS, async (_evt, status: 'ok' | 'warn' | 'err') => {
   updateTray(status);
 });
 
-ipcMain.handle('ag:reveal', async (_evt, p: string) => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.REVEAL, async (_evt, p: string) => {
   shell.showItemInFolder(p);
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
 // MITM Proxy Server Management
-// ─────────────────────────────────────────────────────────────────────────────
-
-ipcMain.handle('ag:proxy:start', async () => {
-  console.log('[IPC] ag:proxy:start called');
+ipcMain.handle(DOCTOR_IPC_CHANNELS.PROXY_START, async () => {
   try {
     const proxyManager = getProxyManager();
-    const result = await proxyManager.start();
-    console.log('[IPC] ag:proxy:start result:', result);
-    return result;
+    return await proxyManager.start();
   } catch (err) {
-    console.error('[IPC] ag:proxy:start error:', err);
     return { ok: false, message: `Failed to start proxy: ${(err as Error).message}` };
   }
 });
 
-ipcMain.handle('ag:proxy:stop', async () => {
-  console.log('[IPC] ag:proxy:stop called');
+ipcMain.handle(DOCTOR_IPC_CHANNELS.PROXY_STOP, async () => {
   try {
     const proxyManager = getProxyManager();
-    const result = await proxyManager.stop();
-    console.log('[IPC] ag:proxy:stop result:', result);
-    return result;
+    return await proxyManager.stop();
   } catch (err) {
-    console.error('[IPC] ag:proxy:stop error:', err);
     return { ok: false, message: `Failed to stop proxy: ${(err as Error).message}` };
   }
 });
 
-ipcMain.handle('ag:proxy:status', async () => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.PROXY_STATUS, async () => {
   try {
     const proxyManager = getProxyManager();
     const status = await proxyManager.getStatus();
     return { ok: true, data: status };
   } catch (err) {
-    console.error('[IPC] ag:proxy:status error:', err);
     return { ok: false, error: (err as Error).message };
   }
 });
 
-ipcMain.handle('ag:proxy:restart', async () => {
-  console.log('[IPC] ag:proxy:restart called');
+ipcMain.handle(DOCTOR_IPC_CHANNELS.PROXY_RESTART, async () => {
   try {
     const proxyManager = getProxyManager();
-    const result = await proxyManager.restart();
-    console.log('[IPC] ag:proxy:restart result:', result);
-    return result;
+    return await proxyManager.restart();
   } catch (err) {
-    console.error('[IPC] ag:proxy:restart error:', err);
     return { ok: false, message: `Failed to restart proxy: ${(err as Error).message}` };
   }
 });
 
-
-// Antigravity lifecycle: thin wrappers around the CLI's `antigravity` subcommand.
-// The CLI returns JSON when invoked with --json, so we forward the parsed payload.
-ipcMain.handle('ag:antigravity:status', async () => {
+// Antigravity Lifecycle
+ipcMain.handle(DOCTOR_IPC_CHANNELS.ANTIGRAVITY_STATUS, async () => {
   const r = await getCliPool().run(['antigravity', 'status', '--json']);
   if (r.code !== 0 && r.code !== 1) {
     return { ok: false, error: r.stderr || r.stdout || `exit ${r.code}` };
@@ -1268,7 +1129,7 @@ ipcMain.handle('ag:antigravity:status', async () => {
   }
 });
 
-ipcMain.handle('ag:antigravity:version', async () => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.ANTIGRAVITY_VERSION, async () => {
   const r = await getCliPool().run(['antigravity', 'version', '--json']);
   try {
     return { ok: true, data: JSON.parse(r.stdout) };
@@ -1277,7 +1138,7 @@ ipcMain.handle('ag:antigravity:version', async () => {
   }
 });
 
-ipcMain.handle('ag:antigravity:launch', async () => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.ANTIGRAVITY_LAUNCH, async () => {
   const r = await getCliPool().run(['antigravity', 'launch', '--json']);
   try {
     return { ok: true, data: JSON.parse(r.stdout) };
@@ -1286,7 +1147,7 @@ ipcMain.handle('ag:antigravity:launch', async () => {
   }
 });
 
-ipcMain.handle('ag:antigravity:kill', async () => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.ANTIGRAVITY_KILL, async () => {
   const r = await getCliPool().run(['antigravity', 'kill', '--json']);
   try {
     return { ok: true, data: JSON.parse(r.stdout) };
@@ -1295,7 +1156,7 @@ ipcMain.handle('ag:antigravity:kill', async () => {
   }
 });
 
-ipcMain.handle('ag:antigravity:restart', async () => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.ANTIGRAVITY_RESTART, async () => {
   const r = await getCliPool().run(['antigravity', 'restart', '--json']);
   try {
     return { ok: true, data: JSON.parse(r.stdout) };
@@ -1304,9 +1165,7 @@ ipcMain.handle('ag:antigravity:restart', async () => {
   }
 });
 
-// Launch Antigravity and immediately start streaming its language_server logs.
-// Returns a unique streamId the renderer can use to receive log chunks.
-ipcMain.handle('ag:antigravity:launch-logs', async (evt) => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.ANTIGRAVITY_LAUNCH_LOGS, async (evt) => {
   const streamId = `launch-logs-${Date.now()}`;
   const cli = getCliPath();
   if (!fs.existsSync(cli)) {
@@ -1360,128 +1219,25 @@ ipcMain.handle('ag:antigravity:launch-logs', async (evt) => {
   return streamId;
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Installation Detector — scans for Antigravity binaries (v1.x vs v2.0+)
-// Returns structured info about each installation found + process ownership
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface InstallationCandidate {
-  path: string;
-  version: 'v1.x' | 'v2.0+' | 'unknown';
-  exists: boolean;
-  size?: number;
-  modified?: string;
-  process?: { pid: number; name: string } | null;
-  portInUse?: { port: number; by: string } | null;
-  recommended?: boolean;
-  reason?: string;
-}
-
-ipcMain.handle('ag:detect-installation', async () => {
-  const candidates: InstallationCandidate[] = [];
-  const isWin = process.platform === 'win32';
-
-  // Common locations to scan
-  const searchPaths: { path: string; version: 'v1.x' | 'v2.0+' }[] = isWin
-    ? [
-        { path: 'C:\\Program Files\\antigravity\\Antigravity.exe', version: 'v1.x' },
-        { path: 'C:\\Program Files\\Antigravity\\Antigravity.exe', version: 'v2.0+' },
-        { path: path.join(process.env.LOCALAPPDATA || '', 'Programs', 'antigravity', 'Antigravity.exe'), version: 'v1.x' },
-        { path: path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Antigravity', 'Antigravity.exe'), version: 'v2.0+' },
-        { path: path.join(process.env.USERPROFILE || '', 'AppData', 'Local', 'Programs', 'antigravity', 'Antigravity.exe'), version: 'v1.x' },
-        { path: path.join(process.env.USERPROFILE || '', 'AppData', 'Local', 'Programs', 'Antigravity', 'Antigravity.exe'), version: 'v2.0+' },
-      ]
-    : [
-        { path: '/usr/local/bin/antigravity', version: 'v1.x' },
-        { path: '/opt/Antigravity/Antigravity', version: 'v2.0+' },
-        { path: path.join(process.env.HOME || '', '.local', 'bin', 'antigravity'), version: 'v1.x' },
-      ];
-
-  for (const sp of searchPaths) {
-    try {
-      if (!fs.existsSync(sp.path)) continue;
-      const stat = fs.statSync(sp.path);
-      candidates.push({
-        path: sp.path,
-        version: sp.version,
-        exists: true,
-        size: stat.size,
-        modified: stat.mtime.toISOString(),
-      });
-    } catch { /* skip */ }
-  }
-
-  // Identify running processes on Windows via tasklist
-  if (isWin) {
-    try {
-      const { execSync } = require('child_process') as typeof import('child_process');
-      const out = execSync('tasklist /FI "IMAGENAME eq Antigravity.exe" /FO CSV /NH', { encoding: 'utf-8' });
-      const lines = out.trim().split('\n').filter((l) => l.includes('Antigravity'));
-      for (const line of lines) {
-        const m = line.match(/^"([^"]+)","(\d+)"/);
-        if (m) {
-          const pid = parseInt(m[2], 10);
-          const cand = candidates.find((c) => c.path.toLowerCase().includes('antigravity\\antigravity.exe'));
-          if (cand) cand.process = { pid, name: m[1] };
-        }
-      }
-    } catch { /* best effort */ }
-  }
-
-  // Check port 50999 ownership
+// Dynamic Installation Detector
+ipcMain.handle(DOCTOR_IPC_CHANNELS.DETECT_INSTALLATION, async () => {
   try {
-    const inUse = await isPortInUse(50999);
-    if (inUse) {
-      const { execSync } = require('child_process') as typeof import('child_process');
-      const out = execSync(`netstat -ano | findstr :50999`, { encoding: 'utf-8' });
-      const line = out.trim().split('\n')[0] || '';
-      const m = line.match(/\s(\d+)\s*$/);
-      const pid = m ? m[1] : 'unknown';
-      // Attach to first candidate that has a process, or create a generic note
-      const target = candidates.find((c) => c.process) || candidates[0];
-      if (target) target.portInUse = { port: 50999, by: `PID ${pid}` };
-    }
-  } catch { /* best effort */ }
-
-  // Recommendation: prefer v2.0+ (uppercase) since that's the user's target
-  const v2 = candidates.find((c) => c.version === 'v2.0+');
-  if (v2) {
-    v2.recommended = true;
-    v2.reason = 'Latest Antigravity 2.0+ (uppercase)';
+    const result = detectAntigravityInstallations();
+    return { ok: true, data: result };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
   }
-  const v1 = candidates.find((c) => c.version === 'v1.x');
-  if (v1 && !v2) {
-    v1.recommended = true;
-    v1.reason = 'Only v1.x installation found';
-  }
-
-  return {
-    ok: true,
-    data: {
-      candidates,
-      hasConflict: candidates.length > 1,
-      summary: candidates.length === 0
-        ? 'No Antigravity installation detected'
-        : candidates.length === 1
-        ? `Single installation: ${candidates[0].version}`
-        : `Multiple installations detected (${candidates.length}) — possible confusion source`,
-    },
-  };
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Proxy Stats — lightweight polling endpoint for the Real-time Proxy Monitor
-// ─────────────────────────────────────────────────────────────────────────────
-
+// Proxy Stats
 const proxyStatsHistory: Array<{ ts: number; latencyMs: number; ok: boolean }> = [];
-const PROXY_STATS_MAX = 60;
 
-ipcMain.handle('ag:proxy-stats', async () => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.PROXY_STATS, async () => {
   const start = Date.now();
   try {
     const result = await new Promise<{ ok: boolean; latencyMs: number; stub: boolean; error?: string }>((resolve) => {
       const req = require('http').request(
-        { hostname: '127.0.0.1', port: STUB_PORT, path: '/health', method: 'GET', timeout: 2000 },
+        { hostname: EnvironmentConfig.bindHost, port: EnvironmentConfig.stubPort, path: '/health', method: 'GET', timeout: 2000 },
         (res: { statusCode: number; headers: Record<string, string>; resume: () => void }) => {
           res.resume();
           resolve({
@@ -1512,11 +1268,7 @@ ipcMain.handle('ag:proxy-stats', async () => {
   }
 });
 
-// ──────────────────────────────────────────���──────────────────────────────────
-// Model Test — tests a single model's connection from the main process
-// ─────────────────────────────────────────────────────────────────────────────
-
-ipcMain.handle('ag:test-model', async (_evt, name: string) => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.TEST_MODEL, async (_evt, name: string) => {
   try {
     const r = await getCliPool().run(['models', 'test', name, '--json']);
     try {
@@ -1529,18 +1281,7 @@ ipcMain.handle('ag:test-model', async (_evt, name: string) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Proxy stub lifecycle — portable emergency proxy on 127.0.0.1:51999
-// (Separate from main Antigravity proxy on 50999 to avoid port conflicts)
-// ───────────────────────────────────────────────────────────────────────��─────
-
-const STUB_PORT = 51999;
-
-/**
- * Check if port 50999 (main Antigravity proxy) is already in use.
- * Used to warn the user when ag-doctor-ui stub might conflict.
- */
-async function isPortInUse(port: number, host = '127.0.0.1'): Promise<boolean> {
+async function isPortInUse(port: number, host = EnvironmentConfig.bindHost): Promise<boolean> {
   return new Promise((resolve) => {
     const net = require('net') as typeof import('net');
     const tester = net.createServer()
@@ -1550,73 +1291,54 @@ async function isPortInUse(port: number, host = '127.0.0.1'): Promise<boolean> {
   });
 }
 
-/**
- * Launch proxy-stub.js in a detached Node.js process.
- * Works on any machine (no hardcoded paths).
- * Returns { ok, pid?, error? }
- */
-ipcMain.handle('ag:proxy:start-stub', async () => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.PROXY_START_STUB, async () => {
   try {
-    // Resolve the stub path relative to the project root (same dir as the CLI package.json)
     const stubPath = path.join(getCliPath(), '..', '..', '..', 'proxy-stub.js');
     const resolved = path.resolve(stubPath);
     if (!fs.existsSync(resolved)) {
       return { ok: false, error: `proxy-stub.js not found at ${resolved}` };
     }
-    // Spawn detached so it survives if ag-doctor-ui is closed
     const child = spawn(process.execPath, [resolved], {
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', AG_STUB_PORT: String(STUB_PORT) },
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', AG_STUB_PORT: String(EnvironmentConfig.stubPort) },
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
     });
     child.unref();
-    // Wait up to 3 s for the port to open
     const deadline = Date.now() + 3000;
     while (Date.now() < deadline) {
       await new Promise<void>((r) => setTimeout(r, 200));
       const alive = await new Promise<boolean>((resolve) => {
         const req = require('http').request(
-          { hostname: '127.0.0.1', port: STUB_PORT, path: '/health', method: 'GET', timeout: 1000 },
+          { hostname: EnvironmentConfig.bindHost, port: EnvironmentConfig.stubPort, path: '/health', method: 'GET', timeout: 1000 },
           (res: { resume: () => void }) => { res.resume(); resolve(true); },
         );
         req.on('error', () => resolve(false));
         req.end();
       });
-      if (alive) return { ok: true, pid: child.pid, port: STUB_PORT };
+      if (alive) return { ok: true, pid: child.pid, port: EnvironmentConfig.stubPort };
     }
-    return { ok: true, pid: child.pid, port: STUB_PORT, note: 'started but port not yet open' };
+    return { ok: true, pid: child.pid, port: EnvironmentConfig.stubPort, note: 'started but port not yet open' };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
 });
 
-// NOTE: 'ag:proxy:status' handler is already registered above (line ~591) via proxyManager.getStatus().
-
-/**
- * Check if the main Antigravity proxy port (50999) is occupied.
- * Useful to detect conflicts when launching Antigravity.
- */
-ipcMain.handle('ag:proxy:check-main-port', async () => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.PROXY_CHECK_MAIN_PORT, async () => {
   try {
-    const MAIN_PORT = 50999;
+    const MAIN_PORT = EnvironmentConfig.proxyPort;
     const inUse = await isPortInUse(MAIN_PORT);
     if (inUse) {
-      // Try to identify which process is using the port
       let processInfo = 'unknown';
       try {
         if (process.platform === 'win32') {
-          const { execSync } = require('child_process') as typeof import('child_process');
-          const out = execSync(`netstat -ano | findstr :${MAIN_PORT}`, { encoding: 'utf-8' });
+          const out = execSync(`netstat -ano | findstr :${MAIN_PORT}`, { encoding: 'utf-8', windowsHide: true });
           processInfo = out.trim().split('\n')[0] || 'unknown';
         } else {
-          const { execSync } = require('child_process') as typeof import('child_process');
           const out = execSync(`lsof -i :${MAIN_PORT} -P -n 2>/dev/null | tail -n +2 | head -n 1`, { encoding: 'utf-8' });
           processInfo = out.trim() || 'unknown';
         }
-      } catch {
-        /* best effort */
-      }
+      } catch { /* best effort */ }
       return { ok: true, inUse: true, port: MAIN_PORT, process: processInfo };
     }
     return { ok: true, inUse: false, port: MAIN_PORT };
@@ -1625,38 +1347,39 @@ ipcMain.handle('ag:proxy:check-main-port', async () => {
   }
 });
 
-/**
- * Kill the process occupying port 50999 (main Antigravity proxy).
- * Use with caution — only kills processes we believe are conflicting.
- */
-ipcMain.handle('ag:proxy:kill-main-port', async () => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.PROXY_KILL_MAIN_PORT, async () => {
   try {
-    const MAIN_PORT = 50999;
-    const { exec } = require('child_process') as typeof import('child_process');
+    const MAIN_PORT = EnvironmentConfig.proxyPort;
     return await new Promise<{ ok: boolean; killed?: string; error?: string }>((resolve) => {
-      let cmd: string;
       if (process.platform === 'win32') {
-        cmd = `for /f "tokens=5" %a in ('netstat -ano ^| findstr :${MAIN_PORT}') do taskkill /F /PID %a`;
-      } else {
-        cmd = `lsof -ti :${MAIN_PORT} | xargs -r kill -9`;
-      }
-      exec(cmd, (err: Error | null, stdout: string) => {
-        if (err) {
-          resolve({ ok: false, error: err.message });
-        } else {
-          resolve({ ok: true, killed: stdout.trim() || 'no process found' });
+        try {
+          const netstatOut = execSync(`netstat -ano | findstr :${MAIN_PORT}`, { encoding: 'utf-8', windowsHide: true });
+          const pids = new Set<string>();
+          for (const l of netstatOut.trim().split('\n')) {
+            const match = l.trim().match(/\s+(\d+)$/);
+            if (match && match[1] && match[1] !== '0') pids.add(match[1]);
+          }
+          for (const pid of pids) {
+            execFile('taskkill', ['/F', '/PID', pid], () => {});
+          }
+          resolve({ ok: true, killed: `PIDs: ${Array.from(pids).join(', ')}` });
+        } catch (e) {
+          resolve({ ok: false, error: (e as Error).message });
         }
-      });
+      } else {
+        const { exec } = require('child_process');
+        exec(`lsof -ti :${MAIN_PORT} | xargs -r kill -9`, (err: Error | null, stdout: string) => {
+          if (err) resolve({ ok: false, error: err.message });
+          else resolve({ ok: true, killed: stdout.trim() || 'no process found' });
+        });
+      }
     });
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
 });
 
-/**
- * Run the repair-all script to self-elevate and fix the system proxy/CA.
- */
-ipcMain.handle('ag:repair:run', async () => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.REPAIR_RUN, async () => {
   try {
     const isWin = process.platform === 'win32';
     const scriptName = isWin ? 'repair-all.ps1' : 'repair-all.sh';
@@ -1702,10 +1425,7 @@ ipcMain.handle('ag:repair:run', async () => {
   }
 });
 
-
-// Streaming for `logs -f` — uses one-shot spawn (long-lived process), with
-// chunk batching to avoid IPC flooding the renderer.
-ipcMain.handle('ag:stream:start', (evt, args: string[], streamId: string) => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.STREAM_START, (evt, args: string[], streamId: string) => {
   const cli = getCliPath();
   if (!fs.existsSync(cli)) {
     evt.sender.send(`ag:stream:${streamId}:error`, `CLI not found: ${cli}`);
@@ -1717,7 +1437,6 @@ ipcMain.handle('ag:stream:start', (evt, args: string[], streamId: string) => {
   });
   activeStreams.set(streamId, proc);
 
-  // Batch chunks: flush at most every 50ms to avoid IPC storm
   let pending: { stdout: string; stderr: string } | null = null;
   let flushTimer: NodeJS.Timeout | null = null;
   const flush = () => {
@@ -1759,7 +1478,7 @@ ipcMain.handle('ag:stream:start', (evt, args: string[], streamId: string) => {
   return true;
 });
 
-ipcMain.handle('ag:stream:cancel', (_evt, streamId: string) => {
+ipcMain.handle(DOCTOR_IPC_CHANNELS.STREAM_CANCEL, (_evt, streamId: string) => {
   const proc = activeStreams.get(streamId);
   if (proc) {
     proc.kill();
@@ -1769,24 +1488,19 @@ ipcMain.handle('ag:stream:cancel', (_evt, streamId: string) => {
   return false;
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-
-// F-28: only proceed if we own the single-instance lock
-// DISABLED FOR DEVELOPMENT - app will start without lock check
 app.whenReady().then(() => {
   createWindow();
   createTray();
 
-  // Global shortcuts
   mainWindow?.webContents.on('before-input-event', (_e, input) => {
     if (input.control && input.key.toLowerCase() === 'r') {
-      mainWindow?.webContents.send('ag:run-doctor');
+      mainWindow?.webContents.send(DOCTOR_IPC_CHANNELS.RUN_DOCTOR);
     } else if (input.control && input.key.toLowerCase() === 'l') {
-      mainWindow?.webContents.send('ag:navigate', 'logs');
+      mainWindow?.webContents.send(DOCTOR_IPC_CHANNELS.NAVIGATE, 'logs');
     } else if (input.control && input.key.toLowerCase() === 'k') {
-      mainWindow?.webContents.send('ag:command-palette');
+      mainWindow?.webContents.send(DOCTOR_IPC_CHANNELS.COMMAND_PALETTE);
     } else if (input.control && input.key.toLowerCase() === ',') {
-      mainWindow?.webContents.send('ag:navigate', 'settings');
+      mainWindow?.webContents.send(DOCTOR_IPC_CHANNELS.NAVIGATE, 'settings');
     }
   });
 
@@ -1796,15 +1510,11 @@ app.whenReady().then(() => {
   });
 });
 
-
 app.on('window-all-closed', () => {
   for (const proc of activeStreams.values()) proc.kill();
   activeStreams.clear();
   cliPool?.shutdown();
 
-  // Nettoyage des processus daemon + cloudflared avant sortie : un daemon
-  // laissé en vie garde le port 8090 occupé → boucle connect/déconnect au
-  // prochain lancement.
   try {
     if (typeof daemonProcess !== 'undefined' && daemonProcess) {
       daemonProcess.kill();
@@ -1815,7 +1525,6 @@ app.on('window-all-closed', () => {
     killOrphanDaemonProcesses();
   } catch { /* ignore */ }
   
-  // Cleanup proxy server
   try {
     getProxyManager().cleanup();
   } catch (err) {

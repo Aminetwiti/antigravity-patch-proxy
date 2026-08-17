@@ -17,6 +17,7 @@ export const PROXY_FORCE_STOP_TIMEOUT_MS = 5_000;
 export const PROXY_RESTART_PAUSE_MS = 500;
 export const WATCHER_DEBOUNCE_MS = 300;
 export const FLUSH_BATCH_MS = 50;
+export const PROXY_POLL_INTERVAL_MS = 1_500;
 export const NOTIFY_DEDUP_MS = 2_000;
 
 // Capacities & limits

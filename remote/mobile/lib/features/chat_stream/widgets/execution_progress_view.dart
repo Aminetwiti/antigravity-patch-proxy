@@ -191,14 +191,16 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
       return const SizedBox.shrink();
     }
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (int i = 0; i < steps.length; i++)
-            _buildStepRow(steps[i], i),
-        ],
+    return RepaintBoundary(
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (int i = 0; i < steps.length; i++)
+              _buildStepRow(steps[i], i),
+          ],
+        ),
       ),
     );
   }

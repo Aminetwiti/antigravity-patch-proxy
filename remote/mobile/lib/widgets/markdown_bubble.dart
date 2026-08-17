@@ -38,20 +38,22 @@ class MarkdownBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final blocks = MarkdownRenderer.blocksOf(text);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (final block in blocks) ...[
-          if (block.code != null)
-            _CodeBlockView(code: block.code!, api: api, workspacePath: workspacePath)
-          else if (block.toolCall != null)
-            _ToolCallPill(call: block.toolCall!)
-          else
-            _ParagraphView(block: block, onLocalFile: onLocalFile),
-          const SizedBox(height: 10),
+    return RepaintBoundary(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final block in blocks) ...[
+            if (block.code != null)
+              _CodeBlockView(code: block.code!, api: api, workspacePath: workspacePath)
+            else if (block.toolCall != null)
+              _ToolCallPill(call: block.toolCall!)
+            else
+              _ParagraphView(block: block, onLocalFile: onLocalFile),
+            const SizedBox(height: 10),
+          ],
+          if (isStreaming) const _StreamingCursor(),
         ],
-        if (isStreaming) const _StreamingCursor(),
-      ],
+      ),
     );
   }
 }
