@@ -17,11 +17,12 @@ class SessionParser {
     if (sessions is List) {
       var out = <CascadeSession>[];
       for (final s in sessions) {
-        if (s is Map<String, dynamic>) {
-          final id = s['cascadeId'] ?? s['id'];
+        if (s is Map) {
+          final sMap = Map<String, dynamic>.from(s);
+          final id = sMap['cascadeId'] ?? sMap['id'];
           // Filtrer les entrées sans clé primaire ou non disponibles (archivées, killed, supprimées)
           if (id is String && id.isNotEmpty) {
-            final session = CascadeSession.fromJson(s);
+            final session = CascadeSession.fromJson(sMap);
             if (session.isAvailable) {
               out.add(session);
             }
@@ -32,10 +33,14 @@ class SessionParser {
         // Tri par date de mise à jour décroissante.
         final byId = <String, DateTime>{};
         for (final s in sessions) {
-          if (s is Map && s['cascadeId'] is String) {
-            byId[s['cascadeId'] as String] =
-                DateTime.tryParse(s['updatedAt'] as String? ?? '') ??
-                    DateTime.fromMillisecondsSinceEpoch(0);
+          if (s is Map) {
+            final sMap = Map<String, dynamic>.from(s);
+            final cId = sMap['cascadeId'] ?? sMap['id'];
+            if (cId is String) {
+              byId[cId] =
+                  DateTime.tryParse(sMap['updatedAt'] as String? ?? '') ??
+                      DateTime.fromMillisecondsSinceEpoch(0);
+            }
           }
         }
         out.sort((a, b) =>
@@ -59,14 +64,15 @@ class SessionParser {
 
     final sessions = <CascadeSession>[];
     for (final f in fields) {
-      if (f is! Map<String, dynamic>) continue;
-      if (f['field'] != 1) continue; // trajectory entries live in field 1
+      if (f is! Map) continue;
+      final fMap = Map<String, dynamic>.from(f);
+      if (fMap['field'] != 1) continue; // trajectory entries live in field 1
 
-      final blob = _blobOf(f);
-      final text = f['text'] is String ? f['text'] as String : '';
+      final blob = _blobOf(fMap);
+      final text = fMap['text'] is String ? fMap['text'] as String : '';
       final combined = '$text ${_asAscii(blob)}';
       final id = _uuidRe.firstMatch(combined)?.group(0) ?? '';
-      final title = _legacyTitleOf(f, text, blob);
+      final title = _legacyTitleOf(fMap, text, blob);
       if (id.isEmpty) continue;
 
       final session = CascadeSession(

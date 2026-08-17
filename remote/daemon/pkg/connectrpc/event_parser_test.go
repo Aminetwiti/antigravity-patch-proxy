@@ -5,8 +5,9 @@ import (
 )
 
 func TestParseFrameEvents(t *testing.T) {
-	// Frame protobuf contenant "run_command"
-	raw := []byte{0x0a, 0x0f, 'r', 'u', 'n', '_', 'c', 'o', 'm', 'm', 'a', 'n', 'd', ' ', 'l', 's'}
+	// Frame protobuf contenant un payload JSON tool
+	jsonPayload := `{"tool":"run_command","command":"ls"}`
+	raw := append([]byte{0x0a, byte(len(jsonPayload))}, []byte(jsonPayload)...)
 	events := ParseFrameEvents(raw, "cascade-123")
 
 	if len(events) == 0 {
@@ -19,6 +20,14 @@ func TestParseFrameEvents(t *testing.T) {
 
 	if events[0].Tool != "run_command" {
 		t.Errorf("Attendu Tool=run_command, reçu=%s", events[0].Tool)
+	}
+
+	// Test regular text containing command word
+	textPayload := "flutter run -d RZCT80F971A"
+	rawText := append([]byte{0x0a, byte(len(textPayload))}, []byte(textPayload)...)
+	textEvents := ParseFrameEvents(rawText, "cascade-123")
+	if len(textEvents) == 0 || textEvents[0].Kind != EventKindText {
+		t.Errorf("Attendu Kind=%s pour texte normal, reçu=%v", EventKindText, textEvents)
 	}
 }
 

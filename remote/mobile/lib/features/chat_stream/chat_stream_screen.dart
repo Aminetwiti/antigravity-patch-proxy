@@ -118,6 +118,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   bool _showStillWorking = false;
   Map<String, dynamic>? _lastLocalStreamEnd;
   final Map<String, String> _externalThoughts = {};
+  final Map<String, String> _streamRequestToMessageId = {};
 
   Timer? _throttleTimer;
   bool _needsStateUpdate = false;
@@ -797,15 +798,27 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         // sessionId is non-null here (isActiveSession=false implies sessionId != null)
         final buf = _sessionMessages.putIfAbsent(sessionId, () => []);
         if (type == 'stream_start') {
-          buf.add(ChatMessage(
-            id: 'ext-$requestId',
-            sender: 'assistant',
-            text: '',
-            timestamp: _timestamp(),
-            isStreaming: true,
-          ));
+          if (buf.isNotEmpty && buf.last.sender == 'assistant') {
+            _streamRequestToMessageId[thKey] = buf.last.id;
+            buf.last = buf.last.copyWith(isStreaming: true);
+          } else {
+            final msgId = 'ext-$requestId';
+            _streamRequestToMessageId[thKey] = msgId;
+            buf.add(ChatMessage(
+              id: msgId,
+              sender: 'assistant',
+              text: '',
+              timestamp: _timestamp(),
+              isStreaming: true,
+            ));
+          }
         } else if (type == 'stream_delta') {
-          final idx = buf.indexWhere((m) => m.id == 'ext-$requestId');
+          final targetId = _streamRequestToMessageId[thKey] ?? 'ext-$requestId';
+          var idx = buf.indexWhere((m) => m.id == targetId);
+          if (idx < 0 && buf.isNotEmpty && buf.last.sender == 'assistant') {
+            idx = buf.length - 1;
+            _streamRequestToMessageId[thKey] = buf.last.id;
+          }
           if (idx >= 0) {
             final textDelta = StreamDeltaParser.textOf(msg);
             final thoughtDelta = StreamDeltaParser.thinkingOf(msg);
@@ -819,9 +832,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             );
           }
         } else if (type == 'stream_end') {
-          final idx = buf.indexWhere((m) => m.id == 'ext-$requestId');
+          final targetId = _streamRequestToMessageId[thKey] ?? 'ext-$requestId';
+          final idx = buf.indexWhere((m) => m.id == targetId);
           if (idx >= 0) buf[idx] = buf[idx].copyWith(isStreaming: false);
           _externalThoughts.remove(thKey);
+          _streamRequestToMessageId.remove(thKey);
         }
         return; // ne pas toucher l'état UI de la session active
       }
@@ -832,18 +847,23 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         // haut → le badge « ↓ N » s'incrémente.
         if (_showJumpToBottom) _hiddenNewCount++;
         setState(() {
-          // Bug #N : cr�er le placeholder d�s stream_start (m�me logique
-          // que la session secondaire ci-dessus) : sans lui, les stream_delta
-          // broadcast pour la session active (prompt lanc� depuis le PC h�te
-          // ou une autre surface) n'ont aucune cible et sont perdus.
-          if (!_messages.any((m) => m.id == 'ext-$requestId')) {
-            _messages.add(ChatMessage(
-              id: 'ext-$requestId',
-              sender: 'assistant',
-              text: '',
-              timestamp: _timestamp(),
-              isStreaming: true,
-            ));
+          // Unifier le flux de l'assistant : si le dernier message est déjà de l'assistant
+          // dans le même tour, on coalesce dedans plutôt que de créer une bulle séparée.
+          if (_messages.isNotEmpty && _messages.last.sender == 'assistant') {
+            _streamRequestToMessageId[requestId] = _messages.last.id;
+            _messages.last = _messages.last.copyWith(isStreaming: true);
+          } else {
+            final msgId = 'ext-$requestId';
+            _streamRequestToMessageId[requestId] = msgId;
+            if (!_messages.any((m) => m.id == msgId)) {
+              _messages.add(ChatMessage(
+                id: msgId,
+                sender: 'assistant',
+                text: '',
+                timestamp: _timestamp(),
+                isStreaming: true,
+              ));
+            }
           }
         });
       } else if (type == 'sync_catchup') {
@@ -916,15 +936,22 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         final thoughtDelta = StreamDeltaParser.thinkingOf(msg);
         final approval = StreamDeltaParser.approvalOf(msg);
 
-        var idx = _messages.indexWhere((m) => m.id == 'ext-$requestId');
+        final targetId = _streamRequestToMessageId[requestId] ?? 'ext-$requestId';
+        var idx = _messages.indexWhere((m) => m.id == targetId);
         if (idx < 0) {
           final lastStreamingIdx = _messages.lastIndexWhere((m) => m.isStreaming);
           if (lastStreamingIdx >= 0) {
             idx = lastStreamingIdx;
+            _streamRequestToMessageId[requestId] = _messages[idx].id;
+          } else if (_messages.isNotEmpty && _messages.last.sender == 'assistant') {
+            idx = _messages.length - 1;
+            _streamRequestToMessageId[requestId] = _messages.last.id;
           } else if (textDelta.isNotEmpty || thoughtDelta.isNotEmpty) {
             _onStreamStarted();
+            final msgId = 'ext-$requestId';
+            _streamRequestToMessageId[requestId] = msgId;
             _messages.add(ChatMessage(
-              id: 'ext-$requestId',
+              id: msgId,
               sender: 'assistant',
               text: '',
               timestamp: _timestamp(),
@@ -942,6 +969,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             thought: _externalThoughts[thKey]!.isNotEmpty
                 ? _externalThoughts[thKey]!.trim()
                 : current.thought,
+            isStreaming: true,
           );
         }
         if (approval != null) {
@@ -971,7 +999,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         _onStreamEnded();
         _handleStreamEnded(msg);
         setState(() {
-          final idx = _messages.indexWhere((m) => m.id == 'ext-$requestId');
+          final targetId = _streamRequestToMessageId[requestId] ?? 'ext-$requestId';
+          final idx = _messages.indexWhere((m) => m.id == targetId);
           if (idx >= 0) {
             _messages[idx] = _messages[idx].copyWith(isStreaming: false);
           } else {
@@ -981,6 +1010,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             }
           }
           _externalThoughts.remove(thKey);
+          _streamRequestToMessageId.remove(requestId);
         });
         _scrollToBottomSettled();
       } else if (type == 'approval_expired') {
@@ -1646,7 +1676,13 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             _activeArtifact = null;
             _currentTab = SessionTabType.plan;
           }),
-          onOpenSubagents: () {},
+          onOpenSubagents: () {
+            SubagentsTreeSheet.show(
+              context,
+              api: widget.api,
+              cascadeId: widget.activeSessionId,
+            );
+          },
         );
       case SessionTabType.review:
         return _buildReviewTabContent();

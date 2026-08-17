@@ -423,7 +423,8 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       List<ProjectItem> projects = [];
       if (data['projects'] is List) {
         projects = (data['projects'] as List)
-            .map((p) => ProjectItem.fromJson(p as Map<String, dynamic>))
+            .whereType<Map>()
+            .map((p) => ProjectItem.fromJson(Map<String, dynamic>.from(p)))
             .toList();
       }
 
@@ -456,6 +457,23 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                 final cur = sessions.firstWhere((s) => s.id == _activeSessionId);
                 _activeSessionTitle = cur.title;
               }
+            }
+          } else {
+            // Si aucune session distante n'existe (ex: purgé sur le PC), préserver seulement une nouvelle conv locale
+            if (_activeSessionTitle == 'Nouvelle conversation' && _activeSessionId.isNotEmpty) {
+              _sessions = [
+                CascadeSession(
+                  id: _activeSessionId,
+                  workspacePath: _sessions.isNotEmpty ? _sessions.first.workspacePath : '',
+                  title: 'Nouvelle conversation',
+                  status: 'CASCADE_STATUS_READY',
+                  time: 'Maintenant',
+                )
+              ];
+            } else {
+              _sessions = const [];
+              _activeSessionId = '';
+              _activeSessionTitle = '';
             }
           }
         });

@@ -303,11 +303,10 @@ class DaemonApi {
   Future<Map<String, dynamic>> listSessions() async {
     try {
       final data = await rpc('list_sessions');
-      if (data['fields'] != null) {
+      final rawList = data['sessions'] ?? data['fields'];
+      if (rawList is List) {
         try {
-          await DatabaseHelper.instance.saveSessions(
-            data['fields'] as List<dynamic>,
-          );
+          await DatabaseHelper.instance.saveSessions(rawList);
         } catch (_) {}
       }
       return data;
@@ -517,7 +516,7 @@ class DaemonApi {
       if (workspacePath != null) 'workspacePath': workspacePath,
     });
     final list = res['branches'] as List?;
-    return list?.cast<String>() ?? [];
+    return list?.map((e) => e.toString()).toList() ?? [];
   }
 
   /// Liste les worktrees Git du workspace.
@@ -528,7 +527,7 @@ class DaemonApi {
       if (workspacePath != null) 'workspacePath': workspacePath,
     });
     final list = res['worktrees'] as List?;
-    return list?.map((e) => (e as Map).cast<String, dynamic>()).toList() ?? [];
+    return list?.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() ?? [];
   }
 
   /// Récupère l'état complet du contrôle de version (VCS / Git) du workspace.
@@ -551,7 +550,8 @@ class DaemonApi {
       if (workspacePath != null) 'workspacePath': workspacePath,
       'data': {'uris': uris},
     });
-    return res['status'] == 'staged';
+    final status = res['status'] ?? (res['data'] is Map ? res['data']['status'] : null);
+    return status == 'staged';
   }
 
   /// Retire des fichiers modifiés de l'index Git (unstage).
@@ -563,7 +563,8 @@ class DaemonApi {
       if (workspacePath != null) 'workspacePath': workspacePath,
       'data': {'uris': uris},
     });
-    return res['status'] == 'unstaged';
+    final status = res['status'] ?? (res['data'] is Map ? res['data']['status'] : null);
+    return status == 'unstaged';
   }
 
   /// Annule les modifications d'un ou plusieurs fichiers (irréversible, confirm obligatoire).
@@ -577,7 +578,8 @@ class DaemonApi {
       'confirm': confirm,
       'data': {'uris': uris},
     });
-    return res['status'] == 'discarded';
+    final status = res['status'] ?? (res['data'] is Map ? res['data']['status'] : null);
+    return status == 'discarded';
   }
 
   /// Crée un commit Git dans le workspace.
@@ -620,7 +622,7 @@ class DaemonApi {
   Future<List<Map<String, dynamic>>> getAvailableModels() async {
     final res = await rpc('get_available_models', {});
     final list = res['models'] as List?;
-    return list?.map((e) => (e as Map).cast<String, dynamic>()).toList() ?? [];
+    return list?.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() ?? [];
   }
 
   /// G7 — Récupère les statuts et disponibilités des modèles.
@@ -665,7 +667,7 @@ class DaemonApi {
   Future<List<Map<String, dynamic>>> listAdbDevices() async {
     final res = await rpc('adb.list_devices', {});
     final list = res['devices'] as List?;
-    return list?.map((e) => (e as Map).cast<String, dynamic>()).toList() ?? [];
+    return list?.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() ?? [];
   }
 
   /// G3 — Liste les fichiers d'un dossier distant sur l'appareil Android.
@@ -678,7 +680,7 @@ class DaemonApi {
       'remotePath': remotePath,
     });
     final list = res['files'] as List?;
-    return list?.map((e) => (e as Map).cast<String, dynamic>()).toList() ?? [];
+    return list?.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() ?? [];
   }
 
   /// G3 — Recherche de fichiers sur l'appareil Android.
@@ -695,7 +697,7 @@ class DaemonApi {
       'maxDepth': maxDepth,
     });
     final list = res['results'] as List?;
-    return list?.cast<String>() ?? [];
+    return list?.map((e) => e.toString()).toList() ?? [];
   }
 
   /// G3 — Télécharge un fichier depuis l'appareil Android vers le PC hôte.
@@ -947,7 +949,8 @@ class DaemonApi {
       'cascadeId': cascadeId,
       'stepIndex': stepIndex,
     });
-    return res['status'] == 'reverted';
+    final status = res['status'] ?? (res['data'] is Map ? res['data']['status'] : null);
+    return status == 'reverted';
   }
 
   /// Bascule des étapes d'exécution en tâche de fond (SendStepsToBackground).
@@ -959,7 +962,8 @@ class DaemonApi {
       'conversationId': conversationId,
       'stepIndices': stepIndices,
     });
-    return res['status'] == 'sent_to_background';
+    final status = res['status'] ?? (res['data'] is Map ? res['data']['status'] : null);
+    return status == 'sent_to_background';
   }
 
   /// Saute une étape de sous-agent de navigation web (SkipBrowserSubagent).
@@ -968,14 +972,16 @@ class DaemonApi {
       'cascadeId': cascadeId,
       'stepIndex': stepIndex,
     });
-    return res['status'] == 'skipped';
+    final status = res['status'] ?? (res['data'] is Map ? res['data']['status'] : null);
+    return status == 'skipped';
   }
 
   /// Récupère l'arbre des sous-agents d'une session (DAG).
   Future<List<Map<String, dynamic>>> getSubagents(String cascadeId) async {
     final res = await rpc('get_subagents', {'cascadeId': cascadeId});
-    final list = res['subagents'] as List? ?? [];
-    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    final rawList = res['subagents'] ?? (res['data'] is Map ? res['data']['subagents'] : null);
+    if (rawList is! List) return [];
+    return rawList.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
   }
 
   /// Récupère le résumé des quotas utilisateur réels du compte Antigravity.
@@ -991,13 +997,8 @@ class DaemonApi {
   /// Génère un message de commit IA conventionnel basé sur le staging git.
   Future<String> generateCommitMessage() async {
     final res = await rpc('generate_commit_message', {});
-    if (res['commitMessage'] != null) {
-      return res['commitMessage'].toString();
-    }
-    if (res['message'] != null) {
-      return res['message'].toString();
-    }
-    return '';
+    final msg = res['commitMessage'] ?? res['message'] ?? (res['data'] is Map ? (res['data']['commitMessage'] ?? res['data']['message']) : null);
+    return msg?.toString() ?? '';
   }
 
   /// Exporte l'intégralité d'une session / trajectoire en Markdown.
@@ -1009,10 +1010,8 @@ class DaemonApi {
       'cascadeId': cascadeId,
       if (trajectoryId != null) 'trajectoryId': trajectoryId,
     });
-    if (res['markdown'] != null) {
-      return res['markdown'].toString();
-    }
-    return '';
+    final md = res['markdown'] ?? (res['data'] is Map ? res['data']['markdown'] : null);
+    return md?.toString() ?? '';
   }
 
   /// Crée un worktree Git pour le développement parallèle.
@@ -1021,7 +1020,8 @@ class DaemonApi {
       'branch': branch,
       if (path != null) 'path': path,
     });
-    return res['status'] == 'created';
+    final status = res['status'] ?? (res['data'] is Map ? res['data']['status'] : null);
+    return status == 'created' || res.containsKey('fields') || res.containsKey('path') || (res.isNotEmpty && !res.containsKey('error'));
   }
 
   /// Démarre un duel multi-modèles (Colosseum) sur deux worktrees.
@@ -1153,9 +1153,10 @@ class DaemonApi {
   /// "action réservée à l'administrateur" → erreur).
   Future<List<Map<String, dynamic>>> listDevices() async {
     final res = await rpc('admin.list_devices', {});
-    final list = res['devices'] as List? ?? [];
+    final list = res['devices'] as List? ?? (res['data'] is Map ? (res['data']['devices'] as List?) : null) ?? [];
     return list
-        .map((e) => Map<String, dynamic>.from(e as Map))
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
         .toList();
   }
 
@@ -1163,7 +1164,8 @@ class DaemonApi {
   /// daemon a révoqué la session (false = deviceId inconnu).
   Future<bool> revokeDevice(String deviceId) async {
     final res = await rpc('admin.revoke_device', {'deviceId': deviceId});
-    return res['status'] == 'revoked';
+    final status = res['status'] ?? (res['data'] is Map ? res['data']['status'] : null);
+    return status == 'revoked';
   }
 
 

@@ -96,7 +96,10 @@ class OutboxReplayer {
     final batch = _queue.snapshot();
     for (final msg in batch) {
       final requestId = msg['requestId'] as String? ?? '';
-      if (requestId == '' || _queue.shouldSkip(requestId)) continue;
+      if (requestId == '' || _queue.shouldSkip(requestId)) {
+        if (requestId != '') _queue.remove(requestId);
+        continue;
+      }
       _queue.markReplayed(requestId);
       _send(msg);
       _queue.remove(requestId);

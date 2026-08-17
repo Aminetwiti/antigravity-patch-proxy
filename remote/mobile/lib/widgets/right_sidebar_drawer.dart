@@ -38,9 +38,40 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
   List<Map<String, dynamic>> _artifacts = [];
   bool _artifactsExpanded = false;
 
+  bool _isLoadingFilesChanged = false;
+  List<String> _filesChanged = [];
+  bool _filesChangedExpanded = false;
+
   bool _isLoadingUploads = false;
   List<Map<String, dynamic>> _uploads = [];
   bool _uploadsExpanded = false;
+
+  Future<void> _fetchFilesChanged() async {
+    if (widget.api == null) return;
+    setState(() => _isLoadingFilesChanged = true);
+    try {
+      final res = await widget.api!.getVcsState();
+      final files = <String>{};
+      final staged = res['stagedFiles'] ?? res['staged_files'] ?? res['staged'];
+      if (staged is List) {
+        for (final item in staged) {
+          if (item is String && item.isNotEmpty) files.add(item);
+          if (item is Map && item['path'] != null) files.add(item['path'].toString());
+        }
+      }
+      final unstaged = res['unstagedFiles'] ?? res['unstaged_files'] ?? res['unstaged'];
+      if (unstaged is List) {
+        for (final item in unstaged) {
+          if (item is String && item.isNotEmpty) files.add(item);
+          if (item is Map && item['path'] != null) files.add(item['path'].toString());
+        }
+      }
+      if (mounted) setState(() => _filesChanged = files.toList());
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _isLoadingFilesChanged = false);
+    }
+  }
 
   Future<void> _fetchArtifacts() async {
     if (widget.api == null || widget.activeSessionId.isEmpty) return;
@@ -182,10 +213,57 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
                       );
                     },
                   ),
-                  _ContextItemRow(
-                    title: 'Files Changed',
-                    badgeCount: widget.filesChangedCount,
-                    onTap: () {},
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _ContextItemRow(
+                        title: 'Files Changed',
+                        badgeCount: widget.filesChangedCount > 0 ? widget.filesChangedCount : _filesChanged.length,
+                        onTap: () {
+                          setState(() {
+                            _filesChangedExpanded = !_filesChangedExpanded;
+                          });
+                          if (_filesChangedExpanded && _filesChanged.isEmpty) {
+                            _fetchFilesChanged();
+                          }
+                        },
+                        isExpanded: _filesChangedExpanded,
+                      ),
+                      if (_filesChangedExpanded)
+                        AnimatedContainer(
+                          duration: AppMotion.fast,
+                          padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
+                          child: _isLoadingFilesChanged
+                              ? Padding(
+                                  padding: const EdgeInsets.all(8.0),
+                                  child: Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(scheme.primary)))),
+                                )
+                              : _filesChanged.isEmpty
+                                  ? Padding(
+                                      padding: const EdgeInsets.all(8.0),
+                                      child: Text('Aucun fichier modifié', style: TextStyle(color: scheme.outline, fontSize: 12)),
+                                    )
+                                  : Column(
+                                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                                      children: _filesChanged.map((file) => Padding(
+                                        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                                        child: Row(
+                                          children: [
+                                            Icon(Icons.insert_drive_file_outlined, size: 14, color: scheme.primary),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                file,
+                                                style: TextStyle(fontSize: 12, color: scheme.onSurface),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      )).toList(),
+                                    ),
+                        ),
+                    ],
                   ),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,

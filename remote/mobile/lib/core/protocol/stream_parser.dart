@@ -73,18 +73,19 @@ class StreamDeltaParser {
   /// fantôme, et l'anomalie est loggée pour diagnostic.
   static AskQuestionChoiceRequest? questionOf(Map<String, dynamic> message) {
     final data = message['data'];
-    if (data is! Map<String, dynamic>) return null;
+    if (data is! Map) return null;
     final events = data['events'];
     if (events is! List) return null;
     for (final e in events) {
-      if (e is Map<String, dynamic> && e['kind'] == 'approval_required') {
-        final tool = (e['tool'] ?? '').toString().toLowerCase();
-        final detail = (e['detail'] ?? '').toString();
+      if (e is Map && e['kind'] == 'approval_required') {
+        final eMap = Map<String, dynamic>.from(e);
+        final tool = (eMap['tool'] ?? '').toString().toLowerCase();
+        final detail = (eMap['detail'] ?? '').toString();
         if (tool == 'ask_question' || tool == 'ask_user') {
-          final q = _parseQuestionDetail(e);
+          final q = _parseQuestionDetail(eMap);
           if (q != null) return q;
           debugPrint('stream_parser: ask_question sans payload JSON exploitable '
-              '(callId=${e['callId'] ?? '?'}) — ignoré');
+              '(callId=${eMap['callId'] ?? '?'}) — ignoré');
           continue;
         }
         // Heuristique legacy : certains daemons marquent ask_question avec un
@@ -92,7 +93,7 @@ class StreamDeltaParser {
         // H1 : on exige alors un champ question réel — un run_command dont les
         // args contiennent un tableau "options" ne doit pas créer de question.
         if (detail.contains('"questions"') || detail.contains('"options"')) {
-          final q = _parseQuestionDetail(e);
+          final q = _parseQuestionDetail(eMap);
           if (q != null) return q;
         }
       }
@@ -115,16 +116,17 @@ class StreamDeltaParser {
       if (startIndex >= 0 && endIndex > startIndex) {
         final jsonStr = detail.substring(startIndex, endIndex + 1);
         final decoded = json.decode(jsonStr);
-        if (decoded is Map<String, dynamic>) {
+        if (decoded is Map) {
+          final decMap = Map<String, dynamic>.from(decoded);
           // H1 : un approval_required non-question (tool générique) ne doit
           // pas produire de question fantôme — exiger question/questions.
-          if (decoded['question'] == null && decoded['questions'] == null) {
+          if (decMap['question'] == null && decMap['questions'] == null) {
             debugPrint('stream_parser: detail JSON sans champ question '
                 '(callId=$callId) — ignoré');
             return null;
           }
           return AskQuestionChoiceRequest.fromJson({
-            ...decoded,
+            ...decMap,
             'callId': callId,
             'cascadeId': cascadeId,
             'trajectoryId': trajectoryId,

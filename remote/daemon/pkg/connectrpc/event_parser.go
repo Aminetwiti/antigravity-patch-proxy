@@ -84,7 +84,11 @@ func ParseFrameEvents(raw []byte, cascadeID string) []StreamEvent {
 		}
 
 		if IsPrintable(s) && len(s) > 0 {
-			if strings.Contains(s, "run_command") || strings.Contains(s, "write_to_file") || strings.Contains(s, "read_file") || strings.Contains(s, "edit_file") || strings.Contains(s, "list_files") || strings.Contains(s, "search_files") || strings.Contains(s, "ask_question") || strings.Contains(s, "ask_user") {
+			trimmed := strings.TrimSpace(s)
+			isJSONApproval := strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") &&
+				(strings.Contains(trimmed, `"tool"`) || strings.Contains(trimmed, `"callId"`) || strings.Contains(trimmed, `"requestedInteraction"`) || strings.Contains(trimmed, `"command"`))
+
+			if isJSONApproval {
 				events = append(events, StreamEvent{
 					Kind:         EventKindApprovalRequired,
 					CascadeID:    cascadeID,
@@ -98,7 +102,7 @@ func ParseFrameEvents(raw []byte, cascadeID string) []StreamEvent {
 					Delta:     s,
 					CascadeID: cascadeID,
 				})
-			} else if len(s) > 1 {
+			} else {
 				events = append(events, StreamEvent{
 					Kind:      EventKindText,
 					Delta:     s,

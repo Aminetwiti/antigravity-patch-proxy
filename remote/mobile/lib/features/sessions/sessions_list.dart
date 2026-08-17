@@ -166,9 +166,16 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                   ),
                   const SizedBox(width: 8),
                   _HeaderIconBtn(
-                    icon: Icons.arrow_forward,
-                    tooltip: 'Suivant',
-                    onTap: () {},
+                    icon: Icons.history,
+                    tooltip: 'Historique des conversations',
+                    onTap: () {
+                      if (widget.onConversationHistory != null) {
+                        if (Navigator.of(context).canPop()) {
+                          Navigator.of(context).pop();
+                        }
+                        widget.onConversationHistory!();
+                      }
+                    },
                   ),
                 ],
               ),

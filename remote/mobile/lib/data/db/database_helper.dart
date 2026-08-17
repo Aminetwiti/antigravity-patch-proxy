@@ -57,12 +57,16 @@ CREATE TABLE session_messages (
 
     for (final session in sessions) {
       if (session is Map) {
+        final id = session['id']?.toString() ?? session['cascadeId']?.toString() ?? '';
+        if (id.isEmpty) continue;
+        final title = session['title']?.toString() ?? 'Session';
+        final time = session['time']?.toString() ?? session['updatedAt']?.toString() ?? '';
         batch.insert(
           'sessions',
           {
-            'id': session['id']?.toString() ?? '',
-            'title': session['title']?.toString() ?? '',
-            'time': session['time']?.toString() ?? '',
+            'id': id,
+            'title': title,
+            'time': time,
             'updated_at': DateTime.now().millisecondsSinceEpoch,
           },
           conflictAlgorithm: ConflictAlgorithm.replace,
