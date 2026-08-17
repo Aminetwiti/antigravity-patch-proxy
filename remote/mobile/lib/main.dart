@@ -370,7 +370,21 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     final api = _api;
     if (api == null) return;
     try {
-      final stats = await api.getContext();
+      final activeWs = _sessions
+              .where((s) => s.id == _activeSessionId)
+              .map((s) => s.workspacePath)
+              .firstWhere((p) => p.isNotEmpty, orElse: () => '')
+          .isNotEmpty
+          ? _sessions
+              .where((s) => s.id == _activeSessionId)
+              .first
+              .workspacePath
+          : (_projects.isNotEmpty ? _projects.first.path : '');
+
+      final stats = await api.getContext(
+        cascadeId: _activeSessionId,
+        workspacePath: activeWs,
+      );
       if (mounted) {
         setState(() {
           _contextStats = stats;
@@ -640,17 +654,34 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           );
           if (parsed.isNotEmpty) {
             setState(() {
-              _sessions = parsed;
-              // Si la session active a disparu (supprimée depuis le PC),
-              // bascule proprement sur la plus récente.
-              if (_activeSessionId.isNotEmpty &&
-                  !parsed.any((s) => s.id == _activeSessionId)) {
-                _activeSessionId = parsed.first.id;
-                _activeSessionTitle = parsed.first.title;
-                _refreshContext();
-              } else if (_activeSessionId.isNotEmpty) {
-                final current = parsed.firstWhere((s) => s.id == _activeSessionId);
-                _activeSessionTitle = current.title;
+              final stillActive = parsed.any((s) => s.id == _activeSessionId);
+              // Garde : une nouvelle conversation pas encore dans le hub
+              // Jetbox ne doit pas écraser le focus (même guard que
+              // _refreshSessions). Sans ça, le push sessions_updated
+              // rebascule sur l'ancienne session.
+              if (!stillActive &&
+                  _activeSessionId.isNotEmpty &&
+                  _activeSessionTitle == 'Nouvelle conversation') {
+                final newSess = CascadeSession(
+                  id: _activeSessionId,
+                  workspacePath: _sessions.isNotEmpty ? _sessions.first.workspacePath : '',
+                  title: 'Nouvelle conversation',
+                  status: 'CASCADE_STATUS_READY',
+                  time: 'Maintenant',
+                );
+                _sessions = [newSess, ...parsed.where((s) => s.id != _activeSessionId)];
+              } else {
+                _sessions = parsed;
+                // Si la session active a disparu (supprimée depuis le PC),
+                // bascule proprement sur la plus récente.
+                if (_activeSessionId.isNotEmpty && !stillActive) {
+                  _activeSessionId = parsed.first.id;
+                  _activeSessionTitle = parsed.first.title;
+                  _refreshContext();
+                } else if (_activeSessionId.isNotEmpty) {
+                  final current = parsed.firstWhere((s) => s.id == _activeSessionId);
+                  _activeSessionTitle = current.title;
+                }
               }
             });
             return;

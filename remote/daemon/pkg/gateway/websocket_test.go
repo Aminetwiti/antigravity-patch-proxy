@@ -857,6 +857,28 @@ func TestWebSocketGetContextReal(t *testing.T) {
 	if data["subagentsCount"].(float64) == 1 && data["filesChangedCount"].(float64) == 3 {
 		t.Fatalf("statistiques mock en dur encore présentes: %v", data)
 	}
+
+	// Test get_context scoped specifically with cascadeId
+	client.send(t, map[string]string{"type": "get_context", "requestId": "ctx2", "cascadeId": cascadeID})
+	respScoped := client.recv(t)
+	if respScoped["error"] != nil {
+		t.Fatalf("get_context scoped a renvoyé une erreur: %v", respScoped["error"])
+	}
+	dataScoped, ok := respScoped["data"].(map[string]interface{})
+	if !ok || dataScoped["cascadeId"] != cascadeID {
+		t.Fatalf("dataScoped invalide: %v", respScoped)
+	}
+
+	// Test list_artifacts for the session
+	client.send(t, map[string]string{"type": "list_artifacts", "requestId": "art1", "cascadeId": cascadeID})
+	respArt := client.recv(t)
+	if respArt["error"] != nil {
+		t.Fatalf("list_artifacts a renvoyé une erreur: %v", respArt["error"])
+	}
+	dataArt, ok := respArt["data"].(map[string]interface{})
+	if !ok || dataArt["cascadeId"] != cascadeID {
+		t.Fatalf("dataArt invalide: %v", respArt)
+	}
 }
 func TestWebSocketStreamBroadcastMultiClient(t *testing.T) {
 	srv := newTestServer(&fakeRPCClient{streamDeltas: []string{"hello", " world"}})

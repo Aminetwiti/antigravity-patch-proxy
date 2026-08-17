@@ -162,6 +162,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   final Set<String> _modifiedFiles = {};
   final List<SessionModifiedFile> _modifiedFileList = [];
   final List<String> _artifacts = [];
+  int _subagentsCount = 0;
   String? _activeArtifact;
   String? _latestPlanText;
 
@@ -353,6 +354,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   void _loadHistoryIfEmpty() {
+    _loadSessionContextAndArtifacts();
+    _fetchVcsChanges();
     if (widget.activeSessionId.isNotEmpty) {
       widget.api?.getSessionHistory(widget.activeSessionId).then((data) {
         if (!mounted) return;
@@ -400,6 +403,34 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         // Ignorer l'erreur
       });
     }
+  }
+
+  Future<void> _loadSessionContextAndArtifacts() async {
+    final api = widget.api;
+    if (widget.activeSessionId.isEmpty || api == null) return;
+    try {
+      final res = await api.getContext(cascadeId: widget.activeSessionId);
+      final rawArts = res['artifacts'] as List<dynamic>? ?? [];
+      final artNames = <String>[];
+      for (final a in rawArts) {
+        if (a is Map && a['name'] != null) {
+          artNames.add(a['name'].toString());
+        } else if (a is String) {
+          artNames.add(a);
+        }
+      }
+      final subCount = (res['subagentsCount'] as int?) ?? 0;
+      if (mounted) {
+        setState(() {
+          if (artNames.isNotEmpty) {
+            _artifacts
+              ..clear()
+              ..addAll(artNames);
+          }
+          _subagentsCount = subCount;
+        });
+      }
+    } catch (_) {}
   }
 
   /// B2 — tap-to-deep-link : quand l'utilisateur tape la notification locale
@@ -1298,11 +1329,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final currentScroll = _scrollController.position.pixels;
     // N'auto-scroll pendant le streaming que si l'utilisateur est déjà proche du bas (< 120px)
     if ((maxScroll - currentScroll) < 120) {
-      _scrollController.animateTo(
-        maxScroll,
-        duration: const Duration(milliseconds: 120),
-        curve: Curves.easeOut,
-      );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _scrollController.hasClients) {
+          _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+        }
+      });
     } else {
       if (!_showJumpToBottom) {
         setState(() {
@@ -1713,11 +1744,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     switch (_currentTab) {
       case SessionTabType.overview:
         return OverviewPanelView(
-          sessionTitle: widget.activeProjectName,
-          workspacePath: widget.activeSessionId,
+          sessionTitle: widget.activeProjectName.isNotEmpty ? widget.activeProjectName : 'Session',
+          workspacePath: widget.activeProjectName,
           modifiedFiles: _modifiedFiles.toList(),
           artifacts: _artifacts,
-          subagentsCount: 0,
+          subagentsCount: _subagentsCount,
+          backgroundTasks: _runningBackgroundTasks,
           onOpenReview: () => setState(() {
             _activeArtifact = null;
             _currentTab = SessionTabType.review;
@@ -2003,53 +2035,45 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   Widget _buildArtifactTabContent(String artifactName) {
-    final scheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Row(
-          children: [
-            Icon(Icons.description_outlined, size: 20, color: scheme.primary),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                artifactName,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: scheme.onSurface,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Divider(color: isDark ? const Color(0xFF2C2F36) : scheme.outlineVariant),
-        const SizedBox(height: 12),
-        Text(
-          'Contenu de l\'artefact "$artifactName" généré pour cette session.',
-          style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant, height: 1.5),
-        ),
-      ],
+    return _ArtifactTabContent(
+      api: widget.api,
+      artifactName: artifactName,
+      activeSessionId: widget.activeSessionId,
+      onOpenPlan: () => setState(() {
+        _activeArtifact = null;
+        _currentTab = SessionTabType.plan;
+      }),
     );
   }
 
-  void _openUnifiedDiffViewer({String? fileName, String? diffContent}) {
-    final diff = diffContent ??
-        '''--- a/${fileName ?? 'workspace/file.dart'}
+  Future<void> _openUnifiedDiffViewer({String? fileName, String? diffContent}) async {
+    String diff = diffContent ?? '';
+    if (diff.isEmpty && fileName != null && widget.api != null) {
+      try {
+        final res = await widget.api!.readFile(fileName);
+        final fileContent = res['content'] as String? ?? '';
+        if (fileContent.isNotEmpty) {
+          final lines = fileContent.split('\n');
+          final buf = StringBuffer();
+          buf.writeln('--- a/$fileName');
+          buf.writeln('+++ b/$fileName');
+          buf.writeln('@@ -1,${lines.length} +1,${lines.length} @@');
+          for (final l in lines) {
+            buf.writeln(' $l');
+          }
+          diff = buf.toString();
+        }
+      } catch (_) {}
+    }
+    if (diff.isEmpty) {
+      diff = '''--- a/${fileName ?? 'workspace/file.dart'}
 +++ b/${fileName ?? 'workspace/file.dart'}
-@@ -1,6 +1,8 @@
- import 'package:flutter/material.dart';
-+// Added enhancements for Antigravity Remote
-+import '../core/protocol/daemon_api.dart';
- 
- void main() {
--  runApp(const MyApp());
-+  runApp(const AntigravityApp());
- }
+@@ -1,1 +1,1 @@
+ // Aucun diff disponible pour ce fichier
 ''';
+    }
 
+    if (!mounted) return;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -2258,30 +2282,32 @@ class _MessageBubble extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     if (isUser) {
-      return Container(
-        margin: const EdgeInsets.only(bottom: 16, left: 48),
-        alignment: Alignment.centerRight,
+      return RepaintBoundary(
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
-            borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(16),
-              topRight: Radius.circular(4),
-              bottomLeft: Radius.circular(16),
-              bottomRight: Radius.circular(16),
+          margin: const EdgeInsets.only(bottom: 16, left: 48),
+          alignment: Alignment.centerRight,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(16),
+                topRight: Radius.circular(4),
+                bottomLeft: Radius.circular(16),
+                bottomRight: Radius.circular(16),
+              ),
+              border: Border.all(
+                color: isDark ? AppColors.borderStrong : scheme.outlineVariant,
+                width: 0.8,
+              ),
             ),
-            border: Border.all(
-              color: isDark ? AppColors.borderStrong : scheme.outlineVariant,
-              width: 0.8,
-            ),
-          ),
-          child: SelectableText(
-            message.text,
-            style: TextStyle(
-              fontSize: 13.5,
-              height: 1.35,
-              color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+            child: SelectableText(
+              message.text,
+              style: TextStyle(
+                fontSize: 13.5,
+                height: 1.35,
+                color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+              ),
             ),
           ),
         ),
@@ -2300,229 +2326,231 @@ class _MessageBubble extends StatelessWidget {
     // → hide timestamp/action row, tighten margin
     final isCompact = !hasContent && !isError && !message.isStreaming;
 
-    return Container(
-      margin: EdgeInsets.only(bottom: isCompact ? 6 : 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (message.modelLabel != null && message.modelLabel!.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+    return RepaintBoundary(
+      child: Container(
+        margin: EdgeInsets.only(bottom: isCompact ? 6 : 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (message.modelLabel != null && message.modelLabel!.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest.withValues(alpha: 0.8),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: scheme.outlineVariant, width: 0.6),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.auto_awesome,
+                        size: 11,
+                        color: scheme.primary,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        message.modelLabel!,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.w600,
+                          color: scheme.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            if (hasThought || (message.isStreaming && !hasContent)) ...[
+              ExecutionProgressView(
+                messageId: message.id,
+                thoughtText: message.thought,
+                isStreaming: message.isStreaming,
+                modelLabel: message.modelLabel,
+                initiallyExpanded: isThoughtExpanded,
+                onToggleExpand: onToggleThought,
+              ),
+            ],
+            if (isError)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: scheme.surfaceContainerHighest.withValues(alpha: 0.8),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: scheme.outlineVariant, width: 0.6),
+                  color: scheme.error.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: scheme.error.withValues(alpha: 0.4)),
                 ),
                 child: Row(
-                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(
-                      Icons.auto_awesome,
-                      size: 11,
-                      color: scheme.primary,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      message.modelLabel!,
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontFamily: 'monospace',
-                        fontWeight: FontWeight.w600,
-                        color: scheme.primary,
+                    Icon(Icons.error_outline, size: 16, color: scheme.error),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        message.text,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: scheme.error,
+                          height: 1.4,
+                        ),
                       ),
                     ),
                   ],
                 ),
-              ),
-            ),
-          if (hasThought || (message.isStreaming && !hasContent)) ...[
-            ExecutionProgressView(
-              messageId: message.id,
-              thoughtText: message.thought,
-              isStreaming: message.isStreaming,
-              modelLabel: message.modelLabel,
-              initiallyExpanded: isThoughtExpanded,
-              onToggleExpand: onToggleThought,
-            ),
-          ],
-          if (isError)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: scheme.error.withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: scheme.error.withValues(alpha: 0.4)),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.error_outline, size: 16, color: scheme.error),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      message.text,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: scheme.error,
-                        height: 1.4,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            )
-          else ...[
-            if (hasContent || (message.isStreaming && message.text.isNotEmpty))
-              MarkdownBubble(
-                text: message.text,
-                isStreaming: message.isStreaming,
-                api: api,
-                workspacePath: workspacePath,
-                onLocalFile: onLocalFile,
-              ),
-            if (!message.isStreaming &&
-                (message.text.contains('Implementation Plan') ||
-                    message.text.contains('implementation_plan.md') ||
-                    message.text.contains('# Plan')))
-              ImplementationPlanCard(
-                summary: 'Le plan d\'implémentation est prêt. Vous pouvez l\'examiner ou approuver directement.',
-                onProceed: onProceedPlan ?? () {},
-                onViewPlan: onViewPlan ?? () {},
-              ),
-          ],
-          if (!isCompact) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-              Text(
-                message.timestamp,
-                style: TextStyle(fontSize: 10.5, color: scheme.onSurfaceVariant),
-              ),
-              if (message.sender == 'user') ...[
-                const SizedBox(width: 8),
-                if (message.isQueued) ...[
-                  Icon(Icons.schedule_outlined, size: 12, color: scheme.tertiary),
-                  const SizedBox(width: 3),
-                  Text(
-                    'En attente',
-                    style: TextStyle(fontSize: 10, color: scheme.tertiary, fontWeight: FontWeight.w600),
-                  ),
-                ] else ...[
-                  Icon(Icons.done_all, size: 12, color: scheme.primary),
-                  const SizedBox(width: 3),
-                  Text(
-                    'Envoyé',
-                    style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
-                  ),
-                ],
-              ],
-              const Spacer(),
-              if (message.isQueued && onResend != null) ...[
-                InkWell(
-                  onTap: () => onResend?.call(message),
-                  borderRadius: BorderRadius.circular(6),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.send_outlined, size: 13, color: scheme.primary),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Retransmettre',
-                          style: TextStyle(
-                            fontSize: 10.5,
-                            color: scheme.primary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+              )
+            else ...[
+              if (hasContent || (message.isStreaming && message.text.isNotEmpty))
+                MarkdownBubble(
+                  text: message.text,
+                  isStreaming: message.isStreaming,
+                  api: api,
+                  workspacePath: workspacePath,
+                  onLocalFile: onLocalFile,
                 ),
-              ],
-              if (hasContent) ...[
-                Tooltip(
-                  message: 'Copier le message',
-                  child: InkWell(
-                    onTap: () {
-                      Clipboard.setData(ClipboardData(text: message.text));
-                      AppToast.show(
-                        context,
-                        message: 'Message copié dans le presse-papiers',
-                        icon: Icons.copy_outlined,
-                        type: ToastType.success,
-                      );
-                    },
-                    borderRadius: BorderRadius.circular(6),
-                    child: Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Semantics(
-                        label: 'Copier le message',
-                        button: true,
-                        child: Icon(Icons.copy_outlined,
-                            size: 15, color: scheme.onSurfaceVariant),
-                      ),
-                    ),
-                  ),
+              if (!message.isStreaming &&
+                  (message.text.contains('Implementation Plan') ||
+                      message.text.contains('implementation_plan.md') ||
+                      message.text.contains('# Plan')))
+                ImplementationPlanCard(
+                  summary: 'Le plan d\'implémentation est prêt. Vous pouvez l\'examiner ou approuver directement.',
+                  onProceed: onProceedPlan ?? () {},
+                  onViewPlan: onViewPlan ?? () {},
                 ),
-                const SizedBox(width: 4),
-                Tooltip(
-                  message: 'Utile',
-                  child: InkWell(
-                    onTap: () {
-                      HapticFeedback.lightImpact();
-                      AppToast.show(
-                        context,
-                        message: 'Merci pour votre retour !',
-                        icon: Icons.thumb_up_outlined,
-                        type: ToastType.info,
-                      );
-                    },
-                    borderRadius: BorderRadius.circular(6),
-                    child: Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Semantics(
-                        label: 'Marquer comme utile',
-                        button: true,
-                        child: Icon(Icons.thumb_up_outlined,
-                            size: 15, color: scheme.onSurfaceVariant),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Tooltip(
-                  message: 'Pas utile',
-                  child: InkWell(
-                    onTap: () {
-                      HapticFeedback.lightImpact();
-                      AppToast.show(
-                        context,
-                        message: 'Retour enregistré',
-                        icon: Icons.thumb_down_outlined,
-                        type: ToastType.info,
-                      );
-                    },
-                    borderRadius: BorderRadius.circular(6),
-                    child: Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Semantics(
-                        label: 'Marquer comme pas utile',
-                        button: true,
-                        child: Icon(Icons.thumb_down_outlined,
-                            size: 15, color: scheme.onSurfaceVariant),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
             ],
-          ),
+            if (!isCompact) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                Text(
+                  message.timestamp,
+                  style: TextStyle(fontSize: 10.5, color: scheme.onSurfaceVariant),
+                ),
+                if (message.sender == 'user') ...[
+                  const SizedBox(width: 8),
+                  if (message.isQueued) ...[
+                    Icon(Icons.schedule_outlined, size: 12, color: scheme.tertiary),
+                    const SizedBox(width: 3),
+                    Text(
+                      'En attente',
+                      style: TextStyle(fontSize: 10, color: scheme.tertiary, fontWeight: FontWeight.w600),
+                    ),
+                  ] else ...[
+                    Icon(Icons.done_all, size: 12, color: scheme.primary),
+                    const SizedBox(width: 3),
+                    Text(
+                      'Envoyé',
+                      style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
+                    ),
+                  ],
+                ],
+                const Spacer(),
+                if (message.isQueued && onResend != null) ...[
+                  InkWell(
+                    onTap: () => onResend?.call(message),
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.send_outlined, size: 13, color: scheme.primary),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Retransmettre',
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              color: scheme.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+                if (hasContent) ...[
+                  Tooltip(
+                    message: 'Copier le message',
+                    child: InkWell(
+                      onTap: () {
+                        Clipboard.setData(ClipboardData(text: message.text));
+                        AppToast.show(
+                          context,
+                          message: 'Message copié dans le presse-papiers',
+                          icon: Icons.copy_outlined,
+                          type: ToastType.success,
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(6),
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Semantics(
+                          label: 'Copier le message',
+                          button: true,
+                          child: Icon(Icons.copy_outlined,
+                              size: 15, color: scheme.onSurfaceVariant),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Tooltip(
+                    message: 'Utile',
+                    child: InkWell(
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        AppToast.show(
+                          context,
+                          message: 'Merci pour votre retour !',
+                          icon: Icons.thumb_up_outlined,
+                          type: ToastType.info,
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(6),
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Semantics(
+                          label: 'Marquer comme utile',
+                          button: true,
+                          child: Icon(Icons.thumb_up_outlined,
+                              size: 15, color: scheme.onSurfaceVariant),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Tooltip(
+                    message: 'Pas utile',
+                    child: InkWell(
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        AppToast.show(
+                          context,
+                          message: 'Retour enregistré',
+                          icon: Icons.thumb_down_outlined,
+                          type: ToastType.info,
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(6),
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Semantics(
+                          label: 'Marquer comme pas utile',
+                          button: true,
+                          child: Icon(Icons.thumb_down_outlined,
+                              size: 15, color: scheme.onSurfaceVariant),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ],
         ],
-      ],
+      ),
     ),
   );
   }
@@ -2723,6 +2751,172 @@ class _SuggestionChip extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _ArtifactTabContent extends StatefulWidget {
+  final DaemonApi? api;
+  final String artifactName;
+  final String activeSessionId;
+  final VoidCallback? onOpenPlan;
+
+  const _ArtifactTabContent({
+    required this.api,
+    required this.artifactName,
+    required this.activeSessionId,
+    this.onOpenPlan,
+  });
+
+  @override
+  State<_ArtifactTabContent> createState() => _ArtifactTabContentState();
+}
+
+class _ArtifactTabContentState extends State<_ArtifactTabContent> {
+  bool _isLoading = true;
+  String _content = '';
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ArtifactTabContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.artifactName != widget.artifactName ||
+        oldWidget.activeSessionId != widget.activeSessionId) {
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    final api = widget.api;
+    if (api == null) {
+      setState(() {
+        _isLoading = false;
+        _error = 'Déconnecté du daemon';
+      });
+      return;
+    }
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+    try {
+      final res = await api.readFile(
+        widget.artifactName,
+        workspacePath: '.gemini/antigravity/brain/${widget.activeSessionId}',
+      );
+      if (mounted) {
+        setState(() {
+          _content = res['content'] as String? ?? '';
+          _isLoading = false;
+        });
+      }
+    } catch (_) {
+      try {
+        final res2 = await api.readFile(
+          widget.artifactName,
+          workspacePath: '.gemini/antigravity-ide/brain/${widget.activeSessionId}',
+        );
+        if (mounted) {
+          setState(() {
+            _content = res2['content'] as String? ?? '';
+            _isLoading = false;
+          });
+          return;
+        }
+      } catch (e2) {
+        if (mounted) {
+          setState(() {
+            _error = 'Impossible de charger l\'artefact ($e2)';
+            _isLoading = false;
+          });
+        }
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    if (_isLoading) {
+      return Center(
+        child: SizedBox(
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            valueColor: AlwaysStoppedAnimation(scheme.primary),
+          ),
+        ),
+      );
+    }
+
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.error_outline_rounded, size: 36, color: scheme.error),
+              const SizedBox(height: 12),
+              Text(_error!,
+                  style: TextStyle(color: scheme.error, fontSize: 13),
+                  textAlign: TextAlign.center),
+              const SizedBox(height: 12),
+              FilledButton.tonal(
+                onPressed: _load,
+                child: const Text('Réessayer'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final isPlan = widget.artifactName.toLowerCase().contains('plan');
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Row(
+          children: [
+            Icon(Icons.article_outlined, size: 20, color: scheme.primary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                widget.artifactName,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: scheme.onSurface,
+                ),
+              ),
+            ),
+            if (isPlan)
+              FilledButton.icon(
+                icon: const Icon(Icons.play_arrow_rounded, size: 16),
+                label: const Text('Proceed ⌘↵'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  visualDensity: VisualDensity.compact,
+                ),
+                onPressed: widget.onOpenPlan,
+              ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Divider(color: isDark ? const Color(0xFF2C2F36) : scheme.outlineVariant),
+        const SizedBox(height: 12),
+        MarkdownBody(content: _content.isNotEmpty ? _content : 'Artefact vide.'),
+      ],
     );
   }
 }

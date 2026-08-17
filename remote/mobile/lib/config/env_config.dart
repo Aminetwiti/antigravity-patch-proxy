@@ -22,7 +22,7 @@ class EnvConfig {
   /// appairage persisté (QR → stockage sécurisé) en production.
   static const String authToken = String.fromEnvironment(
     'AUTH_TOKEN',
-    defaultValue: 'demo123',
+    defaultValue: '11',
   );
 
   static const bool useSsl = bool.fromEnvironment(

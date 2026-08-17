@@ -554,10 +554,21 @@ func sessionsFromSummaries(jetbox map[string]connectrpc.JetboxSummary) map[strin
 }
 
 // computeFocusedSession identifie la session IDE au premier plan :
-// priorité : RUNNING (2) > WAITING (1) > la plus récemment mise à jour.
+// priorité : RUNNING (2) > WAITING (1) > READY (0).
+// En cas d'égalité de score, la session actuelle (best) est conservée pour
+// éviter le flip-flop de focus entre sessions READY à chaque heartbeat Jetbox.
 // Exclut sous-agents (source==16), archivées et tuées.
 func computeFocusedSession(summaries map[string]connectrpc.JetboxSummary) *connectrpc.JetboxSummary {
 	var best *connectrpc.JetboxSummary
+	score := func(st string, w bool) int {
+		if st == "CASCADE_STATUS_RUNNING" {
+			return 2
+		}
+		if w || st == "CASCADE_STATUS_WAITING_FOR_USER_ACTION" {
+			return 1
+		}
+		return 0
+	}
 	for _, sum := range summaries {
 		if sum.Archived || sum.Killed || sum.Source == 16 {
 			continue
@@ -567,17 +578,9 @@ func computeFocusedSession(summaries map[string]connectrpc.JetboxSummary) *conne
 			best = &s
 			continue
 		}
-		score := func(st string, w bool) int {
-			if st == "CASCADE_STATUS_RUNNING" {
-				return 2
-			}
-			if w || st == "CASCADE_STATUS_WAITING_FOR_USER_ACTION" {
-				return 1
-			}
-			return 0
-		}
-		sc, sb := score(s.Status, s.Waiting), score(best.Status, best.Waiting)
-		if sc > sb || (sc == sb && s.UpdatedAt.After(best.UpdatedAt)) {
+		if score(s.Status, s.Waiting) > score(best.Status, best.Waiting) {
+			best = &s
+		} else if score(s.Status, s.Waiting) == score(best.Status, best.Waiting) && s.UpdatedAt.After(best.UpdatedAt) {
 			best = &s
 		}
 	}
@@ -3029,9 +3032,17 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 		history, err := GetSessionHistory(msg.CascadeID)
-		if err != nil {
+		if len(history) == 0 && s.RPCClient != nil {
+			if rawTraj, errTraj := s.RPCClient.GetCascadeTrajectory(msg.CascadeID, 0); errTraj == nil && len(rawTraj) > 0 {
+				history = ExtractHistoryFromTrajectory(rawTraj)
+			}
+		}
+		if err != nil && len(history) == 0 {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
 			return
+		}
+		if history == nil {
+			history = []HistoryMessage{}
 		}
 		respData := map[string]interface{}{"messages": history}
 		s.mu.Lock()
@@ -3326,6 +3337,47 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			logJSON.Debug("open_conversation_failed", "cascadeId", msg.CascadeID, "err", errSet)
 		}
 
+		// Si le flux gRPC-Web n'a pas émis de deltas (génération asynchrone LS 2.5+),
+		// on sonde la trajectoire pour extraire la réponse générée et la diffuser au mobile.
+		if frameIndex == 0 && err == nil && s.RPCClient != nil {
+			for i := 0; i < 8; i++ {
+				select {
+				case <-ctx.Done():
+					break
+				case <-time.After(500 * time.Millisecond):
+				}
+				if rawTraj, errTraj := s.RPCClient.GetCascadeTrajectory(msg.CascadeID, 0); errTraj == nil && len(rawTraj) > 0 {
+					msgs := ExtractHistoryFromTrajectory(rawTraj)
+					if len(msgs) > 0 && msgs[len(msgs)-1].Sender == "assistant" {
+						lastMsg := msgs[len(msgs)-1]
+						deltaData := map[string]interface{}{
+							"frameIndex": 1,
+							"events": []map[string]interface{}{
+								{
+									"kind":  "text",
+									"delta": lastMsg.Text,
+								},
+							},
+							"cascadeId":  msg.CascadeID,
+							"hostActive": hostActiveSince(hostActiveWindow),
+						}
+						stepIdx := s.streamBuffer.RecordEvent(msg.CascadeID, OutgoingMessage{
+							Type:      "stream_delta",
+							RequestID: msg.RequestID,
+							Data:      deltaData,
+						})
+						deltaData["stepIndex"] = stepIdx
+						s.broadcast(OutgoingMessage{
+							Type:      "stream_delta",
+							RequestID: msg.RequestID,
+							Data:      deltaData,
+						})
+						break
+					}
+				}
+			}
+		}
+
 		if ctx.Err() != nil {
 			// stream_end(cancelled) garanti : CancelGeneration supprime la
 			// cascade de activeCancels AVANT de diffuser — si elle y est
@@ -3514,7 +3566,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 		if msg.WorkspacePath != "" {
-			// Confinement : le fichier doit ├¬tre sous la racine workspace.
+			// Confinement : le fichier doit être sous la racine workspace.
 			abs, errRes := resolvePath(homeRoot(msg.WorkspacePath), msg.FilePath)
 			if errRes != nil {
 				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errRes.Error()})
@@ -3528,6 +3580,22 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"content": string(content)}})
 			return
 		}
+		// Direct local file check (e.g. brain artifacts / local paths)
+		cleanPath := strings.TrimPrefix(msg.FilePath, "file:///")
+		cleanPath = strings.TrimPrefix(cleanPath, "file://")
+		if filepath.IsAbs(cleanPath) {
+			if content, errRead := os.ReadFile(cleanPath); errRead == nil {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"content": string(content)}})
+				return
+			}
+		}
+		if strings.HasPrefix(msg.FilePath, ".gemini") {
+			abs := homeRoot(msg.FilePath)
+			if content, errRead := os.ReadFile(abs); errRead == nil {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"content": string(content)}})
+				return
+			}
+		}
 		raw, err = s.RPCClient.ReadFile(toWorkspaceURI(msg.FilePath))
 		if err == nil {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"content": string(raw)}})
@@ -3535,6 +3603,38 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 
 	case "get_context":
+		targetCascadeID := msg.CascadeID
+		if targetCascadeID == "" && msg.Data != nil {
+			targetCascadeID, _ = msg.Data["cascadeId"].(string)
+		}
+		if targetCascadeID != "" {
+			// Scoped to a single session
+			counts := countTranscriptActivity(targetCascadeID)
+			artifacts := ListSessionArtifacts(targetCascadeID)
+			uploads := ListSessionUploads(targetCascadeID)
+			artifactsCount := len(artifacts)
+			if artifactsCount < counts["artifacts"] {
+				artifactsCount = counts["artifacts"]
+			}
+			uploadsCount := len(uploads)
+			if uploadsCount < counts["uploads"] {
+				uploadsCount = counts["uploads"]
+			}
+			stats := map[string]interface{}{
+				"cascadeId":            targetCascadeID,
+				"subagentsCount":       counts["subagents"],
+				"filesChangedCount":    counts["files"],
+				"artifactsCount":       artifactsCount,
+				"uploadsCount":         uploadsCount,
+				"backgroundTasksCount": counts["tasks"],
+				"artifacts":            artifacts,
+				"uploads":              uploads,
+			}
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: stats})
+			return
+		}
+
+		// Global aggregate fallback when no cascadeId is provided
 		var cascadeIDs []string
 		if raw, ok := s.cachedSessions(); ok && len(raw) > 0 {
 			for _, sum := range connectrpc.ParseTrajectories(raw) {
@@ -3542,9 +3642,6 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 		}
 		if len(cascadeIDs) == 0 {
-			// Cache froid (pas de list_sessions r├â┬®cent) : on le r├â┬®chauffe UNE
-			// fois via le single-flight au lieu de retomber sur les sessions
-			// locales (qui comptent 0 artefact pour une vraie session LS).
 			s.fetchSessionsSingleFlight()
 			if raw, ok := s.cachedSessions(); ok && len(raw) > 0 {
 				for _, sum := range connectrpc.ParseTrajectories(raw) {
@@ -3559,22 +3656,52 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				}
 			}
 		}
-		stats := map[string]int{
+		stats := map[string]interface{}{
 			"subagentsCount":       0,
 			"filesChangedCount":    0,
 			"artifactsCount":       0,
 			"uploadsCount":         0,
 			"backgroundTasksCount": 0,
 		}
+		subagentsTotal := 0
+		filesTotal := 0
+		artifactsTotal := 0
+		uploadsTotal := 0
+		tasksTotal := 0
 		for _, cid := range cascadeIDs {
 			counts := countTranscriptActivity(cid)
-			stats["subagentsCount"] += counts["subagents"]
-			stats["filesChangedCount"] += counts["files"]
-			stats["artifactsCount"] += counts["artifacts"]
-			stats["uploadsCount"] += counts["uploads"]
-			stats["backgroundTasksCount"] += counts["tasks"]
+			subagentsTotal += counts["subagents"]
+			filesTotal += counts["files"]
+			artifactsTotal += counts["artifacts"]
+			uploadsTotal += counts["uploads"]
+			tasksTotal += counts["tasks"]
 		}
+		stats["subagentsCount"] = subagentsTotal
+		stats["filesChangedCount"] = filesTotal
+		stats["artifactsCount"] = artifactsTotal
+		stats["uploadsCount"] = uploadsTotal
+		stats["backgroundTasksCount"] = tasksTotal
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: stats})
+		return
+
+	case "list_artifacts":
+		cascadeID := msg.CascadeID
+		if cascadeID == "" && msg.Data != nil {
+			cascadeID, _ = msg.Data["cascadeId"].(string)
+		}
+		if cascadeID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
+			return
+		}
+		artifacts := ListSessionArtifacts(cascadeID)
+		s.writeJSON(conn, OutgoingMessage{
+			Type:      "response",
+			RequestID: msg.RequestID,
+			Data: map[string]interface{}{
+				"cascadeId": cascadeID,
+				"artifacts": artifacts,
+			},
+		})
 		return
 
 	case "get_subagents":

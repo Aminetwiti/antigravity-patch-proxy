@@ -83,22 +83,76 @@ func ParseFrameEvents(raw []byte, cascadeID string) []StreamEvent {
 			continue
 		}
 
-		if IsPrintable(s) && len(s) > 0 {
-			trimmed := strings.TrimSpace(s)
-			isJSONApproval := strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") &&
-				(strings.Contains(trimmed, `"tool"`) ||
-					strings.Contains(trimmed, `"requestedInteraction"`) ||
-					(strings.Contains(trimmed, `"command"`) && (strings.Contains(trimmed, `"callId"`) || strings.Contains(trimmed, `"step"`))))
+		// 1. Détection des blocs d'approbation JSON directs :
+		trimmed := strings.TrimSpace(s)
+		isJSON := strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}")
+		isToolJSON := isJSON && (strings.Contains(trimmed, `"run_command"`) ||
+			strings.Contains(trimmed, `"write_to_file"`) ||
+			strings.Contains(trimmed, `"read_file"`) ||
+			strings.Contains(trimmed, `"edit_file"`) ||
+			strings.Contains(trimmed, `"list_files"`) ||
+			strings.Contains(trimmed, `"search_files"`) ||
+			strings.Contains(trimmed, `"ask_question"`) ||
+			strings.Contains(trimmed, `"ask_user"`) ||
+			strings.Contains(trimmed, `"tool"`) ||
+			strings.Contains(trimmed, `"command"`))
 
-			if isJSONApproval {
-				events = append(events, StreamEvent{
-					Kind:         EventKindApprovalRequired,
-					CascadeID:    cascadeID,
-					TrajectoryID: firstUUID(s),
-					Tool:         extractToolName(s),
-					Detail:       s,
-				})
-			} else if strings.Contains(s, "<thought>") || strings.Contains(s, "Thinking...") {
+		if isToolJSON {
+			events = append(events, StreamEvent{
+				Kind:         EventKindApprovalRequired,
+				CascadeID:    cascadeID,
+				TrajectoryID: firstUUID(s),
+				Tool:         extractToolName(s),
+				Detail:       s,
+			})
+			continue
+		}
+
+		// 2. Détection des frames binaires protobuf imbriquées (champ 1 = sous-message avec trajectoryID + stepIndex + JSON blob) :
+		subFields := DecodeFields(f.Bytes)
+		var trajectoryID string
+		var stepIndex uint32
+		var isNestedApproval bool
+		var nestedTool string
+		var nestedDetail string
+
+		for _, sub := range subFields {
+			if sub.WireType == 0 && sub.Num == 2 {
+				stepIndex = uint32(sub.Varint)
+			}
+			if sub.WireType == 2 && sub.Num == 1 && len(sub.Bytes) == 36 {
+				trajectoryID = string(sub.Bytes)
+			}
+			if sub.WireType == 2 && len(sub.Bytes) > 0 && sub.Num >= 3 {
+				st := strings.TrimSpace(string(sub.Bytes))
+				if strings.HasPrefix(st, "{") && strings.HasSuffix(st, "}") &&
+					(strings.Contains(st, `"run_command"`) || strings.Contains(st, `"write_to_file"`) ||
+						strings.Contains(st, `"read_file"`) || strings.Contains(st, `"edit_file"`) ||
+						strings.Contains(st, `"list_files"`) || strings.Contains(st, `"search_files"`) ||
+						strings.Contains(st, `"ask_question"`) || strings.Contains(st, `"ask_user"`) ||
+						strings.Contains(st, `"tool"`)) {
+					isNestedApproval = true
+					nestedTool = extractToolName(st)
+					nestedDetail = st
+				}
+			}
+		}
+
+		if isNestedApproval {
+			events = append(events, StreamEvent{
+				Kind:         EventKindApprovalRequired,
+				CascadeID:    cascadeID,
+				TrajectoryID: trajectoryID,
+				StepIndex:    stepIndex,
+				Tool:         nestedTool,
+				Detail:       nestedDetail,
+			})
+			continue
+		}
+
+		// 3. Sinon c'est du texte ou du thinking
+		if IsPrintable(s) && len(s) > 0 {
+			if strings.Contains(s, "<thought>") || strings.Contains(s, "Thinking...") {
 				events = append(events, StreamEvent{
 					Kind:      EventKindThinking,
 					Delta:     s,
@@ -110,100 +164,6 @@ func ParseFrameEvents(raw []byte, cascadeID string) []StreamEvent {
 					Delta:     s,
 					CascadeID: cascadeID,
 				})
-			}
-			continue
-		}
-
-		// Si f.Bytes n'est pas du texte brut imprimable, c'est un sous-message protobuf binaire
-		subFields := DecodeFields(f.Bytes)
-		var trajectoryID string
-		var stepIndex uint32
-		var isInteraction bool
-		var detectedTool string
-
-		for _, sub := range subFields {
-			if sub.WireType == 0 && sub.Num == 2 {
-				stepIndex = uint32(sub.Varint)
-			}
-			if sub.WireType == 2 && sub.Num == 1 && len(sub.Bytes) == 36 {
-				trajectoryID = string(sub.Bytes)
-			}
-			if sub.Num == InteractionRunCommand || sub.Num == InteractionOpenBrowserURL ||
-				sub.Num == InteractionFilePermission || sub.Num == InteractionPermission ||
-				sub.Num == InteractionApproval {
-				isInteraction = true
-				if sub.Num == InteractionRunCommand {
-					detectedTool = "run_command"
-				} else if sub.Num == InteractionFilePermission {
-					detectedTool = "write_to_file"
-				}
-			}
-			if sub.WireType == 2 && sub.Num == 2 && len(sub.Bytes) > 0 {
-				nested := DecodeFields(sub.Bytes)
-				for _, nf := range nested {
-					if nf.WireType == 0 && nf.Num == 2 {
-						stepIndex = uint32(nf.Varint)
-					}
-					if nf.WireType == 2 && nf.Num == 1 && len(nf.Bytes) == 36 {
-						trajectoryID = string(nf.Bytes)
-					}
-					if nf.Num == InteractionRunCommand || nf.Num == InteractionOpenBrowserURL ||
-						nf.Num == InteractionFilePermission || nf.Num == InteractionPermission ||
-						nf.Num == InteractionApproval {
-						isInteraction = true
-						if nf.Num == InteractionRunCommand {
-							detectedTool = "run_command"
-						} else if nf.Num == InteractionFilePermission {
-							detectedTool = "write_to_file"
-						}
-					}
-				}
-			}
-		}
-
-		if isInteraction {
-			if detectedTool == "" {
-				detectedTool = extractToolName(s)
-			}
-			events = append(events, StreamEvent{
-				Kind:         EventKindApprovalRequired,
-				CascadeID:    cascadeID,
-				TrajectoryID: trajectoryID,
-				StepIndex:    stepIndex,
-				Tool:         detectedTool,
-				Detail:       s,
-			})
-		} else {
-			for _, sub := range subFields {
-				if sub.WireType == 2 && len(sub.Bytes) > 0 && sub.Num != 1 {
-					st := strings.TrimSpace(string(sub.Bytes))
-					if IsPrintable(st) && len(st) > 0 {
-						isSubJSONTool := strings.HasPrefix(st, "{") && strings.HasSuffix(st, "}") &&
-							(strings.Contains(st, `"tool"`) || strings.Contains(st, `"command"`) || strings.Contains(st, `"questions"`))
-						if isSubJSONTool {
-							events = append(events, StreamEvent{
-								Kind:         EventKindApprovalRequired,
-								CascadeID:    cascadeID,
-								TrajectoryID: trajectoryID,
-								StepIndex:    stepIndex,
-								Tool:         extractToolName(st),
-								Detail:       st,
-							})
-						} else if strings.Contains(st, "<thought>") || strings.Contains(st, "Thinking...") {
-							events = append(events, StreamEvent{
-								Kind:      EventKindThinking,
-								Delta:     st,
-								CascadeID: cascadeID,
-							})
-						} else {
-							events = append(events, StreamEvent{
-								Kind:      EventKindText,
-								Delta:     st,
-								CascadeID: cascadeID,
-							})
-						}
-					}
-				}
 			}
 		}
 	}

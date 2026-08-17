@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/antigravity/remote-daemon/pkg/connectrpc"
 	_ "modernc.org/sqlite"
 )
 
@@ -82,6 +83,106 @@ func findTranscriptPath(cascadeID string) string {
 		}
 	}
 	return ""
+}
+
+// findBrainDir returns the active brain directory for a cascade ID.
+func findBrainDir(cascadeID string) string {
+	if cascadeID == "" {
+		return ""
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	candidates := []string{
+		filepath.Join(home, ".gemini", "antigravity", "brain", cascadeID),
+		filepath.Join(home, ".gemini", "antigravity-ide", "brain", cascadeID),
+	}
+	for _, p := range candidates {
+		if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+			return p
+		}
+	}
+	return ""
+}
+
+// ListSessionArtifacts scans the session brain directory and returns all markdown artifacts.
+func ListSessionArtifacts(cascadeID string) []map[string]interface{} {
+	var results []map[string]interface{}
+	brainDir := findBrainDir(cascadeID)
+	if brainDir == "" {
+		return results
+	}
+	entries, err := os.ReadDir(brainDir)
+	if err != nil {
+		return results
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasSuffix(strings.ToLower(name), ".md") {
+			fullPath := filepath.Join(brainDir, name)
+			info, _ := entry.Info()
+			var size int64
+			var modTime int64
+			if info != nil {
+				size = info.Size()
+				modTime = info.ModTime().UnixMilli()
+			}
+			results = append(results, map[string]interface{}{
+				"name":    name,
+				"path":    filepath.ToSlash(fullPath),
+				"size":    size,
+				"modTime": modTime,
+			})
+		}
+	}
+	return results
+}
+
+// ListSessionUploads scans scratch and user_uploaded directories for images, PDFs, media.
+func ListSessionUploads(cascadeID string) []map[string]interface{} {
+	var results []map[string]interface{}
+	brainDir := findBrainDir(cascadeID)
+	if brainDir == "" {
+		return results
+	}
+	for _, sub := range []string{"scratch", ".user_uploaded", ""} {
+		subDir := filepath.Join(brainDir, sub)
+		entries, err := os.ReadDir(subDir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			name := entry.Name()
+			lower := strings.ToLower(name)
+			if strings.HasSuffix(lower, ".png") ||
+				strings.HasSuffix(lower, ".jpg") ||
+				strings.HasSuffix(lower, ".jpeg") ||
+				strings.HasSuffix(lower, ".gif") ||
+				strings.HasSuffix(lower, ".webp") ||
+				strings.HasSuffix(lower, ".pdf") ||
+				strings.HasSuffix(lower, ".mp4") {
+				fullPath := filepath.Join(subDir, name)
+				info, _ := entry.Info()
+				var size int64
+				if info != nil {
+					size = info.Size()
+				}
+				results = append(results, map[string]interface{}{
+					"name": name,
+					"path": filepath.ToSlash(fullPath),
+					"size": size,
+				})
+			}
+		}
+	}
+	return results
 }
 
 // ListLocalSessions scans local brain directories for conversations when gRPC returns empty.
@@ -927,10 +1028,10 @@ func readSQLiteSteps(dbPath, cascadeID string) ([]HistoryMessage, string, error)
 				Thought:   thought,
 				Timestamp: ts,
 			}
-			if status != 0 {
+			if status > 2 {
 				msg.IsError = true
 				if msg.Text == "" {
-					msg.Text = "Erreur pendant la g├®n├®ration"
+					msg.Text = "Erreur pendant la génération"
 				}
 			}
 			messages = append(messages, msg)
@@ -1042,6 +1143,64 @@ func GetSessionHistory(cascadeID string) ([]HistoryMessage, error) {
 		messages = []HistoryMessage{}
 	}
 	return CoalesceHistoryMessages(messages), nil
+}
+
+// ExtractHistoryFromTrajectory extrait les messages d'un blob GetCascadeTrajectory.
+func ExtractHistoryFromTrajectory(raw []byte) []HistoryMessage {
+	var messages []HistoryMessage
+	fields := connectrpc.DecodeFields(raw)
+	for _, f := range fields {
+		if f.Num == 1 && f.WireType == 2 {
+			subFields := connectrpc.DecodeFields(f.Bytes)
+			for _, sf := range subFields {
+				if sf.Num == 3 && sf.WireType == 2 {
+					turnFields := connectrpc.DecodeFields(sf.Bytes)
+					for _, tf := range turnFields {
+						if tf.Num == 1 && tf.WireType == 2 {
+							stepFields := connectrpc.DecodeFields(tf.Bytes)
+							for _, stf := range stepFields {
+								if stf.Num == 19 && stf.WireType == 2 {
+									for _, subPrompt := range connectrpc.DecodeFields(stf.Bytes) {
+										if (subPrompt.Num == 1 || subPrompt.Num == 2) && subPrompt.WireType == 2 && len(subPrompt.Bytes) > 0 {
+											promptText := string(subPrompt.Bytes)
+											if len(promptText) > 0 && promptText[0] >= 32 && !strings.HasPrefix(promptText, "<USER_REQUEST>") {
+												messages = append(messages, HistoryMessage{
+													ID:        fmt.Sprintf("user-%d", len(messages)+1),
+													Sender:    "user",
+													Text:      promptText,
+													Timestamp: time.Now().Format("15:04"),
+												})
+												break
+											}
+										}
+									}
+								}
+								if stf.Num == 2 && stf.WireType == 2 {
+									for _, subResp := range connectrpc.DecodeFields(stf.Bytes) {
+										if subResp.Num == 3 && subResp.WireType == 2 && len(subResp.Bytes) > 0 {
+											respText := string(subResp.Bytes)
+											if strings.HasPrefix(respText, "<USER_REQUEST>") || strings.HasPrefix(respText, "# Conversation History") {
+												continue
+											}
+											if len(respText) > 0 {
+												messages = append(messages, HistoryMessage{
+													ID:        fmt.Sprintf("assistant-%d", len(messages)+1),
+													Sender:    "assistant",
+													Text:      respText,
+													Timestamp: time.Now().Format("15:04"),
+												})
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return messages
 }
 
 // transcriptCounts regroupe les compteurs d'activit├® extraits d'un transcript.

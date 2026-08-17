@@ -161,7 +161,7 @@ class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
                         )
                       : SingleChildScrollView(
                           padding: const EdgeInsets.all(16),
-                          child: _MarkdownBody(content: _content),
+                          child: MarkdownBody(content: _content),
                         ),
             ),
             if (widget.requestFeedback)
@@ -177,10 +177,10 @@ class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
   }
 }
 
-class _MarkdownBody extends StatelessWidget {
+class MarkdownBody extends StatelessWidget {
   final String content;
 
-  const _MarkdownBody({required this.content});
+  const MarkdownBody({super.key, required this.content});
 
   @override
   Widget build(BuildContext context) {

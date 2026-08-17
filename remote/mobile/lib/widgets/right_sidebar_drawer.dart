@@ -101,16 +101,44 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
     if (widget.api == null || widget.activeSessionId.isEmpty) return;
     setState(() => _isLoadingArtifacts = true);
     try {
-      // Fetch files from the brain directory
-      final path = '.gemini/antigravity-ide/brain/${widget.activeSessionId}/';
-      final res = await widget.api!.listFiles(path);
-      final files = res['files'] as List<dynamic>? ?? [];
-      
-      final arts = <Map<String, dynamic>>[];
-      for (final f in files) {
-        if (f is Map && f['name'] != null && f['name'].toString().endsWith('.md')) {
-          arts.add({'name': f['name'], 'path': f['path'] ?? '$path${f['name']}'});
+      // 1. Try dedicated daemon listArtifacts RPC
+      try {
+        final res = await widget.api!.listArtifacts(widget.activeSessionId);
+        final list = res['artifacts'] as List<dynamic>? ?? [];
+        if (list.isNotEmpty) {
+          final arts = <Map<String, dynamic>>[];
+          for (final a in list) {
+            if (a is Map && a['name'] != null) {
+              arts.add({
+                'name': a['name'].toString(),
+                'path': a['path']?.toString() ?? a['name'].toString(),
+              });
+            }
+          }
+          if (mounted && arts.isNotEmpty) {
+            setState(() => _artifacts = arts);
+            return;
+          }
         }
+      } catch (_) {}
+
+      // 2. Fallback: check both antigravity and antigravity-ide brain directories
+      final brainBases = [
+        '.gemini/antigravity/brain/${widget.activeSessionId}/',
+        '.gemini/antigravity-ide/brain/${widget.activeSessionId}/',
+      ];
+      final arts = <Map<String, dynamic>>[];
+      for (final path in brainBases) {
+        try {
+          final res = await widget.api!.listFiles(path);
+          final files = res['files'] as List<dynamic>? ?? [];
+          for (final f in files) {
+            if (f is Map && f['name'] != null && f['name'].toString().endsWith('.md')) {
+              arts.add({'name': f['name'], 'path': f['path'] ?? '$path${f['name']}'});
+            }
+          }
+          if (arts.isNotEmpty) break;
+        } catch (_) {}
       }
       if (mounted) setState(() => _artifacts = arts);
     } catch (e) {
@@ -124,32 +152,38 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
     if (widget.api == null || widget.activeSessionId.isEmpty) return;
     setState(() => _isLoadingUploads = true);
     try {
-      final base = '.gemini/antigravity-ide/brain/${widget.activeSessionId}';
-      final pathsToTry = ['$base/scratch/', '$base/.user_uploaded/', '$base/'];
+      final brainBases = [
+        '.gemini/antigravity/brain/${widget.activeSessionId}',
+        '.gemini/antigravity-ide/brain/${widget.activeSessionId}',
+      ];
       final ups = <Map<String, dynamic>>[];
 
-      for (final p in pathsToTry) {
-        try {
-          final res = await widget.api!.listFiles(p);
-          final files = res['files'] as List<dynamic>? ?? [];
-          for (final f in files) {
-            if (f is Map && f['name'] != null) {
-              final name = f['name'].toString().toLowerCase();
-              if (name.endsWith('.png') ||
-                  name.endsWith('.jpg') ||
-                  name.endsWith('.jpeg') ||
-                  name.endsWith('.gif') ||
-                  name.endsWith('.webp') ||
-                  name.endsWith('.pdf') ||
-                  name.endsWith('.mp4')) {
-                ups.add({
-                  'name': f['name'],
-                  'path': f['path'] ?? '$p${f['name']}',
-                });
+      for (final base in brainBases) {
+        final pathsToTry = ['$base/scratch/', '$base/.user_uploaded/', '$base/'];
+        for (final p in pathsToTry) {
+          try {
+            final res = await widget.api!.listFiles(p);
+            final files = res['files'] as List<dynamic>? ?? [];
+            for (final f in files) {
+              if (f is Map && f['name'] != null) {
+                final name = f['name'].toString().toLowerCase();
+                if (name.endsWith('.png') ||
+                    name.endsWith('.jpg') ||
+                    name.endsWith('.jpeg') ||
+                    name.endsWith('.gif') ||
+                    name.endsWith('.webp') ||
+                    name.endsWith('.pdf') ||
+                    name.endsWith('.mp4')) {
+                  ups.add({
+                    'name': f['name'],
+                    'path': f['path'] ?? '$p${f['name']}',
+                  });
+                }
               }
             }
-          }
-        } catch (_) {}
+          } catch (_) {}
+        }
+        if (ups.isNotEmpty) break;
       }
       if (mounted) setState(() => _uploads = ups);
     } catch (e) {
@@ -164,17 +198,11 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
     ArtifactViewerModal.show(
       context,
       api: widget.api!,
-      artifactPath: artifact['path'],
-      artifactName: artifact['name'],
-      workspacePath: _brainRoot,
+      artifactPath: artifact['path'] ?? artifact['name'] ?? '',
+      artifactName: artifact['name'] ?? 'Document',
+      workspacePath: widget.workspacePath.isNotEmpty ? widget.workspacePath : null,
     );
   }
-
-  /// Racine du brain pour la session active — le daemon confine read_file
-  /// sous ce workspace (resolvePath), donc les chemins relatifs des artifacts
-  /// doivent être résolus contre `~/.gemini/antigravity-ide/brain/<sessionId>/`.
-  String get _brainRoot =>
-      '.gemini/antigravity-ide/brain/${widget.activeSessionId}';
 
   @override
   Widget build(BuildContext context) {

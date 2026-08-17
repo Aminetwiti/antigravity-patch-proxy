@@ -408,7 +408,14 @@ class DaemonApi {
     if (workspacePath != null) 'workspacePath': workspacePath,
   });
 
-  Future<Map<String, dynamic>> getContext() => rpc('get_context');
+  Future<Map<String, dynamic>> getContext({String? cascadeId, String? workspacePath}) =>
+      rpc('get_context', {
+        if (cascadeId != null && cascadeId.isNotEmpty) 'cascadeId': cascadeId,
+        if (workspacePath != null && workspacePath.isNotEmpty) 'workspacePath': workspacePath,
+      });
+
+  Future<Map<String, dynamic>> listArtifacts(String cascadeId) =>
+      rpc('list_artifacts', {'cascadeId': cascadeId});
 
   Future<Map<String, dynamic>> submitApproval({
     required String cascadeId,

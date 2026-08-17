@@ -46,6 +46,13 @@ CREATE TABLE session_messages (
   PRIMARY KEY (session_id)
 )
 ''');
+
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions (updated_at DESC)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_session_messages_updated_at ON session_messages (updated_at DESC)',
+    );
   }
 
   Future<void> saveSessions(List<dynamic> sessions) async {
