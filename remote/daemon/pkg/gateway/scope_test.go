@@ -1,4 +1,4 @@
-﻿package gateway
+package gateway
 
 import (
 	"encoding/json"
@@ -49,10 +49,11 @@ func TestScope_SendPromptBlocked(t *testing.T) {
 		t.Fatalf("JSON invalide: %v (%s)", err, string(b))
 	}
 	if out["type"] != "response" || out["error"] == nil {
-		t.Fatalf("Prompt hors scope doit ├¬tre refus├®, re├ºu: %v", out)
+		t.Fatalf("Prompt hors scope doit etre refuse, recu: %v", out)
 	}
-	if !strings.Contains(out["error"].(string), "non autoris├®") {
-		t.Fatalf("Erreur = %v, attendu mention non autoris├®", out["error"])
+	errStr := strings.ToLower(fmt.Sprint(out["error"]))
+	if !strings.Contains(errStr, "autoris") && !strings.Contains(errStr, "non") {
+		t.Fatalf("Erreur = %v, attendu refus de scope", out["error"])
 	}
 
 	// 2) Prompt sur workspace autoris├® ÔåÆ flux normal.

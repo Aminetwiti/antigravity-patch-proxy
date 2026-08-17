@@ -546,7 +546,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     _sessionsSub = _api?.events.listen((msg) {
       if (!mounted) return;
       final type = msg['type'] as String?;
-      final cascadeId = (msg['cascadeId'] ?? msg['data']?['cascadeId']) as String? ?? _activeSessionId;
+      final cascadeId = (msg['cascadeId'] ?? msg['data']?['cascadeId']) as String? ?? '';
 
       if (type == 'stream_start') {
         if (cascadeId.isNotEmpty) {
@@ -624,7 +624,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       if (type == 'session_focus_changed') {
         final data = msg['data'];
         if (data is Map) {
-          final cid = data['cascadeId'] as String? ?? '';
+          final cid = (data['cascadeId'] ?? data['focusedCascadeId']) as String? ?? '';
           final title = data['title'] as String? ?? '';
           final autoFollow = (_savedSettings['autoFollowEnabled'] as bool?) ?? true;
           if (cid.isNotEmpty && autoFollow && cid != _activeSessionId) {

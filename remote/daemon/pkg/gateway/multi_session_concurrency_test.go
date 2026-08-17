@@ -217,9 +217,83 @@ func TestMultiSessionCancelIsolation(t *testing.T) {
 	}
 }
 
+// TestThreeSimultaneousCascadesParallelStreaming vérifie l'isolation simultanée de 3 cascades (A, B, C).
+func TestThreeSimultaneousCascadesParallelStreaming(t *testing.T) {
+	mockClient := newMultiSessionMockClient()
+	srv, _ := newTestServerWithGW(mockClient)
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
+
+	clientA := dialWS(t, wsURL)
+	defer clientA.conn.Close()
+
+	clientB := dialWS(t, wsURL)
+	defer clientB.conn.Close()
+
+	clientC := dialWS(t, wsURL)
+	defer clientC.conn.Close()
+
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	runCascade := func(client *testClient, cid, reqId string) {
+		defer wg.Done()
+		client.sendJSON(t, map[string]interface{}{
+			"type":      "send_prompt",
+			"requestId": reqId,
+			"cascadeId": cid,
+			"prompt":    "Prompt for " + cid,
+		})
+		for {
+			msg := client.recv(t)
+			if msg["type"] == "stream_end" && (msg["cascadeId"] == cid || isMapAndHasCascadeHelper(msg["data"], cid)) {
+				break
+			}
+		}
+	}
+
+	go runCascade(clientA, "cascade-A", "req-A-1")
+	go runCascade(clientB, "cascade-B", "req-B-1")
+	go runCascade(clientC, "cascade-C", "req-C-1")
+
+	wg.Wait()
+}
+
+// TestIsolatedStepRecoveryMultiSession vérifie l'isolation stricte des buffers de reprise par cascade.
+func TestIsolatedStepRecoveryMultiSession(t *testing.T) {
+	buf := NewSessionStreamBuffer(100)
+
+	buf.RecordEvent("casc-1", OutgoingMessage{Type: "stream_delta", CascadeID: "casc-1", Data: "A1"})
+	buf.RecordEvent("casc-2", OutgoingMessage{Type: "stream_delta", CascadeID: "casc-2", Data: "B1"})
+	buf.RecordEvent("casc-1", OutgoingMessage{Type: "stream_delta", CascadeID: "casc-1", Data: "A2"})
+	buf.RecordEvent("casc-2", OutgoingMessage{Type: "stream_delta", CascadeID: "casc-2", Data: "B2"})
+
+	missedA, seqA := buf.GetEventsSince("casc-1", 0)
+	if len(missedA) != 2 || seqA != 2 {
+		t.Fatalf("Attendu 2 événements pour casc-1, reçu %d (seq=%d)", len(missedA), seqA)
+	}
+	for _, ev := range missedA {
+		if ev.CascadeID != "casc-1" {
+			t.Errorf("Événement contaminé dans le buffer de casc-1 : %s", ev.CascadeID)
+		}
+	}
+
+	missedB, seqB := buf.GetEventsSince("casc-2", 0)
+	if len(missedB) != 2 || seqB != 2 {
+		t.Fatalf("Attendu 2 événements pour casc-2, reçu %d (seq=%d)", len(missedB), seqB)
+	}
+	for _, ev := range missedB {
+		if ev.CascadeID != "casc-2" {
+			t.Errorf("Événement contaminé dans le buffer de casc-2 : %s", ev.CascadeID)
+		}
+	}
+}
+
 func isMapAndHasCascadeHelper(data interface{}, target string) bool {
 	if m, ok := data.(map[string]interface{}); ok {
 		return m["cascadeId"] == target
 	}
 	return false
 }
+

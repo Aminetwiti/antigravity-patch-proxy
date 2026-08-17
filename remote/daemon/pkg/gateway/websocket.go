@@ -24,6 +24,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -1610,11 +1611,12 @@ func (s *Server) expireApproval(cascadeID string) {
 		}
 	}
 	s.broadcast(OutgoingMessage{
-		Type: "approval_expired",
+		Type:      "approval_expired",
+		CascadeID: cascadeID,
 		Data: map[string]interface{}{
 			"cascadeId": cascadeID,
 			// callId permet au mobile d'annuler la notification locale de
-			// l'approbation expir├®e (Phase 3) sans re-fetch.
+			// l'approbation expirée (Phase 3) sans re-fetch.
 			"callId": p.callID,
 		},
 	})
@@ -3265,7 +3267,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			logJSON.Warn("outbox_append_failed", "cascadeId", msg.CascadeID, "err", errOut.Error())
 		}
 
-		frameIndex := 0
+		var frameIndex int64
 		hasTextDelivered := false
 		onFrameHandler := func(frame []byte) error {
 			select {
@@ -3273,7 +3275,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				return fmt.Errorf("generation cancelled")
 			default:
 			}
-			frameIndex++
+			fIdx := atomic.AddInt64(&frameIndex, 1)
 			events := connectrpc.ParseFrameEvents(frame, msg.CascadeID)
 			for _, ev := range events {
 				if ev.Delta != "" {
@@ -3332,7 +3334,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				}
 			}
 			data := map[string]interface{}{
-				"frameIndex": frameIndex,
+				"frameIndex": fIdx,
 				"events":     events,
 				"raw":        toOutgoing(frame),
 				// C7-B : hostActive=true quand l'utilisateur interagit avec le
@@ -3515,7 +3517,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				},
 			})
 			s.broadcast(OutgoingMessage{
-				Type: "approval_resolved",
+				Type:      "approval_resolved",
+				CascadeID: msg.CascadeID,
 				Data: map[string]interface{}{
 					"cascadeId":    msg.CascadeID,
 					"callId":       msg.CallID,
@@ -5493,7 +5496,7 @@ func executeShellCommand(dir, cmdStr string) (string, error) {
 // (toutes les 30 ms) l'apparition de nouvelles étapes (tool calls, commandes exécutées,
 // lectures/écritures de fichiers, recherches, thinking, nouveaux tokens) dans le transcript
 // de la session active et les diffuse immédiatement au mobile via stream_delta.
-func (s *Server) startLiveStepWatcher(ctx context.Context, cascadeID, requestID string, frameIndex *int) {
+func (s *Server) startLiveStepWatcher(ctx context.Context, cascadeID, requestID string, frameIndex *int64) {
 	transcriptPath := findTranscriptPath(cascadeID)
 	var lastOffset int64
 	if transcriptPath != "" {
@@ -5628,9 +5631,9 @@ func (s *Server) startLiveStepWatcher(ctx context.Context, cascadeID, requestID 
 					}
 
 					if len(events) > 0 {
-						*frameIndex++
+						fIdx := atomic.AddInt64(frameIndex, 1)
 						deltaData := map[string]interface{}{
-							"frameIndex": *frameIndex,
+							"frameIndex": fIdx,
 							"cascadeId":  cascadeID,
 							"hostActive": hostActiveSince(hostActiveWindow),
 							"events":     events,
@@ -5638,6 +5641,7 @@ func (s *Server) startLiveStepWatcher(ctx context.Context, cascadeID, requestID 
 						deltaMsg := OutgoingMessage{
 							Type:      "stream_delta",
 							RequestID: requestID,
+							CascadeID: cascadeID,
 							Data:      deltaData,
 						}
 						stepIdx := s.streamBuffer.RecordEvent(cascadeID, deltaMsg)

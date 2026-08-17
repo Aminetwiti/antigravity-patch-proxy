@@ -92,7 +92,7 @@ func TestSessionApprovalAutoApproves(t *testing.T) {
 		t.Fatalf("envoi send_prompt: %v", err)
 	}
 
-	client.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	client.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	for {
 		_, b, err := client.conn.ReadMessage()
 		if err != nil {

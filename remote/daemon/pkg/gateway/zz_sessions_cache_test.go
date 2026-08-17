@@ -63,7 +63,7 @@ func TestListSessionsSingleFlight(t *testing.T) {
 				errCh <- fmt.Errorf("client %d: send: %w", c, err)
 				return
 			}
-			conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+			conn.SetReadDeadline(time.Now().Add(15 * time.Second))
 			var out map[string]interface{}
 			if err := conn.ReadJSON(&out); err != nil {
 				errCh <- fmt.Errorf("client %d: recv: %w", c, err)

@@ -94,8 +94,9 @@ func (s *Server) reactiveSyncUpdates(updates map[string]connectrpc.ReactiveUpdat
 				}
 				pending["hostActive"] = hostActiveSince(hostActiveWindow)
 				s.broadcast(OutgoingMessage{
-					Type: "approval_pending",
-					Data: pending,
+					Type:      "approval_pending",
+					CascadeID: id,
+					Data:      pending,
 				})
 			}
 		} else if !u.WaitingForInput && s.hasPendingApproval(id) {
@@ -103,7 +104,8 @@ func (s *Server) reactiveSyncUpdates(updates map[string]connectrpc.ReactiveUpdat
 			// on nettoie l'approbation locale et on notifie immédiatement le mobile.
 			s.clearApproval(id)
 			s.broadcast(OutgoingMessage{
-				Type: "approval_resolved",
+				Type:      "approval_resolved",
+				CascadeID: id,
 				Data: map[string]interface{}{
 					"cascadeId": id,
 					"source":    "desktop",

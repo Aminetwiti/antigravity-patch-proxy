@@ -73,6 +73,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   // ponytail: Map simple, pas de provider — l'historique n'est pas persisté sur
   // disque (session restart repart de zéro, ce qui est le comportement voulu).
   final Map<String, List<ChatMessage>> _sessionMessages = {};
+  final Map<String, List<Map<String, dynamic>>> _sessionMessageQueues = {};
 
   List<ChatMessage> get _messages {
     return _sessionMessages.putIfAbsent(widget.activeSessionId, () => []);
@@ -93,27 +94,35 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   // File d'attente des approbations : isolée par session
-  final List<ToolApprovalRequest> _pendingApprovals = [];
-  int _approvalIndex = -1;
+  final Map<String, List<ToolApprovalRequest>> _sessionApprovals = {};
+  final Map<String, int> _sessionApprovalIndices = {};
+
   // Questions interactives à choix multiples (AskQuestion) : isolée par session
-  final List<AskQuestionChoiceRequest> _pendingQuestions = [];
+  final Map<String, List<AskQuestionChoiceRequest>> _sessionQuestions = {};
+
   // callIds dont le daemon a broadcasté approval_expired : la carte reste
   // affichée (pourquoi elle a disparu) mais passe en lecture seule.
   final Set<String> _expiredCallIds = {};
 
   List<AskQuestionChoiceRequest> get _currentSessionQuestions =>
-      _pendingQuestions.where((q) => q.cascadeId.isEmpty || q.cascadeId == widget.activeSessionId).toList();
+      _sessionQuestions.putIfAbsent(widget.activeSessionId, () => []);
 
   List<ToolApprovalRequest> get _currentSessionApprovals =>
-      _pendingApprovals.where((a) => a.cascadeId.isEmpty || a.cascadeId == widget.activeSessionId).toList();
+      _sessionApprovals.putIfAbsent(widget.activeSessionId, () => []);
+
+  int get _approvalIndex =>
+      _sessionApprovalIndices[widget.activeSessionId] ?? -1;
+  set _approvalIndex(int idx) =>
+      _sessionApprovalIndices[widget.activeSessionId] = idx;
 
   ToolApprovalRequest? get _currentApproval {
     final list = _currentSessionApprovals;
     if (list.isEmpty) return null;
-    if (_approvalIndex < 0 || _approvalIndex >= list.length) {
+    final idx = _approvalIndex;
+    if (idx < 0 || idx >= list.length) {
       return list.first;
     }
-    return list[_approvalIndex];
+    return list[idx];
   }
 
   StreamSubscription<Map<String, dynamic>>? _streamSub;
@@ -131,7 +140,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   bool get _hasCurrentActiveStream => _activeStreamingSessions.contains(widget.activeSessionId);
   
   bool _showStillWorking = false;
-  Map<String, dynamic>? _lastLocalStreamEnd;
+  final Map<String, Map<String, dynamic>> _sessionLastStreamEnds = {};
   final Map<String, String> _externalThoughts = {};
   final Map<String, String> _streamRequestToMessageId = {};
 
@@ -185,9 +194,18 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       ];
 
   // ── Side Question (/btw) & Background Tasks state ───────────────────
-  String? _sideQuestion;
-  String? _sideQuestionAnswer;
-  bool _isSideQuestionLoading = false;
+  final Map<String, String?> _sessionSideQuestions = {};
+  final Map<String, String?> _sessionSideQuestionAnswers = {};
+  final Map<String, bool> _sessionSideQuestionLoadings = {};
+
+  String? get _sideQuestion => _sessionSideQuestions[widget.activeSessionId];
+  set _sideQuestion(String? q) => _sessionSideQuestions[widget.activeSessionId] = q;
+
+  String? get _sideQuestionAnswer => _sessionSideQuestionAnswers[widget.activeSessionId];
+  set _sideQuestionAnswer(String? a) => _sessionSideQuestionAnswers[widget.activeSessionId] = a;
+
+  bool get _isSideQuestionLoading => _sessionSideQuestionLoadings[widget.activeSessionId] ?? false;
+  set _isSideQuestionLoading(bool l) => _sessionSideQuestionLoadings[widget.activeSessionId] = l;
   final List<String> _runningBackgroundTasks = [];
 
   // ── Sync & Catch-up status ─────────────────────────────────────────
@@ -410,9 +428,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         }
 
         final buf = _sessionMessages.putIfAbsent(targetSession, () => []);
-        buf
-          ..clear()
-          ..addAll(parsed);
+        if (parsed.isNotEmpty || buf.isEmpty) {
+          buf
+            ..clear()
+            ..addAll(parsed);
+        }
         if (isStreaming) {
           _activeStreamingSessions.add(targetSession);
         } else {
@@ -654,7 +674,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   void didUpdateWidget(covariant ChatStreamScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.activeSessionId != widget.activeSessionId) {
-      _approvalIndex = -1;
+      _sessionApprovalIndices.putIfAbsent(
+        widget.activeSessionId,
+        () => _currentSessionApprovals.isEmpty ? -1 : 0,
+      );
       _visibleCounts[widget.activeSessionId] = _pageSize;
       if (!_activeStreamingSessions.contains(widget.activeSessionId)) {
         _stillWorkingTimer?.cancel();
@@ -726,17 +749,17 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         setState(() => _showStillWorking = false);
       }
     }
-    if (sessionId == widget.activeSessionId) {
-      final outcome = _lastLocalStreamEnd?['data']?['outcome'] as String? ?? 'done';
-      if (outcome == 'cancelled' || outcome == 'error') {
-        _messageQueue.clear();
-      } else if (_messageQueue.isNotEmpty) {
-        final next = _messageQueue.removeAt(0);
-        final text = next['text'] as String;
-        final modelUID = next['modelUID'] as String?;
-        final modelEnum = next['modelEnum'] as int?;
-        _sendPromptToDaemon(text, modelUID: modelUID, modelEnum: modelEnum);
-      }
+    final queue = _sessionMessageQueues[sessionId] ?? [];
+    final lastEnd = _sessionLastStreamEnds[sessionId];
+    final outcome = lastEnd?['data']?['outcome'] as String? ?? 'done';
+    if (outcome == 'cancelled' || outcome == 'error') {
+      queue.clear();
+    } else if (queue.isNotEmpty) {
+      final next = queue.removeAt(0);
+      final text = next['text'] as String;
+      final modelUID = next['modelUID'] as String?;
+      final modelEnum = next['modelEnum'] as int?;
+      _sendPromptToDaemon(text, targetSessionOverride: sessionId, modelUID: modelUID, modelEnum: modelEnum);
     }
   }
 
@@ -748,8 +771,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final cascadeId = targetSessionId ?? data['cascadeId'] as String? ?? widget.activeSessionId;
     final message = data['message'] as String? ?? '';
 
-    if (outcome == 'cancelled' && cascadeId == widget.activeSessionId) {
-      _messageQueue.clear();
+    if (outcome == 'cancelled') {
+      _sessionMessageQueues[cascadeId]?.clear();
     }
 
     ApprovalNotifier.instance.notifyTaskEnded(
@@ -768,23 +791,27 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     // Bug #7 : guard broadcast path — un même callId ne doit jamais re-afficher
     // sa carte après reconnexion si l'utilisateur l'a déjà traitée.
     if (_processedCallIds.contains(approval.callId)) return;
-    if (_pendingApprovals.any((a) => a.callId == approval.callId)) return;
+    final cascadeId = approval.cascadeId.isNotEmpty ? approval.cascadeId : widget.activeSessionId;
+    final list = _sessionApprovals.putIfAbsent(cascadeId, () => []);
+    if (list.any((a) => a.callId == approval.callId)) return;
     _expiredCallIds.remove(approval.callId);
-    if (_currentApproval == null) {
+    if ((_sessionApprovalIndices[cascadeId] == null || _sessionApprovalIndices[cascadeId]! < 0) && cascadeId == widget.activeSessionId) {
       HapticFeedback.mediumImpact();
     }
     setState(() {
-      final wasEmpty = _pendingApprovals.isEmpty;
-      _pendingApprovals.add(approval);
+      final wasEmpty = list.isEmpty;
+      list.add(approval);
       // UX P0-1 : une 2ᵉ approbation ne « vole » pas la carte affichée —
       // l'index reste sur la demande en cours (la nouvelle se rejoint via ▶).
-      if (wasEmpty) _approvalIndex = 0;
+      if (wasEmpty) _sessionApprovalIndices[cascadeId] = 0;
       _pendingApprovalCallIds.add(approval.callId);
       final fp = approval.filePath;
       if (fp != null && fp.isNotEmpty) {
-        _modifiedFiles.add(fp);
-        if (!_modifiedFileList.any((f) => f.path == fp)) {
-          _modifiedFileList.add(SessionModifiedFile(
+        final modFiles = _sessionModifiedFiles.putIfAbsent(cascadeId, () => {});
+        final modFileList = _sessionModifiedFileList.putIfAbsent(cascadeId, () => []);
+        modFiles.add(fp);
+        if (!modFileList.any((f) => f.path == fp)) {
+          modFileList.add(SessionModifiedFile(
             path: fp,
             additions: 1,
             deletions: 0,
@@ -795,43 +822,49 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     if (!hostActive && !fromTap && ApprovalNotifier.instance.initialized) {
       ApprovalNotifier.instance.notifyApprovalRequired(
         callId: approval.callId,
-        cascadeId: approval.cascadeId.isEmpty
-            ? widget.activeSessionId
-            : approval.cascadeId,
+        cascadeId: cascadeId,
         toolName: approval.toolName,
         command: approval.command,
       );
     }
   }
 
-  void _removeApproval(String callId) {
-    final i = _pendingApprovals.indexWhere((a) => a.callId == callId);
-    if (i < 0) return;
+  void _removeApproval(String callId, [String? targetSessionId]) {
     setState(() {
-      _pendingApprovals.removeAt(i);
-      // L'index reste sur la demande qui suit celle retirée (ou la dernière
-      // restante) : la carte visible bascule proprement et le compteur
-      // « x/total » reflète la pile restante. P0-1 : après décision sur la
-      // 2ᵉ de 2, on retombe sur la 1ʳᵉ (1/1), pas sur une pile vide.
-      _approvalIndex = _pendingApprovals.isEmpty
-          ? -1
-          : math.min(i, _pendingApprovals.length - 1);
+      _sessionApprovals.forEach((cid, list) {
+        final i = list.indexWhere((a) => a.callId == callId);
+        if (i >= 0) {
+          list.removeAt(i);
+          // L'index reste sur la demande qui suit celle retirée (ou la dernière
+          // restante) : la carte visible bascule proprement et le compteur
+          // « x/total » reflète la pile restante.
+          _sessionApprovalIndices[cid] = list.isEmpty
+              ? -1
+              : math.min(i, list.length - 1);
+        }
+      });
       _pendingApprovalCallIds.remove(callId);
     });
     ApprovalNotifier.instance.cancelApproval(callId);
   }
 
   void _addQuestion(AskQuestionChoiceRequest q) {
-    if (_pendingQuestions.any((item) => item.requestId == q.requestId)) return;
-    HapticFeedback.mediumImpact();
+    final cascadeId = q.cascadeId.isNotEmpty ? q.cascadeId : widget.activeSessionId;
+    final list = _sessionQuestions.putIfAbsent(cascadeId, () => []);
+    if (list.any((item) => item.requestId == q.requestId)) return;
+    if (cascadeId == widget.activeSessionId) {
+      HapticFeedback.mediumImpact();
+    }
     setState(() {
-      _pendingQuestions.add(q);
+      list.add(q);
     });
   }
 
-  void _removeQuestion(String requestId) {
+  void _removeQuestion(String requestId, [String? targetSessionId]) {
     setState(() {
-      _pendingQuestions.removeWhere((item) => item.requestId == requestId);
+      _sessionQuestions.forEach((cid, list) {
+        list.removeWhere((item) => item.requestId == requestId);
+      });
     });
   }
 
@@ -866,7 +899,32 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       if (!isBroadcast || !mounted) return;
       final type = msg['type'] as String?;
       final requestId = msg['requestId'] as String? ?? '';
-      final sessionId = msg['data']?['cascadeId'] as String?;
+      String? sessionId = (msg['cascadeId'] ?? msg['data']?['cascadeId']) as String?;
+      if (sessionId == null || sessionId.isEmpty) {
+        final data = msg['data'];
+        if (data is Map) {
+          final events = data['events'];
+          if (events is List && events.isNotEmpty && events.first is Map) {
+            sessionId = events.first['cascadeId'] as String?;
+          }
+        }
+      }
+
+      if (type == 'quota_update') {
+        final data = msg['data'] as Map<String, dynamic>?;
+        if (data != null && data.isNotEmpty && mounted) {
+          setState(() => _quotaSummary = data);
+        }
+        return;
+      }
+
+      // Règle fondamentale : un événement sans cascadeId explicite ne doit JAMAIS
+      // être attribué à la session affichée par défaut.
+      if (sessionId == null || sessionId.isEmpty) {
+        return;
+      }
+
+      final targetSessionId = sessionId;
 
       // P1 : notification « Tâche démarrée » — uniquement quand l'app est en
       // arrière-plan/verrouillée ET que personne n'est actif sur le PC hôte
@@ -877,14 +935,13 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           !_appInForeground &&
           msg['data']?['hostActive'] != true) {
         ApprovalNotifier.instance.notifyTaskStarted(
-          cascadeId: sessionId ?? widget.activeSessionId,
+          cascadeId: targetSessionId,
           prompt: 'Une tâche a démarré sur le PC hôte',
         );
       }
 
       // Bug tâches arrière-plan : si l'évènement concerne une autre session,
-      // on le bufferise dans _sessionMessages[sessionId] au lieu de le jeter.
-      final targetSessionId = sessionId ?? widget.activeSessionId;
+      // on le bufferise dans _sessionMessages[targetSessionId] au lieu de le jeter.
       final thKey = '${targetSessionId}_$requestId';
       final isActiveSession = targetSessionId == widget.activeSessionId;
       final buf = _sessionMessages.putIfAbsent(targetSessionId, () => []);
@@ -968,11 +1025,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           if (isActiveSession && mounted) {
             setState(() {});
           }
-        }
-      } else if (type == 'quota_update') {
-        final data = msg['data'] as Map<String, dynamic>?;
-        if (data != null && data.isNotEmpty && mounted) {
-          setState(() => _quotaSummary = data);
         }
       } else if (type == 'stream_delta') {
         final textDelta = StreamDeltaParser.textOf(msg);
@@ -1065,7 +1117,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         final callId = data['callId'] as String? ??
             data['approvalId'] as String? ??
             '';
-        final cascadeId = data['cascadeId'] as String? ?? '';
+        final cascadeId = (msg['cascadeId'] ?? data['cascadeId']) as String? ?? '';
         if (callId.isNotEmpty && _pendingApprovalCallIds.contains(callId)) {
           setState(() => _expiredCallIds.add(callId));
           _pendingApprovalCallIds.remove(callId);
@@ -1077,21 +1129,22 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       } else if (type == 'approval_resolved') {
         final data = msg['data'] as Map<String, dynamic>? ?? const {};
         final callId = data['callId'] as String? ?? '';
-        final cascadeId = data['cascadeId'] as String? ?? '';
+        final cascadeId = (msg['cascadeId'] ?? data['cascadeId']) as String? ?? '';
         if (callId.isNotEmpty && _pendingApprovalCallIds.contains(callId)) {
-          _removeApproval(callId);
+          _removeApproval(callId, cascadeId);
         } else if (cascadeId.isNotEmpty) {
           setState(() {
-            _pendingApprovals.removeWhere((a) => a.cascadeId == cascadeId);
-            _approvalIndex = _pendingApprovals.isEmpty ? -1 : math.min(_approvalIndex, _pendingApprovals.length - 1);
+            final list = _sessionApprovals[cascadeId];
+            if (list != null) {
+              list.clear();
+              _sessionApprovalIndices[cascadeId] = -1;
+            }
           });
           ApprovalNotifier.instance.cancelApprovalByCascadeId(cascadeId);
         }
       }
     });
   }
-
-  final List<Map<String, dynamic>> _messageQueue = [];
 
   void _handleSendMessage(
     String text, {
@@ -1132,7 +1185,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     if (api == null) return;
 
     if (queued && _activeStreamingSessions.contains(targetSession)) {
-      _messageQueue.add({
+      final queue = _sessionMessageQueues.putIfAbsent(targetSession, () => []);
+      queue.add({
         'text': text,
         'activeSessionId': targetSession,
         'modelUID': modelUID,
@@ -1141,16 +1195,16 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       return;
     }
 
-    _sendPromptToDaemon(text, modelUID: modelUID, modelEnum: modelEnum);
+    _sendPromptToDaemon(text, targetSessionOverride: targetSession, modelUID: modelUID, modelEnum: modelEnum);
   }
 
-  void _sendPromptToDaemon(String text, {String? modelUID, int? modelEnum}) {
+  void _sendPromptToDaemon(String text, {String? targetSessionOverride, String? modelUID, int? modelEnum}) {
     final api = widget.api;
     if (api == null) return;
 
-    final targetSession = widget.activeSessionId;
+    final targetSession = targetSessionOverride ?? widget.activeSessionId;
     final assistantId = 'a${++_messageCounter}';
-    _lastLocalStreamEnd = null;
+    _sessionLastStreamEnds.remove(targetSession);
     final modelLabel = modelUID != null && modelUID.isNotEmpty
         ? modelUID
         : 'Gemini 3.7 Flash';
@@ -1167,7 +1221,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       ));
       _activeStreamingSessions.add(targetSession);
     });
-    _scrollToBottom();
+    if (targetSession == widget.activeSessionId) {
+      _scrollToBottom();
+    }
 
     var thoughtBuffer = StringBuffer();
     _onStreamStarted(targetSession);
@@ -1179,7 +1235,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     ).listen(
       (msg) {
         if (msg['type'] == 'stream_end') {
-          _lastLocalStreamEnd = msg;
+          _sessionLastStreamEnds[targetSession] = msg;
         }
         final textDelta = StreamDeltaParser.textOf(msg);
         final thoughtDelta = StreamDeltaParser.thinkingOf(msg);
@@ -1222,16 +1278,17 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       },
       onDone: () {
         if (!mounted) return;
+        final localEnd = _sessionLastStreamEnds[targetSession];
         _onStreamEnded(targetSession);
-        _handleStreamEnded(_lastLocalStreamEnd ?? const {}, targetSession);
+        _handleStreamEnded(localEnd ?? const {}, targetSession);
         setState(() {
           final idx = buf.indexWhere((m) => m.id == assistantId);
           if (idx >= 0) {
             String? error =
-                _lastLocalStreamEnd?['error'] as String? ??
-                (_lastLocalStreamEnd?['data'] is Map
-                    ? (_lastLocalStreamEnd!['data'] as Map)['outcome'] == 'error'
-                        ? (_lastLocalStreamEnd!['data'] as Map)['message'] as String? ?? 'Erreur'
+                localEnd?['error'] as String? ??
+                (localEnd?['data'] is Map
+                    ? (localEnd!['data'] as Map)['outcome'] == 'error'
+                        ? (localEnd!['data'] as Map)['message'] as String? ?? 'Erreur'
                         : null
                     : null);
             if (error != null && (error.contains('MODEL_CAPACITY_EXHAUSTED') || error.contains('No capacity available') || error.contains('503'))) {
@@ -1446,7 +1503,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   Widget _buildSyncStatusBadge(ColorScheme scheme) {
-    final pendingCount = widget.api?.outbox?.pendingCount ?? 0;
+    int pendingCount = 0;
+    try {
+      pendingCount = widget.api?.outbox?.pendingCount ?? 0;
+    } catch (_) {}
     if (!_isSyncing && pendingCount == 0) return const SizedBox.shrink();
 
     return Container(
