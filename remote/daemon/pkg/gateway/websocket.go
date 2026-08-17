@@ -128,6 +128,10 @@ type RPCClient interface {
 	RefreshMcpServers() ([]byte, error)
 	CompleteMcpOAuth(serverID, authCode string) ([]byte, error)
 	DisconnectMcpOAuth(serverID string) ([]byte, error)
+	// RPC Code Index & RAG.
+	HybridSearch(query, workspaceURI string, limit uint32) ([]byte, error)
+	SearchCode(query, workspaceURI string, maxResults, linesContext int32) ([]byte, error)
+	CheckoutWorktree(worktreeDirURI, targetWorkspaceURI string, deleteAfterCheckout bool, mergeStrategy uint64) ([]byte, error)
 }
 
 
@@ -281,6 +285,10 @@ type Server struct {
 	// Invalidation : si le stream ├®choue durablement, une liste vide remplace
 	// la carte pour retomber sur le chemin GetAllCascades + fallback local.
 	jetboxSummaries map[string]connectrpc.JetboxSummary
+	// focusedCascadeID : session IDE actuellement au premier plan sur le PC.
+	// Calculée à chaque frame Jetbox (RUNNING > WAITING > la plus récente).
+	// Broadcast session_focus_changed aux clients mobiles si elle change.
+	focusedCascadeID string
 	// terminals : sessions shell interactives (P3). Chaque session appartient
 	// au client qui l'a cr├®├®e ; ├á la d├®connexion on ne tue que SES sessions
 	// (un autre t├®l├®phone connect├® garde les siennes).
@@ -408,9 +416,10 @@ func (s *Server) jetboxSessionsLocked() []byte {
 	return raw
 }
 
-// jetboxSyncUpdates applique une frame Jetbox (updates/deletes) ├á la carte et
-// diffuse sessions_updated ├á tous les clients. Appel├®e par la goroutine du
-// stream ÔÇö le lock prot├¿ge la carte contre list_sessions concurrent.
+// jetboxSyncUpdates applique une frame Jetbox (updates/deletes) à la carte et
+// diffuse sessions_updated à tous les clients. Appelée par la goroutine du
+// stream — le lock protège la carte contre list_sessions concurrent.
+// Si la session IDE au premier plan change, diffuse aussi session_focus_changed.
 func (s *Server) jetboxSyncUpdates(updates map[string]connectrpc.JetboxSummary, deletes []string) {
 	s.mu.Lock()
 	if s.jetboxSummaries == nil {
@@ -422,13 +431,32 @@ func (s *Server) jetboxSyncUpdates(updates map[string]connectrpc.JetboxSummary, 
 	for _, id := range deletes {
 		delete(s.jetboxSummaries, id)
 	}
+	// Détecte le changement de session au premier plan (miroir parfait mobile).
+	var focusPayload map[string]interface{}
+	if newFocus := computeFocusedSession(s.jetboxSummaries); newFocus != nil && newFocus.CascadeID != s.focusedCascadeID {
+		s.focusedCascadeID = newFocus.CascadeID
+		focusPayload = map[string]interface{}{
+			"cascadeId":     newFocus.CascadeID,
+			"title":         newFocus.Title,
+			"workspacePath": newFocus.Workspace,
+			"status":        newFocus.Status,
+		}
+	}
 	s.mu.Unlock()
-	// Notifie les clients connect├®s : le mobile rafra├«chit sa sidebar
-	// (message r├®actif, contrat inchang├® c├┤t├® Flutter : m├¬mes cl├®s sessions).
+
+	// Notifie les clients connectés : le mobile rafraîchit sa sidebar.
 	s.broadcast(OutgoingMessage{
 		Type: "sessions_updated",
 		Data: sessionsFromSummaries(s.snapshotSummaries()),
 	})
+
+	// Push focus si la session IDE active a changé.
+	if focusPayload != nil {
+		s.broadcast(OutgoingMessage{
+			Type: "session_focus_changed",
+			Data: focusPayload,
+		})
+	}
 }
 
 // snapshotSummaries retourne une copie de la carte sous lock (pour broadcast).
@@ -504,7 +532,38 @@ func (s *Server) sessionsFromSummaries(jetbox map[string]connectrpc.JetboxSummar
 	}
 }
 
-// cachedProjectID resolve le projectID d'un workspace ├á partir du cache
+// computeFocusedSession identifie la session IDE au premier plan :
+// priorité : RUNNING (2) > WAITING (1) > la plus récemment mise à jour.
+// Exclut sous-agents (source==16), archivées et tuées.
+func computeFocusedSession(summaries map[string]connectrpc.JetboxSummary) *connectrpc.JetboxSummary {
+	var best *connectrpc.JetboxSummary
+	for _, sum := range summaries {
+		if sum.Archived || sum.Killed || sum.Source == 16 {
+			continue
+		}
+		s := sum // copie locale (évite capture de variable de boucle)
+		if best == nil {
+			best = &s
+			continue
+		}
+		score := func(st string, w bool) int {
+			if st == "CASCADE_STATUS_RUNNING" {
+				return 2
+			}
+			if w || st == "CASCADE_STATUS_WAITING_FOR_USER_ACTION" {
+				return 1
+			}
+			return 0
+		}
+		sc, sb := score(s.Status, s.Waiting), score(best.Status, best.Waiting)
+		if sc > sb || (sc == sb && s.UpdatedAt.After(best.UpdatedAt)) {
+			best = &s
+		}
+	}
+	return best
+}
+
+// cachedProjectID resolve le projectID d'un workspace à partir du cache
 // list_sessions d├®j├á chaud (co├╗t nul). Retourne ("", false) si le cache est
 // vide ÔÇö l'appelant retombe alors sur le comportement cascade "orpheline".
 // Ponctuellement utilis├® par create_cascade pour ├®viter le GetAllCascades
@@ -644,7 +703,7 @@ func isInteractiveQuestionTool(tool string) bool {
 	}
 }
 
-// cachedModels récupère les modèles disponibles depuis le cache (TTL 30s) ou le Language Server (G7).
+// cachedModels récupère les modèles disponibles depuis le cache (TTL 30s), le Language Server et custom_models.json.
 func (s *Server) cachedModels() ([]connectrpc.ModelInfo, error) {
 	s.mu.Lock()
 	if len(s.modelsCache) > 0 && time.Since(s.modelsCachedAt) < 30*time.Second {
@@ -655,12 +714,31 @@ func (s *Server) cachedModels() ([]connectrpc.ModelInfo, error) {
 	}
 	s.mu.Unlock()
 
+	var models []connectrpc.ModelInfo
 	raw, err := s.RPCClient.ListModels()
-	if err != nil {
-		return nil, err
+	if err == nil {
+		if parsed, ok := connectrpc.ParseModels(raw); ok && len(parsed) > 0 {
+			models = append(models, parsed...)
+		}
 	}
-	models, ok := connectrpc.ParseModels(raw)
-	if !ok || len(models) == 0 {
+
+	// Compléter avec les modèles custom définis dans ~/.gemini/antigravity/custom_models.json
+	customs := loadCustomModelsFile()
+	existingIDs := make(map[string]bool)
+	for _, m := range models {
+		existingIDs[m.ModelID] = true
+	}
+	for _, cm := range customs {
+		if !existingIDs[cm.ModelID] {
+			models = append(models, cm)
+			existingIDs[cm.ModelID] = true
+		}
+	}
+
+	if len(models) == 0 {
+		if err != nil {
+			return nil, err
+		}
 		return nil, nil
 	}
 
@@ -670,6 +748,50 @@ func (s *Server) cachedModels() ([]connectrpc.ModelInfo, error) {
 	s.mu.Unlock()
 
 	return models, nil
+}
+
+type customModelConfig struct {
+	Name              string `json:"name"`
+	DisplayName       string `json:"displayName"`
+	Description       string `json:"description"`
+	Provider          string `json:"provider"`
+	ExternalModelName string `json:"externalModelName"`
+}
+
+func loadCustomModelsFile() []connectrpc.ModelInfo {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	cfgPath := filepath.Join(home, ".gemini", "antigravity", "custom_models.json")
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return nil
+	}
+	var configs []customModelConfig
+	if err := json.Unmarshal(data, &configs); err != nil {
+		return nil
+	}
+	var out []connectrpc.ModelInfo
+	for _, c := range configs {
+		mID := c.Name
+		if mID == "" {
+			mID = c.ExternalModelName
+		}
+		dName := c.DisplayName
+		if dName == "" {
+			dName = mID
+		}
+		out = append(out, connectrpc.ModelInfo{
+			ModelID:          mID,
+			DisplayName:      dName,
+			Description:      c.Description,
+			Recommended:      true,
+			SupportsThinking: strings.Contains(strings.ToLower(mID+dName), "r1") || strings.Contains(strings.ToLower(mID+dName), "reasoning"),
+			SupportsImages:   true,
+		})
+	}
+	return out
 }
 
 // resolveModelID résout un nom de modèle (ou displayName ou alias) vers son ModelID officiel (G7).
@@ -1256,6 +1378,8 @@ type IncomingMessage struct {
 	CommitID string `json:"commitId,omitempty"`
 	// SidecarID : identifiant de sidecar pour les RPC sidecar.* (logs, gestion).
 	SidecarID string `json:"sidecarId,omitempty"`
+	// Limit : nombre max de résultats pour code_search.
+	Limit int `json:"limit,omitempty"`
 	// LogFileName : nom du fichier de log pour get_sidecar_logs / sidecar.get_logs.
 	LogFileName string `json:"logFileName,omitempty"`
 	// Champs Colosseum / Battle Mode :
@@ -1271,6 +1395,11 @@ type IncomingMessage struct {
 	AuthCode string `json:"authCode,omitempty"`
 	// DeviceID : identifiant de session pour les opérations admin (list/revoke) ou appareil ADB.
 	DeviceID string `json:"deviceId,omitempty"`
+	// Champs Git & Worktree étendus :
+	Branch  string   `json:"branch,omitempty"`
+	Path    string   `json:"path,omitempty"`
+	Message string   `json:"message,omitempty"`
+	Uris    []string `json:"uris,omitempty"`
 	// Champs Upload Chunking (G2) :
 	UploadID    string `json:"uploadId,omitempty"`
 	ChunkIndex  int    `json:"chunkIndex,omitempty"`
@@ -1882,6 +2011,9 @@ func buildApprovalPayload(approvalType string, confirm bool, command, filePath, 
 	case "permission":
 		oneofField = connectrpc.InteractionPermission
 		oneofPayload = connectrpc.BuildPermissionInteraction(confirm, 2)
+	case "ask_question":
+		oneofField = connectrpc.InteractionAskQuestion
+		oneofPayload = connectrpc.BuildAskQuestionInteraction(nil, denyReason, !confirm)
 	default:
 		oneofPayload = connectrpc.BuildApprovalInteraction(confirm)
 	}
@@ -2334,6 +2466,12 @@ func sessionsOut(raw []byte) interface{} {
 }
 
 func (s *Server) sessionsOut(raw []byte) interface{} {
+	var alreadyOut map[string]interface{}
+	if err := json.Unmarshal(raw, &alreadyOut); err == nil {
+		if _, ok := alreadyOut["sessions"]; ok {
+			return alreadyOut
+		}
+	}
 	projects := ListOfficialProjects()
 	summaries := connectrpc.ParseTrajectories(raw)
 
@@ -2709,6 +2847,25 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		if strings.HasPrefix(trimmedCmd, "/") {
 			logJSON.Info("slash_command", "command", trimmedCmd)
 			raw, err = s.RPCClient.SendCommand(trimmedCmd)
+			if err == nil {
+				if strings.HasPrefix(trimmedCmd, "/checkout") || strings.HasPrefix(trimmedCmd, "/branch") {
+					s.broadcast(OutgoingMessage{
+						Type: "git_branch_changed",
+						Data: map[string]interface{}{
+							"command": trimmedCmd,
+						},
+					})
+				}
+				s.writeJSON(conn, OutgoingMessage{
+					Type:      "response",
+					RequestID: msg.RequestID,
+					Data: map[string]interface{}{
+						"status": "ok",
+						"raw":    toOutgoing(raw),
+					},
+				})
+				return
+			}
 		} else {
 			// Commande Shell / CLI directe sur le PC hôte (ex: git diff, git status, flutter analyze)
 			logJSON.Info("shell_command", "command", trimmedCmd)
@@ -2906,23 +3063,23 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		logJSON.Info("question_response", "cascadeId", msg.CascadeID, "answer", responseText)
 
 		if p, ok := s.approvalFor(msg.CascadeID); ok && !p.expired {
-			// Fra├«che : annule le timer AVANT l'envoi (pas de course entre
-			// r├®ponse et auto-refus), m├¬me contrat que submit_approval.
+			// Fraîche : annule le timer AVANT l'envoi (pas de course entre
+			// réponse et auto-refus), même contrat que submit_approval.
 			s.clearApproval(msg.CascadeID)
-			oneofField, oneofPayload := buildApprovalPayload("ask_question", true, responseText, "", "")
-			raw, err = s.RPCClient.SubmitToolApproval(msg.CascadeID, msg.TrajectoryID, uint32(msg.StepIndex), oneofField, oneofPayload)
-			// R├®ponse unary au client demandeur (m├¬me contrat que
-			// submit_approval) ÔÇö sinon le fallthrough ├®crirait un dump protobuf
-			// vide, et une ├®criture sans lecture pr├®alable cr├®erait une course
-			// avec le stream_end diffus├® en parall├¿le.
+			oneofPayload := connectrpc.BuildAskQuestionInteraction(msg.SelectedAnswers, msg.CustomAnswer, false)
+			raw, err = s.RPCClient.SubmitToolApproval(msg.CascadeID, msg.TrajectoryID, uint32(msg.StepIndex), connectrpc.InteractionAskQuestion, oneofPayload)
+			// Réponse unary au client demandeur (même contrat que
+			// submit_approval) — sinon le fallthrough écrirait un dump protobuf
+			// vide, et une écriture sans lecture préalable créerait une course
+			// avec le stream_end diffusé en parallèle.
 			if err == nil {
 				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "submitted"}})
 			}
 			return
 		} else if ok {
-			// Garde de fra├«cheur : l'approbation ask_question a expir├® (auto-
-			// refus parti). Une r├®ponse tardive serait un ┬½ oui ┬╗ apr├¿s
-			// expiration ÔåÆ refuser sans contact RPC.
+			// Garde de fraîcheur : l'approbation ask_question a expiré (auto-
+			// refus parti). Une réponse tardive serait un « oui » après
+			// expiration → refuser sans contact RPC.
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "approval expired (auto-denied)"})
 			return
 		}
@@ -3225,6 +3382,30 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 
 		oneofField, oneofPayload := buildApprovalPayload(msg.ApprovalType, confirm, msg.Command, msg.FilePath, msg.DenyReason)
 		raw, err = s.RPCClient.SubmitToolApproval(msg.CascadeID, msg.TrajectoryID, uint32(msg.StepIndex), oneofField, oneofPayload)
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{
+				Type:      "response",
+				RequestID: msg.RequestID,
+				Data: map[string]interface{}{
+					"status": "submitted",
+				},
+			})
+			s.broadcast(OutgoingMessage{
+				Type: "approval_resolved",
+				Data: map[string]interface{}{
+					"cascadeId":    msg.CascadeID,
+					"callId":       msg.CallID,
+					"decision":     msg.Decision,
+					"approvalType": msg.ApprovalType,
+					"scope":        msg.Scope,
+				},
+			})
+			s.broadcast(OutgoingMessage{
+				Type: "sessions_updated",
+				Data: sessionsFromSummaries(s.snapshotSummaries()),
+			})
+			return
+		}
 
 	case "get_pending_approval":
 		// B2 : un client qui revient (tap sur la notification locale) demande
@@ -3253,6 +3434,29 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"results": results}})
+		return
+
+	case "code_search":
+		if msg.Query == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "query requis"})
+			return
+		}
+		maxResults := int32(30)
+		linesContext := int32(2)
+		if msg.Data != nil {
+			if m, ok := msg.Data["maxResults"].(float64); ok && int32(m) > 0 {
+				maxResults = int32(m)
+			}
+			if l, ok := msg.Data["linesContext"].(float64); ok && int32(l) > 0 {
+				linesContext = int32(l)
+			}
+		}
+		raw, err = s.RPCClient.SearchCode(msg.Query, msg.WorkspacePath, maxResults, linesContext)
+		if err != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
+			return
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"raw": string(raw), "status": "ok"}})
 		return
 
 	case "list_files":
@@ -3422,14 +3626,54 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"worktrees": wts}})
 		return
 
+	case "checkout_git_worktree":
+		worktreeDir := msg.WorkspacePath
+		if msg.Data != nil {
+			if w, ok := msg.Data["worktreeDirUri"].(string); ok && w != "" {
+				worktreeDir = w
+			}
+		}
+		if worktreeDir == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "worktreeDirUri requis"})
+			return
+		}
+		targetWs := ""
+		deleteAfter := false
+		mergeStrategy := uint64(2) // 2 = SAFE_MERGE default
+		if msg.Data != nil {
+			if t, ok := msg.Data["targetWorkspaceUri"].(string); ok {
+				targetWs = t
+			}
+			if d, ok := msg.Data["deleteAfterCheckout"].(bool); ok {
+				deleteAfter = d
+			}
+			if m, ok := msg.Data["mergeStrategy"].(float64); ok && uint64(m) > 0 {
+				mergeStrategy = uint64(m)
+			}
+		}
+		raw, err = s.RPCClient.CheckoutWorktree(worktreeDir, targetWs, deleteAfter, mergeStrategy)
+		if err != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
+			return
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"raw": string(raw), "status": "checked_out"}})
+		return
 
 	case "delete_cascade":
 		if msg.CascadeID == "" {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
 			return
 		}
-		// Destructif et irr├®versible : confirmation explicite obligatoire.
-		if !msg.Confirm {
+		// Destructif et irréversible : confirmation explicite obligatoire.
+		confirm := msg.Confirm
+		if !confirm && msg.Data != nil {
+			if c, ok := msg.Data["confirm"].(bool); ok {
+				confirm = c
+			} else if cStr, ok := msg.Data["confirm"].(string); ok {
+				confirm = strings.EqualFold(cStr, "true") || cStr == "1"
+			}
+		}
+		if !confirm {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "confirmation requise (champ confirm=true)"})
 			return
 		}
@@ -3477,7 +3721,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "workspacePath requis"})
 			return
 		}
-		uris := stringList(msg.Data, "uris")
+		uris := msg.Uris
+		if len(uris) == 0 {
+			uris = stringList(msg.Data, "uris")
+		}
 		if len(uris) == 0 {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "uris requis"})
 			return
@@ -3493,7 +3740,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "workspacePath requis"})
 			return
 		}
-		uris := stringList(msg.Data, "uris")
+		uris := msg.Uris
+		if len(uris) == 0 {
+			uris = stringList(msg.Data, "uris")
+		}
 		if len(uris) == 0 {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "uris requis"})
 			return
@@ -3511,11 +3761,22 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 		// Destructif et irréversible : confirmation explicite obligatoire
 		// (même garde que delete_cascade).
-		if !msg.Confirm {
+		confirm := msg.Confirm
+		if !confirm && msg.Data != nil {
+			if c, ok := msg.Data["confirm"].(bool); ok {
+				confirm = c
+			} else if cStr, ok := msg.Data["confirm"].(string); ok {
+				confirm = strings.EqualFold(cStr, "true") || cStr == "1"
+			}
+		}
+		if !confirm {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "confirmation requise (champ confirm=true)"})
 			return
 		}
-		uris := stringList(msg.Data, "uris")
+		uris := msg.Uris
+		if len(uris) == 0 {
+			uris = stringList(msg.Data, "uris")
+		}
 		if len(uris) == 0 {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "uris requis"})
 			return
@@ -3531,7 +3792,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "workspacePath requis"})
 			return
 		}
-		message := msg.Command
+		message := msg.Message
+		if message == "" {
+			message = msg.Command
+		}
 		if msg.Data != nil {
 			if m, ok := msg.Data["message"].(string); ok && m != "" {
 				message = m
@@ -4162,8 +4426,14 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		return
 
 	case "create_worktree", "workspace.create_worktree":
-		branch := msg.Command
-		path := msg.FilePath
+		branch := msg.Branch
+		if branch == "" {
+			branch = msg.Command
+		}
+		path := msg.Path
+		if path == "" {
+			path = msg.FilePath
+		}
 		if msg.Data != nil {
 			if b, ok := msg.Data["branch"].(string); ok && b != "" {
 				branch = b
@@ -4309,6 +4579,49 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 		raw, err = s.RPCClient.DisconnectMcpOAuth(msg.ServerID)
+		if err == nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+			return
+		}
+
+	case "get_active_session", "session.get_active":
+		// Cache Jetbox chaud : O(1), pas de scan disque.
+		s.mu.Lock()
+		jetboxHot := s.jetboxSummaries != nil
+		focusedID := s.focusedCascadeID
+		focusSum := s.jetboxSummaries[focusedID]
+		s.mu.Unlock()
+		var session map[string]interface{}
+		if jetboxHot && focusedID != "" {
+			session = map[string]interface{}{
+				"cascadeId":     focusSum.CascadeID,
+				"title":         focusSum.Title,
+				"workspacePath": focusSum.Workspace,
+				"status":        focusSum.Status,
+			}
+		} else {
+			var errActive error
+			session, errActive = GetMostRecentSession()
+			if errActive != nil {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errActive.Error()})
+				return
+			}
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{
+			"activeSession": session,
+		}})
+		return
+
+	case "rag.hybrid_search", "hybrid_search":
+		targetURI := toWorkspaceURI(msg.WorkspaceURI)
+		if targetURI == "" {
+			targetURI = toWorkspaceURI(msg.WorkspacePath)
+		}
+		limit := uint32(20)
+		if msg.Limit > 0 {
+			limit = uint32(msg.Limit)
+		}
+		raw, err = s.RPCClient.HybridSearch(msg.Query, targetURI, limit)
 		if err == nil {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
 			return

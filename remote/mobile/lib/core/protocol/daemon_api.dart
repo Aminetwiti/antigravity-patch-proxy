@@ -357,7 +357,7 @@ class DaemonApi {
       rpc('create_cascade', {'workspacePath': workspacePath});
 
   Future<Map<String, dynamic>> deleteCascade(String cascadeId) =>
-      rpc('delete_cascade', {'cascadeId': cascadeId, 'confirm': 'true'});
+      rpc('delete_cascade', {'cascadeId': cascadeId, 'confirm': true});
 
   Future<Map<String, dynamic>> renameCascade(String cascadeId, String title) =>
       rpc('rename_cascade', {'cascadeId': cascadeId, 'title': title});
@@ -371,6 +371,21 @@ class DaemonApi {
     String workspacePath,
     String query,
   ) => rpc('search_files', {'workspacePath': workspacePath, 'query': query});
+
+  /// Recherche de symboles et texte dans l'index du Language Server (SearchCode).
+  Future<Map<String, dynamic>> searchCode(
+    String query, {
+    String? workspacePath,
+    int maxResults = 30,
+    int linesContext = 2,
+  }) => rpc('code_search', {
+    'query': query,
+    if (workspacePath != null) 'workspacePath': workspacePath,
+    'data': {
+      'maxResults': maxResults,
+      'linesContext': linesContext,
+    },
+  });
 
   /// Ouvre une session PTY interactive sur le PC hôte (P3). Retourne
   /// {id} ; la sortie est poussée en broadcast terminal_output.
@@ -424,8 +439,10 @@ class DaemonApi {
   /// null si aucune approbation n'est en attente pour cette cascade.
   Future<Map<String, dynamic>?> getPendingApproval(String cascadeId) async {
     final data = await rpc('get_pending_approval', {'cascadeId': cascadeId});
-    final info = data['data'] ?? data;
-    return info is Map && info.isNotEmpty ? info.cast<String, dynamic>() : null;
+    final info = data['data'] ?? data['approval'] ?? data;
+    return info is Map && info.isNotEmpty
+        ? Map<String, dynamic>.from(info)
+        : null;
   }
 
   /// Répond à une question à choix interactifs posée par l'agent (AskQuestion).
@@ -515,8 +532,9 @@ class DaemonApi {
     final res = await rpc('list_git_branches', {
       if (workspacePath != null) 'workspacePath': workspacePath,
     });
-    final list = res['branches'] as List?;
-    return list?.map((e) => e.toString()).toList() ?? [];
+    final rawList = res['branches'] ?? (res['data'] is Map ? res['data']['branches'] : null);
+    if (rawList is! List) return [];
+    return rawList.map((e) => e.toString()).toList();
   }
 
   /// Liste les worktrees Git du workspace.
@@ -526,9 +544,26 @@ class DaemonApi {
     final res = await rpc('list_git_worktrees', {
       if (workspacePath != null) 'workspacePath': workspacePath,
     });
-    final list = res['worktrees'] as List?;
-    return list?.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() ?? [];
+    final rawList = res['worktrees'] ?? (res['data'] is Map ? res['data']['worktrees'] : null);
+    if (rawList is! List) return [];
+    return rawList.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
   }
+
+  /// Bascule l'espace de travail sur un worktree Git ou applique un merge (CheckoutWorktree).
+  Future<Map<String, dynamic>> checkoutGitWorktree(
+    String worktreeDirUri, {
+    String? targetWorkspaceUri,
+    bool deleteAfterCheckout = false,
+    int mergeStrategy = 2, // 2 = SAFE_MERGE
+  }) => rpc('checkout_git_worktree', {
+    'workspacePath': worktreeDirUri,
+    'data': {
+      'worktreeDirUri': worktreeDirUri,
+      if (targetWorkspaceUri != null) 'targetWorkspaceUri': targetWorkspaceUri,
+      'deleteAfterCheckout': deleteAfterCheckout,
+      'mergeStrategy': mergeStrategy,
+    },
+  });
 
   /// Récupère l'état complet du contrôle de version (VCS / Git) du workspace.
   Future<Map<String, dynamic>> getGitState({String? workspacePath}) async {
@@ -551,7 +586,7 @@ class DaemonApi {
       'data': {'uris': uris},
     });
     final status = res['status'] ?? (res['data'] is Map ? res['data']['status'] : null);
-    return status == 'staged';
+    return status == 'staged' || (res.isNotEmpty && !res.containsKey('error'));
   }
 
   /// Retire des fichiers modifiés de l'index Git (unstage).
@@ -564,7 +599,7 @@ class DaemonApi {
       'data': {'uris': uris},
     });
     final status = res['status'] ?? (res['data'] is Map ? res['data']['status'] : null);
-    return status == 'unstaged';
+    return status == 'unstaged' || (res.isNotEmpty && !res.containsKey('error'));
   }
 
   /// Annule les modifications d'un ou plusieurs fichiers (irréversible, confirm obligatoire).
@@ -579,7 +614,7 @@ class DaemonApi {
       'data': {'uris': uris},
     });
     final status = res['status'] ?? (res['data'] is Map ? res['data']['status'] : null);
-    return status == 'discarded';
+    return status == 'discarded' || (res.isNotEmpty && !res.containsKey('error'));
   }
 
   /// Crée un commit Git dans le workspace.
@@ -621,8 +656,9 @@ class DaemonApi {
   /// G7 — Récupère la liste dynamique des modèles disponibles (GetAvailableModels).
   Future<List<Map<String, dynamic>>> getAvailableModels() async {
     final res = await rpc('get_available_models', {});
-    final list = res['models'] as List?;
-    return list?.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() ?? [];
+    final rawList = res['models'] ?? (res['data'] is Map ? res['data']['models'] : null);
+    if (rawList is! List) return [];
+    return rawList.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
   }
 
   /// G7 — Récupère les statuts et disponibilités des modèles.
@@ -666,8 +702,9 @@ class DaemonApi {
   /// G3 — Liste les appareils Android connectés via ADB.
   Future<List<Map<String, dynamic>>> listAdbDevices() async {
     final res = await rpc('adb.list_devices', {});
-    final list = res['devices'] as List?;
-    return list?.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() ?? [];
+    final rawList = res['devices'] ?? (res['data'] is Map ? res['data']['devices'] : null);
+    if (rawList is! List) return [];
+    return rawList.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
   }
 
   /// G3 — Liste les fichiers d'un dossier distant sur l'appareil Android.
@@ -679,8 +716,9 @@ class DaemonApi {
       if (deviceId != null) 'deviceId': deviceId,
       'remotePath': remotePath,
     });
-    final list = res['files'] as List?;
-    return list?.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() ?? [];
+    final rawList = res['files'] ?? (res['data'] is Map ? res['data']['files'] : null);
+    if (rawList is! List) return [];
+    return rawList.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
   }
 
   /// G3 — Recherche de fichiers sur l'appareil Android.
@@ -696,8 +734,9 @@ class DaemonApi {
       'pattern': pattern,
       'maxDepth': maxDepth,
     });
-    final list = res['results'] as List?;
-    return list?.map((e) => e.toString()).toList() ?? [];
+    final rawList = res['results'] ?? res['files'] ?? (res['data'] is Map ? (res['data']['results'] ?? res['data']['files']) : null);
+    if (rawList is! List) return [];
+    return rawList.map((e) => e.toString()).toList();
   }
 
   /// G3 — Télécharge un fichier depuis l'appareil Android vers le PC hôte.
@@ -819,10 +858,11 @@ class DaemonApi {
   /// Liste les serveurs MCP disponibles côté daemon.
   Future<List<McpServerInfo>> getMcpServers() async {
     final res = await rpc('list_mcp_servers');
-    final list = res['servers'] as List?;
-    return (list ?? [])
+    final rawList = res['servers'] ?? res['mcpServers'] ?? (res['data'] is Map ? (res['data']['servers'] ?? res['data']['mcpServers']) : null);
+    if (rawList is! List) return [];
+    return rawList
         .whereType<Map>()
-        .map((e) => McpServerInfo.fromJson(e.cast<String, dynamic>()))
+        .map((e) => McpServerInfo.fromJson(Map<String, dynamic>.from(e)))
         .toList();
   }
 
@@ -851,7 +891,7 @@ class DaemonApi {
     if (rawList is! List) return [];
     return rawList
         .whereType<Map>()
-        .map((e) => ScheduledTaskItem.fromJson(e.cast<String, dynamic>()))
+        .map((e) => ScheduledTaskItem.fromJson(Map<String, dynamic>.from(e)))
         .toList();
   }
 
@@ -871,7 +911,7 @@ class DaemonApi {
     });
     final rawTask = res['task'] ?? (res['data'] is Map ? res['data']['task'] : null);
     if (rawTask is Map) {
-      return ScheduledTaskItem.fromJson(rawTask.cast<String, dynamic>());
+      return ScheduledTaskItem.fromJson(Map<String, dynamic>.from(rawTask));
     }
     return task;
   }
@@ -892,7 +932,7 @@ class DaemonApi {
     });
     final rawTask = res['task'] ?? (res['data'] is Map ? res['data']['task'] : null);
     if (rawTask is Map) {
-      return ScheduledTaskItem.fromJson(rawTask.cast<String, dynamic>());
+      return ScheduledTaskItem.fromJson(Map<String, dynamic>.from(rawTask));
     }
     return task;
   }
@@ -909,7 +949,7 @@ class DaemonApi {
     });
     final rawTask = res['task'] ?? (res['data'] is Map ? res['data']['task'] : null);
     if (rawTask is Map) {
-      return ScheduledTaskItem.fromJson(rawTask.cast<String, dynamic>());
+      return ScheduledTaskItem.fromJson(Map<String, dynamic>.from(rawTask));
     }
     return null;
   }
@@ -919,7 +959,7 @@ class DaemonApi {
     final res = await rpc('trigger_scheduled_task', {'taskId': taskId});
     final rawTask = res['task'] ?? (res['data'] is Map ? res['data']['task'] : null);
     if (rawTask is Map) {
-      return ScheduledTaskItem.fromJson(rawTask.cast<String, dynamic>());
+      return ScheduledTaskItem.fromJson(Map<String, dynamic>.from(rawTask));
     }
     return null;
   }
@@ -950,7 +990,7 @@ class DaemonApi {
       'stepIndex': stepIndex,
     });
     final status = res['status'] ?? (res['data'] is Map ? res['data']['status'] : null);
-    return status == 'reverted';
+    return status == 'reverted' || (res.isNotEmpty && !res.containsKey('error'));
   }
 
   /// Bascule des étapes d'exécution en tâche de fond (SendStepsToBackground).
@@ -963,7 +1003,7 @@ class DaemonApi {
       'stepIndices': stepIndices,
     });
     final status = res['status'] ?? (res['data'] is Map ? res['data']['status'] : null);
-    return status == 'sent_to_background';
+    return status == 'sent_to_background' || (res.isNotEmpty && !res.containsKey('error'));
   }
 
   /// Saute une étape de sous-agent de navigation web (SkipBrowserSubagent).
@@ -973,13 +1013,13 @@ class DaemonApi {
       'stepIndex': stepIndex,
     });
     final status = res['status'] ?? (res['data'] is Map ? res['data']['status'] : null);
-    return status == 'skipped';
+    return status == 'skipped' || (res.isNotEmpty && !res.containsKey('error'));
   }
 
   /// Récupère l'arbre des sous-agents d'une session (DAG).
   Future<List<Map<String, dynamic>>> getSubagents(String cascadeId) async {
     final res = await rpc('get_subagents', {'cascadeId': cascadeId});
-    final rawList = res['subagents'] ?? (res['data'] is Map ? res['data']['subagents'] : null);
+    final rawList = res['subagents'] ?? res['tree'] ?? (res['data'] is Map ? (res['data']['subagents'] ?? res['data']['tree']) : null);
     if (rawList is! List) return [];
     return rawList.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
   }
@@ -997,7 +1037,15 @@ class DaemonApi {
   /// Génère un message de commit IA conventionnel basé sur le staging git.
   Future<String> generateCommitMessage() async {
     final res = await rpc('generate_commit_message', {});
-    final msg = res['commitMessage'] ?? res['message'] ?? (res['data'] is Map ? (res['data']['commitMessage'] ?? res['data']['message']) : null);
+    var msg = res['commitMessage'] ?? res['message'] ?? (res['data'] is Map ? (res['data']['commitMessage'] ?? res['data']['message']) : null);
+    if (msg == null && res['fields'] is List) {
+      for (final f in res['fields'] as List) {
+        if (f is Map && f['text'] != null && (f['text'] as String).isNotEmpty) {
+          msg = f['text'];
+          break;
+        }
+      }
+    }
     return msg?.toString() ?? '';
   }
 
@@ -1010,8 +1058,24 @@ class DaemonApi {
       'cascadeId': cascadeId,
       if (trajectoryId != null) 'trajectoryId': trajectoryId,
     });
-    final md = res['markdown'] ?? (res['data'] is Map ? res['data']['markdown'] : null);
+    var md = res['markdown'] ?? res['content'] ?? res['text'] ?? (res['data'] is Map ? (res['data']['markdown'] ?? res['data']['content'] ?? res['data']['text']) : null);
+    if (md == null && res['fields'] is List) {
+      for (final f in res['fields'] as List) {
+        if (f is Map && f['text'] != null && (f['text'] as String).isNotEmpty) {
+          md = f['text'];
+          break;
+        }
+      }
+    }
     return md?.toString() ?? '';
+  }
+
+  /// G4 — Liste les dossiers workspaces disponibles sur la machine hôte.
+  Future<List<String>> listWorkspaces() async {
+    final res = await rpc('list_workspaces', {});
+    final rawList = res['workspaces'] ?? (res['data'] is Map ? res['data']['workspaces'] : null);
+    if (rawList is! List) return [];
+    return rawList.map((e) => e.toString()).toList();
   }
 
   /// Crée un worktree Git pour le développement parallèle.
@@ -1019,6 +1083,10 @@ class DaemonApi {
     final res = await rpc('create_worktree', {
       'branch': branch,
       if (path != null) 'path': path,
+      'data': {
+        'branch': branch,
+        if (path != null) 'path': path,
+      },
     });
     final status = res['status'] ?? (res['data'] is Map ? res['data']['status'] : null);
     return status == 'created' || res.containsKey('fields') || res.containsKey('path') || (res.isNotEmpty && !res.containsKey('error'));
@@ -1093,6 +1161,28 @@ class DaemonApi {
   Future<Map<String, dynamic>> disconnectMcpOAuth(String serverId) async {
     return await rpc('disconnect_mcp_oauth', {
       'serverId': serverId,
+    });
+  }
+
+  /// Récupère la session activement ouverte/modifiée sur l'IDE PC (Miroir Parfait).
+  Future<Map<String, dynamic>?> getActiveSession() async {
+    final res = await rpc('get_active_session', {});
+    if (res['activeSession'] is Map) {
+      return Map<String, dynamic>.from(res['activeSession'] as Map);
+    }
+    return null;
+  }
+
+  /// Effectue une recherche sémantique hybride (BM25 + Cosine) dans le code indexé.
+  Future<Map<String, dynamic>> codeSearch(
+    String query, {
+    String? workspaceUri,
+    int limit = 20,
+  }) async {
+    return await rpc('code_search', {
+      'query': query,
+      if (workspaceUri != null) 'workspaceUri': workspaceUri,
+      'limit': limit,
     });
   }
 
@@ -1229,11 +1319,11 @@ class DaemonApi {
       }
       final pending = (msg['data'] is Map
           ? (msg['data'] as Map)['pendingMessages']
-          : null);
+          : null) ?? msg['pendingMessages'];
       if (pending is List) {
         final clean = pending
             .whereType<Map>()
-            .map((e) => e.cast<String, dynamic>())
+            .map((e) => Map<String, dynamic>.from(e))
             .toList();
         _pendingMessages.addAll(clean);
         _pendingMessagesNotifier.value =

@@ -259,6 +259,10 @@ void main() {
       expect(find.text('34%'), findsOneWidget);
       expect(find.text('12%'), findsOneWidget);
       expect(tester.takeException(), isNull);
+
+      // Fermer la modal proprement
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
     });
 
     testWidgets('ChatInputBar forwards selected modelUID and modelEnum on send', (tester) async {

@@ -213,3 +213,76 @@ func TestBuildHandleStreamingCommand(t *testing.T) {
 		t.Errorf("Attendu request_source=%d (TERMINAL), reçu=%d", CommandRequestSourceTerminal, gotSource)
 	}
 }
+
+func TestBuildAskQuestionInteraction(t *testing.T) {
+	selected := []string{"opt_1", "opt_2"}
+	writeIn := "Custom write in answer"
+	buf := BuildAskQuestionInteraction(selected, writeIn, false)
+	fields := DecodeFields(buf)
+	if len(fields) != 1 || fields[0].Num != 1 {
+		t.Fatalf("Attendu champ responses (tag 1), reçu: %+v", fields)
+	}
+	entryFields := DecodeFields(fields[0].Bytes)
+	var gotOptions []string
+	var gotWriteIn string
+	for _, f := range entryFields {
+		switch f.Num {
+		case 4:
+			gotOptions = append(gotOptions, string(f.Bytes))
+		case 5:
+			gotWriteIn = string(f.Bytes)
+		}
+	}
+	if len(gotOptions) != 2 || gotOptions[0] != "opt_1" || gotOptions[1] != "opt_2" {
+		t.Errorf("Attendu options [opt_1, opt_2], reçu %v", gotOptions)
+	}
+	if gotWriteIn != writeIn {
+		t.Errorf("Attendu writeIn %q, reçu %q", writeIn, gotWriteIn)
+	}
+}
+
+func TestBuildSearchCode(t *testing.T) {
+	buf := BuildSearchCode("func Calculate", "file:///C:/workspace", 25, 4)
+	fields := DecodeFields(buf)
+	var gotQuery, gotURI string
+	var gotMax, gotLines uint64
+	for _, f := range fields {
+		switch f.Num {
+		case 1:
+			gotQuery = string(f.Bytes)
+		case 2:
+			gotURI = string(f.Bytes)
+		case 3:
+			gotMax = f.Varint
+		case 4:
+			gotLines = f.Varint
+		}
+	}
+	if gotQuery != "func Calculate" || gotURI != "file:///C:/workspace" || gotMax != 25 || gotLines != 4 {
+		t.Errorf("SearchCode mismatch: query=%q uri=%q max=%d lines=%d", gotQuery, gotURI, gotMax, gotLines)
+	}
+}
+
+func TestBuildCheckoutWorktree(t *testing.T) {
+	buf := BuildCheckoutWorktree("file:///C:/worktrees/wt1", "file:///C:/main", true, 2)
+	fields := DecodeFields(buf)
+	var gotDir, gotTarget string
+	var gotDelete bool
+	var gotStrategy uint64
+	for _, f := range fields {
+		switch f.Num {
+		case 1:
+			gotDir = string(f.Bytes)
+		case 2:
+			gotTarget = string(f.Bytes)
+		case 3:
+			gotDelete = f.Varint == 1
+		case 4:
+			gotStrategy = f.Varint
+		}
+	}
+	if gotDir != "file:///C:/worktrees/wt1" || gotTarget != "file:///C:/main" || !gotDelete || gotStrategy != 2 {
+		t.Errorf("CheckoutWorktree mismatch: dir=%q target=%q delete=%v strategy=%d", gotDir, gotTarget, gotDelete, gotStrategy)
+	}
+}
+

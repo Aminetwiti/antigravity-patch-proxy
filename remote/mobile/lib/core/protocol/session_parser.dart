@@ -13,7 +13,7 @@ import 'messages.dart';
 /// (`{"fields":[...]}`) are parsed heuristically (UUID + readable title).
 class SessionParser {
   static List<CascadeSession> parseListSessions(Map<String, dynamic> data) {
-    final sessions = data['sessions'];
+    final sessions = data['sessions'] ?? (data['data'] is Map ? data['data']['sessions'] : null);
     if (sessions is List) {
       var out = <CascadeSession>[];
       for (final s in sessions) {
@@ -59,7 +59,7 @@ class SessionParser {
   );
 
   static List<CascadeSession> _parseLegacyFieldDump(Map<String, dynamic> data) {
-    final fields = data['fields'];
+    final fields = data['fields'] ?? (data['data'] is Map ? data['data']['fields'] : null);
     if (fields is! List) return const [];
 
     final sessions = <CascadeSession>[];
@@ -89,7 +89,7 @@ class SessionParser {
     return sessions;
   }
 
-  static Uint8List _blobOf(Map<String, dynamic> field) {
+  static Uint8List _blobOf(Map field) {
     final b = field['bytes'];
     if (b is int) {
       // Gateway sends `bytes: <length>` — the payload itself is unavailable
@@ -107,7 +107,7 @@ class SessionParser {
   }
 
   static String _legacyTitleOf(
-    Map<String, dynamic> field,
+    Map field,
     String text,
     Uint8List blob,
   ) {

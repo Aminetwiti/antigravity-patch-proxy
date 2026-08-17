@@ -98,6 +98,21 @@ func (s *Server) reactiveSyncUpdates(updates map[string]connectrpc.ReactiveUpdat
 					Data: pending,
 				})
 			}
+		} else if !u.WaitingForInput && s.hasPendingApproval(id) {
+			// L'utilisateur a validé ou refusé l'approbation directement sur l'IDE PC :
+			// on nettoie l'approbation locale et on notifie immédiatement le mobile.
+			s.clearApproval(id)
+			s.broadcast(OutgoingMessage{
+				Type: "approval_resolved",
+				Data: map[string]interface{}{
+					"cascadeId": id,
+					"source":    "desktop",
+				},
+			})
+			s.broadcast(OutgoingMessage{
+				Type: "sessions_updated",
+				Data: sessionsFromSummaries(s.snapshotSummaries()),
+			})
 		}
 	}
 }

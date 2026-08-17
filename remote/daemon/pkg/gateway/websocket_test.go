@@ -359,6 +359,10 @@ func (f *fakeRPCClient) CreateWorktree(branch, path string) ([]byte, error) {
 	return []byte(`{"status":"created","branch":"` + branch + `"}`), nil
 }
 
+func (f *fakeRPCClient) CheckoutWorktree(worktreeDirURI, targetWorkspaceURI string, deleteAfterCheckout bool, mergeStrategy uint64) ([]byte, error) {
+	return []byte(`{"status":"checked_out"}`), nil
+}
+
 // --- Fakes RPC Git + Sidecar (P2) ---
 
 // vcsStateRaw : réponse GetVersionControlState simulée (nil = défaut).
@@ -491,6 +495,18 @@ func (f *fakeRPCClient) CompleteMcpOAuth(serverID, authCode string) ([]byte, err
 
 func (f *fakeRPCClient) DisconnectMcpOAuth(serverID string) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("oauth-disconnected")), nil
+}
+
+func (f *fakeRPCClient) HybridSearch(query, workspaceURI string, limit uint32) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("search-results")), nil
+}
+
+func (f *fakeRPCClient) SearchCode(query, workspaceURI string, maxResults, linesContext int32) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("code-search-results")), nil
+}
+
+func (f *fakeRPCClient) CheckoutWorktree(worktreeDirURI, targetWorkspaceURI string, deleteAfterCheckout bool, mergeStrategy uint64) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("worktree-checked-out")), nil
 }
 
 
@@ -961,11 +977,19 @@ func TestWebSocketApprovalExpiry(t *testing.T) {
 		}
 
 		// Attendre au-delà du timeout : aucun approval_expired ne doit arriver.
+		// approval_resolved est un broadcast légitime — on l'accepte.
 		time.Sleep(200 * time.Millisecond)
-		client.conn.SetReadDeadline(time.Now().Add(150 * time.Millisecond))
-		_, rawMsg, err := client.conn.ReadMessage()
-		if err == nil {
-			t.Fatalf("Message inattendu reçu après submit: %s", rawMsg)
+		deadline := time.Now().Add(150 * time.Millisecond)
+		for {
+			client.conn.SetReadDeadline(deadline)
+			_, rawMsg, err := client.conn.ReadMessage()
+			if err != nil {
+				break // timeout atteint = OK, pas d'approval_expired
+			}
+			var m map[string]interface{}
+			if json.Unmarshal(rawMsg, &m) == nil && m["type"] == "approval_expired" {
+				t.Fatalf("approval_expired reçu alors que submit_approval avait été envoyé avant le timeout")
+			}
 		}
 	})
 

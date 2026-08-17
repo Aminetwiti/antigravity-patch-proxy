@@ -256,3 +256,21 @@ func (c *Client) DisconnectMcpOAuth(serverID string) ([]byte, error) {
 	return c.Call("DisconnectMcpOAuth", BuildDisconnectMcpOAuth(serverID))
 }
 
+// --- Code Index & RAG ---
+
+// HybridSearch effectue une recherche sémantique hybride (BM25 + Cosine) dans le code indexé.
+func (c *Client) HybridSearch(query, workspaceURI string, limit uint32) ([]byte, error) {
+	return c.Call("HybridSearch", BuildHybridSearch(query, workspaceURI, limit))
+}
+
+// SearchCode effectue une recherche de symboles et texte dans l'index du Language Server.
+func (c *Client) SearchCode(query, workspaceURI string, maxResults, linesContext int32) ([]byte, error) {
+	return c.Call("SearchCode", BuildSearchCode(query, workspaceURI, maxResults, linesContext))
+}
+
+// CheckoutWorktree bascule l'espace de travail sur un worktree Git ou fusionne les changements.
+func (c *Client) CheckoutWorktree(worktreeDirURI, targetWorkspaceURI string, deleteAfterCheckout bool, mergeStrategy uint64) ([]byte, error) {
+	return c.Call("CheckoutWorktree", BuildCheckoutWorktree(worktreeDirURI, targetWorkspaceURI, deleteAfterCheckout, mergeStrategy))
+}
+
+

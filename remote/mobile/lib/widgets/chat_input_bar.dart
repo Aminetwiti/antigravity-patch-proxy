@@ -1119,16 +1119,24 @@ class _ChatInputBarState extends State<ChatInputBar> {
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          InkWell(
-                            onTap:
-                                () => setState(() {
-                                  _attachedFileName = null;
-                                  _attachedFileContent = null;
-                                }),
-                            child: Icon(
-                              Icons.close,
-                              size: 14,
-                              color: scheme.onSurfaceVariant,
+                          Semantics(
+                            label: 'Supprimer le fichier attaché',
+                            button: true,
+                            child: InkWell(
+                              onTap:
+                                  () => setState(() {
+                                    _attachedFileName = null;
+                                    _attachedFileContent = null;
+                                  }),
+                              borderRadius: BorderRadius.circular(12),
+                              child: Padding(
+                                padding: const EdgeInsets.all(6),
+                                child: Icon(
+                                  Icons.close,
+                                  size: 16,
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
                             ),
                           ),
                         ],

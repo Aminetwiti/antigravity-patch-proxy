@@ -327,6 +327,9 @@ func (l *loadRPCClient) CompleteMcpOAuth(serverID, authCode string) ([]byte, err
 func (l *loadRPCClient) DisconnectMcpOAuth(serverID string) ([]byte, error) {
 	return connectrpc.Frame(pbTextFrame("oauth-disconnected")), nil
 }
+func (l *loadRPCClient) HybridSearch(query, workspaceURI string, limit uint32) ([]byte, error) {
+	return connectrpc.Frame(pbTextFrame("search-results")), nil
+}
 
 
 

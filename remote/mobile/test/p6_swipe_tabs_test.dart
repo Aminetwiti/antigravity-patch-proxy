@@ -44,7 +44,10 @@ import 'package:mobile/widgets/session_top_tabs.dart';
       if (reqId != null &&
           (type == 'read_file' ||
               type == 'list_files' ||
-              type == 'get_context')) {
+              type == 'get_context' ||
+              type == 'git_state' ||
+              type == 'get_vcs_state' ||
+              type == 'vcs.get_state')) {
         scheduleMicrotask(() {
           if (!ctrl.isClosed) {
             ctrl.add(jsonEncode({'requestId': reqId, 'data': {}}));

@@ -33,7 +33,6 @@ const (
 	InteractionPlanApproval    = 2
 	InteractionSingleSelect    = 3
 	InteractionMultiSelect     = 4
-	InteractionAskQuestion     = 7
 	InteractionApprovalTypeAsk = 10
 )
 

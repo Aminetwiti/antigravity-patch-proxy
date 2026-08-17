@@ -10,6 +10,9 @@ import '../theme/app_colors.dart';
 class RightSidebarDrawer extends StatefulWidget {
   final DaemonApi? api;
   final String activeSessionId;
+  /// Workspace racine de la session active — requis par le daemon pour
+  /// git_state (sinon "workspacePath requis"). Peut être relatif au home.
+  final String workspacePath;
   final int subagentsCount;
   final int filesChangedCount;
   final int artifactsCount;
@@ -21,6 +24,7 @@ class RightSidebarDrawer extends StatefulWidget {
     super.key,
     this.api,
     this.activeSessionId = '',
+    this.workspacePath = '',
     this.subagentsCount = 0,
     this.filesChangedCount = 0,
     this.artifactsCount = 0,
@@ -50,20 +54,28 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
     if (widget.api == null) return;
     setState(() => _isLoadingFilesChanged = true);
     try {
-      final res = await widget.api!.getVcsState();
+      final res = await widget.api!.getVcsState(
+        workspacePath: widget.workspacePath.isEmpty ? null : widget.workspacePath,
+      );
       final files = <String>{};
-      final staged = res['stagedFiles'] ?? res['staged_files'] ?? res['staged'];
-      if (staged is List) {
-        for (final item in staged) {
-          if (item is String && item.isNotEmpty) files.add(item);
-          if (item is Map && item['path'] != null) files.add(item['path'].toString());
-        }
-      }
-      final unstaged = res['unstagedFiles'] ?? res['unstaged_files'] ?? res['unstaged'];
-      if (unstaged is List) {
-        for (final item in unstaged) {
-          if (item is String && item.isNotEmpty) files.add(item);
-          if (item is Map && item['path'] != null) files.add(item['path'].toString());
+      // Contrat réel du daemon (VcsWorkspaceState, vcs.go) : les clés JSON
+      // sont workingDirectoryChanges / stagedChanges, chaque élément étant un
+      // VcsFileChange { uri, operation, originalUri }. On résout le chemin
+      // relatif du workspace et on déduplique (un fichier peut être à la fois
+      // staged et modifié).
+      for (final key in const ['workingDirectoryChanges', 'stagedChanges']) {
+        final list = res[key];
+        if (list is List) {
+          for (final item in list) {
+            if (item is String && item.isNotEmpty) {
+              files.add(item);
+            } else if (item is Map) {
+              final uri = item['uri'];
+              if (uri is String && uri.isNotEmpty) {
+                files.add(_relPath(uri));
+              }
+            }
+          }
         }
       }
       if (mounted) setState(() => _filesChanged = files.toList());
@@ -71,6 +83,18 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
     } finally {
       if (mounted) setState(() => _isLoadingFilesChanged = false);
     }
+  }
+
+  /// Réduit un URI file:///... à son chemin relatif pour l'affichage.
+  /// Ponytail: pas de dépendance — parsing manuel minimal.
+  static String _relPath(String uri) {
+    var p = uri.replaceAll('\\', '/');
+    if (p.startsWith('file:///')) {
+      p = p.substring(8);
+    } else if (p.startsWith('file://')) {
+      p = p.substring(7);
+    }
+    return p;
   }
 
   Future<void> _fetchArtifacts() async {

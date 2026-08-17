@@ -312,7 +312,7 @@ class ClientMessage {
       type: json['type'] as String? ?? '',
       requestId: json['requestId'] as String?,
       cascadeId: json['cascadeId'] as String?,
-      data: json['data'] is Map ? (json['data'] as Map).cast<String, dynamic>() : null,
+      data: json['data'] is Map ? Map<String, dynamic>.from(json['data'] as Map) : null,
     );
   }
 

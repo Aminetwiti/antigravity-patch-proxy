@@ -107,9 +107,16 @@ func TestReactiveApprovalBroadcast(t *testing.T) {
 		},
 	})
 
-	msg := client.recv(t)
-	if msg["type"] != "approval_pending" {
-		t.Fatalf("attendu approval_pending, reçu %v", msg)
+	var msg map[string]interface{}
+	for i := 0; i < 5; i++ {
+		m := client.recv(t)
+		if m["type"] == "approval_pending" {
+			msg = m
+			break
+		}
+	}
+	if msg == nil {
+		t.Fatalf("attendu approval_pending, aucun reçu")
 	}
 	data, _ := msg["data"].(map[string]interface{})
 	if data["cascadeId"] != "casc-r1" || data["approvalType"] != "run_command" ||

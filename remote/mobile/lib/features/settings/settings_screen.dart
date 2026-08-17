@@ -28,6 +28,7 @@ class SettingsScreen extends StatefulWidget {
     this.api,
     this.notifier,
     this.httpClient,
+    this.workspacePath = '',
   });
 
   final Map<String, dynamic> initialSettings;
@@ -36,6 +37,9 @@ class SettingsScreen extends StatefulWidget {
   final DaemonApi? api;
   final ApprovalNotifier? notifier;
   final http.Client? httpClient;
+  /// Workspace racine de la session active — requis par list_git_branches /
+  /// git_state côté daemon (sinon il cherche le repo dans le CWD du daemon).
+  final String workspacePath;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -84,6 +88,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   ];
 
   String _activeBranch = 'main';
+  StreamSubscription<Map<String, dynamic>>? _eventsSub;
 
   @override
   void initState() {
@@ -119,13 +124,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _applyApprovalTimeoutToDaemon();
     _fetchBranches();
     _fetchDevices();
+    if (widget.api != null) {
+      _eventsSub = widget.api!.events.listen((msg) {
+        final type = msg['type'] as String?;
+        if (type == 'git_branch_changed' || type == 'sessions_updated') {
+          _fetchBranches();
+        }
+      });
+    }
   }
 
   Future<void> _fetchBranches() async {
     if (widget.api == null) return;
     setState(() => _isLoadingBranches = true);
     try {
-      final branches = await widget.api!.listGitBranches();
+      final ws = widget.workspacePath.trim();
+      final resolved = ws.startsWith('file:///')
+          ? ws.substring(8)
+          : ws.startsWith('file://')
+              ? ws.substring(7)
+              : ws;
+      final branches = await widget.api!.listGitBranches(
+        workspacePath: resolved.isEmpty ? null : resolved,
+      );
       if (mounted) {
         setState(() {
           _branches = branches;
@@ -158,6 +179,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
+    _eventsSub?.cancel();
     _hostController.dispose();
     _portController.dispose();
     _csrfController.dispose();

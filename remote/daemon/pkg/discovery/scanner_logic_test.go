@@ -37,16 +37,25 @@ func TestSplitJsonObjects_Empty(t *testing.T) {
 func TestCandidatePorts(t *testing.T) {
 	info := &LocalHarnessInfo{ExtensionPort: 50999}
 	ports := candidatePorts(info, nil)
-	if len(ports) != 20 {
-		t.Fatalf("Attendu 20 ports candidats, reçu %d", len(ports))
+	// Doit contenir au moins les 20 ports de extension_server_port + offset
+	if len(ports) < 20 {
+		t.Fatalf("Attendu au moins 20 ports candidats, reçu %d", len(ports))
 	}
-	// extension_server_port + 1 doit être le premier candidat (le service RPC
-	// écoute en général sur le port suivant).
-	if ports[0] != 51000 {
-		t.Errorf("Attendu premier candidat 51000, reçu %d", ports[0])
+	has51000 := false
+	has51019 := false
+	for _, p := range ports {
+		if p == 51000 {
+			has51000 = true
+		}
+		if p == 51019 {
+			has51019 = true
+		}
 	}
-	if ports[19] != 51019 {
-		t.Errorf("Attendu dernier candidat 51019, reçu %d", ports[19])
+	if !has51000 {
+		t.Errorf("Attendu candidat 51000 dans les ports, non trouvé: %v", ports)
+	}
+	if !has51019 {
+		t.Errorf("Attendu candidat 51019 dans les ports, non trouvé: %v", ports)
 	}
 }
 

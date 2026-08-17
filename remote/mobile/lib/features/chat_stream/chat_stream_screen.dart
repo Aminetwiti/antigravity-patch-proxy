@@ -26,6 +26,7 @@ import '../../widgets/artifact_viewer_modal.dart';
 import 'widgets/execution_progress_view.dart';
 import 'widgets/overview_panel_view.dart';
 import 'widgets/session_review_view.dart';
+import '../subagents/subagents_tree_sheet.dart';
 import 'package:mobile/theme/app_colors.dart';
 
 class ChatStreamScreen extends StatefulWidget {
@@ -131,6 +132,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
   // Auto-scroll pendant le streaming (audit UX P1-6).
   final ScrollController _scrollController = ScrollController();
+  // ignore: prefer_final_fields
+  bool _isInitialScrollSettling = true;
 
   // Bouton flottant « retour en bas » (P1) : visible quand l'utilisateur
   // scrolle loin du bas pendant un stream. Compte les nouveaux messages
@@ -214,7 +217,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   void _onScroll() {
-    if (!_scrollController.hasClients) return;
+    if (!_scrollController.hasClients || _isInitialScrollSettling) return;
     final pos = _scrollController.position;
     // P1 : bascule du bouton flottant — on ne setState que lors d'un
     // changement d'état (une fois par départ/retour, pas à chaque pixel).
@@ -225,7 +228,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         if (nearBottom) _hiddenNewCount = 0;
       });
     }
-    if (!_isLoadingMoreOlder && pos.pixels <= 80 && _hiddenOlderCount > 0) {
+    if (!_isLoadingMoreOlder && pos.pixels <= 80 && _hiddenOlderCount > 0 && pos.maxScrollExtent > 100) {
       _loadMoreOlderMessages();
     }
   }
@@ -305,8 +308,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
   void _scrollToBottomSettled({int maxAttempts = 4}) {
     if (!mounted) return;
+    _isInitialScrollSettling = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) return;
+      if (!mounted || !_scrollController.hasClients) {
+        _isInitialScrollSettling = false;
+        return;
+      }
       _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
       if (maxAttempts > 1) {
         Future.delayed(const Duration(milliseconds: 60), () {
@@ -320,14 +327,27 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                     Future.delayed(const Duration(milliseconds: 250), () {
                       if (mounted && _scrollController.hasClients) {
                         _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+                        _isInitialScrollSettling = false;
+                      } else {
+                        _isInitialScrollSettling = false;
                       }
                     });
+                  } else {
+                    _isInitialScrollSettling = false;
                   }
+                } else {
+                  _isInitialScrollSettling = false;
                 }
               });
+            } else {
+              _isInitialScrollSettling = false;
             }
+          } else {
+            _isInitialScrollSettling = false;
           }
         });
+      } else {
+        _isInitialScrollSettling = false;
       }
     });
   }
@@ -1033,6 +1053,20 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           ApprovalNotifier.instance
               .cancelApprovalByCascadeId(cascadeId);
         }
+      } else if (type == 'approval_resolved') {
+        final data = msg['data'] as Map<String, dynamic>? ?? const {};
+        final callId = data['callId'] as String? ?? '';
+        final cascadeId = data['cascadeId'] as String? ?? '';
+        if (callId.isNotEmpty && _pendingApprovalCallIds.contains(callId)) {
+          _removeApproval(callId);
+        } else if (cascadeId.isEmpty || cascadeId == widget.activeSessionId) {
+          setState(() {
+            _pendingApprovals.clear();
+            _approvalIndex = -1;
+            _pendingApprovalCallIds.clear();
+          });
+          ApprovalNotifier.instance.cancelApprovalByCascadeId(widget.activeSessionId);
+        }
       }
     });
   }
@@ -1262,13 +1296,20 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     if (!mounted || !_scrollController.hasClients) return;
     final maxScroll = _scrollController.position.maxScrollExtent;
     final currentScroll = _scrollController.position.pixels;
-    // N'auto-scroll pendant la lecture que si l'utilisateur est déjà proche du bas (< 120px).
-    if ((maxScroll - currentScroll) < 120 || currentScroll == 0) {
+    // N'auto-scroll pendant le streaming que si l'utilisateur est déjà proche du bas (< 120px)
+    if ((maxScroll - currentScroll) < 120) {
       _scrollController.animateTo(
         maxScroll,
-        duration: const Duration(milliseconds: 200),
+        duration: const Duration(milliseconds: 120),
         curve: Curves.easeOut,
       );
+    } else {
+      if (!_showJumpToBottom) {
+        setState(() {
+          _showJumpToBottom = true;
+          _hiddenNewCount++;
+        });
+      }
     }
   }
 
@@ -1548,10 +1589,15 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         connectivityBanner,
         SessionTopTabs(
           activeTab: _currentTab,
-          onTabChanged: (tab) => setState(() {
-            _activeArtifact = null;
-            _currentTab = tab;
-          }),
+          onTabChanged: (tab) {
+            setState(() {
+              _activeArtifact = null;
+              _currentTab = tab;
+            });
+            if (tab == SessionTabType.review) {
+              _fetchVcsChanges();
+            }
+          },
           filesChangedCount: _modifiedFiles.length,
           hasPlan: _latestPlanText != null,
           hasTasks: false,
@@ -1585,10 +1631,14 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                             ? idx - 1
                             : -1;
                     if (next < 0 || next >= tabs.length) return;
+                    final nextTab = tabs[next];
                     setState(() {
                       _activeArtifact = null;
-                      _currentTab = tabs[next];
+                      _currentTab = nextTab;
                     });
+                    if (nextTab == SessionTabType.review) {
+                      _fetchVcsChanges();
+                    }
                   },
                   child: _buildActiveTabContent(scheme, isConnected),
                 ),
@@ -1864,6 +1914,46 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         );
       }
     }
+  }
+
+  Future<void> _fetchVcsChanges() async {
+    final api = widget.api;
+    if (api == null) return;
+    try {
+      final res = await api.getVcsState();
+      final list = <SessionModifiedFile>[];
+      for (final key in const ['workingDirectoryChanges', 'stagedChanges']) {
+        final entries = res[key];
+        if (entries is List) {
+          for (final item in entries) {
+            String path = '';
+            if (item is String && item.isNotEmpty) {
+              path = item;
+            } else if (item is Map && item['uri'] is String) {
+              path = item['uri'] as String;
+            }
+            if (path.isNotEmpty) {
+              var clean = path.replaceAll('\\', '/');
+              if (clean.startsWith('file:///')) clean = clean.substring(8);
+              if (clean.startsWith('file://')) clean = clean.substring(7);
+              if (!_modifiedFiles.contains(clean)) {
+                _modifiedFiles.add(clean);
+              }
+              if (!list.any((f) => f.path == clean)) {
+                list.add(SessionModifiedFile(path: clean, additions: 1, deletions: 0));
+              }
+            }
+          }
+        }
+      }
+      if (mounted && list.isNotEmpty) {
+        setState(() {
+          _modifiedFileList
+            ..clear()
+            ..addAll(list);
+        });
+      }
+    } catch (_) {}
   }
 
   Widget _buildReviewTabContent() {

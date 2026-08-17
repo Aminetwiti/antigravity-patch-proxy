@@ -109,7 +109,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       final res = await widget.api!.listFiles(_workspaceResolved);
       if (mounted) {
         setState(() {
-          _files = List<Map<String, dynamic>>.from(res['files'] ?? []);
+          final rawFiles = res['files'] ?? (res['data'] is Map ? res['data']['files'] : null);
+          _files = (rawFiles is List)
+              ? rawFiles.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+              : <Map<String, dynamic>>[];
           _isLoadingTree = false;
           _loadError = null;
         });
@@ -167,9 +170,15 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         workspacePath: _workspaceResolved,
       );
       if (mounted) {
+        // VCS wire: {conflictState: {inConflict: bool, conflicts: [{path:...}]}}
+        // Some paths flatten this to {inConflict: bool, conflicts: [...]}
+        final conflictState = state['conflictState'] is Map
+            ? Map<String, dynamic>.from(state['conflictState'] as Map)
+            : state;
         final conflictList = <String>[];
-        if (state['conflicts'] is List) {
-          for (final c in state['conflicts'] as List) {
+        final rawConflicts = conflictState['conflicts'];
+        if (rawConflicts is List) {
+          for (final c in rawConflicts) {
             if (c is Map && c['path'] != null) {
               conflictList.add(c['path'].toString());
             } else if (c is String) {
@@ -177,7 +186,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             }
           }
         }
-        final bool isConflict = state['inConflict'] == true || conflictList.isNotEmpty;
+        final bool isConflict =
+            conflictState['inConflict'] == true ||
+            state['inConflict'] == true ||
+            conflictList.isNotEmpty;
 
         setState(() {
           _inConflict = isConflict;
@@ -204,7 +216,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       );
       if (mounted) {
         setState(() {
-          _codeContent = res['content'] as String? ?? '';
+          final rawContent = res['content'] ?? res['text'] ?? (res['data'] is Map ? (res['data']['content'] ?? res['data']['text']) : null);
+          _codeContent = rawContent?.toString() ?? '';
           _isLoadingCode = false;
         });
       }
@@ -246,7 +259,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       final res = await widget.api!.searchFiles(_workspaceResolved, query);
       if (mounted) {
         setState(() {
-          _grepResults = List<Map<String, dynamic>>.from(res['results'] ?? []);
+          final rawResults = res['results'] ?? res['matches'] ?? (res['data'] is Map ? (res['data']['results'] ?? res['data']['matches']) : null);
+          _grepResults = (rawResults is List)
+              ? rawResults.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+              : <Map<String, dynamic>>[];
           _isGrepLoading = false;
         });
       }

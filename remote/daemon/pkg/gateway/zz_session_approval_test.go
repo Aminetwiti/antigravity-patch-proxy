@@ -66,15 +66,23 @@ func TestSessionApprovalAutoApproves(t *testing.T) {
 	// La réponse unary arrive APRÈS le marquage session (handleAction marque
 	// avant d'écrire la réponse) : la lire garantit que le serveur a bien
 	// enregistré l'auto-approbation avant le prompt suivant — aucun sleep.
+	// The server sends the unary "response" and then broadcasts
+	// "approval_resolved" + "sessions_updated" to all clients (including us).
+	// Under load the broadcast can arrive first, so drain until we see "response".
 	client.conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	if _, b, err := client.conn.ReadMessage(); err != nil {
-		t.Fatalf("réponse submit_approval: %v", err)
-	} else {
-		var resp map[string]interface{}
-		_ = json.Unmarshal(b, &resp)
-		if resp["type"] != "response" {
-			t.Fatalf("réponse inattendue: %v", resp)
+	for {
+		_, b, err := client.conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("réponse submit_approval: %v", err)
 		}
+		var resp map[string]interface{}
+		if err := json.Unmarshal(b, &resp); err != nil {
+			continue
+		}
+		if resp["type"] == "response" {
+			break // success — server has registered the session approval
+		}
+		// broadcast frame (approval_resolved / sessions_updated) — skip
 	}
 	client.conn.SetReadDeadline(time.Time{})
 

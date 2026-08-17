@@ -238,6 +238,10 @@ func (f *failingRPC) CompleteMcpOAuth(serverID, authCode string) ([]byte, error)
 
 func (f *failingRPC) DisconnectMcpOAuth(serverID string) ([]byte, error) { return nil, errFailing }
 
+func (f *failingRPC) HybridSearch(query, workspaceURI string, limit uint32) ([]byte, error) {
+	return nil, errFailing
+}
+
 // errFailing : erreur sentinelle.
 var errFailing = &failingError{}
 

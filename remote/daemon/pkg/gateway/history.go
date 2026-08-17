@@ -271,6 +271,11 @@ func extractSessionMetadata(transcriptPath, cascadeID string) (title string, wor
 	scanner.Buffer(buf, 10*1024*1024)
 
 	lineCount := 0
+	hasOfficialTitle := false
+	if title != "" && title != cascadeID {
+		hasOfficialTitle = true
+	}
+
 	for scanner.Scan() {
 		lineCount++
 		text := scanner.Text()
@@ -286,30 +291,38 @@ func extractSessionMetadata(transcriptPath, cascadeID string) (title string, wor
 					cleanTitle = strings.Trim(cleanTitle, "\"': \t\r\n")
 					if cleanTitle != "" {
 						globalConvTitles[strings.ToLower(m[1])] = cleanTitle
+						if strings.EqualFold(m[1], cascadeID) {
+							title = cleanTitle
+							hasOfficialTitle = true
+						}
 					}
 				}
 			}
 			convTitlesMu.Unlock()
 		}
 
-		if title == "" {
+		// 2. Extrait l'objectif utilisateur officiel (### USER Objective:)
+		if m := userObjectiveRe.FindStringSubmatch(text); m != nil {
+			cand := strings.TrimSpace(m[1])
+			cand = strings.Split(cand, "\\n")[0]
+			cand = strings.Split(cand, "\n")[0]
+			cand = strings.Trim(cand, "\"': \t\r\n")
+			if cand != "" && !strings.EqualFold(cand, "None") {
+				title = cand
+				hasOfficialTitle = true
+				convTitlesMu.Lock()
+				globalConvTitles[strings.ToLower(cascadeID)] = cand
+				convTitlesMu.Unlock()
+			}
+		}
+
+		if !hasOfficialTitle {
 			convTitlesMu.RLock()
 			if off, ok := globalConvTitles[strings.ToLower(cascadeID)]; ok && off != "" {
 				title = off
+				hasOfficialTitle = true
 			}
 			convTitlesMu.RUnlock()
-		}
-
-		if title == "" {
-			if m := userObjectiveRe.FindStringSubmatch(text); m != nil {
-				cand := strings.TrimSpace(m[1])
-				cand = strings.Split(cand, "\\n")[0]
-				cand = strings.Split(cand, "\n")[0]
-				cand = strings.Trim(cand, "\"': \t\r\n")
-				if cand != "" && !strings.EqualFold(cand, "None") {
-					title = cand
-				}
-			}
 		}
 
 		// 2. Cherche le workspace directement sur le texte brut
@@ -1493,4 +1506,13 @@ func listWorkspaces() []map[string]interface{} {
 		add(e.Name(), filepath.Join(home, e.Name()), "home")
 	}
 	return out
+}
+
+// GetMostRecentSession retourne la session la plus récemment mise à jour sur le PC.
+func GetMostRecentSession() (map[string]interface{}, error) {
+	sessions := ListLocalSessions()
+	if len(sessions) == 0 {
+		return nil, fmt.Errorf("aucune session active trouvée")
+	}
+	return sessions[0], nil
 }

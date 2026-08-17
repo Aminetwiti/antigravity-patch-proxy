@@ -142,11 +142,11 @@ class ModelCatalog {
     return defaultModel;
   }
 
-  /// Fetches custom models dynamically from custom_models.json via the daemon.
+  /// Fetches custom models dynamically from the daemon or custom_models.json.
   static Future<List<AntigravityModel>> fetchCustomModels(DaemonApi? api) async {
     if (api == null) return const [];
     try {
-      // Try both standard and IDE config locations
+      // Lecture du fichier custom_models.json (format Antigravity 2.0 / 3.0)
       String content = '';
       try {
         final res = await api.readFile('custom_models.json', workspacePath: '.gemini/antigravity');
@@ -160,26 +160,48 @@ class ModelCatalog {
 
       if (content.isEmpty) return const [];
       final dynamic parsed = jsonDecode(content);
-      if (parsed is! Map<String, dynamic>) return const [];
-
       final customList = <AntigravityModel>[];
-      final providers = parsed['providers'] as List<dynamic>? ?? [];
 
+      // Support format tableau plat [ {...}, {...} ]
+      if (parsed is List) {
+        for (final m in parsed) {
+          if (m is! Map) continue;
+          final item = Map<String, dynamic>.from(m);
+          final id = item['name']?.toString() ?? item['externalModelName']?.toString() ?? '';
+          final displayName = item['displayName']?.toString() ?? id;
+          if (id.isNotEmpty) {
+            customList.add(AntigravityModel(
+              id: id,
+              displayName: displayName,
+              isCustom: true,
+              isThinking: id.toLowerCase().contains('r1') || id.toLowerCase().contains('reasoning'),
+            ));
+          }
+        }
+        return customList;
+      }
+
+      if (parsed is! Map) return const [];
+      final parsedMap = Map<String, dynamic>.from(parsed);
+
+      final providers = parsedMap['providers'] as List<dynamic>? ?? [];
       for (final p in providers) {
-        if (p is! Map<String, dynamic>) continue;
-        final enabled = p['enabled'] == true;
+        if (p is! Map) continue;
+        final pMap = Map<String, dynamic>.from(p);
+        final enabled = pMap['enabled'] == true;
         if (!enabled) continue;
 
-        final latencyMs = (p['latencyMs'] as num?)?.toInt();
-        final status = p['status'] as String? ?? 'online';
-        final models = p['models'] as List<dynamic>? ?? [];
+        final latencyMs = (pMap['latencyMs'] as num?)?.toInt();
+        final status = pMap['status'] as String? ?? 'online';
+        final models = pMap['models'] as List<dynamic>? ?? [];
 
         for (final m in models) {
-          if (m is! Map<String, dynamic>) continue;
-          if (m['enabled'] == false) continue;
+          if (m is! Map) continue;
+          final mMap = Map<String, dynamic>.from(m);
+          if (mMap['enabled'] == false) continue;
 
-          final id = m['id']?.toString() ?? '';
-          final displayName = m['displayName']?.toString() ?? id;
+          final id = mMap['id']?.toString() ?? '';
+          final displayName = mMap['displayName']?.toString() ?? id;
           if (id.isEmpty) continue;
 
           customList.add(AntigravityModel(
@@ -193,12 +215,13 @@ class ModelCatalog {
       }
 
       // Also check flat models array if present
-      final flatModels = parsed['models'] as List<dynamic>? ?? [];
+      final flatModels = parsedMap['models'] as List<dynamic>? ?? [];
       for (final m in flatModels) {
-        if (m is! Map<String, dynamic>) continue;
-        if (m['enabled'] == false) continue;
-        final id = m['id']?.toString() ?? '';
-        final displayName = m['displayName']?.toString() ?? id;
+        if (m is! Map) continue;
+        final mMap = Map<String, dynamic>.from(m);
+        if (mMap['enabled'] == false) continue;
+        final id = mMap['id']?.toString() ?? '';
+        final displayName = mMap['displayName']?.toString() ?? id;
         if (id.isNotEmpty && !customList.any((c) => c.id == id)) {
           customList.add(AntigravityModel(
             id: id,

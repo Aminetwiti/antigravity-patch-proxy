@@ -210,6 +210,7 @@ const (
 	InteractionOpenBrowserURL = 6  // CascadeOpenBrowserUrlInteraction
 	InteractionFilePermission = 19 // FilePermissionInteraction
 	InteractionPermission     = 21 // PermissionInteraction
+	InteractionAskQuestion    = 22 // AskQuestionInteraction
 	InteractionApproval       = 23 // ApprovalInteraction
 )
 
@@ -238,6 +239,25 @@ func BuildFilePermissionInteraction(allow bool, scope uint64, pathURI string) []
 	w.varintField(1, boolToUint64(allow))
 	w.varintField(2, scope)
 	w.stringField(3, pathURI)
+	return w.b
+}
+
+// BuildAskQuestionInteraction encode la réponse à un questionnaire interactif
+// (AskQuestionInteraction tag 22 dans CascadeUserInteraction).
+// responses (1) -> AskQuestionEntry { selected_option_ids (4), write_in_response (5) }, cancelled (2).
+func BuildAskQuestionInteraction(selectedIDs []string, writeInResponse string, cancelled bool) []byte {
+	w := &writer{}
+	entry := &writer{}
+	for _, id := range selectedIDs {
+		entry.stringField(4, id)
+	}
+	if writeInResponse != "" {
+		entry.stringField(5, writeInResponse)
+	}
+	w.bytesField(1, entry.b)
+	if cancelled {
+		w.varintField(2, 1)
+	}
 	return w.b
 }
 
@@ -661,4 +681,55 @@ func BuildDisconnectMcpOAuth(serverID string) []byte {
 	w.stringField(1, serverID)
 	return w.b
 }
+
+// --- Code Index & RAG (exa.code_index_pb) ---
+
+// BuildHybridSearch construit un HybridSearchRequest :
+// {1: query, 2: workspace_uri, 3: limit}.
+func BuildHybridSearch(query, workspaceURI string, limit uint32) []byte {
+	w := &writer{}
+	w.stringField(1, query)
+	if workspaceURI != "" {
+		w.stringField(2, workspaceURI)
+	}
+	if limit > 0 {
+		w.varintField(3, uint64(limit))
+	}
+	return w.b
+}
+
+// BuildSearchCode construit un SearchCodeRequest :
+// {1: query, 2: workspace_uri, 3: max_results, 4: lines_context} — schéma language_server.proto.
+func BuildSearchCode(query, workspaceURI string, maxResults, linesContext int32) []byte {
+	w := &writer{}
+	w.stringField(1, query)
+	if workspaceURI != "" {
+		w.stringField(2, workspaceURI)
+	}
+	if maxResults > 0 {
+		w.varintField(3, uint64(maxResults))
+	}
+	if linesContext > 0 {
+		w.varintField(4, uint64(linesContext))
+	}
+	return w.b
+}
+
+// BuildCheckoutWorktree construit un CheckoutWorktreeRequest :
+// {1: worktree_dir_uri, 2: target_workspace_uri, 3: delete_worktree_after_checkout, 4: merge_strategy}.
+func BuildCheckoutWorktree(worktreeDirURI, targetWorkspaceURI string, deleteAfterCheckout bool, mergeStrategy uint64) []byte {
+	w := &writer{}
+	w.stringField(1, worktreeDirURI)
+	if targetWorkspaceURI != "" {
+		w.stringField(2, targetWorkspaceURI)
+	}
+	if deleteAfterCheckout {
+		w.varintField(3, 1)
+	}
+	if mergeStrategy > 0 {
+		w.varintField(4, mergeStrategy)
+	}
+	return w.b
+}
+
 

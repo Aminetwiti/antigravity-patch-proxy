@@ -312,7 +312,37 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       _refreshSessions();
       _refreshContext();
       _applySavedApprovalSettings();
+      _autoDockActiveSession();
     }
+  }
+
+  /// Arrimage automatique instantané (Pilier 3) : au connect, synchronise
+  /// immédiatement l'application mobile sur la session active de l'IDE PC.
+  Future<void> _autoDockActiveSession() async {
+    final api = _api;
+    if (api == null) return;
+    try {
+      final s = await SettingsStore.load();
+      final autoFollow = (s['autoFollowEnabled'] as bool?) ?? true;
+      if (!autoFollow) return;
+      final active = await api.getActiveSession();
+      if (active != null && mounted) {
+        final cid = active['cascadeId'] as String? ?? '';
+        final title = active['title'] as String? ?? '';
+        if (cid.isNotEmpty && cid != _activeSessionId) {
+          setState(() {
+            _activeSessionId = cid;
+            if (title.isNotEmpty) _activeSessionTitle = title;
+          });
+          _refreshContext();
+          SettingsStore.saveSession(
+            wsUrl: _wsClient.targetUrl,
+            token: _wsClient.authToken ?? '',
+            sessionId: _activeSessionId,
+          );
+        }
+      }
+    } catch (_) {}
   }
 
   /// Re-synchronise les réglages d'approbation persistés vers le daemon à
@@ -575,6 +605,30 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         return;
       }
 
+      // session_focus_changed : push instantané du daemon (arrimage automatique bidirectionnel)
+      // dès que l'utilisateur bascule de session ou démarre une requête sur le PC.
+      if (type == 'session_focus_changed') {
+        final data = msg['data'];
+        if (data is Map) {
+          final cid = data['cascadeId'] as String? ?? '';
+          final title = data['title'] as String? ?? '';
+          final autoFollow = (_savedSettings['autoFollowEnabled'] as bool?) ?? true;
+          if (cid.isNotEmpty && autoFollow && cid != _activeSessionId) {
+            setState(() {
+              _activeSessionId = cid;
+              if (title.isNotEmpty) _activeSessionTitle = title;
+            });
+            _refreshContext();
+            SettingsStore.saveSession(
+              wsUrl: _wsClient.targetUrl,
+              token: _wsClient.authToken ?? '',
+              sessionId: _activeSessionId,
+            );
+          }
+        }
+        return;
+      }
+
       // sessions_updated : push réactif du daemon (flux Jetbox) — payload
       // complet au format list_sessions. Évite le rechargement réseau complet
       // (et la latence GetAllCascades) ; met à jour la sidebar en place.
@@ -594,6 +648,9 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                 _activeSessionId = parsed.first.id;
                 _activeSessionTitle = parsed.first.title;
                 _refreshContext();
+              } else if (_activeSessionId.isNotEmpty) {
+                final current = parsed.firstWhere((s) => s.id == _activeSessionId);
+                _activeSessionTitle = current.title;
               }
             });
             return;
@@ -836,6 +893,10 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         _showScheduledTasks();
       },
       onOpenSettings: () {
+        final s = _sessions.firstWhere(
+          (s) => s.id == _activeSessionId,
+          orElse: () => const CascadeSession(id: '', workspacePath: '', title: '', status: '', time: ''),
+        );
         Navigator.of(context).push(
           MaterialPageRoute(
             builder: (context) => SettingsScreen(
@@ -844,6 +905,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
               onDaemonSaved: _applyDaemonSettings,
               api: _api,
               notifier: ApprovalNotifier.instance,
+              workspacePath: s.workspacePath,
             ),
           ),
         );
@@ -924,9 +986,23 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       },
     );
 
+    // Workspace racine de la session active : git_state / list_git_branches
+    // exigent un workspacePath côté daemon (sinon "workspacePath requis").
+    final activeWs = _sessions
+            .where((s) => s.id == _activeSessionId)
+            .map((s) => s.workspacePath)
+            .firstWhere((p) => p.isNotEmpty, orElse: () => '')
+        .isNotEmpty
+        ? _sessions
+            .where((s) => s.id == _activeSessionId)
+            .first
+            .workspacePath
+        : (_projects.isNotEmpty ? _projects.first.path : '');
+
     final contextDrawer = RightSidebarDrawer(
       api: _api,
       activeSessionId: _activeSessionId,
+      workspacePath: activeWs,
       subagentsCount: _contextStats['subagentsCount'] as int? ?? 0,
       filesChangedCount: _contextStats['filesChangedCount'] as int? ?? 0,
       artifactsCount: _contextStats['artifactsCount'] as int? ?? 0,
@@ -1073,19 +1149,31 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
               : chatStream,
     );
 
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.escape): () {
-          if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
-            _scaffoldKey.currentState?.closeDrawer();
-          } else if (_scaffoldKey.currentState?.isEndDrawerOpen ?? false) {
-            _scaffoldKey.currentState?.closeEndDrawer();
-          }
-        },
+    return PopScope(
+      canPop: !(_scaffoldKey.currentState?.isDrawerOpen ?? false) &&
+          !(_scaffoldKey.currentState?.isEndDrawerOpen ?? false),
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
+          _scaffoldKey.currentState?.closeDrawer();
+        } else if (_scaffoldKey.currentState?.isEndDrawerOpen ?? false) {
+          _scaffoldKey.currentState?.closeEndDrawer();
+        }
       },
-      child: Focus(
-        autofocus: false,
-        child: scaffold,
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.escape): () {
+            if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
+              _scaffoldKey.currentState?.closeDrawer();
+            } else if (_scaffoldKey.currentState?.isEndDrawerOpen ?? false) {
+              _scaffoldKey.currentState?.closeEndDrawer();
+            }
+          },
+        },
+        child: Focus(
+          autofocus: false,
+          child: scaffold,
+        ),
       ),
     );
   }

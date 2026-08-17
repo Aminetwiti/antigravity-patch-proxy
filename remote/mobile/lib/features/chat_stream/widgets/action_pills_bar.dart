@@ -40,14 +40,18 @@ class ActionPillsBar extends StatelessWidget {
         separatorBuilder: (_, __) => const SizedBox(width: 6),
         itemBuilder: (context, index) {
           final action = actions[index];
-          return ActionChip(
-            avatar: Icon(action.icon, size: 16),
-            label: Text(action.command, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
-            tooltip: action.label,
-            onPressed: () {
-              HapticFeedback.selectionClick();
-              onActionSelected(action.command);
-            },
+          return Semantics(
+            label: 'Commande ${action.command} : ${action.label}',
+            button: true,
+            child: ActionChip(
+              avatar: Icon(action.icon, size: 16),
+              label: Text(action.command, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+              tooltip: action.label,
+              onPressed: () {
+                HapticFeedback.selectionClick();
+                onActionSelected(action.command);
+              },
+            ),
           );
         },
       ),

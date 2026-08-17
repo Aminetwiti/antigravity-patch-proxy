@@ -27,6 +27,7 @@ class SettingsStore {
   static const _kMcpAllowlistStrict = 'settings.mcpAllowlistStrict';
   static const _kExecutionPolicy = 'settings.executionPolicy';
   static const _kActiveBranch = 'settings.activeBranch';
+  static const _kAutoFollow = 'settings.autoFollowEnabled';
 
   // Session persistée : URL ws complète + token + sessionId actif. Sauvegardée
   // à chaque connexion réussie (le tunnel Cloudflare change d'URL à chaque
@@ -62,6 +63,7 @@ class SettingsStore {
       'mcpAllowlistStrict': prefs.getBool(_kMcpAllowlistStrict) ?? true,
       'executionPolicy': prefs.getString(_kExecutionPolicy) ?? 'request-review',
       'activeBranch': prefs.getString(_kActiveBranch) ?? 'main',
+      'autoFollowEnabled': prefs.getBool(_kAutoFollow) ?? true,
     };
   }
 
@@ -110,6 +112,8 @@ class SettingsStore {
           await prefs.setString(_kExecutionPolicy, entry.value as String);
         case 'activeBranch':
           await prefs.setString(_kActiveBranch, entry.value as String);
+        case 'autoFollowEnabled':
+          await prefs.setBool(_kAutoFollow, entry.value as bool);
       }
     }
   }

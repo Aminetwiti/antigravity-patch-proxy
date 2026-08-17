@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -143,17 +145,41 @@ func probePorts(ports []int, csrfToken string) int {
 	return 0
 }
 
-// candidatePorts : extension_server_port+1..+20 si présent, sinon netstat PID.
+// candidatePorts : active_port file, extension_server_port+1..+20 si présent, sinon netstat PID.
 func candidatePorts(info *LocalHarnessInfo, p *procEntry) []int {
 	var ports []int
+
+	// 0. Vérifier d'abord le fichier active_port standard ~/.gemini/antigravity/active_port
+	if activePort := readActivePortFile(); activePort > 0 {
+		ports = append(ports, activePort)
+	}
+
 	if info.ExtensionPort > 0 {
 		for offset := 1; offset <= 20; offset++ {
 			ports = append(ports, info.ExtensionPort+offset)
 		}
 	} else {
-		ports = listeningPortsForPID(p.pid)
+		ports = append(ports, listeningPortsForPID(p.pid)...)
 	}
 	return ports
+}
+
+func readActivePortFile() int {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return 0
+	}
+	path := filepath.Join(home, ".gemini", "antigravity", "active_port")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	portStr := strings.TrimSpace(string(data))
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port <= 0 || port > 65535 {
+		return 0
+	}
+	return port
 }
 
 // listeningPortsForPID récupère les ports d'écoute du PID via netstat.

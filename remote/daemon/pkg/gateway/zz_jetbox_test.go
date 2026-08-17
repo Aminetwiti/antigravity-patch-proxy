@@ -4,6 +4,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/antigravity/remote-daemon/pkg/connectrpc"
 )
@@ -84,6 +85,10 @@ func TestJetboxFeedsListSessions(t *testing.T) {
 		},
 	}, nil)
 
+	for i := 0; i < 50 && gw.snapshotSummaries() == nil; i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+
 	client := dialWS(t, "ws"+strings.TrimPrefix(ts.URL, "http")+"/ws")
 	defer client.conn.Close()
 
@@ -121,12 +126,21 @@ func TestJetboxSyncBroadcasts(t *testing.T) {
 	client := dialWS(t, "ws"+strings.TrimPrefix(ts.URL, "http")+"/ws")
 	defer client.conn.Close()
 
+	recvSessionsUpdated := func() map[string]interface{} {
+		for {
+			m := client.recv(t)
+			if m["type"] == "sessions_updated" {
+				return m
+			}
+		}
+	}
+
 	jetbox.push(map[string]connectrpc.JetboxSummary{
 		"casc-1": {CascadeID: "casc-1", Title: "nouvelle session", Status: "CASCADE_STATUS_READY"},
 		"casc-2": {CascadeID: "casc-2", Title: "seconde session", Status: "CASCADE_STATUS_READY"},
 	}, nil)
 
-	msg := client.recv(t)
+	msg := recvSessionsUpdated()
 	if msg["type"] != "sessions_updated" {
 		t.Fatalf("attendu sessions_updated, reçu %v", msg)
 	}
@@ -139,7 +153,7 @@ func TestJetboxSyncBroadcasts(t *testing.T) {
 	// Suppression : la session supprimée disparaît du broadcast suivant
 	// (celle qui reste est conservée).
 	jetbox.push(nil, []string{"casc-1"})
-	msg = client.recv(t)
+	msg = recvSessionsUpdated()
 	if msg["type"] != "sessions_updated" {
 		t.Fatalf("attendu sessions_updated (delete), reçu %v", msg)
 	}
@@ -151,5 +165,89 @@ func TestJetboxSyncBroadcasts(t *testing.T) {
 	first := sessions[0].(map[string]interface{})
 	if first["cascadeId"] != "casc-2" {
 		t.Fatalf("session restante inattendue: %v", first)
+	}
+}
+
+// TestSessionFocusChangedBroadcast — quand la session IDE au premier plan change
+// via le stream Jetbox, le daemon émet session_focus_changed avant sessions_updated.
+func TestSessionFocusChangedBroadcast(t *testing.T) {
+	ts, gw := newTestServerWithGW(&fakeRPCClient{})
+	defer ts.Close()
+
+	jetbox := newFakeJetboxStreamer()
+	defer jetbox.closeStream()
+	gw.RunJetboxSubscription(jetbox)
+
+	client := dialWS(t, "ws"+strings.TrimPrefix(ts.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	now := time.Now()
+	// Première frame : 2 sessions READY — focus = la plus récente.
+	jetbox.push(map[string]connectrpc.JetboxSummary{
+		"casc-old": {CascadeID: "casc-old", Title: "vieille session", Status: "CASCADE_STATUS_READY", UpdatedAt: now.Add(-10 * time.Minute)},
+		"casc-new": {CascadeID: "casc-new", Title: "session récente", Status: "CASCADE_STATUS_READY", UpdatedAt: now},
+	}, nil)
+
+	// On attend session_focus_changed (envoyé avant sessions_updated).
+	var focusMsg map[string]interface{}
+	for i := 0; i < 10; i++ {
+		msg := client.recv(t)
+		if msg["type"] == "session_focus_changed" {
+			focusMsg = msg
+			break
+		}
+	}
+	if focusMsg == nil {
+		t.Fatal("session_focus_changed non reçu après le premier push Jetbox")
+	}
+	data, _ := focusMsg["data"].(map[string]interface{})
+	if data["cascadeId"] != "casc-new" {
+		t.Fatalf("focus attendu sur casc-new, reçu %v", data)
+	}
+
+	// Deuxième frame : casc-old passe en RUNNING → nouveau focus.
+	jetbox.push(map[string]connectrpc.JetboxSummary{
+		"casc-old": {CascadeID: "casc-old", Title: "vieille session", Status: "CASCADE_STATUS_RUNNING", UpdatedAt: now.Add(-10 * time.Minute)},
+	}, nil)
+
+	for i := 0; i < 10; i++ {
+		msg := client.recv(t)
+		if msg["type"] == "session_focus_changed" {
+			focusMsg = msg
+			break
+		}
+	}
+	data, _ = focusMsg["data"].(map[string]interface{})
+	if data["cascadeId"] != "casc-old" {
+		t.Fatalf("focus attendu sur casc-old (RUNNING), reçu %v", data)
+	}
+}
+
+// TestComputeFocusedSession — vérifie les règles de priorité :
+// RUNNING (2) > WAITING (1) > READY (0, tri par UpdatedAt).
+func TestComputeFocusedSession(t *testing.T) {
+	now := time.Now()
+	summaries := map[string]connectrpc.JetboxSummary{
+		"a": {CascadeID: "a", Status: "CASCADE_STATUS_READY", UpdatedAt: now.Add(-1 * time.Minute)},
+		"b": {CascadeID: "b", Status: "CASCADE_STATUS_READY", UpdatedAt: now},
+		"c": {CascadeID: "c", Status: "CASCADE_STATUS_RUNNING", UpdatedAt: now.Add(-5 * time.Minute)},
+	}
+	best := computeFocusedSession(summaries)
+	if best == nil || best.CascadeID != "c" {
+		t.Fatalf("attendu 'c' (RUNNING), reçu %v", best)
+	}
+
+	// Sous-agent exclu.
+	summaries["d"] = connectrpc.JetboxSummary{CascadeID: "d", Status: "CASCADE_STATUS_RUNNING", Source: 16}
+	best = computeFocusedSession(summaries)
+	if best == nil || best.CascadeID != "c" {
+		t.Fatalf("sous-agent ne doit pas être sélectionné, reçu %v", best)
+	}
+
+	// Archived exclu.
+	summaries["e"] = connectrpc.JetboxSummary{CascadeID: "e", Status: "CASCADE_STATUS_RUNNING", Archived: true}
+	best = computeFocusedSession(summaries)
+	if best == nil || best.CascadeID != "c" {
+		t.Fatalf("session archivée ne doit pas être sélectionnée, reçu %v", best)
 	}
 }

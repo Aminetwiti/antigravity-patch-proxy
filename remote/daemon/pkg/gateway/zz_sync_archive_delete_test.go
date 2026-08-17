@@ -109,12 +109,21 @@ func TestJetboxArchiveBroadcastExcludesArchived(t *testing.T) {
 	client := dialWS(t, "ws"+strings.TrimPrefix(ts.URL, "http")+"/ws")
 	defer client.conn.Close()
 
+	recvSessionsUpdated := func() map[string]interface{} {
+		for {
+			m := client.recv(t)
+			if m["type"] == "sessions_updated" {
+				return m
+			}
+		}
+	}
+
 	// Snapshot initial : 2 sessions actives.
 	jetbox.push(map[string]connectrpc.JetboxSummary{
 		"casc-a": {CascadeID: "casc-a", Title: "active", Status: "CASCADE_STATUS_READY"},
 		"casc-b": {CascadeID: "casc-b", Title: "à archiver", Status: "CASCADE_STATUS_READY"},
 	}, nil)
-	if msg := client.recv(t); msg["type"] != "sessions_updated" {
+	if msg := recvSessionsUpdated(); msg["type"] != "sessions_updated" {
 		t.Fatalf("attendu sessions_updated (snapshot), reçu %v", msg)
 	}
 
@@ -125,7 +134,7 @@ func TestJetboxArchiveBroadcastExcludesArchived(t *testing.T) {
 		"casc-b": {CascadeID: "casc-b", Title: "à archiver", Status: "CASCADE_STATUS_ARCHIVED", Archived: true},
 	}, nil)
 
-	msg := client.recv(t)
+	msg := recvSessionsUpdated()
 	if msg["type"] != "sessions_updated" {
 		t.Fatalf("attendu sessions_updated (archive), reçu %v", msg)
 	}

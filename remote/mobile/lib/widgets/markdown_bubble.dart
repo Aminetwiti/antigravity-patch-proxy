@@ -187,103 +187,115 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
                 ),
                 const Spacer(),
                 if (isDiff) ...[
-                  InkWell(
-                    onTap: () {
-                      HapticFeedback.lightImpact();
-                      showModalBottomSheet(
-                        context: context,
-                        isScrollControlled: true,
-                        backgroundColor: Colors.transparent,
-                        builder: (ctx) => FractionallySizedBox(
-                          heightFactor: 0.9,
-                          child: UnifiedDiffViewer(
-                            diffContent: widget.code.code,
-                            fileName: 'Code Diff',
-                            onClose: () => Navigator.of(ctx).pop(),
+                  Semantics(
+                    label: 'Examiner les modifications du code diff',
+                    button: true,
+                    child: InkWell(
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        showModalBottomSheet(
+                          context: context,
+                          isScrollControlled: true,
+                          backgroundColor: Colors.transparent,
+                          builder: (ctx) => FractionallySizedBox(
+                            heightFactor: 0.9,
+                            child: UnifiedDiffViewer(
+                              diffContent: widget.code.code,
+                              fileName: 'Code Diff',
+                              onClose: () => Navigator.of(ctx).pop(),
+                            ),
                           ),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(6),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        child: Row(
+                          children: [
+                            Icon(Icons.rate_review_outlined, size: 14, color: scheme.primary),
+                            const SizedBox(width: 4),
+                            Text('Review', style: TextStyle(fontSize: 11.5, color: scheme.primary, fontWeight: FontWeight.w600)),
+                          ],
                         ),
-                      );
-                    },
-                    borderRadius: BorderRadius.circular(4),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      child: Row(
-                        children: [
-                          Icon(Icons.rate_review_outlined, size: 13, color: scheme.primary),
-                          const SizedBox(width: 4),
-                          Text('Review', style: TextStyle(fontSize: 11, color: scheme.primary, fontWeight: FontWeight.w600)),
-                        ],
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
                 ],
                 if (_isShell) ...[
                   // P3 : « Exécuter » — ouvre le terminal distant pré-rempli
                   // avec le contenu du bloc shell (multi-ligne collé d'un coup).
-                  InkWell(
-                    key: const Key('run-in-terminal'),
-                    onTap: () {
-                      HapticFeedback.lightImpact();
-                      RemoteTerminalSheet.show(
-                        context,
-                        api: widget.api,
-                        projectName: widget.workspacePath.isEmpty
-                            ? 'Workspace'
-                            : widget.workspacePath,
-                        initialCommand: widget.code.code.trim(),
-                      );
-                    },
-                    borderRadius: BorderRadius.circular(4),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      child: Row(
-                        children: [
-                          Icon(Icons.play_arrow_rounded, size: 13, color: scheme.primary),
-                          const SizedBox(width: 4),
-                          Text('Exécuter', style: TextStyle(fontSize: 11, color: scheme.primary, fontWeight: FontWeight.w600)),
-                        ],
+                  Semantics(
+                    label: 'Exécuter ce bloc de commande dans le terminal distant',
+                    button: true,
+                    child: InkWell(
+                      key: const Key('run-in-terminal'),
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        RemoteTerminalSheet.show(
+                          context,
+                          api: widget.api,
+                          projectName: widget.workspacePath.isEmpty
+                              ? 'Workspace'
+                              : widget.workspacePath,
+                          initialCommand: widget.code.code.trim(),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(6),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        child: Row(
+                          children: [
+                            Icon(Icons.play_arrow_rounded, size: 15, color: scheme.primary),
+                            const SizedBox(width: 4),
+                            Text('Exécuter', style: TextStyle(fontSize: 11.5, color: scheme.primary, fontWeight: FontWeight.w600)),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
                 ],
-                InkWell(
-                  onTap: () {
-                    HapticFeedback.lightImpact();
-                    Clipboard.setData(ClipboardData(text: widget.code.code));
-                    setState(() => _copied = true);
-                    _copyTimer?.cancel();
-                    _copyTimer = Timer(const Duration(milliseconds: 1500), () {
-                      if (mounted) setState(() => _copied = false);
-                    });
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Code copié dans le presse-papiers'),
-                        duration: Duration(seconds: 1),
+                Semantics(
+                  label: _copied ? 'Code copié' : 'Copier le code dans le presse-papiers',
+                  button: true,
+                  child: InkWell(
+                    onTap: () {
+                      HapticFeedback.lightImpact();
+                      Clipboard.setData(ClipboardData(text: widget.code.code));
+                      setState(() => _copied = true);
+                      _copyTimer?.cancel();
+                      _copyTimer = Timer(const Duration(milliseconds: 1500), () {
+                        if (mounted) setState(() => _copied = false);
+                      });
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Code copié dans le presse-papiers'),
+                          duration: Duration(seconds: 1),
+                        ),
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 180),
+                        transitionBuilder: (child, anim) =>
+                            ScaleTransition(scale: anim, child: child),
+                        child: _copied
+                            ? const Icon(
+                                Icons.check_rounded,
+                                key: ValueKey('copied'),
+                                size: 15,
+                                color: AppColors.positive,
+                              )
+                            : Icon(
+                                Icons.copy_outlined,
+                                key: const ValueKey('copy'),
+                                size: 15,
+                                color: scheme.onSurfaceVariant,
+                              ),
                       ),
-                    );
-                  },
-                  borderRadius: BorderRadius.circular(4),
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 180),
-                      transitionBuilder: (child, anim) =>
-                          ScaleTransition(scale: anim, child: child),
-                      child: _copied
-                          ? const Icon(
-                              Icons.check_rounded,
-                              key: ValueKey('copied'),
-                              size: 14,
-                              color: AppColors.positive,
-                            )
-                          : Icon(
-                              Icons.copy_outlined,
-                              key: const ValueKey('copy'),
-                              size: 14,
-                              color: scheme.onSurfaceVariant,
-                            ),
                     ),
                   ),
                 ),
