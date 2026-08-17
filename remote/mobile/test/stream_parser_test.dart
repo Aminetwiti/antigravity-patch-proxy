@@ -32,4 +32,54 @@ void main() {
       expect(makeApproval(detail).command, '');
     });
   });
+
+  group('StreamDeltaParser live tool execution in thinkingOf', () {
+    test('extracts run_command as Ran <cmd>', () {
+      final msg = {
+        'type': 'stream_delta',
+        'data': {
+          'events': [
+            {
+              'kind': 'tool_call',
+              'tool': 'run_command',
+              'detail': '{"command": "go test ./..."}',
+            }
+          ]
+        }
+      };
+      expect(StreamDeltaParser.thinkingOf(msg), contains('Ran go test ./...'));
+    });
+
+    test('extracts read_file as Viewed <file>', () {
+      final msg = {
+        'type': 'stream_delta',
+        'data': {
+          'events': [
+            {
+              'kind': 'tool_call',
+              'tool': 'read_file',
+              'detail': '{"filePath": "lib/main.dart"}',
+            }
+          ]
+        }
+      };
+      expect(StreamDeltaParser.thinkingOf(msg), contains('Viewed lib/main.dart'));
+    });
+
+    test('extracts search_files as Explored <query>', () {
+      final msg = {
+        'type': 'stream_delta',
+        'data': {
+          'events': [
+            {
+              'kind': 'tool_call',
+              'tool': 'search_files',
+              'detail': '{"query": "stream_delta"}',
+            }
+          ]
+        }
+      };
+      expect(StreamDeltaParser.thinkingOf(msg), contains('Explored stream_delta'));
+    });
+  });
 }

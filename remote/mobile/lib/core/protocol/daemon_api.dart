@@ -55,7 +55,7 @@ class DaemonApi {
   /// plafond acceptable — chemin d'upgrade si le daemon émet par salves > 10/s.
   Timer? _batchTimer;
   final List<Map<String, dynamic>> _batch = [];
-  static const _batchWindow = Duration(milliseconds: 100);
+  static const _batchWindow = Duration(milliseconds: 25);
 
   int _nextRequestId = 0;
 
@@ -358,6 +358,12 @@ class DaemonApi {
 
   Future<Map<String, dynamic>> deleteCascade(String cascadeId) =>
       rpc('delete_cascade', {'cascadeId': cascadeId, 'confirm': true});
+
+  Future<Map<String, dynamic>> archiveCascade(String cascadeId) =>
+      rpc('archive_cascade', {'cascadeId': cascadeId});
+
+  Future<Map<String, dynamic>> unarchiveCascade(String cascadeId) =>
+      rpc('unarchive_cascade', {'cascadeId': cascadeId});
 
   Future<Map<String, dynamic>> renameCascade(String cascadeId, String title) =>
       rpc('rename_cascade', {'cascadeId': cascadeId, 'title': title});

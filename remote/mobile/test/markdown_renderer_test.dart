@@ -30,6 +30,25 @@ void main() {
       expect(blocks[0].code!.language, 'python');
       expect(blocks[0].code!.code, 'print(1)');
     });
+
+    test('parses markdown headers with levels', () {
+      final blocks = MarkdownRenderer.blocksOf('# Titre 1\n## Titre 2\n### Titre 3');
+      expect(blocks.length, 3);
+      expect(blocks[0].headerLevel, 1);
+      expect(blocks[0].paragraph, 'Titre 1');
+      expect(blocks[1].headerLevel, 2);
+      expect(blocks[1].paragraph, 'Titre 2');
+      expect(blocks[2].headerLevel, 3);
+      expect(blocks[2].paragraph, 'Titre 3');
+    });
+
+    test('parses dividers and blockquotes', () {
+      final blocks = MarkdownRenderer.blocksOf('---\n> Note importante');
+      expect(blocks.length, 2);
+      expect(blocks[0].isDivider, isTrue);
+      expect(blocks[1].isQuote, isTrue);
+      expect(blocks[1].paragraph, 'Note importante');
+    });
   });
 
   group('MarkdownRenderer.inlineSpans', () {

@@ -491,6 +491,7 @@ func (s *Server) snapshotSummaries() map[string]connectrpc.JetboxSummary {
 // sessionsFromSummariesLocked applique le filtre Antigravity 2.0 (archivées, killed,
 // subagents), enrichit les statuts d'exécution dynamiques sous lock ou sans lock supplémentaire.
 func (s *Server) sessionsFromSummariesLocked(jetbox map[string]connectrpc.JetboxSummary) map[string]interface{} {
+	home, _ := os.UserHomeDir()
 	projects := ListOfficialProjects()
 	enrichStatus := func(cascadeID, origStatus string) string {
 		if s != nil {
@@ -512,6 +513,15 @@ func (s *Server) sessionsFromSummariesLocked(jetbox map[string]connectrpc.Jetbox
 	items := make([]map[string]interface{}, 0, len(jetbox))
 	for _, sum := range jetbox {
 		if sum.Archived || sum.Killed || sum.Source == 16 {
+			continue
+		}
+		if home != "" && isSessionArchived(home, sum.CascadeID) {
+			continue
+		}
+		if (sum.Title == "" || sum.Title == "Cascade Session") && (sum.UpdatedAt.IsZero() || sum.StepCount == 0) {
+			continue
+		}
+		if isSubagentTitle(sum.Title) {
 			continue
 		}
 		items = append(items, map[string]interface{}{
@@ -2544,9 +2554,19 @@ func (s *Server) sessionsOut(raw []byte) interface{} {
 		}
 	}
 
+	home, _ := os.UserHomeDir()
 	items := make([]map[string]interface{}, 0, len(summaries))
 	for _, sum := range summaries {
 		if sum.Archived || sum.Killed || sum.Source == 16 {
+			continue
+		}
+		if home != "" && isSessionArchived(home, sum.CascadeID) {
+			continue
+		}
+		if (sum.Title == "" || sum.Title == "Cascade Session") && sum.UpdatedAt.IsZero() {
+			continue
+		}
+		if isSubagentTitle(sum.Title) {
 			continue
 		}
 
@@ -3243,6 +3263,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 
 		frameIndex := 0
+		hasTextDelivered := false
 		onFrameHandler := func(frame []byte) error {
 			select {
 			case <-ctx.Done():
@@ -3251,13 +3272,13 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 			frameIndex++
 			events := connectrpc.ParseFrameEvents(frame, msg.CascadeID)
-			// ├ëtape 4/6 : si la frame porte une demande d'approbation, la cascade
-			// est consid├®r├®e ┬½ en attente ┬╗ ÔÇö le stream_end le refl├¿tera, et le
-			// timer d'auto-refus est arm├® (approvalTimeout).
 			for _, ev := range events {
+				if ev.Delta != "" {
+					hasTextDelivered = true
+				}
 				if ev.Kind == connectrpc.EventKindApprovalRequired {
 					// B3 : auto-approbation si l'utilisateur a choisi
-					// ┬½ toujours autoriser ce type pour la session ┬╗.
+					// « toujours autoriser ce type pour la session ».
 					if s.hasSessionApproval(msg.CascadeID, ev.Tool) {
 						oneofField, oneofPayload := buildApprovalPayload(ev.Tool, true, extractCommand(ev.Detail), "", "")
 						if _, errSubmit := s.RPCClient.SubmitToolApproval(
@@ -3337,13 +3358,14 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			logJSON.Debug("open_conversation_failed", "cascadeId", msg.CascadeID, "err", errSet)
 		}
 
-		// Si le flux gRPC-Web n'a pas émis de deltas (génération asynchrone LS 2.5+),
+		// Si le flux gRPC-Web n'a pas émis de texte (génération asynchrone LS 2.5+),
 		// on sonde la trajectoire pour extraire la réponse générée et la diffuser au mobile.
-		if frameIndex == 0 && err == nil && s.RPCClient != nil {
-			for i := 0; i < 8; i++ {
+		if !hasTextDelivered && err == nil && s.RPCClient != nil {
+		pollLoop:
+			for i := 0; i < 15; i++ {
 				select {
 				case <-ctx.Done():
-					break
+					break pollLoop
 				case <-time.After(500 * time.Millisecond):
 				}
 				if rawTraj, errTraj := s.RPCClient.GetCascadeTrajectory(msg.CascadeID, 0); errTraj == nil && len(rawTraj) > 0 {
@@ -3372,7 +3394,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 							RequestID: msg.RequestID,
 							Data:      deltaData,
 						})
-						break
+						break pollLoop
 					}
 				}
 			}
@@ -3565,22 +3587,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "filePath requis"})
 			return
 		}
-		if msg.WorkspacePath != "" {
-			// Confinement : le fichier doit être sous la racine workspace.
-			abs, errRes := resolvePath(homeRoot(msg.WorkspacePath), msg.FilePath)
-			if errRes != nil {
-				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errRes.Error()})
-				return
-			}
-			content, errRead := os.ReadFile(abs)
-			if errRead != nil {
-				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errRead.Error()})
-				return
-			}
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"content": string(content)}})
-			return
-		}
-		// Direct local file check (e.g. brain artifacts / local paths)
+		// 1. Direct local file check (e.g. brain artifacts, absolute file paths, file:// URIs)
 		cleanPath := strings.TrimPrefix(msg.FilePath, "file:///")
 		cleanPath = strings.TrimPrefix(cleanPath, "file://")
 		if filepath.IsAbs(cleanPath) {
@@ -3589,16 +3596,31 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				return
 			}
 		}
-		if strings.HasPrefix(msg.FilePath, ".gemini") {
-			abs := homeRoot(msg.FilePath)
+		if strings.HasPrefix(msg.FilePath, ".gemini") || strings.HasPrefix(cleanPath, ".gemini") {
+			abs := homeRoot(cleanPath)
 			if content, errRead := os.ReadFile(abs); errRead == nil {
 				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"content": string(content)}})
 				return
 			}
 		}
+		// 2. Workspace confinement check if workspacePath is provided
+		if msg.WorkspacePath != "" {
+			abs, errRes := resolvePath(homeRoot(msg.WorkspacePath), msg.FilePath)
+			if errRes == nil {
+				if content, errRead := os.ReadFile(abs); errRead == nil {
+					s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"content": string(content)}})
+					return
+				}
+			}
+		}
+		// 3. Language Server RPC fallback
 		raw, err = s.RPCClient.ReadFile(toWorkspaceURI(msg.FilePath))
 		if err == nil {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"content": string(raw)}})
+			return
+		}
+		if err != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
 			return
 		}
 
@@ -3841,28 +3863,92 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 		logJSON.Info("cascade_deleted", "cascadeId", msg.CascadeID)
-		_, err = s.RPCClient.DeleteCascade(msg.CascadeID)
-		if err == nil {
-			s.purgeCascadeState(msg.CascadeID)
-			// Purge la cascade de la carte Jetbox (si chaude) et invalide le
-			// cache cold-path pour que list_sessions ne renvoie plus la session
-			// supprim├®e avant le prochain tick Jetbox.
-			s.mu.Lock()
-			if s.jetboxSummaries != nil {
-				delete(s.jetboxSummaries, msg.CascadeID)
-			}
-			s.sessionsCache = nil
-			s.mu.Unlock()
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "deleted"}})
-			// Broadcast : toutes les surfaces (autres t├®l├®phones, m├¬me t├®l├®phone
-			// apr├¿s reconnexion) rafra├«chissent imm├®diatement ÔÇö sans attendre le
-			// prochain tick Jetbox ni la fin du TTL cache (5 s).
-			s.broadcast(OutgoingMessage{
-				Type: "sessions_updated",
-				Data: sessionsFromSummaries(s.snapshotSummaries()),
-			})
+		if s.RPCClient != nil {
+			_, _ = s.RPCClient.DeleteCascade(msg.CascadeID)
+		}
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			_ = deleteSessionFromDisk(home, msg.CascadeID)
+		}
+		s.purgeCascadeState(msg.CascadeID)
+		// Purge la cascade de la carte Jetbox (si chaude) et invalide le
+		// cache cold-path pour que list_sessions ne renvoie plus la session
+		// supprimée avant le prochain tick Jetbox.
+		s.mu.Lock()
+		if s.jetboxSummaries != nil {
+			delete(s.jetboxSummaries, msg.CascadeID)
+		}
+		s.sessionsCache = nil
+		s.mu.Unlock()
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "deleted"}})
+		// Broadcast : toutes les surfaces (autres téléphones, même téléphone
+		// après reconnexion) rafraîchissent immédiatement — sans attendre le
+		// prochain tick Jetbox ni la fin du TTL cache (5 s).
+		s.broadcast(OutgoingMessage{
+			Type: "sessions_updated",
+			Data: sessionsFromSummaries(s.snapshotSummaries()),
+		})
+		return
+
+	case "archive_cascade", "archive_session":
+		if msg.CascadeID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
 			return
 		}
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			if err := archiveSessionOnDisk(home, msg.CascadeID, true); err != nil {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
+				return
+			}
+		}
+		s.mu.Lock()
+		if s.jetboxSummaries != nil {
+			if sum, ok := s.jetboxSummaries[msg.CascadeID]; ok {
+				sum.Archived = true
+				sum.Status = "CASCADE_STATUS_ARCHIVED"
+				s.jetboxSummaries[msg.CascadeID] = sum
+			}
+		}
+		s.sessionsCache = nil
+		s.mu.Unlock()
+		logJSON.Info("cascade_archived", "cascadeId", msg.CascadeID)
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "archived", "cascadeId": msg.CascadeID}})
+		s.broadcast(OutgoingMessage{
+			Type: "sessions_updated",
+			Data: sessionsFromSummaries(s.snapshotSummaries()),
+		})
+		return
+
+	case "unarchive_cascade", "unarchive_session":
+		if msg.CascadeID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
+			return
+		}
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			if err := archiveSessionOnDisk(home, msg.CascadeID, false); err != nil {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
+				return
+			}
+		}
+		s.mu.Lock()
+		if s.jetboxSummaries != nil {
+			if sum, ok := s.jetboxSummaries[msg.CascadeID]; ok {
+				sum.Archived = false
+				sum.Status = "CASCADE_STATUS_READY"
+				s.jetboxSummaries[msg.CascadeID] = sum
+			}
+		}
+		s.sessionsCache = nil
+		s.mu.Unlock()
+		logJSON.Info("cascade_unarchived", "cascadeId", msg.CascadeID)
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "unarchived", "cascadeId": msg.CascadeID}})
+		s.broadcast(OutgoingMessage{
+			Type: "sessions_updated",
+			Data: sessionsFromSummaries(s.snapshotSummaries()),
+		})
+		return
 
 	case "git_state", "vcs.get_state":
 		if msg.WorkspacePath == "" {

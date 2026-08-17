@@ -108,16 +108,22 @@ Map<String, List<CascadeSession>> groupSessions({
 
     for (final s in sessions) {
       bool matched = false;
-      final cleanSPath = s.workspacePath.replaceAll('\\', '/').toLowerCase();
+      var cleanSPath = s.workspacePath.replaceAll('\\', '/');
+      try {
+        cleanSPath = Uri.decodeFull(cleanSPath);
+      } catch (_) {}
+      cleanSPath = cleanSPath.toLowerCase();
 
       for (final p in officialProjects) {
-        final cleanPPath = p.path.replaceAll('\\', '/').toLowerCase();
+        var cleanPPath = p.path.replaceAll('\\', '/');
+        try {
+          cleanPPath = Uri.decodeFull(cleanPPath);
+        } catch (_) {}
+        cleanPPath = cleanPPath.toLowerCase();
         final cleanName = p.name.toLowerCase();
 
-        if ((cleanPPath.isNotEmpty && cleanSPath.contains(cleanPPath)) ||
-            (cleanPPath.isNotEmpty && cleanPPath.contains(cleanSPath)) ||
-            (cleanName.isNotEmpty && cleanSPath.contains(cleanName)) ||
-            (cleanName.isNotEmpty && cleanName.contains(cleanSPath))) {
+        if ((cleanPPath.isNotEmpty && (cleanSPath.contains(cleanPPath) || cleanPPath.contains(cleanSPath))) ||
+            (cleanName.isNotEmpty && (cleanSPath.contains(cleanName) || cleanName.contains(cleanSPath)))) {
           grouped[p.name]?.add(s);
           matched = true;
           break;
@@ -132,9 +138,6 @@ Map<String, List<CascadeSession>> groupSessions({
         grouped.putIfAbsent(fallbackName, () => []).add(s);
       }
     }
-
-    // Supprimer les dossiers de projet vides sans sessions
-    grouped.removeWhere((key, value) => value.isEmpty);
   } else {
     for (final s in sessions) {
       final folderName = WorkspacePath.displayName(

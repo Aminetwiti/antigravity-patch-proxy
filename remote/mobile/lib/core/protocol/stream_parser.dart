@@ -25,7 +25,7 @@ class StreamDeltaParser {
     return buffer.toString();
   }
 
-  /// Extracts thinking deltas from a stream_delta message.
+  /// Extracts thinking and live tool execution deltas from a stream_delta message.
   static String thinkingOf(Map<String, dynamic> message) {
     final data = message['data'];
     if (data is! Map) return '';
@@ -33,12 +33,92 @@ class StreamDeltaParser {
     if (events is! List) return '';
     final buffer = StringBuffer();
     for (final e in events) {
-      if (e is Map &&
-          (e['kind'] == 'thinking' || e['kind'] == 'status_change')) {
-        buffer.write(e['delta'] ?? '');
+      if (e is Map) {
+        final kind = e['kind'];
+        if (kind == 'thinking' || kind == 'status_change') {
+          buffer.write(e['delta'] ?? '');
+        } else if (e['tool'] != null &&
+            e['tool'].toString().isNotEmpty &&
+            kind != 'text') {
+          final tool = e['tool'].toString();
+          final detail = (e['detail'] ?? '').toString();
+          final action = _formatToolAction(tool, detail);
+          if (action.isNotEmpty) {
+            if (buffer.isNotEmpty && !buffer.toString().endsWith('\n')) {
+              buffer.writeln();
+            }
+            buffer.writeln(action);
+          }
+        }
       }
     }
     return buffer.toString();
+  }
+
+  static String _formatToolAction(String tool, String detail) {
+    final lowerTool = tool.toLowerCase();
+    if (lowerTool == 'ask_question' || lowerTool == 'ask_user') return '';
+    String arg = '';
+    if (detail.isNotEmpty) {
+      try {
+        final start = detail.indexOf('{');
+        final end = detail.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+          final jsonMap = json.decode(detail.substring(start, end + 1));
+          if (jsonMap is Map) {
+            arg = (jsonMap['command'] ??
+                    jsonMap['CommandLine'] ??
+                    jsonMap['command_line'] ??
+                    jsonMap['path'] ??
+                    jsonMap['filePath'] ??
+                    jsonMap['file_path'] ??
+                    jsonMap['targetFile'] ??
+                    jsonMap['TargetFile'] ??
+                    jsonMap['AbsolutePath'] ??
+                    jsonMap['DirectoryPath'] ??
+                    jsonMap['query'] ??
+                    jsonMap['Query'] ??
+                    jsonMap['pattern'] ??
+                    jsonMap['description'] ??
+                    jsonMap['toolSummary'] ??
+                    jsonMap['toolAction'] ??
+                    '')
+                .toString();
+          }
+        }
+      } catch (_) {}
+      if (arg.isEmpty && !detail.startsWith('{')) {
+        arg = detail.trim();
+      }
+    }
+    if (arg.length > 70) {
+      arg = '${arg.substring(0, 67)}…';
+    }
+
+    switch (lowerTool) {
+      case 'run_command':
+      case 'command':
+      case 'bash':
+      case 'terminal':
+        return arg.isNotEmpty ? 'Ran $arg' : 'Ran command';
+      case 'read_file':
+      case 'view_file':
+        return arg.isNotEmpty ? 'Viewed $arg' : 'Viewed file';
+      case 'write_to_file':
+      case 'edit_file':
+      case 'replace_file_content':
+      case 'multi_replace_file_content':
+        return arg.isNotEmpty ? 'Edited $arg' : 'Edited file';
+      case 'search_files':
+      case 'grep':
+      case 'grep_search':
+      case 'list_files':
+      case 'list_dir':
+        return arg.isNotEmpty ? 'Explored $arg' : 'Explored workspace';
+      default:
+        final cleanTool = tool.replaceAll('_', ' ');
+        return arg.isNotEmpty ? 'Task $cleanTool ($arg)' : 'Task $cleanTool';
+    }
   }
 
   /// Extracts a tool-approval request if the delta carries one.

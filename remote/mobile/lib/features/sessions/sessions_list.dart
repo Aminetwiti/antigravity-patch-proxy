@@ -36,11 +36,13 @@ class LeftSidebarDrawer extends StatefulWidget {
     this.isConnected = false,
     required this.onToggleConnection,
     this.onDeleteSession,
+    this.onArchiveSession,
     this.onRenameSession,
     this.onExportSession,
   });
 
   final Function(String id)? onDeleteSession;
+  final Function(String id)? onArchiveSession;
   final Function(String id, String newTitle)? onRenameSession;
   final Function(CascadeSession session)? onExportSession;
 
@@ -409,6 +411,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                             widget.onOpenSettings?.call();
                           },
                           onDeleteSession: widget.onDeleteSession,
+                          onArchiveSession: widget.onArchiveSession,
                           onRenameSession: widget.onRenameSession,
                           onExportSession: widget.onExportSession,
                           pinnedIds: _pinnedIds,
@@ -567,6 +570,7 @@ class _WorkspaceFolderSection extends StatefulWidget {
   final VoidCallback? onNewConversation;
   final VoidCallback? onOpenSettings;
   final Function(String id)? onDeleteSession;
+  final Function(String id)? onArchiveSession;
   final Function(String id, String newTitle)? onRenameSession;
   final Function(CascadeSession session)? onExportSession;
 
@@ -586,6 +590,7 @@ class _WorkspaceFolderSection extends StatefulWidget {
     this.onNewConversation,
     this.onOpenSettings,
     this.onDeleteSession,
+    this.onArchiveSession,
     this.onRenameSession,
     this.onExportSession,
     this.pinnedIds = const {},
@@ -743,6 +748,9 @@ class _WorkspaceFolderSectionState extends State<_WorkspaceFolderSection> {
                   onDelete: widget.onDeleteSession != null
                       ? () => widget.onDeleteSession!(s.id)
                       : null,
+                  onArchive: widget.onArchiveSession != null
+                      ? () => widget.onArchiveSession!(s.id)
+                      : null,
                   onRename: widget.onRenameSession != null
                       ? (newTitle) => widget.onRenameSession!(s.id, newTitle)
                       : null,
@@ -799,6 +807,7 @@ class _SessionRowItem extends StatefulWidget {
   final bool showSubtitle;
   final VoidCallback onTap;
   final VoidCallback? onDelete;
+  final VoidCallback? onArchive;
   final Function(String newTitle)? onRename;
   final VoidCallback? onExport;
 
@@ -812,6 +821,7 @@ class _SessionRowItem extends StatefulWidget {
     this.showSubtitle = true,
     required this.onTap,
     this.onDelete,
+    this.onArchive,
     this.onRename,
     this.onExport,
     this.isPinned = false,
@@ -924,6 +934,15 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                   );
                 },
               ),
+              if (widget.onArchive != null)
+                ListTile(
+                  leading: Icon(Icons.archive_outlined, size: 18, color: scheme.onSurface),
+                  title: Text('Archiver la conversation', style: TextStyle(fontSize: 13, color: scheme.onSurface)),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    widget.onArchive?.call();
+                  },
+                ),
               if (widget.onDelete != null)
                 ListTile(
                   leading: const Icon(Icons.delete_outline_rounded, size: 18, color: AppColors.danger),

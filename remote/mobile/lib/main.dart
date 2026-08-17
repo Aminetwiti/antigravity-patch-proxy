@@ -774,6 +774,45 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     }
   }
 
+  Future<void> _archiveSession(String id) async {
+    final api = _api;
+    if (api == null) return;
+    try {
+      await api.archiveCascade(id);
+      final wasActive = (id == _activeSessionId);
+      await _refreshSessions();
+      if (wasActive) {
+        final remaining = _sessions.where((s) => s.id != id).toList();
+        if (remaining.isNotEmpty) {
+          if (mounted) {
+            setState(() {
+              _activeSessionId = remaining.first.id;
+              _activeSessionTitle = remaining.first.title;
+            });
+          }
+        } else {
+          if (mounted) {
+            setState(() {
+              _activeSessionId = '';
+              _activeSessionTitle = 'Nouvelle conversation';
+            });
+          }
+        }
+        await _refreshContext();
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Conversation archivée'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Failed to archive cascade: $e');
+    }
+  }
+
   Future<void> _renameSession(String id, String newTitle) async {
     final api = _api;
     if (api == null) return;
@@ -915,6 +954,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       },
       onNewConversation: _createNewConversation,
       onDeleteSession: _deleteSession,
+      onArchiveSession: _archiveSession,
       onRenameSession: _renameSession,
       onExportSession: _exportSession,
       onConversationHistory: () {

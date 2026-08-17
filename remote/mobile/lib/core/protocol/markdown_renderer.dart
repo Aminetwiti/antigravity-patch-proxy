@@ -33,18 +33,34 @@ class MarkdownBlock {
   final CodeBlock? code;
   final ToolCallBlock? toolCall;
   final bool isListItem;
+  final int headerLevel;
+  final bool isDivider;
+  final bool isQuote;
 
-  const MarkdownBlock.paragraph(this.paragraph, {this.isListItem = false})
-      : code = null,
+  const MarkdownBlock.paragraph(
+    this.paragraph, {
+    this.isListItem = false,
+    this.headerLevel = 0,
+    this.isDivider = false,
+    this.isQuote = false,
+  })  : code = null,
         toolCall = null;
+
   const MarkdownBlock.codeBlock(this.code)
       : paragraph = null,
         toolCall = null,
-        isListItem = false;
+        isListItem = false,
+        headerLevel = 0,
+        isDivider = false,
+        isQuote = false;
+
   const MarkdownBlock.toolCall(this.toolCall)
       : paragraph = null,
         code = null,
-        isListItem = false;
+        isListItem = false,
+        headerLevel = 0,
+        isDivider = false,
+        isQuote = false;
 }
 
 /// Callback invoked when a markdown link pointing to a local file
@@ -57,6 +73,9 @@ class MarkdownRenderer {
   static final _toolCallRe = RegExp(
     r'<function_call>|<function_results>|"tool(_name)?"\s*:|(\{|\[)\s*"name"\s*:\s*"[a-zA-Z_]+"\s*,\s*"arguments"',
   );
+  static final _headingRe = RegExp(r'^(#{1,4})\s+(.+)$');
+  static final _dividerRe = RegExp(r'^(---|___|\*\*\*)\s*$');
+  static final _quoteRe = RegExp(r'^>\s*(.+)$');
   static final _bulletListRe = RegExp(r'^\s*[-*+]\s+');
   static final _numberedListRe = RegExp(r'^\s*\d+[.)]\s+');
   static final _toolNameRe = RegExp(r'"(name|tool|tool_name)"\s*:\s*"([^"]+)"');
@@ -95,6 +114,28 @@ class MarkdownRenderer {
         return;
       }
       for (final line in raw.split('\n')) {
+        final trimmed = line.trim();
+        if (trimmed.isEmpty) continue;
+
+        final headMatch = _headingRe.firstMatch(trimmed);
+        if (headMatch != null) {
+          final level = headMatch.group(1)!.length;
+          final content = headMatch.group(2)!.trim();
+          blocks.add(MarkdownBlock.paragraph(content, headerLevel: level));
+          continue;
+        }
+
+        if (_dividerRe.hasMatch(trimmed)) {
+          blocks.add(const MarkdownBlock.paragraph('', isDivider: true));
+          continue;
+        }
+
+        final quoteMatch = _quoteRe.firstMatch(trimmed);
+        if (quoteMatch != null) {
+          blocks.add(MarkdownBlock.paragraph(quoteMatch.group(1)!.trim(), isQuote: true));
+          continue;
+        }
+
         if (_bulletListRe.hasMatch(line)) {
           blocks.add(MarkdownBlock.paragraph(
             line.replaceFirst(_bulletListRe, ''),
@@ -105,9 +146,9 @@ class MarkdownRenderer {
             line.replaceFirst(_numberedListRe, ''),
             isListItem: true,
           ));
-        } else if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
+        } else if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
           // Table row: convert pipe separators to formatted columns
-          final cells = line.split('|').where((c) => c.trim().isNotEmpty).map((c) => c.trim()).join('  │  ');
+          final cells = trimmed.split('|').where((c) => c.trim().isNotEmpty).map((c) => c.trim()).join('  │  ');
           blocks.add(MarkdownBlock.paragraph('│ $cells │'));
         } else {
           blocks.add(MarkdownBlock.paragraph(line));

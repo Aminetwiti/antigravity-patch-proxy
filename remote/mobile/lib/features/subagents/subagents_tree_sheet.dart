@@ -177,12 +177,16 @@ class _SubagentsTreeSheetState extends State<SubagentsTreeSheet> {
                         children: [
                           Row(
                             children: [
-                              Text(
-                                'Hiérarchie des Sous-Agents',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
-                                  color: scheme.onSurface,
+                              Flexible(
+                                child: Text(
+                                  'Hiérarchie des Sous-Agents',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                    color: scheme.onSurface,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                               const SizedBox(width: 8),

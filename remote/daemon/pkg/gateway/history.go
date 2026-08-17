@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -40,24 +41,119 @@ var (
 	convTitlesMu     sync.RWMutex
 )
 
-// stepTypeUser/stepTypeAssistant/stepTypeTitle sont les step_type observ├®s
-// dans les conversations Antigravity 2.0 stock├®es en SQLite (~/.gemini/
+// stepTypeUser/stepTypeAssistant/stepTypeTitle sont les step_type observés
+// dans les conversations Antigravity 2.0 stockées en SQLite (~/.gemini/
 // antigravity/conversations/<cascadeID>.db, table `steps`).
 const (
 	stepTypeUser      = 14 // message utilisateur
-	stepTypeAssistant = 15 // r├®ponse du mod├¿le
-	stepTypeTitle     = 23 // mise ├á jour du titre de conversation
+	stepTypeAssistant = 15 // réponse du modèle
+	stepTypeTitle     = 23 // mise à jour du titre de conversation
 )
 
-// findTranscriptPath searches for transcript.jsonl in antigravity and antigravity-ide brain paths.
+// normalizeWorkspace normalise les chemins et URIs de workspace (décote URL %20, %3A, slashes)
+func normalizeWorkspace(uri string) string {
+	if uri == "" {
+		return ""
+	}
+	if decoded, err := url.PathUnescape(uri); err == nil {
+		uri = decoded
+	}
+	if decoded, err := url.QueryUnescape(uri); err == nil {
+		uri = decoded
+	}
+	uri = strings.TrimPrefix(uri, "file:///")
+	uri = strings.TrimPrefix(uri, "file://")
+	uri = strings.ReplaceAll(uri, `\`, `/`)
+	uri = strings.TrimRight(uri, "/")
+	return uri
+}
+
+// isSubagentTitle détecte si un titre ou prompt correspond à un sous-agent interne
+func isSubagentTitle(title string) bool {
+	lowerTitle := strings.ToLower(strings.TrimSpace(title))
+	return strings.HasPrefix(lowerTitle, "you are") ||
+		strings.HasPrefix(lowerTitle, "en tant qu'") ||
+		strings.HasPrefix(lowerTitle, "tu es ") ||
+		strings.HasPrefix(lowerTitle, "system:") ||
+		strings.HasPrefix(lowerTitle, "@[") ||
+		strings.HasPrefix(lowerTitle, "analyse en profondeur") ||
+		strings.HasPrefix(lowerTitle, "# mission") ||
+		strings.HasPrefix(lowerTitle, "# role") ||
+		strings.HasPrefix(lowerTitle, "# performance") ||
+		strings.HasPrefix(lowerTitle, "analyzing stream delta")
+}
+
+// isSessionArchived vérifie si la session est archivée dans ~/.gemini/antigravity/annotations/<cascadeID>.pbtxt
 func isSessionArchived(home, cascadeID string) bool {
+	if cascadeID == "" {
+		return false
+	}
 	annoPath := filepath.Join(home, ".gemini", "antigravity", "annotations", cascadeID+".pbtxt")
 	data, err := os.ReadFile(annoPath)
 	if err != nil {
 		return false
 	}
-	s := string(data)
+	s := strings.ToLower(string(data))
+	if strings.Contains(s, "archived: false") || strings.Contains(s, "archived:false") {
+		return false
+	}
 	return strings.Contains(s, "archived: true") || strings.Contains(s, "archived:true")
+}
+
+// archiveSessionOnDisk écrit ou met à jour le statut archivé dans annotations/<cascadeID>.pbtxt
+func archiveSessionOnDisk(home, cascadeID string, archive bool) error {
+	if cascadeID == "" {
+		return fmt.Errorf("cascadeId requis")
+	}
+	annoDir := filepath.Join(home, ".gemini", "antigravity", "annotations")
+	_ = os.MkdirAll(annoDir, 0o755)
+	annoPath := filepath.Join(annoDir, cascadeID+".pbtxt")
+
+	nowSec := time.Now().Unix()
+	nowNano := time.Now().Nanosecond()
+
+	data, err := os.ReadFile(annoPath)
+	if err != nil {
+		if !archive {
+			return nil
+		}
+		content := fmt.Sprintf("archived:true archival_status_timestamp:{seconds:%d nanos:%d} last_user_view_time:{seconds:%d nanos:%d}\n",
+			nowSec, nowNano, nowSec, nowNano)
+		return os.WriteFile(annoPath, []byte(content), 0o644)
+	}
+
+	s := string(data)
+	reArch := regexp.MustCompile(`(?i)archived:\s*(true|false)`)
+	s = reArch.ReplaceAllString(s, "")
+	s = strings.TrimSpace(s)
+
+	if archive {
+		s = fmt.Sprintf("archived:true archival_status_timestamp:{seconds:%d nanos:%d} %s", nowSec, nowNano, s)
+	} else {
+		s = fmt.Sprintf("archived:false %s", s)
+	}
+	s = strings.TrimSpace(s) + "\n"
+	return os.WriteFile(annoPath, []byte(s), 0o644)
+}
+
+// deleteSessionFromDisk supprime les artefacts résiduels d'une session sur disque (.pbtxt, .db, brain/)
+func deleteSessionFromDisk(home, cascadeID string) error {
+	if cascadeID == "" {
+		return nil
+	}
+	annoPath := filepath.Join(home, ".gemini", "antigravity", "annotations", cascadeID+".pbtxt")
+	_ = os.Remove(annoPath)
+
+	dbPath := filepath.Join(home, ".gemini", "antigravity", "conversations", cascadeID+".db")
+	_ = os.Remove(dbPath)
+
+	brainDir := filepath.Join(home, ".gemini", "antigravity", "brain", cascadeID)
+	_ = os.RemoveAll(brainDir)
+
+	ideBrainDir := filepath.Join(home, ".gemini", "antigravity-ide", "brain", cascadeID)
+	_ = os.RemoveAll(ideBrainDir)
+
+	return nil
 }
 
 func findTranscriptPath(cascadeID string) string {
@@ -244,17 +340,8 @@ func ListLocalSessions() []map[string]interface{} {
 			seen[cascadeID] = true
 			title, workspacePath, modTime := extractSessionMetadata(transcriptPath, cascadeID)
 
-			// Exclure les subagents et prompts syst├¿mes
-			lowerTitle := strings.ToLower(strings.TrimSpace(title))
-			if strings.HasPrefix(lowerTitle, "you are") ||
-				strings.HasPrefix(lowerTitle, "en tant qu'") ||
-				strings.HasPrefix(lowerTitle, "tu es ") ||
-				strings.HasPrefix(lowerTitle, "system:") ||
-				strings.HasPrefix(lowerTitle, "@[") ||
-				strings.HasPrefix(lowerTitle, "analyse en profondeur") ||
-				strings.HasPrefix(lowerTitle, "# mission") ||
-				strings.HasPrefix(lowerTitle, "# role") ||
-				strings.HasPrefix(lowerTitle, "# performance") {
+			// Exclure les subagents et prompts systèmes
+			if isSubagentTitle(title) {
 				continue
 			}
 
@@ -262,17 +349,16 @@ func ListLocalSessions() []map[string]interface{} {
 				workspacePath = extractWorkspace(root, cascadeID)
 			}
 
-			cleanWs := strings.ReplaceAll(workspacePath, `\`, `/`)
-			cleanWs = strings.TrimRight(cleanWs, "/")
+			cleanWs := normalizeWorkspace(workspacePath)
 			lowerWs := strings.ToLower(cleanWs)
 
 			// Si nous avons des projets officiels Antigravity 2.0, ne garder QUE les sessions
-			// rattach├®es ├á un projet officiel
+			// rattachées à un projet officiel
 			matchedProjectName := ""
 			matchedProjectPath := workspacePath
 			if len(officialProjs) > 0 {
 				for _, p := range officialProjs {
-					pPath := strings.ToLower(p.Path)
+					pPath := strings.ToLower(normalizeWorkspace(p.Path))
 					pName := strings.ToLower(p.Name)
 					if (pPath != "" && (strings.Contains(lowerWs, pPath) || strings.Contains(pPath, lowerWs))) ||
 						(pName != "" && (strings.Contains(lowerWs, pName) || strings.Contains(pName, lowerWs))) {
@@ -662,11 +748,9 @@ func parseTranscriptLine(line []byte) *HistoryMessage {
 			Thought:   thought,
 			Timestamp: ts,
 		}
-		if entry.Error != "" {
+		if entry.Error != "" && msg.Text == "" {
 			msg.IsError = true
-			if msg.Text == "" {
-				msg.Text = entry.Error
-			}
+			msg.Text = entry.Error
 		}
 		return msg
 	}
@@ -1028,7 +1112,7 @@ func readSQLiteSteps(dbPath, cascadeID string) ([]HistoryMessage, string, error)
 				Thought:   thought,
 				Timestamp: ts,
 			}
-			if status > 2 {
+			if status > 2 && text == "" {
 				msg.IsError = true
 				if msg.Text == "" {
 					msg.Text = "Erreur pendant la génération"
@@ -1084,7 +1168,7 @@ func CoalesceHistoryMessages(raw []HistoryMessage) []HistoryMessage {
 					prev.Text = strings.TrimSpace(prev.Text) + "\n\n" + mText
 				}
 			}
-			if m.IsError {
+			if m.IsError && strings.TrimSpace(prev.Text) == "" {
 				prev.IsError = true
 			}
 			if m.Timestamp != "" {
@@ -1163,11 +1247,12 @@ func ExtractHistoryFromTrajectory(raw []byte) []HistoryMessage {
 									for _, subPrompt := range connectrpc.DecodeFields(stf.Bytes) {
 										if (subPrompt.Num == 1 || subPrompt.Num == 2) && subPrompt.WireType == 2 && len(subPrompt.Bytes) > 0 {
 											promptText := string(subPrompt.Bytes)
-											if len(promptText) > 0 && promptText[0] >= 32 && !strings.HasPrefix(promptText, "<USER_REQUEST>") {
+											cleaned := extractUserRequest(promptText)
+											if len(cleaned) > 0 && cleaned[0] >= 32 && !strings.HasPrefix(cleaned, "# Conversation History") {
 												messages = append(messages, HistoryMessage{
 													ID:        fmt.Sprintf("user-%d", len(messages)+1),
 													Sender:    "user",
-													Text:      promptText,
+													Text:      cleaned,
 													Timestamp: time.Now().Format("15:04"),
 												})
 												break

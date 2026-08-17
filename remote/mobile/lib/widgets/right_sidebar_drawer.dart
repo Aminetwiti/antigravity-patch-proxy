@@ -200,7 +200,6 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
       api: widget.api!,
       artifactPath: artifact['path'] ?? artifact['name'] ?? '',
       artifactName: artifact['name'] ?? 'Document',
-      workspacePath: widget.workspacePath.isNotEmpty ? widget.workspacePath : null,
     );
   }
 

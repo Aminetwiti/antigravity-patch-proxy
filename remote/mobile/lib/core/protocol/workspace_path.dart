@@ -14,6 +14,9 @@ class WorkspacePath {
     var clean = rawPath.replaceAll('\\', '/');
     if (clean.startsWith('file:///')) clean = clean.substring(8);
     if (clean.startsWith('file://')) clean = clean.substring(7);
+    try {
+      clean = Uri.decodeFull(clean);
+    } catch (_) {}
     final segments = clean.split('/').where((s) => s.isNotEmpty).toList();
     if (segments.isNotEmpty) return segments.last;
     return fallback;

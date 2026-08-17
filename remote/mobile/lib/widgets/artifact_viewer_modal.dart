@@ -69,10 +69,15 @@ class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
 
   Future<void> _fetchArtifactContent() async {
     try {
-      final res = await widget.api.readFile(
-        widget.artifactPath,
-        workspacePath: widget.workspacePath,
-      );
+      Map<String, dynamic> res;
+      try {
+        res = await widget.api.readFile(
+          widget.artifactPath,
+          workspacePath: widget.workspacePath,
+        );
+      } catch (_) {
+        res = await widget.api.readFile(widget.artifactPath);
+      }
       if (mounted) {
         setState(() {
           _content = res['content'] as String? ?? 'Contenu vide';

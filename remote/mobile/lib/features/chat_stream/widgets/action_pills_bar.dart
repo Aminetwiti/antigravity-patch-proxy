@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../../theme/app_colors.dart';
 
 class SlashAction {
   final String command;
@@ -31,11 +32,14 @@ class ActionPillsBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return SizedBox(
-      height: 44,
+      height: 34,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 4),
         itemCount: actions.length,
         separatorBuilder: (_, __) => const SizedBox(width: 6),
         itemBuilder: (context, index) {
@@ -43,14 +47,44 @@ class ActionPillsBar extends StatelessWidget {
           return Semantics(
             label: 'Commande ${action.command} : ${action.label}',
             button: true,
-            child: ActionChip(
-              avatar: Icon(action.icon, size: 16),
-              label: Text(action.command, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
-              tooltip: action.label,
-              onPressed: () {
-                HapticFeedback.selectionClick();
-                onActionSelected(action.command);
-              },
+            child: Tooltip(
+              message: action.label,
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    onActionSelected(action.command);
+                  },
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF141518) : scheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: isDark ? const Color(0xFF27272A) : scheme.outlineVariant,
+                        width: 0.8,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(action.icon, size: 13.5, color: scheme.primary),
+                        const SizedBox(width: 5),
+                        Text(
+                          action.command,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             ),
           );
         },

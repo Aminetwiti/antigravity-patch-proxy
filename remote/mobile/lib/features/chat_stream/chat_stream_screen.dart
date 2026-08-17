@@ -123,7 +123,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
   Timer? _throttleTimer;
   bool _needsStateUpdate = false;
-  static const _throttleDuration = Duration(milliseconds: 100);
+  static const _throttleDuration = Duration(milliseconds: 25);
 
   // Bug persistance pensées : état d'expansion stocké ici par message ID
   // pour survivre aux switches de session et aux rebuilds de la liste.
@@ -370,7 +370,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                 text: m['text']?.toString() ?? '',
                 thought: m['thought']?.toString(),
                 timestamp: m['timestamp']?.toString() ?? '',
-                isError: m['isError'] == true,
+                isError: m['isError'] == true && (m['text']?.toString().trim().isEmpty ?? true),
               ));
             }
           }
@@ -1243,12 +1243,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             if (error != null && (error.contains('MODEL_CAPACITY_EXHAUSTED') || error.contains('No capacity available') || error.contains('503'))) {
               error = '⚠️ Capacité du modèle saturée sur les serveurs (HTTP 503 / MODEL_CAPACITY_EXHAUSTED).\nVeuillez basculer vers Gemini 3.7 Flash, Claude ou un modèle custom via le sélecteur ci-dessous.';
             }
+            final hasRealText = _messages[idx].text.trim().isNotEmpty;
+            final isTrueError = error != null && !hasRealText;
             _messages[idx] = _messages[idx].copyWith(
               isStreaming: false,
-              isError: error != null,
-              text: error != null
-                  ? (_messages[idx].text.isEmpty ? error : _messages[idx].text)
-                  : _messages[idx].text,
+              isError: isTrueError,
+              text: isTrueError ? error : _messages[idx].text,
             );
           }
         });
@@ -2377,11 +2377,11 @@ class _MessageBubble extends StatelessWidget {
             if (isError)
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
                   color: scheme.error.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: scheme.error.withValues(alpha: 0.4)),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: scheme.error.withValues(alpha: 0.3)),
                 ),
                 child: Row(
                   children: [

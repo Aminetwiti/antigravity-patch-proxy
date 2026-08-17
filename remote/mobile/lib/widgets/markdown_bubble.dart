@@ -67,11 +67,78 @@ class _ParagraphView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    if (block.isDivider) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Divider(
+          height: 1,
+          thickness: 0.8,
+          color: isDark ? AppColors.borderSubtle : scheme.outlineVariant,
+        ),
+      );
+    }
+
+    if (block.headerLevel > 0) {
+      double fontSize = 14;
+      FontWeight fontWeight = FontWeight.w600;
+      double topPadding = 6;
+      double bottomPadding = 2;
+
+      switch (block.headerLevel) {
+        case 1:
+          fontSize = 17.5;
+          fontWeight = FontWeight.w700;
+          topPadding = 12;
+          bottomPadding = 4;
+          break;
+        case 2:
+          fontSize = 15.5;
+          fontWeight = FontWeight.w600;
+          topPadding = 10;
+          bottomPadding = 3;
+          break;
+        case 3:
+          fontSize = 14.5;
+          fontWeight = FontWeight.w600;
+          topPadding = 8;
+          bottomPadding = 2;
+          break;
+        default:
+          fontSize = 13.5;
+          fontWeight = FontWeight.w600;
+          topPadding = 6;
+          bottomPadding = 2;
+      }
+
+      final headerBase = TextStyle(
+        fontSize: fontSize,
+        fontWeight: fontWeight,
+        height: 1.35,
+        color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+        letterSpacing: -0.2,
+      );
+
+      final spans = MarkdownRenderer.inlineSpans(
+        block.paragraph ?? '',
+        headerBase,
+        scheme: scheme,
+        onLocalFile: onLocalFile,
+      );
+
+      return Padding(
+        padding: EdgeInsets.only(top: topPadding, bottom: bottomPadding),
+        child: Text.rich(TextSpan(children: spans)),
+      );
+    }
+
     final base = TextStyle(
-      fontSize: 14,
-      height: 1.45,
-      color: scheme.onSurface,
+      fontSize: 13.5,
+      height: 1.48,
+      color: isDark ? AppColors.inkSecondary : scheme.onSurface,
     );
+
     final spans = MarkdownRenderer.inlineSpans(
       block.paragraph ?? '',
       base,
@@ -79,26 +146,46 @@ class _ParagraphView extends StatelessWidget {
       onLocalFile: onLocalFile,
     );
 
-    if (block.isListItem) {
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 3, right: 8),
-            child: Container(
-              width: 5,
-              height: 5,
-              margin: const EdgeInsets.only(top: 6),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                shape: BoxShape.circle,
-              ),
+    if (block.isQuote) {
+      return Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.only(left: 10, top: 3, bottom: 3),
+        decoration: BoxDecoration(
+          border: Border(
+            left: BorderSide(
+              color: scheme.primary.withValues(alpha: 0.6),
+              width: 3,
             ),
           ),
-          Expanded(child: Text.rich(TextSpan(children: spans))),
-        ],
+        ),
+        child: Text.rich(TextSpan(children: spans)),
       );
     }
+
+    if (block.isListItem) {
+      return Padding(
+        padding: const EdgeInsets.only(left: 4, bottom: 2),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 4, right: 8),
+              child: Container(
+                width: 4.5,
+                height: 4.5,
+                margin: const EdgeInsets.only(top: 4),
+                decoration: BoxDecoration(
+                  color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+            Expanded(child: Text.rich(TextSpan(children: spans))),
+          ],
+        ),
+      );
+    }
+
     return Text.rich(TextSpan(children: spans));
   }
 }
