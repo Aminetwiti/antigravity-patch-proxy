@@ -87,7 +87,9 @@ IDE Chat UI ↔ Language Server (Hub :55256) ◄── gRPC-Web ── Daemon Go
 
 1. **Go Daemon Bridge (`remote/daemon`)**:
    - **Discovery & Watchdog**: Probes local processes to identify the active `language_server` Hub instance, port, and CSRF token. Runs a 10s watchdog to detect token rotations.
+   - **Pairing & Zero-Config LAN Beacon**: Generates rotating 60s 6-digit PIN codes with 5-attempt brute-force lockouts (`POST /pair`), and broadcasts UDP LAN discovery announcements on port `41234`.
    - **Protocol Translator**: Connects over gRPC-Web with manual Protobuf wire encoding to translate mobile WebSocket messages into `StartCascade`, `SendUserCascadeMessage`, `SubmitToolApproval`, `GetAvailableModels`, and file operations.
+   - **Interactive Terminal & ADB Bridge**: Hosts PTY shell sessions (`terminal_create`/`write`/`kill`) and an Android Debug Bridge service (`adb.*`) for remote file and device inspection.
    - **Tunnel Bridge**: Seamlessly spins up Cloudflare Quick Tunnels (`cloudflared.exe`) and prints paired terminal QR codes for zero-config remote access.
    - **StepRecovery**: Retains in-memory ring buffers of trajectory events to replay lost messages after transient mobile network disconnections.
    - **Quota Push (real-time)**: The `Scheduler` (30 s tick) calls `RetrieveUserQuotaSummary` (force_refresh) at most every 60 s — and only while ≥1 WebSocket client is connected — then parses the raw protobuf (`ParseQuotaSummary` scans for `gemini-weekly`/`gemini-5h`/`3p-weekly`/`3p-5h` + fixed32 marker `0x25`) and broadcasts `quota_update` with the 4 usage percentages. The mobile consumes the push instead of polling; its 60 s timer stays as a fallback for older daemons.

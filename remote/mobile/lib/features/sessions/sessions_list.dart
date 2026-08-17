@@ -200,23 +200,23 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1B1D22),
+                      color: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(AppRadius.lg),
                       border: Border.all(
-                        color: const Color(0xFF2C2F36),
+                        color: isDark ? const Color(0xFF2C2F36) : scheme.outlineVariant,
                         width: 1,
                       ),
                     ),
-                    child: const Row(
+                    child: Row(
                       children: [
-                        Icon(Icons.add, size: 16, color: AppColors.inkSecondary),
-                        SizedBox(width: 10),
+                        Icon(Icons.add, size: 16, color: scheme.onSurfaceVariant),
+                        const SizedBox(width: 10),
                         Text(
                           'New Conversation',
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
-                            color: AppColors.inkPrimary,
+                            color: scheme.onSurface,
                           ),
                         ),
                       ],
@@ -311,15 +311,15 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                   child: TextField(
                     controller: _filterController,
                     autofocus: true,
-                    style: const TextStyle(fontSize: 12, color: AppColors.inkPrimary),
+                    style: TextStyle(fontSize: 12, color: scheme.onSurface),
                     decoration: InputDecoration(
                       hintText: 'Filtrer les sessions...',
-                      hintStyle: const TextStyle(fontSize: 12, color: AppColors.inkMuted),
-                      prefixIcon: const Icon(Icons.search, size: 14, color: AppColors.inkMuted),
+                      hintStyle: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                      prefixIcon: Icon(Icons.search, size: 14, color: scheme.onSurfaceVariant),
                       prefixIconConstraints: const BoxConstraints(minWidth: 26),
                       suffixIcon: _filterQuery.isNotEmpty
                           ? IconButton(
-                              icon: const Icon(Icons.close, size: 12, color: AppColors.inkMuted),
+                              icon: Icon(Icons.close, size: 12, color: scheme.onSurfaceVariant),
                               tooltip: 'Effacer le filtre',
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(minWidth: 20),
@@ -330,19 +330,19 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                             )
                           : null,
                       filled: true,
-                      fillColor: const Color(0xFF1B1D22),
+                      fillColor: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(6),
-                        borderSide: const BorderSide(color: Color(0xFF2C2F36), width: 1),
+                        borderSide: BorderSide(color: isDark ? const Color(0xFF2C2F36) : scheme.outlineVariant, width: 1),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(6),
-                        borderSide: const BorderSide(color: Color(0xFF2C2F36), width: 1),
+                        borderSide: BorderSide(color: isDark ? const Color(0xFF2C2F36) : scheme.outlineVariant, width: 1),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(6),
-                        borderSide: const BorderSide(color: AppColors.accentBlueBright, width: 1),
+                        borderSide: BorderSide(color: scheme.primary, width: 1),
                       ),
                     ),
                     onChanged: (val) {
@@ -664,25 +664,25 @@ class _WorkspaceFolderSectionState extends State<_WorkspaceFolderSection> {
                       }
                     },
                     itemBuilder: (context) => [
-                      const PopupMenuItem<String>(
+                      PopupMenuItem<String>(
                         value: 'copy_name',
                         height: 32,
                         child: Row(
                           children: [
-                            Icon(Icons.copy_rounded, size: 14, color: AppColors.inkPrimary),
-                            SizedBox(width: 8),
-                            Text('Copy Project Name', style: TextStyle(fontSize: 12.5, color: AppColors.inkPrimary)),
+                            Icon(Icons.copy_rounded, size: 14, color: scheme.onSurface),
+                            const SizedBox(width: 8),
+                            Text('Copy Project Name', style: TextStyle(fontSize: 12.5, color: scheme.onSurface)),
                           ],
                         ),
                       ),
-                      const PopupMenuItem<String>(
+                      PopupMenuItem<String>(
                         value: 'settings',
                         height: 32,
                         child: Row(
                           children: [
-                            Icon(Icons.settings_outlined, size: 14, color: AppColors.inkPrimary),
-                            SizedBox(width: 8),
-                            Text('Project Settings', style: TextStyle(fontSize: 12.5, color: AppColors.inkPrimary)),
+                            Icon(Icons.settings_outlined, size: 14, color: scheme.onSurface),
+                            const SizedBox(width: 8),
+                            Text('Project Settings', style: TextStyle(fontSize: 12.5, color: scheme.onSurface)),
                           ],
                         ),
                       ),
@@ -1217,13 +1217,16 @@ class _EmptyState extends StatelessWidget {
   const _EmptyState({required this.isConnected, required this.onConnect});
 
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
         margin: const EdgeInsets.all(10),
         padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 16),
         decoration: BoxDecoration(
-          color: const Color(0xFF181A1F),
+          color: isDark ? const Color(0xFF181A1F) : scheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(AppRadius.lg),
-          border: Border.all(color: const Color(0xFF272A30), width: 1),
+          border: Border.all(color: isDark ? const Color(0xFF272A30) : scheme.outlineVariant, width: 1),
         ),
         child: Column(
           children: [
@@ -1232,15 +1235,15 @@ class _EmptyState extends StatelessWidget {
                   ? Icons.chat_bubble_outline
                   : Icons.cloud_off_outlined,
               size: 26,
-              color: AppColors.inkMuted,
+              color: scheme.onSurfaceVariant,
             ),
             const SizedBox(height: 10),
             Text(
               isConnected ? 'No active sessions' : 'Disconnected',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: AppColors.inkPrimary,
+                color: scheme.onSurface,
               ),
             ),
             const SizedBox(height: 4),
@@ -1249,9 +1252,9 @@ class _EmptyState extends StatelessWidget {
                   ? 'Start a new conversation in a project.'
                   : 'Connect to Daemon to view workspace sessions.',
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 11.5,
-                color: AppColors.inkMuted,
+                color: scheme.onSurfaceVariant,
                 height: 1.4,
               ),
             ),
@@ -1262,7 +1265,7 @@ class _EmptyState extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   decoration: BoxDecoration(
-                    color: AppColors.accentBlue,
+                    color: scheme.primary,
                     borderRadius: BorderRadius.circular(AppRadius.md),
                   ),
                   child: const Row(
@@ -1286,16 +1289,21 @@ class _EmptyState extends StatelessWidget {
           ],
         ),
       );
+  }
 }
 
 // ── Divider
 class _Divider extends StatelessWidget {
   const _Divider();
   @override
-  Widget build(BuildContext context) => Container(
-        height: 1,
-        color: const Color(0xFF1F2127),
-      );
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      height: 1,
+      color: isDark ? const Color(0xFF1F2127) : scheme.outlineVariant,
+    );
+  }
 }
 
 // ── Connection status row (bottom)
@@ -1314,7 +1322,9 @@ class _ConnectionRowState extends State<_ConnectionRow> {
 
   @override
   Widget build(BuildContext context) {
-    final color = widget.isConnected ? AppColors.positive : AppColors.inkMuted;
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final color = widget.isConnected ? AppColors.positive : scheme.onSurfaceVariant;
     final label = widget.isConnected ? 'Connected' : 'Offline';
 
     return MouseRegion(
@@ -1328,7 +1338,7 @@ class _ConnectionRowState extends State<_ConnectionRow> {
           margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           decoration: BoxDecoration(
-            color: _hovered ? const Color(0xFF1E2025) : Colors.transparent,
+            color: _hovered ? (isDark ? const Color(0xFF1E2025) : scheme.surfaceContainerHighest) : Colors.transparent,
             borderRadius: BorderRadius.circular(AppRadius.md),
           ),
           child: Row(
@@ -1339,7 +1349,7 @@ class _ConnectionRowState extends State<_ConnectionRow> {
                 decoration: BoxDecoration(
                   color: widget.isConnected
                       ? AppColors.positive
-                      : AppColors.inkFaint,
+                      : (isDark ? AppColors.inkFaint : scheme.onSurfaceVariant),
                   shape: BoxShape.circle,
                   boxShadow: widget.isConnected
                       ? [

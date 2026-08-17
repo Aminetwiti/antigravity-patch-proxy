@@ -1,160 +1,93 @@
-﻿# Plans d'ImplÃ©mentation â€” Par Sous-Projet
+# Plans d'Implémentation — Par Sous-Projet
 
-> Plans dÃ©taillÃ©s par composant. Chaque plan suit le principe directeur : **chaque marche doit fonctionner Ã  100% avant de passer Ã  la suivante** (voir [objectif.md](objectif.md)).
-
----
-
-## Plan A â€” CLI de Validation (TerminÃ© âœ…)
-
-**Objectif :** Prouver que le contrÃ´le RPC du `language_server` est possible.
-**Statut :** âœ… TerminÃ© et validÃ© (Phase 1 du PRD)
-
-### Ã‰tapes
-| # | Ã‰tape | Statut |
-|:--|:---|:---|
-| A1 | DÃ©couverte du processus (PID + port + CSRF) | âœ… |
-| A2 | Client gRPC-Web manuel (framing, headers) | âœ… |
-| A3 | Encodage protobuf manuel (StartCascade, SendMessage) | âœ… |
-| A4 | CrÃ©ation de session + envoi de prompt | âœ… |
-| A5 | Liste des sessions (GetAllCascadeTrajectories) | âœ… |
-| A6 | Gestion des modÃ¨les (GetAvailableModels) | âœ… |
-| A7 | Workspace tree + lecture de fichiers | âœ… |
-
-### Fichiers
-- `cli/src/discovery.ts` â€” dÃ©couverte processus + probe Heartbeat
-- `cli/src/grpcweb.ts` â€” client gRPC-Web
-- `cli/src/protobuf.ts` â€” encodeur/dÃ©codeur varint manuel
-- `cli/src/client.ts` â€” mÃ©thodes RPC haut niveau
-- `cli/src/index.ts` â€” script de validation
-
-### DÃ©couverte clÃ© validÃ©e
-> L'instance qui expose le service RPC est le **hub standalone** (`--subclient_type hub`), pas les instances IDE qui rÃ©pondent 404.
+> Plans d'exécution et état d'avancement par composant. Chaque sous-projet est validé de bout en bout avant transition.
 
 ---
 
-## Plan B â€” Daemon Bridge Go (En cours ðŸ”„)
+## 🗺️ Matrice d'Avancement Global
 
-**Objectif :** Pont WebSocket entre le mobile et le `language_server`.
-**Statut :** ðŸ”„ Fonctionnel â€” validation E2E en cours
-
-### Ã‰tapes
-| # | Ã‰tape | Statut |
-|:--|:---|:---|
-| B1 | DÃ©couverte automatique (hub + probe Heartbeat) | âœ… |
-| B2 | Client gRPC-Web Go (`pkg/connectrpc`) | âœ… |
-| B3 | Gateway WebSocket (`pkg/gateway`) | âœ… |
-| B4 | CreateCascade via WebSocket | âœ… (testÃ©, reÃ§oit cascadeId) |
-| B5 | ListSessions via WebSocket | âœ… (55 trajectoires lues) |
-| B6 | **Streaming SendMessage (multi-frames)** | â³ EN COURS |
-| B7 | SubmitToolApproval via WebSocket | â³ |
-| B8 | Watchdog : rÃ©-authentification si l'IDE redÃ©marre | â³ |
-| B9 | SÃ©curisation (token d'accÃ¨s, origine, TLS optionnel) | â³ |
-
-### Plan d'implÃ©mentation B6 â€” Streaming multi-frames
-1. **Client** : modifier `client.go` â†’ `CallStream(method, payload, onFrame)` qui itÃ¨re TOUTES les frames gRPC-Web (pas seulement la premiÃ¨re), et ne s'arrÃªte pas sur une frame vide.
-2. **Gateway** : `send_prompt` â†’ Ã©mettre un Ã©vÃ©nement WS par frame reÃ§ue :
-   ```json
-   {"type":"stream","requestId":"p1","frame":1,"data":{...decoded...}}
-   {"type":"stream_end","requestId":"p1"}
-   ```
-3. **Timeout** : 120 s par prompt (les agents longs dÃ©passent 60 s).
-4. **Test** : `scratch/test_ws_prompt.ps1` â€” attendre â‰¥ 3 frames ou un `finished`.
-
-### Plan d'implÃ©mentation B7 â€” SubmitToolApproval
-1. **SchÃ©ma protobuf** : confirmer les numÃ©ros de champs exacts (actuellement : 1=cascadeID, 2=callID, 3=decision â€” Ã  vÃ©rifier contre le stream).
-2. **Gateway** : `submit_approval` â†’ appeler `SubmitToolApproval` avec `DECISION_ALLOW` (1) / `DECISION_DENY` (2).
-3. **Test** : prompt dÃ©clenchant `run_command`, attendre l'Ã©vÃ©nement d'approbation, approuver, vÃ©rifier la reprise du stream.
-
-### Plan d'implÃ©mentation B8 â€” Watchdog CSRF
-1. Goroutine toutes les 10 s : `discovery.Discover()`.
-2. Si PID/token changent â†’ recrÃ©er le `connectrpc.Client`, logguer Â« re-authentifiÃ© Â».
-3. Les connexions WS actives restent ouvertes (le client RPC est partagÃ©).
-
-### Fichiers
-- `daemon/main.go` â€” bootstrap + endpoints HTTP
-- `daemon/pkg/discovery/scanner.go` â€” dÃ©couverte hub + probe
-- `daemon/pkg/connectrpc/client.go` â€” transport gRPC-Web
-- `daemon/pkg/connectrpc/protobuf.go` â€” encodeurs varint manuels
-- `daemon/pkg/connectrpc/methods.go` â€” mÃ©thodes RPC
-- `daemon/pkg/gateway/websocket.go` â€” protocole JSON mobile
-
-### Protocole WS v1 (en vigueur)
-```json
-â†’ {"type":"heartbeat","requestId":"r1"}
-â† {"type":"response","requestId":"r1","data":{...}}
-
-â†’ {"type":"list_sessions","requestId":"r2"}
-â† {"type":"response","requestId":"r2","data":{"fields":[...]}}
-
-â†’ {"type":"create_cascade","requestId":"r3","workspacePath":"C:\\path"}
-â† {"type":"response","requestId":"r3","data":{"fields":[{"field":1,"text":"<cascadeId>"}]}}
+```
+Plan A (CLI de Validation)     ✅ TERMINÉ & VALIDÉ
+           │
+           ▼
+Plan B (Daemon Bridge Go)       ✅ TERMINÉ & VALIDÉ (243 tests)
+           │
+           ▼
+Plan C (Mobile Flutter)         ✅ TERMINÉ & VALIDÉ (215 tests)
+           │
+           ▼
+Plan D (Infrastructure & WAN)   ✅ OPÉRATIONNEL (Cloudflare / Pinggy / UDP Beacon)
 ```
 
 ---
 
-## Plan C â€” Application Mobile Android (Ã€ venir ðŸ“‹)
+## Plan A — CLI de Validation (Terminé ✅)
 
-**Objectif :** TÃ©lÃ©commande native â€” tableau de bord, chat, approbations, workspace.
-**Statut :** ðŸ“‹ PlanifiÃ© â€” dÃ©pend de B6/B7 validÃ©s
+**Objectif :** Prouver que le contrôle RPC du `language_server` est possible en local.  
+**Statut :** ✅ Validé (Phase 1).
 
-### Ã‰tapes
-| # | Ã‰tape | CritÃ¨re de succÃ¨s |
-|:--|:---|:---|
-| C1 | Connexion WebSocket au Daemon (OkHttp) | Ã‰tat de connexion visible, reconnexion auto |
-| C2 | Ã‰cran tableau de bord (liste sessions) | 55 sessions affichÃ©es depuis le hub |
-| C3 | Ã‰cran chat + streaming | Deltas affichÃ©s en temps rÃ©el |
-| C4 | Boutons d'approbation | Approuver/Refuser un `run_command` bloquÃ© |
-| C5 | Workspace browser | Arborescence + diffs (lecture seule) |
-| C6 | Room DB offline-first | Historique consultable hors-ligne |
-| C7 | Notifications FCM | Alerte systÃ¨me quand un agent attend |
-
-### Plan d'implÃ©mentation C1 â€” Connexion WebSocket
-1. **DÃ©pendance** : OkHttp 4.12 (dÃ©jÃ  dans `build.gradle.kts`).
-2. **Service** : `WebSocketService` (foreground) qui maintient la connexion et expose un `StateFlow<ConnectionState>`.
-3. **Repository** : `DaemonRepository` â€” mapping messages JSON â†” modÃ¨les Kotlin (`DaemonEvent`).
-4. **Ã‰cran** : champ Â« Adresse du PC Â» (ex. `ws://192.168.1.20:8090/ws`), bouton connecter.
-5. **Test** : Ã©mulateur Android + daemon local â†’ liste des sessions affichÃ©e.
-
-### Plan d'implÃ©mentation C4 â€” Approbation tactile
-1. **ModÃ¨le** : `ApprovalRequest(cascadeId, callId, toolName, command)`.
-2. **UI** : carte avec la commande Ã  exÃ©cuter + boutons Approuver (vert) / Refuser (rouge).
-3. **Action** : `submit_approval` avec `decision:"allow"|"deny"`.
-4. **Feedback** : le stream reprend â†’ l'UI passe en mode Â« exÃ©cution en cours Â».
-
-### Plan d'implÃ©mentation C6 â€” Offline-first
-1. **Room** : `SessionEntity`, `MessageEntity`, `ApprovalEntity`.
-2. **Sync** : au retour du rÃ©seau, rejouer les actions en attente (queue).
-3. **Anti-doublon** : `requestId` gÃ©nÃ©rÃ© cÃ´tÃ© mobile â†’ idempotence cÃ´tÃ© daemon.
-
-### Fichiers cibles
-- `mobile/app/src/main/java/com/antigravity/remote/`
-  - `data/ws/WebSocketService.kt`
-  - `data/ws/DaemonRepository.kt`
-  - `data/db/AppDatabase.kt` (+ DAOs)
-  - `ui/DashboardScreen.kt`, `ui/ChatScreen.kt`, `ui/ApprovalCard.kt`
-  - `MainActivity.kt`
+### Étapes Validées
+| # | Étape | Statut | Résultat |
+|:--|:---|:---:|:---|
+| A1 | Découverte du processus (PID + port + CSRF) | ✅ | Extraction WMI/CIM opérationnelle |
+| A2 | Client gRPC-Web manuel (framing, headers) | ✅ | Framing binaire standard validé |
+| A3 | Encodage protobuf manuel (StartCascade, SendMessage) | ✅ | Décodage/Encodage varint sans bibliothèque |
+| A4 | Création de session + envoi de prompt | ✅ | Création de cascade et réception stream |
+| A5 | Liste des sessions (`GetAllCascadeTrajectories`) | ✅ | Lecture des trajectoires du Hub |
+| A6 | Gestion des modèles (`GetAvailableModels`) | ✅ | Catalogue de modèles reçu |
+| A7 | Workspace tree + lecture de fichiers | ✅ | Navigation arborescente locale |
 
 ---
 
-## Plan D â€” Infrastructure & DÃ©ploiement (Ã€ venir ðŸ“‹)
+## Plan B — Daemon Bridge Go (Terminé ✅)
 
-| # | Ã‰tape | DÃ©tail |
-|:--|:---|:---|
-| D1 | Packaging Daemon | Binaire Windows/macOS/Linux (cross-compile Go) |
-| D2 | Autostart | TÃ¢che planifiÃ©e Windows / launchd macOS |
-| D3 | Tunnel | `cloudflared` ou Tailscale â€” script d'installation + config |
-| D4 | Versioning | `daemon --version`, protocole WS versionnÃ© |
-| D5 | SÃ©curitÃ© | Token d'accÃ¨s alÃ©atoire exigÃ© par le gateway, TLS optionnel |
+**Objectif :** Pont WebSocket haute performance entre le client mobile et le `language_server`.  
+**Statut :** ✅ Validé — 243 tests unitaires et de propriétés (`go test ./...`).
+
+### Étapes Validées
+| # | Étape | Statut | Résultat |
+|:--|:---|:---:|:---|
+| B1 | Découverte automatique (`pkg/discovery`) | ✅ | Probe Heartbeat & ciblage Hub (`--subclient_type hub`) |
+| B2 | Client gRPC-Web Go (`pkg/connectrpc`) | ✅ | Wire protocol binaire et framing gRPC-Web |
+| B3 | Gateway WebSocket JSON (`pkg/gateway`) | ✅ | Routeur de 70+ actions WebSocket |
+| B4 | Streaming `SendUserCascadeMessage` | ✅ | Streaming multi-frames temps réel |
+| B5 | Validation d'outils (`SubmitToolApproval`) | ✅ | Approbation/Rejet `submit_approval` avec portée `once`/`session` |
+| B6 | StepRecovery Buffer (Résilience réseau) | ✅ | Buffer circulaire FIFO de 100 deltas par cascade |
+| B7 | Watchdog CSRF | ✅ | Surveillance 10s et ré-authentification automatique |
+| B8 | Sécurité & Anti-Rebinding | ✅ | Validation d'origine stricte, tokens en temps constant |
+| B9 | Appairage par PIN 6 chiffres (`POST /pair`) | ✅ | Rotation 60s, lockout anti-brute force, token 256 bits |
+| B10 | Flux Temps Réel Dédiés | ✅ | Jetbox Summaries (Connect JSON) & StreamReactiveUpdates |
+| B11 | Terminal PTY & Service ADB | ✅ | PTY interactif et pont Android Debug Bridge complet |
 
 ---
 
-## DÃ©pendances entre plans
+## Plan C — Application Mobile Flutter (Terminé ✅)
 
-```
-A (CLI) âœ… â”€â”€â–º B (Daemon) ðŸ”„ â”€â”€â–º C (Mobile) ðŸ“‹
-                        â”‚
-                        â””â”€â”€â–º D (DÃ©ploiement) ðŸ“‹
-```
+**Objectif :** Télécommande mobile complète (iOS & Android) avec design "Quiet Console".  
+**Statut :** ✅ Validé — 215 tests unitaires et widgets (`flutter test --exclude-tags=live`).
 
-**RÃ¨gle :** ne pas commencer C avant la fin de B6 (streaming) et B7 (approbation).
+### Étapes Validées
+| # | Étape | Statut | Résultat |
+|:--|:---|:---:|:---|
+| C1 | Client Protocolaire Typé (`DaemonApi`) | ✅ | Gestion WebSocket, Outbox queue et reconnexion |
+| C2 | Design System "Quiet Console" | ✅ | Tokens de couleurs extraits d'Antigravity 2.0 (`htmlcss.log`) |
+| C3 | Chat Stream & Markdown Bubble | ✅ | Rendu Markdown, blocs de code syntaxiques, LaTeX et LaTeX Math |
+| C4 | Validation d'Actions Tactile | ✅ | Cartes interactives `ToolApprovalCard` avec portée et auto-deny |
+| C5 | QCM Interactif (`AskQuestionChoiceCard`) | ✅ | Choix unique / multiple en 1 tap |
+| C6 | Revue de Code (`UnifiedDiffViewer`) | ✅ | Visualiseur de diffs colorisés et commentaires en ligne |
+| C7 | Terminal PTY Distant (`RemoteTerminalSheet`) | ✅ | Shell interactif connecté en direct |
+| C8 | Mode Colosseum (`BattleArenaScreen`) | ✅ | Supervision de duels de modèles A vs B et vote |
+| C9 | Tâches Planifiées (`ScheduledTasksScreen`) | ✅ | Dashboard des cron jobs et déclenchements manuels |
+| C10 | Découverte Zero-Config & Appairage | ✅ | Client UDP Beacon (`41234`), QR Scanner et saisie PIN |
 
+---
+
+## Plan D — Infrastructure, Tunneling & Résilience (Opérationnel ✅)
+
+| # | Étape | Statut | Description |
+|:--|:---|:---:|:---|
+| D1 | Packaging Daemon | ✅ | Binaire autonome Go (~10 MB compilé) |
+| D2 | Tunnels WAN Automatisés | ✅ | Cloudflare Quick Tunnel (`trycloudflare.com`) & Pinggy SSH |
+| D3 | Découverte LAN Zero-Config | ✅ | Annonce UDP périodique (`DiscoveryPort: 41234`) |
+| D4 | Auto-Heal & Supervision | ✅ | Scripts PowerShell `auto-heal.ps1` et `supervise-daemon.ps1` |
+| D5 | Profils Multi-Environnements | ✅ | Fichiers Dart Defines `env_dev.json`, `env_emulator.json`, `env_prod.json` |

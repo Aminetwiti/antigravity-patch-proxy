@@ -126,17 +126,17 @@ class _SessionReviewViewState extends State<SessionReviewView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // ── Review Header: [Review] [⋮] [🔍] [☰]
+        // ── En-tête : Titre "Review (N)" + Actions
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 12, 8),
           child: Row(
             children: [
-              const Text(
+              Text(
                 'Review',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
-                  color: AppColors.inkPrimary,
+                  color: scheme.onSurface,
                   letterSpacing: -0.2,
                 ),
               ),
@@ -144,15 +144,15 @@ class _SessionReviewViewState extends State<SessionReviewView> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF23262D),
+                  color: isDark ? const Color(0xFF23262D) : scheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
                   '${widget.files.length}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w600,
-                    color: AppColors.inkSecondary,
+                    color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
                   ),
                 ),
               ),
@@ -161,17 +161,17 @@ class _SessionReviewViewState extends State<SessionReviewView> {
               // ⋮ Options menu
               PopupMenuButton<String>(
                 tooltip: 'Options de revue',
-                color: const Color(0xFF1B1D22),
+                color: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainer,
                 surfaceTintColor: Colors.transparent,
                 elevation: 8,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(AppRadius.md),
-                  side: const BorderSide(color: Color(0xFF2C2F36), width: 1),
+                  side: BorderSide(color: isDark ? const Color(0xFF2C2F36) : scheme.outlineVariant, width: 1),
                 ),
-                icon: const Icon(
+                icon: Icon(
                   Icons.more_vert_rounded,
                   size: 18,
-                  color: Color(0xFF8F909A),
+                  color: scheme.onSurfaceVariant,
                 ),
                 padding: EdgeInsets.zero,
                 onSelected: (val) {
@@ -191,36 +191,36 @@ class _SessionReviewViewState extends State<SessionReviewView> {
                   }
                 },
                 itemBuilder: (context) => [
-                  const PopupMenuItem<String>(
+                  PopupMenuItem<String>(
                     value: 'split',
                     height: 34,
                     child: Row(
                       children: [
-                        Icon(Icons.splitscreen_rounded, size: 15, color: AppColors.inkPrimary),
-                        SizedBox(width: 8),
-                        Text('View Split Diff', style: TextStyle(fontSize: 13, color: AppColors.inkPrimary)),
+                        Icon(Icons.splitscreen_rounded, size: 15, color: scheme.onSurface),
+                        const SizedBox(width: 8),
+                        Text('View Split Diff', style: TextStyle(fontSize: 13, color: scheme.onSurface)),
                       ],
                     ),
                   ),
-                  const PopupMenuItem<String>(
+                  PopupMenuItem<String>(
                     value: 'expand',
                     height: 34,
                     child: Row(
                       children: [
-                        Icon(Icons.unfold_more_rounded, size: 15, color: AppColors.inkPrimary),
-                        SizedBox(width: 8),
-                        Text('Expand All', style: TextStyle(fontSize: 13, color: AppColors.inkPrimary)),
+                        Icon(Icons.unfold_more_rounded, size: 15, color: scheme.onSurface),
+                        const SizedBox(width: 8),
+                        Text('Expand All', style: TextStyle(fontSize: 13, color: scheme.onSurface)),
                       ],
                     ),
                   ),
-                  const PopupMenuItem<String>(
+                  PopupMenuItem<String>(
                     value: 'copy_paths',
                     height: 34,
                     child: Row(
                       children: [
-                        Icon(Icons.copy_rounded, size: 15, color: AppColors.inkPrimary),
-                        SizedBox(width: 8),
-                        Text('Copy File Paths', style: TextStyle(fontSize: 13, color: AppColors.inkPrimary)),
+                        Icon(Icons.copy_rounded, size: 15, color: scheme.onSurface),
+                        const SizedBox(width: 8),
+                        Text('Copy File Paths', style: TextStyle(fontSize: 13, color: scheme.onSurface)),
                       ],
                     ),
                   ),
@@ -232,13 +232,16 @@ class _SessionReviewViewState extends State<SessionReviewView> {
                 icon: Icon(
                   Icons.search_rounded,
                   size: 18,
-                  color: _isSearchOpen ? AppColors.accentBlue : const Color(0xFF8F909A),
+                  color: _isSearchOpen ? scheme.primary : scheme.onSurfaceVariant,
                 ),
                 tooltip: 'Rechercher un fichier modifié',
                 onPressed: () {
                   setState(() {
                     _isSearchOpen = !_isSearchOpen;
-                    if (!_isSearchOpen) _searchController.clear();
+                    if (!_isSearchOpen) {
+                      _searchController.clear();
+                      _searchQuery = '';
+                    }
                   });
                 },
                 padding: EdgeInsets.zero,
@@ -250,7 +253,7 @@ class _SessionReviewViewState extends State<SessionReviewView> {
                 icon: Icon(
                   _groupByFolder ? Icons.view_list_rounded : Icons.folder_outlined,
                   size: 18,
-                  color: _groupByFolder ? AppColors.accentBlue : const Color(0xFF8F909A),
+                  color: _groupByFolder ? scheme.primary : scheme.onSurfaceVariant,
                 ),
                 tooltip: _groupByFolder ? 'Vue liste plate' : 'Grouper par dossier',
                 onPressed: () => setState(() => _groupByFolder = !_groupByFolder),
@@ -268,33 +271,36 @@ class _SessionReviewViewState extends State<SessionReviewView> {
             child: Container(
               height: 34,
               decoration: BoxDecoration(
-                color: const Color(0xFF1B1D22),
+                color: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(AppRadius.md),
-                border: Border.all(color: const Color(0xFF2C2F36), width: 1),
+                border: Border.all(color: isDark ? const Color(0xFF2C2F36) : scheme.outlineVariant, width: 1),
               ),
               child: TextField(
                 controller: _searchController,
-                style: const TextStyle(fontSize: 12.5, color: AppColors.inkPrimary),
-                cursorColor: AppColors.accentBlue,
+                style: TextStyle(fontSize: 12.5, color: scheme.onSurface),
+                cursorColor: scheme.primary,
                 decoration: InputDecoration(
                   hintText: 'Filtrer les modifications...',
-                  hintStyle: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
-                  prefixIcon: const Icon(Icons.search_rounded, size: 16, color: Color(0xFF6B7280)),
+                  hintStyle: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                  prefixIcon: Icon(Icons.search_rounded, size: 16, color: scheme.onSurfaceVariant),
                   suffixIcon: _searchQuery.isNotEmpty
                       ? IconButton(
-                          icon: const Icon(Icons.close_rounded, size: 14, color: Color(0xFF6B7280)),
-                          tooltip: 'Effacer le filtre',
-                          onPressed: () => _searchController.clear(),
-                          padding: EdgeInsets.zero,
+                          icon: Icon(Icons.close_rounded, size: 14, color: scheme.onSurfaceVariant),
+                          tooltip: 'Effacer la recherche',
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() => _searchQuery = '');
+                          },
                         )
                       : null,
+                  filled: false,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                   border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
                 ),
+                onChanged: (val) => setState(() => _searchQuery = val.trim()),
               ),
             ),
           ),
-
         // P5 : actions groupées (Accepter tout / Tout rejeter) — uniquement
         // quand des fichiers sont listés et que l'écran parent fournit les
         // callbacks d'application.
@@ -523,8 +529,10 @@ class _BulkActionChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Material(
-      color: const Color(0xFF1B1D22),
+      color: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest,
       borderRadius: BorderRadius.circular(AppRadius.md),
       child: InkWell(
         onTap: onTap,

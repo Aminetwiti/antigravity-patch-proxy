@@ -57,6 +57,40 @@ abstract class AppColors {
   static const Color providerOllama = Color(0xFFF0F0F0);
   static const Color providerOpenRouter = Color(0xFFFF7A45);
   static const Color providerCustom = Color(0xFFA855F7);
+
+  // ── Dynamic Contextual Accessors (prevents Light/Dark mode conflicts)
+  static Color canvas(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark ? surfaceBase : const Color(0xFFFFFFFF);
+
+  static Color panel(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark ? surfaceRaised : const Color(0xFFF6F8FA);
+
+  static Color input(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark ? surfaceInput : const Color(0xFFEAEEF2);
+
+  static Color text(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark ? inkPrimary : const Color(0xFF1F2328);
+
+  static Color textSecondary(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark ? inkSecondary : const Color(0xFF57606A);
+
+  static Color textMuted(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark ? inkMuted : const Color(0xFF6E7781);
+
+  static Color border(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark ? borderSubtle : const Color(0xFFD0D7DE);
+
+  static Color borderStrongContext(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark ? borderStrong : const Color(0xFFAFB8C1);
+
+  static Color accent(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark ? accentBlue : const Color(0xFF0969DA);
+}
+
+/// Ergonomic syntax sugar for accessing theme colors on any BuildContext
+extension ThemeContextExtension on BuildContext {
+  ColorScheme get colors => Theme.of(this).colorScheme;
+  bool get isDarkMode => Theme.of(this).brightness == Brightness.dark;
 }
 
 /// Radius scale (PC ag-doctor-ui --r-sm/md/lg/xl/pill)

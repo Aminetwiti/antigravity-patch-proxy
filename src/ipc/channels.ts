@@ -18,6 +18,8 @@ export const IPC_CHANNELS = {
   IDE_INSTALL: 'ide:install',
 
   // System Notifications & Settings
+  NOTIFICATION_SEND: 'notification:send',
+  NOTIFICATION_CLICKED: 'notification:clicked',
   NOTIFICATION_OPEN_PREFS: 'notification:open-system-preferences',
 
   // Storage & Provider Configurations
@@ -42,6 +44,7 @@ export const IPC_CHANNELS = {
 
   // Logs & Diagnostics
   LOGS_ELECTRON: 'logs:electron',
+  PROXY_ERROR: 'proxy:error',
 
   // Extensions & Agents
   EXTENSIONS_SEND_AUTHORITIES: 'extensions:send-authorities',

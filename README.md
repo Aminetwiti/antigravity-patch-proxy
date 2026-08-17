@@ -329,17 +329,19 @@ IDE Chat UI ↔ Language Server (Hub :55256) ◄── gRPC-Web ── Daemon Go
 ```
 
 ### Remote Architecture & Protocol
-- **Go Daemon Bridge (`remote/daemon`)**: Scans running Antigravity `language_server` processes, extracts session CSRF tokens with a background watchdog, frames binary gRPC-Web Protobuf streams, and serves a hardened WebSocket server (`/ws?token=...`).
-- **Zero-Config Remote Tunneling**: Automatically establishes live **Cloudflare Quick Tunnels** (`trycloudflare.com`) and generates terminal ASCII QR codes for instant 1-second camera pairing with your phone.
+- **Go Daemon Bridge (`remote/daemon`)**: Scans running Antigravity `language_server` processes, extracts session CSRF tokens with a background watchdog, frames binary gRPC-Web Protobuf & Jetbox Connect JSON streams, and serves a hardened WebSocket server (`/ws?token=...`).
+- **Zero-Config Discovery & Pairing**: UDP LAN Beacon on port `41234` for automatic discovery, 60s rotating 6-digit PIN pairing (`POST /pair`), and live **Cloudflare Quick Tunnels** with terminal QR code pairing.
+- **Interactive PTY Terminal & ADB Bridge**: Interactive shell terminal emulator and Android Debug Bridge (`adb.*`) for remote device and file management.
 - **StepRecovery Buffer**: Retains the last 100 trajectory frames in memory to re-synchronize sessions immediately after transient network drops without losing chat state.
 
 ### Mobile Companion Features (`remote/mobile`)
 - **Exact Antigravity 2.0 Design Tokens**: Built to match real computed IDE stylesheet tokens (`htmlcss.log`) — featuring Quiet Console welcome cards, `#101010` canvas, `#21252B` sidebars, `#528BFF` focus accents, `#D7BA7D` syntax highlights, and native diff insertion/deletion tints.
-- **Interactive Tool Approvals**: Push alerts and cards to authorize shell commands and file writes with single-use (`once`) or full-session (`session`) approval scopes and auto-rejection timeouts.
+- **Interactive Tool Approvals (`submit_approval`)**: Push alerts and cards to authorize shell commands and file writes with single-use (`once`) or full-session (`session`) approval scopes and auto-rejection timeouts.
 - **Interactive Choice Prompts (`AskQuestion`)**: Single and multi-select cards for responding directly to agent decision forks.
-- **MCP Server & Tool Explorer**: Inspect active Model Context Protocol (MCP) servers and their tool declarations.
+- **Colosseum Battle Arena**: Multi-model duel supervision (e.g. Claude vs Gemini) with live branch diffing and arbitration voting.
+- **MCP Server & Tool Explorer**: Inspect active Model Context Protocol (MCP) servers, trigger tools, and complete OAuth flows.
 - **Workspace File Explorer & Code Viewer**: Interactive tree navigation, search, find-in-page, syntax icons, and code inspection.
-- **Scheduled Tasks Monitor & Code Review Comments**: View cron jobs and attach comments to code diffs on the fly.
+- **Scheduled Tasks Monitor & Code Review Comments**: View cron jobs, trigger tasks on-demand, and attach comments to code diffs on the fly.
 
 ### Running the Remote Daemon
 ```bash

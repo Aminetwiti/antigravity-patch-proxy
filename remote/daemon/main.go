@@ -34,10 +34,22 @@ func main() {
 	var authToken string
 	var approvalTimeoutMin int
 
-	flag.IntVar(&listenPort, "port", 8090, "Port for the WebSocket server")
-	flag.StringVar(&host, "host", "0.0.0.0", "Host for the WebSocket server")
+	defaultPort := 8090
+	if envPort := os.Getenv("AG_DAEMON_PORT"); envPort != "" {
+		if p, err := strconv.Atoi(envPort); err == nil {
+			defaultPort = p
+		}
+	}
+	defaultHost := "0.0.0.0"
+	if envHost := os.Getenv("AG_DAEMON_HOST"); envHost != "" {
+		defaultHost = envHost
+	}
+	defaultAuthToken := os.Getenv("AG_DAEMON_AUTH_TOKEN")
+
+	flag.IntVar(&listenPort, "port", defaultPort, "Port for the WebSocket server")
+	flag.StringVar(&host, "host", defaultHost, "Host for the WebSocket server")
 	flag.StringVar(&tunnelFlag, "tunnel", "", "Tunnel provider (ngrok, cloudflare, pinggy)")
-	flag.StringVar(&authToken, "auth-token", "", "Authentication token for Mobile App")
+	flag.StringVar(&authToken, "auth-token", defaultAuthToken, "Authentication token for Mobile App")
 	flag.IntVar(&approvalTimeoutMin, "approval-timeout", 5, "Auto-deny timeout for pending approvals in minutes (0 = disabled)")
 	flag.Parse()
 

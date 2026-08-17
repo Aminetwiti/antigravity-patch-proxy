@@ -2080,24 +2080,27 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   Widget _buildPlanTabContent() {
-    if (_latestPlanText == null) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    if (_latestPlanText == null || _latestPlanText!.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.description_outlined, size: 36, color: AppColors.inkMuted),
+              Icon(Icons.architecture_rounded, size: 36, color: scheme.onSurfaceVariant),
               const SizedBox(height: 12),
-              const Text(
-                'Aucun plan d\'implémentation',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.inkPrimary),
+              Text(
+                'Aucun plan actif',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: scheme.onSurface),
               ),
               const SizedBox(height: 6),
-              const Text(
-                'Demandez à l\'agent de générer un plan (ex: "plan" ou "/plan") pour le visualiser ici.',
+              Text(
+                'Les plans d\'implémentation générés par l\'agent apparaîtront ici.',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: AppColors.inkMuted),
+                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
               ),
             ],
           ),
@@ -2111,18 +2114,18 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: AppColors.surfaceRaised,
+            color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
             borderRadius: BorderRadius.circular(AppRadius.md),
-            border: Border.all(color: AppColors.borderSubtle),
+            border: Border.all(color: isDark ? AppColors.borderSubtle : scheme.outlineVariant),
           ),
           child: Row(
             children: [
-              const Icon(Icons.description_outlined, size: 16, color: AppColors.accentBlue),
+              Icon(Icons.description_outlined, size: 16, color: scheme.primary),
               const SizedBox(width: 8),
-              const Expanded(
+              Expanded(
                 child: Text(
                   'Implementation Plan',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.inkPrimary),
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: scheme.onSurface),
                 ),
               ),
               GestureDetector(
@@ -2130,7 +2133,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: AppColors.accentBlue,
+                    color: scheme.primary,
                     borderRadius: BorderRadius.circular(AppRadius.sm),
                   ),
                   child: const Text(
@@ -2154,17 +2157,18 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   Widget _buildTasksTabContent() {
+    final scheme = Theme.of(context).colorScheme;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.checklist_rtl_outlined, size: 36, color: AppColors.inkMuted),
+            Icon(Icons.checklist_rtl_outlined, size: 36, color: scheme.onSurfaceVariant),
             const SizedBox(height: 12),
-            const Text(
+            Text(
               'Suivi des tâches',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.inkPrimary),
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: scheme.onSurface),
             ),
             const SizedBox(height: 6),
             const Text(

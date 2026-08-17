@@ -29,12 +29,12 @@ antigravity-add-model-main/
 ├── remote/                          # Antigravity Remote 2.0 Ecosystem
 │   ├── PROTOCOL.md                  # ConnectRPC & WebSocket wire protocol specification
 │   ├── daemon/                      # Go Daemon Bridge (gRPC-Web ↔ WebSocket + Cloudflare/Pinggy Tunnels)
-│   │   ├── main.go                  # Daemon CLI entrypoint (flags: --port, --tunnel, --auth-token)
-│   │   ├── pkg/discovery/           # Process scanner & CSRF token watchdog for language_server
-│   │   ├── pkg/connectrpc/          # ConnectRPC / gRPC-Web client & protobuf framing
-│   │   ├── pkg/gateway/             # WebSocket hub, outbox queue, and RPC dispatchers
-│   │   ├── pkg/history/             # Cascade trajectory & chat transcript parsing
-│   │   └── pkg/tunnel/              # Automated Cloudflare Quick Tunnel & Pinggy bridge
+│   │   ├── main.go                  # Daemon CLI entrypoint (flags: --port, --host, --tunnel, --auth-token, --approval-timeout)
+│   │   ├── pkg/adb/                 # Android Debug Bridge remote file & device operations
+│   │   ├── pkg/discovery/           # Process scanner, CSRF watchdog, PIN pairing & UDP LAN Beacon
+│   │   ├── pkg/connectrpc/          # ConnectRPC / gRPC-Web client, Jetbox Connect JSON & protobuf framing
+│   │   ├── pkg/gateway/             # WebSocket hub, StepRecovery, PTY terminal, Scheduler, history & RPC dispatchers
+│   │   └── pkg/tunnel/              # Automated Cloudflare Quick Tunnel & Pinggy bridge, terminal QR generator
 │   │
 │   └── mobile/                      # Flutter Companion App (Android / iOS)
 │       ├── lib/

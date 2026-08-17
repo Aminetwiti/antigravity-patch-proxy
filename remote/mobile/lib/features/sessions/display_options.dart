@@ -202,26 +202,29 @@ class DisplayOptionsMenuButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return PopupMenuButton<String>(
       tooltip: 'Display Options',
-      color: const Color(0xFF1B1D22),
+      color: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainer,
       surfaceTintColor: Colors.transparent,
       elevation: 8,
       offset: const Offset(0, 24),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppRadius.md),
-        side: const BorderSide(color: Color(0xFF2C2F36), width: 1),
+        side: BorderSide(color: isDark ? const Color(0xFF2C2F36) : scheme.outlineVariant, width: 1),
       ),
       icon: Container(
         padding: const EdgeInsets.all(5),
         decoration: BoxDecoration(
-          color: isFilterOpen ? const Color(0xFF26282E) : Colors.transparent,
+          color: isFilterOpen ? (isDark ? const Color(0xFF26282E) : scheme.surfaceContainerHighest) : Colors.transparent,
           borderRadius: BorderRadius.circular(5),
         ),
-        child: const Icon(
+        child: Icon(
           Icons.tune_rounded,
           size: 16,
-          color: Color(0xFF8F909A),
+          color: isFilterOpen ? scheme.primary : scheme.onSurfaceVariant,
         ),
       ),
       onSelected: (value) {
@@ -252,36 +255,42 @@ class DisplayOptionsMenuButton extends StatelessWidget {
       },
       itemBuilder: (context) => [
         // ── Group By Header
-        _buildSectionHeader('Group By'),
+        _buildSectionHeader('Group By', scheme, isDark),
         ...SessionGroupBy.values.map(
           (opt) => _buildCheckItem(
             value: 'group_${opt.name}',
             label: opt.label,
             isSelected: selectedGroupBy == opt,
+            scheme: scheme,
+            isDark: isDark,
           ),
         ),
 
         const PopupMenuDivider(height: 12),
 
         // ── Sort Conversations Header
-        _buildSectionHeader('Sort Conversations'),
+        _buildSectionHeader('Sort Conversations', scheme, isDark),
         ...SessionSortBy.values.map(
           (opt) => _buildCheckItem(
             value: 'sort_${opt.name}',
             label: opt.label,
             isSelected: selectedSortBy == opt,
+            scheme: scheme,
+            isDark: isDark,
           ),
         ),
 
         const PopupMenuDivider(height: 12),
 
         // ── Subtitles Header
-        _buildSectionHeader('Subtitles'),
+        _buildSectionHeader('Subtitles', scheme, isDark),
         ...SessionSubtitle.values.map(
           (opt) => _buildCheckItem(
             value: 'sub_${opt.name}',
             label: opt.label,
             isSelected: selectedSubtitle == opt,
+            scheme: scheme,
+            isDark: isDark,
           ),
         ),
 
@@ -296,7 +305,7 @@ class DisplayOptionsMenuButton extends StatelessWidget {
               Icon(
                 isFilterOpen ? Icons.filter_list_off_rounded : Icons.filter_list_rounded,
                 size: 15,
-                color: isFilterOpen ? AppColors.accentBlue : AppColors.inkPrimary,
+                color: isFilterOpen ? scheme.primary : scheme.onSurface,
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -304,7 +313,7 @@ class DisplayOptionsMenuButton extends StatelessWidget {
                   isFilterOpen ? 'Hide Filter Bar' : 'Filter',
                   style: TextStyle(
                     fontSize: 13,
-                    color: isFilterOpen ? AppColors.accentBlue : AppColors.inkPrimary,
+                    color: isFilterOpen ? scheme.primary : scheme.onSurface,
                     fontWeight: isFilterOpen ? FontWeight.w600 : FontWeight.w400,
                   ),
                 ),
@@ -316,7 +325,7 @@ class DisplayOptionsMenuButton extends StatelessWidget {
     );
   }
 
-  PopupMenuItem<String> _buildSectionHeader(String title) {
+  PopupMenuItem<String> _buildSectionHeader(String title, ColorScheme scheme, bool isDark) {
     return PopupMenuItem<String>(
       enabled: false,
       height: 26,
@@ -324,10 +333,10 @@ class DisplayOptionsMenuButton extends StatelessWidget {
         padding: const EdgeInsets.only(top: 4, bottom: 2),
         child: Text(
           title,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w600,
-            color: Color(0xFF6E707A),
+            color: isDark ? const Color(0xFF6E707A) : scheme.onSurfaceVariant,
             letterSpacing: 0.2,
           ),
         ),
@@ -339,6 +348,8 @@ class DisplayOptionsMenuButton extends StatelessWidget {
     required String value,
     required String label,
     required bool isSelected,
+    required ColorScheme scheme,
+    required bool isDark,
   }) {
     return PopupMenuItem<String>(
       value: value,
@@ -350,16 +361,16 @@ class DisplayOptionsMenuButton extends StatelessWidget {
               label,
               style: TextStyle(
                 fontSize: 13,
-                color: isSelected ? Colors.white : AppColors.inkPrimary,
+                color: isSelected ? (isDark ? Colors.white : scheme.primary) : scheme.onSurface,
                 fontWeight: isSelected ? FontWeight.w500 : FontWeight.w400,
               ),
             ),
           ),
           if (isSelected)
-            const Icon(
+            Icon(
               Icons.check_rounded,
-              size: 16,
-              color: AppColors.accentBlue,
+              size: 15,
+              color: isDark ? Colors.white : scheme.primary,
             ),
         ],
       ),

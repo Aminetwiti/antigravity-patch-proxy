@@ -10,26 +10,25 @@
 |:---|:---|:---|
 | **Daemon Bridge (PC)** | Go 1.22 — binaire unique | Même langage que le `language_server` (Go), stdlib `net/http`, aucun runtime requis, binaire ~10 MB |
 | **Client mobile** | Flutter (Dart) / Android & iOS | Base de code multi-plateforme, rendu réactif 120 Hz, composants UI "Quiet Console", persistance locale |
-| **Transport PC ↔ Mobile** | WebSocket (JSON v1) | Typage strict, streaming temps réel, bidirectionnel, support natif |
-| **Accès réseau distant** | Pinggy SSH / Cloudflare Tunnel | Zero Trust, URL publique sécurisée en 1 seconde sans port ouvert sur le routeur |
+| **Transport PC ↔ Mobile** | WebSocket (JSON) | Typage strict, streaming temps réel, bidirectionnel, support natif |
+| **Accès réseau distant** | Cloudflare Tunnel / Pinggy SSH | Zero Trust, URL publique sécurisée en 1 seconde sans port ouvert sur le routeur |
+| **Découverte LAN locale** | UDP Broadcast (Zero-Config) | Annonces périodiques sur le port UDP `41234` sans transmission de secrets |
 | **Sérialisation RPC interne** | ConnectRPC / gRPC-Web natif | Communication directe avec le `language_server` sans intermédiaire |
-| **Source de Vérité Protobuf** | **`antigravity-client`** | Référence canonique des 188 RPC methods et schémas Protobuf officiels |
+| **Source de Vérité Protobuf** | `remote/tools/` & `remote/proto/` | Référence canonique des schémas Protobuf officiels |
 
 ---
 
-## 2. Source de Vérité & Référence Officielle : `antigravity-client`
+## 2. Source de Vérité Protobuf & Référence Officielle
 
-Le sous-projet **`remote/tools/antigravity-client-main/antigravity-client-main`** constitue la **Source de Vérité canonique (Golden Reference)** pour l'ensemble de notre stack RPC :
-
-1. **Définition intégrale des 188 méthodes RPC** : [`src/gen/exa/language_server_pb/language_server_pb.ts`](file:///C:/Users/amine/Downloads/antigravity-add-model-main/antigravity-add-model-main/remote/tools/antigravity-client-main/antigravity-client-main/src/gen/exa/language_server_pb/language_server_pb.ts).
-2. **Schémas Protobuf de sessions et planners** :
-   - `src/gen/exa/cortex_pb/` : `StartCascadeRequest`, `CascadeConfig`, `CascadePlannerConfig`.
-   - `src/gen/exa/codeium_common_pb/` : `TextOrScopeItem`, `Metadata`, `ModelOrAlias`.
-   - `src/gen/exa/jetski_cortex_pb/` : Trajectoires, étapes et résumés.
-3. **Parseur d'Événements Delta Typé** :
-   - [`src/core/cascade/event-parser.ts`](file:///C:/Users/amine/Downloads/antigravity-add-model-main/antigravity-add-model-main/remote/tools/antigravity-client-main/antigravity-client-main/src/core/cascade/event-parser.ts) : Modèle de référence pour le décodage des 130+ types d'événements de stream.
-4. **Harnais de Test Standalone** :
-   - Scripts `src/test-*.ts` pour valider chaque fonctionnalité (approbations, switch de modèle, injection de prompt, focus IDE) de façon unitaire en Node.js.
+L'ensemble des définitions de services et schémas Protobuf est consigné dans :
+1. **Schémas gRPC & Protobuf** : [`remote/tools/protocols/grpc-schemas/`](file:///C:/Users/amine/Downloads/antigravity-add-model-main/antigravity-add-model-main/remote/tools/protocols/grpc-schemas) et [`remote/proto/remote_service.proto`](file:///C:/Users/amine/Downloads/antigravity-add-model-main/antigravity-add-model-main/remote/proto/remote_service.proto).
+2. **Schémas de sessions et planners** :
+   - `StartCascadeRequest`, `CascadeConfig`, `CascadePlannerConfig`.
+   - `TextOrScopeItem`, `Metadata`, `ModelOrAlias`.
+   - Trajectoires, étapes et résumés.
+3. **Flux Temps Réel Hybrides** :
+   - **`JetboxSubscribeToSummaries`** : flux push JSON ConnectRPC alimentant la sidebar de sessions sans polling.
+   - **`StreamReactiveUpdates`** : flux réactif de notification d'état (`IDLE`, `RUNNING`, `CANCELING`) et d'interactions (`requestedInteraction`).
 
 ---
 
@@ -40,10 +39,11 @@ Le sous-projet **`remote/tools/antigravity-client-main/antigravity-client-main`*
 - **Binaire unique autonome** sans dépendance système externe (~10 MB compilé).
 - Performance maximale et empreinte mémoire négligeable (< 25 MB RAM).
 
-### 3.2 Protocole RPC : gRPC-Web natif
-- Le serveur attend du **`application/grpc-web+proto`** (pas du Connect JSON).
+### 3.2 Protocole RPC : gRPC-Web natif & Jetbox
+- Le serveur attend du **`application/grpc-web+proto`** pour les appels unaires et le streaming de prompts.
+- Flux Jetbox et réactif en **`application/connect+json`**.
 - Header d'auth obligatoire : **`x-codeium-csrf-token`** (héritage Codeium).
-- Framing standard : `1 octet flags + 4 octets longueur Big-Endian + charge Protobuf`.
+- Framing standard : `1 octet flags + 4 octets longueur Big-Endian + charge utile`.
 
 ### 3.3 Découverte automatique du moteur
 1. Scanner les processus `language_server*` via WMI / CIM.
@@ -57,6 +57,7 @@ Le sous-projet **`remote/tools/antigravity-client-main/antigravity-client-main`*
 
 ### 4.1 Sécurité des Communications
 - **Token d'authentification** vérifié en temps constant (`crypto/subtle.ConstantTimeCompare`).
+- **Appairage par code PIN 6 chiffres** (validité 60s) via `POST /pair` avec lockout après 5 échecs.
 - **Anti-DNS Rebinding** strict dans `checkOrigin` (autorisant uniquement `127.0.0.1`, LAN privé et tunnels certifiés).
 - **Confinement Path Traversal** dans `resolvePath` et `saveUploadedImage`.
 
@@ -70,8 +71,9 @@ Le sous-projet **`remote/tools/antigravity-client-main/antigravity-client-main`*
 
 ### 5.1 Architecture Applicative
 - **Dart / Flutter** pour une expérience multiplateforme unifiée (Android / iOS).
-- Rendu réactif 120 Hz, composants tactiles dédiés (`AskQuestionChoiceCard`, `UnifiedDiffViewer`, `ChatInputBar`).
+- Rendu réactif 120 Hz, composants tactiles dédiés (`AskQuestionChoiceCard`, `UnifiedDiffViewer`, `RemoteTerminalSheet`, `ChatInputBar`).
 - File d'attente locale (Outbox) garantissant l'envoi dès le retour de la connexion réseau.
+- Gestion d'environnements multiples via `--dart-define-from-file` (`config/env_dev.json`, `env_emulator.json`, `env_prod.json`).
 
 ---
 
@@ -79,4 +81,4 @@ Le sous-projet **`remote/tools/antigravity-client-main/antigravity-client-main`*
 
 - Documentation Protocole : [PROTOCOL.md](file:///C:/Users/amine/Downloads/antigravity-add-model-main/antigravity-add-model-main/remote/PROTOCOL.md)
 - Guide d'utilisation : [README.md](file:///C:/Users/amine/Downloads/antigravity-add-model-main/antigravity-add-model-main/remote/README.md)
-- Spécifications SDK & Schemas : [antigravity-client](file:///C:/Users/amine/Downloads/antigravity-add-model-main/antigravity-add-model-main/remote/tools/antigravity-client-main/antigravity-client-main/README.md)
+- Répertoire d'outils et de schémas : [remote/tools/](file:///C:/Users/amine/Downloads/antigravity-add-model-main/antigravity-add-model-main/remote/tools/README.md)
