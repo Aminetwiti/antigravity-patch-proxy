@@ -422,10 +422,10 @@ func (s *Server) cachedSessionsLocked() ([]byte, bool) {
 	return nil, false
 }
 
-// jetboxSessionsLocked s├®rialise la carte Jetbox au format historique
-// list_sessions (m├¬mes cl├®s que sessionsOut, filtres Antigravity 2.0 inclus).
+// jetboxSessionsLocked sérialise la carte Jetbox au format historique
+// list_sessions (mêmes clés que sessionsOut, filtres Antigravity 2.0 inclus).
 func (s *Server) jetboxSessionsLocked() []byte {
-	out := sessionsFromSummaries(s.jetboxSummaries)
+	out := s.sessionsFromSummariesLocked(s.jetboxSummaries)
 	raw, _ := json.Marshal(out)
 	return raw
 }
@@ -461,7 +461,7 @@ func (s *Server) jetboxSyncUpdates(updates map[string]connectrpc.JetboxSummary, 
 	// Notifie les clients connectés : le mobile rafraîchit sa sidebar.
 	s.broadcast(OutgoingMessage{
 		Type: "sessions_updated",
-		Data: sessionsFromSummaries(s.snapshotSummaries()),
+		Data: s.sessionsFromSummaries(s.snapshotSummaries()),
 	})
 
 	// Push focus si la session IDE active a changé.
@@ -487,24 +487,19 @@ func (s *Server) snapshotSummaries() map[string]connectrpc.JetboxSummary {
 	return cp
 }
 
-func sessionsFromSummaries(jetbox map[string]connectrpc.JetboxSummary) map[string]interface{} {
-	return (&Server{}).sessionsFromSummaries(jetbox)
-}
-
-// sessionsFromSummaries applique le filtre Antigravity 2.0 (archivées, killed,
-// subagents), enrichit les statuts d'exécution dynamiques et produit la
-// payload list_sessions partagée par sessionsOut et le broadcast sessions_updated.
-func (s *Server) sessionsFromSummaries(jetbox map[string]connectrpc.JetboxSummary) map[string]interface{} {
+// sessionsFromSummariesLocked applique le filtre Antigravity 2.0 (archivées, killed,
+// subagents), enrichit les statuts d'exécution dynamiques sous lock ou sans lock supplémentaire.
+func (s *Server) sessionsFromSummariesLocked(jetbox map[string]connectrpc.JetboxSummary) map[string]interface{} {
 	projects := ListOfficialProjects()
 	enrichStatus := func(cascadeID, origStatus string) string {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if s.activeCascades != nil && s.activeCascades[cascadeID] {
-			return "CASCADE_STATUS_RUNNING"
-		}
-		if s.approvals != nil {
-			if p, ok := s.approvals[cascadeID]; ok && !p.expired {
-				return "CASCADE_STATUS_WAITING_FOR_USER_ACTION"
+		if s != nil {
+			if s.activeCascades != nil && s.activeCascades[cascadeID] {
+				return "CASCADE_STATUS_RUNNING"
+			}
+			if s.approvals != nil {
+				if p, ok := s.approvals[cascadeID]; ok && !p.expired {
+					return "CASCADE_STATUS_WAITING_FOR_USER_ACTION"
+				}
 			}
 		}
 		if origStatus != "" && origStatus != "idle" {
@@ -544,6 +539,17 @@ func (s *Server) sessionsFromSummaries(jetbox map[string]connectrpc.JetboxSummar
 		"projects": projects,
 		"sessions": items,
 	}
+}
+
+// sessionsFromSummaries applique le filtre Antigravity 2.0 et enrichit les statuts dynamiques.
+func (s *Server) sessionsFromSummaries(jetbox map[string]connectrpc.JetboxSummary) map[string]interface{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sessionsFromSummariesLocked(jetbox)
+}
+
+func sessionsFromSummaries(jetbox map[string]connectrpc.JetboxSummary) map[string]interface{} {
+	return (&Server{}).sessionsFromSummariesLocked(jetbox)
 }
 
 // computeFocusedSession identifie la session IDE au premier plan :
@@ -1837,7 +1843,18 @@ func (s *Server) handleUploadChunk(conn *websocket.Conn, msg IncomingMessage) {
 				destFile = filepath.Join(destDir, cleanName)
 			}
 		} else {
-			destFile = homeRoot(destFile)
+			wsDir := homeRoot(msg.WorkspacePath)
+			if wsDir == "" {
+				if projs := ListOfficialProjects(); len(projs) > 0 && projs[0].Path != "" {
+					wsDir = projs[0].Path
+				}
+			}
+			resolved, errResolve := resolvePath(wsDir, destFile)
+			if errResolve != nil {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé hors du workspace: " + errResolve.Error()})
+				return
+			}
+			destFile = resolved
 			_ = os.MkdirAll(filepath.Dir(destFile), 0755)
 		}
 
@@ -5056,9 +5073,39 @@ func (m *terminalPtyManager) killAllFor(owner *websocket.Conn) {
 	}
 }
 
-// executeShellCommand exécute une commande shell locale dans un répertoire de travail
+// allowedExecBinaries est la liste blanche des binaires autorisés à l'exécution directe depuis le mobile.
+var allowedExecBinaries = map[string]bool{
+	"git": true, "flutter": true, "dart": true, "go": true, "npm": true,
+	"npx": true, "cargo": true, "pytest": true, "ls": true, "dir": true,
+	"echo": true, "cat": true,
+}
+
+// executeShellCommand exécute une commande locale confinée et sécurisée dans un répertoire de travail
 // avec un timeout de protection de 10s.
 func executeShellCommand(dir, cmdStr string) (string, error) {
+	trimmed := strings.TrimSpace(cmdStr)
+	if trimmed == "" {
+		return "", fmt.Errorf("commande vide")
+	}
+
+	// Interdire les caractères de chaînage shell
+	for _, ch := range []string{";", "&", "|", "`", "$", "(", ")", "<", ">", "\n", "\r"} {
+		if strings.Contains(trimmed, ch) {
+			return "", fmt.Errorf("caractère de contrôle shell interdit: %q", ch)
+		}
+	}
+
+	tokens := strings.Fields(trimmed)
+	if len(tokens) == 0 {
+		return "", fmt.Errorf("commande vide")
+	}
+
+	binary := strings.ToLower(filepath.Base(tokens[0]))
+	binary = strings.TrimSuffix(binary, ".exe")
+	if !allowedExecBinaries[binary] {
+		return "", fmt.Errorf("commande non autorisée: %s (seules les commandes de dev approuvées sont permises)", tokens[0])
+	}
+
 	if dir == "" || dir == "." {
 		if projs := ListOfficialProjects(); len(projs) > 0 && projs[0].Path != "" {
 			dir = projs[0].Path
@@ -5071,42 +5118,23 @@ func executeShellCommand(dir, cmdStr string) (string, error) {
 		absDir = dir
 	}
 
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd.exe", "/c", cmdStr)
-	} else {
-		cmd = exec.Command("sh", "-c", cmdStr)
-	}
-	cmd.Dir = absDir
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
+	cmd := exec.CommandContext(ctx, tokens[0], tokens[1:]...)
+	cmd.Dir = absDir
 
 	var outBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &outBuf
 
-	if err := cmd.Start(); err != nil {
+	if err := cmd.Run(); err != nil {
+		out := outBuf.String()
+		if out != "" {
+			return out, nil
+		}
 		return "", err
 	}
-
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	select {
-	case <-ctx.Done():
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		return "", fmt.Errorf("exécution expirée après 10s")
-	case err := <-done:
-		out := outBuf.String()
-		if err != nil && out == "" {
-			return "", err
-		}
-		return out, nil
-	}
+	return outBuf.String(), nil
 }
 

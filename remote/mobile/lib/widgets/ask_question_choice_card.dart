@@ -162,7 +162,7 @@ class _AskQuestionChoiceCardState extends State<AskQuestionChoiceCard> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: AppSpacing.space12, horizontal: AppSpacing.space4),
+      margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
       padding: AppSpacing.edgeInsetsA16,
       decoration: BoxDecoration(
         color: scheme.surfaceContainer,

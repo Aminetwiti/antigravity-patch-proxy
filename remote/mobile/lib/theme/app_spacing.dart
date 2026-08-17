@@ -1,9 +1,8 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 
-/// Centralized layout tokens, spacings, and edge insets for Antigravity Remote Mobile.
-/// Eliminates hardcoded magic numbers across widget trees.
+/// AppSpacing : Tokens d'espacement et de marges standardisés pour l'application mobile Antigravity.
 abstract class AppSpacing {
-  // ─── Dimensions (dp) ───────────────────────────────────────────────────────
+  // Valeurs numériques brutes (const double pour EdgeInsets.symmetric etc.)
   static const double space2 = 2.0;
   static const double space4 = 4.0;
   static const double space6 = 6.0;
@@ -15,65 +14,72 @@ abstract class AppSpacing {
   static const double space20 = 20.0;
   static const double space24 = 24.0;
   static const double space32 = 32.0;
-  static const double space40 = 40.0;
-  static const double space48 = 48.0;
 
-  // ─── Border Radii ─────────────────────────────────────────────────────────
-  static const double radiusXs = 4.0;
-  static const double radiusSm = 6.0;
-  static const double radiusMd = 8.0;
-  static const double radiusLg = 12.0;
-  static const double radiusXl = 16.0;
-  static const double radiusFull = 999.0;
+  // Gaps horizontaux
+  static const gapW4 = SizedBox(width: 4);
+  static const gapW6 = SizedBox(width: 6);
+  static const gapW8 = SizedBox(width: 8);
+  static const gapW10 = SizedBox(width: 10);
+  static const gapW12 = SizedBox(width: 12);
+  static const gapW16 = SizedBox(width: 16);
+  static const gapW24 = SizedBox(width: 24);
+  static const hGap10 = SizedBox(width: 10);
 
-  static final BorderRadius borderRadiusXs = BorderRadius.circular(radiusXs);
-  static final BorderRadius borderRadiusSm = BorderRadius.circular(radiusSm);
-  static final BorderRadius borderRadiusMd = BorderRadius.circular(radiusMd);
-  static final BorderRadius borderRadiusLg = BorderRadius.circular(radiusLg);
-  static final BorderRadius borderRadiusXl = BorderRadius.circular(radiusXl);
-  static final BorderRadius borderRadiusFull = BorderRadius.circular(radiusFull);
+  // Gaps verticaux
+  static const gapH4 = SizedBox(height: 4);
+  static const gapH6 = SizedBox(height: 6);
+  static const gapH8 = SizedBox(height: 8);
+  static const gapH10 = SizedBox(height: 10);
+  static const gapH12 = SizedBox(height: 12);
+  static const gapH14 = SizedBox(height: 14);
+  static const gapH16 = SizedBox(height: 16);
+  static const gapH24 = SizedBox(height: 24);
+  static const gapH32 = SizedBox(height: 32);
+  static const vGap4 = SizedBox(height: 4);
+  static const vGap8 = SizedBox(height: 8);
+  static const vGap10 = SizedBox(height: 10);
+  static const vGap12 = SizedBox(height: 12);
+  static const vGap14 = SizedBox(height: 14);
+  static const vGap16 = SizedBox(height: 16);
 
-  // ─── Horizontal Gaps (SizedBox) ───────────────────────────────────────────
-  static const SizedBox hGap2 = SizedBox(width: space2);
-  static const SizedBox hGap4 = SizedBox(width: space4);
-  static const SizedBox hGap6 = SizedBox(width: space6);
-  static const SizedBox hGap8 = SizedBox(width: space8);
-  static const SizedBox hGap10 = SizedBox(width: space10);
-  static const SizedBox hGap12 = SizedBox(width: space12);
-  static const SizedBox hGap16 = SizedBox(width: space16);
-  static const SizedBox hGap20 = SizedBox(width: space20);
-  static const SizedBox hGap24 = SizedBox(width: space24);
+  // Paddings all
+  static const paddingXs = EdgeInsets.all(4);
+  static const paddingSm = EdgeInsets.all(8);
+  static const paddingMd = EdgeInsets.all(12);
+  static const paddingLg = EdgeInsets.all(16);
+  static const paddingXl = EdgeInsets.all(24);
 
-  // ─── Vertical Gaps (SizedBox) ─────────────────────────────────────────────
-  static const SizedBox vGap2 = SizedBox(height: space2);
-  static const SizedBox vGap4 = SizedBox(height: space4);
-  static const SizedBox vGap6 = SizedBox(height: space6);
-  static const SizedBox vGap8 = SizedBox(height: space8);
-  static const SizedBox vGap10 = SizedBox(height: space10);
-  static const SizedBox vGap12 = SizedBox(height: space12);
-  static const SizedBox vGap14 = SizedBox(height: space14);
-  static const SizedBox vGap16 = SizedBox(height: space16);
-  static const SizedBox vGap20 = SizedBox(height: space20);
-  static const SizedBox vGap24 = SizedBox(height: space24);
-  static const SizedBox vGap32 = SizedBox(height: space32);
-  static const SizedBox vGap40 = SizedBox(height: space40);
+  static const edgeInsetsA2 = EdgeInsets.all(2);
+  static const edgeInsetsA4 = EdgeInsets.all(4);
+  static const edgeInsetsA8 = EdgeInsets.all(8);
+  static const edgeInsetsA10 = EdgeInsets.all(10);
+  static const edgeInsetsA12 = EdgeInsets.all(12);
+  static const edgeInsetsA16 = EdgeInsets.all(16);
+  static const edgeInsetsA20 = EdgeInsets.all(20);
+  static const edgeInsetsA24 = EdgeInsets.all(24);
 
-  // ─── Edge Insets ──────────────────────────────────────────────────────────
-  static const EdgeInsets edgeInsetsZero = EdgeInsets.zero;
-  static const EdgeInsets edgeInsetsA4 = EdgeInsets.all(space4);
-  static const EdgeInsets edgeInsetsA8 = EdgeInsets.all(space8);
-  static const EdgeInsets edgeInsetsA12 = EdgeInsets.all(space12);
-  static const EdgeInsets edgeInsetsA16 = EdgeInsets.all(space16);
-  static const EdgeInsets edgeInsetsA20 = EdgeInsets.all(space20);
-  static const EdgeInsets edgeInsetsA24 = EdgeInsets.all(space24);
+  // Paddings symétriques horizontaux
+  static const paddingHorizontalXs = EdgeInsets.symmetric(horizontal: 4);
+  static const paddingHorizontalSm = EdgeInsets.symmetric(horizontal: 8);
+  static const paddingHorizontalMd = EdgeInsets.symmetric(horizontal: 12);
+  static const paddingHorizontalLg = EdgeInsets.symmetric(horizontal: 16);
+  static const paddingHorizontalXl = EdgeInsets.symmetric(horizontal: 24);
 
-  static const EdgeInsets edgeInsetsH8 = EdgeInsets.symmetric(horizontal: space8);
-  static const EdgeInsets edgeInsetsH12 = EdgeInsets.symmetric(horizontal: space12);
-  static const EdgeInsets edgeInsetsH16 = EdgeInsets.symmetric(horizontal: space16);
-  static const EdgeInsets edgeInsetsH20 = EdgeInsets.symmetric(horizontal: space20);
+  // Paddings symétriques verticaux
+  static const paddingVerticalXs = EdgeInsets.symmetric(vertical: 4);
+  static const paddingVerticalSm = EdgeInsets.symmetric(vertical: 8);
+  static const paddingVerticalMd = EdgeInsets.symmetric(vertical: 12);
+  static const paddingVerticalLg = EdgeInsets.symmetric(vertical: 16);
 
-  static const EdgeInsets edgeInsetsV4 = EdgeInsets.symmetric(vertical: space4);
-  static const EdgeInsets edgeInsetsV8 = EdgeInsets.symmetric(vertical: space8);
-  static const EdgeInsets edgeInsetsV12 = EdgeInsets.symmetric(vertical: space12);
-  static const EdgeInsets edgeInsetsV16 = EdgeInsets.symmetric(vertical: space16);
+  // Paddings composés
+  static const paddingCard = EdgeInsets.symmetric(horizontal: 16, vertical: 12);
+  static const paddingDialog = EdgeInsets.symmetric(horizontal: 20, vertical: 16);
+  static const paddingInput = EdgeInsets.symmetric(horizontal: 12, vertical: 10);
+
+  // Border Radii compatibles
+  static const borderRadiusSm = BorderRadius.all(Radius.circular(6));
+  static const borderRadiusMd = BorderRadius.all(Radius.circular(8));
+  static const borderRadiusLg = BorderRadius.all(Radius.circular(12));
+  static const borderRadiusXl = BorderRadius.all(Radius.circular(16));
+  static const borderRadiusPill = BorderRadius.all(Radius.circular(999));
 }

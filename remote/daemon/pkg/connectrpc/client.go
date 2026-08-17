@@ -35,11 +35,21 @@ type Client struct {
 }
 
 func NewClient(port int, csrfToken string) *Client {
+	transport := &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 20,
+		IdleConnTimeout:     90 * time.Second,
+		DisableKeepAlives:   false,
+		ForceAttemptHTTP2:   true,
+	}
 	return &Client{
 		port:      port,
 		csrfToken: csrfToken,
 		Host:      "127.0.0.1",
-		HTTP:      &http.Client{Timeout: 60 * time.Second},
+		HTTP: &http.Client{
+			Timeout:   60 * time.Second,
+			Transport: transport,
+		},
 	}
 }
 

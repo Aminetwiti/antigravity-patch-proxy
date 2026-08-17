@@ -53,6 +53,16 @@ class MarkdownBlock {
 typedef LocalFileTap = void Function(String filePath);
 
 class MarkdownRenderer {
+  // Pre-compiled regular expressions for high-performance timeline streaming
+  static final _toolCallRe = RegExp(
+    r'<function_call>|<function_results>|"tool(_name)?"\s*:|(\{|\[)\s*"name"\s*:\s*"[a-zA-Z_]+"\s*,\s*"arguments"',
+  );
+  static final _bulletListRe = RegExp(r'^\s*[-*+]\s+');
+  static final _numberedListRe = RegExp(r'^\s*\d+[.)]\s+');
+  static final _toolNameRe = RegExp(r'"(name|tool|tool_name)"\s*:\s*"([^"]+)"');
+  static final _toolArgRe = RegExp(r'"(command|query|pattern|path|file_path)"\s*:\s*"([^"]+)"');
+  static final _whitespaceRe = RegExp(r'\s+');
+
   /// Splits raw markdown text into display blocks.
   static List<MarkdownBlock> blocksOf(String text) {
     final lines = text.replaceAll('\r\n', '\n').split('\n');
@@ -61,32 +71,26 @@ class MarkdownRenderer {
     var inFence = false;
     var fenceLang = '';
 
-    // Tool-invocation markers: XML tags (function_call / function_results) or
-    // JSON with a tool name + arguments — rendered as pills, not raw text.
-    final toolCallRe = RegExp(
-      r'<function_call>|<function_results>|"tool(_name)?"\s*:|(\{|\[)\s*"name"\s*:\s*"[a-zA-Z_]+"\s*,\s*"arguments"',
-    );
-
     void flushParagraph() {
       if (buffer.isEmpty) return;
       final raw = buffer.join('\n').trim();
       buffer.clear();
       if (raw.isEmpty) return;
       // Single-line tool invocation → dedicated pill block.
-      if (toolCallRe.hasMatch(raw)) {
+      if (_toolCallRe.hasMatch(raw)) {
         final parsed = _toolCallOf(raw);
         blocks.add(MarkdownBlock.toolCall(parsed));
         return;
       }
       for (final line in raw.split('\n')) {
-        if (RegExp(r'^\s*[-*+]\s+').hasMatch(line)) {
+        if (_bulletListRe.hasMatch(line)) {
           blocks.add(MarkdownBlock.paragraph(
-            line.replaceFirst(RegExp(r'^\s*[-*+]\s+'), ''),
+            line.replaceFirst(_bulletListRe, ''),
             isListItem: true,
           ));
-        } else if (RegExp(r'^\s*\d+[.)]\s+').hasMatch(line)) {
+        } else if (_numberedListRe.hasMatch(line)) {
           blocks.add(MarkdownBlock.paragraph(
-            line.replaceFirst(RegExp(r'^\s*\d+[.)]\s+'), ''),
+            line.replaceFirst(_numberedListRe, ''),
             isListItem: true,
           ));
         } else if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
@@ -129,12 +133,10 @@ class MarkdownRenderer {
 
   /// Parses a raw tool-invocation string into a [ToolCallBlock].
   static ToolCallBlock _toolCallOf(String raw) {
-    final nameRe = RegExp(r'"(name|tool|tool_name)"\s*:\s*"([^"]+)"');
-    final name = nameRe.firstMatch(raw)?.group(2) ?? 'tool';
+    final name = _toolNameRe.firstMatch(raw)?.group(2) ?? 'tool';
     // Compact one-line summary: first quoted argument value, else first line.
-    final argRe = RegExp(r'"(command|query|pattern|path|file_path)"\s*:\s*"([^"]+)"');
-    final summary = argRe.firstMatch(raw)?.group(2) ??
-        raw.replaceAll(RegExp(r'\s+'), ' ').substring(0, raw.length > 80 ? 80 : raw.length);
+    final summary = _toolArgRe.firstMatch(raw)?.group(2) ??
+        raw.replaceAll(_whitespaceRe, ' ').substring(0, raw.length > 80 ? 80 : raw.length);
     return ToolCallBlock(name, summary, raw);
   }
 

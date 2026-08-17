@@ -11,6 +11,7 @@ import { BrowserWindow } from 'electron';
 import { ChildProcess, spawn } from 'child_process';
 import path from 'path';
 import net from 'net';
+import { EnvironmentConfig } from './config/environment';
 
 export interface ProxyServerStatus {
   running: boolean;
@@ -21,8 +22,8 @@ export interface ProxyServerStatus {
 
 class ProxyManager {
   private proxyProcess: ChildProcess | null = null;
-  private port: number = 50999;
-  private host: string = '127.0.0.1';
+  private port: number = EnvironmentConfig.proxyPort;
+  private host: string = EnvironmentConfig.bindHost;
   private scriptPath: string;
   
   constructor() {
@@ -99,7 +100,7 @@ class ProxyManager {
           ...process.env,
           AG_MITM_PORT: String(this.port),
           AG_MITM_HOST: this.host,
-          AG_PROXY_TARGET: 'http://127.0.0.1:50999', // Forward to main Antigravity proxy
+          AG_PROXY_TARGET: EnvironmentConfig.proxyTarget,
         };
 
         // Spawn the proxy server process

@@ -1330,8 +1330,39 @@ type ProjectSummary struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+var (
+	projectsCacheMu  sync.RWMutex
+	cachedProjects   []ProjectSummary
+	projectsCachedAt time.Time
+	projectsCacheTTL = 5 * time.Second
+)
+
+// InvalidateProjectsCache force le rechargement immédiat du registre de projets.
+func InvalidateProjectsCache() {
+	projectsCacheMu.Lock()
+	cachedProjects = nil
+	projectsCacheMu.Unlock()
+}
+
 // ListOfficialProjects reads registered projects from ~/.gemini/config/projects/
 func ListOfficialProjects() []ProjectSummary {
+	projectsCacheMu.RLock()
+	if cachedProjects != nil && time.Since(projectsCachedAt) < projectsCacheTTL {
+		res := make([]ProjectSummary, len(cachedProjects))
+		copy(res, cachedProjects)
+		projectsCacheMu.RUnlock()
+		return res
+	}
+	projectsCacheMu.RUnlock()
+
+	projectsCacheMu.Lock()
+	defer projectsCacheMu.Unlock()
+	if cachedProjects != nil && time.Since(projectsCachedAt) < projectsCacheTTL {
+		res := make([]ProjectSummary, len(cachedProjects))
+		copy(res, cachedProjects)
+		return res
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
@@ -1406,12 +1437,17 @@ func ListOfficialProjects() []ProjectSummary {
 		})
 	}
 
-	// Tri par date de mise ├á jour d├®croissante
+	// Tri par date de mise à jour décroissante
 	sort.Slice(list, func(i, j int) bool {
 		return list[i].UpdatedAt.After(list[j].UpdatedAt)
 	})
 
-	return list
+	cachedProjects = list
+	projectsCachedAt = time.Now()
+
+	res := make([]ProjectSummary, len(list))
+	copy(res, list)
+	return res
 }
 
 // projectIDFromRegistry résout le projectID d'un workspace à partir du

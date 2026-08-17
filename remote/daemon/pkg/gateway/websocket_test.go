@@ -545,6 +545,14 @@ func (c *wsTestClient) send(t *testing.T, msg map[string]string) {
 	}
 }
 
+func (c *wsTestClient) sendJSON(t *testing.T, msg interface{}) {
+	t.Helper()
+	b, _ := json.Marshal(msg)
+	if err := c.conn.WriteMessage(websocket.TextMessage, b); err != nil {
+		t.Fatalf("Envoi WebSocket échoué: %v", err)
+	}
+}
+
 // sendRaw envoie un message JSON brut (champs data, nombres, …) sans passer
 // par le typage map[string]string de send.
 func (c *wsTestClient) sendRaw(t *testing.T, raw string) {
