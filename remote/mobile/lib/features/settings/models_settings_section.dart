@@ -28,6 +28,7 @@ class _ModelsSettingsSectionState extends State<ModelsSettingsSection> {
   String _reasoningEffort = 'medium'; // off, low, medium, high
   bool _enableCreditOverages = false;
   bool _isLoadingQuotas = false;
+  Map<String, String> _modelStatuses = {};
 
   // Real-time Quota metrics (1:1 with Antigravity IDE)
   int _geminiWeeklyPercent = 59;
@@ -85,6 +86,18 @@ class _ModelsSettingsSectionState extends State<ModelsSettingsSection> {
           if (q['claude5Hour'] is int) _claude5HourPercent = q['claude5Hour'] as int;
         });
       }
+      try {
+        final statuses = await widget.api!.getModelStatuses();
+        if (mounted && statuses.isNotEmpty) {
+          final Map<String, String> parsed = {};
+          statuses.forEach((k, v) {
+            parsed[k.toLowerCase()] = v.toString();
+          });
+          setState(() {
+            _modelStatuses = parsed;
+          });
+        }
+      } catch (_) {}
     } catch (_) {
     } finally {
       if (mounted) setState(() => _isLoadingQuotas = false);
@@ -530,9 +543,51 @@ class _ModelsSettingsSectionState extends State<ModelsSettingsSection> {
           style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: scheme.onSurface),
           isDense: true,
           items: items.map((item) {
+            final lower = item.toLowerCase();
+            Color dotColor = const Color(0xFF4CAF50); // Vert par défaut (opérationnel)
+            String? statusText;
+            for (final entry in _modelStatuses.entries) {
+              if (lower.contains(entry.key)) {
+                final st = entry.value.toLowerCase();
+                if (st.contains('degrad') || st.contains('warn')) {
+                  dotColor = const Color(0xFFFFA000);
+                  statusText = 'Dégradé';
+                } else if (st.contains('down') || st.contains('error')) {
+                  dotColor = const Color(0xFFE5534B);
+                  statusText = 'Indisponible';
+                }
+                break;
+              }
+            }
+
             return DropdownMenuItem<String>(
               value: item,
-              child: Text(item),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 6,
+                    height: 6,
+                    margin: const EdgeInsets.only(right: 8),
+                    decoration: BoxDecoration(
+                      color: dotColor,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  Text(item),
+                  if (statusText != null) ...[
+                    const SizedBox(width: 6),
+                    Text(
+                      '($statusText)',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: dotColor,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             );
           }).toList(),
           onChanged: onChanged,

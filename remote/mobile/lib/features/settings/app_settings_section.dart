@@ -10,6 +10,7 @@ import 'package:mobile/theme/app_colors.dart';
 import 'package:mobile/widgets/app_toast.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import '../diagnostics/diagnostics_screen.dart';
 
 /// Section App (Antigravity IDE 1:1)
 /// Gère la connexion au daemon bridge, les tunnels, et les diagnostics système.
@@ -298,18 +299,46 @@ class _AppSettingsSectionState extends State<AppSettingsSection> {
                   style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
                 ),
                 const SizedBox(height: 14),
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: scheme.onSurface,
-                    side: BorderSide(color: isDark ? const Color(0xFF383B44) : scheme.outline),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.sm)),
-                  ),
-                  onPressed: _diagnosticsBusy ? null : _exportDiagnostics,
-                  icon: _diagnosticsBusy
-                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator.adaptive(strokeWidth: 2))
-                      : const Icon(Icons.share_outlined, size: 16),
-                  label: const Text('Exporter le rapport JSON', style: TextStyle(fontSize: 12.5)),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: scheme.onSurface,
+                        side: BorderSide(color: isDark ? const Color(0xFF383B44) : scheme.outline),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.sm)),
+                      ),
+                      onPressed: _diagnosticsBusy ? null : _exportDiagnostics,
+                      icon: _diagnosticsBusy
+                          ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator.adaptive(strokeWidth: 2))
+                          : const Icon(Icons.share_outlined, size: 16),
+                      label: const Text('Exporter le rapport JSON', style: TextStyle(fontSize: 12)),
+                    ),
+                    if (widget.api != null)
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: isDark ? const Color(0xFF26282E) : scheme.surfaceContainerHighest,
+                          foregroundColor: scheme.onSurface,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(AppRadius.sm),
+                            side: BorderSide(color: isDark ? const Color(0xFF383B44) : scheme.outlineVariant),
+                          ),
+                        ),
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (context) => DiagnosticsScreen(api: widget.api!),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.monitor_heart_outlined, size: 16, color: Color(0xFF4CAF50)),
+                        label: const Text('FlightRecorder & Profiling 📊', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                      ),
+                  ],
                 ),
               ],
             ),

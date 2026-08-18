@@ -18,6 +18,8 @@ import 'theme/app_theme.dart';
 import 'features/sessions/sessions_list.dart';
 import 'features/sessions/conversation_history_screen.dart';
 import 'features/scheduled_tasks/scheduled_tasks_screen.dart';
+import 'features/battle_arena/battle_arena_screen.dart';
+import 'features/sidecars/sidecars_dashboard_screen.dart';
 import 'services/settings_store.dart';
 import 'widgets/remote_terminal_sheet.dart';
 import 'widgets/right_sidebar_drawer.dart';
@@ -1015,6 +1017,31 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       onScheduledTasks: () {
         _showScheduledTasks();
       },
+      onOpenBattleArena: () {
+        if (_api == null) return;
+        final s = _sessions.firstWhere(
+          (s) => s.id == _activeSessionId,
+          orElse: () => const CascadeSession(id: '', workspacePath: '', title: '', status: '', time: ''),
+        );
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => BattleArenaScreen(
+              api: _api!,
+              workspaceUri: s.workspacePath.isNotEmpty ? s.workspacePath : '.',
+            ),
+          ),
+        );
+      },
+      onOpenSidecars: () {
+        if (_api == null) return;
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => SidecarsDashboardScreen(
+              api: _api!,
+            ),
+          ),
+        );
+      },
       onOpenSettings: () {
         final s = _sessions.firstWhere(
           (s) => s.id == _activeSessionId,
@@ -1119,6 +1146,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       api: _api,
       activeSessionId: _activeSessionId,
       activeProjectName: activeProjectDisplayName,
+      activeSessionTitle: _activeSessionTitle,
       workspacePath: activeWs,
       projects: _projects,
       onSelectProject: (p) => _createNewConversation(p),
@@ -1168,14 +1196,16 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
               ),
         title: Row(
           children: [
-            Expanded(
-              child: Text(
-                '$activeProjectDisplayName${_activeSessionTitle.isNotEmpty ? ' / $_activeSessionTitle' : ''}',
-                style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                overflow: TextOverflow.ellipsis,
+            Text(
+              'Antigravity',
+              style: TextStyle(
+                fontSize: 14.5,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(context).colorScheme.onSurface,
+                letterSpacing: -0.2,
               ),
             ),
-            const SizedBox(width: 8),
+            const Spacer(),
             InkWell(
               onTap: () {
                 if (isConnected) {

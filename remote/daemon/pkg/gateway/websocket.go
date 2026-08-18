@@ -472,6 +472,17 @@ func (s *Server) jetboxSyncUpdates(updates map[string]connectrpc.JetboxSummary, 
 		Data: s.sessionsFromSummaries(s.snapshotSummaries()),
 	})
 
+	// Notifie les mises à jour individuelles de statut pour chaque session
+	for id, sum := range updates {
+		s.broadcast(OutgoingMessage{
+			Type:      "session_status_update",
+			CascadeID: id,
+			Data: map[string]interface{}{
+				"status": sum.Status,
+			},
+		})
+	}
+
 	// Push focus si la session IDE active a changé.
 	if focusPayload != nil {
 		s.broadcast(OutgoingMessage{
@@ -6071,6 +6082,7 @@ func (s *Server) runLiveTurnStreamer(ctx context.Context, cascadeID, requestID s
 
 	var deliveredTextLen int
 	var turnCompleted bool
+	var nextTranscriptLookup time.Time
 	lastActivityTime := time.Now()
 
 	for {
@@ -6083,8 +6095,9 @@ func (s *Server) runLiveTurnStreamer(ctx context.Context, cascadeID, requestID s
 				return
 			}
 
-			if transcriptPath == "" {
+			if transcriptPath == "" && time.Now().After(nextTranscriptLookup) {
 				transcriptPath = findTranscriptPath(cascadeID)
+				nextTranscriptLookup = time.Now().Add(500 * time.Millisecond)
 				if transcriptPath != "" && lastOffset == 0 {
 					if fi, err := os.Stat(transcriptPath); err == nil {
 						lastOffset = fi.Size()
@@ -6242,8 +6255,8 @@ func (s *Server) runLiveTurnStreamer(ctx context.Context, cascadeID, requestID s
 				}
 			}
 
-			// 3. Fallback / Synchronisation de trajectoire (si pas de nouveaux tokens via fichier sous 300ms)
-			if s.RPCClient != nil && time.Since(lastActivityTime) >= 300*time.Millisecond {
+			// 3. Fallback / Synchronisation de trajectoire (si pas de nouveaux tokens et AUCUN transcript local disponible)
+			if s.RPCClient != nil && transcriptPath == "" && time.Since(lastActivityTime) >= 300*time.Millisecond {
 				if rawTraj, errTraj := s.RPCClient.GetCascadeTrajectory(cascadeID, 0); errTraj == nil && len(rawTraj) > 0 {
 					msgs := ExtractHistoryFromTrajectory(rawTraj)
 					if len(msgs) > 0 && msgs[len(msgs)-1].Sender == "assistant" {

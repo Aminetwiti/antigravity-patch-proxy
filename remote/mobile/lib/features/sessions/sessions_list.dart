@@ -16,10 +16,16 @@ class LeftSidebarDrawer extends StatefulWidget {
   final VoidCallback? onOpenWorkspace;
   final VoidCallback? onConversationHistory;
   final VoidCallback? onScheduledTasks;
+  final VoidCallback? onOpenBattleArena;
+  final VoidCallback? onOpenSidecars;
   final List<CascadeSession>? sessions;
   final List<ProjectItem>? projects;
   final bool isConnected;
   final VoidCallback onToggleConnection;
+  final Function(String id)? onDeleteSession;
+  final Function(String id)? onArchiveSession;
+  final Function(String id, String newTitle)? onRenameSession;
+  final Function(CascadeSession session)? onExportSession;
 
   const LeftSidebarDrawer({
     super.key,
@@ -31,6 +37,8 @@ class LeftSidebarDrawer extends StatefulWidget {
     this.onOpenWorkspace,
     this.onConversationHistory,
     this.onScheduledTasks,
+    this.onOpenBattleArena,
+    this.onOpenSidecars,
     this.sessions,
     this.projects,
     this.isConnected = false,
@@ -40,11 +48,7 @@ class LeftSidebarDrawer extends StatefulWidget {
     this.onRenameSession,
     this.onExportSession,
   });
-
-  final Function(String id)? onDeleteSession;
-  final Function(String id)? onArchiveSession;
-  final Function(String id, String newTitle)? onRenameSession;
-  final Function(CascadeSession session)? onExportSession;
+  final VoidCallback? onOpenSidecars;
 
   @override
   State<LeftSidebarDrawer> createState() => _LeftSidebarDrawerState();
@@ -923,8 +927,10 @@ class _SessionRowItemState extends State<_SessionRowItem> {
     HapticFeedback.mediumImpact();
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainer,
-      shape: const RoundedRectangleBorder(
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
       ),
       builder: (ctx) => SafeArea(

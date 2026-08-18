@@ -133,6 +133,20 @@ class StreamDeltaParser {
       case 'list_files':
       case 'list_dir':
         return arg.isNotEmpty ? 'Explored $arg' : 'Explored directory';
+      case 'invoke_subagent':
+      case 'define_subagent':
+      case 'subagent':
+        return arg.isNotEmpty ? 'Subagent $arg' : 'Spawned subagent';
+      case 'send_message':
+        return arg.isNotEmpty ? 'Sent to $arg' : 'Sent message';
+      case 'generate_image':
+        return arg.isNotEmpty ? 'Generated $arg' : 'Generated image';
+      case 'schedule':
+        return arg.isNotEmpty ? 'Scheduled $arg' : 'Scheduled task';
+      case 'browse':
+      case 'read_url_content':
+      case 'read_url':
+        return arg.isNotEmpty ? 'Browsed $arg' : 'Browsed web';
       case 'tool_output':
       case 'runner_output':
       case 'search_result':

@@ -20,9 +20,18 @@ class SessionParser {
         if (s is Map) {
           final sMap = Map<String, dynamic>.from(s);
           final id = sMap['cascadeId'] ?? sMap['id'];
-          // Filtrer les entrées sans clé primaire ou non disponibles (archivées, killed, supprimées)
           if (id is String && id.isNotEmpty) {
-            final session = CascadeSession.fromJson(sMap);
+            final stepCount = (sMap['stepCount'] as num?)?.toInt() ?? 0;
+            // Point bleu : session avec activité (≥ 1 étape) mais pas en cours
+            // Identique au comportement de l'indicateur Antigravity IDE
+            final status = (sMap['status'] as String? ?? '').toUpperCase();
+            final isRunning = status.contains('RUNNING');
+            final hasUnread = stepCount >= 1 && !isRunning;
+            final session = CascadeSession.fromJson({
+              ...sMap,
+              'stepCount': stepCount,
+              'hasUnread': hasUnread,
+            });
             if (session.isAvailable) {
               out.add(session);
             }

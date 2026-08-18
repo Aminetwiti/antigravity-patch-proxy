@@ -12,11 +12,12 @@ enum ExecutionStepType {
   exploredGroup,
   task,
   thought,
+  subagent,
 }
 
 class ExecutionStepItem {
   final ExecutionStepType type;
-  final String action; // "Edited", "Analyzed", "Ran", "Run", "Explored", "Thinking", "Thought"
+  final String action; // "Edited", "Analyzed", "Ran", "Run", "Explored", "Thinking", "Thought", "Subagent"
   final String title; // "chat_stream_screen.dart", "1 file", "flutter test ...", etc.
   final String? diffAdded; // "+12"
   final String? diffRemoved; // "-3"
@@ -47,12 +48,15 @@ class ExecutionStepItem {
 }
 
 /// Vue de déroulement d'exécution en direct fidèle à Antigravity 2.0 ("The Quiet Console").
+/// Affiche la progression temps réel de l'agent en cours d'exécution avec chronomètre,
+/// modèle actif, étapes d'outils animées et console d'exécution en direct.
 class ExecutionProgressView extends StatefulWidget {
   final String? messageId;
   final String? thoughtText;
   final bool isStreaming;
   final String? modelLabel;
   final VoidCallback? onToggleExpand;
+  final VoidCallback? onStop;
   final bool initiallyExpanded;
 
   const ExecutionProgressView({
@@ -62,6 +66,7 @@ class ExecutionProgressView extends StatefulWidget {
     this.isStreaming = false,
     this.modelLabel,
     this.onToggleExpand,
+    this.onStop,
     this.initiallyExpanded = false,
   });
 
@@ -74,10 +79,17 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
   final Set<int> _expandedIndices = {};
   int _secondsElapsed = 0;
   Timer? _timer;
+  late AnimationController _pulseAnim;
+  bool _showAllSteps = false;
 
   @override
   void initState() {
     super.initState();
+    _pulseAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+
     if (widget.isStreaming) {
       _startTimer();
     }
@@ -97,6 +109,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
   @override
   void dispose() {
     _timer?.cancel();
+    _pulseAnim.dispose();
     super.dispose();
   }
 
@@ -183,9 +196,15 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
 
       final lower = line.toLowerCase();
 
-      // 1. Edited <file> +X -Y
-      if (lower.startsWith('edited ')) {
-        final rest = line.substring(7).trim();
+      // 1. Edited / Wrote <file> +X -Y
+      if (lower.startsWith('edited ') || lower.startsWith('wrote ') || lower.startsWith('writing to file') || lower.startsWith('editing file')) {
+        final isEdit = lower.startsWith('edited ') || lower.startsWith('editing file');
+        final prefixLen = lower.startsWith('edited ')
+            ? 7
+            : (lower.startsWith('wrote ')
+                ? 6
+                : (lower.startsWith('writing to file') ? 15 : 12));
+        final rest = line.substring(prefixLen).trim();
         final match = RegExp(r'^(\S+)(?:\s+\+(\d+)\s+-(\d+))?').firstMatch(rest);
         if (match != null) {
           final fileName = match.group(1) ?? rest;
@@ -193,7 +212,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
           final del = match.group(3);
           rawItems.add(ExecutionStepItem(
             type: ExecutionStepType.fileEdit,
-            action: 'Edited',
+            action: isEdit ? 'Edited' : 'Wrote',
             title: fileName,
             diffAdded: add != null ? '+$add' : '+1',
             diffRemoved: del != null ? '-$del' : '-0',
@@ -202,10 +221,15 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
         }
       }
 
-      // 2. Analyzed / Viewed <file> #L123-456
-      if (lower.startsWith('analyzed ') || lower.startsWith('viewed ')) {
+      // 2. Analyzed / Viewed / Reading <file> #L123-456
+      if (lower.startsWith('analyzed ') || lower.startsWith('viewed ') || lower.startsWith('reading file') || lower.startsWith('viewing file')) {
         final isAnalyzed = lower.startsWith('analyzed ');
-        final rest = line.substring(isAnalyzed ? 9 : 7).trim();
+        final prefixLen = lower.startsWith('analyzed ')
+            ? 9
+            : (lower.startsWith('viewed ')
+                ? 7
+                : (lower.startsWith('reading file') ? 12 : 12));
+        final rest = line.substring(prefixLen).trim();
         final match = RegExp(r'^(\S+)(?:\s+(#L\d+(?:-\d+)?))?').firstMatch(rest);
         final fileName = match?.group(1) ?? rest;
         final lineRange = match?.group(2);
@@ -231,7 +255,21 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
         continue;
       }
 
-      // 4. Ran / Run <command>
+      // 4. Subagent invocation / task
+      if (lower.startsWith('subagent') || lower.startsWith('invoking subagent') || lower.startsWith('spawned subagent') || lower.startsWith('sub-agent')) {
+        final clean = line.replaceFirst(
+            RegExp(r'^(invoking subagent|spawned subagent|subagent|sub-agent)[:\s]*', caseSensitive: false), '').trim();
+        rawItems.add(ExecutionStepItem(
+          type: ExecutionStepType.subagent,
+          action: 'Subagent',
+          title: clean.isNotEmpty ? clean : 'Agent',
+          isExpandable: true,
+          isRunning: widget.isStreaming,
+        ));
+        continue;
+      }
+
+      // 5. Ran / Run <command>
       if (lower.startsWith('ran ') || lower.startsWith('run ') || lower.startsWith('running command:') || lower.startsWith('executed:')) {
         final cleanTitle = line.replaceFirst(
             RegExp(r'^(ran|run|running command:|executed:)\s*', caseSensitive: false), '');
@@ -243,10 +281,10 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
         continue;
       }
 
-      // 5. Checked task / Search / Task
-      if (lower.startsWith('checked task ') || lower.startsWith('search ') || lower.startsWith('task ')) {
+      // 6. Checked task / Search / Task
+      if (lower.startsWith('checked task ') || lower.startsWith('search ') || lower.startsWith('task ') || lower.startsWith('searching ')) {
         final isChecked = lower.startsWith('checked task ');
-        final isSearch = lower.startsWith('search ');
+        final isSearch = lower.startsWith('search ') || lower.startsWith('searching ');
         String action = 'Task';
         String title = line.substring(5).trim();
         if (isChecked) {
@@ -254,7 +292,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
           title = line.substring(13).trim();
         } else if (isSearch) {
           action = 'Search';
-          title = line.substring(7).trim();
+          title = lower.startsWith('searching ') ? line.substring(10).trim() : line.substring(7).trim();
         }
         rawItems.add(ExecutionStepItem(
           type: ExecutionStepType.task,
@@ -265,7 +303,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
         continue;
       }
 
-      // 6. Error messages
+      // 7. Error messages
       if (lower.startsWith('error')) {
         var clean = line;
         if (clean.endsWith('>')) clean = clean.substring(0, clean.length - 1).trim();
@@ -279,7 +317,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
         continue;
       }
 
-      // 7. Duration headers
+      // 8. Duration headers
       if (lower.startsWith('worked for ') || lower.startsWith('thinking for ') || lower.startsWith('thought for ')) {
         var clean = line;
         if (clean.endsWith('>')) clean = clean.substring(0, clean.length - 1).trim();
@@ -292,7 +330,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
         continue;
       }
 
-      // 8. Output / thought text
+      // 9. Output / thought text
       currentThoughtBuffer.writeln(lines[i]);
     }
 
@@ -339,7 +377,6 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
     // Process Thought Buffer
     final thoughtContent = currentThoughtBuffer.toString().trim();
     if (thoughtContent.isNotEmpty) {
-      // Extract optional thought title (first bold line or short first paragraph)
       String? thoughtTitle;
       String body = thoughtContent;
       final thoughtLines = thoughtContent.split('\n');
@@ -372,13 +409,150 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
     return items;
   }
 
+  Widget _buildPulsingDot({Color? color}) {
+    final dotColor = color ?? AppColors.accentBlueBright;
+    return AnimatedBuilder(
+      animation: _pulseAnim,
+      builder: (context, child) {
+        return Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: dotColor,
+            boxShadow: [
+              BoxShadow(
+                color: dotColor.withValues(alpha: 0.25 + 0.5 * _pulseAnim.value),
+                blurRadius: 3 + 3 * _pulseAnim.value,
+                spreadRadius: 0.5 + 1.5 * _pulseAnim.value,
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildLiveAgentHeader(ColorScheme scheme, bool isDark) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF14171F) : scheme.primaryContainer.withValues(alpha: 0.25),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isDark ? const Color(0xFF2A3142) : scheme.primary.withValues(alpha: 0.2),
+          width: 0.8,
+        ),
+      ),
+      child: Row(
+        children: [
+          _buildPulsingDot(),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Row(
+              children: [
+                Text(
+                  'Agent en cours d\'exécution',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? AppColors.accentBlueBright : scheme.primary,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF1F2430) : scheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    _formatDuration(_secondsElapsed),
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontFamily: 'monospace',
+                      fontWeight: FontWeight.w500,
+                      color: isDark ? const Color(0xFF9E9FA8) : scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                if (widget.modelLabel != null && widget.modelLabel!.isNotEmpty) ...[
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      widget.modelLabel!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontFamily: 'monospace',
+                        color: isDark ? const Color(0xFF71717A) : scheme.outline,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (widget.onStop != null) ...[
+            const SizedBox(width: 6),
+            GestureDetector(
+              onTap: () {
+                HapticFeedback.heavyImpact();
+                widget.onStop?.call();
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF3B151A) : scheme.errorContainer,
+                  borderRadius: BorderRadius.circular(5),
+                  border: Border.all(
+                    color: isDark ? const Color(0xFF7F1D1D) : scheme.error,
+                    width: 0.7,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.stop_rounded,
+                      size: 11,
+                      color: isDark ? const Color(0xFFFCA5A5) : scheme.onErrorContainer,
+                    ),
+                    const SizedBox(width: 3),
+                    Text(
+                      'Arrêter',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? const Color(0xFFFCA5A5) : scheme.onErrorContainer,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final raw = widget.thoughtText ?? '';
     final steps = _parseSteps(raw);
     if (steps.isEmpty && !widget.isStreaming) {
       return const SizedBox.shrink();
     }
+
+    final displaySteps = (!widget.isStreaming && steps.length > 5 && !_showAllSteps)
+        ? steps.take(4).toList()
+        : steps;
+    final hiddenCount = steps.length - displaySteps.length;
 
     return RepaintBoundary(
       child: Container(
@@ -387,8 +561,68 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            for (int i = 0; i < steps.length; i++)
-              _buildStepRow(steps[i], i),
+            if (widget.isStreaming)
+              _buildLiveAgentHeader(scheme, isDark),
+            for (int i = 0; i < displaySteps.length; i++)
+              _buildStepRow(displaySteps[i], i),
+            if (hiddenCount > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 2, bottom: 4),
+                child: InkWell(
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    setState(() => _showAllSteps = true);
+                  },
+                  borderRadius: BorderRadius.circular(4),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.unfold_more, size: 12, color: Color(0xFF8B8D98)),
+                        const SizedBox(width: 4),
+                        Text(
+                          '+ $hiddenCount more steps',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Color(0xFF8B8D98),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              )
+            else if (steps.length > 5 && _showAllSteps && !widget.isStreaming)
+              Padding(
+                padding: const EdgeInsets.only(top: 2, bottom: 4),
+                child: InkWell(
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    setState(() => _showAllSteps = false);
+                  },
+                  borderRadius: BorderRadius.circular(4),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.unfold_less, size: 12, color: Color(0xFF8B8D98)),
+                        SizedBox(width: 4),
+                        Text(
+                          'Show fewer steps',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Color(0xFF8B8D98),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -429,7 +663,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Action verb: "Explored", "Edited", "Run", "Thought", "Thinking"
+                  // Action verb: "Explored", "Edited", "Run", "Thought", "Thinking", "Subagent"
                   if (item.action.isNotEmpty) ...[
                     Text(
                       item.action,
@@ -456,6 +690,46 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
                       child: const Center(
                         child: Icon(
                           Icons.description_rounded,
+                          size: 8.5,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+
+                  // Subagent Icon Badge (🟣 purple icon)
+                  if (item.type == ExecutionStepType.subagent) ...[
+                    Container(
+                      margin: const EdgeInsets.only(right: 5),
+                      width: 13,
+                      height: 13,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF7C3AED),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Center(
+                        child: Icon(
+                          Icons.hub_rounded,
+                          size: 8.5,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+
+                  // Command Icon Badge (⬛ dark terminal icon)
+                  if (item.type == ExecutionStepType.command) ...[
+                    Container(
+                      margin: const EdgeInsets.only(right: 5),
+                      width: 13,
+                      height: 13,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF3F3F46),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Center(
+                        child: Icon(
+                          Icons.terminal_rounded,
                           size: 8.5,
                           color: Colors.white,
                         ),
@@ -528,7 +802,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
                     ),
                   ],
 
-                  // Running Spinner or Expand Chevron
+                  // Running Spinner / Pulse or Expand Chevron
                   if (item.isRunning) ...[
                     const SizedBox(width: 6),
                     const SizedBox(
@@ -536,7 +810,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
                       height: 10,
                       child: CircularProgressIndicator(
                         strokeWidth: 1.5,
-                        valueColor: AlwaysStoppedAnimation<Color>(AppColors.accentBlueBright),
+                        valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF0284C7)),
                       ),
                     ),
                   ],

@@ -317,4 +317,57 @@ func TestLiveAgentStreamingScenarios(t *testing.T) {
 			t.Fatalf("Expected session-X on client2, got %v", start2)
 		}
 	})
+
+	// Scenario 8: Long multi-tool turn with sequential deltas does not prematurely abort
+	t.Run("Scenario 8: Long multi-tool turn does not prematurely abort", func(t *testing.T) {
+		toolChunks := []string{
+			"Thinking: I will examine the project files first.",
+			"Explored 1 file",
+			"Ran go test ./pkg/gateway",
+			"Edited websocket.go +15 -2",
+			"All tests pass successfully.",
+		}
+		backend := &fakeRPCClient{
+			streamDeltas: toolChunks,
+		}
+		srv := newTestServer(backend)
+		defer srv.Close()
+
+		wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
+		client := dialWS(t, wsURL)
+		defer client.conn.Close()
+
+		client.send(t, map[string]string{
+			"type":      "send_prompt",
+			"requestId": "req-long-1",
+			"cascadeId": "casc-long-1",
+			"prompt":    "Run long refactor",
+		})
+
+		start := client.recv(t)
+		if start["type"] != "stream_start" {
+			t.Fatalf("Expected stream_start, got %v", start)
+		}
+
+		receivedDeltas := 0
+		var finalOutcome string
+		for {
+			msg := client.recv(t)
+			if msg["type"] == "stream_delta" {
+				receivedDeltas++
+			} else if msg["type"] == "stream_end" {
+				if data, ok := msg["data"].(map[string]interface{}); ok {
+					finalOutcome = fmt.Sprint(data["outcome"])
+				}
+				break
+			}
+		}
+
+		if receivedDeltas < len(toolChunks) {
+			t.Fatalf("Expected at least %d deltas, got %d", len(toolChunks), receivedDeltas)
+		}
+		if finalOutcome != "done" {
+			t.Fatalf("Expected outcome done, got %s", finalOutcome)
+		}
+	})
 }

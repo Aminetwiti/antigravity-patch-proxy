@@ -4,9 +4,9 @@ import '../../theme/app_colors.dart';
 
 /// Écran de supervision et de contrôle des Sidecars conteneurisés (cascade_plugins.proto).
 class SidecarsDashboardScreen extends StatefulWidget {
-  final DaemonApi api;
+  final DaemonApi? api;
 
-  const SidecarsDashboardScreen({super.key, required this.api});
+  const SidecarsDashboardScreen({super.key, this.api});
 
   @override
   State<SidecarsDashboardScreen> createState() => _SidecarsDashboardScreenState();
@@ -39,8 +39,17 @@ class _SidecarsDashboardScreenState extends State<SidecarsDashboardScreen> {
       _statusMessage = 'Récupération des fichiers de logs pour $sidecarId...';
     });
 
+    final api = widget.api;
+    if (api == null) {
+      setState(() {
+        _isLoadingLogs = false;
+        _statusMessage = 'Mode hors ligne (API non disponible)';
+      });
+      return;
+    }
+
     try {
-      final files = await widget.api.listSidecarLogFiles(sidecarId);
+      final files = await api.listSidecarLogFiles(sidecarId);
       if (!mounted) return;
       setState(() {
         _logFiles = files;
@@ -67,8 +76,17 @@ class _SidecarsDashboardScreenState extends State<SidecarsDashboardScreen> {
       _isLoadingLogs = true;
     });
 
+    final api = widget.api;
+    if (api == null) {
+      setState(() {
+        _isLoadingLogs = false;
+        _logContent = 'API non disponible';
+      });
+      return;
+    }
+
     try {
-      final content = await widget.api.getSidecarLogs(sidecarId, logFileName);
+      final content = await api.getSidecarLogs(sidecarId, logFileName);
       if (!mounted) return;
       setState(() {
         _logContent = content.isNotEmpty ? content : 'Aucun log enregistré.';
@@ -86,8 +104,10 @@ class _SidecarsDashboardScreenState extends State<SidecarsDashboardScreen> {
 
   Future<void> _sendSidecarAction(int action, String actionName) async {
     if (_selectedSidecar == null) return;
+    final api = widget.api;
+    if (api == null) return;
     try {
-      await widget.api.manageSidecar(_selectedSidecar!, action: action);
+      await api.manageSidecar(_selectedSidecar!, action: action);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

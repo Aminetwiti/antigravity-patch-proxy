@@ -1129,6 +1129,31 @@ class DaemonApi {
     return status == 'reverted' || (res.isNotEmpty && !res.containsKey('error'));
   }
 
+  /// Récupère les erreurs et avertissements LSP de linting pour un fichier (GetLintErrors).
+  Future<Map<String, dynamic>> getLintErrors(String filePath) async {
+    return await rpc('get_lint_errors', {
+      'filePath': filePath,
+    });
+  }
+
+  /// Récupère la définition LSP d'un symbole à une position (GetDefinition).
+  Future<Map<String, dynamic>> getDefinition(String filePath, int line, int character) async {
+    return await rpc('get_definition', {
+      'filePath': filePath,
+      'data': {
+        'line': line,
+        'character': character,
+      },
+    });
+  }
+
+  /// Récupère les états de validation et compilation du code (GetCodeValidationStates).
+  Future<Map<String, dynamic>> getCodeValidationStates(String workspacePath) async {
+    return await rpc('get_code_validation', {
+      'workspacePath': workspacePath,
+    });
+  }
+
   /// Bascule des étapes d'exécution en tâche de fond (SendStepsToBackground).
   Future<bool> sendStepsToBackground(
     String conversationId,

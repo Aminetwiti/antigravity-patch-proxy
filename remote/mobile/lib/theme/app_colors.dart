@@ -87,10 +87,11 @@ abstract class AppColors {
       Theme.of(context).brightness == Brightness.dark ? accentBlue : const Color(0xFF0969DA);
 }
 
-/// Ergonomic syntax sugar for accessing theme colors on any BuildContext
+/// Ergonomic syntax sugar for accessing theme colors and animation preference on any BuildContext
 extension ThemeContextExtension on BuildContext {
   ColorScheme get colors => Theme.of(this).colorScheme;
   bool get isDarkMode => Theme.of(this).brightness == Brightness.dark;
+  bool get shouldAnimate => AppMotion.shouldAnimate(this);
 }
 
 /// Radius scale (PC ag-doctor-ui --r-sm/md/lg/xl/pill)
@@ -110,4 +111,9 @@ abstract class AppMotion {
 
   static const Curve easeOut = Curves.easeOutCubic;
   static const Curve easeStandard = Curves.easeInOut;
+
+  /// Vérifie si les animations système sont actives (support Reduce Motion / Accessibility).
+  static bool shouldAnimate(BuildContext context) {
+    return !MediaQuery.disableAnimationsOf(context);
+  }
 }

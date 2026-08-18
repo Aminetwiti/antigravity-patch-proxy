@@ -203,7 +203,9 @@ class WalkthroughCard extends StatelessWidget {
   }
 }
 
-/// Carte interactive de fichiers modifiés avec bouton Review
+/// Session-result card — matches the Antigravity IDE inline summary:
+/// "3 files changed  +467  -223  >"  with a [Review] button.
+/// Collapsed by default; tapping the row expands the file list.
 class FilesChangedCard extends StatefulWidget {
   final List<String> files;
   final int additions;
@@ -222,135 +224,231 @@ class FilesChangedCard extends StatefulWidget {
   State<FilesChangedCard> createState() => _FilesChangedCardState();
 }
 
-class _FilesChangedCardState extends State<FilesChangedCard> {
-  bool _expanded = true;
+class _FilesChangedCardState extends State<FilesChangedCard>
+    with SingleTickerProviderStateMixin {
+  bool _expanded = false;
+  late final AnimationController _anim;
+  late final Animation<double> _sizeFactor;
+
+  @override
+  void initState() {
+    super.initState();
+    _anim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 200),
+    );
+    _sizeFactor = CurvedAnimation(parent: _anim, curve: Curves.easeOut);
+  }
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    super.dispose();
+  }
+
+  void _toggle() {
+    setState(() => _expanded = !_expanded);
+    _expanded ? _anim.forward() : _anim.reverse();
+    HapticFeedback.selectionClick();
+  }
+
+  IconData _iconFor(String name) {
+    final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+    switch (ext) {
+      case 'dart': return Icons.flutter_dash_outlined;
+      case 'go': return Icons.code_rounded;
+      case 'ts': case 'tsx': case 'js': case 'jsx': return Icons.javascript_rounded;
+      case 'json': case 'yaml': case 'yml': case 'toml': return Icons.settings_suggest_outlined;
+      case 'md': case 'txt': return Icons.article_outlined;
+      case 'sh': case 'bat': case 'ps1': return Icons.terminal_rounded;
+      default: return Icons.insert_drive_file_outlined;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final count = widget.files.length;
-    final title = '$count ${count > 1 ? 'files changed' : 'file changed'}';
+    final label = '$count ${count > 1 ? 'files changed' : 'file changed'}';
+
+    final positiveColor = isDark ? AppColors.positive : const Color(0xFF1A7F37);
+    final negativeColor = isDark ? AppColors.danger : const Color(0xFFCF222E);
 
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 6),
       decoration: BoxDecoration(
         color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
         borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: isDark ? AppColors.borderStrong : scheme.outlineVariant, width: 1),
+        border: Border.all(
+          color: isDark ? AppColors.borderStrong : scheme.outlineVariant,
+          width: 1,
+        ),
       ),
+      clipBehavior: Clip.hardEdge,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Header
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(
-              children: [
-                GestureDetector(
-                  onTap: () => setState(() => _expanded = !_expanded),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        title,
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w500,
-                          color: scheme.onSurface,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '+${widget.additions} -${widget.deletions}',
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w600,
-                          color: isDark ? AppColors.positive : const Color(0xFF1A7F37),
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      Icon(
-                        _expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-                        size: 16,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ],
-                  ),
-                ),
-                const Spacer(),
-                GestureDetector(
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    widget.onReview();
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(AppRadius.sm),
-                      border: Border.all(color: isDark ? AppColors.borderSubtle : scheme.outlineVariant, width: 1),
+          // ── Header row ───────────────────────────────────────────────
+          InkWell(
+            onTap: _toggle,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                children: [
+                  // File-count label
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                      color: scheme.onSurface,
+                      letterSpacing: -0.1,
                     ),
+                  ),
+                  const SizedBox(width: 10),
+                  // Additions
+                  if (widget.additions > 0) ...[
+                    Text(
+                      '+${widget.additions}',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: positiveColor,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                  ],
+                  // Deletions
+                  if (widget.deletions > 0)
+                    Text(
+                      '-${widget.deletions}',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: negativeColor,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  const Spacer(),
+                  // Expand chevron
+                  AnimatedRotation(
+                    turns: _expanded ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    child: Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      size: 16,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Review button
+                  GestureDetector(
+                    onTap: () {
+                      HapticFeedback.lightImpact();
+                      widget.onReview();
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? AppColors.surfaceInput
+                            : scheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(AppRadius.sm),
+                        border: Border.all(
+                          color: isDark
+                              ? AppColors.borderSubtle
+                              : scheme.outlineVariant,
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.rate_review_outlined,
+                              size: 12, color: scheme.primary),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Review',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: scheme.onSurface,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // ── Expandable file list ──────────────────────────────────────
+          SizeTransition(
+            sizeFactor: _sizeFactor,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Divider(height: 1, color: scheme.outlineVariant),
+                ...widget.files.map((file) {
+                  final normalized = file.replaceAll('\\', '/');
+                  final lastSlash = normalized.lastIndexOf('/');
+                  final fileName = lastSlash >= 0
+                      ? normalized.substring(lastSlash + 1)
+                      : normalized;
+                  final dirPath = lastSlash >= 0
+                      ? normalized.substring(0, lastSlash)
+                      : '';
+
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 5),
                     child: Row(
-                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.rate_review_outlined, size: 12, color: scheme.primary),
-                        const SizedBox(width: 5),
-                        Text(
-                          'Review',
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w600,
-                            color: scheme.onSurface,
+                        Icon(
+                          _iconFor(fileName),
+                          size: 13,
+                          color: scheme.primary.withValues(alpha: 0.75),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: RichText(
+                            overflow: TextOverflow.ellipsis,
+                            text: TextSpan(
+                              children: [
+                                TextSpan(
+                                  text: fileName,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                    color: scheme.onSurface,
+                                    fontFamily: 'monospace',
+                                  ),
+                                ),
+                                if (dirPath.isNotEmpty)
+                                  TextSpan(
+                                    text: '  $dirPath',
+                                    style: TextStyle(
+                                      fontSize: 10.5,
+                                      color: scheme.onSurfaceVariant
+                                          .withValues(alpha: 0.6),
+                                      fontFamily: 'monospace',
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
                         ),
                       ],
                     ),
-                  ),
-                ),
+                  );
+                }),
+                const SizedBox(height: 6),
               ],
             ),
           ),
-
-          // File list (if expanded)
-          if (_expanded && widget.files.isNotEmpty) ...[
-            Divider(height: 1, color: scheme.outlineVariant),
-            ...widget.files.map((file) {
-              final fileName = file.split(RegExp(r'[\\/]')).last;
-              final path = file.length > fileName.length ? file : '';
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                child: Row(
-                  children: [
-                    Icon(Icons.insert_drive_file_outlined, size: 13, color: scheme.onSurfaceVariant),
-                    const SizedBox(width: 8),
-                    Text(
-                      fileName,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                        color: scheme.onSurface,
-                      ),
-                    ),
-                    if (path.isNotEmpty) ...[
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          path,
-                          style: TextStyle(
-                            fontSize: 10.5,
-                            color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              );
-            }),
-            const SizedBox(height: 4),
-          ],
         ],
       ),
     );

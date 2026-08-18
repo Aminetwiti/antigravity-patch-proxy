@@ -181,6 +181,11 @@ class ChatMessage {
   final bool isQueued;
   final String? modelLabel;
 
+  /// Session result: list of modified file paths, populated at stream_end.
+  final List<String> filesChanged;
+  final int additions;
+  final int deletions;
+
   const ChatMessage({
     required this.id,
     required this.sender,
@@ -191,6 +196,9 @@ class ChatMessage {
     this.isError = false,
     this.isQueued = false,
     this.modelLabel,
+    this.filesChanged = const [],
+    this.additions = 0,
+    this.deletions = 0,
   });
 
   ChatMessage copyWith({
@@ -200,6 +208,9 @@ class ChatMessage {
     bool? isError,
     bool? isQueued,
     String? modelLabel,
+    List<String>? filesChanged,
+    int? additions,
+    int? deletions,
   }) {
     return ChatMessage(
       id: id,
@@ -211,6 +222,9 @@ class ChatMessage {
       isError: isError ?? this.isError,
       isQueued: isQueued ?? this.isQueued,
       modelLabel: modelLabel ?? this.modelLabel,
+      filesChanged: filesChanged ?? this.filesChanged,
+      additions: additions ?? this.additions,
+      deletions: deletions ?? this.deletions,
     );
   }
 }

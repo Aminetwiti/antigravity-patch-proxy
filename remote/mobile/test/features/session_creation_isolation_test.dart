@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/core/protocol/messages.dart';
-import 'package:mobile/features/sessions/display_options.dart';
 
 void main() {
   group('Session Creation and Active Focus Isolation Tests', () {
@@ -22,7 +21,6 @@ void main() {
       );
 
       String activeSessionId = newSession.id;
-      String activeSessionTitle = newSession.title;
       List<CascadeSession> sessions = [newSession, oldSession];
 
       // Simule une réponse serveur listSessions qui ne contient pas encore la nouvelle session (lag réseau)
@@ -66,7 +64,6 @@ void main() {
       );
 
       String activeSessionId = newSession.id;
-      String activeSessionTitle = 'hi';
       List<CascadeSession> sessions = [newSession, oldSession];
 
       // Push sessions_updated sans session-new-2

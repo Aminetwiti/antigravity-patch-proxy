@@ -4,12 +4,12 @@ import '../../theme/app_colors.dart';
 
 /// Écran Colosseum Battle Arena : Duel multi-modèles et arbitrage de branches.
 class BattleArenaScreen extends StatefulWidget {
-  final DaemonApi api;
+  final DaemonApi? api;
   final String workspaceUri;
 
   const BattleArenaScreen({
     super.key,
-    required this.api,
+    this.api,
     required this.workspaceUri,
   });
 
@@ -54,10 +54,12 @@ class _BattleArenaScreenState extends State<BattleArenaScreen> {
     });
 
     try {
+      final api = widget.api;
+      if (api == null) return;
       final selectedA = _availableModels.firstWhere((m) => m['uid'] == _modelA);
       final selectedB = _availableModels.firstWhere((m) => m['uid'] == _modelB);
 
-      await widget.api.startBattleMode(
+      await api.startBattleMode(
         widget.workspaceUri,
         prompt,
         modelUIDA: selectedA['uid'] as String?,
@@ -81,8 +83,10 @@ class _BattleArenaScreenState extends State<BattleArenaScreen> {
   }
 
   Future<void> _refreshDiff() async {
+    final api = widget.api;
+    if (api == null) return;
     try {
-      final diff = await widget.api.getBattleDiff(widget.workspaceUri);
+      final diff = await api.getBattleDiff(widget.workspaceUri);
       setState(() {
         _battleDiff = diff;
       });
@@ -90,8 +94,10 @@ class _BattleArenaScreenState extends State<BattleArenaScreen> {
   }
 
   Future<void> _eliminateArm(String armId) async {
+    final api = widget.api;
+    if (api == null) return;
     try {
-      await widget.api.eliminateBattleArm(armId);
+      await api.eliminateBattleArm(armId);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Branche $armId éliminée')),
@@ -106,8 +112,10 @@ class _BattleArenaScreenState extends State<BattleArenaScreen> {
   }
 
   Future<void> _concludeBattle(String winningArm, int strategy) async {
+    final api = widget.api;
+    if (api == null) return;
     try {
-      await widget.api.endBattleMode(winningArm, mergeStrategy: strategy);
+      await api.endBattleMode(winningArm, mergeStrategy: strategy);
       if (!mounted) return;
       setState(() {
         _isRunning = false;

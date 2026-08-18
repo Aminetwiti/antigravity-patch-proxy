@@ -24,6 +24,8 @@ import '../../widgets/background_task_output_sheet.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/unified_diff_viewer.dart';
 import '../../widgets/artifact_viewer_modal.dart';
+import '../../widgets/project_selector_bottom_sheet.dart';
+import '../../widgets/session_breadcrumb.dart';
 import 'widgets/execution_progress_view.dart';
 import 'widgets/overview_panel_view.dart';
 import 'widgets/session_review_view.dart';
@@ -37,6 +39,7 @@ class ChatStreamScreen extends StatefulWidget {
   final DaemonApi? api;
   final String activeSessionId;
   final String activeProjectName;
+  final String? activeSessionTitle;
   final bool isConnected;
 
   /// Client WebSocket partagé (null en tests/aperçu) — fournit l'état de
@@ -68,6 +71,7 @@ class ChatStreamScreen extends StatefulWidget {
     required this.api,
     required this.activeSessionId,
     required this.activeProjectName,
+    this.activeSessionTitle,
     this.workspacePath,
     this.projects,
     this.onSelectProject,
@@ -1216,12 +1220,29 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         _handleStreamEnded(msg, targetSessionId);
         final targetId = _streamRequestToMessageId[thKey] ?? 'ext-$requestId';
         final idx = buf.indexWhere((m) => m.id == targetId);
+
+        // Stamp the completed assistant message with the session's file-change summary.
+        final changedFiles = (_sessionModifiedFiles[targetSessionId] ?? {}).toList();
+        final modFileList = _sessionModifiedFileList[targetSessionId] ?? [];
+        final totalAdded = modFileList.fold(0, (s, f) => s + f.additions);
+        final totalRemoved = modFileList.fold(0, (s, f) => s + f.deletions);
+
         if (idx >= 0) {
-          buf[idx] = buf[idx].copyWith(isStreaming: false);
+          buf[idx] = buf[idx].copyWith(
+            isStreaming: false,
+            filesChanged: changedFiles.isNotEmpty ? changedFiles : null,
+            additions: changedFiles.isNotEmpty ? totalAdded : null,
+            deletions: changedFiles.isNotEmpty ? totalRemoved : null,
+          );
         } else {
           final lastStreamingIdx = buf.lastIndexWhere((m) => m.isStreaming);
           if (lastStreamingIdx >= 0) {
-            buf[lastStreamingIdx] = buf[lastStreamingIdx].copyWith(isStreaming: false);
+            buf[lastStreamingIdx] = buf[lastStreamingIdx].copyWith(
+              isStreaming: false,
+              filesChanged: changedFiles.isNotEmpty ? changedFiles : null,
+              additions: changedFiles.isNotEmpty ? totalAdded : null,
+              deletions: changedFiles.isNotEmpty ? totalRemoved : null,
+            );
           }
         }
         _externalThoughts.remove(thKey);
@@ -1230,6 +1251,20 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         if (isActiveSession && mounted) {
           setState(() {});
           _scrollToBottomSettled();
+        }
+      } else if (type == 'session_status_update') {
+        final data = msg['data'] as Map<String, dynamic>? ?? const {};
+        final status = (data['status'] ?? '').toString().toUpperCase();
+        final cascadeId = (msg['cascadeId'] ?? data['cascadeId'] ?? '').toString();
+        if (cascadeId.isNotEmpty) {
+          if (status.contains('RUNNING') || status.contains('BUSY')) {
+            _onStreamStarted(cascadeId);
+          } else if (status.contains('IDLE') || status.contains('READY') || status.contains('DONE')) {
+            _onStreamEnded(cascadeId);
+          }
+          if (mounted && cascadeId == widget.activeSessionId) {
+            setState(() {});
+          }
         }
       } else if (type == 'approval_expired') {
         final data = msg['data'] as Map<String, dynamic>? ?? const {};
@@ -1769,86 +1804,18 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   void _showProjectSelector(BuildContext context) {
     final projs = widget.projects ?? [];
     if (projs.isEmpty) return;
-    final scheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainer,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) {
-        bool isSelecting = false;
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.workspaces_outlined, size: 18, color: scheme.primary),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Sélectionner un projet de travail',
-                      style: TextStyle(
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w600,
-                        color: scheme.onSurface,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                ...projs.map((p) => ListTile(
-                      leading: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: scheme.primary.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Icon(Icons.folder_outlined, size: 18, color: scheme.primary),
-                      ),
-                      title: Text(
-                        p.name,
-                        style: TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w600,
-                          color: scheme.onSurface,
-                        ),
-                      ),
-                      subtitle: Text(
-                        p.path,
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          color: scheme.onSurfaceVariant,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      onTap: () {
-                        if (isSelecting) return;
-                        isSelecting = true;
-                        Navigator.of(ctx).pop();
-                        widget.onSelectProject?.call(p);
-                      },
-                    )),
-              ],
-            ),
-          ),
-        );
-      },
+    ProjectSelectorBottomSheet.show(
+      context,
+      projects: projs,
+      activeProjectPath: widget.activeProjectName,
+      onSelectProject: (p) => widget.onSelectProject?.call(p),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final hasKeyboard = MediaQuery.of(context).viewInsets.bottom > 0;
     Widget connectivityBanner = AnimatedSize(
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeOutQuart,
@@ -1867,12 +1834,20 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         ? widget.isConnected
         : _status == ConnectionStatus.connected;
 
-    final hasKeyboard = MediaQuery.of(context).viewInsets.bottom > 0;
+    final breadcrumb = SessionBreadcrumb(
+      projectName: widget.activeProjectName,
+      sessionTitle: widget.activeSessionTitle ?? '',
+      projects: widget.projects,
+      onSelectProject: (widget.projects != null && widget.projects!.length > 1)
+          ? () => _showProjectSelector(context)
+          : null,
+    );
 
     if (_messages.isEmpty && _currentApproval == null) {
       return Column(
         children: [
           connectivityBanner,
+          breadcrumb,
           if (!hasKeyboard) ...[
             _buildSyncStatusBadge(scheme),
             _buildQuotaBadge(scheme),
@@ -1924,6 +1899,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     return Column(
       children: [
         connectivityBanner,
+        breadcrumb,
         SessionTopTabs(
           activeTab: _currentTab,
           onTabChanged: (tab) {
@@ -2034,6 +2010,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             onEdit: _handleQueueEdit,
             onDelete: _handleQueueDelete,
           ),
+        if (_hasCurrentActiveStream)
+          _buildLiveAgentActivityDock(scheme),
         ChatInputBar(
           onSend: _handleSendMessage,
           isConnected: isConnected,
@@ -2045,6 +2023,110 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           onDraftChanged: setDraft,
         ),
       ],
+    );
+  }
+
+  Widget _buildLiveAgentActivityDock(ColorScheme scheme) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF131722) : scheme.primaryContainer.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isDark ? const Color(0xFF232D42) : scheme.primary.withValues(alpha: 0.3),
+          width: 1,
+        ),
+      ),
+      child: InkWell(
+        onTap: () {
+          _scrollToBottomSettled();
+          HapticFeedback.selectionClick();
+        },
+        borderRadius: BorderRadius.circular(8),
+        child: Row(
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.accentBlueBright,
+                boxShadow: [
+                  BoxShadow(
+                    color: Color(0x6638BDF8),
+                    blurRadius: 5,
+                    spreadRadius: 1.5,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Agent en cours d\'exécution…',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? AppColors.accentBlueBright : scheme.primary,
+                      letterSpacing: -0.1,
+                    ),
+                  ),
+                  Text(
+                    'Toucher pour suivre les actions en direct',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      color: isDark ? const Color(0xFF8B8D98) : scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 6),
+            GestureDetector(
+              onTap: () {
+                HapticFeedback.heavyImpact();
+                _handleStopGeneration();
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF381519) : scheme.errorContainer,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: isDark ? const Color(0xFF7F1D1D) : scheme.error,
+                    width: 0.8,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.stop_rounded,
+                      size: 12,
+                      color: isDark ? const Color(0xFFFCA5A5) : scheme.onErrorContainer,
+                    ),
+                    const SizedBox(width: 3),
+                    Text(
+                      'Arrêter',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? const Color(0xFFFCA5A5) : scheme.onErrorContainer,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -2109,59 +2191,58 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       case SessionTabType.chat:
         final visibleList = _visibleMessages;
         final hiddenCount = _hiddenOlderCount;
-        return Scrollbar(
-          controller: _scrollController,
-          thumbVisibility: false,
-          child: ListView(
-            controller: _scrollController,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            children: [
-            if (hiddenCount > 0)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Center(
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: _loadMoreOlderMessages,
-                      borderRadius: BorderRadius.circular(20),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1E2025),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: const Color(0xFF2C2F36),
-                            width: 1,
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        final scheme = Theme.of(context).colorScheme;
+
+        final headerWidgets = <Widget>[
+          if (hiddenCount > 0)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Center(
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: _loadMoreOlderMessages,
+                    borderRadius: BorderRadius.circular(AppRadius.pill),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHigh,
+                        borderRadius: BorderRadius.circular(AppRadius.pill),
+                        border: Border.all(
+                          color: isDark ? AppColors.borderSubtle : scheme.outlineVariant,
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.history_rounded,
+                            size: 14,
+                            color: AppColors.accentBlue,
                           ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.history_rounded,
-                              size: 14,
+                          const SizedBox(width: 6),
+                          Text(
+                            'Charger les $hiddenCount messages précédents',
+                            style: const TextStyle(
+                              fontSize: 11.5,
                               color: AppColors.accentBlue,
+                              fontWeight: FontWeight.w500,
                             ),
-                            const SizedBox(width: 6),
-                            Text(
-                              'Charger les $hiddenCount messages précédents',
-                              style: const TextStyle(
-                                fontSize: 11.5,
-                                color: AppColors.accentBlue,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
                 ),
               ),
-            _buildReminderBanners(),
-            if (_subagents.isNotEmpty)
-              SubagentTreeCard(
+            ),
+          _buildReminderBanners(),
+          if (_subagents.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: SubagentTreeCard(
                 subagents: _subagents,
                 onOpenFullTree: () {
                   SubagentsTreeSheet.show(
@@ -2178,60 +2259,91 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                   );
                 },
               ),
-            ...visibleList.map((msg) => AnimatedContainer(
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeOutQuart,
-                  margin: const EdgeInsets.only(bottom: 16),
+            ),
+        ];
+
+        final totalCount = headerWidgets.length + visibleList.length;
+
+        return Scrollbar(
+          controller: _scrollController,
+          thumbVisibility: false,
+          child: ListView.builder(
+            controller: _scrollController,
+            physics: const BouncingScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            itemCount: totalCount,
+            itemBuilder: (ctx, index) {
+              if (index < headerWidgets.length) {
+                return headerWidgets[index];
+              }
+
+              final msgIndex = index - headerWidgets.length;
+              final msg = visibleList[msgIndex];
+              final isLatest = msgIndex == visibleList.length - 1;
+
+              final bubbleWidget = _MessageBubble(
+                message: msg,
+                api: widget.api,
+                workspacePath: widget.activeProjectName,
+                onLocalFile: _openLocalFile,
+                isThoughtExpanded: _expandedThoughts.contains(msg.id),
+                onToggleThought: () => setState(() {
+                  if (_expandedThoughts.contains(msg.id)) {
+                    _expandedThoughts.remove(msg.id);
+                  } else {
+                    _expandedThoughts.add(msg.id);
+                  }
+                }),
+                onProceedPlan: () => _handleSendMessage('Proceed', queued: false),
+                onViewPlan: () => setState(() => _currentTab = SessionTabType.plan),
+                onViewReview: () => setState(() => _currentTab = SessionTabType.review),
+                onStop: _handleStopGeneration,
+                onResend: (m) {
+                  final reqId = m.id.startsWith('pending-')
+                      ? m.id.substring('pending-'.length)
+                      : '';
+                  if (reqId.isEmpty) return;
+                  widget.api?.resendPending({'requestId': reqId});
+                  setState(() {
+                    _messages.removeWhere((item) => item.id == m.id);
+                  });
+                  AppToast.show(
+                    context,
+                    message: 'Prompt retransmis au daemon',
+                    icon: Icons.send_outlined,
+                    type: ToastType.success,
+                  );
+                },
+              );
+
+              // N'anime l'entrée que pour le dernier message en cours et uniquement si Reduce Motion est inactif
+              if (isLatest && ctx.shouldAnimate) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
                   child: TweenAnimationBuilder<double>(
                     key: ValueKey(msg.id),
-                    duration: const Duration(milliseconds: 400),
-                    curve: Curves.easeOutQuart,
+                    duration: AppMotion.slow,
+                    curve: AppMotion.easeOut,
                     tween: Tween(begin: 0.0, end: 1.0),
                     builder: (context, value, child) {
                       return Opacity(
                         opacity: value,
                         child: Transform.translate(
-                          offset: Offset(0, 10 * (1 - value)),
+                          offset: Offset(0, 8 * (1 - value)),
                           child: child,
                         ),
                       );
                     },
-                    child: _MessageBubble(
-                      message: msg,
-                      api: widget.api,
-                      workspacePath: widget.activeProjectName,
-                      onLocalFile: _openLocalFile,
-                      isThoughtExpanded: _expandedThoughts.contains(msg.id),
-                      onToggleThought: () => setState(() {
-                        if (_expandedThoughts.contains(msg.id)) {
-                          _expandedThoughts.remove(msg.id);
-                        } else {
-                          _expandedThoughts.add(msg.id);
-                        }
-                      }),
-                      onProceedPlan: () => _handleSendMessage('Proceed', queued: false),
-                      onViewPlan: () => setState(() => _currentTab = SessionTabType.plan),
-                      onViewReview: () => setState(() => _currentTab = SessionTabType.review),
-                      onResend: (msg) {
-                        final reqId = msg.id.startsWith('pending-')
-                            ? msg.id.substring('pending-'.length)
-                            : '';
-                        if (reqId.isEmpty) return;
-                        widget.api?.resendPending({'requestId': reqId});
-                        setState(() {
-                          _messages.removeWhere((m) => m.id == msg.id);
-                        });
-                        AppToast.show(
-                          context,
-                          message: 'Prompt retransmis au daemon',
-                          icon: Icons.send_outlined,
-                          type: ToastType.success,
-                        );
-                      },
-                    ),
+                    child: bubbleWidget,
                   ),
-                )),
-            ],
+                );
+              }
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: bubbleWidget,
+              );
+            },
           ),
         );
     }
@@ -2637,6 +2749,7 @@ class _MessageBubble extends StatelessWidget {
   final VoidCallback? onProceedPlan;
   final VoidCallback? onViewPlan;
   final VoidCallback? onViewReview;
+  final VoidCallback? onStop;
   final ValueChanged<ChatMessage>? onResend;
 
   /// P5 : tap sur un lien markdown file:/// → ouvre le fichier distant.
@@ -2652,6 +2765,7 @@ class _MessageBubble extends StatelessWidget {
     this.onProceedPlan,
     this.onViewPlan,
     this.onViewReview,
+    this.onStop,
     this.onResend,
   });
 
@@ -2744,7 +2858,7 @@ class _MessageBubble extends StatelessWidget {
                   ),
                 ),
               ),
-            if (hasThought || (message.isStreaming && !hasContent)) ...[
+            if (hasThought || message.isStreaming) ...[
               ExecutionProgressView(
                 messageId: message.id,
                 thoughtText: message.thought,
@@ -2752,6 +2866,7 @@ class _MessageBubble extends StatelessWidget {
                 modelLabel: message.modelLabel,
                 initiallyExpanded: isThoughtExpanded,
                 onToggleExpand: onToggleThought,
+                onStop: onStop,
               ),
             ],
             if (isError && (message.text.length < 120 && !message.text.contains('\n') && !message.text.startsWith('#')))
@@ -2806,6 +2921,16 @@ class _MessageBubble extends StatelessWidget {
                   summary: 'Le plan d\'implémentation est prêt. Vous pouvez l\'examiner ou approuver directement.',
                   onProceed: onProceedPlan ?? () {},
                   onViewPlan: onViewPlan ?? () {},
+                ),
+              if (!message.isStreaming && message.filesChanged.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: FilesChangedCard(
+                    files: message.filesChanged,
+                    additions: message.additions,
+                    deletions: message.deletions,
+                    onReview: onViewReview ?? () {},
+                  ),
                 ),
             ],
             if (!isCompact) ...[
@@ -2945,8 +3070,6 @@ class _MessageBubble extends StatelessWidget {
   }
 }
 
-/// P1 — bouton flottant « retour en bas » : pilule sombre avec icône ↓ et
-/// badge compteur des nouveaux messages arrivés pendant la lecture.
 class _JumpToBottomButton extends StatelessWidget {
   final int count;
   final VoidCallback onTap;
@@ -2956,18 +3079,22 @@ class _JumpToBottomButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Material(
       color: Colors.transparent,
       child: InkWell(
         key: const Key('jump-to-bottom'),
         onTap: onTap,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(AppRadius.pill),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
-            color: const Color(0xFF1E2025),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: const Color(0xFF2C2F36), width: 1),
+            color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(AppRadius.pill),
+            border: Border.all(
+              color: isDark ? AppColors.borderSubtle : scheme.outlineVariant,
+              width: 1,
+            ),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.35),
@@ -3030,10 +3157,10 @@ class _WelcomeEmptyState extends StatelessWidget {
           width: 56,
           height: 56,
           decoration: BoxDecoration(
-            color: scheme.surfaceContainerHighest,
+            color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(AppRadius.lg),
             border: Border.all(
-              color: scheme.outlineVariant,
+              color: isDark ? AppColors.borderSubtle : scheme.outlineVariant,
               width: 1,
             ),
           ),
@@ -3062,10 +3189,10 @@ class _WelcomeEmptyState extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest,
+              color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
-                color: isDark ? const Color(0xFF2C2F36) : scheme.outlineVariant.withValues(alpha: 0.5),
+                color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.5),
                 width: 1,
               ),
             ),

@@ -772,6 +772,31 @@ func formatToolCallStep(name string, argsRaw json.RawMessage) string {
 			return "Explored " + arg
 		}
 		return "Explored 1 file"
+	case strings.Contains(lowerName, "invoke_subagent") || strings.Contains(lowerName, "define_subagent") || strings.Contains(lowerName, "subagent"):
+		if arg != "" {
+			return "Subagent " + arg
+		}
+		return "Spawned subagent"
+	case strings.Contains(lowerName, "send_message"):
+		if arg != "" {
+			return "Sent to " + arg
+		}
+		return "Sent message"
+	case strings.Contains(lowerName, "generate_image"):
+		if arg != "" {
+			return "Generated " + arg
+		}
+		return "Generated image"
+	case strings.Contains(lowerName, "schedule"):
+		if arg != "" {
+			return "Scheduled " + arg
+		}
+		return "Scheduled task"
+	case strings.Contains(lowerName, "browse") || strings.Contains(lowerName, "read_url"):
+		if arg != "" {
+			return "Browsed " + arg
+		}
+		return "Browsed web"
 	default:
 		cleanTool := strings.ReplaceAll(name, "_", " ")
 		if arg != "" {
