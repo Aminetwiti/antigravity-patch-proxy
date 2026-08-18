@@ -50,6 +50,10 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
   List<Map<String, dynamic>> _uploads = [];
   bool _uploadsExpanded = false;
 
+  bool _isLoadingWorktrees = false;
+  List<Map<String, dynamic>> _worktrees = [];
+  bool _worktreesExpanded = false;
+
   @override
   void didUpdateWidget(covariant RightSidebarDrawer oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -58,10 +62,75 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
         _artifacts.clear();
         _uploads.clear();
         _filesChanged.clear();
+        _worktrees.clear();
         _artifactsExpanded = false;
         _uploadsExpanded = false;
         _filesChangedExpanded = false;
+        _worktreesExpanded = false;
       });
+    }
+  }
+
+  Future<void> _fetchWorktrees() async {
+    if (widget.api == null) return;
+    setState(() => _isLoadingWorktrees = true);
+    try {
+      final list = await widget.api!.listGitWorktrees(
+        workspacePath: widget.workspacePath.isNotEmpty ? widget.workspacePath : null,
+      );
+      if (!mounted) return;
+      setState(() {
+        _worktrees = list;
+        _isLoadingWorktrees = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _isLoadingWorktrees = false);
+    }
+  }
+
+  Future<void> _createNewWorktreeDialog() async {
+    final branchCtrl = TextEditingController();
+    final created = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Nouveau Git Worktree', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Crée une copie isolée du dépôt pour exécuter des tâches ou des agents en parallèle sans conflits.',
+              style: TextStyle(fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: branchCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Nom de la branche / worktree',
+                hintText: 'feat-refactor-auth',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Annuler')),
+          FilledButton(
+            onPressed: () {
+              if (branchCtrl.text.trim().isNotEmpty) {
+                Navigator.of(ctx).pop(true);
+              }
+            },
+            child: const Text('Créer'),
+          ),
+        ],
+      ),
+    );
+
+    if (created == true && branchCtrl.text.trim().isNotEmpty && widget.api != null) {
+      await widget.api!.createWorktree(branchCtrl.text.trim());
+      _fetchWorktrees();
     }
   }
 
@@ -499,6 +568,130 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
                                         ),
                                       )).toList(),
                                     ),
+                        ),
+                    ],
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _ContextItemRow(
+                        title: 'Git Worktrees',
+                        badgeCount: _worktrees.length,
+                        onTap: () {
+                          setState(() {
+                            _worktreesExpanded = !_worktreesExpanded;
+                          });
+                          if (_worktreesExpanded && _worktrees.isEmpty) {
+                            _fetchWorktrees();
+                          }
+                        },
+                        isExpanded: _worktreesExpanded,
+                      ),
+                      if (_worktreesExpanded)
+                        AnimatedContainer(
+                          duration: AppMotion.fast,
+                          padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
+                          child: _isLoadingWorktrees
+                              ? Padding(
+                                  padding: const EdgeInsets.all(8.0),
+                                  child: Center(
+                                    child: SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor: AlwaysStoppedAnimation(scheme.primary),
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              : Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    if (_worktrees.isEmpty)
+                                      Padding(
+                                        padding: const EdgeInsets.all(8.0),
+                                        child: Text(
+                                          'Aucun worktree actif',
+                                          style: TextStyle(color: scheme.outline, fontSize: 12),
+                                        ),
+                                      )
+                                    else
+                                      ..._worktrees.map((wt) {
+                                        final branch = wt['branch'] ?? wt['head'] ?? 'main';
+                                        final path = wt['path'] ?? wt['worktreeDirUri'] ?? '';
+                                        final isCurrent = wt['isCurrent'] == true ||
+                                            (widget.workspacePath.isNotEmpty && path.toString().contains(widget.workspacePath));
+
+                                        return InkWell(
+                                          onTap: () async {
+                                            if (path.toString().isNotEmpty && widget.api != null) {
+                                              await widget.api!.checkoutGitWorktree(path.toString());
+                                              _fetchWorktrees();
+                                            }
+                                          },
+                                          borderRadius: BorderRadius.circular(AppRadius.sm),
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                                            child: Row(
+                                              children: [
+                                                Icon(
+                                                  isCurrent ? Icons.check_circle : Icons.alt_route,
+                                                  size: 14,
+                                                  color: isCurrent ? scheme.primary : scheme.onSurfaceVariant,
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Expanded(
+                                                  child: Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    children: [
+                                                      Text(
+                                                        branch.toString(),
+                                                        style: TextStyle(
+                                                          fontSize: 12,
+                                                          fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+                                                          color: scheme.onSurface,
+                                                        ),
+                                                        overflow: TextOverflow.ellipsis,
+                                                      ),
+                                                      if (path.toString().isNotEmpty)
+                                                        Text(
+                                                          path.toString().split('/').last.split('\\').last,
+                                                          style: TextStyle(fontSize: 10, color: scheme.outline),
+                                                          overflow: TextOverflow.ellipsis,
+                                                        ),
+                                                    ],
+                                                  ),
+                                                ),
+                                                if (isCurrent)
+                                                  Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                                    decoration: BoxDecoration(
+                                                      color: scheme.primary.withValues(alpha: 0.12),
+                                                      borderRadius: BorderRadius.circular(4),
+                                                    ),
+                                                    child: Text(
+                                                      'Actif',
+                                                      style: TextStyle(fontSize: 10, color: scheme.primary, fontWeight: FontWeight.w600),
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                          ),
+                                        );
+                                      }),
+                                    const SizedBox(height: 6),
+                                    OutlinedButton.icon(
+                                      onPressed: _createNewWorktreeDialog,
+                                      icon: const Icon(Icons.add, size: 14),
+                                      label: const Text('Nouveau Worktree', style: TextStyle(fontSize: 11)),
+                                      style: OutlinedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        minimumSize: const Size(0, 30),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                         ),
                     ],
                   ),

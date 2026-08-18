@@ -133,6 +133,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
   ConnectionStatus _prevStatus = ConnectionStatus.disconnected;
 
   Map<String, dynamic> _savedSettings = const {};
+  StreamSubscription<Map<String, dynamic>>? _notifTapSub;
 
   @override
   void initState() {
@@ -170,6 +171,26 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       }
     };
     ApprovalNotifier.instance.init();
+    _notifTapSub = ApprovalNotifier.instance.taps.listen((tap) {
+      final cascadeId = tap['cascadeId'] as String? ?? '';
+      if (cascadeId.isNotEmpty && mounted) {
+        setState(() {
+          _activeSessionId = cascadeId;
+          final s = _sessions.firstWhere(
+            (e) => e.id == cascadeId,
+            orElse: () => CascadeSession(
+              id: cascadeId,
+              title: 'Session',
+              workspacePath: '',
+              status: 'CASCADE_STATUS_READY',
+              time: '',
+            ),
+          );
+          _activeSessionTitle = s.title;
+        });
+        _refreshContext();
+      }
+    });
     // Restaure la dernière session active (si encore valide) sans attendre
     // la liste distante — l'UI affiche immédiatement le bon contexte.
     SettingsStore.loadSession().then((s) {
@@ -297,11 +318,19 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         _wsClient.reconnectVersion,
         _resyncSessions,
         onCatchup: () async {
-          if (_activeSessionId.isNotEmpty && _api != null) {
-            final lastStep = _api!.getLastStepIndex(_activeSessionId);
+          if (_api == null) return;
+          final sessionsToSync = <String>{};
+          if (_activeSessionId.isNotEmpty) sessionsToSync.add(_activeSessionId);
+          for (final s in _sessions) {
+            if (s.status == 'CASCADE_STATUS_RUNNING' || s.status == 'CASCADE_STATUS_WAITING_USER') {
+              sessionsToSync.add(s.id);
+            }
+          }
+          for (final cid in sessionsToSync) {
+            final lastStep = _api!.getLastStepIndex(cid);
             try {
               await _api!.syncSession(
-                cascadeId: _activeSessionId,
+                cascadeId: cid,
                 lastStepIndex: lastStep,
               );
             } catch (_) {}
@@ -400,19 +429,31 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
   /// Crée une nouvelle conversation (bouton « + » de la barre latérale ET des
   /// onglets de session) puis bascule dessus. Workflow partagé entre
   /// LeftSidebarDrawer et ChatStreamScreen.
-  Future<void> _createNewConversation() async {
+  Future<void> _createNewConversation([ProjectItem? targetProject]) async {
     final api = _api;
     if (api == null) return;
     try {
-      var ws = _sessions.isNotEmpty ? _sessions.first.workspacePath : '';
+      var ws = targetProject?.path ?? '';
+      var projId = targetProject?.id ?? '';
+
       if (ws.isEmpty) {
-        final cur = _sessions.where((s) => s.id == _activeSessionId);
-        if (cur.isNotEmpty) ws = cur.first.workspacePath;
+        if (_projects.length == 1) {
+          ws = _projects.first.path;
+          projId = _projects.first.id;
+        } else if (_sessions.isNotEmpty) {
+          final cur = _sessions.where((s) => s.id == _activeSessionId);
+          if (cur.isNotEmpty) {
+            ws = cur.first.workspacePath;
+          } else {
+            ws = _sessions.first.workspacePath;
+          }
+        }
       }
       if (ws.isEmpty && _projects.isNotEmpty) {
         ws = _projects.first.path;
+        projId = _projects.first.id;
       }
-      final res = await api.createCascade(ws);
+      final res = await api.createCascade(ws, projectId: projId);
       final data = (res['data'] is Map<String, dynamic>)
           ? (res['data'] as Map<String, dynamic>)
           : (res['data'] is Map ? Map<String, dynamic>.from(res['data'] as Map) : res);
@@ -707,6 +748,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => ConversationHistoryScreen(
+          api: _api,
           sessions: _sessions,
           activeSessionId: _activeSessionId,
           onRefresh: _refreshSessions,
@@ -911,6 +953,8 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
 
   @override
   void dispose() {
+    _notifTapSub?.cancel();
+    _wsClient.statusNotifier.removeListener(_onStatusChanged);
     _sessionsSub?.cancel();
     _api?.dispose();
     _wsClient.dispose();

@@ -13,12 +13,14 @@ type BufferedEvent struct {
 }
 
 // SessionStreamBuffer conserve un tampon circulaire des N derniers événements
-// par session (cascadeId) pour permettre la reprise rapide lors d'une reconnexion mobile.
+// par session (cascadeId) ainsi que son dernier snapshot d'état pour permettre
+// la reprise instantanée sans perte de messages (Late-Joiner & Reconnection).
 type SessionStreamBuffer struct {
 	mu          sync.RWMutex
 	maxCapacity int
 	buffers     map[string][]*BufferedEvent
 	seqCounters map[string]int64
+	snapshots   map[string]map[string]interface{}
 }
 
 // NewSessionStreamBuffer instancie un gestionnaire de buffer avec une capacité par défaut.
@@ -30,6 +32,7 @@ func NewSessionStreamBuffer(maxCapacity int) *SessionStreamBuffer {
 		maxCapacity: maxCapacity,
 		buffers:     make(map[string][]*BufferedEvent),
 		seqCounters: make(map[string]int64),
+		snapshots:   make(map[string]map[string]interface{}),
 	}
 }
 
@@ -43,6 +46,11 @@ func (b *SessionStreamBuffer) RecordEvent(cascadeID string, msg OutgoingMessage)
 
 	b.seqCounters[cascadeID]++
 	stepIndex := b.seqCounters[cascadeID]
+
+	// Assure que le message enregistré porte le stepIndex dans son payload Data
+	if m, ok := msg.Data.(map[string]interface{}); ok {
+		m["stepIndex"] = stepIndex
+	}
 
 	ev := &BufferedEvent{
 		StepIndex: stepIndex,
@@ -82,12 +90,30 @@ func (b *SessionStreamBuffer) GetEventsSince(cascadeID string, lastStepIndex int
 	return missed, currentSeq
 }
 
-// ClearCascade purge les événements d'une session terminée.
+// SetSessionSnapshot met à jour le snapshot d'état complet de la session.
+func (b *SessionStreamBuffer) SetSessionSnapshot(cascadeID string, snapshot map[string]interface{}) {
+	if cascadeID == "" || snapshot == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.snapshots[cascadeID] = snapshot
+}
+
+// GetSessionSnapshot renvoie le snapshot d'état le plus récent d'une session.
+func (b *SessionStreamBuffer) GetSessionSnapshot(cascadeID string) map[string]interface{} {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.snapshots[cascadeID]
+}
+
+// ClearCascade purge les événements et le snapshot d'une session terminée.
 func (b *SessionStreamBuffer) ClearCascade(cascadeID string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	delete(b.buffers, cascadeID)
 	delete(b.seqCounters, cascadeID)
+	delete(b.snapshots, cascadeID)
 }
 
 // LastStepIndex renvoie le dernier StepIndex enregistré pour une cascade.

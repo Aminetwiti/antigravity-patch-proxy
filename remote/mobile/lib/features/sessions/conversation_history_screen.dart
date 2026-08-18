@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:mobile/core/protocol/daemon_api.dart';
 import 'package:mobile/core/protocol/messages.dart';
+import 'package:mobile/core/protocol/session_parser.dart';
 import 'package:mobile/core/protocol/workspace_path.dart';
 import 'package:mobile/theme/app_colors.dart';
 import 'display_options.dart';
@@ -9,6 +11,7 @@ import 'display_options.dart';
 /// Affiche la liste complète de toutes les conversations avec recherche en temps réel,
 /// filtrage par workspace/projet, indicateurs de sessions actives/en cours et sélection rapide.
 class ConversationHistoryScreen extends StatefulWidget {
+  final DaemonApi? api;
   final List<CascadeSession> sessions;
   final String activeSessionId;
   final Function(String sessionId) onSessionSelected;
@@ -17,6 +20,7 @@ class ConversationHistoryScreen extends StatefulWidget {
 
   const ConversationHistoryScreen({
     super.key,
+    this.api,
     required this.sessions,
     required this.activeSessionId,
     required this.onSessionSelected,
@@ -37,6 +41,11 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
   SessionSortBy _sortBy = SessionSortBy.lastUpdated;
   SessionSubtitle _subtitle = SessionSubtitle.worktree;
 
+  List<CascadeSession>? _fetchedSessions;
+  bool _isLoading = false;
+
+  List<CascadeSession> get _allSessions => _fetchedSessions ?? widget.sessions;
+
   @override
   void initState() {
     super.initState();
@@ -45,6 +54,27 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
         _searchQuery = _searchController.text.trim().toLowerCase();
       });
     });
+    if (widget.api != null) {
+      _loadAllSessions();
+    }
+  }
+
+  Future<void> _loadAllSessions() async {
+    if (widget.api == null) return;
+    setState(() => _isLoading = true);
+    try {
+      final res = await widget.api!.listAllSessions();
+      final parsed = SessionParser.parseListSessions(res);
+      if (!mounted) return;
+      setState(() {
+        if (parsed.isNotEmpty) {
+          _fetchedSessions = parsed;
+        }
+        _isLoading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   @override
@@ -56,7 +86,7 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
   @override
   Widget build(BuildContext context) {
     // Filtrer STRICTEMENT les sessions disponibles (non archivées et non supprimées)
-    final available = widget.sessions.where((s) => s.isAvailable && s.id.isNotEmpty).toList();
+    final available = _allSessions.where((s) => s.isAvailable && s.id.isNotEmpty).toList();
 
     // Extraire tous les workspaces distincts pour le filtre
     final workspaces = available
@@ -125,15 +155,15 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
           ),
         ),
         actions: [
-          if (widget.onRefresh != null)
-            IconButton(
-              icon: Icon(Icons.refresh_rounded, size: 20, color: scheme.onSurfaceVariant),
-              onPressed: () {
-                HapticFeedback.selectionClick();
-                widget.onRefresh!();
-              },
-              tooltip: 'Actualiser',
-            ),
+          IconButton(
+            icon: Icon(Icons.refresh_rounded, size: 20, color: scheme.onSurfaceVariant),
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              _loadAllSessions();
+              widget.onRefresh?.call();
+            },
+            tooltip: 'Actualiser',
+          ),
           DisplayOptionsMenuButton(
             selectedGroupBy: _groupBy,
             selectedSortBy: _sortBy,
@@ -157,6 +187,7 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
       body: SafeArea(
         child: Column(
           children: [
+            if (_isLoading) const LinearProgressIndicator(minHeight: 2),
             // ── Search & Filter Bar ──────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),

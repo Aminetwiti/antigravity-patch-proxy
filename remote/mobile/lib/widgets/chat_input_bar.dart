@@ -1050,12 +1050,12 @@ class _ChatInputBarState extends State<ChatInputBar> {
       top: false,
       bottom: !hasKeyboard,
       child: Container(
-        margin: EdgeInsets.fromLTRB(12, 4, 12, hasKeyboard ? 4 : 8),
+        margin: EdgeInsets.fromLTRB(12, 2, 12, hasKeyboard ? 2 : 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Padding(
-              padding: const EdgeInsets.only(bottom: 6),
+              padding: EdgeInsets.only(bottom: hasKeyboard ? 3 : 6),
               child: ActionPillsBar(
                 onActionSelected: (cmd) {
                   _insertTextAtCursor(cmd);
@@ -1063,7 +1063,10 @@ class _ChatInputBarState extends State<ChatInputBar> {
               ),
             ),
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: hasKeyboard ? 8 : 12,
+              ),
               decoration: BoxDecoration(
                 color: scheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(20),

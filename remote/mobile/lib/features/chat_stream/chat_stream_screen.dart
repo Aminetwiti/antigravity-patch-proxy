@@ -27,6 +27,8 @@ import 'widgets/execution_progress_view.dart';
 import 'widgets/overview_panel_view.dart';
 import 'widgets/session_review_view.dart';
 import '../subagents/subagents_tree_sheet.dart';
+import '../subagents/models/subagent_item.dart';
+import '../subagents/widgets/subagent_tree_card.dart';
 import 'package:mobile/theme/app_colors.dart';
 
 class ChatStreamScreen extends StatefulWidget {
@@ -178,13 +180,15 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   final Map<String, List<SessionModifiedFile>> _sessionModifiedFileList = {};
   final Map<String, List<String>> _sessionArtifacts = {};
   final Map<String, int> _sessionSubagentCounts = {};
+  final Map<String, List<SubagentItem>> _sessionSubagents = {};
   final Map<String, String?> _sessionActiveArtifacts = {};
   final Map<String, String?> _sessionPlanTexts = {};
 
   Set<String> get _modifiedFiles => _sessionModifiedFiles.putIfAbsent(widget.activeSessionId, () => {});
   List<SessionModifiedFile> get _modifiedFileList => _sessionModifiedFileList.putIfAbsent(widget.activeSessionId, () => []);
   List<String> get _artifacts => _sessionArtifacts.putIfAbsent(widget.activeSessionId, () => []);
-  int get _subagentsCount => _sessionSubagentCounts[widget.activeSessionId] ?? 0;
+  int get _subagentsCount => _sessionSubagentCounts[widget.activeSessionId] ?? _subagents.length;
+  List<SubagentItem> get _subagents => _sessionSubagents.putIfAbsent(widget.activeSessionId, () => []);
   String? get _activeArtifact => _sessionActiveArtifacts[widget.activeSessionId];
   set _activeArtifact(String? art) => _sessionActiveArtifacts[widget.activeSessionId] = art;
   String? get _latestPlanText => _sessionPlanTexts[widget.activeSessionId];
@@ -418,6 +422,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         }
 
         final isStreaming = data['isStreaming'] == true;
+        final isStreamingLive = _activeStreamingSessions.contains(targetSession);
         final activeReqId = data['activeRequestId']?.toString() ?? 'live';
         if (isStreaming && !parsed.any((m) => m.id == 'ext-$activeReqId' || m.isStreaming)) {
           parsed.add(ChatMessage(
@@ -430,20 +435,22 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         }
 
         final buf = _sessionMessages.putIfAbsent(targetSession, () => []);
-        if (parsed.isNotEmpty || buf.isEmpty) {
-          buf
-            ..clear()
-            ..addAll(parsed);
-        }
-        if (isStreaming) {
-          _onStreamStarted(targetSession);
-          // Catch up any in-flight live events from the daemon's StepRecovery buffer
-          widget.api?.syncSession(cascadeId: targetSession, lastStepIndex: 0);
-          if (data['hasPendingApproval'] == true) {
-            widget.api?.getPendingApproval(targetSession);
+        if (!isStreamingLive) {
+          if (parsed.isNotEmpty || buf.isEmpty) {
+            buf
+              ..clear()
+              ..addAll(parsed);
           }
-        } else {
-          _onStreamEnded(targetSession);
+          if (isStreaming) {
+            _onStreamStarted(targetSession);
+            // Catch up any in-flight live events from the daemon's StepRecovery buffer
+            widget.api?.syncSession(cascadeId: targetSession, lastStepIndex: 0);
+            if (data['hasPendingApproval'] == true) {
+              widget.api?.getPendingApproval(targetSession);
+            }
+          } else {
+            _onStreamEnded(targetSession);
+          }
         }
 
         if (widget.activeSessionId == targetSession) {
@@ -491,21 +498,40 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         if (plan != null && plan.isNotEmpty) {
           _sessionPlanTexts[targetSession] = plan;
         }
+        final targetModFiles = _sessionModifiedFiles.putIfAbsent(targetSession, () => {});
+        final targetModFileList = _sessionModifiedFileList.putIfAbsent(targetSession, () => []);
         for (final p in modFiles) {
           var clean = p.replaceAll('\\', '/');
           if (clean.startsWith('file:///')) clean = clean.substring(8);
           if (clean.startsWith('file://')) clean = clean.substring(7);
-          if (!_modifiedFiles.contains(clean)) {
-            _modifiedFiles.add(clean);
+          if (!targetModFiles.contains(clean)) {
+            targetModFiles.add(clean);
           }
-          if (!_modifiedFileList.any((f) => f.path == clean)) {
-            _modifiedFileList.add(SessionModifiedFile(path: clean, additions: 1, deletions: 0));
+          if (!targetModFileList.any((f) => f.path == clean)) {
+            targetModFileList.add(SessionModifiedFile(path: clean, additions: 1, deletions: 0));
           }
+        }
+        if (subCount > 0) {
+          _fetchSubagentsForSession(targetSession);
         }
         if (widget.activeSessionId == targetSession) {
           setState(() {});
         }
       }
+    } catch (_) {}
+  }
+
+  Future<void> _fetchSubagentsForSession(String targetSession) async {
+    final api = widget.api;
+    if (api == null || targetSession.isEmpty) return;
+    try {
+      final raw = await api.getSubagents(targetSession);
+      if (!mounted) return;
+      final parsed = raw.map((m) => SubagentItem.fromJson(m)).toList();
+      setState(() {
+        _sessionSubagents[targetSession] = parsed;
+        _sessionSubagentCounts[targetSession] = parsed.length;
+      });
     } catch (_) {}
   }
 
@@ -1633,12 +1659,16 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         ? widget.isConnected
         : _status == ConnectionStatus.connected;
 
+    final hasKeyboard = MediaQuery.of(context).viewInsets.bottom > 0;
+
     if (_messages.isEmpty && _currentApproval == null) {
       return Column(
         children: [
           connectivityBanner,
-          _buildSyncStatusBadge(scheme),
-          _buildQuotaBadge(scheme),
+          if (!hasKeyboard) ...[
+            _buildSyncStatusBadge(scheme),
+            _buildQuotaBadge(scheme),
+          ],
           Expanded(
             child: Center(
               child: SingleChildScrollView(
@@ -1698,8 +1728,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           }),
           onNewTab: widget.onNewConversation,
         ),
-        _buildSyncStatusBadge(scheme),
-        _buildQuotaBadge(scheme),
+        if (!hasKeyboard) ...[
+          _buildSyncStatusBadge(scheme),
+          _buildQuotaBadge(scheme),
+        ],
         Expanded(
           child: Stack(
             children: [
@@ -1891,6 +1923,24 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                 ),
               ),
             _buildReminderBanners(),
+            if (_subagents.isNotEmpty)
+              SubagentTreeCard(
+                subagents: _subagents,
+                onOpenFullTree: () {
+                  SubagentsTreeSheet.show(
+                    context,
+                    api: widget.api,
+                    cascadeId: widget.activeSessionId,
+                  );
+                },
+                onSelectSubagent: (sub) {
+                  SubagentsTreeSheet.show(
+                    context,
+                    api: widget.api,
+                    cascadeId: widget.activeSessionId,
+                  );
+                },
+              ),
             ...visibleList.map((msg) => AnimatedContainer(
                   duration: const Duration(milliseconds: 300),
                   curve: Curves.easeOutQuart,

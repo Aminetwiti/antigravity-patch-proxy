@@ -51,11 +51,10 @@ class ApprovalNotifier {
   String? _lastTaskDoneCascade;
   DateTime? _lastTaskDoneAt;
 
-  /// Auto-annulation différée des notifications de tâche (C7/UX) : on garde
-  /// une référence pour pouvoir l'annuler avant son déclenchement quand
-  /// l'utilisateur répond (côté mobile) à une notification d'approbation
-  /// « Action requise » via une action inline.
-  Timer? _autoCancelTimer;
+  /// Auto-annulation différée des notifications de tâche (C7/UX) : isolée par
+  /// ID de notification pour éviter que le démarrage d'une tâche B n'écrase
+  /// le timer d'auto-nettoyage d'une tâche A.
+  final Map<int, Timer> _autoCancelTimers = {};
 
   bool _initialized = false;
 
@@ -284,9 +283,11 @@ class ApprovalNotifier {
 
     // Auto-annulation différée (5 s) : c'est un démarrage, pas un événement
     // critique — la notification ne doit pas s'accumuler dans le tiroir.
-    _autoCancelTimer?.cancel();
-    _autoCancelTimer = Timer(const Duration(seconds: 5), () {
-      plugin.cancel(cascadeId.hashCode);
+    final notifId = cascadeId.hashCode;
+    _autoCancelTimers[notifId]?.cancel();
+    _autoCancelTimers[notifId] = Timer(const Duration(seconds: 5), () {
+      plugin.cancel(notifId);
+      _autoCancelTimers.remove(notifId);
     });
   }
 
@@ -380,13 +381,11 @@ class ApprovalNotifier {
     );
     debugPrint('[Notifier] task notification -> $cascadeId ($outcome)');
 
-    // Auto-annulation différée (5 s) pour ne pas laisser de notification
-    // « Tâche terminée » s'accumuler. Référence annulable : si l'utilisateur
-    // répond via une action inline d'une notification d'approbation, on
-    // annule ce timer pour ne pas retirer la notification pendant la réponse.
-    _autoCancelTimer?.cancel();
-    _autoCancelTimer = Timer(const Duration(seconds: 5), () {
-      plugin.cancel(cascadeId.hashCode);
+    final notifId = cascadeId.hashCode;
+    _autoCancelTimers[notifId]?.cancel();
+    _autoCancelTimers[notifId] = Timer(const Duration(seconds: 5), () {
+      plugin.cancel(notifId);
+      _autoCancelTimers.remove(notifId);
     });
   }
 

@@ -125,6 +125,8 @@ class _ConnectionBannerState extends State<ConnectionBanner> {
             ),
     };
 
+    final hasKeyboard = MediaQuery.of(context).viewInsets.bottom > 0;
+
     return AnimatedSize(
       duration: const Duration(milliseconds: 350),
       curve: Curves.easeOutQuart,
@@ -141,7 +143,10 @@ class _ConnectionBannerState extends State<ConnectionBanner> {
         ),
         child: Container(
           width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          padding: EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: hasKeyboard ? 4 : 10,
+          ),
           decoration: BoxDecoration(
             color: bg,
             border: Border(
@@ -160,21 +165,22 @@ class _ConnectionBannerState extends State<ConnectionBanner> {
                   ),
                 )
               else
-                Icon(icon, size: 18, color: color),
-              const SizedBox(width: 12),
+                Icon(icon, size: hasKeyboard ? 15 : 18, color: color),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       _title,
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: hasKeyboard ? 12 : 13,
                         fontWeight: FontWeight.w600,
                         color: scheme.onSurface,
                       ),
                     ),
-                    if (_subtitle.isNotEmpty)
+                    if (_subtitle.isNotEmpty && !hasKeyboard)
                       Padding(
                         padding: const EdgeInsets.only(top: 2),
                         child: Text(

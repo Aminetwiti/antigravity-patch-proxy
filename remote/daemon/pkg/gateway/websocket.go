@@ -608,20 +608,64 @@ func computeFocusedSession(summaries map[string]connectrpc.JetboxSummary) *conne
 func (s *Server) cachedProjectID(uri string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	norm := strings.TrimPrefix(uri, "file:///")
+	norm = strings.TrimPrefix(norm, "file://")
+	norm = strings.ReplaceAll(norm, "%3A", ":")
+	norm = strings.ReplaceAll(norm, "%20", " ")
+	norm = strings.ReplaceAll(norm, `\`, `/`)
+	norm = strings.TrimRight(norm, "/")
+
 	if s.jetboxSummaries != nil {
 		for _, sum := range s.jetboxSummaries {
-			if sum.ProjectID != "" && strings.EqualFold(sum.Workspace, uri) {
-				return sum.ProjectID, true
+			if sum.ProjectID != "" {
+				wsNorm := strings.TrimPrefix(sum.Workspace, "file:///")
+				wsNorm = strings.TrimPrefix(wsNorm, "file://")
+				wsNorm = strings.ReplaceAll(wsNorm, "%3A", ":")
+				wsNorm = strings.ReplaceAll(wsNorm, "%20", " ")
+				wsNorm = strings.ReplaceAll(wsNorm, `\`, `/`)
+				wsNorm = strings.TrimRight(wsNorm, "/")
+				if norm == "" || strings.EqualFold(wsNorm, norm) || strings.HasSuffix(wsNorm, norm) || strings.HasSuffix(norm, wsNorm) {
+					return sum.ProjectID, true
+				}
 			}
 		}
-		return "", false
 	}
-	if len(s.sessionsCache) == 0 {
-		return "", false
+	if len(s.sessionsCache) > 0 {
+		for _, sum := range connectrpc.ParseTrajectories(s.sessionsCache) {
+			if sum.ProjectID != "" {
+				wsNorm := strings.TrimPrefix(sum.Workspace, "file:///")
+				wsNorm = strings.TrimPrefix(wsNorm, "file://")
+				wsNorm = strings.ReplaceAll(wsNorm, "%3A", ":")
+				wsNorm = strings.ReplaceAll(wsNorm, "%20", " ")
+				wsNorm = strings.ReplaceAll(wsNorm, `\`, `/`)
+				wsNorm = strings.TrimRight(wsNorm, "/")
+				if norm == "" || strings.EqualFold(wsNorm, norm) || strings.HasSuffix(wsNorm, norm) || strings.HasSuffix(norm, wsNorm) {
+					return sum.ProjectID, true
+				}
+			}
+		}
 	}
-	for _, sum := range connectrpc.ParseTrajectories(s.sessionsCache) {
-		if sum.ProjectID != "" && strings.EqualFold(sum.Workspace, uri) {
-			return sum.ProjectID, true
+	// Fallback sur le registre officiel ~/.gemini/config/projects/*.json
+	if regID := projectIDFromRegistry(uri); regID != "" {
+		return regID, true
+	}
+	// Fallback sur les projets officiels
+	projs := ListOfficialProjects()
+	if len(projs) > 0 {
+		for _, p := range projs {
+			pNorm := strings.TrimPrefix(p.FolderURI, "file:///")
+			pNorm = strings.TrimPrefix(pNorm, "file://")
+			pNorm = strings.ReplaceAll(pNorm, "%3A", ":")
+			pNorm = strings.ReplaceAll(pNorm, "%20", " ")
+			pNorm = strings.ReplaceAll(pNorm, `\`, `/`)
+			pNorm = strings.TrimRight(pNorm, "/")
+			if norm == "" || strings.EqualFold(pNorm, norm) || strings.HasSuffix(pNorm, norm) || strings.HasSuffix(norm, pNorm) {
+				return p.ID, true
+			}
+		}
+		if len(projs) == 1 {
+			return projs[0].ID, true
 		}
 	}
 	return "", false
@@ -654,7 +698,11 @@ func (s *Server) fetchSessionsSingleFlight() []byte {
 	s.fetchDone = doneCh
 	s.mu.Unlock()
 
-	raw, err := s.RPCClient.GetAllCascades()
+	var raw []byte
+	var err error
+	if s.RPCClient != nil {
+		raw, err = s.RPCClient.GetAllCascades()
+	}
 
 	s.mu.Lock()
 	if err == nil && len(raw) > 0 {
@@ -1361,6 +1409,7 @@ type IncomingMessage struct {
 	RequestID     string `json:"requestId"`
 	WorkspaceURI  string `json:"workspaceUri"`
 	WorkspacePath string `json:"workspacePath,omitempty"`
+	ProjectID     string `json:"projectId,omitempty"`
 	CascadeID     string `json:"cascadeId,omitempty"`
 	CallID        string `json:"callId,omitempty"`
 	TrajectoryID  string `json:"trajectoryID,omitempty"`
@@ -2530,6 +2579,14 @@ func sessionsOut(raw []byte) interface{} {
 }
 
 func (s *Server) sessionsOut(raw []byte) interface{} {
+	return s.sessionsOutWithLimit(raw, 6)
+}
+
+func (s *Server) allSessionsOut(raw []byte) interface{} {
+	return s.sessionsOutWithLimit(raw, 0)
+}
+
+func (s *Server) sessionsOutWithLimit(raw []byte, limitPerProject int) interface{} {
 	var alreadyOut map[string]interface{}
 	if err := json.Unmarshal(raw, &alreadyOut); err == nil {
 		if _, ok := alreadyOut["sessions"]; ok {
@@ -2571,7 +2628,12 @@ func (s *Server) sessionsOut(raw []byte) interface{} {
 	}
 
 	home, _ := os.UserHomeDir()
-	items := make([]map[string]interface{}, 0, len(summaries))
+	type sessionWithTime struct {
+		data      map[string]interface{}
+		updatedAt time.Time
+		isActive  bool
+	}
+	var items []sessionWithTime
 	for _, sum := range summaries {
 		if sum.Archived || sum.Killed || sum.Source == 16 {
 			continue
@@ -2586,13 +2648,18 @@ func (s *Server) sessionsOut(raw []byte) interface{} {
 			continue
 		}
 
-		items = append(items, map[string]interface{}{
-			"cascadeId": sum.CascadeID,
-			"title":     sum.Title,
-			"workspace": sum.Workspace,
-			"projectId": sum.ProjectID,
-			"status":    enrichStatus(sum.CascadeID, sum.Status),
-			"updatedAt": sum.UpdatedAt,
+		status := enrichStatus(sum.CascadeID, sum.Status)
+		items = append(items, sessionWithTime{
+			data: map[string]interface{}{
+				"cascadeId": sum.CascadeID,
+				"title":     sum.Title,
+				"workspace": sum.Workspace,
+				"projectId": sum.ProjectID,
+				"status":    status,
+				"updatedAt": sum.UpdatedAt,
+			},
+			updatedAt: sum.UpdatedAt,
+			isActive:  status == "CASCADE_STATUS_RUNNING" || status == "CASCADE_STATUS_WAITING_FOR_USER_ACTION",
 		})
 	}
 	if len(items) == 0 {
@@ -2608,9 +2675,31 @@ func (s *Server) sessionsOut(raw []byte) interface{} {
 			"sessions": local,
 		}
 	}
+
+	// Tri décroissant par date de mise à jour (plus récentes d'abord)
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].updatedAt.After(items[j].updatedAt)
+	})
+
+	var resultSessions []map[string]interface{}
+	if limitPerProject > 0 {
+		projectCounts := make(map[string]int)
+		for _, it := range items {
+			ws, _ := it.data["workspace"].(string)
+			if it.isActive || projectCounts[ws] < limitPerProject {
+				resultSessions = append(resultSessions, it.data)
+				projectCounts[ws]++
+			}
+		}
+	} else {
+		for _, it := range items {
+			resultSessions = append(resultSessions, it.data)
+		}
+	}
+
 	return map[string]interface{}{
 		"projects": projects,
-		"sessions": items,
+		"sessions": resultSessions,
 	}
 }
 
@@ -2838,12 +2927,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		if uri == "" {
 			err = fmt.Errorf("workspaceUri requis")
 		} else {
-			// projectID : r├®solu depuis le cache list_sessions quand dispo (co├╗t
-			// nul) ÔÇö JAMAIS via un GetAllCascades synchrone ici (~9,5 s) sinon le
-			// create part avec 10 s de retard et le mobile (deadline 10 s) timeoute
-			// ÔåÆ boucle connect/disconnect. Sans cache, cascade "orpheline" : le LS
-			// cr├®e la cascade sur le workspace URI (comportement d├®j├á existant).
-			projectID, _ := s.cachedProjectID(uri)
+			projectID := msg.ProjectID
+			if projectID == "" {
+				projectID, _ = s.cachedProjectID(uri)
+			}
 
 			if projectID != "" {
 				logJSON.Info("cascade_created", "projectId", projectID)
@@ -3062,6 +3149,32 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		writeScoped(map[string]interface{}{"projects": projects, "sessions": local})
 		return
 
+	case "list_all_sessions", "get_all_sessions":
+		writeScoped := func(data interface{}) {
+			m, _ := data.(map[string]interface{})
+			if m != nil {
+				m = s.filterByScope(conn, m)
+			}
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: m})
+		}
+		if raw, ok := s.cachedSessions(); ok {
+			writeScoped(s.allSessionsOut(raw))
+			return
+		}
+		raw = s.fetchSessionsSingleFlight()
+		if ctx.Err() != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "error", RequestID: msg.RequestID, Error: "rpc timeout after 15s"})
+			return
+		}
+		if len(raw) > 0 {
+			writeScoped(s.allSessionsOut(raw))
+			return
+		}
+		local := ListLocalSessions()
+		projects := ListOfficialProjects()
+		writeScoped(map[string]interface{}{"projects": projects, "sessions": local})
+		return
+
 	case "get_session_history":
 		if msg.CascadeID == "" {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId is required"})
@@ -3106,6 +3219,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			respData["hasPendingApproval"] = true
 		}
 		respData["currentStepIndex"] = lastSeq
+		s.streamBuffer.SetSessionSnapshot(msg.CascadeID, respData)
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: respData})
 		return
 
@@ -3120,6 +3234,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			"missedEvents":     missed,
 			"currentStepIndex": currentSeq,
 			"isStreaming":      s.IsCascadeActive(msg.CascadeID),
+		}
+		if snapshot := s.streamBuffer.GetSessionSnapshot(msg.CascadeID); snapshot != nil {
+			data["snapshot"] = snapshot
 		}
 		// Offline buffering (3.2) : les send_prompt non confirmés de cette
 		// cascade sont joints au catch-up — le mobile ré-affiche les messages

@@ -10,7 +10,7 @@ import 'display_options.dart';
 class LeftSidebarDrawer extends StatefulWidget {
   final String activeSessionId;
   final Function(String sessionId) onSessionSelected;
-  final VoidCallback onNewConversation;
+  final Function onNewConversation;
   final VoidCallback? onOpenSettings;
   final VoidCallback? onDiscover;
   final VoidCallback? onOpenWorkspace;
@@ -97,6 +97,107 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
     _scrollController.dispose();
     _filterController.dispose();
     super.dispose();
+  }
+
+  void _callNewConversation([ProjectItem? project]) {
+    final fn = widget.onNewConversation;
+    if (fn is void Function(ProjectItem?)) {
+      fn(project);
+    } else if (fn is void Function([ProjectItem?])) {
+      fn(project);
+    } else if (fn is VoidCallback) {
+      fn();
+    } else {
+      try {
+        (fn as dynamic)(project);
+      } catch (_) {
+        (fn as dynamic)();
+      }
+    }
+  }
+
+  void _handleNewConversation(BuildContext context, ColorScheme scheme, bool isDark) {
+    final projs = widget.projects ?? [];
+    if (projs.length <= 1) {
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      _callNewConversation(projs.isNotEmpty ? projs.first : null);
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainer,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.workspaces_outlined, size: 18, color: scheme.primary),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Sélectionner un projet de travail',
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w600,
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                ...projs.map((p) => ListTile(
+                      leading: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: scheme.primary.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(Icons.folder_outlined, size: 18, color: scheme.primary),
+                      ),
+                      title: Text(
+                        p.name,
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                          color: scheme.onSurface,
+                        ),
+                      ),
+                      subtitle: Text(
+                        p.path,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      onTap: () {
+                        Navigator.of(ctx).pop();
+                        if (Navigator.of(context).canPop()) {
+                          Navigator.of(context).pop();
+                        }
+                        _callNewConversation(p);
+                      },
+                    )),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -195,10 +296,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                 child: InkWell(
                   onTap: () {
                     HapticFeedback.selectionClick();
-                    if (Navigator.of(context).canPop()) {
-                      Navigator.of(context).pop();
-                    }
-                    widget.onNewConversation();
+                    _handleNewConversation(context, scheme, isDark);
                   },
                   borderRadius: BorderRadius.circular(AppRadius.lg),
                   child: Container(
@@ -382,9 +480,19 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                       ...projectNames.map((proj) {
                         final sessions = projectSessions[proj] ?? [];
                         final isCollapsed = _collapsedFolders.contains(proj);
+                        ProjectItem? matchingProj;
+                        if (widget.projects != null) {
+                          for (final p in widget.projects!) {
+                            if (p.name == proj || p.path == proj || p.id == proj) {
+                              matchingProj = p;
+                              break;
+                            }
+                          }
+                        }
                         return _WorkspaceFolderSection(
                           folderName: proj,
                           sessions: sessions,
+                          project: matchingProj,
                           isCollapsed: isCollapsed,
                           showSubtitle: _subtitle == SessionSubtitle.worktree,
                           hideHeader: _groupBy == SessionGroupBy.none,
@@ -402,9 +510,11 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                             Navigator.of(context).pop();
                             widget.onSessionSelected(id);
                           },
-                          onNewConversation: () {
-                            Navigator.of(context).pop();
-                            widget.onNewConversation();
+                          onNewConversation: (ProjectItem? p) {
+                            if (Navigator.of(context).canPop()) {
+                              Navigator.of(context).pop();
+                            }
+                            _callNewConversation(p ?? matchingProj);
                           },
                           onOpenSettings: () {
                             Navigator.of(context).pop();
@@ -557,30 +667,30 @@ class _SidebarActionItemState extends State<_SidebarActionItem> {
   }
 }
 
-// ── Workspace Folder Section (Grouping by folder)
-class _WorkspaceFolderSection extends StatefulWidget {
+// ── Workspace Folder Section (Grouping & Sessions under a folder)
+class _WorkspaceFolderSection extends StatelessWidget {
   final String folderName;
   final List<CascadeSession> sessions;
+  final ProjectItem? project;
   final bool isCollapsed;
   final bool showSubtitle;
   final bool hideHeader;
   final String activeSessionId;
   final VoidCallback onToggleCollapse;
   final Function(String id) onSessionTap;
-  final VoidCallback? onNewConversation;
+  final void Function(ProjectItem? project)? onNewConversation;
   final VoidCallback? onOpenSettings;
   final Function(String id)? onDeleteSession;
   final Function(String id)? onArchiveSession;
   final Function(String id, String newTitle)? onRenameSession;
   final Function(CascadeSession session)? onExportSession;
-
-  // P4 : épinglage local
   final Set<String> pinnedIds;
   final ValueChanged<String>? onTogglePin;
 
   const _WorkspaceFolderSection({
     required this.folderName,
     required this.sessions,
+    this.project,
     required this.isCollapsed,
     this.showSubtitle = true,
     this.hideHeader = false,
@@ -593,33 +703,24 @@ class _WorkspaceFolderSection extends StatefulWidget {
     this.onArchiveSession,
     this.onRenameSession,
     this.onExportSession,
-    this.pinnedIds = const {},
+    required this.pinnedIds,
     this.onTogglePin,
   });
-
-  @override
-  State<_WorkspaceFolderSection> createState() => _WorkspaceFolderSectionState();
-}
-
-class _WorkspaceFolderSectionState extends State<_WorkspaceFolderSection> {
-  bool _showAll = false;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final hasMore = widget.sessions.length > 5;
-    final visibleSessions = (_showAll || !hasMore)
-        ? widget.sessions
-        : widget.sessions.take(5).toList();
+    // Antigravity 2.0 IDE sidebar: max 6 sessions récentes par projet
+    final visibleSessions = sessions.take(6).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // Workspace Folder Header (hidden if hideHeader is true)
-        if (!widget.hideHeader && widget.folderName.isNotEmpty)
+        if (!hideHeader && folderName.isNotEmpty)
           InkWell(
-            onTap: widget.onToggleCollapse,
+            onTap: onToggleCollapse,
             borderRadius: BorderRadius.circular(4),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -633,7 +734,7 @@ class _WorkspaceFolderSectionState extends State<_WorkspaceFolderSection> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      widget.folderName,
+                      folderName,
                       style: TextStyle(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w500,
@@ -660,16 +761,16 @@ class _WorkspaceFolderSectionState extends State<_WorkspaceFolderSection> {
                     padding: EdgeInsets.zero,
                     onSelected: (val) {
                       if (val == 'copy_name') {
-                        Clipboard.setData(ClipboardData(text: widget.folderName));
+                        Clipboard.setData(ClipboardData(text: folderName));
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            content: Text('Nom du projet "${widget.folderName}" copié'),
+                            content: Text('Nom du projet "$folderName" copié'),
                             duration: const Duration(seconds: 2),
                             behavior: SnackBarBehavior.floating,
                           ),
                         );
                       } else if (val == 'settings') {
-                        widget.onOpenSettings?.call();
+                        onOpenSettings?.call();
                       }
                     },
                     itemBuilder: (ctx) {
@@ -707,7 +808,7 @@ class _WorkspaceFolderSectionState extends State<_WorkspaceFolderSection> {
                     child: InkWell(
                       onTap: () {
                         HapticFeedback.selectionClick();
-                        widget.onNewConversation?.call();
+                        onNewConversation?.call(project);
                       },
                       borderRadius: BorderRadius.circular(4),
                       child: const Padding(
@@ -726,8 +827,8 @@ class _WorkspaceFolderSectionState extends State<_WorkspaceFolderSection> {
           ),
 
         // Session list under this workspace
-        if (!widget.isCollapsed) ...[
-          if (widget.sessions.isEmpty)
+        if (!isCollapsed) ...[
+          if (sessions.isEmpty)
             const Padding(
               padding: EdgeInsets.only(left: 28, top: 4, bottom: 8),
               child: Text(
@@ -742,56 +843,26 @@ class _WorkspaceFolderSectionState extends State<_WorkspaceFolderSection> {
           else ...[
             ...visibleSessions.map((s) => _SessionRowItem(
                   session: s,
-                  isSelected: s.id == widget.activeSessionId,
-                  showSubtitle: widget.showSubtitle,
-                  onTap: () => widget.onSessionTap(s.id),
-                  onDelete: widget.onDeleteSession != null
-                      ? () => widget.onDeleteSession!(s.id)
+                  isSelected: s.id == activeSessionId,
+                  showSubtitle: showSubtitle,
+                  onTap: () => onSessionTap(s.id),
+                  onDelete: onDeleteSession != null
+                      ? () => onDeleteSession!(s.id)
                       : null,
-                  onArchive: widget.onArchiveSession != null
-                      ? () => widget.onArchiveSession!(s.id)
+                  onArchive: onArchiveSession != null
+                      ? () => onArchiveSession!(s.id)
                       : null,
-                  onRename: widget.onRenameSession != null
-                      ? (newTitle) => widget.onRenameSession!(s.id, newTitle)
+                  onRename: onRenameSession != null
+                      ? (newTitle) => onRenameSession!(s.id, newTitle)
                       : null,
-                  onExport: widget.onExportSession != null
-                      ? () => widget.onExportSession!(s)
+                  onExport: onExportSession != null
+                      ? () => onExportSession!(s)
                       : null,
-                  isPinned: widget.pinnedIds.contains(s.id),
-                  onTogglePin: widget.onTogglePin != null
-                      ? () => widget.onTogglePin!(s.id)
+                  isPinned: pinnedIds.contains(s.id),
+                  onTogglePin: onTogglePin != null
+                      ? () => onTogglePin!(s.id)
                       : null,
                 )),
-            if (hasMore)
-              Padding(
-                padding: const EdgeInsets.only(left: 24, top: 4, bottom: 4),
-                child: InkWell(
-                  onTap: () => setState(() => _showAll = !_showAll),
-                  borderRadius: BorderRadius.circular(4),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          _showAll ? 'See less' : 'See more (${widget.sessions.length - 5})',
-                          style: const TextStyle(
-                            fontSize: 11.5,
-                            color: Color(0xFF8F909A),
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Icon(
-                          _showAll ? Icons.expand_less_rounded : Icons.expand_more_rounded,
-                          size: 14,
-                          color: const Color(0xFF8F909A),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
           ],
         ],
         const SizedBox(height: 4),

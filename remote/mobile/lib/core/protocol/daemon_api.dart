@@ -328,6 +328,15 @@ class DaemonApi {
     }
   }
 
+  Future<Map<String, dynamic>> listAllSessions() async {
+    try {
+      final data = await rpc('list_all_sessions');
+      return data;
+    } catch (_) {
+      return listSessions();
+    }
+  }
+
   Future<Map<String, dynamic>> getSessionHistory(String cascadeId) async {
     try {
       final data = await rpc('get_session_history', {'cascadeId': cascadeId});
@@ -353,8 +362,18 @@ class DaemonApi {
     }
   }
 
-  Future<Map<String, dynamic>> createCascade(String workspacePath) =>
-      rpc('create_cascade', {'workspacePath': workspacePath});
+  Future<Map<String, dynamic>> createCascade(
+    String workspacePath, {
+    String? projectId,
+    String? modelUID,
+    int? modelEnum,
+  }) =>
+      rpc('create_cascade', {
+        'workspacePath': workspacePath,
+        if (projectId != null && projectId.isNotEmpty) 'projectId': projectId,
+        if (modelUID != null && modelUID.isNotEmpty) 'modelUID': modelUID,
+        if (modelEnum != null && modelEnum != 0) 'modelEnum': modelEnum,
+      });
 
   Future<Map<String, dynamic>> deleteCascade(String cascadeId) =>
       rpc('delete_cascade', {'cascadeId': cascadeId, 'confirm': true});

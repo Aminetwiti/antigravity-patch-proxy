@@ -2,6 +2,7 @@ package connectrpc
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -87,8 +88,13 @@ func BuildStartCascade(workspaceURI, projectID, modelUID string, modelEnum uint6
 		envW.stringField(1, projectID)
 		envW.bytesField(4, []byte{}) // defaultProjectEnvironment
 		w.bytesField(17, envW.b)
-	} else {
-		w.stringField(8, workspaceURI)
+	}
+	if workspaceURI != "" {
+		normURI := workspaceURI
+		if !strings.HasPrefix(normURI, "file://") {
+			normURI = "file:///" + strings.TrimPrefix(strings.ReplaceAll(normURI, `\`, "/"), "/")
+		}
+		w.stringField(8, normURI)
 	}
 	if modelUID != "" {
 		w.stringField(15, modelUID)
