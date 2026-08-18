@@ -135,33 +135,56 @@ func BuildSendMessage(cascadeID, text, apiKey, sessionID, modelUID string, model
 // create_cascade du gateway : deux littéraux 312/190 auraient divergé.
 const DefaultModelEnum uint64 = 312
 
+// ResolveStandardModelEnum résout un nom de modèle (ou displayName ou ID) vers son enum LS officiel.
+func ResolveStandardModelEnum(nameOrID string) uint64 {
+	lower := strings.ToLower(strings.TrimSpace(nameOrID))
+	if lower == "" {
+		return 0
+	}
+	switch {
+	case strings.Contains(lower, "3.7-flash") || strings.Contains(lower, "3.6-flash") || strings.Contains(lower, "3.5-flash") || strings.Contains(lower, "gemini-flash"):
+		return 312
+	case strings.Contains(lower, "3.1-pro") || strings.Contains(lower, "2.5-pro") || strings.Contains(lower, "gemini-pro"):
+		return 246
+	case strings.Contains(lower, "sonnet") || strings.Contains(lower, "claude-3-7") || strings.Contains(lower, "claude-3.7") || strings.Contains(lower, "claude-3-5"):
+		return 334
+	case strings.Contains(lower, "opus"):
+		return 291
+	case strings.Contains(lower, "gpt-oss") || strings.Contains(lower, "120b") || strings.Contains(lower, "gpt-4"):
+		return 342
+	default:
+		return 0
+	}
+}
+
 // BuildCascadeConfig construit le sous-message cascade_config.
 //
-// Format validé contre le vrai Language Server 2.8.0 (probe gRPC-Web le
-// 2026-08-14) : l'ancien layout « planner {5: requested_model_id,
-// 6: requested_model_uid} » est rejeté par le LS avec
-// « neither PlanModel nor RequestedModel specified » (grpc-status 2).
-// Le layout accepté (grpc-status 0) est :
+// Format validé contre le vrai Language Server 2.8.0 :
 //
 //	CascadeConfig {
 //	  1: planner_config (CascadePlannerConfig) {
 //	    1: plan_model (enum, ex: 246 = GOOGLE_GEMINI_2_5_PRO)
 //	    2: conversational_config {1: planner_mode}
 //	    15: requested_model (ModelOrAlias {1: model})
+//	    28: model_name (string, ex: "claude-sonnet-4.6-thinking" ou custom model UID)
 //	  }
 //	}
 //
 // planner_mode 3 = NO_TOOL (pas de boucle d'outils — le mobile ne voit
-// que le texte). requested_model (15) est la clé qui débloque le LS.
+// que le texte). requested_model (15) et plan_model (1) contrôlent le modèle du tour.
 func BuildCascadeConfig(modelUID string, modelEnum uint64, noTools ...bool) []byte {
 	planner := &writer{}
 
 	// plan_model (field 1) : même valeur que requested_model ci-dessous.
 	// Le LS l'exige explicitement (« neither PlanModel nor RequestedModel »).
-	if modelEnum == 0 {
-		modelEnum = DefaultModelEnum
+	effectiveEnum := modelEnum
+	if effectiveEnum == 0 && modelUID != "" {
+		effectiveEnum = ResolveStandardModelEnum(modelUID)
 	}
-	planner.varintField(1, modelEnum)
+	if effectiveEnum == 0 {
+		effectiveEnum = DefaultModelEnum
+	}
+	planner.varintField(1, effectiveEnum)
 
 	// conversational_config (field 2) {1: planner_mode} :
 	// 3 = NO_TOOL (pas de boucle d'outils — le mobile ne voit que le texte),
@@ -175,14 +198,20 @@ func BuildCascadeConfig(modelUID string, modelEnum uint64, noTools ...bool) []by
 	planner.bytesField(2, conv.b)
 
 	// requested_model (field 15) = ModelOrAlias {1: model}.
+	// Si un modèle explicite (UID ou enum) est fourni, on transmet l'enum demandé.
+	// Si AUCUN modèle n'est spécifié (modelUID == "" && modelEnum == 0), on retombe sur
+	// ModelOrAlias.alias = CASCADE_BASE (1) pour hériter du modèle initial de la cascade.
 	reqModel := &writer{}
-	if modelUID != "" {
-		// ModelOrAlias.alias = CASCADE_BASE (1) : hérite du modèle de la cascade.
+	if modelEnum != 0 || modelUID != "" {
+		reqModel.varintField(1, effectiveEnum)
+	} else {
 		reqModel.varintField(2, 1)
-	} else if modelEnum != 0 {
-		reqModel.varintField(1, modelEnum)
 	}
 	planner.bytesField(15, reqModel.b)
+
+	if modelUID != "" {
+		planner.stringField(28, modelUID)
+	}
 
 	w := &writer{}
 	w.bytesField(1, planner.b)

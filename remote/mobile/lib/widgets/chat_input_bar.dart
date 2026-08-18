@@ -63,6 +63,10 @@ class ChatInputBar extends StatefulWidget {
   /// P6 : notifie le parent de chaque frappe pour persister le brouillon.
   final ValueChanged<String>? onDraftChanged;
 
+  /// Nom du projet / workspace actif affiché au-dessus de la barre
+  final String? projectName;
+  final VoidCallback? onSelectProject;
+
   const ChatInputBar({
     super.key,
     required this.onSend,
@@ -74,6 +78,8 @@ class ChatInputBar extends StatefulWidget {
     this.onStop,
     this.initialText = '',
     this.onDraftChanged,
+    this.projectName,
+    this.onSelectProject,
   });
 
   @override
@@ -125,6 +131,13 @@ class _ChatInputBarState extends State<ChatInputBar> {
   @override
   void didUpdateWidget(covariant ChatInputBar oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialText != widget.initialText && widget.initialText != _controller.text) {
+      _controller.text = widget.initialText;
+      _lastDraftText = widget.initialText;
+      _controller.selection = TextSelection.collapsed(
+        offset: _controller.text.length,
+      );
+    }
     if (oldWidget.api != widget.api || oldWidget.isConnected != widget.isConnected) {
       _loadModelsAndPreferences();
     }
@@ -239,7 +252,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
     // (compat rétro) n'a plus de raison d'être.
     widget.onSend(
       fullMessage,
-      queued: _sendMode == SendMode.queued,
+      queued: _sendMode == SendMode.queued || widget.hasActiveStream,
       modelUID: _selectedModelId,
       modelEnum: _selectedModelEnum,
     );
@@ -1053,7 +1066,48 @@ class _ChatInputBarState extends State<ChatInputBar> {
         margin: EdgeInsets.fromLTRB(12, 2, 12, hasKeyboard ? 2 : 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (widget.projectName != null && widget.projectName!.isNotEmpty)
+              Padding(
+                padding: EdgeInsets.only(bottom: hasKeyboard ? 3 : 6, left: 4),
+                child: InkWell(
+                  onTap: widget.onSelectProject,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? const Color(0xFF1B1D22)
+                          : scheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? const Color(0xFF2C2F36)
+                            : scheme.outlineVariant.withValues(alpha: 0.5),
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.folder_outlined, size: 14, color: scheme.primary),
+                        const SizedBox(width: 6),
+                        Text(
+                          widget.projectName!,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: scheme.onSurface,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: scheme.onSurfaceVariant),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             Padding(
               padding: EdgeInsets.only(bottom: hasKeyboard ? 3 : 6),
               child: ActionPillsBar(
@@ -1331,24 +1385,55 @@ class _ChatInputBarState extends State<ChatInputBar> {
                         },
                         tooltip: 'Saisie vocale — bientôt disponible',
                       ),
-                      // Send / Stop button (unified primary action with accessible 48x48 touch target)
+                      // If streaming and user has typed text, show both Stop and Queue/Send buttons
+                      if (widget.hasActiveStream && _controller.text.trim().isNotEmpty) ...[
+                        // Dedicated Stop button
+                        IconButton(
+                          key: const Key('stop-generation-button'),
+                          icon: Container(
+                            width: 26,
+                            height: 26,
+                            decoration: BoxDecoration(
+                              color: scheme.error,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.stop_rounded,
+                              size: 16,
+                              color: AppColors.onDanger,
+                            ),
+                          ),
+                          tooltip: 'Arrêter la génération (Emergency Stop)',
+                          onPressed: () {
+                            HapticFeedback.heavyImpact();
+                            widget.onStop?.call();
+                          },
+                        ),
+                        const SizedBox(width: 4),
+                      ],
+
+                      // Primary action button (Send / Queue / Stop)
                       Semantics(
                         button: true,
-                        label: widget.hasActiveStream
+                        label: widget.hasActiveStream && _controller.text.trim().isEmpty
                             ? 'Arrêter la génération'
-                            : (isQueued ? 'Ajouter à la file d\'attente' : 'Envoyer le message'),
+                            : (isQueued || widget.hasActiveStream
+                                ? 'Ajouter à la file d\'attente'
+                                : 'Envoyer le message'),
                         child: Tooltip(
-                          message: widget.hasActiveStream
+                          message: widget.hasActiveStream && _controller.text.trim().isEmpty
                               ? 'Arrêter la génération (Emergency Stop)'
-                              : 'Envoyer',
+                              : (widget.hasActiveStream || isQueued
+                                  ? 'Ajouter à la file d\'attente'
+                                  : 'Envoyer'),
                           child: GestureDetector(
-                            key: widget.hasActiveStream
+                            key: widget.hasActiveStream && _controller.text.trim().isEmpty
                                 ? const Key('stop-generation-button')
                                 : const Key('send-message-button'),
                             onTapDown: (_) => setState(() => _isSendPressed = true),
                             onTapUp: (_) {
                               setState(() => _isSendPressed = false);
-                              if (widget.hasActiveStream) {
+                              if (widget.hasActiveStream && _controller.text.trim().isEmpty) {
                                 if (widget.onStop != null) {
                                   HapticFeedback.heavyImpact();
                                   widget.onStop!();
@@ -1372,7 +1457,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                                       width: 28,
                                       height: 28,
                                       decoration: BoxDecoration(
-                                        color: widget.hasActiveStream
+                                        color: widget.hasActiveStream && _controller.text.trim().isEmpty
                                             ? scheme.error
                                             : (_controller.text.trim().isNotEmpty &&
                                                     widget.isConnected
@@ -1381,15 +1466,15 @@ class _ChatInputBarState extends State<ChatInputBar> {
                                         shape: BoxShape.circle,
                                       ),
                                       child: Icon(
-                                        isQueued
+                                        (isQueued || (widget.hasActiveStream && _controller.text.trim().isNotEmpty))
                                             ? Icons.playlist_add_check
-                                            : (widget.hasActiveStream
+                                            : (widget.hasActiveStream && _controller.text.trim().isEmpty
                                                 ? Icons.stop_rounded
                                                 : Icons.arrow_forward),
                                         size: 15,
                                         color: (_controller.text.trim().isNotEmpty &&
                                                     widget.isConnected) ||
-                                                widget.hasActiveStream
+                                                (widget.hasActiveStream && _controller.text.trim().isEmpty)
                                             ? AppColors.onAccent
                                             : scheme.onSurfaceVariant.withValues(alpha: 0.7),
                                       ),

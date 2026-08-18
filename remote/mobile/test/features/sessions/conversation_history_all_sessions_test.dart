@@ -104,7 +104,11 @@ void main() {
     expect(find.text('Historical Task 2'), findsOneWidget);
 
     // Scroll to verify off-screen items are present in the list
-    await tester.scrollUntilVisible(find.text('Historical Task 19'), 500);
+    await tester.scrollUntilVisible(
+      find.text('Historical Task 19'),
+      300,
+      scrollable: find.byType(Scrollable).last,
+    );
     expect(find.text('Historical Task 19'), findsOneWidget);
 
     api.dispose();

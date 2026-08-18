@@ -1098,6 +1098,9 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       activeSessionId: _activeSessionId,
       activeProjectName: _activeProjectName,
       workspacePath: activeWs,
+      projects: _projects,
+      onSelectProject: (p) => _createNewConversation(p),
+      onNewConversation: _createNewConversation,
       isConnected: isConnected,
       wsClient: _wsClient,
       onStreamingSessionChanged: (sessionId, isStreaming) {

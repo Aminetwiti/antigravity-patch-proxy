@@ -4842,6 +4842,41 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 
+	case "get_account_info", "account.get_info":
+		acc := s.GetAccountInfo()
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: acc})
+		return
+
+	case "set_account_preferences", "account.set_preferences":
+		telemetry := true
+		marketing := false
+		if msg.Data != nil {
+			if t, ok := msg.Data["telemetryEnabled"].(bool); ok {
+				telemetry = t
+			}
+			if m, ok := msg.Data["marketingEmails"].(bool); ok {
+				marketing = m
+			}
+		}
+		SetAccountPreferences(telemetry, marketing)
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"ok": true, "telemetryEnabled": telemetry, "marketingEmails": marketing}})
+		return
+
+	case "list_skills", "skills.list", "get_skills":
+		skills := ListDiscoveredSkills()
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"skills": skills, "total": len(skills)}})
+		return
+
+	case "get_rules", "rules.get", "list_rules":
+		rules := ListDiscoveredRules()
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"rules": rules, "total": len(rules)}})
+		return
+
+	case "get_browser_status", "browser.get_status":
+		status := GetBrowserStatus()
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: status})
+		return
+
 	case "get_available_models", "models.get_available_models", "list_models":
 		models, errModels := s.cachedModels()
 		if errModels == nil && len(models) > 0 {
@@ -5478,16 +5513,19 @@ func (m *terminalPtyManager) pump(sess *terminalSession, r io.Reader, kind strin
 	}
 }
 
-// broadcastOutput ├®met terminal_output {id, data, kind} ├á tous les clients.
+// broadcastOutput émet terminal_output {id, terminalId, data, output, kind} à tous les clients.
 func (m *terminalPtyManager) broadcastOutput(sess *terminalSession, data []byte, kind string) {
 	// Le broadcast se fait via le Server ; on expose un hook.
 	if m.onBroadcast != nil {
+		outStr := string(data)
 		m.onBroadcast(OutgoingMessage{
 			Type: "terminal_output",
 			Data: map[string]interface{}{
-				"id":   sess.id,
-				"data": string(data),
-				"kind": kind,
+				"id":         sess.id,
+				"terminalId": sess.id,
+				"data":       outStr,
+				"output":     outStr,
+				"kind":       kind,
 			},
 		})
 	}
@@ -5498,9 +5536,11 @@ func (m *terminalPtyManager) broadcastExit(sess *terminalSession) {
 		m.onBroadcast(OutgoingMessage{
 			Type: "terminal_output",
 			Data: map[string]interface{}{
-				"id":   sess.id,
-				"data": "",
-				"kind": "exit",
+				"id":         sess.id,
+				"terminalId": sess.id,
+				"data":       "",
+				"output":     "",
+				"kind":       "exit",
 			},
 		})
 	}
@@ -5622,7 +5662,17 @@ func executeShellCommand(dir, cmdStr string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, tokens[0], tokens[1:]...)
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		if _, lookErr := exec.LookPath(tokens[0]); lookErr != nil {
+			cmdArgs := append([]string{"/c", tokens[0]}, tokens[1:]...)
+			cmd = exec.CommandContext(ctx, "cmd.exe", cmdArgs...)
+		} else {
+			cmd = exec.CommandContext(ctx, tokens[0], tokens[1:]...)
+		}
+	} else {
+		cmd = exec.CommandContext(ctx, tokens[0], tokens[1:]...)
+	}
 	cmd.Dir = absDir
 
 	var outBuf bytes.Buffer
@@ -5743,8 +5793,15 @@ func (s *Server) runLiveTurnStreamer(ctx context.Context, cascadeID, requestID s
 												args = tc.Function.Arguments
 											}
 											if toolName != "" && toolName != "ask_question" && toolName != "ask_user" {
+												lowerTool := strings.ToLower(toolName)
+												kind := "tool_start"
+												if strings.Contains(lowerTool, "run_command") || strings.Contains(lowerTool, "command") || strings.Contains(lowerTool, "bash") || strings.Contains(lowerTool, "terminal") {
+													kind = "runner_started"
+												} else if strings.Contains(lowerTool, "grep") || strings.Contains(lowerTool, "search") || strings.Contains(lowerTool, "find_by_name") || strings.Contains(lowerTool, "list_dir") || strings.Contains(lowerTool, "list_files") {
+													kind = "search_started"
+												}
 												events = append(events, map[string]interface{}{
-													"kind":   "tool_start",
+													"kind":   kind,
 													"tool":   toolName,
 													"detail": string(args),
 												})
@@ -5756,15 +5813,22 @@ func (s *Server) runLiveTurnStreamer(ctx context.Context, cascadeID, requestID s
 								// 2b. Tool Results
 								if entry.Type == "VIEW_FILE" || entry.Type == "RUN_COMMAND" || entry.Type == "GREP_SEARCH" || entry.Type == "FIND_BY_NAME" || entry.Type == "WRITE_TO_FILE" || entry.Type == "REPLACE_FILE_CONTENT" || entry.Type == "TOOL_RESULT" {
 									preview := entry.Content
+									kind := "tool_output"
 									if entry.Type == "RUN_COMMAND" {
-										if len(preview) > 3000 {
-											preview = preview[:2997] + "…"
+										kind = "runner_output"
+										if len(preview) > 4000 {
+											preview = preview[:3997] + "…"
 										}
-									} else if len(preview) > 500 {
-										preview = preview[:497] + "…"
+									} else if entry.Type == "GREP_SEARCH" || entry.Type == "FIND_BY_NAME" {
+										kind = "search_result"
+										if len(preview) > 1000 {
+											preview = preview[:997] + "…"
+										}
+									} else if len(preview) > 800 {
+										preview = preview[:797] + "…"
 									}
 									events = append(events, map[string]interface{}{
-										"kind":   "tool_output",
+										"kind":   kind,
 										"tool":   strings.ToLower(entry.Type),
 										"detail": preview,
 										"status": entry.Status,

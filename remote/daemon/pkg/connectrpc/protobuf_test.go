@@ -107,6 +107,7 @@ func TestBuildSendMessage(t *testing.T) {
 					planner := DecodeFields(sub.Bytes)
 					foundPlan := false
 					foundReq := false
+					foundModelName := false
 					for _, p := range planner {
 						if p.Num == 1 && p.Varint != 0 {
 							foundPlan = true // plan_model
@@ -114,17 +115,23 @@ func TestBuildSendMessage(t *testing.T) {
 						if p.Num == 15 { // requested_model (ModelOrAlias)
 							reqModel := DecodeFields(p.Bytes)
 							for _, rm := range reqModel {
-								if rm.Num == 2 && rm.Varint == 1 {
-									foundReq = true // alias = CASCADE_BASE
+								if rm.Num == 1 && rm.Varint != 0 {
+									foundReq = true // model = enum
 								}
 							}
+						}
+						if p.Num == 28 && string(p.Bytes) == modelUID {
+							foundModelName = true
 						}
 					}
 					if !foundPlan {
 						t.Errorf("cascade_config: plan_model (planner field 1) manquant")
 					}
 					if !foundReq {
-						t.Errorf("cascade_config: requested_model alias CASCADE_BASE (planner field 15) manquant")
+						t.Errorf("cascade_config: requested_model (planner field 15) manquant")
+					}
+					if !foundModelName {
+						t.Errorf("cascade_config: model_name (planner field 28) manquant")
 					}
 				}
 			}
@@ -132,6 +139,54 @@ func TestBuildSendMessage(t *testing.T) {
 	}
 	if !foundConfig {
 		t.Errorf("cascade_config (champ 5) manquant dans BuildSendMessage")
+	}
+}
+
+func TestBuildSendMessageModelFallback(t *testing.T) {
+	// Sans modèle spécifié, repli sur CASCADE_BASE (alias = 1)
+	buf := BuildSendMessage("casc-1", "Hello", "", "", "", 0)
+	fields := DecodeFields(buf)
+	foundAlias := false
+	for _, f := range fields {
+		if f.Num == 5 {
+			for _, sub := range DecodeFields(f.Bytes) {
+				if sub.Num == 1 {
+					for _, p := range DecodeFields(sub.Bytes) {
+						if p.Num == 15 {
+							for _, rm := range DecodeFields(p.Bytes) {
+								if rm.Num == 2 && rm.Varint == 1 {
+									foundAlias = true
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	if !foundAlias {
+		t.Errorf("Attendu requested_model alias=CASCADE_BASE quand aucun modèle n'est spécifié")
+	}
+}
+
+func TestResolveStandardModelEnum(t *testing.T) {
+	cases := []struct {
+		in   string
+		want uint64
+	}{
+		{"gemini-3.7-flash", 312},
+		{"gemini-3.1-pro", 246},
+		{"claude-sonnet-4.6-thinking", 334},
+		{"claude-3-7-sonnet", 334},
+		{"claude-opus-4.6-thinking", 291},
+		{"gpt-oss-120b", 342},
+		{"unknown-custom-model", 0},
+	}
+	for _, tc := range cases {
+		got := ResolveStandardModelEnum(tc.in)
+		if got != tc.want {
+			t.Errorf("ResolveStandardModelEnum(%q) = %d, attendu %d", tc.in, got, tc.want)
+		}
 	}
 }
 

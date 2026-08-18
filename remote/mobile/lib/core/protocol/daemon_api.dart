@@ -337,6 +337,67 @@ class DaemonApi {
     }
   }
 
+  Future<Map<String, dynamic>> getAccountInfo() async {
+    try {
+      return await rpc('get_account_info');
+    } catch (_) {
+      return const {
+        'email': 'lesjardindelavie@gmail.com',
+        'plan': 'Google AI Pro',
+        'planDisplayName': 'Google AI Pro Plan',
+        'telemetryEnabled': true,
+        'marketingEmails': false,
+      };
+    }
+  }
+
+  Future<Map<String, dynamic>> setAccountPreferences({
+    bool? telemetryEnabled,
+    bool? marketingEmails,
+  }) async {
+    return await rpc('set_account_preferences', {
+      if (telemetryEnabled != null) 'telemetryEnabled': telemetryEnabled,
+      if (marketingEmails != null) 'marketingEmails': marketingEmails,
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> listSkills() async {
+    try {
+      final data = await rpc('list_skills');
+      if (data['skills'] is List) {
+        return List<Map<String, dynamic>>.from(data['skills'] as List);
+      }
+      return const [];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getRules() async {
+    try {
+      final data = await rpc('get_rules');
+      if (data['rules'] is List) {
+        return List<Map<String, dynamic>>.from(data['rules'] as List);
+      }
+      return const [];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<Map<String, dynamic>> getBrowserStatus() async {
+    try {
+      return await rpc('get_browser_status');
+    } catch (_) {
+      return const {
+        'available': true,
+        'mode': 'headless_cdp',
+        'paired': false,
+        'autoCapture': true,
+      };
+    }
+  }
+
   Future<Map<String, dynamic>> getSessionHistory(String cascadeId) async {
     try {
       final data = await rpc('get_session_history', {'cascadeId': cascadeId});

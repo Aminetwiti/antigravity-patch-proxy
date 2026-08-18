@@ -11,6 +11,15 @@ const (
 	EventKindText             EventKind = "text"
 	EventKindThinking         EventKind = "thinking"
 	EventKindApprovalRequired EventKind = "approval_required"
+	EventKindSearchStarted    EventKind = "search_started"
+	EventKindSearchCompleted  EventKind = "search_completed"
+	EventKindRunnerStarted    EventKind = "runner_started"
+	EventKindRunnerStdout     EventKind = "runner_stdout"
+	EventKindRunnerCompleted  EventKind = "runner_completed"
+	EventKindToolStarted      EventKind = "tool_started"
+	EventKindToolOutput       EventKind = "tool_output"
+	EventKindToolCompleted    EventKind = "tool_completed"
+	EventKindStatusUpdate     EventKind = "status_update"
 )
 
 type StreamEvent struct {
@@ -23,6 +32,10 @@ type StreamEvent struct {
 	CallID       string    `json:"callId,omitempty"`
 	Tool         string    `json:"tool,omitempty"`
 	Detail       string    `json:"detail,omitempty"`
+	Command      string    `json:"command,omitempty"`
+	Output       string    `json:"output,omitempty"`
+	RunID        string    `json:"runId,omitempty"`
+	Sequence     uint64    `json:"sequence,omitempty"`
 }
 
 // ParseFrameEvents analyse une frame protobuf gRPC-Web et extrait les événements lisibles.

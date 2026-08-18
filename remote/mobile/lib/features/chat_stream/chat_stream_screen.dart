@@ -26,6 +26,7 @@ import '../../widgets/artifact_viewer_modal.dart';
 import 'widgets/execution_progress_view.dart';
 import 'widgets/overview_panel_view.dart';
 import 'widgets/session_review_view.dart';
+import 'widgets/queued_messages_card.dart';
 import '../subagents/subagents_tree_sheet.dart';
 import '../subagents/models/subagent_item.dart';
 import '../subagents/widgets/subagent_tree_card.dart';
@@ -55,12 +56,20 @@ class ChatStreamScreen extends StatefulWidget {
   /// Workspace racine pour la détection VCS et fichiers modifiés.
   final String? workspacePath;
 
+  /// Liste des projets officiels disponibles
+  final List<ProjectItem>? projects;
+
+  /// Callback de changement de projet workspace
+  final void Function(ProjectItem project)? onSelectProject;
+
   const ChatStreamScreen({
     super.key,
     required this.api,
     required this.activeSessionId,
     required this.activeProjectName,
     this.workspacePath,
+    this.projects,
+    this.onSelectProject,
     this.isConnected = true,
     this.wsClient,
     this.onStreamingSessionChanged,
@@ -787,13 +796,20 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final queue = _sessionMessageQueues[sessionId] ?? [];
     final lastEnd = _sessionLastStreamEnds[sessionId];
     final outcome = lastEnd?['data']?['outcome'] as String? ?? 'done';
-    if (outcome == 'cancelled' || outcome == 'error') {
-      queue.clear();
-    } else if (queue.isNotEmpty) {
+    if (outcome == 'done' && queue.isNotEmpty) {
       final next = queue.removeAt(0);
       final text = next['text'] as String;
       final modelUID = next['modelUID'] as String?;
       final modelEnum = next['modelEnum'] as int?;
+      final buf = _sessionMessages.putIfAbsent(sessionId, () => []);
+      setState(() {
+        buf.add(ChatMessage(
+          id: 'm${++_messageCounter}',
+          sender: 'user',
+          text: text,
+          timestamp: _timestamp(),
+        ));
+      });
       _sendPromptToDaemon(text, targetSessionOverride: sessionId, modelUID: modelUID, modelEnum: modelEnum);
     }
   }
@@ -805,10 +821,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final outcome = data['outcome'] as String? ?? 'done';
     final cascadeId = targetSessionId ?? data['cascadeId'] as String? ?? widget.activeSessionId;
     final message = data['message'] as String? ?? '';
-
-    if (outcome == 'cancelled') {
-      _sessionMessageQueues[cascadeId]?.clear();
-    }
 
     ApprovalNotifier.instance.notifyTaskEnded(
       cascadeId: cascadeId,
@@ -1206,12 +1218,28 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     }
 
     final targetSession = widget.activeSessionId;
+    final isStreaming = _activeStreamingSessions.contains(targetSession);
+
+    if (queued || isStreaming) {
+      final queue = _sessionMessageQueues.putIfAbsent(targetSession, () => []);
+      setState(() {
+        queue.add({
+          'text': text,
+          'activeSessionId': targetSession,
+          'modelUID': modelUID,
+          'modelEnum': modelEnum,
+          'timestamp': DateTime.now().millisecondsSinceEpoch,
+        });
+      });
+      return;
+    }
+
     final buf = _sessionMessages.putIfAbsent(targetSession, () => []);
     setState(() {
       buf.add(ChatMessage(
         id: 'm${++_messageCounter}',
         sender: 'user',
-        text: text + (queued ? ' (File d\'attente)' : ''),
+        text: text,
         timestamp: _timestamp(),
       ));
     });
@@ -1219,18 +1247,46 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final api = widget.api;
     if (api == null) return;
 
-    if (queued && _activeStreamingSessions.contains(targetSession)) {
-      final queue = _sessionMessageQueues.putIfAbsent(targetSession, () => []);
-      queue.add({
-        'text': text,
-        'activeSessionId': targetSession,
-        'modelUID': modelUID,
-        'modelEnum': modelEnum,
-      });
-      return;
-    }
-
     _sendPromptToDaemon(text, targetSessionOverride: targetSession, modelUID: modelUID, modelEnum: modelEnum);
+  }
+
+  void _handleQueueSendNow(int index) {
+    final queue = _sessionMessageQueues[widget.activeSessionId];
+    if (queue == null || index < 0 || index >= queue.length) return;
+    final item = queue.removeAt(index);
+    final text = item['text'] as String? ?? '';
+    final modelUID = item['modelUID'] as String?;
+    final modelEnum = item['modelEnum'] as int?;
+    final targetSession = widget.activeSessionId;
+
+    final buf = _sessionMessages.putIfAbsent(targetSession, () => []);
+    setState(() {
+      buf.add(ChatMessage(
+        id: 'm${++_messageCounter}',
+        sender: 'user',
+        text: text,
+        timestamp: _timestamp(),
+      ));
+    });
+    _sendPromptToDaemon(text, targetSessionOverride: targetSession, modelUID: modelUID, modelEnum: modelEnum);
+  }
+
+  void _handleQueueEdit(int index) {
+    final queue = _sessionMessageQueues[widget.activeSessionId];
+    if (queue == null || index < 0 || index >= queue.length) return;
+    final item = queue.removeAt(index);
+    final text = item['text'] as String? ?? '';
+    setState(() {
+      setDraft(text);
+    });
+  }
+
+  void _handleQueueDelete(int index) {
+    final queue = _sessionMessageQueues[widget.activeSessionId];
+    if (queue == null || index < 0 || index >= queue.length) return;
+    setState(() {
+      queue.removeAt(index);
+    });
   }
 
   void _sendPromptToDaemon(String text, {String? targetSessionOverride, String? modelUID, int? modelEnum}) {
@@ -1638,6 +1694,83 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     );
   }
 
+  void _showProjectSelector(BuildContext context) {
+    final projs = widget.projects ?? [];
+    if (projs.isEmpty) return;
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainer,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.workspaces_outlined, size: 18, color: scheme.primary),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Sélectionner un projet de travail',
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w600,
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                ...projs.map((p) => ListTile(
+                      leading: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: scheme.primary.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(Icons.folder_outlined, size: 18, color: scheme.primary),
+                      ),
+                      title: Text(
+                        p.name,
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                          color: scheme.onSurface,
+                        ),
+                      ),
+                      subtitle: Text(
+                        p.path,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      onTap: () {
+                        Navigator.of(ctx).pop();
+                        widget.onSelectProject?.call(p);
+                      },
+                    )),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -1680,8 +1813,16 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                       _WelcomeEmptyState(
                         projectName: widget.activeProjectName,
                         onSuggestionTap: (text) => _handleSendMessage(text, queued: false),
+                        onSelectProject: () => _showProjectSelector(context),
                       ),
                       const SizedBox(height: 32),
+                      if ((_sessionMessageQueues[widget.activeSessionId]?.isNotEmpty ?? false))
+                        QueuedMessagesCard(
+                          queuedMessages: _sessionMessageQueues[widget.activeSessionId]!,
+                          onSendNow: _handleQueueSendNow,
+                          onEdit: _handleQueueEdit,
+                          onDelete: _handleQueueDelete,
+                        ),
                       ChatInputBar(
                         onSend: _handleSendMessage,
                         isConnected: isConnected,
@@ -1797,6 +1938,13 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             onStopTask: () => setState(() => _runningBackgroundTasks.clear()),
             onViewTasks: () => setState(() => _currentTab = SessionTabType.tasks),
           ),
+        if ((_sessionMessageQueues[widget.activeSessionId]?.isNotEmpty ?? false))
+          QueuedMessagesCard(
+            queuedMessages: _sessionMessageQueues[widget.activeSessionId]!,
+            onSendNow: _handleQueueSendNow,
+            onEdit: _handleQueueEdit,
+            onDelete: _handleQueueDelete,
+          ),
         ChatInputBar(
           onSend: _handleSendMessage,
           isConnected: isConnected,
@@ -1806,6 +1954,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           cascadeId: widget.activeSessionId,
           initialText: currentDraft,
           onDraftChanged: setDraft,
+          projectName: widget.activeProjectName,
+          onSelectProject: () => _showProjectSelector(context),
         ),
       ],
     );
@@ -2774,15 +2924,18 @@ class _JumpToBottomButton extends StatelessWidget {
 class _WelcomeEmptyState extends StatelessWidget {
   final String projectName;
   final ValueChanged<String> onSuggestionTap;
+  final VoidCallback? onSelectProject;
 
   const _WelcomeEmptyState({
     required this.projectName,
     required this.onSuggestionTap,
+    this.onSelectProject,
   });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -2815,14 +2968,38 @@ class _WelcomeEmptyState extends StatelessWidget {
             letterSpacing: 0.2,
           ),
         ),
-        const SizedBox(height: 4),
-        Text(
-          projectName,
-          style: TextStyle(
-            fontSize: 13,
-            color: scheme.onSurfaceVariant,
+        const SizedBox(height: 6),
+        InkWell(
+          onTap: onSelectProject,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: isDark ? const Color(0xFF2C2F36) : scheme.outlineVariant.withValues(alpha: 0.5),
+                width: 1,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.folder_outlined, size: 14, color: scheme.primary),
+                const SizedBox(width: 6),
+                Text(
+                  projectName.isNotEmpty ? projectName : 'Select project',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w500,
+                    color: scheme.onSurface,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: scheme.onSurfaceVariant),
+              ],
+            ),
           ),
-          textAlign: TextAlign.center,
         ),
         const SizedBox(height: 24),
         Wrap(
