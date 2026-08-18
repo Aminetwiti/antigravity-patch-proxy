@@ -9,6 +9,7 @@ class SessionBreadcrumb extends StatelessWidget {
   final String sessionTitle;
   final VoidCallback? onSelectProject;
   final VoidCallback? onSelectSession;
+  final VoidCallback? onOpenIde;
   final List<ProjectItem>? projects;
 
   const SessionBreadcrumb({
@@ -17,6 +18,7 @@ class SessionBreadcrumb extends StatelessWidget {
     this.sessionTitle = '',
     this.onSelectProject,
     this.onSelectSession,
+    this.onOpenIde,
     this.projects,
   });
 
@@ -53,34 +55,40 @@ class SessionBreadcrumb extends StatelessWidget {
         mainAxisSize: MainAxisSize.max,
         children: [
           // Segment 1 : Nom du projet / workspace
-          InkWell(
-            onTap: canSwitchProject ? onSelectProject : null,
-            borderRadius: BorderRadius.circular(4),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    displayProject,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w400,
-                      color: isDark ? const Color(0xFF9E9FA9) : scheme.onSurfaceVariant,
-                      letterSpacing: -0.1,
+          Flexible(
+            flex: displayTitle.isNotEmpty ? 1 : 2,
+            fit: FlexFit.loose,
+            child: InkWell(
+              onTap: canSwitchProject ? onSelectProject : null,
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        displayProject,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w400,
+                          color: isDark ? const Color(0xFF9E9FA9) : scheme.onSurfaceVariant,
+                          letterSpacing: -0.1,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  if (canSwitchProject) ...[
-                    const SizedBox(width: 2),
-                    Icon(
-                      Icons.arrow_drop_down,
-                      size: 14,
-                      color: isDark ? const Color(0xFF6B6E77) : scheme.outline,
-                    ),
+                    if (canSwitchProject) ...[
+                      const SizedBox(width: 2),
+                      Icon(
+                        Icons.arrow_drop_down,
+                        size: 14,
+                        color: isDark ? const Color(0xFF6B6E77) : scheme.outline,
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ),
@@ -99,6 +107,8 @@ class SessionBreadcrumb extends StatelessWidget {
               ),
             ),
             Flexible(
+              flex: 2,
+              fit: FlexFit.loose,
               child: InkWell(
                 onTap: onSelectSession,
                 borderRadius: BorderRadius.circular(4),
@@ -115,6 +125,43 @@ class SessionBreadcrumb extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
+                ),
+              ),
+            ),
+          ],
+          if (onOpenIde != null) ...[
+            const Spacer(),
+            InkWell(
+              onTap: onOpenIde,
+              borderRadius: BorderRadius.circular(4),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1F2430) : scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                    color: isDark ? const Color(0xFF2A3142) : scheme.outlineVariant.withValues(alpha: 0.4),
+                    width: 0.6,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.open_in_new_rounded,
+                      size: 11,
+                      color: isDark ? const Color(0xFF60A5FA) : scheme.primary,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Open IDE',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w500,
+                        color: isDark ? const Color(0xFFD4D4D8) : scheme.onSurface,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),

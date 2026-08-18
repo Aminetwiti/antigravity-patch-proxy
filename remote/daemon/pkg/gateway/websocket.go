@@ -2902,16 +2902,11 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			s.writeJSON(conn, OutgoingMessage{Type: "error", Error: "Invalid JSON format"})
 			continue
 		}
-		// send_prompt est long (streaming jusqu'├á 120 s) : il tourne en
-		// goroutine pour ne PAS bloquer la boucle de lecture ÔÇö sinon un hub
-		// lent g├¿lerait heartbeat, submit_approval et les autres messages
-		// de la m├¬me connexion (C3). Les r├®ponses portent leur requestId,
-		// donc le client les corr├¿le sans ordre garanti.
-		if msg.Type == "send_prompt" || msg.Type == "send_command" {
-			go s.handleAction(conn, msg)
-			continue
-		}
-		s.handleAction(conn, msg)
+		// Les requêtes tournent en goroutine pour ne JAMAIS bloquer la boucle
+		// de lecture WebSocket — sinon des opérations I/O (list_files, read_file,
+		// get_subagents) bloqueraient le traitement des autres requêtes concurrentes.
+		// Les réponses portent leur requestId et writeJSON est protégé par mutex.
+		go s.handleAction(conn, msg)
 	}
 }
 
@@ -2925,7 +2920,7 @@ var unaryNoTimeout = map[string]bool{
 	"heartbeat": true, "ping": true, "create_cascade": true,
 	"get_pending_approval": true, "list_files": true, "read_file": true,
 	"sync_session": true, "get_quota_summary": true, "system.get_quota_summary": true,
-	"get_user_status": true, "get_model_statuses": true,
+	"get_user_status": true, "get_model_statuses": true, "get_subagents": true,
 	"generate_commit_message": true, "export_markdown": true, "create_worktree": true,
 	"archive_cascade": true, "unarchive_cascade": true, "delete_cascade": true,
 	"submit_approval": true, "get_session_history": true,

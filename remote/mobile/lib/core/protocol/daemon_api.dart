@@ -89,7 +89,7 @@ class DaemonApi {
     Stream<dynamic>? incoming,
     void Function(dynamic)? send,
     void Function(ClientMessage)? sendRaw,
-    Duration timeout = const Duration(seconds: 5),
+    Duration timeout = const Duration(seconds: 15),
     OutboxQueue? outbox,
   }) : _incoming = incoming ?? const Stream.empty(),
        _send = send ?? ((_) {}),
@@ -275,10 +275,11 @@ class DaemonApi {
   }
 
   /// Unary call resolved when a `response`/`error` with the same requestId
-  /// arrives (30s timeout).
+  /// arrives (default 15s timeout).
   Future<Map<String, dynamic>> rpc(
     String type, [
     Map<String, dynamic> params = const {},
+    Duration? customTimeout,
   ]) {
     final id = _newRequestId();
     final completer = Completer<Map<String, dynamic>>();
@@ -290,9 +291,10 @@ class DaemonApi {
     }
     _send(message);
     return completer.future.timeout(
-      _timeout,
+      customTimeout ?? _timeout,
       onTimeout: () {
         _pending.remove(id);
+        _outbox?.remove(id);
         throw TimeoutException('Daemon did not respond to $type ($id)');
       },
     );

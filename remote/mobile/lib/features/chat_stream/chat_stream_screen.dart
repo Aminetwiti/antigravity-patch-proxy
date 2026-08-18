@@ -706,6 +706,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         ApprovalNotifier.instance.notifyConnectionRestored();
       }
       _notifiedLost = false;
+      if (widget.activeSessionId.isNotEmpty) {
+        _loadHistoryIfEmpty(widget.activeSessionId);
+      }
+      _refreshQuotaSummary();
     }
 
     setState(() {
@@ -997,6 +1001,13 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         final data = msg['data'] as Map<String, dynamic>?;
         if (data != null && data.isNotEmpty && mounted) {
           setState(() => _quotaSummary = data);
+        }
+        return;
+      }
+
+      if (type == 'sessions_updated') {
+        if (mounted && widget.activeSessionId.isNotEmpty) {
+          _loadHistoryIfEmpty(widget.activeSessionId);
         }
         return;
       }
@@ -1635,8 +1646,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final expired = _expiredCallIds.contains(approval.callId);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
@@ -1644,6 +1656,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               if (total > 1)
                 IconButton(
                   key: const Key('approval-prev'),
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                  padding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
                   icon: const Icon(Icons.chevron_left, size: 18),
                   tooltip: 'Approbation précédente',
                   onPressed: () => setState(() {
@@ -1654,7 +1669,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               Text(
                 'Approbation ${_approvalIndex + 1}/$total',
                 style: TextStyle(
-                  fontSize: 11.5,
+                  fontSize: 11,
                   fontWeight: FontWeight.w600,
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
@@ -1662,21 +1677,27 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               if (total > 1)
                 IconButton(
                   key: const Key('approval-next'),
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                  padding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
                   icon: const Icon(Icons.chevron_right, size: 18),
                   tooltip: 'Approbation suivante',
                   onPressed: () => setState(() {
                     _approvalIndex = (_approvalIndex + 1) % total;
                   }),
                 ),
-                const Spacer(),
-                IconButton(
-                  key: const Key('approval-dismiss'),
-                  icon: const Icon(Icons.close, size: 16),
-                  tooltip: 'Fermer cette approbation',
-                  onPressed: () => _removeApproval(approval.callId),
-                ),
-              ],
-            ),
+              const Spacer(),
+              IconButton(
+                key: const Key('approval-dismiss'),
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                padding: EdgeInsets.zero,
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.close, size: 16),
+                tooltip: 'Fermer cette approbation',
+                onPressed: () => _removeApproval(approval.callId),
+              ),
+            ],
+          ),
           TweenAnimationBuilder<double>(
             key: ValueKey('approval-${approval.callId}'),
             duration: const Duration(milliseconds: 300),
@@ -1841,6 +1862,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       onSelectProject: (widget.projects != null && widget.projects!.length > 1)
           ? () => _showProjectSelector(context)
           : null,
+      onOpenIde: () {
+        AppToast.show(context, message: 'Session synchronisée avec Antigravity Desktop IDE');
+      },
     );
 
     if (_messages.isEmpty && _currentApproval == null) {
@@ -1899,7 +1923,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     return Column(
       children: [
         connectivityBanner,
-        breadcrumb,
         SessionTopTabs(
           activeTab: _currentTab,
           onTabChanged: (tab) {
@@ -2267,12 +2290,19 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         return Scrollbar(
           controller: _scrollController,
           thumbVisibility: false,
-          child: ListView.builder(
-            controller: _scrollController,
-            physics: const BouncingScrollPhysics(),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            itemCount: totalCount,
-            itemBuilder: (ctx, index) {
+          child: RefreshIndicator(
+            onRefresh: () async {
+              if (widget.activeSessionId.isNotEmpty) {
+                _loadHistoryIfEmpty(widget.activeSessionId);
+              }
+              await Future.delayed(const Duration(milliseconds: 300));
+            },
+            child: ListView.builder(
+              controller: _scrollController,
+              physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              itemCount: totalCount,
+              itemBuilder: (ctx, index) {
               if (index < headerWidgets.length) {
                 return headerWidgets[index];
               }
@@ -2345,7 +2375,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               );
             },
           ),
-        );
+        ),
+      );
     }
   }
 
@@ -2599,6 +2630,23 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     );
   }
 
+  void _openArtifactByName(String artifactName) {
+    final api = widget.api;
+    if (api == null) return;
+    final cleanName = artifactName.trim();
+    final fileName = cleanName.toLowerCase().contains('plan') && !cleanName.endsWith('.md')
+        ? 'implementation_plan.md'
+        : cleanName;
+    ArtifactViewerModal.show(
+      context,
+      api: api,
+      artifactPath: fileName,
+      artifactName: cleanName.isNotEmpty ? cleanName : 'Implementation Plan',
+      cascadeId: widget.activeSessionId,
+      workspacePath: widget.workspacePath,
+    );
+  }
+
   Widget _buildPlanTabContent() {
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -2754,12 +2802,14 @@ class _MessageBubble extends StatelessWidget {
 
   /// P5 : tap sur un lien markdown file:/// → ouvre le fichier distant.
   final LocalFileTap? onLocalFile;
+  final ValueChanged<String>? onOpenArtifact;
 
   const _MessageBubble({
     required this.message,
     this.api,
     this.workspacePath = '',
     this.onLocalFile,
+    this.onOpenArtifact,
     this.isThoughtExpanded = false,
     this.onToggleThought,
     this.onProceedPlan,
@@ -2867,6 +2917,7 @@ class _MessageBubble extends StatelessWidget {
                 initiallyExpanded: isThoughtExpanded,
                 onToggleExpand: onToggleThought,
                 onStop: onStop,
+                onOpenArtifact: _openArtifactByName,
               ),
             ],
             if (isError && (message.text.length < 120 && !message.text.contains('\n') && !message.text.startsWith('#')))

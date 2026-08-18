@@ -787,11 +787,48 @@ func formatToolCallStep(name string, argsRaw json.RawMessage) string {
 			return "Generated " + arg
 		}
 		return "Generated image"
-	case strings.Contains(lowerName, "schedule"):
+	case strings.Contains(lowerName, "schedule") || strings.Contains(lowerName, "timer"):
+		if len(argsRaw) > 0 {
+			var scheduleMap map[string]interface{}
+			if json.Unmarshal(argsRaw, &scheduleMap) == nil {
+				durationSec := 0
+				for _, k := range []string{"DurationSeconds", "duration_seconds", "durationSeconds"} {
+					if v, ok := scheduleMap[k]; ok {
+						if num, okNum := v.(float64); okNum {
+							durationSec = int(num)
+							break
+						}
+					}
+				}
+				prompt := ""
+				for _, k := range []string{"Prompt", "prompt"} {
+					if v, ok := scheduleMap[k]; ok {
+						if s, okS := v.(string); okS {
+							prompt = s
+							break
+						}
+					}
+				}
+				if durationSec > 0 {
+					if prompt != "" {
+						return fmt.Sprintf("Timed %d seconds\n> %s\nStatus: Fired", durationSec, prompt)
+					}
+					return fmt.Sprintf("Timed %d seconds", durationSec)
+				}
+				if prompt != "" {
+					return fmt.Sprintf("Scheduled %s", prompt)
+				}
+			}
+		}
 		if arg != "" {
 			return "Scheduled " + arg
 		}
 		return "Scheduled task"
+	case strings.Contains(lowerName, "auto_proceed") || strings.Contains(lowerName, "autoproceed"):
+		if arg != "" {
+			return "Auto-proceeded with " + arg
+		}
+		return "Auto-proceeded with Implementation Plan"
 	case strings.Contains(lowerName, "browse") || strings.Contains(lowerName, "read_url"):
 		if arg != "" {
 			return "Browsed " + arg

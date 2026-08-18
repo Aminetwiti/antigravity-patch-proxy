@@ -74,42 +74,44 @@ class _QueuedMessagesCardState extends State<QueuedMessagesCard> {
                   Text(
                     'Queued Messages',
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: 12.5,
                       fontWeight: FontWeight.w600,
                       color: isDark ? AppColors.inkPrimary : scheme.onSurface,
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                     decoration: BoxDecoration(
                       color: isDark ? AppColors.surfaceHover : scheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
                     ),
                     child: Text(
                       '$count',
                       style: TextStyle(
-                        fontSize: 11,
+                        fontSize: 10.5,
                         fontWeight: FontWeight.w600,
                         color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       'Sends after agent finishes working',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
+                      softWrap: false,
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: 11,
                         color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant.withValues(alpha: 0.8),
                       ),
                     ),
                   ),
+                  const SizedBox(width: 4),
                   Icon(
                     _isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-                    size: 18,
+                    size: 16,
                     color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
                   ),
                 ],
@@ -180,11 +182,11 @@ class _QueuedMessagesCardState extends State<QueuedMessagesCard> {
                       // Action: Send Now
                       IconButton(
                         icon: const Icon(Icons.arrow_forward_rounded),
-                        iconSize: 18,
+                        iconSize: 16,
                         color: isDark ? AppColors.inkSecondary : scheme.primary,
                         tooltip: 'Send now',
-                        padding: const EdgeInsets.all(4),
-                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                         onPressed: () {
                           HapticFeedback.lightImpact();
                           widget.onSendNow(index);
@@ -194,11 +196,11 @@ class _QueuedMessagesCardState extends State<QueuedMessagesCard> {
                       // Action: Edit
                       IconButton(
                         icon: const Icon(Icons.edit_outlined),
-                        iconSize: 18,
+                        iconSize: 16,
                         color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
                         tooltip: 'Edit message',
-                        padding: const EdgeInsets.all(4),
-                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                         onPressed: () {
                           HapticFeedback.lightImpact();
                           widget.onEdit(index);
@@ -208,11 +210,11 @@ class _QueuedMessagesCardState extends State<QueuedMessagesCard> {
                       // Action: Delete
                       IconButton(
                         icon: const Icon(Icons.delete_outline_rounded),
-                        iconSize: 18,
+                        iconSize: 16,
                         color: isDark ? AppColors.danger : scheme.error,
                         tooltip: 'Delete from queue',
-                        padding: const EdgeInsets.all(4),
-                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                         onPressed: () {
                           HapticFeedback.mediumImpact();
                           widget.onDelete(index);

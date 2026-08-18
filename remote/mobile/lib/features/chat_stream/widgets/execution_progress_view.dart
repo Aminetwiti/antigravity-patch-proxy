@@ -11,20 +11,27 @@ enum ExecutionStepType {
   fileAnalysis,
   exploredGroup,
   task,
-  thought,
+  taskFinished,
+  workedDuration,
+  timer,
+  autoProceed,
   subagent,
+  narrativeText,
+  thought,
 }
 
 class ExecutionStepItem {
   final ExecutionStepType type;
-  final String action; // "Edited", "Analyzed", "Ran", "Run", "Explored", "Thinking", "Thought", "Subagent"
-  final String title; // "chat_stream_screen.dart", "1 file", "flutter test ...", etc.
+  final String action; // "Edited", "Analyzed", "Ran", "Run", "Explored", "Task", "Worked", "Timed", "Auto-proceeded with", "Subagent"
+  final String title; // "chat_stream_screen.dart", "1 task", "332 finished", "for 19m", "30 seconds", etc.
   final String? diffAdded; // "+12"
   final String? diffRemoved; // "-3"
   final String? lineRange; // "#L680-710"
   final String? thoughtTitle; // "Examining Conditional Logic"
   final String? consolePrompt; // "...\remote\mobile > flutter test --exclude-tags=live"
   final String? consoleOutput; // "Working." or stdout
+  final String? timerPrompt; // "Check flutter test results"
+  final String? timerStatus; // "Status: Fired"
   final String? rawDetail;
   final List<ExecutionStepItem>? subItems; // Indented child items (e.g. Analyzed under Explored)
   final bool isExpandable;
@@ -40,6 +47,8 @@ class ExecutionStepItem {
     this.thoughtTitle,
     this.consolePrompt,
     this.consoleOutput,
+    this.timerPrompt,
+    this.timerStatus,
     this.rawDetail,
     this.subItems,
     this.isExpandable = false,
@@ -49,7 +58,7 @@ class ExecutionStepItem {
 
 /// Vue de déroulement d'exécution en direct fidèle à Antigravity 2.0 ("The Quiet Console").
 /// Affiche la progression temps réel de l'agent en cours d'exécution avec chronomètre,
-/// modèle actif, étapes d'outils animées et console d'exécution en direct.
+/// modèle actif, étapes d'outils animées, sous-messages ouvrables et indicateur "Working..".
 class ExecutionProgressView extends StatefulWidget {
   final String? messageId;
   final String? thoughtText;
@@ -57,6 +66,7 @@ class ExecutionProgressView extends StatefulWidget {
   final String? modelLabel;
   final VoidCallback? onToggleExpand;
   final VoidCallback? onStop;
+  final ValueChanged<String>? onOpenArtifact;
   final bool initiallyExpanded;
 
   const ExecutionProgressView({
@@ -67,6 +77,7 @@ class ExecutionProgressView extends StatefulWidget {
     this.modelLabel,
     this.onToggleExpand,
     this.onStop,
+    this.onOpenArtifact,
     this.initiallyExpanded = false,
   });
 
@@ -135,9 +146,9 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
       if (widget.isStreaming) {
         return [
           ExecutionStepItem(
-            type: ExecutionStepType.thought,
-            action: 'Thinking',
-            title: _secondsElapsed > 0 ? 'for ${_formatDuration(_secondsElapsed)}' : '…',
+            type: ExecutionStepType.workedDuration,
+            action: 'Working',
+            title: _secondsElapsed > 0 ? 'for ${_formatDuration(_secondsElapsed)}' : '..',
             isRunning: true,
             isExpandable: false,
           )
@@ -196,8 +207,119 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
 
       final lower = line.toLowerCase();
 
-      // 1. Edited / Wrote <file> +X -Y
-      if (lower.startsWith('edited ') || lower.startsWith('wrote ') || lower.startsWith('writing to file') || lower.startsWith('editing file')) {
+      // 1. Auto-proceeded with <Plan/Artifact>
+      if (lower.startsWith('auto-proceeded with') ||
+          lower.startsWith('auto proceeded with') ||
+          lower.startsWith('auto-proceed with')) {
+        final prefix = lower.startsWith('auto-proceeded with')
+            ? 'auto-proceeded with'
+            : (lower.startsWith('auto proceeded with')
+                ? 'auto proceeded with'
+                : 'auto-proceed with');
+        var planName = line.substring(prefix.length).trim();
+        planName = planName.replaceAll('📄', '').replaceAll('`', '').trim();
+        rawItems.add(ExecutionStepItem(
+          type: ExecutionStepType.autoProceed,
+          action: 'Auto-proceeded with',
+          title: planName.isNotEmpty ? planName : 'Implementation Plan',
+          isExpandable: false,
+        ));
+        continue;
+      }
+
+      // 2. Timed <duration> / Wait for task-<id>: Timer has expired
+      if (lower.startsWith('timed ') ||
+          lower.startsWith('wait for task') ||
+          lower.startsWith('wait for ') ||
+          lower.startsWith('timer has expired') ||
+          lower.startsWith('scheduled ')) {
+        final title = line;
+        final action = '';
+
+        // Lookahead for prompt and status
+        String? timerPrompt;
+        String? timerStatus;
+        int nextI = i + 1;
+        while (nextI < lines.length) {
+          final nextLine = lines[nextI].trim();
+          if (nextLine.isEmpty) {
+            nextI++;
+            continue;
+          }
+          final nextLower = nextLine.toLowerCase();
+          if (nextLower.startsWith('status:')) {
+            timerStatus = nextLine;
+            nextI++;
+          } else if (nextLine.startsWith('>') ||
+              (!nextLower.startsWith('task ') &&
+                  !nextLower.startsWith('worked ') &&
+                  !nextLower.startsWith('explored ') &&
+                  !nextLower.startsWith('edited ') &&
+                  !nextLower.startsWith('analyzed ') &&
+                  !nextLower.startsWith('ran ') &&
+                  !nextLower.startsWith('wait for ') &&
+                  !nextLower.startsWith('timed ') &&
+                  timerPrompt == null)) {
+            timerPrompt = nextLine.startsWith('>') ? nextLine.substring(1).trim() : nextLine;
+            nextI++;
+          } else {
+            break;
+          }
+        }
+        if (timerPrompt != null || timerStatus != null) {
+          i = nextI - 1;
+        }
+
+        rawItems.add(ExecutionStepItem(
+          type: ExecutionStepType.timer,
+          action: action,
+          title: title,
+          timerPrompt: timerPrompt,
+          timerStatus: timerStatus ?? 'Status: Fired',
+          isExpandable: true,
+        ));
+        continue;
+      }
+
+      // 3. Task <id> finished / Task finished / Task <id> completed
+      if (lower.startsWith('task ') &&
+          (lower.contains('finished') || lower.contains('completed') || lower.contains('done'))) {
+        var clean = line;
+        if (clean.endsWith('>')) clean = clean.substring(0, clean.length - 1).trim();
+        rawItems.add(ExecutionStepItem(
+          type: ExecutionStepType.taskFinished,
+          action: '',
+          title: clean,
+          isExpandable: true,
+          rawDetail: clean,
+        ));
+        continue;
+      }
+
+      // 4. Worked for <duration> / Thought for <duration> / Thinking for <duration>
+      if (lower.startsWith('worked for ') ||
+          lower.startsWith('thinking for ') ||
+          lower.startsWith('thought for ')) {
+        var clean = line;
+        if (clean.endsWith('>')) clean = clean.substring(0, clean.length - 1).trim();
+        final action = lower.startsWith('worked for ')
+            ? 'Worked'
+            : (lower.startsWith('thinking for ') ? 'Thinking' : 'Thought');
+        final dur = clean.substring(action.length).trim();
+        rawItems.add(ExecutionStepItem(
+          type: ExecutionStepType.workedDuration,
+          action: action,
+          title: dur,
+          isExpandable: true,
+        ));
+        continue;
+      }
+
+      // 5. Edited / Wrote <file> +X -Y
+      if (lower.startsWith('edited ') ||
+          lower.startsWith('wrote ') ||
+          lower.startsWith('writing to file') ||
+          lower.startsWith('editing file')) {
         final isEdit = lower.startsWith('edited ') || lower.startsWith('editing file');
         final prefixLen = lower.startsWith('edited ')
             ? 7
@@ -221,8 +343,11 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
         }
       }
 
-      // 2. Analyzed / Viewed / Reading <file> #L123-456
-      if (lower.startsWith('analyzed ') || lower.startsWith('viewed ') || lower.startsWith('reading file') || lower.startsWith('viewing file')) {
+      // 6. Analyzed / Viewed / Reading <file> #L123-456
+      if (lower.startsWith('analyzed ') ||
+          lower.startsWith('viewed ') ||
+          lower.startsWith('reading file') ||
+          lower.startsWith('viewing file')) {
         final isAnalyzed = lower.startsWith('analyzed ');
         final prefixLen = lower.startsWith('analyzed ')
             ? 9
@@ -242,7 +367,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
         continue;
       }
 
-      // 3. Explored <N> file(s)
+      // 7. Explored <N> task(s) / file(s)
       if (lower.startsWith('explored ')) {
         var title = line.substring(9).trim();
         if (title.endsWith('>')) title = title.substring(0, title.length - 1).trim();
@@ -255,8 +380,11 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
         continue;
       }
 
-      // 4. Subagent invocation / task
-      if (lower.startsWith('subagent') || lower.startsWith('invoking subagent') || lower.startsWith('spawned subagent') || lower.startsWith('sub-agent')) {
+      // 8. Subagent invocation / task
+      if (lower.startsWith('subagent') ||
+          lower.startsWith('invoking subagent') ||
+          lower.startsWith('spawned subagent') ||
+          lower.startsWith('sub-agent')) {
         final clean = line.replaceFirst(
             RegExp(r'^(invoking subagent|spawned subagent|subagent|sub-agent)[:\s]*', caseSensitive: false), '').trim();
         rawItems.add(ExecutionStepItem(
@@ -269,8 +397,11 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
         continue;
       }
 
-      // 5. Ran / Run <command>
-      if (lower.startsWith('ran ') || lower.startsWith('run ') || lower.startsWith('running command:') || lower.startsWith('executed:')) {
+      // 9. Ran / Run <command>
+      if (lower.startsWith('ran ') ||
+          lower.startsWith('run ') ||
+          lower.startsWith('running command:') ||
+          lower.startsWith('executed:')) {
         final cleanTitle = line.replaceFirst(
             RegExp(r'^(ran|run|running command:|executed:)\s*', caseSensitive: false), '');
         currentCmdTitle = cleanTitle;
@@ -281,8 +412,11 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
         continue;
       }
 
-      // 6. Checked task / Search / Task
-      if (lower.startsWith('checked task ') || lower.startsWith('search ') || lower.startsWith('task ') || lower.startsWith('searching ')) {
+      // 10. Checked task / Search / Task
+      if (lower.startsWith('checked task ') ||
+          lower.startsWith('search ') ||
+          lower.startsWith('task ') ||
+          lower.startsWith('searching ')) {
         final isChecked = lower.startsWith('checked task ');
         final isSearch = lower.startsWith('search ') || lower.startsWith('searching ');
         String action = 'Task';
@@ -303,7 +437,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
         continue;
       }
 
-      // 7. Error messages
+      // 11. Error messages
       if (lower.startsWith('error')) {
         var clean = line;
         if (clean.endsWith('>')) clean = clean.substring(0, clean.length - 1).trim();
@@ -317,20 +451,18 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
         continue;
       }
 
-      // 8. Duration headers
-      if (lower.startsWith('worked for ') || lower.startsWith('thinking for ') || lower.startsWith('thought for ')) {
-        var clean = line;
-        if (clean.endsWith('>')) clean = clean.substring(0, clean.length - 1).trim();
+      // 12. Narrative text from agent (e.g. "Vérification globale...", "Attente des résultats...")
+      if (line.endsWith('...') || line.endsWith('…') || (!line.startsWith('#') && line.length < 100 && !line.contains('`'))) {
         rawItems.add(ExecutionStepItem(
-          type: ExecutionStepType.thought,
+          type: ExecutionStepType.narrativeText,
           action: '',
-          title: clean,
-          isExpandable: true,
+          title: line,
+          isExpandable: false,
         ));
         continue;
       }
 
-      // 9. Output / thought text
+      // 13. Output / thought text
       currentThoughtBuffer.writeln(lines[i]);
     }
 
@@ -342,7 +474,6 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
     for (int i = 0; i < rawItems.length; i++) {
       final current = rawItems[i];
       if (current.type == ExecutionStepType.exploredGroup) {
-        // Look ahead for subsequent fileAnalysis items
         final sub = <ExecutionStepItem>[];
         int j = i + 1;
         while (j < rawItems.length && rawItems[j].type == ExecutionStepType.fileAnalysis) {
@@ -357,11 +488,10 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
             subItems: sub,
             isExpandable: true,
           ));
-          i = j - 1; // Skip absorbed children
+          i = j - 1;
           continue;
         }
       } else if (current.type == ExecutionStepType.fileAnalysis) {
-        // Standalone file analysis: encapsulate in an Explored 1 file row
         items.add(ExecutionStepItem(
           type: ExecutionStepType.exploredGroup,
           action: 'Explored',
@@ -452,12 +582,15 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
           Expanded(
             child: Row(
               children: [
-                Text(
-                  'Agent en cours d\'exécution',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? AppColors.accentBlueBright : scheme.primary,
+                Flexible(
+                  child: Text(
+                    'Agent en cours d\'exécution',
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? AppColors.accentBlueBright : scheme.primary,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 6),
@@ -549,8 +682,8 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
       return const SizedBox.shrink();
     }
 
-    final displaySteps = (!widget.isStreaming && steps.length > 5 && !_showAllSteps)
-        ? steps.take(4).toList()
+    final displaySteps = (!widget.isStreaming && steps.length > 8 && !_showAllSteps)
+        ? steps.take(6).toList()
         : steps;
     final hiddenCount = steps.length - displaySteps.length;
 
@@ -564,7 +697,9 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
             if (widget.isStreaming)
               _buildLiveAgentHeader(scheme, isDark),
             for (int i = 0; i < displaySteps.length; i++)
-              _buildStepRow(displaySteps[i], i),
+              _buildStepRow(displaySteps[i], i, scheme, isDark),
+            if (widget.isStreaming)
+              const _LiveWorkingIndicator(),
             if (hiddenCount > 0)
               Padding(
                 padding: const EdgeInsets.only(top: 2, bottom: 4),
@@ -594,7 +729,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
                   ),
                 ),
               )
-            else if (steps.length > 5 && _showAllSteps && !widget.isStreaming)
+            else if (steps.length > 8 && _showAllSteps && !widget.isStreaming)
               Padding(
                 padding: const EdgeInsets.only(top: 2, bottom: 4),
                 child: InkWell(
@@ -629,9 +764,87 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
     );
   }
 
-  Widget _buildStepRow(ExecutionStepItem item, int index) {
+  Widget _buildStepRow(ExecutionStepItem item, int index, ColorScheme scheme, bool isDark) {
+    // 1. Cas particulier : Narrative Text (commentaire en ligne de l'agent)
+    if (item.type == ExecutionStepType.narrativeText) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 2),
+        child: Text(
+          item.title,
+          style: TextStyle(
+            fontSize: 12.5,
+            height: 1.4,
+            color: isDark ? const Color(0xFFD4D4D8) : scheme.onSurface,
+            fontWeight: FontWeight.w400,
+          ),
+        ),
+      );
+    }
+
+    // 2. Cas particulier : Auto-proceeded with Implementation Plan / Artifact
+    if (item.type == ExecutionStepType.autoProceed) {
+      return GestureDetector(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          widget.onOpenArtifact?.call(item.title);
+        },
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF14171F) : scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: isDark ? const Color(0xFF27272A) : scheme.outlineVariant.withValues(alpha: 0.6),
+              width: 0.8,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.check_circle_outline_rounded,
+                size: 14,
+                color: isDark ? const Color(0xFF9E9FA8) : scheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'Auto-proceeded with',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isDark ? const Color(0xFF9E9FA8) : scheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Icon(
+                Icons.article_outlined,
+                size: 13,
+                color: isDark ? const Color(0xFFF4F4F5) : scheme.onSurface,
+              ),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  item.title,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? const Color(0xFFF4F4F5) : scheme.onSurface,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     final isExpanded = _expandedIndices.contains(index) ||
-        (widget.initiallyExpanded && item.type == ExecutionStepType.thought);
+        (widget.initiallyExpanded &&
+            (item.type == ExecutionStepType.thought || item.type == ExecutionStepType.timer));
+
+    final isThoughtType = item.type == ExecutionStepType.thought || item.type == ExecutionStepType.workedDuration;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 2.5),
@@ -639,7 +852,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           InkWell(
-            key: (item.type == ExecutionStepType.thought && widget.messageId != null)
+            key: (isThoughtType && widget.messageId != null)
                 ? Key('thought-toggle-${widget.messageId}')
                 : null,
             onTap: item.isExpandable
@@ -652,7 +865,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
                         _expandedIndices.add(index);
                       }
                     });
-                    if (item.type == ExecutionStepType.thought) {
+                    if (isThoughtType) {
                       widget.onToggleExpand?.call();
                     }
                   }
@@ -663,7 +876,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Action verb: "Explored", "Edited", "Run", "Thought", "Thinking", "Subagent"
+                  // Action verb: "Explored", "Edited", "Run", "Thought", "Worked", "Timed", "Subagent"
                   if (item.action.isNotEmpty) ...[
                     Text(
                       item.action,
@@ -737,13 +950,13 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
                     ),
                   ],
 
-                  // Step title (Filename / Duration / Command)
+                  // Step title (Filename / Duration / Command / Task status)
                   Flexible(
                     child: Text(
-                      isExpanded && item.rawDetail != null && item.type != ExecutionStepType.thought
+                      isExpanded && item.rawDetail != null && !isThoughtType && item.type != ExecutionStepType.timer
                           ? item.rawDetail!
                           : item.title,
-                      key: (item.type == ExecutionStepType.thought && widget.messageId != null)
+                      key: (isThoughtType && widget.messageId != null)
                           ? Key('thought-${widget.messageId}')
                           : null,
                       maxLines: isExpanded ? null : 1,
@@ -755,12 +968,14 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
                                 item.type == ExecutionStepType.fileAnalysis)
                             ? 'monospace'
                             : null,
-                        fontWeight: item.type == ExecutionStepType.thought
+                        fontWeight: isThoughtType
                             ? FontWeight.w400
                             : FontWeight.w500,
-                        color: item.type == ExecutionStepType.thought
+                        color: isThoughtType
                             ? const Color(0xFF9E9FA8)
-                            : const Color(0xFFF4F4F5),
+                            : (item.type == ExecutionStepType.taskFinished
+                                ? const Color(0xFF9E9FA8)
+                                : const Color(0xFFF4F4F5)),
                       ),
                     ),
                   ),
@@ -897,6 +1112,73 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
               ),
             ),
 
+          // Inset Box for Timers & Wait Events (e.g. "Check flutter test results" + "Status: Fired")
+          if (isExpanded && item.type == ExecutionStepType.timer)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(top: 4, bottom: 4, left: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF0E0F12) : scheme.surfaceContainerHighest.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: isDark ? const Color(0xFF27272A) : scheme.outlineVariant.withValues(alpha: 0.5),
+                  width: 0.8,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (item.timerPrompt != null && item.timerPrompt!.isNotEmpty)
+                    SelectableText(
+                      item.timerPrompt!,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontFamily: 'monospace',
+                        color: isDark ? const Color(0xFFD4D4D8) : scheme.onSurface,
+                        height: 1.35,
+                      ),
+                    ),
+                  if (item.timerStatus != null && item.timerStatus!.isNotEmpty) ...[
+                    const SizedBox(height: 5),
+                    Text(
+                      item.timerStatus!,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? const Color(0xFF9E9FA8) : scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+
+          // Inset Box for Task Output (Task Finished Details)
+          if (isExpanded && item.type == ExecutionStepType.taskFinished && item.rawDetail != null && item.rawDetail!.isNotEmpty && item.rawDetail != item.title)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(top: 4, bottom: 4, left: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF0E0F12) : scheme.surfaceContainerHighest.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: isDark ? const Color(0xFF27272A) : scheme.outlineVariant.withValues(alpha: 0.5),
+                  width: 0.8,
+                ),
+              ),
+              child: SelectableText(
+                item.rawDetail!,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontFamily: 'monospace',
+                  color: isDark ? const Color(0xFFD4D4D8) : scheme.onSurface,
+                  height: 1.35,
+                ),
+              ),
+            ),
+
           // Console Terminal Box for Run command
           if (isExpanded && item.type == ExecutionStepType.command)
             Container(
@@ -938,7 +1220,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
             ),
 
           // Thought Reasoned Detail Block (with Header & Token Highlights)
-          if (isExpanded && item.type == ExecutionStepType.thought && item.rawDetail != null)
+          if (isExpanded && isThoughtType && item.rawDetail != null)
             Padding(
               padding: const EdgeInsets.only(left: 4, top: 4, bottom: 6),
               child: Column(
@@ -1004,6 +1286,59 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
 
     return SelectableText.rich(
       TextSpan(children: spans),
+    );
+  }
+}
+
+/// Indicateur en direct "Working.." avec ellipse animée (. -> .. -> ...)
+class _LiveWorkingIndicator extends StatefulWidget {
+  const _LiveWorkingIndicator();
+
+  @override
+  State<_LiveWorkingIndicator> createState() => _LiveWorkingIndicatorState();
+}
+
+class _LiveWorkingIndicatorState extends State<_LiveWorkingIndicator> {
+  int _dotCount = 2;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(milliseconds: 550), (_) {
+      if (mounted) {
+        setState(() {
+          _dotCount = (_dotCount % 3) + 1; // 1 -> 2 -> 3 -> 1
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dots = '.' * _dotCount;
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 4, left: 2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Working$dots',
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w400,
+              color: Color(0xFF9E9FA8),
+              letterSpacing: -0.1,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

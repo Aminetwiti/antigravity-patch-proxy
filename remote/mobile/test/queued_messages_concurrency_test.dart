@@ -39,6 +39,7 @@ Future<void> _pumpScreen(
   tester.view.physicalSize = const Size(1080, 2400);
   tester.view.devicePixelRatio = 2.0;
   addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
 
   await tester.pumpWidget(
     MaterialApp(

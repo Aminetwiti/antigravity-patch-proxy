@@ -21,8 +21,15 @@ class OutboxQueue {
 
   OutboxQueue({Duration maxAge = const Duration(minutes: 5)}) : _maxAge = maxAge;
 
-  bool get hasPending => _pending.isNotEmpty;
-  int get pendingCount => _pending.length;
+  bool get hasPending {
+    takeExpired();
+    return _pending.isNotEmpty;
+  }
+
+  int get pendingCount {
+    takeExpired();
+    return _pending.length;
+  }
 
   void enqueue(Map<String, dynamic> message) {
     _pending.add({

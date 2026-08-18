@@ -48,7 +48,6 @@ class LeftSidebarDrawer extends StatefulWidget {
     this.onRenameSession,
     this.onExportSession,
   });
-  final VoidCallback? onOpenSidecars;
 
   @override
   State<LeftSidebarDrawer> createState() => _LeftSidebarDrawerState();

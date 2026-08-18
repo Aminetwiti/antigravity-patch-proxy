@@ -142,17 +142,52 @@ class StreamDeltaParser {
       case 'generate_image':
         return arg.isNotEmpty ? 'Generated $arg' : 'Generated image';
       case 'schedule':
+      case 'timer':
+        if (detail.isNotEmpty) {
+          try {
+            final start = detail.indexOf('{');
+            final end = detail.lastIndexOf('}');
+            if (start >= 0 && end > start) {
+              final jsonMap = json.decode(detail.substring(start, end + 1));
+              if (jsonMap is Map) {
+                final dur = jsonMap['DurationSeconds'] ?? jsonMap['durationSeconds'] ?? jsonMap['duration_seconds'];
+                final prompt = (jsonMap['Prompt'] ?? jsonMap['prompt'] ?? '').toString();
+                if (dur != null) {
+                  final durSec = int.tryParse(dur.toString()) ?? 0;
+                  if (durSec > 0) {
+                    if (prompt.isNotEmpty) {
+                      return 'Timed $durSec seconds\n> $prompt\nStatus: Fired';
+                    }
+                    return 'Timed $durSec seconds';
+                  }
+                }
+                if (prompt.isNotEmpty) {
+                  return 'Scheduled $prompt';
+                }
+              }
+            }
+          } catch (_) {}
+        }
         return arg.isNotEmpty ? 'Scheduled $arg' : 'Scheduled task';
       case 'browse':
       case 'read_url_content':
       case 'read_url':
         return arg.isNotEmpty ? 'Browsed $arg' : 'Browsed web';
+      case 'auto_proceed':
+      case 'auto_proceeded':
+        return arg.isNotEmpty ? 'Auto-proceeded with $arg' : 'Auto-proceeded with Implementation Plan';
+      case 'task_finished':
+      case 'task_completed':
+        return arg.isNotEmpty ? 'Task $arg finished' : 'Task finished';
       case 'tool_output':
       case 'runner_output':
       case 'search_result':
         return arg.isNotEmpty ? '✓ $arg' : '✓ completed';
       default:
         final cleanTool = tool.replaceAll('_', ' ');
+        if (cleanTool.toLowerCase().startsWith('task ') && (arg.toLowerCase().contains('finish') || arg.toLowerCase().contains('complete'))) {
+          return cleanTool;
+        }
         return arg.isNotEmpty ? 'Task $cleanTool ($arg)' : 'Task $cleanTool';
     }
   }
