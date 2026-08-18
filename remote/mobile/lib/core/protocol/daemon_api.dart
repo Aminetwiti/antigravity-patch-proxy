@@ -1086,6 +1086,28 @@ class DaemonApi {
     return status == 'cancelled' || id == taskId;
   }
 
+  /// Récupère la liste des tâches actives en arrière-plan (list_running_tasks).
+  Future<List<Map<String, dynamic>>> listRunningTasks() async {
+    try {
+      final res = await rpc('list_running_tasks', {});
+      final tasks = res['tasks'] ?? (res['data'] is Map ? res['data']['tasks'] : null);
+      if (tasks is List) {
+        return tasks.map((e) => Map<String, dynamic>.from(e is Map ? e : {})).toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  /// Interrompt une tâche active en arrière-plan (kill_running_task).
+  Future<bool> killRunningTask(String taskId) async {
+    try {
+      final res = await rpc('kill_running_task', {'taskId': taskId});
+      return res['success'] == true || (res['data'] is Map && res['data']['success'] == true);
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Demande la prévisualisation du rollback d'une cascade (GetRevertPreview).
   Future<Map<String, dynamic>> getRevertPreview(
     String cascadeId,

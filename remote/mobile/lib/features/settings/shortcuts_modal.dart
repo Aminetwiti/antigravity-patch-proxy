@@ -43,43 +43,45 @@ class ShortcutsModal extends StatelessWidget {
           ),
         ],
       ),
-      content: SizedBox(
-        width: 360,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: shortcuts.map((s) {
-            return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF1F2228) : scheme.surfaceContainerHigh,
-                      borderRadius: BorderRadius.circular(4),
-                      border: Border.all(color: isDark ? const Color(0xFF33363F) : scheme.outlineVariant),
-                    ),
-                    child: Text(
-                      s['key']!,
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        fontFamily: 'monospace',
-                        fontWeight: FontWeight.w600,
-                        color: scheme.onSurface,
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 360, maxHeight: 400),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: shortcuts.map((s) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF1F2228) : scheme.surfaceContainerHigh,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: isDark ? const Color(0xFF33363F) : scheme.outlineVariant),
+                      ),
+                      child: Text(
+                        s['key']!,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.w600,
+                          color: scheme.onSurface,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      s['desc']!,
-                      style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        s['desc']!,
+                        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            );
-          }).toList(),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
         ),
       ),
       actions: [

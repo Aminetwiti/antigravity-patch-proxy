@@ -1317,6 +1317,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
                       // Model & Reasoning Effort Pill
                       Flexible(
+                        fit: FlexFit.loose,
                         child: InkWell(
                           key: _modelButtonKey,
                           onTap: () => _showModelDropdown(context),

@@ -20,6 +20,7 @@ import '../../widgets/session_top_tabs.dart';
 import '../../widgets/artifact_cards.dart';
 import '../../widgets/side_question_card.dart';
 import '../../widgets/background_tasks_bar.dart';
+import '../../widgets/background_task_output_sheet.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/unified_diff_viewer.dart';
 import '../../widgets/artifact_viewer_modal.dart';
@@ -179,6 +180,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   // près du bas (ou tape le bouton).
   bool _showJumpToBottom = false;
   int _hiddenNewCount = 0;
+  bool _isSideQuestionLoading = false;
 
   // ── Session Top Tabs & Artifact state (isolé par session) ───────────
   final Map<String, SessionTabType> _sessionTabs = {};
@@ -223,7 +225,38 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
   bool get _isSideQuestionLoading => _sessionSideQuestionLoadings[widget.activeSessionId] ?? false;
   set _isSideQuestionLoading(bool l) => _sessionSideQuestionLoadings[widget.activeSessionId] = l;
+
   final List<String> _runningBackgroundTasks = [];
+  final Map<String, StringBuffer> _taskOutputs = {};
+  final Map<String, String> _taskStatuses = {};
+  final Map<String, StreamController<String>> _taskOutputControllers = {};
+
+  void _openTaskOutputSheet(String taskNameOrId) {
+    final initialOut = _taskOutputs[taskNameOrId]?.toString() ?? '';
+    final status = _taskStatuses[taskNameOrId] ?? 'running';
+    final ctrl = _taskOutputControllers.putIfAbsent(
+      taskNameOrId,
+      () => StreamController<String>.broadcast(),
+    );
+
+    BackgroundTaskOutputSheet.show(
+      context,
+      taskId: taskNameOrId,
+      command: taskNameOrId,
+      initialOutput: initialOut,
+      status: status,
+      outputStream: ctrl.stream,
+      onStop: () => _handleStopBackgroundTask(taskNameOrId),
+    );
+  }
+
+  void _handleStopBackgroundTask(String taskNameOrId) {
+    widget.api?.killRunningTask(taskNameOrId);
+    setState(() {
+      _runningBackgroundTasks.remove(taskNameOrId);
+      _taskStatuses[taskNameOrId] = 'killed';
+    });
+  }
 
   // ── Sync & Catch-up status ─────────────────────────────────────────
   bool _isSyncing = false;
@@ -962,6 +995,46 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         if (data != null && data.isNotEmpty && mounted) {
           setState(() => _quotaSummary = data);
         }
+        return;
+      }
+
+      if (type == 'task_started') {
+        final data = msg['data'] as Map<String, dynamic>? ?? {};
+        final cmd = data['command'] as String? ?? data['id'] as String? ?? 'Task';
+        final taskId = data['id'] as String? ?? cmd;
+        if (!_runningBackgroundTasks.contains(cmd)) {
+          setState(() {
+            _runningBackgroundTasks.add(cmd);
+            _taskStatuses[cmd] = 'running';
+            _taskStatuses[taskId] = 'running';
+            _taskOutputs.putIfAbsent(cmd, () => StringBuffer());
+            _taskOutputs.putIfAbsent(taskId, () => StringBuffer());
+          });
+        }
+        return;
+      } else if (type == 'task_output') {
+        final data = msg['data'] as Map<String, dynamic>? ?? {};
+        final cmd = data['command'] as String? ?? data['id'] as String? ?? '';
+        final taskId = data['id'] as String? ?? cmd;
+        final delta = data['delta'] as String? ?? '';
+        if (delta.isNotEmpty) {
+          _taskOutputs[cmd]?.write(delta);
+          _taskOutputs[taskId]?.write(delta);
+          _taskOutputControllers[cmd]?.add(delta);
+          _taskOutputControllers[taskId]?.add(delta);
+        }
+        return;
+      } else if (type == 'task_ended') {
+        final data = msg['data'] as Map<String, dynamic>? ?? {};
+        final cmd = data['command'] as String? ?? data['id'] as String? ?? '';
+        final taskId = data['id'] as String? ?? cmd;
+        final status = data['status'] as String? ?? 'completed';
+        setState(() {
+          _runningBackgroundTasks.remove(cmd);
+          _runningBackgroundTasks.remove(taskId);
+          _taskStatuses[cmd] = status;
+          _taskStatuses[taskId] = status;
+        });
         return;
       }
 
@@ -1935,8 +2008,13 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         if (_runningBackgroundTasks.isNotEmpty)
           BackgroundTasksBar(
             runningTasks: _runningBackgroundTasks,
-            onStopTask: () => setState(() => _runningBackgroundTasks.clear()),
-            onViewTasks: () => setState(() => _currentTab = SessionTabType.tasks),
+            onTapTask: _openTaskOutputSheet,
+            onStopTask: _handleStopBackgroundTask,
+            onViewTasks: () {
+              if (_runningBackgroundTasks.isNotEmpty) {
+                _openTaskOutputSheet(_runningBackgroundTasks.first);
+              }
+            },
           ),
         if ((_sessionMessageQueues[widget.activeSessionId]?.isNotEmpty ?? false))
           QueuedMessagesCard(

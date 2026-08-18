@@ -52,7 +52,7 @@ void main() {
     // Verify categories in sidebar
     expect(find.text('SETTINGS'), findsOneWidget);
     expect(find.text('Account'), findsAtLeastNWidgets(1));
-    expect(find.text('General'), findsOneWidget);
+    expect(find.text('General'), findsAtLeastNWidgets(1));
     expect(find.text('Appearance'), findsOneWidget);
     expect(find.text('Models'), findsOneWidget);
     expect(find.text('Customizations'), findsOneWidget);

@@ -410,12 +410,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 color: isSelected ? const Color(0xFF007AFF) : scheme.onSurfaceVariant,
               ),
               const SizedBox(width: 10),
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                  color: isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                    color: isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
@@ -438,7 +441,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
             children: [
               Icon(icon, size: 14, color: scheme.onSurfaceVariant),
               const SizedBox(width: 8),
-              Text(title, style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
             ],
           ),
         ),
