@@ -89,3 +89,11 @@ func (b *SessionStreamBuffer) ClearCascade(cascadeID string) {
 	delete(b.buffers, cascadeID)
 	delete(b.seqCounters, cascadeID)
 }
+
+// LastStepIndex renvoie le dernier StepIndex enregistré pour une cascade.
+func (b *SessionStreamBuffer) LastStepIndex(cascadeID string) int64 {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.seqCounters[cascadeID]
+}
+

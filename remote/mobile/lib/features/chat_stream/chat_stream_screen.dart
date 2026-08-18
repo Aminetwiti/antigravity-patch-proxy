@@ -418,10 +418,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         }
 
         final isStreaming = data['isStreaming'] == true;
-        final activeReqId = data['activeRequestId']?.toString() ?? '';
-        if (isStreaming &&
-            activeReqId.isNotEmpty &&
-            !parsed.any((m) => m.id == 'ext-$activeReqId')) {
+        final activeReqId = data['activeRequestId']?.toString() ?? 'live';
+        if (isStreaming && !parsed.any((m) => m.id == 'ext-$activeReqId' || m.isStreaming)) {
           parsed.add(ChatMessage(
             id: 'ext-$activeReqId',
             sender: 'assistant',
@@ -438,9 +436,14 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             ..addAll(parsed);
         }
         if (isStreaming) {
-          _activeStreamingSessions.add(targetSession);
+          _onStreamStarted(targetSession);
+          // Catch up any in-flight live events from the daemon's StepRecovery buffer
+          widget.api?.syncSession(cascadeId: targetSession, lastStepIndex: 0);
+          if (data['hasPendingApproval'] == true) {
+            widget.api?.getPendingApproval(targetSession);
+          }
         } else {
-          _activeStreamingSessions.remove(targetSession);
+          _onStreamEnded(targetSession);
         }
 
         if (widget.activeSessionId == targetSession) {

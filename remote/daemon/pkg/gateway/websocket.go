@@ -971,6 +971,13 @@ func (s *Server) ClearCascadeActive(cascadeID string) {
 	s.mu.Unlock()
 }
 
+// IsCascadeActive renvoie vrai si la cascade est actuellement en cours de stream ou active.
+func (s *Server) IsCascadeActive(cascadeID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.activeCascades[cascadeID] || s.activeRequestIDs[cascadeID] != ""
+}
+
 // Stats renvoie un snapshot coh├®rent de l'├®tat du serveur (C5).
 func (s *Server) Stats() Stats {
 	s.mu.Lock()
@@ -3076,20 +3083,29 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		respData := map[string]interface{}{"messages": history}
 		s.mu.Lock()
 		reqID, isActive := s.activeRequestIDs[msg.CascadeID]
+		if !isActive {
+			isActive = s.activeCascades[msg.CascadeID]
+		}
 		hasApproval := false
 		if s.approvals != nil {
 			if p, ok := s.approvals[msg.CascadeID]; ok && !p.expired {
 				hasApproval = true
 			}
 		}
+		lastSeq := s.streamBuffer.LastStepIndex(msg.CascadeID)
 		s.mu.Unlock()
 		if isActive {
 			respData["isStreaming"] = true
-			respData["activeRequestId"] = reqID
+			if reqID != "" {
+				respData["activeRequestId"] = reqID
+			} else {
+				respData["activeRequestId"] = "live"
+			}
 		}
 		if hasApproval {
 			respData["hasPendingApproval"] = true
 		}
+		respData["currentStepIndex"] = lastSeq
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: respData})
 		return
 
@@ -3103,10 +3119,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			"cascadeId":        msg.CascadeID,
 			"missedEvents":     missed,
 			"currentStepIndex": currentSeq,
+			"isStreaming":      s.IsCascadeActive(msg.CascadeID),
 		}
-		// Offline buffering (3.2) : les send_prompt non confirm├®s de cette
-		// cascade sont joints au catch-up ÔÇö le mobile r├®-affiche les messages
-		// que le hub a peut-├¬tre re├ºus (d├®dupliqu├®s par requestId au re-send).
+		// Offline buffering (3.2) : les send_prompt non confirmés de cette
+		// cascade sont joints au catch-up — le mobile ré-affiche les messages
+		// que le hub a peut-être reçus (dédupliqués par requestId au re-send).
 		if pending := s.outbox.Pending(msg.CascadeID); len(pending) > 0 {
 			data["pendingMessages"] = pending
 		}
@@ -5620,10 +5637,14 @@ func (s *Server) runLiveTurnStreamer(ctx context.Context, cascadeID, requestID s
 								}
 
 								// 2b. Tool Results
-								if entry.Type == "VIEW_FILE" || entry.Type == "RUN_COMMAND" || entry.Type == "GREP_SEARCH" || entry.Type == "WRITE_TO_FILE" || entry.Type == "TOOL_RESULT" {
+								if entry.Type == "VIEW_FILE" || entry.Type == "RUN_COMMAND" || entry.Type == "GREP_SEARCH" || entry.Type == "FIND_BY_NAME" || entry.Type == "WRITE_TO_FILE" || entry.Type == "REPLACE_FILE_CONTENT" || entry.Type == "TOOL_RESULT" {
 									preview := entry.Content
-									if len(preview) > 200 {
-										preview = preview[:197] + "…"
+									if entry.Type == "RUN_COMMAND" {
+										if len(preview) > 3000 {
+											preview = preview[:2997] + "…"
+										}
+									} else if len(preview) > 500 {
+										preview = preview[:497] + "…"
 									}
 									events = append(events, map[string]interface{}{
 										"kind":   "tool_output",

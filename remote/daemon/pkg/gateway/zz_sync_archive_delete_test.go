@@ -223,7 +223,7 @@ func TestArchiveAndUnarchiveCascadeActions(t *testing.T) {
 	annoDir := filepath.Join(home, ".gemini", "antigravity", "annotations")
 	_ = os.MkdirAll(annoDir, 0o755)
 
-	testID := "feedface-0000-4000-8000-00000000face"
+	testID := "feedface-0000-4000-8000-00000000act2"
 	annoPath := filepath.Join(annoDir, testID+".pbtxt")
 	defer os.Remove(annoPath)
 

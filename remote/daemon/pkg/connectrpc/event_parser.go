@@ -78,7 +78,8 @@ func ParseFrameEvents(raw []byte, cascadeID string) []StreamEvent {
 		if f.WireType != 2 || len(f.Bytes) == 0 {
 			continue
 		}
-		s := strings.TrimSpace(string(f.Bytes))
+		rawStr := string(f.Bytes)
+		s := strings.TrimSpace(rawStr)
 		if s == "" {
 			continue
 		}
@@ -150,18 +151,18 @@ func ParseFrameEvents(raw []byte, cascadeID string) []StreamEvent {
 			continue
 		}
 
-		// 3. Sinon c'est du texte ou du thinking
-		if IsPrintable(s) && len(s) > 0 {
-			if strings.Contains(s, "<thought>") || strings.Contains(s, "Thinking...") {
+		// 3. Sinon c'est du texte ou du thinking (en préservant les espaces des tokens)
+		if IsPrintable(rawStr) && len(rawStr) > 0 {
+			if strings.Contains(rawStr, "<thought>") || strings.Contains(rawStr, "Thinking...") {
 				events = append(events, StreamEvent{
 					Kind:      EventKindThinking,
-					Delta:     s,
+					Delta:     rawStr,
 					CascadeID: cascadeID,
 				})
 			} else {
 				events = append(events, StreamEvent{
 					Kind:      EventKindText,
-					Delta:     s,
+					Delta:     rawStr,
 					CascadeID: cascadeID,
 				})
 			}

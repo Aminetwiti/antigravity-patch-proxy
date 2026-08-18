@@ -100,6 +100,7 @@ class StreamDeltaParser {
       case 'command':
       case 'bash':
       case 'terminal':
+      case 'runner':
         return arg.isNotEmpty ? 'Ran $arg' : 'Ran command';
       case 'read_file':
       case 'view_file':
@@ -113,10 +114,15 @@ class StreamDeltaParser {
       case 'grep':
       case 'grep_search':
         return arg.isNotEmpty ? 'Explored $arg' : 'Explored codebase';
+      case 'search':
+      case 'find_by_name':
+        return arg.isNotEmpty ? 'Search $arg' : 'Search codebase';
       case 'list_files':
       case 'list_dir':
         return arg.isNotEmpty ? 'Explored $arg' : 'Explored directory';
       case 'tool_output':
+      case 'runner_output':
+      case 'search_result':
         return arg.isNotEmpty ? '✓ $arg' : '✓ completed';
       default:
         final cleanTool = tool.replaceAll('_', ' ');
