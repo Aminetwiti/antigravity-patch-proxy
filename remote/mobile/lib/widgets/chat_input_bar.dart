@@ -814,228 +814,56 @@ class _ChatInputBarState extends State<ChatInputBar> {
     _mentionOrActionOpen = false;
     _loadModelsAndPreferences();
 
-    final scheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
     final standard = _availableModels.where((m) => !m.isCustom).toList();
     final custom = _availableModels.where((m) => m.isCustom).toList();
 
     CustomDropdownOverlay.show(
       context: context,
       targetKey: _modelButtonKey,
-      width: 290,
-      maxHeight: 460,
-      child: Material(
-        color: Colors.transparent,
-        child: ListView(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          shrinkWrap: true,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              child: Text(
-                'Model',
-                style: (textTheme.labelSmall ?? const TextStyle(fontSize: 12)).copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-            ...standard.map((m) => _buildModelRow(m)),
-            if (custom.isNotEmpty) ...[
-              Divider(color: scheme.outlineVariant, height: 1),
-              ...custom.map((m) => _buildCustomModelRow(m)),
-            ],
-            Divider(color: scheme.outlineVariant, height: 1),
-            _buildViewUsageRow(context),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildModelRow(AntigravityModel model) {
-    final scheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
-    final isSelected = _selectedModel.toLowerCase().contains(model.shortName.toLowerCase()) ||
-        _selectedModel.toLowerCase() == model.displayName.toLowerCase();
-
-    return Semantics(
-      button: true,
-      selected: isSelected,
-      label: model.displayName,
-      child: InkWell(
-        onTap: () => _selectModel(model),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 48),
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: isSelected ? scheme.surfaceContainerHighest : Colors.transparent,
-              borderRadius: BorderRadius.circular(AppRadius.md),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    model.displayName,
-                    style: (textTheme.bodyMedium ?? const TextStyle(fontSize: 13)).copyWith(
-                      color: isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (model.tag != null) ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: scheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(AppRadius.sm),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          model.tag!,
-                          style: (textTheme.labelSmall ?? const TextStyle(fontSize: 10)).copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Icon(Icons.info_outline, size: 10, color: scheme.onSurfaceVariant),
-                      ],
-                    ),
-                  ),
-                ],
-                const SizedBox(width: 8),
-                if (isSelected)
-                  Icon(Icons.check, size: 16, color: scheme.primary)
-                else
-                  Icon(Icons.chevron_right, size: 14, color: scheme.outline),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCustomModelRow(AntigravityModel model) {
-    final scheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
-    final isSelected = _selectedModel.toLowerCase().contains(model.id.toLowerCase()) ||
-        _selectedModel.toLowerCase().contains(model.displayName.toLowerCase());
-
-    Color statusColor = scheme.primary;
-    if (model.status == 'degraded') {
-      statusColor = scheme.tertiary;
-    } else if (model.status == 'offline') {
-      statusColor = scheme.error;
-    }
-
-    return Semantics(
-      button: true,
-      selected: isSelected,
-      label: model.customLabel,
-      child: InkWell(
-        onTap: () => _selectModel(model),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 48),
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: isSelected ? scheme.surfaceContainerHighest : Colors.transparent,
-              borderRadius: BorderRadius.circular(AppRadius.md),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: statusColor,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    model.customLabel,
-                    style: (textTheme.bodyMedium ?? const TextStyle(fontSize: 12.5)).copyWith(
-                      color: isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (isSelected)
-                  Icon(Icons.check, size: 16, color: scheme.primary),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildViewUsageRow(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
-    return Semantics(
-      button: true,
-      label: 'View Usage',
-      child: InkWell(
-        onTap: () {
+      width: 300,
+      maxHeight: 480,
+      child: _ModelDropdownMenuContent(
+        standardModels: standard,
+        customModels: custom,
+        selectedModel: _selectedModel,
+        reasoningEffort: _reasoningEffort,
+        onModelSelected: (model, effort) => _selectModelWithEffort(model, effort),
+        onViewUsage: () {
           CustomDropdownOverlay.hide();
           _showUsageLimitsDialog(context);
         },
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 48),
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(
-              children: [
-                Icon(Icons.query_stats_outlined, size: 15, color: scheme.onSurfaceVariant),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'View Usage',
-                    style: (textTheme.bodyMedium ?? const TextStyle(fontSize: 13)).copyWith(
-                      fontWeight: FontWeight.w500,
-                      color: scheme.onSurface,
-                    ),
-                  ),
-                ),
-                Icon(Icons.chevron_right, size: 14, color: scheme.outline),
-              ],
-            ),
-          ),
-        ),
       ),
     );
   }
 
-  Future<void> _selectModel(AntigravityModel model) async {
+  Future<void> _selectModelWithEffort(AntigravityModel model, String? effort) async {
     HapticFeedback.selectionClick();
-    final short = model.shortName;
+    final effectiveModel = effort != null ? model.withEffort(effort) : model;
+    final short = effectiveModel.shortName;
     setState(() {
       _selectedModel = short;
-      _selectedModelId = model.id;
-      _selectedModelEnum = model.modelEnum;
+      _selectedModelId = effectiveModel.id;
+      _selectedModelEnum = effectiveModel.modelEnum;
+      if (effort != null) {
+        _reasoningEffort = effort;
+      }
     });
     CustomDropdownOverlay.hide();
 
-    widget.onModelChanged?.call(model.displayName);
+    widget.onModelChanged?.call(effectiveModel.displayName);
 
     // Persist choice in local settings
-    await SettingsStore.save({'defaultModel': model.displayName});
+    await SettingsStore.save({
+      'defaultModel': effectiveModel.displayName,
+      if (effort != null) 'reasoningEffort': effort.toLowerCase(),
+    });
 
-    // Send /model command to daemon to synchronize active session model without conflict
+    // Send /model and /effort commands to daemon
     try {
-      await widget.api?.sendCommand('/model ${model.id}');
+      await widget.api?.sendCommand('/model ${effectiveModel.id}');
+      if (effort != null) {
+        await widget.api?.sendCommand('/effort ${effort.toLowerCase()}');
+      }
     } catch (_) {}
   }
 
@@ -1343,7 +1171,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                                 const SizedBox(width: 4),
                                 Flexible(
                                   child: Text(
-                                    '$_selectedModel ($_reasoningEffort)',
+                                    _selectedModel,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
@@ -1355,8 +1183,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
                                 ),
                                 const SizedBox(width: 2),
                                 Icon(
-                                  Icons.keyboard_arrow_down,
-                                  size: 16,
+                                  Icons.keyboard_arrow_up,
+                                  size: 15,
                                   color: scheme.onSurfaceVariant,
                                 ),
                               ],
@@ -1791,6 +1619,354 @@ class _UsageLimitsModalState extends State<_UsageLimitsModal> {
         ],
       ),
     );
+  }
+}
+
+class _ModelDropdownMenuContent extends StatefulWidget {
+  final List<AntigravityModel> standardModels;
+  final List<AntigravityModel> customModels;
+  final String selectedModel;
+  final String reasoningEffort;
+  final void Function(AntigravityModel model, String? effort) onModelSelected;
+  final VoidCallback onViewUsage;
+
+  const _ModelDropdownMenuContent({
+    required this.standardModels,
+    required this.customModels,
+    required this.selectedModel,
+    required this.reasoningEffort,
+    required this.onModelSelected,
+    required this.onViewUsage,
+  });
+
+  @override
+  State<_ModelDropdownMenuContent> createState() => _ModelDropdownMenuContentState();
+}
+
+class _ModelDropdownMenuContentState extends State<_ModelDropdownMenuContent> {
+  String? _expandedBaseName;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Material(
+      color: Colors.transparent,
+      child: ListView(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        shrinkWrap: true,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Text(
+              'Model',
+              style: (textTheme.labelSmall ?? const TextStyle(fontSize: 12)).copyWith(
+                fontWeight: FontWeight.w600,
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          ...widget.standardModels.map((m) => _buildStandardModelRow(m, isDark, scheme, textTheme)),
+          if (widget.customModels.isNotEmpty) ...[
+            Divider(color: isDark ? const Color(0xFF2B2D31) : scheme.outlineVariant, height: 1),
+            ...widget.customModels.map((m) => _buildCustomModelRow(m, isDark, scheme, textTheme)),
+          ],
+          Divider(color: isDark ? const Color(0xFF2B2D31) : scheme.outlineVariant, height: 1),
+          _buildViewUsageRow(isDark, scheme, textTheme),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStandardModelRow(
+    AntigravityModel model,
+    bool isDark,
+    ColorScheme scheme,
+    TextTheme textTheme,
+  ) {
+    final isSelected = widget.selectedModel.toLowerCase().contains(model.baseName.toLowerCase()) ||
+        widget.selectedModel.toLowerCase() == model.displayName.toLowerCase();
+    final isExpanded = _expandedBaseName == model.baseName;
+
+    final currentEffort = isSelected
+        ? (widget.reasoningEffort.isNotEmpty ? _capitalize(widget.reasoningEffort) : (model.effort ?? 'Medium'))
+        : (model.effort ?? 'Medium');
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Semantics(
+          button: true,
+          selected: isSelected,
+          label: '${model.baseName} $currentEffort',
+          child: InkWell(
+            onTap: () {
+              if (model.supportsEffort) {
+                setState(() {
+                  _expandedBaseName = isExpanded ? null : model.baseName;
+                });
+              } else {
+                widget.onModelSelected(model, null);
+              }
+            },
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 44),
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isSelected && !isExpanded
+                      ? (isDark ? const Color(0xFF26282E) : scheme.surfaceContainerHighest)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              model.baseName,
+                              style: (textTheme.bodyMedium ?? const TextStyle(fontSize: 13)).copyWith(
+                                color: isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
+                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (model.supportsEffort) ...[
+                            const SizedBox(width: 6),
+                            Text(
+                              currentEffort,
+                              style: (textTheme.bodyMedium ?? const TextStyle(fontSize: 12.5)).copyWith(
+                                color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
+                                fontWeight: FontWeight.w400,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    if (model.tag != null) ...[
+                      const SizedBox(width: 4),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF26282E) : scheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(AppRadius.sm),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              model.tag!,
+                              style: (textTheme.labelSmall ?? const TextStyle(fontSize: 10)).copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(width: 3),
+                            Icon(Icons.info_outline, size: 10, color: scheme.onSurfaceVariant),
+                          ],
+                        ),
+                      ),
+                    ],
+                    const SizedBox(width: 8),
+                    if (isSelected && !model.supportsEffort)
+                      Icon(Icons.check, size: 16, color: scheme.primary)
+                    else if (model.supportsEffort)
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () {
+                          setState(() {
+                            _expandedBaseName = isExpanded ? null : model.baseName;
+                          });
+                        },
+                        child: Icon(
+                          isExpanded ? Icons.keyboard_arrow_down : Icons.chevron_right,
+                          size: 15,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      )
+                    else
+                      const SizedBox(width: 14),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (model.supportsEffort && isExpanded)
+          Container(
+            margin: const EdgeInsets.only(left: 20, right: 10, top: 2, bottom: 4),
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF181A1D) : scheme.surfaceContainer,
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              border: Border.all(
+                color: isDark ? const Color(0xFF2B2D31) : scheme.outlineVariant,
+                width: 0.8,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildEffortTile(model, 'Low', isSelected, currentEffort, isDark, scheme, textTheme),
+                _buildEffortTile(model, 'Medium', isSelected, currentEffort, isDark, scheme, textTheme),
+                _buildEffortTile(model, 'High', isSelected, currentEffort, isDark, scheme, textTheme),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildEffortTile(
+    AntigravityModel model,
+    String effortTier,
+    bool isModelSelected,
+    String currentEffort,
+    bool isDark,
+    ColorScheme scheme,
+    TextTheme textTheme,
+  ) {
+    final isTierActive = isModelSelected && currentEffort.toLowerCase() == effortTier.toLowerCase();
+
+    return InkWell(
+      onTap: () => widget.onModelSelected(model, effortTier),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(
+          color: isTierActive ? (isDark ? const Color(0xFF26282E) : scheme.surfaceContainerHighest) : Colors.transparent,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              effortTier,
+              style: (textTheme.bodyMedium ?? const TextStyle(fontSize: 12.5)).copyWith(
+                fontWeight: isTierActive ? FontWeight.w600 : FontWeight.w400,
+                color: isTierActive ? scheme.onSurface : scheme.onSurfaceVariant,
+              ),
+            ),
+            if (isTierActive)
+              Icon(Icons.check, size: 14, color: scheme.primary)
+            else
+              const SizedBox(width: 14),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCustomModelRow(
+    AntigravityModel model,
+    bool isDark,
+    ColorScheme scheme,
+    TextTheme textTheme,
+  ) {
+    final isSelected = widget.selectedModel.toLowerCase().contains(model.id.toLowerCase()) ||
+        widget.selectedModel.toLowerCase().contains(model.displayName.toLowerCase());
+
+    Color statusColor = scheme.primary;
+    if (model.status == 'degraded') {
+      statusColor = const Color(0xFFFFCC00);
+    } else if (model.status == 'offline') {
+      statusColor = scheme.error;
+    } else {
+      statusColor = const Color(0xFFFFCC00);
+    }
+
+    return Semantics(
+      button: true,
+      selected: isSelected,
+      label: model.customLabel,
+      child: InkWell(
+        onTap: () => widget.onModelSelected(model, null),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 44),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: isSelected ? (isDark ? const Color(0xFF26282E) : scheme.surfaceContainerHighest) : Colors.transparent,
+              borderRadius: BorderRadius.circular(AppRadius.md),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: statusColor,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    model.customLabel,
+                    style: (textTheme.bodyMedium ?? const TextStyle(fontSize: 12.5)).copyWith(
+                      color: isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
+                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (isSelected)
+                  Icon(Icons.check, size: 16, color: scheme.primary),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildViewUsageRow(
+    bool isDark,
+    ColorScheme scheme,
+    TextTheme textTheme,
+  ) {
+    return Semantics(
+      button: true,
+      label: 'View Usage',
+      child: InkWell(
+        onTap: widget.onViewUsage,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 44),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                Icon(Icons.query_stats_outlined, size: 15, color: scheme.onSurfaceVariant),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'View Usage',
+                    style: (textTheme.bodyMedium ?? const TextStyle(fontSize: 13)).copyWith(
+                      fontWeight: FontWeight.w500,
+                      color: scheme.onSurface,
+                    ),
+                  ),
+                ),
+                Icon(Icons.chevron_right, size: 14, color: scheme.outline),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _capitalize(String s) {
+    if (s.isEmpty) return s;
+    return s[0].toUpperCase() + s.substring(1);
   }
 }
 

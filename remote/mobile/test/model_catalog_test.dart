@@ -138,7 +138,7 @@ void main() {
 
       // Dropdown should show Antigravity 2.0 models & View Usage
       expect(find.text('Model'), findsOneWidget);
-      expect(find.text('Gemini 3.7 Flash Medium'), findsOneWidget);
+      expect(find.text('Gemini 3.7 Flash'), findsOneWidget);
       expect(find.text('Claude Sonnet 4.6 (Thinking)'), findsOneWidget);
       expect(find.text('View Usage'), findsOneWidget);
 
@@ -159,6 +159,49 @@ void main() {
       );
 
       await tester.pump(const Duration(seconds: 2));
+    });
+
+    testWidgets('ChatInputBar allows selecting Reasoning Effort degrees (Low, Medium, High)', (tester) async {
+      tester.view.physicalSize = const Size(1080, 1920);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      String? selectedModelFromCallback;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ChatInputBar(
+              onSend: (_, {queued = false, modelUID, modelEnum}) {},
+              isConnected: true,
+              onModelChanged: (m) => selectedModelFromCallback = m,
+            ),
+          ),
+        ),
+      );
+
+      // Open model dropdown
+      await tester.tap(find.textContaining('Gemini 3.7 Flash'));
+      await tester.pumpAndSettle();
+
+      // Tap on Gemini 3.6 Flash to expand degree tiers
+      expect(find.text('Gemini 3.6 Flash'), findsOneWidget);
+      await tester.tap(find.text('Gemini 3.6 Flash'));
+      await tester.pumpAndSettle();
+
+      // Verify degree options are shown
+      expect(find.text('Low'), findsWidgets);
+      expect(find.text('Medium'), findsWidgets);
+      expect(find.text('High'), findsWidgets);
+
+      // Select High effort for Gemini 3.6 Flash
+      await tester.tap(find.text('High').last);
+      await tester.pumpAndSettle();
+
+      // Verify model updated to Gemini 3.6 Flash High
+      expect(selectedModelFromCallback, 'Gemini 3.6 Flash High');
+      expect(find.textContaining('Gemini 3.6 Flash High'), findsOneWidget);
     });
 
     testWidgets('View Usage opens Quota Limits modal without overflow on small screens', (tester) async {

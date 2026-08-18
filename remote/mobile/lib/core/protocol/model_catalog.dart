@@ -27,20 +27,45 @@ class AntigravityModel {
     this.modelEnum,
   });
 
+  /// Base model name without effort suffix (e.g. "Gemini 3.7 Flash")
+  String get baseName {
+    if (isCustom) return displayName;
+    if (displayName.startsWith('Gemini')) {
+      final parts = displayName.split(' ');
+      if (parts.length >= 3) {
+        return parts.take(3).join(' ');
+      }
+    }
+    return displayName;
+  }
+
+  /// Whether this model supports reasoning effort degrees (Low, Medium, High).
+  bool get supportsEffort => displayName.startsWith('Gemini') && !isCustom;
+
+  /// Clones the model with an updated reasoning effort degree.
+  AntigravityModel withEffort(String newEffort) {
+    return AntigravityModel(
+      id: id,
+      displayName: '$baseName $newEffort',
+      tag: tag,
+      effort: newEffort,
+      isThinking: isThinking,
+      isCustom: isCustom,
+      latencyMs: latencyMs,
+      status: status,
+      modelEnum: modelEnum,
+    );
+  }
+
   /// Short display title for the compact button in the input bar.
   String get shortName {
     if (isCustom) {
       return displayName;
     }
-    // E.g. "Gemini 3.7 Flash", "Claude Sonnet 4.6", "GPT-OSS 120B"
-    final parts = displayName.split(' ');
-    if (displayName.startsWith('Claude') || displayName.startsWith('GPT')) {
-      return parts.take(3).join(' ');
-    }
-    return parts.take(3).join(' ');
+    return displayName;
   }
 
-  /// Full formatted label for custom models (e.g. "441ms • deepseek-v4-flash")
+  /// Full formatted label for custom models (e.g. "797ms • deepseek-v4-flash")
   String get customLabel {
     if (latencyMs != null) {
       return '${latencyMs}ms • $displayName';
@@ -70,9 +95,9 @@ class ModelCatalog {
   static const List<AntigravityModel> standardModels = [
     AntigravityModel(
       id: 'gemini-3.7-flash',
-      displayName: 'Gemini 3.7 Flash Medium',
+      displayName: 'Gemini 3.7 Flash High',
       tag: 'Fast',
-      effort: 'Medium',
+      effort: 'High',
       modelEnum: 312,
     ),
     AntigravityModel(
@@ -120,9 +145,9 @@ class ModelCatalog {
   /// Default model when opening a fresh session.
   static const AntigravityModel defaultModel = AntigravityModel(
     id: 'gemini-3.7-flash',
-    displayName: 'Gemini 3.7 Flash Medium',
+    displayName: 'Gemini 3.7 Flash High',
     tag: 'Fast',
-    effort: 'Medium',
+    effort: 'High',
     modelEnum: 312,
   );
 

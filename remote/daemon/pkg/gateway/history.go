@@ -711,14 +711,106 @@ func parseWorkspaceFromTranscript(content string) string {
 // (final messages) OR in `thinking` (intermediate reasoning when the model
 // continued with tool calls ÔÇö `content` is then absent).
 type transcriptEntry struct {
-	StepIndex int    `json:"step_index"`
-	Source    string `json:"source"`
-	Type      string `json:"type"`
-	CreatedAt string `json:"created_at"`
-	Content   string `json:"content"`
-	Thinking  string `json:"thinking"`
-	Status    string `json:"status"`
-	Error     string `json:"error"`
+	StepIndex int             `json:"step_index"`
+	Source    string          `json:"source"`
+	Type      string          `json:"type"`
+	CreatedAt string          `json:"created_at"`
+	Content   string          `json:"content"`
+	Thinking  string          `json:"thinking"`
+	Status    string          `json:"status"`
+	Error     string          `json:"error"`
+	ToolCalls json.RawMessage `json:"tool_calls"`
+}
+
+func formatToolCallStep(name string, argsRaw json.RawMessage) string {
+	lowerName := strings.ToLower(name)
+	if lowerName == "ask_question" || lowerName == "ask_user" {
+		return ""
+	}
+	arg := extractCmdFromArgs(argsRaw)
+	if arg == "" && len(argsRaw) > 0 {
+		var argMap map[string]interface{}
+		if json.Unmarshal(argsRaw, &argMap) == nil {
+			for _, k := range []string{"targetFile", "TargetFile", "filePath", "file_path", "path", "AbsolutePath", "DirectoryPath", "query", "Query", "pattern", "command", "CommandLine", "command_line", "description", "toolAction"} {
+				if v, ok := argMap[k]; ok {
+					if s, okS := v.(string); okS && s != "" {
+						arg = s
+						break
+					}
+				}
+			}
+		}
+	}
+	if strings.Contains(arg, "/") || strings.Contains(arg, "\\") {
+		cleanBase := filepath.Base(arg)
+		if cleanBase != "." && cleanBase != "" && cleanBase != "/" && cleanBase != "\\" {
+			arg = cleanBase
+		}
+	}
+	if len(arg) > 70 {
+		arg = arg[:67] + "…"
+	}
+
+	switch {
+	case strings.Contains(lowerName, "run_command") || strings.Contains(lowerName, "command") || strings.Contains(lowerName, "terminal") || strings.Contains(lowerName, "bash"):
+		if arg != "" {
+			return "Ran " + arg
+		}
+		return "Ran command"
+	case strings.Contains(lowerName, "write_to_file") || strings.Contains(lowerName, "replace_file_content") || strings.Contains(lowerName, "edit_file"):
+		if arg != "" {
+			return "Edited " + arg
+		}
+		return "Edited file"
+	case strings.Contains(lowerName, "view_file") || strings.Contains(lowerName, "read_file"):
+		if arg != "" {
+			return "Viewed " + arg
+		}
+		return "Viewed file"
+	case strings.Contains(lowerName, "grep") || strings.Contains(lowerName, "search") || strings.Contains(lowerName, "find_by_name") || strings.Contains(lowerName, "list_dir") || strings.Contains(lowerName, "list_files"):
+		if arg != "" {
+			return "Explored " + arg
+		}
+		return "Explored 1 file"
+	default:
+		cleanTool := strings.ReplaceAll(name, "_", " ")
+		if arg != "" {
+			return fmt.Sprintf("Task %s (%s)", cleanTool, arg)
+		}
+		return "Task " + cleanTool
+	}
+}
+
+func formatToolCallsForThought(toolCallsRaw json.RawMessage) string {
+	if len(toolCallsRaw) == 0 {
+		return ""
+	}
+	var toolCalls []struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"args"`
+		Function  struct {
+			Name      string          `json:"name"`
+			Arguments json.RawMessage `json:"arguments"`
+		} `json:"function"`
+	}
+	if err := json.Unmarshal(toolCallsRaw, &toolCalls); err != nil {
+		return ""
+	}
+	var steps []string
+	for _, tc := range toolCalls {
+		name := tc.Name
+		if name == "" {
+			name = tc.Function.Name
+		}
+		args := tc.Arguments
+		if len(args) == 0 {
+			args = tc.Function.Arguments
+		}
+		if step := formatToolCallStep(name, args); step != "" {
+			steps = append(steps, step)
+		}
+	}
+	return strings.Join(steps, "\n")
 }
 
 // parseTranscriptLine converts one JSONL line into a HistoryMessage, or
@@ -749,7 +841,7 @@ func parseTranscriptLine(line []byte) *HistoryMessage {
 	}
 
 	if entry.Type == "TOOL_CALL" || entry.Type == "TOOL_RESULT" || entry.Source == "TOOL" {
-		return nil // events d'outils : invisibles dans le chat mobile
+		return nil // events d'outils bruts : gérés via PLANNER_RESPONSE ou agrégation
 	}
 
 	// Réponse visible du modèle : PLANNER_RESPONSE place la réponse finale
@@ -760,6 +852,14 @@ func parseTranscriptLine(line []byte) *HistoryMessage {
 	if entry.Type == "PLANNER_RESPONSE" {
 		text := cleanAssistantText(entry.Content)
 		thought := cleanRawContent(entry.Thinking)
+		toolSteps := formatToolCallsForThought(entry.ToolCalls)
+		if toolSteps != "" {
+			if thought != "" {
+				thought = thought + "\n" + toolSteps
+			} else {
+				thought = toolSteps
+			}
+		}
 		if text == "" && thought == "" {
 			return nil
 		}

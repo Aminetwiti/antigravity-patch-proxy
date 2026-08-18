@@ -1779,6 +1779,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (ctx) {
+        bool isSelecting = false;
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
@@ -1831,6 +1832,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                         borderRadius: BorderRadius.circular(8),
                       ),
                       onTap: () {
+                        if (isSelecting) return;
+                        isSelecting = true;
                         Navigator.of(ctx).pop();
                         widget.onSelectProject?.call(p);
                       },

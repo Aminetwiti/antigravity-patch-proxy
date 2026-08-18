@@ -1050,6 +1050,22 @@ func (s *Server) IsCascadeActive(cascadeID string) bool {
 	return s.activeCascades[cascadeID] || s.activeRequestIDs[cascadeID] != ""
 }
 
+// isSessionActivelyRunning vérifie si la cascade est actuellement active (statut RUNNING ou BUSY dans Jetbox/LS).
+// N'utilise QUE le statut Jetbox — activeCascades est un marqueur interne daemon et ne reflète pas l'état réel du LS.
+func (s *Server) isSessionActivelyRunning(cascadeID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.jetboxSummaries == nil {
+		return false
+	}
+	sum, ok := s.jetboxSummaries[cascadeID]
+	if !ok {
+		return false
+	}
+	st := strings.ToUpper(sum.Status)
+	return strings.Contains(st, "RUNNING") || strings.Contains(st, "BUSY")
+}
+
 // Stats renvoie un snapshot coh├®rent de l'├®tat du serveur (C5).
 func (s *Server) Stats() Stats {
 	s.mu.Lock()
@@ -3599,16 +3615,27 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		if err != nil {
 			cancelWatcher()
 		} else {
-			if hasTextDelivered || s.hasPendingApproval(msg.CascadeID) {
-				select {
-				case <-doneChan:
-				case <-time.After(50 * time.Millisecond):
-				}
-			} else {
+			// Si un fichier transcript existe ou que la cascade est activement en cours dans Jetbox/LS,
+			// laisser runLiveTurnStreamer streamer les étapes jusqu'à la fin réelle
+			transcriptPath := findTranscriptPath(msg.CascadeID)
+			if transcriptPath != "" || s.isSessionActivelyRunning(msg.CascadeID) {
 				select {
 				case <-doneChan:
 				case <-ctx.Done():
-				case <-time.After(2 * time.Second):
+				}
+			} else {
+				// Streaming direct sans fichier transcript sur disque (ex. tests unitaires ou réponse directe)
+				if hasTextDelivered || s.hasPendingApproval(msg.CascadeID) {
+					select {
+					case <-doneChan:
+					case <-time.After(10 * time.Millisecond):
+					}
+				} else {
+					select {
+					case <-doneChan:
+					case <-ctx.Done():
+					case <-time.After(1 * time.Second):
+					}
 				}
 			}
 			cancelWatcher()
@@ -6253,12 +6280,25 @@ func (s *Server) runLiveTurnStreamer(ctx context.Context, cascadeID, requestID s
 				}
 			}
 
-			// 4. Clôture propre dès que le tour est stabilisé ou si aucun fichier transcript n'est disponible
-			if turnCompleted && time.Since(lastActivityTime) >= 100*time.Millisecond {
+			// 4. Clôture propre dès que le tour est stabilisé
+			// Ne JAMAIS terminer tant que la session est activement en cours d'exécution (statut RUNNING ou BUSY)
+			if s.isSessionActivelyRunning(cascadeID) {
+				continue
+			}
+
+			if turnCompleted && time.Since(lastActivityTime) >= 1000*time.Millisecond {
 				return
 			}
-			if transcriptPath == "" && time.Since(lastActivityTime) >= 100*time.Millisecond {
+			if transcriptPath != "" && (*hasTextDelivered || deliveredTextLen > 0) && time.Since(lastActivityTime) >= 1500*time.Millisecond {
 				return
+			}
+			if transcriptPath == "" {
+				if *hasTextDelivered && time.Since(lastActivityTime) >= 50*time.Millisecond {
+					return
+				}
+				if time.Since(lastActivityTime) >= 1000*time.Millisecond {
+					return
+				}
 			}
 		}
 	}

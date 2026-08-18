@@ -99,20 +99,31 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
     super.dispose();
   }
 
+  // Guard anti-rebond contre les clics rapides créant des sessions fantômes concurrentes.
+  bool _isDispatchingNewSession = false;
+
   void _callNewConversation([ProjectItem? project]) {
+    if (_isDispatchingNewSession) return;
+    _isDispatchingNewSession = true;
     final fn = widget.onNewConversation;
-    if (fn is void Function(ProjectItem?)) {
-      fn(project);
-    } else if (fn is void Function([ProjectItem?])) {
-      fn(project);
-    } else if (fn is VoidCallback) {
-      fn();
-    } else {
-      try {
-        (fn as dynamic)(project);
-      } catch (_) {
-        (fn as dynamic)();
+    try {
+      if (fn is void Function(ProjectItem?)) {
+        fn(project);
+      } else if (fn is void Function([ProjectItem?])) {
+        fn(project);
+      } else if (fn is VoidCallback) {
+        fn();
+      } else {
+        try {
+          (fn as dynamic)(project);
+        } catch (_) {
+          (fn as dynamic)();
+        }
       }
+    } finally {
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) _isDispatchingNewSession = false;
+      });
     }
   }
 

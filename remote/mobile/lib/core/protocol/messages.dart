@@ -8,6 +8,10 @@ class CascadeSession {
   final String? lastPrompt;
   final String? worktree;
   final String? projectId;
+  /// Nombre d'étapes enregistrées — sert à détecter l'activité récente (point bleu)
+  final int stepCount;
+  /// Indicateur d'activité non-consultée — identique au point bleu de l'IDE
+  final bool hasUnread;
 
   const CascadeSession({
     required this.id,
@@ -18,6 +22,8 @@ class CascadeSession {
     this.lastPrompt,
     this.worktree,
     this.projectId,
+    this.stepCount = 0,
+    this.hasUnread = false,
   });
 
   factory CascadeSession.fromJson(Map<String, dynamic> json) {
@@ -30,6 +36,8 @@ class CascadeSession {
       lastPrompt: json['lastPrompt']?.toString(),
       worktree: json['worktree']?.toString(),
       projectId: json['projectId']?.toString(),
+      stepCount: (json['stepCount'] as num?)?.toInt() ?? 0,
+      hasUnread: json['hasUnread'] == true,
     );
   }
 
@@ -93,6 +101,8 @@ class CascadeSession {
     String? lastPrompt,
     String? worktree,
     String? projectId,
+    int? stepCount,
+    bool? hasUnread,
   }) {
     return CascadeSession(
       id: id ?? this.id,
@@ -103,6 +113,8 @@ class CascadeSession {
       lastPrompt: lastPrompt ?? this.lastPrompt,
       worktree: worktree ?? this.worktree,
       projectId: projectId ?? this.projectId,
+      stepCount: stepCount ?? this.stepCount,
+      hasUnread: hasUnread ?? this.hasUnread,
     );
   }
 
@@ -115,6 +127,8 @@ class CascadeSession {
         if (lastPrompt != null) 'lastPrompt': lastPrompt,
         if (worktree != null) 'worktree': worktree,
         if (projectId != null) 'projectId': projectId,
+        'stepCount': stepCount,
+        'hasUnread': hasUnread,
       };
 }
 

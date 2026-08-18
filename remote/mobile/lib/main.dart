@@ -426,12 +426,19 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     }
   }
 
+  bool _isCreatingSession = false;
+
   /// Crée une nouvelle conversation (bouton « + » de la barre latérale ET des
   /// onglets de session) puis bascule dessus. Workflow partagé entre
   /// LeftSidebarDrawer et ChatStreamScreen.
   Future<void> _createNewConversation([ProjectItem? targetProject]) async {
+    if (_isCreatingSession) return;
+    _isCreatingSession = true;
     final api = _api;
-    if (api == null) return;
+    if (api == null) {
+      _isCreatingSession = false;
+      return;
+    }
     try {
       var ws = targetProject?.path ?? '';
       var projId = targetProject?.id ?? '';
@@ -471,17 +478,18 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           }
         }
       }
-      if (newId.isEmpty && res['cascadeId'] is String) {
-        newId = res['cascadeId'] as String;
+      if (newId.isEmpty) {
+        newId = 'cascade-${DateTime.now().millisecondsSinceEpoch}';
       }
 
-      if (newId.isNotEmpty && mounted) {
+      if (mounted) {
         final newSession = CascadeSession(
           id: newId,
           workspacePath: ws,
           title: 'Nouvelle conversation',
           status: 'CASCADE_STATUS_READY',
           time: 'Maintenant',
+          projectId: projId,
         );
         setState(() {
           _activeSessionId = newId;
@@ -492,6 +500,8 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       }
     } catch (e) {
       debugPrint('createCascade failed: $e');
+    } finally {
+      _isCreatingSession = false;
     }
   }
 
@@ -520,41 +530,44 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           }
           if (sessions.isNotEmpty) {
             final stillActive = sessions.any((s) => s.id == _activeSessionId);
-            // Si la session active est une nouvelle conversation pas encore enregistrée sur disque,
-            // on la préserve en tête de liste sans écraser _activeSessionId.
-            if (!stillActive &&
-                _activeSessionId.isNotEmpty &&
-                _activeSessionTitle == 'Nouvelle conversation') {
-              final newSess = CascadeSession(
-                id: _activeSessionId,
-                workspacePath: _sessions.isNotEmpty ? _sessions.first.workspacePath : '',
-                title: 'Nouvelle conversation',
-                status: 'CASCADE_STATUS_READY',
-                time: 'Maintenant',
-              );
-              _sessions = [newSess, ...sessions.where((s) => s.id != _activeSessionId)];
-            } else {
-              _sessions = sessions;
-              if (_activeSessionId.isEmpty || (!stillActive && _activeSessionTitle != 'Nouvelle conversation')) {
-                _activeSessionId = sessions.first.id;
-                _activeSessionTitle = sessions.first.title;
-              } else if (stillActive) {
+            if (_activeSessionId.isNotEmpty) {
+              if (stillActive) {
+                _sessions = sessions;
                 final cur = sessions.firstWhere((s) => s.id == _activeSessionId);
                 _activeSessionTitle = cur.title;
+              } else {
+                // Si la session active locale n'est pas encore synchronisée sur le serveur,
+                // la préserver en tête de liste sans changer de session active.
+                final curLocal = _sessions.firstWhere(
+                  (s) => s.id == _activeSessionId,
+                  orElse: () => CascadeSession(
+                    id: _activeSessionId,
+                    workspacePath: _projects.isNotEmpty ? _projects.first.path : '',
+                    title: _activeSessionTitle.isNotEmpty ? _activeSessionTitle : 'Nouvelle conversation',
+                    status: 'CASCADE_STATUS_READY',
+                    time: 'Maintenant',
+                  ),
+                );
+                _sessions = [curLocal, ...sessions.where((s) => s.id != _activeSessionId)];
               }
+            } else {
+              _sessions = sessions;
+              _activeSessionId = sessions.first.id;
+              _activeSessionTitle = sessions.first.title;
             }
           } else {
-            // Si aucune session distante n'existe (ex: purgé sur le PC), préserver seulement une nouvelle conv locale
-            if (_activeSessionTitle == 'Nouvelle conversation' && _activeSessionId.isNotEmpty) {
-              _sessions = [
-                CascadeSession(
+            if (_activeSessionId.isNotEmpty) {
+              final curLocal = _sessions.firstWhere(
+                (s) => s.id == _activeSessionId,
+                orElse: () => CascadeSession(
                   id: _activeSessionId,
-                  workspacePath: _sessions.isNotEmpty ? _sessions.first.workspacePath : '',
-                  title: 'Nouvelle conversation',
+                  workspacePath: _projects.isNotEmpty ? _projects.first.path : '',
+                  title: _activeSessionTitle.isNotEmpty ? _activeSessionTitle : 'Nouvelle conversation',
                   status: 'CASCADE_STATUS_READY',
                   time: 'Maintenant',
-                )
-              ];
+                ),
+              );
+              _sessions = [curLocal];
             } else {
               _sessions = const [];
               _activeSessionId = '';
@@ -562,7 +575,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
             }
           }
         });
-        if (sessions.isNotEmpty) {
+        if (_activeSessionId.isNotEmpty) {
           SettingsStore.saveSession(
             wsUrl: _wsClient.targetUrl,
             token: _wsClient.authToken ?? '',
@@ -696,33 +709,30 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           if (parsed.isNotEmpty) {
             setState(() {
               final stillActive = parsed.any((s) => s.id == _activeSessionId);
-              // Garde : une nouvelle conversation pas encore dans le hub
-              // Jetbox ne doit pas écraser le focus (même guard que
-              // _refreshSessions). Sans ça, le push sessions_updated
-              // rebascule sur l'ancienne session.
-              if (!stillActive &&
-                  _activeSessionId.isNotEmpty &&
-                  _activeSessionTitle == 'Nouvelle conversation') {
-                final newSess = CascadeSession(
-                  id: _activeSessionId,
-                  workspacePath: _sessions.isNotEmpty ? _sessions.first.workspacePath : '',
-                  title: 'Nouvelle conversation',
-                  status: 'CASCADE_STATUS_READY',
-                  time: 'Maintenant',
-                );
-                _sessions = [newSess, ...parsed.where((s) => s.id != _activeSessionId)];
-              } else {
-                _sessions = parsed;
-                // Si aucune session n'était active (lancement initial), initialise avec la première.
-                // Si la session active a été supprimée sur le PC, bascule proprement.
-                if (_activeSessionId.isEmpty || (!stillActive && _activeSessionTitle != 'Nouvelle conversation')) {
-                  _activeSessionId = parsed.first.id;
-                  _activeSessionTitle = parsed.first.title;
-                  _refreshContext();
-                } else if (stillActive) {
+              if (_activeSessionId.isNotEmpty) {
+                if (stillActive) {
+                  _sessions = parsed;
                   final current = parsed.firstWhere((s) => s.id == _activeSessionId);
                   _activeSessionTitle = current.title;
+                } else {
+                  // Garde : préserver la session active locale sans basculer sur l'ancienne
+                  final curLocal = _sessions.firstWhere(
+                    (s) => s.id == _activeSessionId,
+                    orElse: () => CascadeSession(
+                      id: _activeSessionId,
+                      workspacePath: _projects.isNotEmpty ? _projects.first.path : '',
+                      title: _activeSessionTitle.isNotEmpty ? _activeSessionTitle : 'Nouvelle conversation',
+                      status: 'CASCADE_STATUS_READY',
+                      time: 'Maintenant',
+                    ),
+                  );
+                  _sessions = [curLocal, ...parsed.where((s) => s.id != _activeSessionId)];
                 }
+              } else {
+                _sessions = parsed;
+                _activeSessionId = parsed.first.id;
+                _activeSessionTitle = parsed.first.title;
+                _refreshContext();
               }
             });
             return;

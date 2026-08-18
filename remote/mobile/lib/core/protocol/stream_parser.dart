@@ -91,6 +91,19 @@ class StreamDeltaParser {
         arg = detail.trim();
       }
     }
+    if (lowerTool != 'run_command' && lowerTool != 'command' && lowerTool != 'bash' && lowerTool != 'terminal' && lowerTool != 'runner') {
+      if (arg.contains('/') || arg.contains('\\')) {
+        arg = arg.replaceAll(RegExp(r'^file:///[a-zA-Z]:[/\\]?'), '');
+        arg = arg.replaceAll(RegExp(r'^[a-zA-Z]:[/\\]'), '');
+        if (arg.length > 50) {
+          final segments = arg.split(RegExp(r'[/\\]'));
+          final base = segments.lastWhere((s) => s.trim().isNotEmpty, orElse: () => arg);
+          if (base.isNotEmpty) {
+            arg = base;
+          }
+        }
+      }
+    }
     if (arg.length > 70) {
       arg = '${arg.substring(0, 67)}…';
     }
