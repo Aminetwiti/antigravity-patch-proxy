@@ -98,7 +98,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               const SizedBox(height: 20),
               AppearanceSettingsSection(
-                onThemeModeChanged: widget.onThemeModeChanged,
+                initialIndex: (widget.initialSettings['themeIndex'] as int?) ?? 0,
+                onThemeModeChanged: widget.onThemeModeChanged ?? (_) {},
               ),
             ],
           ),

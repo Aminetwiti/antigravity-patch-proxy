@@ -69,6 +69,12 @@ void main() {
               'requestId': reqId,
               'data': {'id': 'pty-test-42'},
             }));
+          } else if (reqId != null) {
+            incomingController.add(jsonEncode({
+              'type': 'response',
+              'requestId': reqId,
+              'data': {'status': 'ok'},
+            }));
           }
         }
       },

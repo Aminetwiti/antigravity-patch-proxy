@@ -398,6 +398,22 @@ class DaemonApi {
     }
   }
 
+  Future<Map<String, dynamic>> listModels() async {
+    try {
+      return await rpc('get_available_models');
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  void sendApprovalTimeout(int minutes) {
+    _send({'type': 'set_approval_timeout', 'minutes': minutes});
+  }
+
+  void sendAutoAccept({required bool enabled, String mode = 'readonly'}) {
+    _send({'type': 'set_auto_accept', 'enabled': enabled, 'mode': mode});
+  }
+
   Future<Map<String, dynamic>> getSessionHistory(String cascadeId) async {
     try {
       final data = await rpc('get_session_history', {'cascadeId': cascadeId});

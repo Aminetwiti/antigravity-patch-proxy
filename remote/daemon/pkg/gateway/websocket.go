@@ -299,6 +299,8 @@ type Server struct {
 	// au client qui l'a cr├®├®e ; ├á la d├®connexion on ne tue que SES sessions
 	// (un autre t├®l├®phone connect├® garde les siennes).
 	terminals *terminalPtyManager
+	// runningTasks : gestionnaire des tâches d'arrière-plan en cours d'exécution
+	runningTasks *runningTaskManager
 	// tokenValidator : validateur dynamique de jetons de session (P4 pairing PIN).
 	tokenValidator func(token string) bool
 	// sessionValidator : variante enrichie qui retourne les infos de session
@@ -378,9 +380,11 @@ func NewServer(client RPCClient, authToken string) *Server {
 		activeRequestIDs: make(map[string]string),
 		scheduledTasks:   make(map[string]*ScheduledTask),
 		terminals:        newTerminalPtyManager(),
+		runningTasks:     newRunningTaskManager(),
 		clientSessions:   make(map[*websocket.Conn]discovery.SessionInfo),
 	}
 	s.terminals.onBroadcast = s.broadcast
+	s.runningTasks.onBroadcast = s.broadcast
 	// Recharge les t├óches planifi├®es persist├®es au red├®marrage (non-fatal :
 	// un fichier absent ou corrompu repart avec une liste vide).
 	if err := s.LoadScheduledTasks(); err != nil {
@@ -2856,6 +2860,8 @@ var unaryNoTimeout = map[string]bool{
 	"sync_session": true, "get_quota_summary": true, "system.get_quota_summary": true,
 	"get_user_status": true, "get_model_statuses": true,
 	"generate_commit_message": true, "export_markdown": true, "create_worktree": true,
+	"archive_cascade": true, "unarchive_cascade": true, "delete_cascade": true,
+	"submit_approval": true, "get_session_history": true,
 }
 
 func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
@@ -3094,6 +3100,43 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "killed"}})
+		return
+
+	case "list_running_tasks":
+		s.writeJSON(conn, OutgoingMessage{
+			Type:      "response",
+			RequestID: msg.RequestID,
+			Data: map[string]interface{}{
+				"tasks": s.runningTasks.listTasks(),
+			},
+		})
+		return
+
+	case "kill_running_task", "kill_task":
+		taskId := msg.TaskID
+		if taskId == "" {
+			if tid, ok := msg.Data["taskId"].(string); ok && tid != "" {
+				taskId = tid
+			} else if tid, ok := msg.Data["id"].(string); ok && tid != "" {
+				taskId = tid
+			}
+		}
+		if taskId == "" {
+			taskId = msg.TerminalID
+		}
+		if taskId == "" {
+			taskId = msg.TerminalIDAlt
+		}
+		success := s.runningTasks.killTask(taskId)
+		s.writeJSON(conn, OutgoingMessage{
+			Type:      "response",
+			RequestID: msg.RequestID,
+			Data: map[string]interface{}{
+				"success": success,
+				"id":      taskId,
+				"status":  "killed",
+			},
+		})
 		return
 
 	case "list_workspaces":
@@ -3499,6 +3542,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		// planner_mode 3 = NO_TOOL : pas de boucle d'outils, réponse directe.
 		noTools := msg.NoTools || s.noTools()
 		modelUID := s.resolveModelID(msg.ModelUID)
+		modelEnum := msg.ModelEnum
+		if modelEnum == 0 && modelUID != "" {
+			modelEnum = connectrpc.ResolveStandardModelEnum(modelUID)
+		}
 
 		doneChan := make(chan struct{})
 		watcherCtx, cancelWatcher := context.WithCancel(ctx)
@@ -3507,7 +3554,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		// Démarre le streaming temps réel (transcript.jsonl + trajectoire)
 		go s.runLiveTurnStreamer(watcherCtx, msg.CascadeID, msg.RequestID, &frameIndex, &hasTextDelivered, doneChan)
 
-		err = s.RPCClient.SendMessageStreamModel(msg.CascadeID, promptText, modelUID, msg.ModelEnum, onFrameHandler, noTools)
+		err = s.RPCClient.SendMessageStreamModel(msg.CascadeID, promptText, modelUID, modelEnum, onFrameHandler, noTools)
 
 		if err != nil {
 			cancelWatcher()
@@ -5380,20 +5427,152 @@ func searchInWorkspace(root, query string, maxResults int) ([]map[string]interfa
 }
 
 // isIgnoredDir reproduit les exclusions de buildFileTree (dossiers de build /
-// d├®pendances jamais index├®s par la recherche).
+// dépendances jamais indexés par la recherche).
 func isIgnoredDir(name string) bool {
 	return name == ".git" || name == "node_modules" || name == "build" || name == "dist" || name == ".dart_tool"
 }
 
 // ---------------------------------------------------------------------------
+// Running Background Tasks Manager
+// ---------------------------------------------------------------------------
+
+// RunningTaskInfo représente une tâche active en cours d'exécution
+type RunningTaskInfo struct {
+	ID        string    `json:"id"`
+	Command   string    `json:"command"`
+	CascadeID string    `json:"cascadeId,omitempty"`
+	Status    string    `json:"status"` // "running", "completed", "failed", "killed"
+	StartedAt time.Time `json:"startedAt"`
+	Output    string    `json:"output,omitempty"`
+}
+
+type runningTaskManager struct {
+	mu          sync.RWMutex
+	tasks       map[string]*RunningTaskInfo
+	onBroadcast func(OutgoingMessage)
+}
+
+func newRunningTaskManager() *runningTaskManager {
+	return &runningTaskManager{
+		tasks: make(map[string]*RunningTaskInfo),
+	}
+}
+
+func (m *runningTaskManager) startTask(id, command, cascadeID string) *RunningTaskInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if id == "" {
+		id = fmt.Sprintf("task_%d", time.Now().UnixNano())
+	}
+	task := &RunningTaskInfo{
+		ID:        id,
+		Command:   command,
+		CascadeID: cascadeID,
+		Status:    "running",
+		StartedAt: time.Now(),
+	}
+	m.tasks[id] = task
+	if m.onBroadcast != nil {
+		m.onBroadcast(OutgoingMessage{
+			Type: "task_started",
+			Data: map[string]interface{}{
+				"id":        task.ID,
+				"command":   task.Command,
+				"cascadeId": task.CascadeID,
+				"status":    task.Status,
+				"startedAt": task.StartedAt.UnixMilli(),
+			},
+		})
+	}
+	return task
+}
+
+func (m *runningTaskManager) appendOutput(id, delta string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, ok := m.tasks[id]
+	if !ok {
+		return
+	}
+	task.Output += delta
+	if len(task.Output) > 100000 {
+		task.Output = task.Output[len(task.Output)-100000:]
+	}
+	if m.onBroadcast != nil {
+		m.onBroadcast(OutgoingMessage{
+			Type: "task_output",
+			Data: map[string]interface{}{
+				"id":        task.ID,
+				"command":   task.Command,
+				"cascadeId": task.CascadeID,
+				"delta":     delta,
+			},
+		})
+	}
+}
+
+func (m *runningTaskManager) finishTask(id, status string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, ok := m.tasks[id]
+	if !ok {
+		return
+	}
+	task.Status = status
+	if m.onBroadcast != nil {
+		m.onBroadcast(OutgoingMessage{
+			Type: "task_ended",
+			Data: map[string]interface{}{
+				"id":        task.ID,
+				"command":   task.Command,
+				"cascadeId": task.CascadeID,
+				"status":    task.Status,
+			},
+		})
+	}
+}
+
+func (m *runningTaskManager) listTasks() []RunningTaskInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	res := make([]RunningTaskInfo, 0, len(m.tasks))
+	for _, t := range m.tasks {
+		res = append(res, *t)
+	}
+	return res
+}
+
+func (m *runningTaskManager) killTask(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, ok := m.tasks[id]
+	if !ok {
+		return false
+	}
+	task.Status = "killed"
+	if m.onBroadcast != nil {
+		m.onBroadcast(OutgoingMessage{
+			Type: "task_ended",
+			Data: map[string]interface{}{
+				"id":        task.ID,
+				"command":   task.Command,
+				"cascadeId": task.CascadeID,
+				"status":    "killed",
+			},
+		})
+	}
+	return true
+}
+
+// ---------------------------------------------------------------------------
 // Terminal PTY (P3)
 //
-// Le mobile pilote un vrai shell interactif sur le PC h├┤te. Impl├®mentation
+// Le mobile pilote un vrai shell interactif sur le PC hôte. Implémentation
 // volontairement stdlib-only : exec.Cmd avec stdin/stdout/stderr pipe, un
-// scanner de sortie par session et un nettoyage ├á la d├®connexion.
+// scanner de sortie par session et un nettoyage à la déconnexion.
 //
-// ponytail: pas de vrai PTY (creack/pty) ÔÇö sur Windows un PTY natif exigerait
-// une d├®pendance CGO (conpty). Ce pipe-based shell couvre l'usage mobile
+// ponytail: pas de vrai PTY (creack/pty) — sur Windows un PTY natif exigerait
+// une dépendance CGO (conpty). Ce pipe-based shell couvre l'usage mobile
 // (cd, git, npm, ls) ; plafond connu : pas de TUIO/tty raw, pas de resize.
 // Upgrade path : brancher creack/pty sur les builds non-Windows.
 // ---------------------------------------------------------------------------
@@ -5689,10 +5868,25 @@ func executeShellCommand(dir, cmdStr string) (string, error) {
 	return outBuf.String(), nil
 }
 
-// startLiveStepWatcher démarre une goroutine ultra-réactive qui surveille en temps réel
-// (toutes les 30 ms) l'apparition de nouvelles étapes (tool calls, commandes exécutées,
-// lectures/écritures de fichiers, recherches, thinking, nouveaux tokens) dans le transcript
-// de la session active et les diffuse immédiatement au mobile via stream_delta.
+func extractCmdFromArgs(raw []byte) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var m map[string]interface{}
+	if json.Unmarshal(raw, &m) == nil {
+		for _, k := range []string{"CommandLine", "command_line", "command", "cmd", "CommandLineString"} {
+			if v, ok := m[k].(string); ok && v != "" {
+				return v
+			}
+		}
+	}
+	s := string(raw)
+	if len(s) > 80 {
+		s = s[:77] + "..."
+	}
+	return s
+}
+
 // runLiveTurnStreamer surveille en temps réel (toutes les 30 ms) l'apparition de
 // nouvelles étapes (tool calls, commandes exécutées, lectures/écritures de fichiers,
 // recherches, thinking, tokens de texte) et les diffuse immédiatement au mobile via stream_delta.
@@ -5797,6 +5991,11 @@ func (s *Server) runLiveTurnStreamer(ctx context.Context, cascadeID, requestID s
 												kind := "tool_start"
 												if strings.Contains(lowerTool, "run_command") || strings.Contains(lowerTool, "command") || strings.Contains(lowerTool, "bash") || strings.Contains(lowerTool, "terminal") {
 													kind = "runner_started"
+													cmdText := extractCmdFromArgs(args)
+													if cmdText == "" {
+														cmdText = toolName
+													}
+													s.runningTasks.startTask(fmt.Sprintf("%s-%d", cascadeID, entry.StepIndex), cmdText, cascadeID)
 												} else if strings.Contains(lowerTool, "grep") || strings.Contains(lowerTool, "search") || strings.Contains(lowerTool, "find_by_name") || strings.Contains(lowerTool, "list_dir") || strings.Contains(lowerTool, "list_files") {
 													kind = "search_started"
 												}
@@ -5816,6 +6015,8 @@ func (s *Server) runLiveTurnStreamer(ctx context.Context, cascadeID, requestID s
 									kind := "tool_output"
 									if entry.Type == "RUN_COMMAND" {
 										kind = "runner_output"
+										s.runningTasks.appendOutput(fmt.Sprintf("%s-%d", cascadeID, entry.StepIndex), preview)
+										s.runningTasks.finishTask(fmt.Sprintf("%s-%d", cascadeID, entry.StepIndex), "completed")
 										if len(preview) > 4000 {
 											preview = preview[:3997] + "…"
 										}

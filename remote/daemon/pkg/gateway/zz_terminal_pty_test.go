@@ -62,6 +62,20 @@ func waitSessions(t *testing.T, gw *Server, n int) {
 	}
 }
 
+func recvResponse(t *testing.T, client *wsTestClient, reqID string) map[string]interface{} {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatalf("Timeout en attente de réponse pour requestId=%s", reqID)
+		}
+		msg := client.recv(t)
+		if msg["type"] == "response" && msg["requestId"] == reqID {
+			return msg
+		}
+	}
+}
+
 func TestTerminalWriteHandlerWorks(t *testing.T) {
 	srv, gw := newTestServerWithGW(&fakeRPCClient{})
 	defer srv.Close()
@@ -71,7 +85,7 @@ func TestTerminalWriteHandlerWorks(t *testing.T) {
 
 	// terminal_create → réponse {id}
 	client.send(t, map[string]string{"type": "terminal_create", "requestId": "t1", "workspacePath": "."})
-	resp := client.recv(t)
+	resp := recvResponse(t, client, "t1")
 	if resp["type"] != "response" || resp["error"] != nil {
 		t.Fatalf("terminal_create a échoué: %v", resp)
 	}
@@ -85,7 +99,7 @@ func TestTerminalWriteHandlerWorks(t *testing.T) {
 	sendTerminalJSON(t, client, map[string]interface{}{
 		"type": "terminal_write", "requestId": "t2", "id": id, "input": echoCmd(t, gw.terminals.shellPath),
 	})
-	wr := client.recv(t)
+	wr := recvResponse(t, client, "t2")
 	if wr["type"] != "response" || wr["error"] != nil {
 		t.Fatalf("terminal_write a échoué (bug #1) : %v", wr)
 	}

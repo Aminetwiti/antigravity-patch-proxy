@@ -180,6 +180,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
     if (text != _lastDraftText) {
       _lastDraftText = text;
       widget.onDraftChanged?.call(text);
+      if (mounted) setState(() {});
     }
 
     final selection = _controller.selection;
