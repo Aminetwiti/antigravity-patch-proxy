@@ -53,7 +53,7 @@ class BackgroundTaskOutputSheet extends StatefulWidget {
 class _BackgroundTaskOutputSheetState extends State<BackgroundTaskOutputSheet> {
   final ScrollController _scrollController = ScrollController();
   late StringBuffer _outputBuffer;
-  bool _autoScroll = true;
+  final bool _autoScroll = true;
 
   @override
   void initState() {

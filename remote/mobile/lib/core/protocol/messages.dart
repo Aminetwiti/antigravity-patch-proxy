@@ -7,6 +7,7 @@ class CascadeSession {
   final String time;
   final String? lastPrompt;
   final String? worktree;
+  final String? projectId;
 
   const CascadeSession({
     required this.id,
@@ -16,6 +17,7 @@ class CascadeSession {
     required this.time,
     this.lastPrompt,
     this.worktree,
+    this.projectId,
   });
 
   factory CascadeSession.fromJson(Map<String, dynamic> json) {
@@ -27,6 +29,7 @@ class CascadeSession {
       time: json['time'] ?? _relativeTime(json['updatedAt']),
       lastPrompt: json['lastPrompt']?.toString(),
       worktree: json['worktree']?.toString(),
+      projectId: json['projectId']?.toString(),
     );
   }
 
@@ -51,6 +54,16 @@ class CascadeSession {
         st == 'CASCADE_STATUS_ARCHIVED' ||
         st == 'CASCADE_STATUS_DELETED' ||
         st == 'CASCADE_STATUS_KILLED') {
+      return false;
+    }
+    final lowerTitle = title.toLowerCase();
+    final lowerWs = workspacePath.toLowerCase();
+    if (lowerTitle.startsWith('subagent') ||
+        lowerTitle.contains('subagent-') ||
+        lowerTitle.contains('subagent_') ||
+        lowerWs.startsWith('subagent') ||
+        lowerWs.contains('subagent-') ||
+        lowerWs.contains('subagent_')) {
       return false;
     }
     return true;
@@ -79,6 +92,7 @@ class CascadeSession {
     String? time,
     String? lastPrompt,
     String? worktree,
+    String? projectId,
   }) {
     return CascadeSession(
       id: id ?? this.id,
@@ -88,6 +102,7 @@ class CascadeSession {
       time: time ?? this.time,
       lastPrompt: lastPrompt ?? this.lastPrompt,
       worktree: worktree ?? this.worktree,
+      projectId: projectId ?? this.projectId,
     );
   }
 
@@ -99,6 +114,7 @@ class CascadeSession {
         'time': time,
         if (lastPrompt != null) 'lastPrompt': lastPrompt,
         if (worktree != null) 'worktree': worktree,
+        if (projectId != null) 'projectId': projectId,
       };
 }
 

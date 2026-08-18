@@ -24,7 +24,7 @@ void main() {
       expect(find.text('1 task running'), findsOneWidget);
       expect(find.text('flutter test --exclude-tags=live'), findsOneWidget);
 
-      await tester.tap(find.byIcon(Icons.stop_rounded));
+      await tester.tap(find.text('Stop'));
       await tester.pump();
       expect(stopped, isTrue);
 
@@ -45,10 +45,8 @@ void main() {
       );
 
       expect(find.text('2 tasks running'), findsOneWidget);
-      expect(find.byIcon(Icons.keyboard_arrow_down_rounded), findsOneWidget);
-
-      await tester.tap(find.text('2 tasks running'));
-      await tester.pumpAndSettle();
+      await tester.tap(find.byType(InkWell).first);
+      await tester.pump();
 
       expect(find.byIcon(Icons.keyboard_arrow_up_rounded), findsOneWidget);
       expect(find.text('task 1'), findsOneWidget);

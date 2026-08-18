@@ -74,35 +74,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           notifier: widget.notifier,
         );
       case SettingsCategory.appearance:
-        return SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Appearance',
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w700,
-                  color: Theme.of(context).colorScheme.onSurface,
-                  letterSpacing: -0.5,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Customize theme mode, fonts, and message bubble styles.',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 20),
-              AppearanceSettingsSection(
-                initialIndex: (widget.initialSettings['themeIndex'] as int?) ?? 0,
-                onThemeModeChanged: widget.onThemeModeChanged ?? (_) {},
-              ),
-            ],
-          ),
+        return AppearanceSettingsSection(
+          initialIndex: (widget.initialSettings['themeIndex'] as int?) ?? 0,
+          onThemeModeChanged: widget.onThemeModeChanged ?? (_) {},
         );
       case SettingsCategory.models:
         return ModelsSettingsSection(

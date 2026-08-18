@@ -29,6 +29,14 @@ func NewTokenManager(flagToken string) (*TokenManager, string, error) {
 		token = strings.TrimSpace(flagToken)
 	}
 
+	// Permettre la désactivation explicite de l'authentification (ex: --auth-token none)
+	if strings.EqualFold(token, "none") || strings.EqualFold(token, "disabled") || strings.EqualFold(token, "off") || strings.EqualFold(token, "false") || token == "0" {
+		return &TokenManager{
+			expectedToken: "",
+			isGenerated:   false,
+		}, "", nil
+	}
+
 	isGenerated := false
 	if token == "" {
 		b := make([]byte, 16)
@@ -43,6 +51,11 @@ func NewTokenManager(flagToken string) (*TokenManager, string, error) {
 		expectedToken: token,
 		isGenerated:   isGenerated,
 	}, token, nil
+}
+
+// IsDisabled indique si l'authentification a été désactivée.
+func (m *TokenManager) IsDisabled() bool {
+	return m.expectedToken == ""
 }
 
 // IsGenerated indique si le token a été généré dynamiquement au démarrage.

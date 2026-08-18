@@ -112,18 +112,38 @@ Map<String, List<CascadeSession>> groupSessions({
       try {
         cleanSPath = Uri.decodeFull(cleanSPath);
       } catch (_) {}
-      cleanSPath = cleanSPath.toLowerCase();
+      cleanSPath = cleanSPath.toLowerCase().trim();
+      while (cleanSPath.endsWith('/')) {
+        cleanSPath = cleanSPath.substring(0, cleanSPath.length - 1);
+      }
 
       for (final p in officialProjects) {
+        if (s.projectId != null && s.projectId!.isNotEmpty && s.projectId == p.id) {
+          grouped[p.name]?.add(s);
+          matched = true;
+          break;
+        }
+
         var cleanPPath = p.path.replaceAll('\\', '/');
         try {
           cleanPPath = Uri.decodeFull(cleanPPath);
         } catch (_) {}
-        cleanPPath = cleanPPath.toLowerCase();
-        final cleanName = p.name.toLowerCase();
+        cleanPPath = cleanPPath.toLowerCase().trim();
+        while (cleanPPath.endsWith('/')) {
+          cleanPPath = cleanPPath.substring(0, cleanPPath.length - 1);
+        }
 
-        if ((cleanPPath.isNotEmpty && (cleanSPath.contains(cleanPPath) || cleanPPath.contains(cleanSPath))) ||
-            (cleanName.isNotEmpty && (cleanSPath.contains(cleanName) || cleanName.contains(cleanSPath)))) {
+        var cleanPUri = p.folderUri.replaceAll('\\', '/');
+        try {
+          cleanPUri = Uri.decodeFull(cleanPUri);
+        } catch (_) {}
+        cleanPUri = cleanPUri.toLowerCase().trim();
+
+        final cleanName = p.name.replaceAll('\\', '/').toLowerCase().trim();
+
+        if ((cleanPPath.isNotEmpty && (cleanSPath == cleanPPath || cleanSPath.contains(cleanPPath) || cleanPPath.contains(cleanSPath))) ||
+            (cleanPUri.isNotEmpty && (cleanSPath.contains(cleanPUri) || cleanPUri.contains(cleanSPath))) ||
+            (cleanName.isNotEmpty && (cleanSPath == cleanName || cleanSPath.endsWith('/$cleanName')))) {
           grouped[p.name]?.add(s);
           matched = true;
           break;
@@ -131,12 +151,12 @@ Map<String, List<CascadeSession>> groupSessions({
       }
 
       if (!matched) {
-        final fallbackName = WorkspacePath.displayName(
-          s.workspacePath,
-          fallback: 'antigravity-workspace',
-        );
+        final fallbackName = 'Outside of Project';
         grouped.putIfAbsent(fallbackName, () => []).add(s);
       }
+    }
+    if (grouped['Outside of Project']?.isEmpty ?? false) {
+      grouped.remove('Outside of Project');
     }
   } else {
     for (final s in sessions) {

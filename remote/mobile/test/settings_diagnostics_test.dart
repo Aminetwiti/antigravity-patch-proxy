@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -80,36 +79,36 @@ void main() {
         reason: 'le tap doit déclencher un appel au daemon');
   });
 
-  testWidgets('apparence: compactBubbles et monospaceCode persistent dans SettingsStore',
+  testWidgets('apparence: verboseAgentChat et conversationWidth persistent dans SettingsStore',
       (tester) async {
     await _pumpScreen(tester, initialCategory: SettingsCategory.appearance);
 
-    final compactSwitch = find.text('Bulles compactes');
-    await tester.ensureVisible(compactSwitch);
-    await tester.tap(compactSwitch);
+    final verboseSwitch = find.byType(Switch).first;
+    await tester.ensureVisible(verboseSwitch);
+    await tester.tap(verboseSwitch);
     await tester.pumpAndSettle();
 
     final prefs = await SharedPreferences.getInstance();
-    expect(prefs.getBool('settings.compactBubbles'), isTrue);
+    expect(prefs.getBool('settings.verboseAgentChat'), isFalse);
 
-    final monoSwitch = find.text('Code monospace');
-    await tester.ensureVisible(monoSwitch);
-    await tester.tap(monoSwitch);
+    final narrowOption = find.text('Narrow');
+    await tester.ensureVisible(narrowOption);
+    await tester.tap(narrowOption);
     await tester.pumpAndSettle();
 
-    expect(prefs.getBool('settings.monospaceCode'), isFalse);
+    expect(prefs.getString('settings.conversationWidth'), 'Narrow');
   });
 
-  testWidgets('general: auto-accept et auto-refus timeout persistent',
+  testWidgets('general: queuedMessagesMode et securityPreset persistent',
       (tester) async {
     await _pumpScreen(tester, initialCategory: SettingsCategory.general);
 
-    final autoAcceptSwitch = find.text('Auto-approuver les actions en lecture seule');
-    await tester.ensureVisible(autoAcceptSwitch);
-    await tester.tap(autoAcceptSwitch);
+    final sendImmediateBtn = find.text('Send Immediately');
+    await tester.ensureVisible(sendImmediateBtn);
+    await tester.tap(sendImmediateBtn);
     await tester.pumpAndSettle();
 
     final prefs = await SharedPreferences.getInstance();
-    expect(prefs.getBool('settings.autoAcceptEnabled'), isTrue);
+    expect(prefs.getString('settings.queuedMessagesMode'), 'immediate');
   });
 }

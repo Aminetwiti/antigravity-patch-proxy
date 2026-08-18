@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/protocol/daemon_api.dart';
 import '../core/protocol/markdown_renderer.dart';
+import '../core/protocol/workspace_path.dart';
 import '../theme/app_colors.dart';
 import 'remote_terminal_sheet.dart';
 import 'unified_diff_viewer.dart';
@@ -324,9 +325,8 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
                         RemoteTerminalSheet.show(
                           context,
                           api: widget.api,
-                          projectName: widget.workspacePath.isEmpty
-                              ? 'Workspace'
-                              : widget.workspacePath,
+                          projectName: WorkspacePath.displayName(widget.workspacePath),
+                          workspacePath: widget.workspacePath,
                           initialCommand: widget.code.code.trim(),
                         );
                       },

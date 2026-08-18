@@ -146,14 +146,11 @@ class _BackgroundTasksBarState extends State<BackgroundTasksBar> with SingleTick
                   ],
 
                   if (count > 1) ...[
-                    AnimatedRotation(
-                      turns: _expanded ? 0.5 : 0.0,
-                      duration: const Duration(milliseconds: 200),
-                      child: Icon(
-                        Icons.keyboard_arrow_down_rounded,
-                        size: 16,
-                        color: isDark ? AppColors.inkMuted : const Color(0xFF8B949E),
-                      ),
+                    const SizedBox(width: 6),
+                    Icon(
+                      _expanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+                      size: 16,
+                      color: isDark ? AppColors.inkMuted : const Color(0xFF8B949E),
                     ),
                   ],
                 ],

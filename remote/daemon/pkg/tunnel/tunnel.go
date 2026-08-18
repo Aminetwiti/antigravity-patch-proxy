@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"regexp"
@@ -32,6 +33,7 @@ type Manager struct {
 	Provider     string `json:"provider"`
 	ProviderPref string `json:"-"`
 	PublicURL    string `json:"publicUrl"`
+	AuthToken    string `json:"-"`
 	cmd          *exec.Cmd
 	mu           sync.Mutex
 	stopChan     chan struct{}
@@ -42,6 +44,12 @@ func NewManager(providerPref string) *Manager {
 		ProviderPref: providerPref,
 		stopChan:     make(chan struct{}),
 	}
+}
+
+func (m *Manager) SetAuthToken(token string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.AuthToken = token
 }
 
 // StartAutoTunnel tente de lancer Cloudflare Quick Tunnel ou Pinggy SSH Tunnel.
@@ -118,6 +126,10 @@ func (m *Manager) startCloudflare(binPath string, localPort int) (string, error)
 	cmd := execCommand(binPath, "tunnel", "--url", targetURL)
 	m.cmd = cmd
 
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", err
+	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return "", err
@@ -130,8 +142,7 @@ func (m *Manager) startCloudflare(binPath string, localPort int) (string, error)
 	urlChan := make(chan string, 1)
 	re := cloudflareURLRe
 
-	go func() {
-		scanner := bufio.NewScanner(stderr)
+	scanFunc := func(scanner *bufio.Scanner) {
 		for scanner.Scan() {
 			line := scanner.Text()
 			if match := re.FindString(line); match != "" {
@@ -141,12 +152,15 @@ func (m *Manager) startCloudflare(binPath string, localPort int) (string, error)
 				}
 			}
 		}
-	}()
+	}
+
+	go scanFunc(bufio.NewScanner(stdout))
+	go scanFunc(bufio.NewScanner(stderr))
 
 	select {
 	case url := <-urlChan:
 		return url, nil
-	case <-time.After(15 * time.Second):
+	case <-time.After(30 * time.Second):
 		cmd.Process.Kill()
 		return "", fmt.Errorf("timeout d'attente de l'URL Cloudflare")
 	}
@@ -212,13 +226,23 @@ func WebSocketURL(publicURL string) string {
 
 func (m *Manager) printBanner(publicURL string) {
 	wsURL := WebSocketURL(publicURL)
+	token := m.AuthToken
+
+	qrTarget := wsURL
+	if token != "" {
+		qrTarget = fmt.Sprintf("%s?token=%s", wsURL, url.QueryEscape(token))
+	}
+
 	fmt.Println("\n========================================================")
 	fmt.Println("🌐 TUNNEL DISTANT 4G/5G ET ACCÈS HORS DOMICILE ACTIF !")
 	fmt.Printf("   Fournisseur : %s\n", strings.ToUpper(m.Provider))
 	fmt.Printf("   URL Web     : %s\n", publicURL)
 	fmt.Printf("   URL WebSocket mobile : %s\n", wsURL)
+	if token != "" {
+		fmt.Printf("   Token Auth Mobile    : %s\n", token)
+	}
 	fmt.Println("========================================================")
-	PrintQRCode(wsURL)
+	PrintQRCode(qrTarget)
 }
 
 func (m *Manager) GetPublicURL() string {

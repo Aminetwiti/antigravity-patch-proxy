@@ -88,7 +88,10 @@ func isSubagentTitle(title string) bool {
 		strings.HasPrefix(lowerTitle, "# mission") ||
 		strings.HasPrefix(lowerTitle, "# role") ||
 		strings.HasPrefix(lowerTitle, "# performance") ||
-		strings.HasPrefix(lowerTitle, "analyzing stream delta")
+		strings.HasPrefix(lowerTitle, "analyzing stream delta") ||
+		strings.HasPrefix(lowerTitle, "subagent") ||
+		strings.Contains(lowerTitle, "subagent-") ||
+		strings.Contains(lowerTitle, "subagent_")
 }
 
 // isSessionArchived vérifie si la session est archivée dans ~/.gemini/antigravity/annotations/<cascadeID>.pbtxt
@@ -369,6 +372,7 @@ func ListLocalSessions() []map[string]interface{} {
 			// rattachées à un projet officiel
 			matchedProjectName := ""
 			matchedProjectPath := workspacePath
+			matchedProjectID := ""
 			if len(officialProjs) > 0 {
 				for _, p := range officialProjs {
 					pPath := strings.ToLower(normalizeWorkspace(p.Path))
@@ -377,6 +381,7 @@ func ListLocalSessions() []map[string]interface{} {
 						(pName != "" && (strings.Contains(lowerWs, pName) || strings.Contains(pName, lowerWs))) {
 						matchedProjectName = p.Name
 						matchedProjectPath = p.Path
+						matchedProjectID = p.ID
 						break
 					}
 				}
@@ -410,7 +415,7 @@ func ListLocalSessions() []map[string]interface{} {
 				"title":         title,
 				"workspace":     matchedProjectName,
 				"workspacePath": matchedProjectPath,
-				"projectId":     "p1",
+				"projectId":     matchedProjectID,
 				"status":        "idle",
 				"updatedAt":     modTime.Format(time.RFC3339),
 			}
@@ -1848,13 +1853,9 @@ func ListOfficialProjects() []ProjectSummary {
 		}
 
 		// Convert folderUri (file:///c%3A/...) to normalized path
-		path := folderURI
-		if strings.HasPrefix(path, "file:///") {
-			path = strings.TrimPrefix(path, "file:///")
-			path = strings.ReplaceAll(path, "%3A", ":")
-			path = strings.ReplaceAll(path, "%20", " ")
-			path = strings.ReplaceAll(path, `\`, `/`)
-			path = strings.TrimRight(path, "/")
+		path := normalizeWorkspace(folderURI)
+		if path == "" && parsed.Name != "" && (strings.Contains(parsed.Name, `\`) || strings.Contains(parsed.Name, "/")) {
+			path = normalizeWorkspace(parsed.Name)
 		}
 
 		var updatedTime time.Time
@@ -1899,8 +1900,14 @@ func projectIDFromRegistry(uri string) string {
 	if uri == "" {
 		return ""
 	}
+	normUri := strings.ToLower(normalizeWorkspace(uri))
 	for _, p := range ListOfficialProjects() {
-		if strings.EqualFold(p.FolderURI, uri) || strings.EqualFold(p.Path, strings.TrimPrefix(uri, "file:///")) {
+		pNormPath := strings.ToLower(normalizeWorkspace(p.Path))
+		pNormUri := strings.ToLower(normalizeWorkspace(p.FolderURI))
+		if strings.EqualFold(p.FolderURI, uri) ||
+			(pNormUri != "" && pNormUri == normUri) ||
+			(pNormPath != "" && pNormPath == normUri) ||
+			strings.EqualFold(p.Name, uri) {
 			return p.ID
 		}
 	}
@@ -1937,27 +1944,27 @@ func GetUniqueWorkspaces() []string {
 }
 
 // listWorkspaces construit le sélecteur de workspace (G4) : le registre
-// officiel ~/.gemini/config/projects d'abord, complété par un scan borné
-// (niveau 1 uniquement) du home directory. Les dossiers cachés, AppData,
-// Library et les noms système sont exclus. Toujours non-fatal : un scan qui
-// échoue ne renvoie que le registre.
+// officiel ~/.gemini/config/projects uniquement pour rester synchronisé avec Antigravity.
+// Si aucun projet officiel n'est configuré, fallback sur un scan borné du home.
 func listWorkspaces() []map[string]interface{} {
 	seen := make(map[string]bool)
 	var out []map[string]interface{}
 	add := func(name, path, source string) {
-		if name == "" || path == "" || seen[path] {
+		norm := filepath.ToSlash(strings.TrimRight(path, "/\\"))
+		lowerKey := strings.ToLower(norm)
+		if name == "" || norm == "" || seen[lowerKey] {
 			return
 		}
-		seen[path] = true
+		seen[lowerKey] = true
 		rel := ""
 		if home, err := os.UserHomeDir(); err == nil {
-			if r, err := filepath.Rel(home, path); err == nil && !strings.HasPrefix(r, "..") {
+			if r, err := filepath.Rel(home, norm); err == nil && !strings.HasPrefix(r, "..") {
 				rel = filepath.ToSlash(r)
 			}
 		}
 		out = append(out, map[string]interface{}{
 			"name":         name,
-			"path":         filepath.ToSlash(path),
+			"path":         norm,
 			"relativePath": rel,
 			"source":       source,
 		})
@@ -1967,25 +1974,24 @@ func listWorkspaces() []map[string]interface{} {
 		add(p.Name, p.Path, "registry")
 	}
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return out
-	}
-	entries, err := os.ReadDir(home)
-	if err != nil {
-		return out
-	}
-	skip := map[string]bool{
-		"AppData": true, "Library": true, "Applications": true,
-		"Desktop": true, "Documents": true, "Downloads": true,
-		"Pictures": true, "Music": true, "Videos": true, "Public": true,
-		".git": true, ".gemini": true, "node_modules": true,
-	}
-	for _, e := range entries {
-		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") || skip[e.Name()] {
-			continue
+	// Uniquement en fallback si aucun projet officiel n'est configuré
+	if len(out) == 0 {
+		if home, err := os.UserHomeDir(); err == nil {
+			if entries, err := os.ReadDir(home); err == nil {
+				skip := map[string]bool{
+					"AppData": true, "Library": true, "Applications": true,
+					"Desktop": true, "Documents": true, "Downloads": true,
+					"Pictures": true, "Music": true, "Videos": true, "Public": true,
+					".git": true, ".gemini": true, "node_modules": true,
+				}
+				for _, e := range entries {
+					if !e.IsDir() || strings.HasPrefix(e.Name(), ".") || skip[e.Name()] {
+						continue
+					}
+					add(e.Name(), filepath.Join(home, e.Name()), "home")
+				}
+			}
 		}
-		add(e.Name(), filepath.Join(home, e.Name()), "home")
 	}
 	return out
 }

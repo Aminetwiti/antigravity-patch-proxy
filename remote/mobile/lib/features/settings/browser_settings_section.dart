@@ -18,7 +18,6 @@ class BrowserSettingsSection extends StatefulWidget {
 class _BrowserSettingsSectionState extends State<BrowserSettingsSection> {
   bool _autoCapture = true;
   bool _headlessMode = true;
-  bool _isLoading = false;
   Map<String, dynamic> _browserStatus = const {
     'available': true,
     'mode': 'headless_cdp',
@@ -44,18 +43,14 @@ class _BrowserSettingsSectionState extends State<BrowserSettingsSection> {
 
   Future<void> _fetchBrowserStatus() async {
     if (widget.api == null) return;
-    setState(() => _isLoading = true);
     try {
       final status = await widget.api!.getBrowserStatus();
       if (mounted) {
         setState(() {
           _browserStatus = status;
-          _isLoading = false;
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _isLoading = false);
-    }
+    } catch (_) {}
   }
 
   @override

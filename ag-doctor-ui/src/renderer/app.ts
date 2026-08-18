@@ -4180,10 +4180,6 @@ if (startRemoteBtn) {
       const tunnel = remoteTunnel?.value || 'none';
       let token = remoteAuthToken?.value || '';
 
-      if (!token) {
-        token = Math.random().toString(36).substring(2, 10);
-        if (remoteAuthToken) remoteAuthToken.value = token;
-      }
 
       await window.ag.startDaemon({ port, tunnel, token });
 

@@ -10,6 +10,7 @@ import '../theme/app_colors.dart';
 class RemoteTerminalSheet extends StatefulWidget {
   final DaemonApi? api;
   final String projectName;
+  final String workspacePath;
 
   /// Contenu pré-rempli dans la barre de saisie (bloc shell envoyé
   /// depuis un message — l'utilisateur n'a plus qu'à valider).
@@ -19,6 +20,7 @@ class RemoteTerminalSheet extends StatefulWidget {
     super.key,
     required this.api,
     this.projectName = 'Workspace',
+    this.workspacePath = '',
     this.initialCommand = '',
   });
 
@@ -26,6 +28,7 @@ class RemoteTerminalSheet extends StatefulWidget {
     BuildContext context, {
     DaemonApi? api,
     String projectName = 'Workspace',
+    String workspacePath = '',
     String initialCommand = '',
   }) {
     return showModalBottomSheet(
@@ -35,6 +38,7 @@ class RemoteTerminalSheet extends StatefulWidget {
       builder: (_) => RemoteTerminalSheet(
         api: api,
         projectName: projectName,
+        workspacePath: workspacePath,
         initialCommand: initialCommand,
       ),
     );
@@ -86,11 +90,12 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
   @override
   void initState() {
     super.initState();
+    final displayPath = widget.workspacePath.isNotEmpty ? widget.workspacePath : '.';
     _entries.add(
       _TerminalEntry(
         command: 'init',
         output:
-            'Antigravity Remote Terminal Bridge v3.1.0\nConnecté au PC hôte — prêt pour exécution.',
+            'Antigravity Remote Terminal Bridge v3.1.0\nProjet: ${widget.projectName} ($displayPath)\nConnecté au PC hôte — prêt pour exécution.',
       ),
     );
     if (widget.initialCommand.isNotEmpty) {
@@ -106,7 +111,8 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
     final api = widget.api;
     if (api == null) return;
     try {
-      final res = await api.terminalCreate('.');
+      final ws = widget.workspacePath.isNotEmpty ? widget.workspacePath : '.';
+      final res = await api.terminalCreate(ws);
       final id = (res['id'] ?? res['terminalId']) as String?;
       if (!mounted || id == null || id.isEmpty) return;
       setState(() {
@@ -548,15 +554,31 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
                   child: Row(
                     children: [
                       Flexible(
-                        child: Text(
-                          'Terminal — ${widget.projectName}',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: scheme.onSurface,
-                            fontFamily: 'monospace',
-                          ),
-                          overflow: TextOverflow.ellipsis,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Terminal — ${widget.projectName}',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: scheme.onSurface,
+                                fontFamily: 'monospace',
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (widget.workspacePath.isNotEmpty)
+                              Text(
+                                widget.workspacePath,
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  color: scheme.onSurfaceVariant,
+                                  fontFamily: 'monospace',
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                          ],
                         ),
                       ),
                       const SizedBox(width: 8),

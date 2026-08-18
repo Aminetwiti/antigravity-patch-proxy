@@ -72,8 +72,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(ModelsSettingsSection), findsOneWidget);
-    expect(find.text('Default Model'), findsOneWidget);
-    expect(find.text('Reasoning Effort (Thinking Budget)'), findsOneWidget);
+    expect(find.text('Models & Usage'), findsOneWidget);
+    expect(find.text('Gemini Models'), findsOneWidget);
+    expect(find.text('Claude and GPT models'), findsOneWidget);
     expect(find.text('Medium (8k)'), findsOneWidget);
 
     // Switch to Customizations category
@@ -81,7 +82,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(CustomizationsSettingsSection), findsOneWidget);
-    expect(find.text('MCP Servers'), findsOneWidget);
+    expect(find.text('Token Usage'), findsOneWidget);
+    expect(find.textContaining('of the customization budget is available.'), findsOneWidget);
 
     api.dispose();
     await ctrl.close();

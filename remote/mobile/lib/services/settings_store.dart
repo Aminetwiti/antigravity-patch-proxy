@@ -37,6 +37,16 @@ class SettingsStore {
   static const _kLastSessionId = 'session.lastSessionId';
   static const _kSessionSavedAt = 'session.savedAt';
 
+  static const _kVerboseAgentChat = 'settings.verboseAgentChat';
+  static const _kConversationWidth = 'settings.conversationWidth';
+  static const _kQueuedMessagesMode = 'settings.queuedMessagesMode';
+  static const _kSecurityPreset = 'settings.securityPreset';
+  static const _kArtifactReviewPolicy = 'settings.artifactReviewPolicy';
+  static const _kLightPreset = 'settings.lightPreset';
+  static const _kDarkPreset = 'settings.darkPreset';
+  static const _kEnableCreditOverages = 'settings.enableCreditOverages';
+  static const _kReasoningEffort = 'settings.reasoningEffort';
+
   SettingsStore._();
 
   /// Charge l'état initial (valeurs par défaut si jamais persistées).
@@ -64,6 +74,15 @@ class SettingsStore {
       'executionPolicy': prefs.getString(_kExecutionPolicy) ?? 'request-review',
       'activeBranch': prefs.getString(_kActiveBranch) ?? 'main',
       'autoFollowEnabled': prefs.getBool(_kAutoFollow) ?? true,
+      'verboseAgentChat': prefs.getBool(_kVerboseAgentChat) ?? true,
+      'conversationWidth': prefs.getString(_kConversationWidth) ?? 'Default',
+      'queuedMessagesMode': prefs.getString(_kQueuedMessagesMode) ?? 'queue',
+      'securityPreset': prefs.getString(_kSecurityPreset) ?? 'Default',
+      'artifactReviewPolicy': prefs.getString(_kArtifactReviewPolicy) ?? 'Always Ask',
+      'lightPreset': prefs.getString(_kLightPreset) ?? 'Default Light',
+      'darkPreset': prefs.getString(_kDarkPreset) ?? 'Default Dark',
+      'enableCreditOverages': prefs.getBool(_kEnableCreditOverages) ?? false,
+      'reasoningEffort': prefs.getString(_kReasoningEffort) ?? 'medium',
     };
   }
 
@@ -114,6 +133,24 @@ class SettingsStore {
           await prefs.setString(_kActiveBranch, entry.value as String);
         case 'autoFollowEnabled':
           await prefs.setBool(_kAutoFollow, entry.value as bool);
+        case 'verboseAgentChat':
+          await prefs.setBool(_kVerboseAgentChat, entry.value as bool);
+        case 'conversationWidth':
+          await prefs.setString(_kConversationWidth, entry.value as String);
+        case 'queuedMessagesMode':
+          await prefs.setString(_kQueuedMessagesMode, entry.value as String);
+        case 'securityPreset':
+          await prefs.setString(_kSecurityPreset, entry.value as String);
+        case 'artifactReviewPolicy':
+          await prefs.setString(_kArtifactReviewPolicy, entry.value as String);
+        case 'lightPreset':
+          await prefs.setString(_kLightPreset, entry.value as String);
+        case 'darkPreset':
+          await prefs.setString(_kDarkPreset, entry.value as String);
+        case 'enableCreditOverages':
+          await prefs.setBool(_kEnableCreditOverages, entry.value as bool);
+        case 'reasoningEffort':
+          await prefs.setString(_kReasoningEffort, entry.value as String);
       }
     }
   }

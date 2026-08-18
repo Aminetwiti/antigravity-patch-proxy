@@ -64,3 +64,28 @@ func TestTokenManager_RejectsDefaultMySecret(t *testing.T) {
 		t.Errorf("Expected token NOT to be 'mysecret'")
 	}
 }
+
+func TestTokenManager_DisabledAuth(t *testing.T) {
+	_ = os.Unsetenv("AG_REMOTE_AUTH_TOKEN")
+	_ = os.Unsetenv("AG_DAEMON_AUTH_TOKEN")
+
+	for _, flagVal := range []string{"none", "NONE", "disabled", "off", "false", "0"} {
+		mgr, token, err := NewTokenManager(flagVal)
+		if err != nil {
+			t.Fatalf("NewTokenManager(%q) failed: %v", flagVal, err)
+		}
+		if !mgr.IsDisabled() {
+			t.Errorf("Expected IsDisabled() to be true for flag %q", flagVal)
+		}
+		if token != "" {
+			t.Errorf("Expected empty token for disabled auth, got %q", token)
+		}
+		if !mgr.Validate("") {
+			t.Errorf("Expected empty token to validate successfully when disabled")
+		}
+		if !mgr.Validate("anything") {
+			t.Errorf("Expected any token to validate successfully when disabled")
+		}
+	}
+}
+

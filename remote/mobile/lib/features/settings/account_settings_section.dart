@@ -20,7 +20,6 @@ class _AccountSettingsSectionState extends State<AccountSettingsSection> {
   String _plan = 'Google AI Pro';
   bool _telemetryEnabled = true;
   bool _marketingEmails = false;
-  bool _isLoading = false;
 
   @override
   void initState() {
@@ -30,7 +29,6 @@ class _AccountSettingsSectionState extends State<AccountSettingsSection> {
 
   Future<void> _loadAccountInfo() async {
     if (widget.api == null) return;
-    setState(() => _isLoading = true);
     try {
       final info = await widget.api!.getAccountInfo();
       if (mounted) {
@@ -39,12 +37,9 @@ class _AccountSettingsSectionState extends State<AccountSettingsSection> {
           _plan = (info['plan'] as String?) ?? _plan;
           _telemetryEnabled = (info['telemetryEnabled'] as bool?) ?? _telemetryEnabled;
           _marketingEmails = (info['marketingEmails'] as bool?) ?? _marketingEmails;
-          _isLoading = false;
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _isLoading = false);
-    }
+    } catch (_) {}
   }
 
   Future<void> _toggleTelemetry(bool val) async {

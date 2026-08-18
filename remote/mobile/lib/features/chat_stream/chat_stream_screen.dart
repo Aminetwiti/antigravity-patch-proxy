@@ -180,7 +180,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   // près du bas (ou tape le bouton).
   bool _showJumpToBottom = false;
   int _hiddenNewCount = 0;
-  bool _isSideQuestionLoading = false;
 
   // ── Session Top Tabs & Artifact state (isolé par session) ───────────
   final Map<String, SessionTabType> _sessionTabs = {};
@@ -1886,7 +1885,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                       _WelcomeEmptyState(
                         projectName: widget.activeProjectName,
                         onSuggestionTap: (text) => _handleSendMessage(text, queued: false),
-                        onSelectProject: () => _showProjectSelector(context),
+                        onSelectProject: (widget.projects != null && widget.projects!.length > 1)
+                            ? () => _showProjectSelector(context)
+                            : null,
                       ),
                       const SizedBox(height: 32),
                       if ((_sessionMessageQueues[widget.activeSessionId]?.isNotEmpty ?? false))
@@ -1940,7 +1941,14 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           onOpenArtifact: (art) => setState(() {
             _activeArtifact = art;
           }),
-          onNewTab: widget.onNewConversation,
+          onNewTab: () {
+            final projs = widget.projects ?? [];
+            if (projs.length > 1) {
+              _showProjectSelector(context);
+            } else {
+              widget.onNewConversation?.call();
+            }
+          },
         ),
         if (!hasKeyboard) ...[
           _buildSyncStatusBadge(scheme),
@@ -2032,8 +2040,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           cascadeId: widget.activeSessionId,
           initialText: currentDraft,
           onDraftChanged: setDraft,
-          projectName: widget.activeProjectName,
-          onSelectProject: () => _showProjectSelector(context),
         ),
       ],
     );
@@ -3073,8 +3079,10 @@ class _WelcomeEmptyState extends StatelessWidget {
                     color: scheme.onSurface,
                   ),
                 ),
-                const SizedBox(width: 4),
-                Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: scheme.onSurfaceVariant),
+                if (onSelectProject != null) ...[
+                  const SizedBox(width: 4),
+                  Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: scheme.onSurfaceVariant),
+                ],
               ],
             ),
           ),

@@ -531,13 +531,33 @@ func (s *Server) sessionsFromSummariesLocked(jetbox map[string]connectrpc.Jetbox
 		if isSubagentTitle(sum.Title) {
 			continue
 		}
+		projID := sum.ProjectID
+		wsPath := normalizeWorkspace(sum.Workspace)
+		wsName := sum.Workspace
+		for _, p := range projects {
+			pNorm := strings.ToLower(normalizeWorkspace(p.Path))
+			pNormUri := strings.ToLower(normalizeWorkspace(p.FolderURI))
+			sumNorm := strings.ToLower(wsPath)
+			if (p.ID != "" && p.ID == projID) ||
+				(pNorm != "" && (strings.Contains(sumNorm, pNorm) || strings.Contains(pNorm, sumNorm))) ||
+				(pNormUri != "" && pNormUri == sumNorm) ||
+				strings.EqualFold(p.Name, sum.Workspace) {
+				if projID == "" {
+					projID = p.ID
+				}
+				wsName = p.Name
+				wsPath = p.Path
+				break
+			}
+		}
 		items = append(items, map[string]interface{}{
-			"cascadeId": sum.CascadeID,
-			"title":     sum.Title,
-			"workspace": sum.Workspace,
-			"projectId": sum.ProjectID,
-			"status":    enrichStatus(sum.CascadeID, sum.Status),
-			"updatedAt": sum.UpdatedAt,
+			"cascadeId":     sum.CascadeID,
+			"title":         sum.Title,
+			"workspace":     wsName,
+			"workspacePath": wsPath,
+			"projectId":     projID,
+			"status":        enrichStatus(sum.CascadeID, sum.Status),
+			"updatedAt":     sum.UpdatedAt,
 		})
 	}
 	if len(items) == 0 {
@@ -2653,14 +2673,34 @@ func (s *Server) sessionsOutWithLimit(raw []byte, limitPerProject int) interface
 		}
 
 		status := enrichStatus(sum.CascadeID, sum.Status)
+		projID := sum.ProjectID
+		wsPath := normalizeWorkspace(sum.Workspace)
+		wsName := sum.Workspace
+		for _, p := range projects {
+			pNorm := strings.ToLower(normalizeWorkspace(p.Path))
+			pNormUri := strings.ToLower(normalizeWorkspace(p.FolderURI))
+			sumNorm := strings.ToLower(wsPath)
+			if (p.ID != "" && p.ID == projID) ||
+				(pNorm != "" && (strings.Contains(sumNorm, pNorm) || strings.Contains(pNorm, sumNorm))) ||
+				(pNormUri != "" && pNormUri == sumNorm) ||
+				strings.EqualFold(p.Name, sum.Workspace) {
+				if projID == "" {
+					projID = p.ID
+				}
+				wsName = p.Name
+				wsPath = p.Path
+				break
+			}
+		}
 		items = append(items, sessionWithTime{
 			data: map[string]interface{}{
-				"cascadeId": sum.CascadeID,
-				"title":     sum.Title,
-				"workspace": sum.Workspace,
-				"projectId": sum.ProjectID,
-				"status":    status,
-				"updatedAt": sum.UpdatedAt,
+				"cascadeId":     sum.CascadeID,
+				"title":         sum.Title,
+				"workspace":     wsName,
+				"workspacePath": wsPath,
+				"projectId":     projID,
+				"status":        status,
+				"updatedAt":     sum.UpdatedAt,
 			},
 			updatedAt: sum.UpdatedAt,
 			isActive:  status == "CASCADE_STATUS_RUNNING" || status == "CASCADE_STATUS_WAITING_FOR_USER_ACTION",
@@ -5262,6 +5302,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 // contre le home de l'utilisateur ÔÇö le CWD du daemon n'est pas fiable (il peut
 // ├¬tre lanc├® depuis n'importe o├╣). Les chemins absolus passent inchang├®s.
 func homeRoot(root string) string {
+	root = strings.TrimPrefix(root, "file:///")
+	root = strings.TrimPrefix(root, "file://")
 	if root == "" || filepath.IsAbs(root) {
 		return root
 	}

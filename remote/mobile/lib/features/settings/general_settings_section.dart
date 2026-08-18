@@ -6,8 +6,8 @@ import 'package:mobile/services/settings_store.dart';
 import 'package:mobile/theme/app_colors.dart';
 import 'package:mobile/widgets/app_toast.dart';
 
-/// Section General (Antigravity IDE 1:1)
-/// Gère l'autonomie de l'agent, le timeout d'auto-refus et les notifications.
+/// Section General (Antigravity IDE 1:1 Exact)
+/// Configure agent execution, queued message delivery, and permissions.
 class GeneralSettingsSection extends StatefulWidget {
   final DaemonApi? api;
   final ApprovalNotifier? notifier;
@@ -23,71 +23,71 @@ class GeneralSettingsSection extends StatefulWidget {
 }
 
 class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
-  static const int _defaultApprovalTimeoutMinutes = 5;
-  late TextEditingController _timeoutController;
-  int _timeoutMinutes = _defaultApprovalTimeoutMinutes;
-  bool _timeoutSaved = false;
+  // Execution
+  String _queuedMessagesMode = 'queue'; // 'queue' | 'immediate'
 
+  // Agent Settings
+  String _securityPreset = 'Default'; // 'Default' | 'Strict' | 'Permissive'
+
+  // Agent Behavior
+  String _artifactReviewPolicy = 'Always Ask'; // 'Always Ask' | 'Auto Approve' | 'Never'
+
+  // Tool Approvals & Notifications
   bool _toolNotifications = true;
-  bool _autoAcceptEnabled = false;
-  String _autoAcceptMode = 'readonly'; // readonly | full
 
   @override
   void initState() {
     super.initState();
-    _timeoutController = TextEditingController(text: '$_timeoutMinutes');
     _loadSettings();
-  }
-
-  @override
-  void dispose() {
-    _timeoutController.dispose();
-    super.dispose();
   }
 
   Future<void> _loadSettings() async {
     final s = await SettingsStore.load();
     if (mounted) {
       setState(() {
-        _timeoutMinutes = (s['approvalTimeoutMinutes'] as int?) ?? _defaultApprovalTimeoutMinutes;
-        _timeoutController.text = '$_timeoutMinutes';
+        _queuedMessagesMode = (s['queuedMessagesMode'] as String?) ?? 'queue';
+        _securityPreset = (s['securityPreset'] as String?) ?? 'Default';
+        _artifactReviewPolicy = (s['artifactReviewPolicy'] as String?) ?? 'Always Ask';
         _toolNotifications = (s['toolNotifications'] as bool?) ?? true;
-        _autoAcceptEnabled = (s['autoAcceptEnabled'] as bool?) ?? false;
-        _autoAcceptMode = (s['autoAcceptMode'] as String?) ?? 'readonly';
       });
       widget.notifier?.setEnabled(_toolNotifications);
     }
   }
 
-  Future<void> _applyTimeout() async {
-    final val = int.tryParse(_timeoutController.text.trim()) ?? _defaultApprovalTimeoutMinutes;
-    final clamped = val.clamp(0, 1440);
-    setState(() {
-      _timeoutMinutes = clamped;
-      _timeoutController.text = '$clamped';
-      _timeoutSaved = true;
-    });
+  Future<void> _setQueuedMessagesMode(String mode) async {
+    setState(() => _queuedMessagesMode = mode);
     HapticFeedback.selectionClick();
-    await SettingsStore.save({'approvalTimeoutMinutes': clamped});
-    if (widget.api != null) {
-      widget.api!.sendApprovalTimeout(clamped);
-    }
-    if (mounted) {
-      AppToast.show(
-        context,
-        message: clamped == 0 ? 'Auto-refus désactivé.' : 'Délai d\'auto-refus : $clamped min.',
-        icon: Icons.timer_outlined,
-      );
-    }
+    await SettingsStore.save({'queuedMessagesMode': mode});
+    if (!mounted) return;
+    AppToast.show(
+      context,
+      message: mode == 'queue' ? 'Queued Messages activé.' : 'Envoi immédiat activé.',
+      icon: Icons.schedule_send_outlined,
+    );
   }
 
-  Future<void> _toggleAutoAccept(bool val) async {
-    setState(() => _autoAcceptEnabled = val);
+  Future<void> _setSecurityPreset(String preset) async {
+    setState(() => _securityPreset = preset);
     HapticFeedback.selectionClick();
-    await SettingsStore.save({'autoAcceptEnabled': val, 'autoAcceptMode': _autoAcceptMode});
-    if (widget.api != null) {
-      widget.api!.sendAutoAccept(enabled: val, mode: _autoAcceptMode);
-    }
+    await SettingsStore.save({'securityPreset': preset});
+    if (!mounted) return;
+    AppToast.show(
+      context,
+      message: 'Security Preset : $preset',
+      icon: Icons.shield_outlined,
+    );
+  }
+
+  Future<void> _setArtifactReviewPolicy(String policy) async {
+    setState(() => _artifactReviewPolicy = policy);
+    HapticFeedback.selectionClick();
+    await SettingsStore.save({'artifactReviewPolicy': policy});
+    if (!mounted) return;
+    AppToast.show(
+      context,
+      message: 'Artifact Review Policy : $policy',
+      icon: Icons.rate_review_outlined,
+    );
   }
 
   @override
@@ -112,7 +112,7 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
           ),
           const SizedBox(height: 4),
           Text(
-            'Manage agent autonomy, tool approval timeouts, and push notifications.',
+            'Configure agent execution, queued message delivery, and permissions.',
             style: TextStyle(
               fontSize: 13,
               color: scheme.onSurfaceVariant,
@@ -120,78 +120,52 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
           ),
           const SizedBox(height: 24),
 
-          // Autonomy Card
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF141619) : scheme.surfaceContainer,
-              borderRadius: BorderRadius.circular(AppRadius.md),
-              border: Border.all(
-                color: isDark ? const Color(0xFF26282E) : scheme.outlineVariant,
-                width: 1,
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          // ── 1. Execution
+          _buildSectionHeader('Execution', scheme),
+          const SizedBox(height: 8),
+          _buildCard(
+            isDark: isDark,
+            scheme: scheme,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Text(
-                  'Autonomie & Approbations d\'outils',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: scheme.onSurface),
-                ),
-                const SizedBox(height: 12),
-                SwitchListTile.adaptive(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(
-                    'Auto-approuver les actions en lecture seule',
-                    style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500, color: scheme.onSurface),
-                  ),
-                  subtitle: Text(
-                    _autoAcceptMode == 'full'
-                        ? 'Accès total : toutes les commandes et écritures passent automatiquement.'
-                        : 'Lecture seule : fichiers et recherches passent sans confirmation.',
-                    style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
-                  ),
-                  value: _autoAcceptEnabled,
-                  activeColor: const Color(0xFF007AFF),
-                  onChanged: _toggleAutoAccept,
-                ),
-                const Divider(height: 20, thickness: 0.5),
-                // Timeout
-                Text(
-                  'Délai d\'auto-refus des approbations (minutes)',
-                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _timeoutController,
-                        keyboardType: TextInputType.number,
-                        style: TextStyle(fontSize: 13, color: scheme.onSurface),
-                        decoration: InputDecoration(
-                          hintText: '$_defaultApprovalTimeoutMinutes',
-                          suffixIcon: Icon(Icons.timer_outlined, size: 18, color: scheme.onSurfaceVariant),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        ),
-                        onChanged: (_) => setState(() => _timeoutSaved = false),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Queued Messages',
+                        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: scheme.onSurface),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton(
-                      tooltip: 'Appliquer au daemon',
-                      icon: Icon(
-                        _timeoutSaved ? Icons.check_circle : Icons.check,
-                        color: _timeoutSaved ? const Color(0xFF007AFF) : scheme.onSurfaceVariant,
+                      const SizedBox(height: 3),
+                      Text(
+                        'Configure when follow-up messages are sent.',
+                        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                       ),
-                      onPressed: _applyTimeout,
-                    ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Text(
+                            'Keyboard shortcuts',
+                            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant.withValues(alpha: 0.8)),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(Icons.info_outline, size: 12, color: scheme.onSurfaceVariant),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                _buildSegmentedToggle(
+                  isDark: isDark,
+                  scheme: scheme,
+                  options: const [
+                    {'id': 'queue', 'label': 'Queue'},
+                    {'id': 'immediate', 'label': 'Send Immediately'},
                   ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '0 = pas de timeout (attend indéfiniment). Défaut : 5 min.',
-                  style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+                  selectedId: _queuedMessagesMode,
+                  onChanged: _setQueuedMessagesMode,
                 ),
               ],
             ),
@@ -199,38 +173,298 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
 
           const SizedBox(height: 24),
 
-          // Notifications Card
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF141619) : scheme.surfaceContainer,
-              borderRadius: BorderRadius.circular(AppRadius.md),
-              border: Border.all(
-                color: isDark ? const Color(0xFF26282E) : scheme.outlineVariant,
-                width: 1,
-              ),
-            ),
-            child: SwitchListTile.adaptive(
-              contentPadding: EdgeInsets.zero,
-              title: Text(
-                'Notifications Push (Approbations)',
-                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500, color: scheme.onSurface),
-              ),
-              subtitle: Text(
-                'Alerte sonore et vibration lorsqu\'une commande shell requiert votre accord.',
-                style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
-              ),
-              value: _toolNotifications,
-              activeColor: const Color(0xFF007AFF),
-              onChanged: (val) {
-                setState(() => _toolNotifications = val);
-                SettingsStore.save({'toolNotifications': val});
-                widget.notifier?.setEnabled(val);
-              },
+          // ── 2. Agent Settings
+          _buildSectionHeader('Agent Settings', scheme),
+          const SizedBox(height: 8),
+          _buildCard(
+            isDark: isDark,
+            scheme: scheme,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Security Preset',
+                        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: scheme.onSurface),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'Choose a predefined security preset for the agent. This controls terminal auto-execution policy, and file access policy.',
+                        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Text(
+                            'Learn more about $_securityPreset',
+                            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant.withValues(alpha: 0.8)),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(Icons.info_outline, size: 12, color: scheme.onSurfaceVariant),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                _buildDropdown(
+                  isDark: isDark,
+                  scheme: scheme,
+                  value: _securityPreset,
+                  items: const ['Default', 'Strict', 'Permissive'],
+                  onChanged: (val) {
+                    if (val != null) _setSecurityPreset(val);
+                  },
+                ),
+              ],
             ),
           ),
+
+          const SizedBox(height: 24),
+
+          // ── 3. Agent Behavior
+          _buildSectionHeader('Agent Behavior', scheme),
+          const SizedBox(height: 8),
+          _buildCard(
+            isDark: isDark,
+            scheme: scheme,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Artifact Review Policy',
+                        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: scheme.onSurface),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'Specifies Agent\'s behavior when asking for review on artifacts, which are documents it creates to enable a richer conversation experience.',
+                        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                _buildDropdown(
+                  isDark: isDark,
+                  scheme: scheme,
+                  value: _artifactReviewPolicy,
+                  items: const ['Always Ask', 'Auto Approve', 'Never'],
+                  onChanged: (val) {
+                    if (val != null) _setArtifactReviewPolicy(val);
+                  },
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          // ── 4. File Permissions
+          _buildSectionHeader('File Permissions', scheme),
+          const SizedBox(height: 8),
+          _buildCard(
+            isDark: isDark,
+            scheme: scheme,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'File Access Rules',
+                        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: scheme.onSurface),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'Configure allowed and denied paths for file reads and writes.',
+                        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                OutlinedButton(
+                  onPressed: () {
+                    AppToast.show(context, message: 'Règles de fichiers configurées via le workspace.', icon: Icons.folder_open_outlined);
+                  },
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    side: BorderSide(color: isDark ? const Color(0xFF33363F) : scheme.outlineVariant),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                  ),
+                  child: Text(
+                    'Open',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: scheme.onSurface),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          // ── 5. Network Permissions
+          _buildSectionHeader('Network Permissions', scheme),
+          const SizedBox(height: 8),
+          _buildCard(
+            isDark: isDark,
+            scheme: scheme,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Network Access Policy',
+                        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: scheme.onSurface),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'Allow outbound network connections to approved hosts and MCP servers.',
+                        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                OutlinedButton(
+                  onPressed: () {
+                    AppToast.show(context, message: 'Trafic réseau géré par le proxy local.', icon: Icons.lan_outlined);
+                  },
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    side: BorderSide(color: isDark ? const Color(0xFF33363F) : scheme.outlineVariant),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                  ),
+                  child: Text(
+                    'Open',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: scheme.onSurface),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
           const SizedBox(height: 20),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title, ColorScheme scheme) {
+    return Text(
+      title,
+      style: TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        color: scheme.onSurface,
+      ),
+    );
+  }
+
+  Widget _buildCard({
+    required bool isDark,
+    required ColorScheme scheme,
+    required Widget child,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF141619) : scheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(
+          color: isDark ? const Color(0xFF26282E) : scheme.outlineVariant,
+          width: 1,
+        ),
+      ),
+      child: child,
+    );
+  }
+
+  Widget _buildSegmentedToggle({
+    required bool isDark,
+    required ColorScheme scheme,
+    required List<Map<String, String>> options,
+    required String selectedId,
+    required ValueChanged<String> onChanged,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1F2228) : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: isDark ? const Color(0xFF33363F) : scheme.outlineVariant),
+      ),
+      padding: const EdgeInsets.all(2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: options.map((opt) {
+          final isSelected = opt['id'] == selectedId;
+          return GestureDetector(
+            onTap: () => onChanged(opt['id']!),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? (isDark ? const Color(0xFF33363F) : scheme.surface)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                opt['label']!,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                  color: isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildDropdown({
+    required bool isDark,
+    required ColorScheme scheme,
+    required String value,
+    required List<String> items,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1F2228) : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: isDark ? const Color(0xFF33363F) : scheme.outlineVariant),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: items.contains(value) ? value : items.first,
+          dropdownColor: isDark ? const Color(0xFF1F2228) : scheme.surfaceContainerHigh,
+          icon: Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: scheme.onSurfaceVariant),
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: scheme.onSurface),
+          isDense: true,
+          items: items.map((item) {
+            return DropdownMenuItem<String>(
+              value: item,
+              child: Text(item),
+            );
+          }).toList(),
+          onChanged: onChanged,
+        ),
       ),
     );
   }

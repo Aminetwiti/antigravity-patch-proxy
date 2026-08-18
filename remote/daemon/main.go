@@ -37,14 +37,20 @@ func main() {
 	var host string
 	var tunnelFlag string
 	var authToken string
+	var noAuth bool
 	var approvalTimeoutMin int
 
 	flag.IntVar(&listenPort, "port", cfg.Port, "Port for the WebSocket server")
 	flag.StringVar(&host, "host", cfg.Host, "Host for the WebSocket server")
 	flag.StringVar(&tunnelFlag, "tunnel", cfg.TunnelProvider, "Tunnel provider (ngrok, cloudflare, pinggy)")
-	flag.StringVar(&authToken, "auth-token", "", "Authentication token for Mobile App (generates dynamic CSPRNG if omitted)")
+	flag.StringVar(&authToken, "auth-token", "", "Authentication token for Mobile App (generates dynamic CSPRNG if omitted, or 'none' to disable)")
+	flag.BoolVar(&noAuth, "no-auth", false, "Disable authentication (allow any client without token)")
 	flag.IntVar(&approvalTimeoutMin, "approval-timeout", int(cfg.ApprovalTimeout.Minutes()), "Auto-deny timeout for pending approvals in minutes (0 = disabled)")
 	flag.Parse()
+
+	if noAuth {
+		authToken = "none"
+	}
 
 	authMgr, resolvedToken, err := auth.NewTokenManager(authToken)
 	if err != nil {
@@ -52,7 +58,9 @@ func main() {
 	}
 
 	fmt.Printf("🚀 Starting Antigravity Remote Daemon Bridge on %s:%d...\n", host, listenPort)
-	if authMgr.IsGenerated() {
+	if authMgr.IsDisabled() {
+		fmt.Println("🔓 Authentication is DISABLED (--no-auth / --auth-token none)")
+	} else if authMgr.IsGenerated() {
 		fmt.Printf("🔒 Dynamic CSPRNG Auth Token generated: %s\n", resolvedToken)
 	} else {
 		fmt.Println("🔒 Authentication is ENABLED with configured token")
@@ -80,6 +88,9 @@ func main() {
 
 	// Lancement asynchrone du Tunnel Distant (Cloudflare / Pinggy / Ngrok)
 	tunnelMgr := tunnel.NewManager(tunnelFlag)
+	if !authMgr.IsDisabled() && resolvedToken != "" {
+		tunnelMgr.SetAuthToken(resolvedToken)
+	}
 	go func() {
 		if url, err := tunnelMgr.StartAutoTunnel(listenPort); err == nil {
 			log.Printf("­ƒîÉ Tunnel public actif : %s", url)
@@ -110,12 +121,14 @@ func main() {
 	fmt.Printf("­ƒöæ Code PIN d'appairage mobile : %s (valable 60s ÔÇö saisissez ce code sur votre t├®l├®phone)\n", pin)
 
 	server := gateway.NewServer(rpcClient, resolvedToken)
-	server.SetTokenValidator(func(t string) bool {
-		return authMgr.Validate(t) || pairingMgr.ValidateToken(t)
-	})
-	// Variante enrichie (3.3) : le gateway r├®cup├¿re deviceId + allowedProjects
-	// au handshake pour le filtrage par projet (send_prompt / list_sessions).
-	server.SetSessionValidator(pairingMgr.ValidateSession)
+	if !authMgr.IsDisabled() {
+		server.SetTokenValidator(func(t string) bool {
+			return authMgr.Validate(t) || pairingMgr.ValidateToken(t)
+		})
+		// Variante enrichie (3.3) : le gateway récupère deviceId + allowedProjects
+		// au handshake pour le filtrage par projet (send_prompt / list_sessions).
+		server.SetSessionValidator(pairingMgr.ValidateSession)
+	}
 	// 3.4 : branche le PairingManager pour list_devices / revoke_device
 	// (gestion administrative des appareils pairÃ©s depuis le mobile admin).
 	server.SetPairingManager(pairingMgr)

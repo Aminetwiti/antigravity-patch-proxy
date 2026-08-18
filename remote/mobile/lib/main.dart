@@ -9,6 +9,7 @@ import 'core/notifications/approval_notifier.dart';
 import 'core/protocol/daemon_api.dart';
 import 'core/protocol/messages.dart';
 import 'core/protocol/session_parser.dart';
+import 'core/protocol/workspace_path.dart';
 import 'features/chat_stream/chat_stream_screen.dart';
 import 'features/discovery/discovery_screen.dart';
 import 'features/settings/settings_screen.dart';
@@ -117,7 +118,6 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
   final DaemonWebSocketClient _wsClient = DaemonWebSocketClient();
 
   String _activeSessionId = '';
-  final String _activeProjectName = 'antigravity-add-model-main';
   String _activeSessionTitle = '';
 
   DaemonApi? _api;
@@ -1093,10 +1093,22 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
             .workspacePath
         : (_projects.isNotEmpty ? _projects.first.path : '');
 
+    var cleanActiveWs = activeWs;
+    if (cleanActiveWs.startsWith('file:///')) {
+      cleanActiveWs = cleanActiveWs.substring(8);
+    } else if (cleanActiveWs.startsWith('file://')) {
+      cleanActiveWs = cleanActiveWs.substring(7);
+    }
+
+    final activeProjectDisplayName = WorkspacePath.displayName(
+      activeWs,
+      fallback: _projects.isNotEmpty ? _projects.first.name : 'antigravity-add-model-main',
+    );
+
     final chatStream = ChatStreamScreen(
       api: _api,
       activeSessionId: _activeSessionId,
-      activeProjectName: _activeProjectName,
+      activeProjectName: activeProjectDisplayName,
       workspacePath: activeWs,
       projects: _projects,
       onSelectProject: (p) => _createNewConversation(p),
@@ -1148,7 +1160,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           children: [
             Expanded(
               child: Text(
-                '$_activeProjectName${_activeSessionTitle.isNotEmpty ? ' / $_activeSessionTitle' : ''}',
+                '$activeProjectDisplayName${_activeSessionTitle.isNotEmpty ? ' / $_activeSessionTitle' : ''}',
                 style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -1202,7 +1214,8 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
               RemoteTerminalSheet.show(
                 context,
                 api: _api,
-                projectName: _activeProjectName,
+                projectName: activeProjectDisplayName,
+                workspacePath: cleanActiveWs.isNotEmpty ? cleanActiveWs : activeWs,
               );
             },
             tooltip: 'Ouvrir le terminal distant',
