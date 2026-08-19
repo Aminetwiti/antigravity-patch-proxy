@@ -4697,16 +4697,20 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		if taskID == "" {
 			taskID = fmt.Sprintf("task_%d", time.Now().UnixMilli())
 		}
-		name := msg.Prompt
-		if msg.Data != nil {
-			if n, ok := msg.Data["name"].(string); ok && n != "" {
-				name = n
-			}
-		}
 		prompt := msg.Prompt
 		if msg.Data != nil {
 			if p, ok := msg.Data["prompt"].(string); ok && p != "" {
 				prompt = p
+			}
+		}
+		if strings.TrimSpace(prompt) == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "prompt requis"})
+			return
+		}
+		name := prompt
+		if msg.Data != nil {
+			if n, ok := msg.Data["name"].(string); ok && n != "" {
+				name = n
 			}
 		}
 		wsName := "Workspace"
@@ -4728,8 +4732,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 		}
 
-		// NextRunAt initialis├® d├¿s la cr├®ation : le mobile l'affiche sans
-		// attendre la premi├¿re ex├®cution cron.
+		// NextRunAt initialisé dès la création : le mobile l'affiche sans
+		// attendre la première exécution cron.
 		task := &ScheduledTask{
 			ID:             taskID,
 			Name:           name,
@@ -4799,6 +4803,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				task.Name = n
 			}
 			if p, ok := msg.Data["prompt"].(string); ok {
+				if strings.TrimSpace(p) == "" {
+					s.mu.Unlock()
+					s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "prompt requis"})
+					return
+				}
 				task.Prompt = p
 			}
 			if c, ok := msg.Data["cronExpression"].(string); ok {

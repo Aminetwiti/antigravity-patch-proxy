@@ -243,6 +243,9 @@ func (s *Server) runScheduledTask(taskID string) {
 // pouvoir interrompre le stream de la tÃ¢che, sinon la goroutine reste bloquÃ©e
 // jusqu'au timeout rÃ©seau (120 s) â€” goroutine fantÃ´me.
 func (s *Server) executeTaskPrompt(task ScheduledTask) error {
+	if strings.TrimSpace(task.Prompt) == "" {
+		return fmt.Errorf("prompt vide pour la tâche %s", task.ID)
+	}
 	uri := toWorkspaceURI(task.WorkspaceName)
 	projectID, _ := s.cachedProjectID(uri)
 	raw, err := s.RPCClient.CreateCascade(uri, projectID, "", connectrpcDefaultModelEnum())

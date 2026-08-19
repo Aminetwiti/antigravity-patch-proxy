@@ -240,6 +240,7 @@ func TestScheduler_TickDeduplicatesSameMinute(t *testing.T) {
 	server.mu.Lock()
 	server.scheduledTasks["t1"] = &ScheduledTask{
 		ID:             "t1",
+		Prompt:         "check status",
 		CronExpression: "* * * * *",
 		IsEnabled:      true,
 	}
@@ -268,3 +269,20 @@ func TestScheduler_TickDeduplicatesSameMinute(t *testing.T) {
 		t.Fatalf("LastRunMinute a changé à T+30s: %d != %d", secondRunMinute, firstRunMinute)
 	}
 }
+
+func TestScheduler_ExecuteTaskPromptRejectsEmptyPrompt(t *testing.T) {
+	backend := &fakeRPCClient{}
+	_, server := newTestServerWithGW(backend)
+
+	err := server.executeTaskPrompt(ScheduledTask{
+		ID:     "t_empty",
+		Prompt: "   ",
+	})
+	if err == nil {
+		t.Fatal("executeTaskPrompt should fail on empty prompt")
+	}
+	if backend.lastCascade != nil {
+		t.Fatal("CreateCascade must not be called on empty prompt")
+	}
+}
+
