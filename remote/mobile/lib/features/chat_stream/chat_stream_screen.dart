@@ -31,6 +31,7 @@ import 'widgets/overview_panel_view.dart';
 import 'widgets/session_review_view.dart';
 import 'widgets/queued_messages_card.dart';
 import '../../services/offline_outbox_store.dart';
+import '../../services/session_history_cache_store.dart';
 import '../subagents/subagents_tree_sheet.dart';
 import '../subagents/models/subagent_item.dart';
 import '../subagents/widgets/subagent_tree_card.dart';
@@ -186,6 +187,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   // près du bas (ou tape le bouton).
   bool _showJumpToBottom = false;
   int _hiddenNewCount = 0;
+  bool _userScrollLocked = false;
 
   // ── Session Top Tabs & Artifact state (isolé par session) ───────────
   final Map<String, SessionTabType> _sessionTabs = {};
@@ -342,6 +344,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     // P1 : bascule du bouton flottant — on ne setState que lors d'un
     // changement d'état (une fois par départ/retour, pas à chaque pixel).
     final nearBottom = (pos.maxScrollExtent - pos.pixels) < 120;
+    if (!nearBottom && !_userScrollLocked) {
+      _userScrollLocked = true;
+    } else if (nearBottom && _userScrollLocked) {
+      _userScrollLocked = false;
+    }
     if (nearBottom != _showJumpToBottom) {
       setState(() {
         _showJumpToBottom = !nearBottom;
@@ -355,6 +362,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
   void _jumpToBottom() {
     HapticFeedback.lightImpact();
+    _userScrollLocked = false;
     if (_scrollController.hasClients) {
       _scrollController.animateTo(
         _scrollController.position.maxScrollExtent,
@@ -399,6 +407,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           : ConnectionStatus.disconnected;
     }
     _loadHistoryIfEmpty();
+    _fetchSubagentsForSession(widget.activeSessionId);
     _refreshQuotaSummary();
     _quotaTimer = Timer.periodic(const Duration(seconds: 60), (_) {
       if (mounted) _refreshQuotaSummary();
@@ -521,6 +530,23 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     _loadSessionContextAndArtifacts(targetSession);
     _fetchVcsChanges();
     if (targetSession.isNotEmpty) {
+      // 0ms instant cache display before API responds
+      final buf = _sessionMessages.putIfAbsent(targetSession, () => []);
+      if (buf.isEmpty) {
+        final cached = SessionHistoryCacheStore.instance.getInMemory(targetSession);
+        if (cached != null && cached.isNotEmpty) {
+          buf.addAll(cached);
+        } else {
+          SessionHistoryCacheStore.instance.loadSessionHistory(targetSession).then((cachedList) {
+            if (mounted && cachedList.isNotEmpty && (_sessionMessages[targetSession]?.isEmpty ?? true)) {
+              setState(() {
+                _sessionMessages.putIfAbsent(targetSession, () => []).addAll(cachedList);
+              });
+            }
+          });
+        }
+      }
+
       widget.api?.getSessionHistory(targetSession).then((data) {
         if (!mounted) return;
         final rawMessages = data['messages'] as List?;
@@ -553,12 +579,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           ));
         }
 
-        final buf = _sessionMessages.putIfAbsent(targetSession, () => []);
         if (!isStreamingLive) {
           if (parsed.isNotEmpty || buf.isEmpty) {
             buf
               ..clear()
               ..addAll(parsed);
+            SessionHistoryCacheStore.instance.saveSessionHistory(targetSession, buf);
           }
           if (isStreaming) {
             _onStreamStarted(targetSession);
@@ -570,9 +596,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           } else {
             _onStreamEnded(targetSession);
           }
-        }
-
-        if (widget.activeSessionId == targetSession) {
           setState(() {});
           _scrollToBottomSettled();
         }
@@ -630,9 +653,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             targetModFileList.add(SessionModifiedFile(path: clean, additions: 1, deletions: 0));
           }
         }
-        if (subCount > 0) {
-          _fetchSubagentsForSession(targetSession);
-        }
+        _fetchSubagentsForSession(targetSession);
         if (widget.activeSessionId == targetSession) {
           setState(() {});
         }
@@ -843,6 +864,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         }
       }
       _loadHistoryIfEmpty();
+      _fetchSubagentsForSession(widget.activeSessionId);
       _loadPersistedDraft();
       _loadOfflineOutbox(widget.activeSessionId);
       _refreshRunningTasks();
@@ -1034,6 +1056,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     setState(() {
       list.add(q);
     });
+    ApprovalNotifier.instance.notifyQuestionRequired(
+      cascadeId: cascadeId,
+      question: q.question,
+    );
   }
 
   void _removeQuestion(String requestId) {
@@ -1042,6 +1068,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         list.removeWhere((item) => item.requestId == requestId);
       });
     });
+    ApprovalNotifier.instance.cancelApproval(requestId);
   }
 
   void _handleQuestionSubmit(
@@ -1368,6 +1395,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         }
         _externalThoughts.remove(thKey);
         _streamRequestToMessageId.remove(thKey);
+        SessionHistoryCacheStore.instance.saveSessionHistory(targetSessionId, buf);
 
         if (isActiveSession && mounted) {
           setState(() {});
@@ -1484,6 +1512,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           'timestamp': DateTime.now().millisecondsSinceEpoch,
         });
       });
+      OfflineOutboxStore.saveQueuedMessages(targetSession, queue);
       return;
     }
 
@@ -1507,6 +1536,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final queue = _sessionMessageQueues[widget.activeSessionId];
     if (queue == null || index < 0 || index >= queue.length) return;
     final item = queue.removeAt(index);
+    OfflineOutboxStore.saveQueuedMessages(widget.activeSessionId, queue);
     final text = item['text'] as String? ?? '';
     final modelUID = item['modelUID'] as String?;
     final modelEnum = item['modelEnum'] as int?;
@@ -1528,6 +1558,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final queue = _sessionMessageQueues[widget.activeSessionId];
     if (queue == null || index < 0 || index >= queue.length) return;
     final item = queue.removeAt(index);
+    OfflineOutboxStore.saveQueuedMessages(widget.activeSessionId, queue);
     final text = item['text'] as String? ?? '';
     setState(() {
       setDraft(text);
@@ -1540,6 +1571,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     setState(() {
       queue.removeAt(index);
     });
+    OfflineOutboxStore.saveQueuedMessages(widget.activeSessionId, queue);
   }
 
   void _sendPromptToDaemon(String text, {String? targetSessionOverride, String? modelUID, int? modelEnum}) {
@@ -1721,19 +1753,22 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     if (!mounted || !_scrollController.hasClients) return;
     final maxScroll = _scrollController.position.maxScrollExtent;
     final currentScroll = _scrollController.position.pixels;
-    // N'auto-scroll pendant le streaming que si l'utilisateur est déjà proche du bas (< 120px)
-    if ((maxScroll - currentScroll) < 120) {
+    final nearBottom = (maxScroll - currentScroll) < 120;
+
+    if (nearBottom && !_userScrollLocked) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _scrollController.hasClients) {
+        if (mounted && _scrollController.hasClients && !_userScrollLocked) {
           _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
         }
       });
     } else {
-      if (!_showJumpToBottom) {
+      if (!_showJumpToBottom || _hiddenNewCount == 0) {
         setState(() {
           _showJumpToBottom = true;
           _hiddenNewCount++;
         });
+      } else {
+        _hiddenNewCount++;
       }
     }
   }
@@ -3387,11 +3422,11 @@ class _JumpToBottomButton extends StatelessWidget {
                 const SizedBox(width: 4),
               ],
               Text(
-                count > 0 ? 'nouveaux' : 'Retour en bas',
+                count > 0 ? 'nouveaux tokens' : 'Retour en bas',
                 style: TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w600,
-                  color: scheme.onSurfaceVariant,
+                  color: count > 0 ? scheme.primary : scheme.onSurfaceVariant,
                 ),
               ),
             ],

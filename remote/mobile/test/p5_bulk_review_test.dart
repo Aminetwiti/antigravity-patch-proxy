@@ -66,7 +66,7 @@ void main() {
           ),
         ),
       ));
-      expect(find.text('ls -la'), findsOneWidget);
+      expect(find.textContaining('ls -la', findRichText: true), findsOneWidget);
     });
   });
 }

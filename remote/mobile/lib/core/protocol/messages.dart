@@ -236,6 +236,36 @@ class ChatMessage {
       deletions: deletions ?? this.deletions,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'sender': sender,
+        'text': text,
+        if (thought != null) 'thought': thought,
+        'timestamp': timestamp,
+        'isStreaming': isStreaming,
+        'isError': isError,
+        'isQueued': isQueued,
+        if (modelLabel != null) 'modelLabel': modelLabel,
+        'filesChanged': filesChanged,
+        'additions': additions,
+        'deletions': deletions,
+      };
+
+  factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
+        id: json['id']?.toString() ?? '',
+        sender: json['sender']?.toString() ?? 'assistant',
+        text: json['text']?.toString() ?? '',
+        thought: json['thought']?.toString(),
+        timestamp: json['timestamp']?.toString() ?? '',
+        isStreaming: json['isStreaming'] == true,
+        isError: json['isError'] == true,
+        isQueued: json['isQueued'] == true,
+        modelLabel: json['modelLabel']?.toString(),
+        filesChanged: (json['filesChanged'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+        additions: json['additions'] is int ? json['additions'] as int : int.tryParse(json['additions']?.toString() ?? '0') ?? 0,
+        deletions: json['deletions'] is int ? json['deletions'] as int : int.tryParse(json['deletions']?.toString() ?? '0') ?? 0,
+      );
 }
 
 enum ToolDecision { allow, deny }

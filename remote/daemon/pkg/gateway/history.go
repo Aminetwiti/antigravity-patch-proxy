@@ -810,6 +810,120 @@ type transcriptEntry struct {
 	ToolCalls json.RawMessage `json:"tool_calls"`
 }
 
+func formatExtTag(filename string) string {
+	ext := strings.ToLower(filepath.Ext(filename))
+	switch ext {
+	case ".ts", ".tsx":
+		return "TS"
+	case ".js", ".jsx":
+		return "JS"
+	case ".dart":
+		return "Dart"
+	case ".go":
+		return "Go"
+	case ".py":
+		return "Py"
+	case ".ps1", ".bat", ".sh", ".cmd":
+		return ">_"
+	case ".json":
+		return "JSON"
+	case ".md":
+		return "MD"
+	case ".html", ".htm":
+		return "HTML"
+	case ".css", ".scss":
+		return "CSS"
+	default:
+		return ""
+	}
+}
+
+func formatWorkedDuration(start, end time.Time) string {
+	if start.IsZero() || end.IsZero() || end.Before(start) {
+		return "Worked for 12s"
+	}
+	d := end.Sub(start)
+	if d < 5*time.Second {
+		return "Worked for 5s"
+	}
+	if d < time.Minute {
+		return fmt.Sprintf("Worked for %ds", int(d.Seconds()))
+	}
+	mins := int(d.Minutes())
+	secs := int(d.Seconds()) % 60
+	if secs == 0 {
+		return fmt.Sprintf("Worked for %dm", mins)
+	}
+	return fmt.Sprintf("Worked for %dm %ds", mins, secs)
+}
+
+func formatExploredHeader(files map[string]bool, searches int) string {
+	numFiles := len(files)
+	if numFiles == 0 && searches == 0 {
+		return ""
+	}
+	var parts []string
+	if numFiles > 0 {
+		fileLabel := "files"
+		if numFiles == 1 {
+			fileLabel = "file"
+		}
+		parts = append(parts, fmt.Sprintf("%d %s", numFiles, fileLabel))
+	}
+	if searches > 0 {
+		searchLabel := "searches"
+		if searches == 1 {
+			searchLabel = "search"
+		}
+		parts = append(parts, fmt.Sprintf("%d %s", searches, searchLabel))
+	}
+	return "Explored " + strings.Join(parts, ", ")
+}
+
+func countGrepResults(content string) int {
+	if strings.TrimSpace(content) == "" {
+		return 0
+	}
+	if idx := strings.Index(content, "Found "); idx >= 0 {
+		var n int
+		if _, err := fmt.Sscanf(content[idx:], "Found %d results", &n); err == nil && n > 0 {
+			return n
+		}
+	}
+	count := strings.Count(content, "\"LineNumber\"")
+	if count == 0 {
+		count = strings.Count(content, "\"File\"")
+	}
+	if count == 0 {
+		count = strings.Count(content, "\n")
+		if count > 10 {
+			count = 10
+		}
+	}
+	if count > 0 {
+		return count
+	}
+	return 1
+}
+
+func extractConsoleSnippet(content string) string {
+	lines := strings.Split(content, "\n")
+	var kept []string
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(l)
+		if strings.HasPrefix(trimmed, "Created At:") || strings.HasPrefix(trimmed, "Completed At:") || strings.HasPrefix(trimmed, "The command exited with code") {
+			continue
+		}
+		if trimmed != "" {
+			kept = append(kept, l)
+		}
+		if len(kept) >= 15 {
+			break
+		}
+	}
+	return strings.Join(kept, "\n")
+}
+
 func formatToolCallStep(name string, argsRaw json.RawMessage) string {
 	lowerName := strings.ToLower(name)
 	if lowerName == "ask_question" || lowerName == "ask_user" {
@@ -830,16 +944,24 @@ func formatToolCallStep(name string, argsRaw json.RawMessage) string {
 			}
 		}
 	}
+
+	cleanBase := arg
 	if !strings.Contains(lowerName, "run_command") && !strings.Contains(lowerName, "command") && !strings.Contains(lowerName, "bash") && !strings.Contains(lowerName, "terminal") {
 		if strings.Contains(arg, "/") || strings.Contains(arg, "\\") {
-			cleanBase := filepath.Base(arg)
-			if cleanBase != "." && cleanBase != "" && cleanBase != "/" && cleanBase != "\\" {
-				arg = cleanBase
+			b := filepath.Base(arg)
+			if b != "." && b != "" && b != "/" && b != "\\" {
+				cleanBase = b
 			}
 		}
 	}
-	if len(arg) > 80 {
-		arg = arg[:77] + "…"
+	if len(cleanBase) > 80 {
+		cleanBase = cleanBase[:77] + "…"
+	}
+
+	tag := formatExtTag(arg)
+	tagPrefix := ""
+	if tag != "" {
+		tagPrefix = tag + " "
 	}
 
 	switch {
@@ -848,11 +970,27 @@ func formatToolCallStep(name string, argsRaw json.RawMessage) string {
 			return "Ran " + arg
 		}
 		return "Ran command"
+
 	case strings.Contains(lowerName, "write_to_file") || strings.Contains(lowerName, "replace_file_content") || strings.Contains(lowerName, "edit_file"):
-		if arg != "" {
-			return "Edited " + arg
+		diffStr := "+1 -0"
+		if argMap != nil {
+			added := 1
+			deleted := 0
+			if tc, ok := argMap["TargetContent"].(string); ok && tc != "" {
+				deleted = len(strings.Split(tc, "\n"))
+			}
+			if rc, ok := argMap["ReplacementContent"].(string); ok && rc != "" {
+				added = len(strings.Split(rc, "\n"))
+			} else if cc, ok := argMap["CodeContent"].(string); ok && cc != "" {
+				added = len(strings.Split(cc, "\n"))
+			}
+			diffStr = fmt.Sprintf("+%d -%d", added, deleted)
+		}
+		if cleanBase != "" {
+			return fmt.Sprintf("Edited %s%s %s", tagPrefix, cleanBase, diffStr)
 		}
 		return "Edited file"
+
 	case strings.Contains(lowerName, "view_file") || strings.Contains(lowerName, "read_file"):
 		lineRange := ""
 		if argMap != nil {
@@ -870,27 +1008,31 @@ func formatToolCallStep(name string, argsRaw json.RawMessage) string {
 				lineRange = fmt.Sprintf(" #L%v", sLine)
 			}
 		}
-		if arg != "" {
-			return "Viewed " + arg + lineRange
+		if cleanBase != "" {
+			return fmt.Sprintf("Analyzed %s%s%s", tagPrefix, cleanBase, lineRange)
 		}
-		return "Viewed file"
+		return "Analyzed file"
+
 	case strings.Contains(lowerName, "grep") || strings.Contains(lowerName, "grep_search"):
 		if arg != "" {
-			return "Explored " + arg
+			return "Searched " + arg
 		}
-		return "Explored codebase"
+		return "Searched codebase"
+
 	case strings.Contains(lowerName, "find_by_name") || strings.Contains(lowerName, "search"):
 		if arg != "" {
-			return "Search " + arg
+			return "Searched " + arg
 		}
-		return "Search codebase"
+		return "Searched codebase"
+
 	case strings.Contains(lowerName, "list_dir") || strings.Contains(lowerName, "list_files"):
-		if arg != "" {
-			return "Explored " + arg
+		if cleanBase != "" {
+			return "Explored " + cleanBase
 		}
 		return "Explored directory"
+
 	case strings.Contains(lowerName, "invoke_subagent") || strings.Contains(lowerName, "define_subagent") || strings.Contains(lowerName, "subagent"):
-		subName := arg
+		subName := cleanBase
 		if argMap != nil {
 			if role, ok := argMap["Role"].(string); ok && role != "" {
 				subName = role
@@ -902,6 +1044,7 @@ func formatToolCallStep(name string, argsRaw json.RawMessage) string {
 			return "Subagent " + subName
 		}
 		return "Spawned subagent"
+
 	case strings.Contains(lowerName, "manage_task") || strings.Contains(lowerName, "task"):
 		if argMap != nil {
 			if taskId, ok := argMap["TaskId"].(string); ok && taskId != "" {
@@ -917,20 +1060,23 @@ func formatToolCallStep(name string, argsRaw json.RawMessage) string {
 				return fmt.Sprintf("Task %s %s", cleanId, action)
 			}
 		}
-		if arg != "" {
-			return "Task " + arg
+		if cleanBase != "" {
+			return "Task " + cleanBase
 		}
 		return "Task finished"
+
 	case strings.Contains(lowerName, "send_message"):
-		if arg != "" {
-			return "Sent to " + arg
+		if cleanBase != "" {
+			return "Sent to " + cleanBase
 		}
 		return "Sent message"
+
 	case strings.Contains(lowerName, "generate_image"):
-		if arg != "" {
-			return "Generated " + arg
+		if cleanBase != "" {
+			return "Generated " + cleanBase
 		}
 		return "Generated image"
+
 	case strings.Contains(lowerName, "schedule") || strings.Contains(lowerName, "timer"):
 		if argMap != nil {
 			durationSec := 0
@@ -961,27 +1107,263 @@ func formatToolCallStep(name string, argsRaw json.RawMessage) string {
 				return fmt.Sprintf("Scheduled %s", prompt)
 			}
 		}
-		if arg != "" {
-			return "Scheduled " + arg
+		if cleanBase != "" {
+			return "Scheduled " + cleanBase
 		}
 		return "Scheduled task"
+
 	case strings.Contains(lowerName, "auto_proceed") || strings.Contains(lowerName, "autoproceed"):
-		if arg != "" {
-			return "Auto-proceeded with " + arg
+		if cleanBase != "" {
+			return "Auto-proceeded with " + cleanBase
 		}
 		return "Auto-proceeded with Implementation Plan"
+
 	case strings.Contains(lowerName, "browse") || strings.Contains(lowerName, "read_url"):
-		if arg != "" {
-			return "Browsed " + arg
+		if cleanBase != "" {
+			return "Browsed " + cleanBase
 		}
 		return "Browsed web"
+
 	default:
 		cleanTool := strings.ReplaceAll(name, "_", " ")
-		if arg != "" {
-			return fmt.Sprintf("Task %s (%s)", cleanTool, arg)
+		if cleanBase != "" {
+			return fmt.Sprintf("Task %s (%s)", cleanTool, cleanBase)
 		}
 		return "Task " + cleanTool
 	}
+}
+
+func parseTranscriptFullTurns(transcriptPath string) ([]HistoryMessage, error) {
+	f, err := os.Open(transcriptPath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var messages []HistoryMessage
+	scanner := bufio.NewScanner(f)
+	hBuf := AcquireHistoryBuffer()
+	defer ReleaseHistoryBuffer(hBuf)
+	scanner.Buffer(*hBuf, len(*hBuf))
+
+	var currentTurnUser *HistoryMessage
+	var currentTurnSteps []string
+	var currentTurnAnswer string
+	var currentTurnStart time.Time
+	var currentTurnEnd time.Time
+	var currentTurnLastIdx int
+	var currentTurnHasError bool
+	turnFilesExplored := make(map[string]bool)
+	turnSearchesCount := 0
+	lastSearchIdx := -1
+	lastCmdIdx := -1
+
+	flushAssistantTurn := func() {
+		if currentTurnUser == nil && len(currentTurnSteps) == 0 && currentTurnAnswer == "" {
+			return
+		}
+		if len(currentTurnSteps) == 0 && currentTurnAnswer == "" {
+			return
+		}
+
+		durStr := formatWorkedDuration(currentTurnStart, currentTurnEnd)
+		exploredStr := formatExploredHeader(turnFilesExplored, turnSearchesCount)
+
+		var allThoughtLines []string
+		if durStr != "" && (len(currentTurnSteps) > 0 || currentTurnAnswer != "") {
+			allThoughtLines = append(allThoughtLines, durStr)
+		}
+		if exploredStr != "" {
+			allThoughtLines = append(allThoughtLines, exploredStr)
+		}
+		allThoughtLines = append(allThoughtLines, currentTurnSteps...)
+		fullThought := strings.Join(allThoughtLines, "\n")
+
+		msgID := fmt.Sprintf("h-%d", currentTurnLastIdx)
+		if currentTurnLastIdx == 0 && currentTurnUser != nil {
+			msgID = currentTurnUser.ID + "-resp"
+		}
+		ts := "00:00"
+		if !currentTurnEnd.IsZero() {
+			ts = fmt.Sprintf("%02d:%02d", currentTurnEnd.Hour(), currentTurnEnd.Minute())
+		} else if currentTurnUser != nil {
+			ts = currentTurnUser.Timestamp
+		}
+
+		messages = append(messages, HistoryMessage{
+			ID:        msgID,
+			Sender:    "assistant",
+			Text:      currentTurnAnswer,
+			Thought:   strings.TrimSpace(fullThought),
+			Timestamp: ts,
+			IsError:   currentTurnHasError,
+		})
+
+		currentTurnSteps = nil
+		currentTurnAnswer = ""
+		currentTurnHasError = false
+		turnFilesExplored = make(map[string]bool)
+		turnSearchesCount = 0
+		lastSearchIdx = -1
+		lastCmdIdx = -1
+	}
+
+	for scanner.Scan() {
+		lineBytes := scanner.Bytes()
+		if len(lineBytes) == 0 {
+			continue
+		}
+		var entry transcriptEntry
+		if err := json.Unmarshal(lineBytes, &entry); err != nil {
+			continue
+		}
+
+		entryTime, _ := time.Parse(time.RFC3339, entry.CreatedAt)
+		if !entryTime.IsZero() {
+			currentTurnEnd = entryTime
+		}
+		if entry.StepIndex > 0 {
+			currentTurnLastIdx = entry.StepIndex
+		}
+
+		if entry.Type == "USER_INPUT" {
+			flushAssistantTurn()
+			cleaned := extractUserRequest(entry.Content)
+			if cleaned != "" {
+				ts := "00:00"
+				if !entryTime.IsZero() {
+					ts = fmt.Sprintf("%02d:%02d", entryTime.Hour(), entryTime.Minute())
+				}
+				userMsg := HistoryMessage{
+					ID:        fmt.Sprintf("h-%d", entry.StepIndex),
+					Sender:    "user",
+					Text:      cleaned,
+					Timestamp: ts,
+				}
+				messages = append(messages, userMsg)
+				currentTurnUser = &userMsg
+				currentTurnStart = entryTime
+				currentTurnEnd = entryTime
+				currentTurnLastIdx = entry.StepIndex
+			}
+			continue
+		}
+
+		if entry.Type == "CHECKPOINT" || entry.Type == "CONVERSATION_HISTORY" {
+			continue
+		}
+
+		// Tool result matching
+		if entry.Type == "GREP_SEARCH" || entry.Type == "FIND_BY_NAME" {
+			count := countGrepResults(entry.Content)
+			if lastSearchIdx >= 0 && lastSearchIdx < len(currentTurnSteps) {
+				resLabel := fmt.Sprintf("%d results", count)
+				if count == 1 {
+					resLabel = "1 result"
+				}
+				if !strings.Contains(currentTurnSteps[lastSearchIdx], "result") {
+					currentTurnSteps[lastSearchIdx] = currentTurnSteps[lastSearchIdx] + " " + resLabel
+				}
+				lastSearchIdx = -1
+			}
+			continue
+		}
+
+		if entry.Type == "RUN_COMMAND" {
+			snippet := extractConsoleSnippet(entry.Content)
+			if snippet != "" && lastCmdIdx >= 0 && lastCmdIdx < len(currentTurnSteps) {
+				cmdTitle := strings.TrimPrefix(currentTurnSteps[lastCmdIdx], "Ran ")
+				consoleBlock := fmt.Sprintf("```console\n... > %s\n%s\n```", cmdTitle, snippet)
+				currentTurnSteps = append(currentTurnSteps, consoleBlock)
+				lastCmdIdx = -1
+			}
+			continue
+		}
+
+		// Thinking
+		if entry.Thinking != "" {
+			thoughtClean := cleanRawContent(entry.Thinking)
+			if thoughtClean != "" {
+				currentTurnSteps = append(currentTurnSteps, "Thought for 7s", thoughtClean)
+			}
+		}
+
+		// Tool Calls
+		if len(entry.ToolCalls) > 0 {
+			var toolCalls []struct {
+				Name      string          `json:"name"`
+				Arguments json.RawMessage `json:"args"`
+				Function  struct {
+					Name      string          `json:"name"`
+					Arguments json.RawMessage `json:"arguments"`
+				} `json:"function"`
+			}
+			if json.Unmarshal(entry.ToolCalls, &toolCalls) == nil {
+				for _, tc := range toolCalls {
+					name := tc.Name
+					if name == "" {
+						name = tc.Function.Name
+					}
+					args := tc.Arguments
+					if len(args) == 0 {
+						args = tc.Function.Arguments
+					}
+					if name == "" || name == "ask_question" || name == "ask_user" {
+						continue
+					}
+					lower := strings.ToLower(name)
+					if strings.Contains(lower, "grep") || strings.Contains(lower, "find_by_name") || strings.Contains(lower, "search") {
+						turnSearchesCount++
+					}
+					var argMap map[string]interface{}
+					if len(args) > 0 {
+						_ = json.Unmarshal(args, &argMap)
+					}
+					if argMap != nil {
+						for _, k := range []string{"targetFile", "TargetFile", "filePath", "file_path", "AbsolutePath"} {
+							if fv, ok := argMap[k].(string); ok && fv != "" {
+								turnFilesExplored[filepath.Base(fv)] = true
+							}
+						}
+					}
+					stepStr := formatToolCallStep(name, args)
+					if stepStr != "" {
+						currentTurnSteps = append(currentTurnSteps, stepStr)
+						if strings.HasPrefix(stepStr, "Searched ") {
+							lastSearchIdx = len(currentTurnSteps) - 1
+						} else if strings.HasPrefix(stepStr, "Ran ") {
+							lastCmdIdx = len(currentTurnSteps) - 1
+						}
+					}
+				}
+			}
+		}
+
+		// Assistant text / narrative
+		if entry.Type == "PLANNER_RESPONSE" {
+			if entry.Error != "" {
+				currentTurnHasError = true
+			}
+			if entry.Content != "" {
+				cleaned := cleanAssistantText(entry.Content)
+				if cleaned != "" {
+					if len(entry.ToolCalls) > 0 {
+						currentTurnSteps = append(currentTurnSteps, cleaned)
+					} else {
+						currentTurnAnswer = cleaned
+					}
+				}
+			}
+		}
+	}
+
+	flushAssistantTurn()
+
+	if err := scanner.Err(); err != nil {
+		logJSON.Error("scan_transcript_error", "err", err)
+	}
+
+	return messages, nil
 }
 
 func formatToolCallsForThought(toolCallsRaw json.RawMessage) string {
@@ -1515,24 +1897,9 @@ func CoalesceHistoryMessages(raw []HistoryMessage) []HistoryMessage {
 func GetSessionHistory(cascadeID string) ([]HistoryMessage, error) {
 	transcriptPath := findTranscriptPath(cascadeID)
 	if transcriptPath != "" {
-		if f, err := os.Open(transcriptPath); err == nil {
-			var messages []HistoryMessage
-			scanner := bufio.NewScanner(f)
-			hBuf := AcquireHistoryBuffer()
-			scanner.Buffer(*hBuf, len(*hBuf))
-
-			for scanner.Scan() {
-				if msg := parseTranscriptLine(scanner.Bytes()); msg != nil {
-					messages = append(messages, *msg)
-				}
-			}
-			ReleaseHistoryBuffer(hBuf)
-			f.Close()
-
-			if len(messages) > 0 {
-				logJSON.Debug("history_from_transcript", "cascade", cascadeID, "messages", len(messages))
-				return CoalesceHistoryMessages(messages), nil
-			}
+		if messages, err := parseTranscriptFullTurns(transcriptPath); err == nil && len(messages) > 0 {
+			logJSON.Debug("history_from_transcript", "cascade", cascadeID, "messages", len(messages))
+			return messages, nil
 		}
 	}
 
@@ -1664,23 +2031,45 @@ func countTranscriptActivity(cascadeID string) map[string]int {
 		// Subagents : comptage depuis tool_calls ou entry.Content
 		if len(entry.ToolCalls) > 0 {
 			var calls []struct {
-				Name string `json:"name"`
+				Name      string                 `json:"name"`
+				Args      map[string]interface{} `json:"args"`
+				Arguments map[string]interface{} `json:"arguments"`
 			}
 			if json.Unmarshal(entry.ToolCalls, &calls) == nil {
 				for _, c := range calls {
 					if c.Name == "invoke_subagent" || c.Name == "define_subagent" {
-						out["subagents"]++
+						args := c.Args
+						if args == nil {
+							args = c.Arguments
+						}
+						subs := extractRawSubagentEntries(args)
+						if len(subs) > 0 {
+							out["subagents"] += len(subs)
+						} else {
+							out["subagents"]++
+						}
 					}
 				}
 			}
 		}
-		if entry.Type == "TOOL_CALL" {
+		if entry.Type == "TOOL_CALL" || strings.Contains(entry.Content, "invoke_subagent") {
 			var tc struct {
-				Name string `json:"name"`
+				Name      string                 `json:"name"`
+				Args      map[string]interface{} `json:"args"`
+				Arguments map[string]interface{} `json:"arguments"`
 			}
 			if json.Unmarshal([]byte(entry.Content), &tc) == nil {
 				if tc.Name == "invoke_subagent" || tc.Name == "define_subagent" {
-					out["subagents"]++
+					args := tc.Args
+					if args == nil {
+						args = tc.Arguments
+					}
+					subs := extractRawSubagentEntries(args)
+					if len(subs) > 0 {
+						out["subagents"] += len(subs)
+					} else {
+						out["subagents"]++
+					}
 				}
 			}
 		}
@@ -1833,6 +2222,45 @@ func ListSessionModifiedFiles(cascadeID string) []string {
 	return results
 }
 
+// extractRawSubagentEntries extrait les objets sous-agents depuis les arguments (map ou string JSON).
+func extractRawSubagentEntries(argsRaw map[string]interface{}) []map[string]interface{} {
+	if argsRaw == nil {
+		return nil
+	}
+	var rawSubs interface{}
+	for _, k := range []string{"Subagents", "subagents", "subagent", "Subagent"} {
+		if val, exists := argsRaw[k]; exists && val != nil {
+			rawSubs = val
+			break
+		}
+	}
+	if rawSubs == nil {
+		return nil
+	}
+	// Cas 1 : Tranche déjà désérialisée
+	if list, ok := rawSubs.([]interface{}); ok {
+		var out []map[string]interface{}
+		for _, item := range list {
+			if m, ok := item.(map[string]interface{}); ok {
+				out = append(out, m)
+			}
+		}
+		return out
+	}
+	// Cas 2 : Chaîne encodée en JSON
+	if s, ok := rawSubs.(string); ok && len(strings.TrimSpace(s)) > 0 {
+		var list []map[string]interface{}
+		if json.Unmarshal([]byte(s), &list) == nil && len(list) > 0 {
+			return list
+		}
+		var single map[string]interface{}
+		if json.Unmarshal([]byte(s), &single) == nil && len(single) > 0 {
+			return []map[string]interface{}{single}
+		}
+	}
+	return nil
+}
+
 // SubagentSummary représente un sous-agent découvert dans l'arbre d'exécution (DAG).
 type SubagentSummary struct {
 	ID              string `json:"id"`
@@ -1882,67 +2310,30 @@ func ExtractSubagents(cascadeID string) []SubagentSummary {
 			continue
 		}
 
-		// Détection dans tool_calls JSON array
+		// Détection dans tool_calls JSON array (support args et arguments)
 		if len(entry.ToolCalls) > 0 {
 			var calls []struct {
 				Name      string                 `json:"name"`
+				Args      map[string]interface{} `json:"args"`
 				Arguments map[string]interface{} `json:"arguments"`
 			}
 			if json.Unmarshal(entry.ToolCalls, &calls) == nil {
 				for _, c := range calls {
-					if c.Name == "invoke_subagent" {
-						if subList, ok := c.Arguments["Subagents"].([]interface{}); ok {
-							for _, item := range subList {
-								if smap, ok := item.(map[string]interface{}); ok {
-									typeName, _ := smap["TypeName"].(string)
-									role, _ := smap["Role"].(string)
-									if role == "" {
-										role = typeName
-									}
-									if role == "" {
-										role = "Subagent"
-									}
-									prompt, _ := smap["Prompt"].(string)
-									subID, _ := smap["ConversationId"].(string)
-									if subID == "" {
-										subID = fmt.Sprintf("subagent-%s-%d", typeName, len(results)+1)
-									}
-									if idx, exists := seen[subID]; exists {
-										results[idx].State = "running"
-									} else {
-										seen[subID] = len(results)
-										results = append(results, SubagentSummary{
-											ID:              subID,
-											ParentID:        cascadeID,
-											TypeName:        typeName,
-											Role:            role,
-											Prompt:          prompt,
-											State:           "running",
-											CreatedAt:       entry.Timestamp,
-											DurationSeconds: 14,
-											WorkedFor:       "14s",
-										})
-									}
-								}
-							}
+					if c.Name == "invoke_subagent" || c.Name == "define_subagent" {
+						args := c.Args
+						if args == nil {
+							args = c.Arguments
 						}
-					}
-				}
-			}
-		}
-
-		// Détection dans Content texte si stringifié
-		if strings.Contains(entry.Content, "invoke_subagent") || strings.Contains(entry.Content, "manage_subagents") {
-			var tc struct {
-				Name      string                 `json:"name"`
-				Arguments map[string]interface{} `json:"arguments"`
-			}
-			if json.Unmarshal([]byte(entry.Content), &tc) == nil && tc.Name == "invoke_subagent" {
-				if subList, ok := tc.Arguments["Subagents"].([]interface{}); ok {
-					for _, item := range subList {
-						if smap, ok := item.(map[string]interface{}); ok {
+						subList := extractRawSubagentEntries(args)
+						for _, smap := range subList {
 							typeName, _ := smap["TypeName"].(string)
+							if typeName == "" {
+								typeName, _ = smap["typeName"].(string)
+							}
 							role, _ := smap["Role"].(string)
+							if role == "" {
+								role, _ = smap["role"].(string)
+							}
 							if role == "" {
 								role = typeName
 							}
@@ -1950,11 +2341,22 @@ func ExtractSubagents(cascadeID string) []SubagentSummary {
 								role = "Subagent"
 							}
 							prompt, _ := smap["Prompt"].(string)
+							if prompt == "" {
+								prompt, _ = smap["prompt"].(string)
+							}
 							subID, _ := smap["ConversationId"].(string)
+							if subID == "" {
+								subID, _ = smap["conversationId"].(string)
+							}
+							if subID == "" {
+								subID, _ = smap["id"].(string)
+							}
 							if subID == "" {
 								subID = fmt.Sprintf("subagent-%s-%d", typeName, len(results)+1)
 							}
-							if _, exists := seen[subID]; !exists {
+							if idx, exists := seen[subID]; exists {
+								results[idx].State = "running"
+							} else {
 								seen[subID] = len(results)
 								results = append(results, SubagentSummary{
 									ID:              subID,
@@ -1969,6 +2371,66 @@ func ExtractSubagents(cascadeID string) []SubagentSummary {
 								})
 							}
 						}
+					}
+				}
+			}
+		}
+
+		// Détection dans Content texte si stringifié
+		if strings.Contains(entry.Content, "invoke_subagent") || strings.Contains(entry.Content, "manage_subagents") {
+			var tc struct {
+				Name      string                 `json:"name"`
+				Args      map[string]interface{} `json:"args"`
+				Arguments map[string]interface{} `json:"arguments"`
+			}
+			if json.Unmarshal([]byte(entry.Content), &tc) == nil && (tc.Name == "invoke_subagent" || tc.Name == "define_subagent") {
+				args := tc.Args
+				if args == nil {
+					args = tc.Arguments
+				}
+				subList := extractRawSubagentEntries(args)
+				for _, smap := range subList {
+					typeName, _ := smap["TypeName"].(string)
+					if typeName == "" {
+						typeName, _ = smap["typeName"].(string)
+					}
+					role, _ := smap["Role"].(string)
+					if role == "" {
+						role, _ = smap["role"].(string)
+					}
+					if role == "" {
+						role = typeName
+					}
+					if role == "" {
+						role = "Subagent"
+					}
+					prompt, _ := smap["Prompt"].(string)
+					if prompt == "" {
+						prompt, _ = smap["prompt"].(string)
+					}
+					subID, _ := smap["ConversationId"].(string)
+					if subID == "" {
+						subID, _ = smap["conversationId"].(string)
+					}
+					if subID == "" {
+						subID, _ = smap["id"].(string)
+					}
+					if subID == "" {
+						subID = fmt.Sprintf("subagent-%s-%d", typeName, len(results)+1)
+					}
+					if _, exists := seen[subID]; !exists {
+						seen[subID] = len(results)
+						results = append(results, SubagentSummary{
+							ID:              subID,
+							ParentID:        cascadeID,
+							TypeName:        typeName,
+							Role:            role,
+							Prompt:          prompt,
+							State:           "completed",
+							CreatedAt:       entry.Timestamp,
+							DurationSeconds: 14,
+							WorkedFor:       "14s",
+						})
 					}
 				}
 			}

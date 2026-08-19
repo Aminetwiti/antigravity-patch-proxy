@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/protocol/daemon_api.dart';
 import '../../core/protocol/messages.dart';
+import '../../core/protocol/workspace_path.dart';
 import '../../widgets/custom_dropdown_overlay.dart';
 import 'git_commit_dialog.dart';
 import 'package:mobile/theme/app_colors.dart';
@@ -70,6 +71,15 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     return w;
   }
 
+  /// Extrait le nom court du dossier d'un chemin de workspace.
+  static String _extractWorkspaceName(String raw) {
+    final p = raw.trim();
+    if (p.isEmpty || p == '.') return 'Workspace';
+    final cleaned = p.endsWith('/') || p.endsWith('\\') ? p.substring(0, p.length - 1) : p;
+    final i = cleaned.lastIndexOf(RegExp(r'[/\\]'));
+    return i >= 0 ? cleaned.substring(i + 1) : cleaned;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -97,13 +107,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   }
 
   // Basename réel du workspace (nom du dossier, pas le path complet).
-  String get _workspaceLabel {
-    final p = widget.workspacePath.trim();
-    if (p.isEmpty || p == '.') return 'Workspace';
-    final cleaned = p.endsWith('/') ? p.substring(0, p.length - 1) : p;
-    final i = cleaned.lastIndexOf(RegExp(r'[/\\]'));
-    return i >= 0 ? cleaned.substring(i + 1) : cleaned;
-  }
+  String get _workspaceLabel => WorkspacePath.displayName(widget.workspacePath, fallback: 'Workspace');
 
   Future<void> _loadFiles() async {
     if (widget.api == null) {
@@ -940,12 +944,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           children: [
             if (projects.isNotEmpty)
               ...projects.map((proj) {
-                final name = proj.name.isNotEmpty ? proj.name : WorkspacePath.extractWorkspaceName(proj.path);
+                final dispName = proj.name.isNotEmpty
+                    ? proj.name
+                    : _extractWorkspaceName(proj.path);
                 final isSelected = proj.name == _workspaceLabel ||
                     proj.path == _workspaceResolved ||
-                    WorkspacePath.extractWorkspaceName(proj.path) == _workspaceLabel;
+                    _extractWorkspaceName(proj.path) == _workspaceLabel;
                 return _buildWorkspaceItem(
-                  name,
+                  dispName,
                   isSelected,
                   scheme,
                   onTap: () {

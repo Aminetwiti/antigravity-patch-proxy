@@ -453,6 +453,44 @@ class ApprovalNotifier {
     debugPrint('[Notifier] connection restored notification');
   }
 
+  /// Notifie l'utilisateur lorsqu'une question interactive (AskQuestion / QCM) requiert son choix.
+  Future<void> notifyQuestionRequired({
+    required String cascadeId,
+    required String question,
+  }) async {
+    if (!_initialized || !_enabled) return;
+
+    const androidDetails = AndroidNotificationDetails(
+      'approval_required',
+      'Questions de l\'Agent',
+      channelDescription: 'Questions et choix interactifs posés par l\'agent',
+      importance: Importance.max,
+      priority: Priority.high,
+      category: AndroidNotificationCategory.call,
+      visibility: NotificationVisibility.public,
+      playSound: true,
+      enableVibration: true,
+    );
+    const iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+    );
+    final details = const NotificationDetails(android: androidDetails, iOS: iosDetails);
+
+    final plugin = _plugin;
+    if (plugin == null) return;
+
+    await plugin.show(
+      ('question_$cascadeId').hashCode,
+      '❓ Question de l\'Agent',
+      question.length > 120 ? '${question.substring(0, 120)}…' : question,
+      details,
+      payload: payloadForApproval(cascadeId),
+    );
+    debugPrint('[Notifier] question notification -> $cascadeId');
+  }
+
   /// Annule la notification (l'utilisateur a répondu sur une autre surface).
   Future<void> cancelApproval(String callId) async {
     if (!_initialized) return;

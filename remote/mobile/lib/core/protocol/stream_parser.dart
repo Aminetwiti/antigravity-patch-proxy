@@ -139,7 +139,7 @@ class StreamDeltaParser {
             }
           } catch (_) {}
         }
-        return arg.isNotEmpty ? 'Viewed $arg$lineRange' : 'Viewed file';
+        return arg.isNotEmpty ? 'Analyzed $arg$lineRange' : 'Analyzed file';
       case 'write_to_file':
       case 'edit_file':
       case 'replace_file_content':
@@ -148,10 +148,10 @@ class StreamDeltaParser {
       case 'search_files':
       case 'grep':
       case 'grep_search':
-        return arg.isNotEmpty ? 'Explored $arg' : 'Explored codebase';
+        return arg.isNotEmpty ? 'Searched $arg' : 'Searched codebase';
       case 'search':
       case 'find_by_name':
-        return arg.isNotEmpty ? 'Search $arg' : 'Search codebase';
+        return arg.isNotEmpty ? 'Searched $arg' : 'Searched codebase';
       case 'list_files':
       case 'list_dir':
         return arg.isNotEmpty ? 'Explored $arg' : 'Explored directory';

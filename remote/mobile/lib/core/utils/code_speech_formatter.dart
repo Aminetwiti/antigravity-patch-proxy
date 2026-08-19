@@ -10,18 +10,18 @@ class CodeSpeechFormatter {
 
   // Regex pour commandes CLI courantes
   static final RegExp _cliCommandPattern = RegExp(
-    r'\b((?:git|npm|yarn|pnpm|flutter|dart|go|cargo|docker|kubectl|npx)\s+[a-z0-9_:\-]+(?:\s+-[a-zA-Z0-9_\-]+)*)\b',
+    r'\b((?:git|npm|yarn|pnpm|flutter|dart|go|cargo|docker|kubectl|npx)\s+(?:status|commit|push|pull|fetch|run|build|test|add|checkout|branch|diff|log|install|init|update|deploy|analyze|[a-z0-9_:\-]+(?:\s+-[a-zA-Z0-9_\-]+)*))\b',
     caseSensitive: false,
+  );
+
+  // Regex pour appels de fonctions comme `functionName()`
+  static final RegExp _functionCallPattern = RegExp(
+    r'\b([a-zA-Z_][a-zA-Z0-9_]*\(\))',
   );
 
   // Regex pour identifiants camelCase / PascalCase
   static final RegExp _camelCasePattern = RegExp(
     r'\b([a-z]+[A-Z0-9][a-zA-Z0-9]*)\b',
-  );
-
-  // Regex pour appels de fonctions comme `functionName()`
-  static final RegExp _functionCallPattern = RegExp(
-    r'\b([a-zA-Z_][a-zA-Z0-9_]*\(\))\b',
   );
 
   /// Nettoie et formate une dictée vocale brute.
@@ -33,22 +33,22 @@ class CodeSpeechFormatter {
     // 1. Remplacements des ponctuations dictées en français / anglais
     text = _replaceSpokenPunctuation(text);
 
-    // 2. Encapsulation des commandes CLI
-    text = text.replaceAllMapped(_cliCommandPattern, (m) {
-      final match = m.group(1)!;
-      if (_isAlreadyQuoted(text, m.start, m.end)) return match;
-      return '`$match`';
-    });
-
-    // 3. Encapsulation des noms de fichiers
+    // 2. Encapsulation des fichiers EN PREMIER
     text = text.replaceAllMapped(_filePattern, (m) {
       final match = m.group(1)!;
       if (_isAlreadyQuoted(text, m.start, m.end)) return match;
       return '`$match`';
     });
 
-    // 4. Encapsulation des appels de fonctions
+    // 3. Encapsulation des appels de fonctions (sans \b terminal pour capturer les parenthèses)
     text = text.replaceAllMapped(_functionCallPattern, (m) {
+      final match = m.group(1)!;
+      if (_isAlreadyQuoted(text, m.start, m.end)) return match;
+      return '`$match`';
+    });
+
+    // 4. Encapsulation des commandes CLI
+    text = text.replaceAllMapped(_cliCommandPattern, (m) {
       final match = m.group(1)!;
       if (_isAlreadyQuoted(text, m.start, m.end)) return match;
       return '`$match`';
@@ -58,7 +58,6 @@ class CodeSpeechFormatter {
     text = text.replaceAllMapped(_camelCasePattern, (m) {
       final match = m.group(1)!;
       if (_isAlreadyQuoted(text, m.start, m.end)) return match;
-      // Ne pas quoter les mots français normaux accidentellement appariés
       if (match.length < 3) return match;
       return '`$match`';
     });
@@ -75,9 +74,9 @@ class CodeSpeechFormatter {
   static String _replaceSpokenPunctuation(String text) {
     var out = text;
     final replacements = <Pattern, String>{
-      RegExp(r'\b(?:à la ligne|nouvelle ligne|retour chariot)\b', caseSensitive: false): '\n',
       RegExp(r'\b(?:point d\x27interrogation|point d interrogation)\b', caseSensitive: false): '?',
       RegExp(r'\b(?:point d\x27exclamation|point d exclamation)\b', caseSensitive: false): '!',
+      RegExp(r'(?:à la ligne|a la ligne|nouvelle ligne|retour chariot)', caseSensitive: false): '\n',
       RegExp(r'\b(?:deux points)\b', caseSensitive: false): ':',
       RegExp(r'\b(?:point virgule)\b', caseSensitive: false): ';',
       RegExp(r'\b(?:virgule)\b', caseSensitive: false): ',',
