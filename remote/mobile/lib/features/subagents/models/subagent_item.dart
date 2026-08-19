@@ -38,7 +38,7 @@ class SubagentItem {
     final wf = json['workedFor'] as String?;
     return SubagentItem(
       id: json['conversationId'] as String? ?? json['id'] as String? ?? '',
-      role: json['role'] as String? ?? 'Subagent',
+      role: json['role'] as String? ?? json['name'] as String? ?? 'Subagent',
       status: json['state'] as String? ?? json['status'] as String? ?? 'idle',
       stateDetail: json['stateDetail'] as String?,
       typeName: json['type'] as String? ?? json['typeName'] as String?,

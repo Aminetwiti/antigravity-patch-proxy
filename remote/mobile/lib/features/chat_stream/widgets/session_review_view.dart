@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile/theme/app_colors.dart';
+import '../../../widgets/skeleton_loader.dart';
 
 /// Modèle représentant un fichier modifié dans la session (avec additions/deletions)
 class SessionModifiedFile {
@@ -35,6 +36,7 @@ class SessionReviewView extends StatefulWidget {
   final Function(SessionModifiedFile file) onOpenFileDiff;
   final VoidCallback? onExpandAll;
   final VoidCallback? onSplitDiffView;
+  final bool isLoading;
 
   /// P5 : actions groupées — accepter / rejeter l'ensemble des modifications.
   /// Les callbacks restent optionnels : si absents, la barre d'actions est
@@ -48,6 +50,7 @@ class SessionReviewView extends StatefulWidget {
     required this.onOpenFileDiff,
     this.onExpandAll,
     this.onSplitDiffView,
+    this.isLoading = false,
     this.onAcceptAll,
     this.onDiscardAll,
   });
@@ -347,7 +350,23 @@ class _SessionReviewViewState extends State<SessionReviewView> {
 
         // ── Liste des fichiers modifiés
         Expanded(
-          child: filtered.isEmpty
+          child: widget.isLoading && widget.files.isEmpty
+              ? SkeletonLoader(
+                  child: ListView(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    physics: const NeverScrollableScrollPhysics(),
+                    children: const [
+                      SkeletonDiffFileItem(),
+                      Divider(color: Color(0xFF1B1D22), height: 1, indent: 14, endIndent: 14),
+                      SkeletonDiffFileItem(),
+                      Divider(color: Color(0xFF1B1D22), height: 1, indent: 14, endIndent: 14),
+                      SkeletonDiffFileItem(),
+                      Divider(color: Color(0xFF1B1D22), height: 1, indent: 14, endIndent: 14),
+                      SkeletonDiffFileItem(),
+                    ],
+                  ),
+                )
+              : filtered.isEmpty
               ? LayoutBuilder(
                   builder: (context, constraints) => SingleChildScrollView(
                     child: ConstrainedBox(

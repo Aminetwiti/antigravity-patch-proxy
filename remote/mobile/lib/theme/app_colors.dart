@@ -99,6 +99,7 @@ extension ThemeContextExtension on BuildContext {
 
 /// Radius scale (PC ag-doctor-ui --r-sm/md/lg/xl/pill)
 abstract class AppRadius {
+  static const double xs = 2;    // micro tags, lines
   static const double sm = 4;    // inputs, chips
   static const double md = 6;    // buttons, nav items
   static const double lg = 10;   // cards, modals

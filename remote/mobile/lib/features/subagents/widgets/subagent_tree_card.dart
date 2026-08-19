@@ -147,14 +147,46 @@ class _SubagentTreeCardState extends State<SubagentTreeCard> {
 
                         const SizedBox(width: 10),
 
-                        // Right: Status Icon (checkmark circle / spinner / error)
+                        // Right: Status Icon (pulsing live badge / checkmark / error)
                         if (isRunning)
-                          const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 1.5,
-                              color: AppColors.accentBlueBright,
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+                            decoration: BoxDecoration(
+                              color: isDark ? const Color(0xFF132338) : const Color(0xFFE0F2FE),
+                              borderRadius: BorderRadius.circular(AppRadius.pill),
+                              border: Border.all(
+                                color: AppColors.accentBlueBright.withValues(alpha: 0.45),
+                                width: 0.8,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 6,
+                                  height: 6,
+                                  decoration: const BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: AppColors.accentBlueBright,
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Color(0x6638BDF8),
+                                        blurRadius: 4,
+                                        spreadRadius: 1,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 4.5),
+                                const Text(
+                                  'Actif',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.accentBlueBright,
+                                  ),
+                                ),
+                              ],
                             ),
                           )
                         else if (isErrored)

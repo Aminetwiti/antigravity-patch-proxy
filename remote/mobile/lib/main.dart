@@ -456,21 +456,25 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       var projId = targetProject?.id ?? '';
 
       if (ws.isEmpty) {
-        if (_projects.length == 1) {
+        if (_projects.isNotEmpty) {
           ws = _projects.first.path;
           projId = _projects.first.id;
         } else if (_sessions.isNotEmpty) {
           final cur = _sessions.where((s) => s.id == _activeSessionId);
           if (cur.isNotEmpty) {
             ws = cur.first.workspacePath;
+            projId = cur.first.projectId ?? '';
           } else {
             ws = _sessions.first.workspacePath;
+            projId = _sessions.first.projectId ?? '';
           }
         }
       }
-      if (ws.isEmpty && _projects.isNotEmpty) {
-        ws = _projects.first.path;
-        projId = _projects.first.id;
+      if (projId.isEmpty && ws.isNotEmpty && _projects.isNotEmpty) {
+        final match = _projects.where((p) => p.path == ws || p.folderUri == ws);
+        if (match.isNotEmpty) {
+          projId = match.first.id;
+        }
       }
       final res = await api.createCascade(ws, projectId: projId);
       final data = (res['data'] is Map<String, dynamic>)
@@ -560,6 +564,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                     title: _activeSessionTitle.isNotEmpty ? _activeSessionTitle : 'Nouvelle conversation',
                     status: 'CASCADE_STATUS_READY',
                     time: 'Maintenant',
+                    projectId: _projects.isNotEmpty ? _projects.first.id : '',
                   ),
                 );
                 _sessions = [curLocal, ...sessions.where((s) => s.id != _activeSessionId)];

@@ -50,7 +50,7 @@ void main() {
       expect(StreamDeltaParser.thinkingOf(msg), contains('Ran go test ./...'));
     });
 
-    test('extracts read_file as Viewed <file>', () {
+    test('extracts read_file as Analyzed <file>', () {
       final msg = {
         'type': 'stream_delta',
         'data': {
@@ -63,10 +63,10 @@ void main() {
           ]
         }
       };
-      expect(StreamDeltaParser.thinkingOf(msg), contains('Viewed lib/main.dart'));
+      expect(StreamDeltaParser.thinkingOf(msg), contains('Analyzed lib/main.dart'));
     });
 
-    test('extracts search_files as Explored <query>', () {
+    test('extracts search_files as Searched <query>', () {
       final msg = {
         'type': 'stream_delta',
         'data': {
@@ -79,7 +79,7 @@ void main() {
           ]
         }
       };
-      expect(StreamDeltaParser.thinkingOf(msg), contains('Explored stream_delta'));
+      expect(StreamDeltaParser.thinkingOf(msg), contains('Searched stream_delta'));
     });
   });
 }

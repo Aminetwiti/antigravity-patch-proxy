@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../theme/app_colors.dart';
 
 class ConflictDialog extends StatelessWidget {
@@ -109,7 +110,10 @@ class ConflictDialog extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 TextButton(
-                  onPressed: onSecondaryAction,
+                  onPressed: () {
+                    HapticFeedback.selectionClick();
+                    onSecondaryAction();
+                  },
                   child: Text(
                     secondaryButtonText,
                     style: TextStyle(
@@ -120,7 +124,10 @@ class ConflictDialog extends StatelessWidget {
                 ),
                 const SizedBox(width: 12),
                 ElevatedButton(
-                  onPressed: onPrimaryAction,
+                  onPressed: () {
+                    HapticFeedback.mediumImpact();
+                    onPrimaryAction();
+                  },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: scheme.error,
                     foregroundColor: scheme.onError,

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'models/mcp_server_info.dart';
 import '../../core/protocol/daemon_api.dart';
+import '../../widgets/skeleton_loader.dart';
 import 'package:mobile/theme/app_colors.dart';
 
 class McpExplorerScreen extends StatefulWidget {
@@ -169,7 +170,47 @@ class _McpExplorerScreenState extends State<McpExplorerScreen> {
       ),
 
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? SkeletonLoader(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                physics: const NeverScrollableScrollPhysics(),
+                children: [
+                  for (int i = 0; i < 3; i++) ...[
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(AppRadius.md),
+                        border: Border.all(color: scheme.outlineVariant),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Row(
+                            children: [
+                              SkeletonLine(width: 130, height: 14),
+                              Spacer(),
+                              SkeletonLine(width: 50, height: 18, borderRadius: AppRadius.pill),
+                            ],
+                          ),
+                          SizedBox(height: 10),
+                          SkeletonLine(width: 220, height: 11),
+                          SizedBox(height: 12),
+                          Row(
+                            children: [
+                              SkeletonLine(width: 60, height: 16, borderRadius: AppRadius.xs),
+                              SizedBox(width: 8),
+                              SkeletonLine(width: 75, height: 16, borderRadius: AppRadius.xs),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            )
           : RefreshIndicator(
               onRefresh: _loadServers,
               child: Column(

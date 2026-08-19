@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/protocol/daemon_api.dart';
 import '../../core/notifications/approval_notifier.dart';
+import '../../widgets/skeleton_loader.dart';
 import 'models/scheduled_task_item.dart';
 import 'scheduled_task_detail_screen.dart';
 import 'package:mobile/theme/app_colors.dart';
@@ -269,17 +270,31 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
 
             // ── Tasks List or Empty State ─────────────────────────────
             Expanded(
-              child: RefreshIndicator(
-                onRefresh: widget.onRefresh ?? _loadFromApi,
-                color: scheme.primary,
-                child: filtered.isEmpty
-                    ? SingleChildScrollView(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        child: SizedBox(
-                          height: MediaQuery.of(context).size.height * 0.6,
-                          child: _buildEmptyState(scheme),
-                        ),
-                      )
+              child: _isLoading && filtered.isEmpty
+                  ? SkeletonLoader(
+                      child: ListView(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        physics: const NeverScrollableScrollPhysics(),
+                        children: const [
+                          SkeletonScheduledTaskRow(),
+                          Divider(height: 1),
+                          SkeletonScheduledTaskRow(),
+                          Divider(height: 1),
+                          SkeletonScheduledTaskRow(),
+                        ],
+                      ),
+                    )
+                  : RefreshIndicator(
+                      onRefresh: widget.onRefresh ?? _loadFromApi,
+                      color: scheme.primary,
+                      child: filtered.isEmpty
+                          ? SingleChildScrollView(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              child: SizedBox(
+                                height: MediaQuery.of(context).size.height * 0.6,
+                                child: _buildEmptyState(scheme),
+                              ),
+                            )
                     : ListView.separated(
                         physics: const AlwaysScrollableScrollPhysics(),
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),

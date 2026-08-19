@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/core/protocol/daemon_api.dart';
 import 'package:mobile/features/subagents/subagents_tree_sheet.dart';
+import 'package:mobile/widgets/skeleton_loader.dart';
 
 void main() {
   testWidgets('SubagentsTreeSheet affiche la liste des sous-agents après chargement', (tester) async {
@@ -16,24 +17,26 @@ void main() {
           ctrl.add(jsonEncode({
             'type': 'response',
             'requestId': map['requestId'],
-            'data': {
-              'cascadeId': 'test-cascade-1',
+            'payload': {
               'subagents': [
                 {
                   'id': 'sub-1',
-                  'parentId': 'test-cascade-1',
-                  'typeName': 'research',
-                  'role': 'Codebase Researcher',
+                  'name': 'Codebase Researcher',
+                  'type': 'research',
+                  'status': 'completed',
+                  'model': 'claude-3-5-sonnet',
+                  'startedAt': '2026-08-18T10:00:00Z',
+                  'completedAt': '2026-08-18T10:02:15Z',
                   'prompt': 'Explore auth middleware',
-                  'state': 'running',
                 },
                 {
                   'id': 'sub-2',
-                  'parentId': 'test-cascade-1',
-                  'typeName': 'database-debugger',
-                  'role': 'DB Optimizer',
-                  'prompt': 'Profile slow queries',
-                  'state': 'completed',
+                  'name': 'DB Optimizer',
+                  'type': 'database-debugger',
+                  'status': 'running',
+                  'model': 'gpt-4o',
+                  'startedAt': '2026-08-18T10:03:00Z',
+                  'parentId': 'sub-1',
                 },
               ],
             },
@@ -57,7 +60,7 @@ void main() {
     );
 
     // Initial loading
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.byType(SkeletonLoader), findsOneWidget);
     await tester.pumpAndSettle();
 
     // Renders subagent cards

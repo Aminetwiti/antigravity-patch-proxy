@@ -657,23 +657,13 @@ func (s *Server) cachedProjectID(uri string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	norm := strings.TrimPrefix(uri, "file:///")
-	norm = strings.TrimPrefix(norm, "file://")
-	norm = strings.ReplaceAll(norm, "%3A", ":")
-	norm = strings.ReplaceAll(norm, "%20", " ")
-	norm = strings.ReplaceAll(norm, `\`, `/`)
-	norm = strings.TrimRight(norm, "/")
+	norm := strings.ToLower(normalizeWorkspace(uri))
 
 	if s.jetboxSummaries != nil {
 		for _, sum := range s.jetboxSummaries {
 			if sum.ProjectID != "" {
-				wsNorm := strings.TrimPrefix(sum.Workspace, "file:///")
-				wsNorm = strings.TrimPrefix(wsNorm, "file://")
-				wsNorm = strings.ReplaceAll(wsNorm, "%3A", ":")
-				wsNorm = strings.ReplaceAll(wsNorm, "%20", " ")
-				wsNorm = strings.ReplaceAll(wsNorm, `\`, `/`)
-				wsNorm = strings.TrimRight(wsNorm, "/")
-				if norm == "" || strings.EqualFold(wsNorm, norm) || strings.HasSuffix(wsNorm, norm) || strings.HasSuffix(norm, wsNorm) {
+				wsNorm := strings.ToLower(normalizeWorkspace(sum.Workspace))
+				if norm == "" || wsNorm == norm || strings.HasSuffix(wsNorm, norm) || strings.HasSuffix(norm, wsNorm) {
 					return sum.ProjectID, true
 				}
 			}
@@ -682,13 +672,8 @@ func (s *Server) cachedProjectID(uri string) (string, bool) {
 	if len(s.sessionsCache) > 0 {
 		for _, sum := range connectrpc.ParseTrajectories(s.sessionsCache) {
 			if sum.ProjectID != "" {
-				wsNorm := strings.TrimPrefix(sum.Workspace, "file:///")
-				wsNorm = strings.TrimPrefix(wsNorm, "file://")
-				wsNorm = strings.ReplaceAll(wsNorm, "%3A", ":")
-				wsNorm = strings.ReplaceAll(wsNorm, "%20", " ")
-				wsNorm = strings.ReplaceAll(wsNorm, `\`, `/`)
-				wsNorm = strings.TrimRight(wsNorm, "/")
-				if norm == "" || strings.EqualFold(wsNorm, norm) || strings.HasSuffix(wsNorm, norm) || strings.HasSuffix(norm, wsNorm) {
+				wsNorm := strings.ToLower(normalizeWorkspace(sum.Workspace))
+				if norm == "" || wsNorm == norm || strings.HasSuffix(wsNorm, norm) || strings.HasSuffix(norm, wsNorm) {
 					return sum.ProjectID, true
 				}
 			}
@@ -702,13 +687,9 @@ func (s *Server) cachedProjectID(uri string) (string, bool) {
 	projs := ListOfficialProjects()
 	if len(projs) > 0 {
 		for _, p := range projs {
-			pNorm := strings.TrimPrefix(p.FolderURI, "file:///")
-			pNorm = strings.TrimPrefix(pNorm, "file://")
-			pNorm = strings.ReplaceAll(pNorm, "%3A", ":")
-			pNorm = strings.ReplaceAll(pNorm, "%20", " ")
-			pNorm = strings.ReplaceAll(pNorm, `\`, `/`)
-			pNorm = strings.TrimRight(pNorm, "/")
-			if norm == "" || strings.EqualFold(pNorm, norm) || strings.HasSuffix(pNorm, norm) || strings.HasSuffix(norm, pNorm) {
+			pNorm := strings.ToLower(normalizeWorkspace(p.FolderURI))
+			pNormPath := strings.ToLower(normalizeWorkspace(p.Path))
+			if norm == "" || pNorm == norm || pNormPath == norm || strings.HasSuffix(pNorm, norm) || strings.HasSuffix(norm, pNorm) || strings.EqualFold(p.Name, uri) {
 				return p.ID, true
 			}
 		}

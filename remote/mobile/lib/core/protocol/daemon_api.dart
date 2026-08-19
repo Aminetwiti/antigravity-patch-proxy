@@ -668,6 +668,18 @@ class DaemonApi {
     return rawList.map((e) => e.toString()).toList();
   }
 
+  /// Récupère l'arbre des sous-agents d'une session (DAG).
+  Future<List<Map<String, dynamic>>> getSubagents(String cascadeId) async {
+    final res = await rpc('get_subagents', {'cascadeId': cascadeId});
+    final payloadMap = (res['data'] is Map) ? res['data'] : (res['payload'] is Map ? res['payload'] : null);
+    final rawList = res['subagents'] ??
+        res['tree'] ??
+        (payloadMap is Map ? (payloadMap['subagents'] ?? payloadMap['tree']) : null) ??
+        (res['payload'] is List ? res['payload'] : null);
+    if (rawList is! List) return [];
+    return rawList.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+  }
+
   /// Liste les worktrees Git du workspace.
   Future<List<Map<String, dynamic>>> listGitWorktrees({
     String? workspacePath,
@@ -1208,14 +1220,6 @@ class DaemonApi {
     });
     final status = res['status'] ?? (res['data'] is Map ? res['data']['status'] : null);
     return status == 'skipped' || (res.isNotEmpty && !res.containsKey('error'));
-  }
-
-  /// Récupère l'arbre des sous-agents d'une session (DAG).
-  Future<List<Map<String, dynamic>>> getSubagents(String cascadeId) async {
-    final res = await rpc('get_subagents', {'cascadeId': cascadeId});
-    final rawList = res['subagents'] ?? res['tree'] ?? (res['data'] is Map ? (res['data']['subagents'] ?? res['data']['tree']) : null);
-    if (rawList is! List) return [];
-    return rawList.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
   }
 
   /// Récupère le résumé des quotas utilisateur réels du compte Antigravity.

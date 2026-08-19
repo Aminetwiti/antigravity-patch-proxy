@@ -32,6 +32,7 @@ import 'widgets/session_review_view.dart';
 import 'widgets/queued_messages_card.dart';
 import '../../services/offline_outbox_store.dart';
 import '../../services/session_history_cache_store.dart';
+import '../../widgets/skeleton_loader.dart';
 import '../subagents/subagents_tree_sheet.dart';
 import '../subagents/models/subagent_item.dart';
 import '../subagents/widgets/subagent_tree_card.dart';
@@ -201,6 +202,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   final Map<String, List<SubagentItem>> _sessionSubagents = {};
   final Map<String, String?> _sessionActiveArtifacts = {};
   final Map<String, String?> _sessionPlanTexts = {};
+  bool _isVcsLoading = false;
+  final Set<String> _loadingHistorySessions = {};
 
   Set<String> get _modifiedFiles => _sessionModifiedFiles.putIfAbsent(widget.activeSessionId, () => {});
   List<SessionModifiedFile> get _modifiedFileList => _sessionModifiedFileList.putIfAbsent(widget.activeSessionId, () => []);
@@ -537,6 +540,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         if (cached != null && cached.isNotEmpty) {
           buf.addAll(cached);
         } else {
+          _loadingHistorySessions.add(targetSession);
           SessionHistoryCacheStore.instance.loadSessionHistory(targetSession).then((cachedList) {
             if (mounted && cachedList.isNotEmpty && (_sessionMessages[targetSession]?.isEmpty ?? true)) {
               setState(() {
@@ -548,6 +552,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       }
 
       widget.api?.getSessionHistory(targetSession).then((data) {
+        _loadingHistorySessions.remove(targetSession);
         if (!mounted) return;
         final rawMessages = data['messages'] as List?;
         final parsed = <ChatMessage>[];
@@ -600,7 +605,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           _scrollToBottomSettled();
         }
       }).catchError((_) {
-        // Ignorer l'erreur
+        _loadingHistorySessions.remove(targetSession);
+        if (mounted) setState(() {});
       });
     }
   }
@@ -1500,8 +1506,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
     final targetSession = widget.activeSessionId;
     final isStreaming = _activeStreamingSessions.contains(targetSession);
+    final isOffline = !widget.isConnected || widget.api == null;
 
-    if (queued || isStreaming) {
+    if (queued || isStreaming || isOffline) {
       final queue = _sessionMessageQueues.putIfAbsent(targetSession, () => []);
       setState(() {
         queue.add({
@@ -2367,6 +2374,21 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         final scheme = Theme.of(context).colorScheme;
 
         if (visibleList.isEmpty && _currentApproval == null && _currentSessionQuestions.isEmpty) {
+          if (_loadingHistorySessions.contains(widget.activeSessionId)) {
+            return SkeletonLoader(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                physics: const NeverScrollableScrollPhysics(),
+                children: const [
+                  SkeletonChatMessage(isUser: true),
+                  SizedBox(height: 12),
+                  SkeletonChatMessage(isUser: false),
+                  SizedBox(height: 12),
+                  SkeletonChatMessage(isUser: true),
+                ],
+              ),
+            );
+          }
           return Center(
             child: SingleChildScrollView(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -2619,6 +2641,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   Future<void> _fetchVcsChanges() async {
     final api = widget.api;
     if (api == null) return;
+    if (_modifiedFileList.isEmpty && mounted) {
+      setState(() => _isVcsLoading = true);
+    }
     try {
       final ws = widget.workspacePath?.isNotEmpty == true
           ? widget.workspacePath
@@ -2679,11 +2704,16 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             ..addAll(list);
         });
       }
-    } catch (_) {}
+    } catch (_) {} finally {
+      if (mounted && _isVcsLoading) {
+        setState(() => _isVcsLoading = false);
+      }
+    }
   }
 
   Widget _buildReviewTabContent() {
     return SessionReviewView(
+      isLoading: _isVcsLoading,
       files: _modifiedFileList.isNotEmpty
           ? _modifiedFileList
           : _modifiedFiles

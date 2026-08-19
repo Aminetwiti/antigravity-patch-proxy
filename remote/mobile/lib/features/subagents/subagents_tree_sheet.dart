@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../core/protocol/daemon_api.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/skeleton_loader.dart';
 import 'models/subagent_item.dart';
 
 /// Modal bottom sheet presenting the active subagent DAG / tree for a session.
@@ -232,7 +233,19 @@ class _SubagentsTreeSheetState extends State<SubagentsTreeSheet> {
               // Content Body
               Expanded(
                 child: _loading
-                    ? const Center(child: CircularProgressIndicator(strokeWidth: 2.5))
+                    ? SkeletonLoader(
+                        child: ListView(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          physics: const NeverScrollableScrollPhysics(),
+                          children: const [
+                            SkeletonSubagentItem(),
+                            Divider(height: 1, indent: 40),
+                            SkeletonSubagentItem(),
+                            Divider(height: 1, indent: 40),
+                            SkeletonSubagentItem(),
+                          ],
+                        ),
+                      )
                     : _error != null
                         ? Center(
                             child: Padding(

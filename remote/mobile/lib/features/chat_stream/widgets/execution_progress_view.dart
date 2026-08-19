@@ -18,6 +18,7 @@ enum ExecutionStepType {
   subagent,
   narrativeText,
   thought,
+  search,
 }
 
 class ExecutionStepItem {
@@ -91,7 +92,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
   int _secondsElapsed = 0;
   Timer? _timer;
   late AnimationController _pulseAnim;
-  bool _showAllSteps = false;
+  bool _showAllSteps = true;
 
   @override
   void initState() {
@@ -315,7 +316,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
         continue;
       }
 
-      // 5. Edited / Wrote <file> +X -Y
+      // 5. Edited / Wrote <ext> <file> +X -Y
       if (lower.startsWith('edited ') ||
           lower.startsWith('wrote ') ||
           lower.startsWith('writing to file') ||
@@ -327,15 +328,16 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
                 ? 6
                 : (lower.startsWith('writing to file') ? 15 : 12));
         final rest = line.substring(prefixLen).trim();
-        final match = RegExp(r'^(\S+)(?:\s+\+(\d+)\s+-(\d+))?').firstMatch(rest);
+        final match = RegExp(r'^(?:(TS|JS|Dart|Go|Py|>_|JSON|MD|HTML|CSS|YAML|SQL)\s+)?(\S+)(?:\s+\+(\d+)\s+-(\d+))?', caseSensitive: false).firstMatch(rest);
         if (match != null) {
-          final fileName = match.group(1) ?? rest;
-          final add = match.group(2);
-          final del = match.group(3);
+          final extTag = match.group(1);
+          final fileName = match.group(2) ?? rest;
+          final add = match.group(3);
+          final del = match.group(4);
           rawItems.add(ExecutionStepItem(
             type: ExecutionStepType.fileEdit,
             action: isEdit ? 'Edited' : 'Wrote',
-            title: fileName,
+            title: extTag != null ? '$extTag $fileName' : fileName,
             diffAdded: add != null ? '+$add' : '+1',
             diffRemoved: del != null ? '-$del' : '-0',
           ));
@@ -343,7 +345,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
         }
       }
 
-      // 6. Analyzed / Viewed / Reading <file> #L123-456
+      // 6. Analyzed / Viewed / Reading <ext> <file> #L123-456
       if (lower.startsWith('analyzed ') ||
           lower.startsWith('viewed ') ||
           lower.startsWith('reading file') ||
@@ -355,14 +357,31 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
                 ? 7
                 : (lower.startsWith('reading file') ? 12 : 12));
         final rest = line.substring(prefixLen).trim();
-        final match = RegExp(r'^(\S+)(?:\s+(#L\d+(?:-\d+)?))?').firstMatch(rest);
-        final fileName = match?.group(1) ?? rest;
-        final lineRange = match?.group(2);
+        final match = RegExp(r'^(?:(TS|JS|Dart|Go|Py|>_|JSON|MD|HTML|CSS|YAML|SQL)\s+)?(\S+)(?:\s+(#L\d+(?:-\d+)?))?', caseSensitive: false).firstMatch(rest);
+        final extTag = match?.group(1);
+        final fileName = match?.group(2) ?? rest;
+        final lineRange = match?.group(3);
         rawItems.add(ExecutionStepItem(
           type: ExecutionStepType.fileAnalysis,
           action: isAnalyzed ? 'Analyzed' : 'Viewed',
-          title: fileName,
+          title: extTag != null ? '$extTag $fileName' : fileName,
           lineRange: lineRange,
+        ));
+        continue;
+      }
+
+      // 6b. Searched <query> <count> results
+      if (lower.startsWith('searched ')) {
+        final rest = line.substring(9).trim();
+        final match = RegExp(r'^(.*?)(?:\s+(\d+)\s+results?)?$', caseSensitive: false).firstMatch(rest);
+        final query = match?.group(1)?.trim() ?? rest;
+        final count = match?.group(2);
+        rawItems.add(ExecutionStepItem(
+          type: ExecutionStepType.search,
+          action: 'Searched',
+          title: query,
+          diffAdded: count != null ? '$count results' : null,
+          isExpandable: true,
         ));
         continue;
       }
@@ -982,6 +1001,26 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
                     ),
                   ],
 
+                  // Search Icon Badge (🔍 teal/cyan icon)
+                  if (item.type == ExecutionStepType.search) ...[
+                    Container(
+                      margin: const EdgeInsets.only(right: 5),
+                      width: 13,
+                      height: 13,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF0D9488),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Center(
+                        child: Icon(
+                          Icons.search_rounded,
+                          size: 8.5,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+
                   // Subagent Icon Badge (🟣 purple icon)
                   if (item.type == ExecutionStepType.subagent) ...[
                     Container(
@@ -1065,8 +1104,30 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
                     ),
                   ],
 
-                  // Diffs: +12 -3
-                  if (item.diffAdded != null) ...[
+                  // Search result count badge or Diffs: +12 -3
+                  if (item.diffAdded != null && item.type == ExecutionStepType.search) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF1F2430) : scheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                          color: isDark ? const Color(0xFF2E3345) : scheme.outlineVariant,
+                          width: 0.5,
+                        ),
+                      ),
+                      child: Text(
+                        item.diffAdded!,
+                        style: const TextStyle(
+                          fontSize: 10.5,
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF9E9FA8),
+                        ),
+                      ),
+                    ),
+                  ] else if (item.diffAdded != null) ...[
                     const SizedBox(width: 6),
                     Text(
                       item.diffAdded!,
