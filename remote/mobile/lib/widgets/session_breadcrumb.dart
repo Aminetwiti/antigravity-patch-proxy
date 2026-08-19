@@ -33,7 +33,7 @@ class SessionBreadcrumb extends StatelessWidget {
 
     final displayTitle = sessionTitle.trim().isNotEmpty
         ? sessionTitle.trim()
-        : '';
+        : 'Nouvelle conversation';
 
     final canSwitchProject = onSelectProject != null && (projects == null || projects!.length > 1);
 

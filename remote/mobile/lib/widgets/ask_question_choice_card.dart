@@ -363,6 +363,7 @@ class _AskQuestionChoiceCardState extends State<AskQuestionChoiceCard> {
               ),
               const SizedBox(width: 8),
               ElevatedButton.icon(
+                key: const Key('submit-question-response'),
                 onPressed:
                     _canSubmit && !_isSubmitting ? _handleSubmit : null,
                 style: ElevatedButton.styleFrom(

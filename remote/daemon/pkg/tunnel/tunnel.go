@@ -57,6 +57,11 @@ func (m *Manager) StartAutoTunnel(localPort int) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Si aucun tunnel n'est demandé (réseau local uniquement)
+	if m.ProviderPref == "none" || m.ProviderPref == "local" || m.ProviderPref == "disabled" {
+		return "", fmt.Errorf("tunnel désactivé (mode réseau local uniquement)")
+	}
+
 	// Si un provider est forcé
 	if m.ProviderPref == "cloudflare" {
 		return m.tryCloudflare(localPort)

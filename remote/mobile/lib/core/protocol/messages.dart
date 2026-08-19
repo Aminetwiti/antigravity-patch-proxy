@@ -12,6 +12,8 @@ class CascadeSession {
   final int stepCount;
   /// Indicateur d'activité non-consultée — identique au point bleu de l'IDE
   final bool hasUnread;
+  /// Session épinglée
+  final bool isPinned;
 
   const CascadeSession({
     required this.id,
@@ -24,6 +26,7 @@ class CascadeSession {
     this.projectId,
     this.stepCount = 0,
     this.hasUnread = false,
+    this.isPinned = false,
   });
 
   factory CascadeSession.fromJson(Map<String, dynamic> json) {
@@ -38,6 +41,7 @@ class CascadeSession {
       projectId: json['projectId']?.toString(),
       stepCount: (json['stepCount'] as num?)?.toInt() ?? 0,
       hasUnread: json['hasUnread'] == true,
+      isPinned: json['isPinned'] == true || json['pinned'] == true,
     );
   }
 
@@ -103,6 +107,7 @@ class CascadeSession {
     String? projectId,
     int? stepCount,
     bool? hasUnread,
+    bool? isPinned,
   }) {
     return CascadeSession(
       id: id ?? this.id,
@@ -115,6 +120,7 @@ class CascadeSession {
       projectId: projectId ?? this.projectId,
       stepCount: stepCount ?? this.stepCount,
       hasUnread: hasUnread ?? this.hasUnread,
+      isPinned: isPinned ?? this.isPinned,
     );
   }
 
@@ -129,6 +135,7 @@ class CascadeSession {
         if (projectId != null) 'projectId': projectId,
         'stepCount': stepCount,
         'hasUnread': hasUnread,
+        'isPinned': isPinned,
       };
 }
 
@@ -305,22 +312,26 @@ class AskQuestionChoiceRequest {
 
   factory AskQuestionChoiceRequest.fromJson(Map<String, dynamic> json) {
     List<String> parsedOptions = [];
+    String parsedQuestion = json['question'] ?? '';
+    bool isMulti = json['isMultiSelect'] == true || json['is_multi_select'] == true;
+
     if (json['options'] is List) {
       parsedOptions = (json['options'] as List).map((e) => e.toString()).toList();
     } else if (json['questions'] is List && (json['questions'] as List).isNotEmpty) {
       final firstQ = (json['questions'] as List).first;
-      if (firstQ is Map && firstQ['options'] is List) {
-        parsedOptions = (firstQ['options'] as List).map((e) => e.toString()).toList();
+      if (firstQ is Map) {
+        if (firstQ['options'] is List) {
+          parsedOptions = (firstQ['options'] as List).map((e) => e.toString()).toList();
+        }
+        if (parsedQuestion.isEmpty && firstQ['question'] != null) {
+          parsedQuestion = firstQ['question'].toString();
+        }
+        if (firstQ['is_multi_select'] == true || firstQ['isMultiSelect'] == true) {
+          isMulti = true;
+        }
       }
     }
 
-    String parsedQuestion = json['question'] ?? '';
-    if (parsedQuestion.isEmpty && json['questions'] is List && (json['questions'] as List).isNotEmpty) {
-      final firstQ = (json['questions'] as List).first;
-      if (firstQ is Map && firstQ['question'] != null) {
-        parsedQuestion = firstQ['question'].toString();
-      }
-    }
     if (parsedQuestion.isEmpty) {
       parsedQuestion = 'The agent needs your feedback:';
     }
@@ -332,7 +343,7 @@ class AskQuestionChoiceRequest {
       stepIndex: (json['stepIndex'] as num?)?.toInt() ?? -1,
       question: parsedQuestion,
       options: parsedOptions,
-      isMultiSelect: json['isMultiSelect'] == true || json['is_multi_select'] == true,
+      isMultiSelect: isMulti,
       allowCustom: json['allowCustom'] ?? true,
     );
   }

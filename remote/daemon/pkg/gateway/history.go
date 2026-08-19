@@ -111,8 +111,39 @@ func isSessionArchived(home, cascadeID string) bool {
 	return strings.Contains(s, "archived: true") || strings.Contains(s, "archived:true")
 }
 
-// archiveSessionOnDisk écrit ou met à jour le statut archivé dans annotations/<cascadeID>.pbtxt
-func archiveSessionOnDisk(home, cascadeID string, archive bool) error {
+// renameSessionOnDisk persiste le titre personnalisé d'une session dans annotations/<cascadeID>.pbtxt
+func renameSessionOnDisk(home, cascadeID, title string) error {
+	if cascadeID == "" {
+		return fmt.Errorf("cascadeId requis")
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return fmt.Errorf("title requis")
+	}
+	annoDir := filepath.Join(home, ".gemini", "antigravity", "annotations")
+	_ = os.MkdirAll(annoDir, 0o755)
+	annoPath := filepath.Join(annoDir, cascadeID+".pbtxt")
+
+	nowSec := time.Now().Unix()
+	nowNano := time.Now().Nanosecond()
+
+	data, err := os.ReadFile(annoPath)
+	if err != nil {
+		content := fmt.Sprintf("custom_title:%q last_user_view_time:{seconds:%d nanos:%d}\n",
+			title, nowSec, nowNano)
+		return os.WriteFile(annoPath, []byte(content), 0o644)
+	}
+
+	s := string(data)
+	reTitle := regexp.MustCompile(`(?i)custom_title:\s*"[^"]*"`)
+	s = reTitle.ReplaceAllString(s, "")
+	s = strings.TrimSpace(s)
+	s = fmt.Sprintf("custom_title:%q %s\n", title, s)
+	return os.WriteFile(annoPath, []byte(s), 0o644)
+}
+
+// pinSessionOnDisk persiste le statut épinglé dans annotations/<cascadeID>.pbtxt
+func pinSessionOnDisk(home, cascadeID string, pinned bool) error {
 	if cascadeID == "" {
 		return fmt.Errorf("cascadeId requis")
 	}
@@ -125,11 +156,47 @@ func archiveSessionOnDisk(home, cascadeID string, archive bool) error {
 
 	data, err := os.ReadFile(annoPath)
 	if err != nil {
-		if !archive {
+		if !pinned {
 			return nil
 		}
-		content := fmt.Sprintf("archived:true archival_status_timestamp:{seconds:%d nanos:%d} last_user_view_time:{seconds:%d nanos:%d}\n",
-			nowSec, nowNano, nowSec, nowNano)
+		content := fmt.Sprintf("pinned:true last_user_view_time:{seconds:%d nanos:%d}\n",
+			nowSec, nowNano)
+		return os.WriteFile(annoPath, []byte(content), 0o644)
+	}
+
+	s := string(data)
+	rePin := regexp.MustCompile(`(?i)pinned:\s*(true|false)`)
+	s = rePin.ReplaceAllString(s, "")
+	s = strings.TrimSpace(s)
+
+	if pinned {
+		s = fmt.Sprintf("pinned:true %s", s)
+	} else {
+		s = fmt.Sprintf("pinned:false %s", s)
+	}
+	s = strings.TrimSpace(s) + "\n"
+	return os.WriteFile(annoPath, []byte(s), 0o644)
+}
+
+// archiveSessionOnDisk persiste le statut archivé dans annotations/<cascadeID>.pbtxt
+func archiveSessionOnDisk(home, cascadeID string, archived bool) error {
+	if cascadeID == "" {
+		return fmt.Errorf("cascadeId requis")
+	}
+	annoDir := filepath.Join(home, ".gemini", "antigravity", "annotations")
+	_ = os.MkdirAll(annoDir, 0o755)
+	annoPath := filepath.Join(annoDir, cascadeID+".pbtxt")
+
+	nowSec := time.Now().Unix()
+	nowNano := time.Now().Nanosecond()
+
+	data, err := os.ReadFile(annoPath)
+	if err != nil {
+		if !archived {
+			return nil
+		}
+		content := fmt.Sprintf("archived:true last_user_view_time:{seconds:%d nanos:%d}\n",
+			nowSec, nowNano)
 		return os.WriteFile(annoPath, []byte(content), 0o644)
 	}
 
@@ -138,14 +205,29 @@ func archiveSessionOnDisk(home, cascadeID string, archive bool) error {
 	s = reArch.ReplaceAllString(s, "")
 	s = strings.TrimSpace(s)
 
-	if archive {
-		s = fmt.Sprintf("archived:true archival_status_timestamp:{seconds:%d nanos:%d} %s", nowSec, nowNano, s)
+	if archived {
+		s = fmt.Sprintf("archived:true %s", s)
 	} else {
 		s = fmt.Sprintf("archived:false %s", s)
 	}
 	s = strings.TrimSpace(s) + "\n"
 	return os.WriteFile(annoPath, []byte(s), 0o644)
 }
+
+// isSessionPinned vérifie si la session est épinglée dans ~/.gemini/antigravity/annotations/<cascadeID>.pbtxt
+func isSessionPinned(home, cascadeID string) bool {
+	if cascadeID == "" {
+		return false
+	}
+	annoPath := filepath.Join(home, ".gemini", "antigravity", "annotations", cascadeID+".pbtxt")
+	data, err := os.ReadFile(annoPath)
+	if err != nil {
+		return false
+	}
+	s := strings.ToLower(string(data))
+	return strings.Contains(s, "pinned: true") || strings.Contains(s, "pinned:true")
+}
+
 
 // deleteSessionFromDisk supprime les artefacts résiduels d'une session sur disque (.pbtxt, .db, brain/)
 func deleteSessionFromDisk(home, cascadeID string) error {

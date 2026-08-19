@@ -677,6 +677,53 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final raw = widget.thoughtText ?? '';
+
+    if (raw.trim().isEmpty) {
+      if (widget.isStreaming) {
+        return RepaintBoundary(
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildLiveAgentHeader(scheme, isDark),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 1.5,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            isDark ? const Color(0xFF60A5FA) : scheme.primary,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Thinking…',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark ? const Color(0xFF9E9FA8) : scheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const _LiveWorkingIndicator(),
+              ],
+            ),
+          ),
+        );
+      }
+      return const SizedBox.shrink();
+    }
+
     final steps = _parseSteps(raw);
     if (steps.isEmpty && !widget.isStreaming) {
       return const SizedBox.shrink();
@@ -686,6 +733,11 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
         ? steps.take(6).toList()
         : steps;
     final hiddenCount = steps.length - displaySteps.length;
+
+    final firstThoughtIndex = displaySteps.indexWhere((s) =>
+        s.type == ExecutionStepType.thought ||
+        s.type == ExecutionStepType.narrativeText ||
+        s.type == ExecutionStepType.workedDuration);
 
     return RepaintBoundary(
       child: Container(
@@ -697,7 +749,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
             if (widget.isStreaming)
               _buildLiveAgentHeader(scheme, isDark),
             for (int i = 0; i < displaySteps.length; i++)
-              _buildStepRow(displaySteps[i], i, scheme, isDark),
+              _buildStepRow(displaySteps[i], i, scheme, isDark, isFirstThought: i == firstThoughtIndex),
             if (widget.isStreaming)
               const _LiveWorkingIndicator(),
             if (hiddenCount > 0)
@@ -729,7 +781,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
                   ),
                 ),
               )
-            else if (steps.length > 8 && _showAllSteps && !widget.isStreaming)
+            else if (_showAllSteps && steps.length > 8)
               Padding(
                 padding: const EdgeInsets.only(top: 2, bottom: 4),
                 child: InkWell(
@@ -764,18 +816,47 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
     );
   }
 
-  Widget _buildStepRow(ExecutionStepItem item, int index, ColorScheme scheme, bool isDark) {
+  Widget _buildStepRow(
+    ExecutionStepItem item,
+    int index,
+    ColorScheme scheme,
+    bool isDark, {
+    bool isFirstThought = false,
+  }) {
     // 1. Cas particulier : Narrative Text (commentaire en ligne de l'agent)
     if (item.type == ExecutionStepType.narrativeText) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 2),
-        child: Text(
-          item.title,
-          style: TextStyle(
-            fontSize: 12.5,
-            height: 1.4,
-            color: isDark ? const Color(0xFFD4D4D8) : scheme.onSurface,
-            fontWeight: FontWeight.w400,
+      final isExpanded = _expandedIndices.contains(index) || widget.initiallyExpanded;
+      return InkWell(
+        key: (isFirstThought && widget.messageId != null)
+            ? Key('thought-toggle-${widget.messageId}')
+            : null,
+        onTap: () {
+          HapticFeedback.selectionClick();
+          setState(() {
+            if (_expandedIndices.contains(index)) {
+              _expandedIndices.remove(index);
+            } else {
+              _expandedIndices.add(index);
+            }
+          });
+          widget.onToggleExpand?.call();
+        },
+        borderRadius: BorderRadius.circular(4),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 2),
+          child: Text(
+            item.title,
+            key: (isFirstThought && widget.messageId != null)
+                ? Key('thought-${widget.messageId}')
+                : null,
+            maxLines: isExpanded ? null : 1,
+            overflow: isExpanded ? TextOverflow.visible : TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 12.5,
+              height: 1.4,
+              color: isDark ? const Color(0xFFD4D4D8) : scheme.onSurface,
+              fontWeight: FontWeight.w400,
+            ),
           ),
         ),
       );
@@ -852,7 +933,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           InkWell(
-            key: (isThoughtType && widget.messageId != null)
+            key: (isFirstThought && isThoughtType && widget.messageId != null)
                 ? Key('thought-toggle-${widget.messageId}')
                 : null,
             onTap: item.isExpandable
@@ -956,7 +1037,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
                       isExpanded && item.rawDetail != null && !isThoughtType && item.type != ExecutionStepType.timer
                           ? item.rawDetail!
                           : item.title,
-                      key: (isThoughtType && widget.messageId != null)
+                      key: (isFirstThought && isThoughtType && widget.messageId != null)
                           ? Key('thought-${widget.messageId}')
                           : null,
                       maxLines: isExpanded ? null : 1,

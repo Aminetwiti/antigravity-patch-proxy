@@ -40,6 +40,8 @@ Future<void> _pumpScreen(
   tester.view.devicePixelRatio = 2.0;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
+  addTearDown(api.dispose);
+  addTearDown(ctrl.close);
 
   await tester.pumpWidget(
     MaterialApp(
@@ -237,7 +239,7 @@ void main() {
           'cascadeId': 'c1',
         }
       }));
-      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pumpAndSettle();
 
       // Un seul prompt a été envoyé au daemon
       final prompts = out.where((m) => m['type'] == 'send_prompt').toList();

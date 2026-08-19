@@ -294,7 +294,6 @@ class DaemonApi {
       customTimeout ?? _timeout,
       onTimeout: () {
         _pending.remove(id);
-        _outbox?.remove(id);
         throw TimeoutException('Daemon did not respond to $type ($id)');
       },
     );
@@ -465,6 +464,12 @@ class DaemonApi {
 
   Future<Map<String, dynamic>> renameCascade(String cascadeId, String title) =>
       rpc('rename_cascade', {'cascadeId': cascadeId, 'title': title});
+
+  Future<Map<String, dynamic>> pinCascade(String cascadeId, {bool pinned = true}) =>
+      rpc('pin_cascade', {'cascadeId': cascadeId, 'pinned': pinned});
+
+  Future<Map<String, dynamic>> unpinCascade(String cascadeId) =>
+      rpc('pin_cascade', {'cascadeId': cascadeId, 'pinned': false});
 
   Future<Map<String, dynamic>> listFiles(String workspacePath) =>
       rpc('list_files', {'workspacePath': workspacePath});
@@ -758,7 +763,7 @@ class DaemonApi {
   /// Active/désactive l'auto-approbation côté daemon avec mode ("readonly" ou "full")
   /// (message WS set_auto_accept). Retourne true si le daemon a confirmé.
   Future<bool> setAutoAccept({
-    required bool enabled,
+    bool enabled = true,
     String mode = 'readonly',
   }) async {
     return sendWithResult('set_auto_accept', {

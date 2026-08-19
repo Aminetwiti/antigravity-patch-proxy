@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/protocol/messages.dart';
 import '../../core/protocol/workspace_path.dart';
+import '../../core/protocol/daemon_api.dart';
 import 'package:mobile/theme/app_colors.dart';
 import 'display_options.dart';
 
@@ -26,6 +27,7 @@ class LeftSidebarDrawer extends StatefulWidget {
   final Function(String id)? onArchiveSession;
   final Function(String id, String newTitle)? onRenameSession;
   final Function(CascadeSession session)? onExportSession;
+  final DaemonApi? api;
 
   const LeftSidebarDrawer({
     super.key,
@@ -47,6 +49,7 @@ class LeftSidebarDrawer extends StatefulWidget {
     this.onArchiveSession,
     this.onRenameSession,
     this.onExportSession,
+    this.api,
   });
 
   @override
@@ -64,8 +67,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
   SessionSortBy _sortBy = SessionSortBy.lastUpdated;
   SessionSubtitle _subtitle = SessionSubtitle.worktree;
 
-  // P4 : sessions épinglées — local-only via SharedPreferences (jamais
-  // synchronisées avec le daemon).
+  // P4 : sessions épinglées — synchronisées localement et avec le daemon.
   final Set<String> _pinnedIds = {};
 
   @override
@@ -77,22 +79,30 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
   Future<void> _loadPins() async {
     final prefs = await SharedPreferences.getInstance();
     final ids = prefs.getStringList('pinned_session_ids') ?? const [];
+    final fromSessions = widget.sessions?.where((s) => s.isPinned).map((s) => s.id) ?? const [];
     if (!mounted) return;
     setState(() {
       _pinnedIds
         ..clear()
-        ..addAll(ids);
+        ..addAll(ids)
+        ..addAll(fromSessions);
     });
   }
 
   void _togglePin(String id) {
     HapticFeedback.selectionClick();
+    final isNowPinned = !_pinnedIds.contains(id);
     setState(() {
-      if (!_pinnedIds.remove(id)) _pinnedIds.add(id);
+      if (isNowPinned) {
+        _pinnedIds.add(id);
+      } else {
+        _pinnedIds.remove(id);
+      }
     });
     // ponytail: fire-and-forget, SharedPreferences garde le dernier état écrit.
     SharedPreferences.getInstance().then((prefs) =>
         prefs.setStringList('pinned_session_ids', _pinnedIds.toList()));
+    widget.api?.pinCascade(id, pinned: isNowPinned);
   }
 
   @override

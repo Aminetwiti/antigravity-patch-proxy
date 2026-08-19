@@ -561,14 +561,27 @@ func (s *Server) sessionsFromSummariesLocked(jetbox map[string]connectrpc.Jetbox
 				break
 			}
 		}
+		title := sum.Title
+		convTitlesMu.RLock()
+		if custom, ok := globalConvTitles[strings.ToLower(sum.CascadeID)]; ok && custom != "" {
+			title = custom
+		}
+		convTitlesMu.RUnlock()
+
+		isPinned := false
+		if home != "" {
+			isPinned = isSessionPinned(home, sum.CascadeID)
+		}
+
 		items = append(items, map[string]interface{}{
 			"cascadeId":     sum.CascadeID,
-			"title":         sum.Title,
+			"title":         title,
 			"workspace":     wsName,
 			"workspacePath": wsPath,
 			"projectId":     projID,
 			"status":        enrichStatus(sum.CascadeID, sum.Status),
 			"updatedAt":     sum.UpdatedAt,
+			"isPinned":      isPinned,
 		})
 	}
 	if len(items) == 0 {
@@ -2923,6 +2936,7 @@ var unaryNoTimeout = map[string]bool{
 	"get_user_status": true, "get_model_statuses": true, "get_subagents": true,
 	"generate_commit_message": true, "export_markdown": true, "create_worktree": true,
 	"archive_cascade": true, "unarchive_cascade": true, "delete_cascade": true,
+	"rename_cascade": true, "rename_session": true, "pin_cascade": true, "pin_session": true,
 	"submit_approval": true, "get_session_history": true,
 }
 
@@ -3049,9 +3063,68 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 							extractedID = cid
 							break
 						}
+						// Vérifier aussi les sous-champs imbriqués
+						for _, sf := range connectrpc.DecodeFields(f.Bytes) {
+							if sf.WireType == 2 {
+								scid := strings.TrimSpace(string(sf.Bytes))
+								if scid != "" && (sf.Num == 1 || (len(scid) >= 16 && strings.Contains(scid, "-"))) {
+									extractedID = scid
+									break
+								}
+							}
+						}
+						if extractedID != "" {
+							break
+						}
 					}
 				}
+
+				if extractedID == "" {
+					// Fallback : réchauffer le cache sessions et trouver la cascade la plus récente
+					s.fetchSessionsSingleFlight()
+					s.mu.Lock()
+					if s.jetboxSummaries != nil {
+						var newestID string
+						var newestTime time.Time
+						for cid, sum := range s.jetboxSummaries {
+							if !sum.Archived && !sum.Killed && sum.Source != 16 {
+								if newestID == "" || sum.UpdatedAt.After(newestTime) {
+									newestID = cid
+									newestTime = sum.UpdatedAt
+								}
+							}
+						}
+						if newestID != "" {
+							extractedID = newestID
+						}
+					}
+					s.mu.Unlock()
+				}
+
 				if extractedID != "" {
+					s.mu.Lock()
+					if s.jetboxSummaries == nil {
+						s.jetboxSummaries = make(map[string]connectrpc.JetboxSummary)
+					}
+					if _, exists := s.jetboxSummaries[extractedID]; !exists {
+						s.jetboxSummaries[extractedID] = connectrpc.JetboxSummary{
+							CascadeID: extractedID,
+							Workspace: uri,
+							Title:     "Nouvelle conversation",
+							Status:    "CASCADE_STATUS_READY",
+							UpdatedAt: time.Now(),
+							ProjectID: projectID,
+						}
+					}
+					s.focusedCascadeID = extractedID
+					s.mu.Unlock()
+
+					// Diffuse sessions_updated immédiatement pour que le mobile voie la session sans délai
+					s.broadcast(OutgoingMessage{
+						Type: "sessions_updated",
+						Data: s.sessionsFromSummaries(s.snapshotSummaries()),
+					})
+
 					s.writeJSON(conn, OutgoingMessage{
 						Type:      "response",
 						RequestID: msg.RequestID,
@@ -4305,6 +4378,76 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		})
 		return
 
+	case "rename_cascade", "rename_session":
+		if msg.CascadeID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
+			return
+		}
+		title := msg.Prompt
+		if title == "" && msg.Data != nil {
+			if t, ok := msg.Data["title"].(string); ok {
+				title = t
+			} else if t, ok := msg.Data["newTitle"].(string); ok {
+				title = t
+			}
+		}
+		if title == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "title requis"})
+			return
+		}
+		convTitlesMu.Lock()
+		globalConvTitles[strings.ToLower(msg.CascadeID)] = title
+		convTitlesMu.Unlock()
+
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			_ = renameSessionOnDisk(home, msg.CascadeID, title)
+		}
+		s.mu.Lock()
+		if s.jetboxSummaries != nil {
+			if sum, ok := s.jetboxSummaries[msg.CascadeID]; ok {
+				sum.Title = title
+				s.jetboxSummaries[msg.CascadeID] = sum
+			}
+		}
+		s.sessionsCache = nil
+		s.mu.Unlock()
+
+		logJSON.Info("cascade_renamed", "cascadeId", msg.CascadeID, "title", title)
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "renamed", "cascadeId": msg.CascadeID, "title": title}})
+		s.broadcast(OutgoingMessage{
+			Type: "sessions_updated",
+			Data: sessionsFromSummaries(s.snapshotSummaries()),
+		})
+		return
+
+	case "pin_cascade", "pin_session":
+		if msg.CascadeID == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
+			return
+		}
+		pinned := msg.Confirm
+		if !pinned && msg.Data != nil {
+			if p, ok := msg.Data["pinned"].(bool); ok {
+				pinned = p
+			}
+		}
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			_ = pinSessionOnDisk(home, msg.CascadeID, pinned)
+		}
+		s.mu.Lock()
+		s.sessionsCache = nil
+		s.mu.Unlock()
+
+		logJSON.Info("cascade_pinned", "cascadeId", msg.CascadeID, "pinned", pinned)
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "pinned", "cascadeId": msg.CascadeID, "pinned": pinned}})
+		s.broadcast(OutgoingMessage{
+			Type: "sessions_updated",
+			Data: sessionsFromSummaries(s.snapshotSummaries()),
+		})
+		return
+
 	case "git_state", "vcs.get_state":
 		targetWs := msg.WorkspacePath
 		if targetWs == "" && msg.Data != nil {
@@ -5405,7 +5548,7 @@ func buildFileTree(root, relativePath string, depth int) ([]map[string]interface
 
 	for _, entry := range entries {
 		name := entry.Name()
-		if name == ".git" || name == "node_modules" || name == "build" || name == "dist" || name == ".dart_tool" {
+		if isIgnoredDir(name) {
 			continue
 		}
 
@@ -5501,10 +5644,15 @@ func searchInWorkspace(root, query string, maxResults int) ([]map[string]interfa
 	return results, nil
 }
 
-// isIgnoredDir reproduit les exclusions de buildFileTree (dossiers de build /
-// dépendances jamais indexés par la recherche).
 func isIgnoredDir(name string) bool {
-	return name == ".git" || name == "node_modules" || name == "build" || name == "dist" || name == ".dart_tool"
+	switch name {
+	case ".git", "node_modules", "build", "dist", ".dart_tool",
+		".gradle", ".idea", ".vscode", "Pods", "target", "vendor",
+		"__pycache__", "coverage", ".gemini", "obj", "bin", ".cache":
+		return true
+	default:
+		return false
+	}
 }
 
 // ---------------------------------------------------------------------------

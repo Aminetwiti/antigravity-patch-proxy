@@ -33,20 +33,26 @@ function Write-Log($m) {
     if (-not $Loop) { Write-Host $line }
 }
 
-# Vrai si un daemon.exe avec le BON token écoute sur $Port.
+# Vrai si un daemon.exe écoute et répond sur $Port.
 function Test-DaemonOk {
     $lis = Get-NetTCPConnection -LocalPort $Port -State Listen
     if (-not $lis) { return $false }
-    $owner = ($lis | Select-Object -First 1).OwningProcess
-    $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$owner"
-    return ($proc -and $proc.Name -eq "daemon.exe" -and $proc.CommandLine -match "auth-token $Token")
+    try {
+        $d = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health/diagnostic" -TimeoutSec 2
+        return ($d.status -eq "ok" -or $d.status -eq "degraded" -or $d.rpcPort -ne 0)
+    } catch {
+        $owner = ($lis | Select-Object -First 1).OwningProcess
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$owner"
+        return ($proc -and $proc.Name -eq "daemon.exe")
+    }
 }
 
-# Vrai si le daemon expose un tunnel cloudflare (publicUrl non vide).
+# Vrai si le daemon est sain et son tunnel configuré (ou en mode local).
 function Test-TunnelOk {
     try {
         $d = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health/diagnostic" -TimeoutSec 3
-        return ($d.tunnelProvider -eq "cloudflare" -and $d.publicUrl -ne "")
+        if ($d.tunnelProvider -eq "" -or $d.tunnelProvider -eq "none") { return $true }
+        return ($d.publicUrl -ne "")
     } catch { return $false }
 }
 

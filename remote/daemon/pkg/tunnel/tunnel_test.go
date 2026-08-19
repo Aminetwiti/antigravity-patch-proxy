@@ -65,10 +65,11 @@ func TestPinggyURLRegex(t *testing.T) {
 	}
 }
 
-// TestProviderPrefDispatch supprimÃ© (Ã‰tape 6) â€” il dÃ©pendait de l'absence de
-// binaires tunnel sur $PATH ; sur Windows, ssh.exe est TOUJOURS prÃ©sent
-// (C:\Windows\System32\OpenSSH) et le test lanÃ§ait un vrai tunnel pinggy â†’
-// flaky. Le dispatch "provider inconnu â†’ auto" est couvert par le code review
-// et par les tests unitaires de parsing (TestCloudflareURLRegex,
-// TestPinggyURLRegex).
+func TestTunnelDisabledPreference(t *testing.T) {
+	mgr := NewManager("none")
+	url, err := mgr.StartAutoTunnel(8090)
+	if err == nil || url != "" {
+		t.Fatalf("Attendu erreur de tunnel désactivé, reçu URL=%q, err=%v", url, err)
+	}
+}
 

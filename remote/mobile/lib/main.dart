@@ -136,6 +136,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
 
   Map<String, dynamic> _savedSettings = const {};
   StreamSubscription<Map<String, dynamic>>? _notifTapSub;
+  Timer? _sessionsPollTimer;
 
   @override
   void initState() {
@@ -344,6 +345,15 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       _refreshContext();
       _applySavedApprovalSettings();
       _autoDockActiveSession();
+      _sessionsPollTimer?.cancel();
+      _sessionsPollTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+        if (mounted && _wsClient.statusNotifier.value == ConnectionStatus.connected) {
+          _refreshSessions();
+        }
+      });
+    } else {
+      _sessionsPollTimer?.cancel();
+      _sessionsPollTimer = null;
     }
   }
 
@@ -536,7 +546,9 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
               if (stillActive) {
                 _sessions = sessions;
                 final cur = sessions.firstWhere((s) => s.id == _activeSessionId);
-                _activeSessionTitle = cur.title;
+                _activeSessionTitle = cur.title.isNotEmpty
+                    ? cur.title
+                    : (_activeSessionTitle.isNotEmpty ? _activeSessionTitle : 'Nouvelle conversation');
               } else {
                 // Si la session active locale n'est pas encore synchronisée sur le serveur,
                 // la préserver en tête de liste sans changer de session active.
@@ -715,7 +727,9 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                 if (stillActive) {
                   _sessions = parsed;
                   final current = parsed.firstWhere((s) => s.id == _activeSessionId);
-                  _activeSessionTitle = current.title;
+                  _activeSessionTitle = current.title.isNotEmpty
+                      ? current.title
+                      : (_activeSessionTitle.isNotEmpty ? _activeSessionTitle : 'Nouvelle conversation');
                 } else {
                   // Garde : préserver la session active locale sans basculer sur l'ancienne
                   final curLocal = _sessions.firstWhere(
@@ -965,6 +979,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
 
   @override
   void dispose() {
+    _sessionsPollTimer?.cancel();
     _notifTapSub?.cancel();
     _wsClient.statusNotifier.removeListener(_onStatusChanged);
     _sessionsSub?.cancel();
@@ -975,6 +990,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
 
   Widget _buildSidebar(bool isConnected) {
     return LeftSidebarDrawer(
+      api: _api,
       activeSessionId: _activeSessionId,
       sessions: _sessions,
       projects: _projects,

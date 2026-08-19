@@ -22,7 +22,7 @@ void main() {
       expect(find.text('setting'), findsOneWidget);
     });
 
-    testWidgets('renders only project name when sessionTitle is empty', (tester) async {
+    testWidgets('renders fallback "Nouvelle conversation" when sessionTitle is empty', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
           home: Scaffold(
@@ -35,7 +35,8 @@ void main() {
       );
 
       expect(find.text('my-awesome-project'), findsOneWidget);
-      expect(find.text('/'), findsNothing);
+      expect(find.text('/'), findsOneWidget);
+      expect(find.text('Nouvelle conversation'), findsOneWidget);
     });
 
     testWidgets('triggers onSelectProject when tapped with multiple projects', (tester) async {

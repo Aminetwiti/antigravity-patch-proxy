@@ -153,6 +153,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   final Set<String> _pendingApprovalCallIds = {};
   final Set<String> _processedCallIds = {};
   Timer? _stillWorkingTimer;
+  final List<Timer> _settleTimers = [];
   
   // Streaming multi-session : ensemble des sessions actuellement en train de streamer
   final Set<String> _activeStreamingSessions = {};
@@ -405,37 +406,40 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         return;
       }
       _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+      for (final t in _settleTimers) {
+        t.cancel();
+      }
+      _settleTimers.clear();
+      if (!mounted) return;
       if (maxAttempts > 1) {
-        Future.delayed(const Duration(milliseconds: 60), () {
-          if (mounted && _scrollController.hasClients) {
-            _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
-            if (maxAttempts > 2) {
-              Future.delayed(const Duration(milliseconds: 150), () {
-                if (mounted && _scrollController.hasClients) {
-                  _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
-                  if (maxAttempts > 3) {
-                    Future.delayed(const Duration(milliseconds: 250), () {
-                      if (mounted && _scrollController.hasClients) {
-                        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
-                        _isInitialScrollSettling = false;
-                      } else {
-                        _isInitialScrollSettling = false;
-                      }
-                    });
-                  } else {
-                    _isInitialScrollSettling = false;
+        _settleTimers.add(Timer(const Duration(milliseconds: 60), () {
+          if (!mounted || !_scrollController.hasClients) {
+            _isInitialScrollSettling = false;
+            return;
+          }
+          _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+          if (maxAttempts > 2) {
+            _settleTimers.add(Timer(const Duration(milliseconds: 150), () {
+              if (!mounted || !_scrollController.hasClients) {
+                _isInitialScrollSettling = false;
+                return;
+              }
+              _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+              if (maxAttempts > 3) {
+                _settleTimers.add(Timer(const Duration(milliseconds: 250), () {
+                  if (mounted && _scrollController.hasClients) {
+                    _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
                   }
-                } else {
                   _isInitialScrollSettling = false;
-                }
-              });
-            } else {
-              _isInitialScrollSettling = false;
-            }
+                }));
+              } else {
+                _isInitialScrollSettling = false;
+              }
+            }));
           } else {
             _isInitialScrollSettling = false;
           }
-        });
+        }));
       } else {
         _isInitialScrollSettling = false;
       }
@@ -791,6 +795,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     _stillWorkingTimer?.cancel();
     _syncTimer?.cancel();
     _quotaTimer?.cancel();
+    for (final t in _settleTimers) {
+      t.cancel();
+    }
+    _settleTimers.clear();
     _scrollController.dispose();
     final client = widget.wsClient;
     client?.statusNotifier.removeListener(_onConnectionStatusChanged);
@@ -982,9 +990,21 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   void _watchBroadcastStreams() {
     _streamSub?.cancel();
     _streamSub = widget.api?.events.listen((msg) {
-      final isBroadcast = msg['broadcast'] == true;
-      if (!isBroadcast || !mounted) return;
       final type = msg['type'] as String?;
+      final isBroadcast = msg['broadcast'] == true ||
+          type == 'stream_delta' ||
+          type == 'stream_start' ||
+          type == 'stream_end' ||
+          type == 'approval_pending' ||
+          type == 'approval_required' ||
+          type == 'question_pending' ||
+          type == 'question_required' ||
+          type == 'approval_resolved' ||
+          type == 'approval_expired' ||
+          type == 'session_status_update' ||
+          type == 'quota_update' ||
+          type == 'sessions_updated';
+      if (!isBroadcast || !mounted) return;
       final requestId = msg['requestId'] as String? ?? '';
       String? sessionId = (msg['cascadeId'] ?? msg['data']?['cascadeId']) as String?;
       if (sessionId == null || sessionId.isEmpty) {
@@ -1276,6 +1296,31 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           if (mounted && cascadeId == widget.activeSessionId) {
             setState(() {});
           }
+        }
+      } else if (type == 'approval_pending' || type == 'approval_required') {
+        final data = msg['data'] as Map<String, dynamic>? ?? const {};
+        final approval = StreamDeltaParser.parseApprovalMap(data, cascadeId: (msg['cascadeId'] ?? data['cascadeId']) as String? ?? targetSessionId);
+        if (approval != null) {
+          final hostActive = data['hostActive'] == true;
+          _addApproval(
+            ToolApprovalRequest(
+              callId: approval.callId,
+              toolName: approval.tool,
+              command: approval.command,
+              description: 'Tool execution requires your confirmation',
+              cascadeId: approval.cascadeId.isNotEmpty ? approval.cascadeId : targetSessionId,
+              trajectoryId: approval.trajectoryId,
+              stepIndex: approval.stepIndex,
+              approvalType: approval.approvalType,
+            ),
+            hostActive: hostActive,
+          );
+        }
+      } else if (type == 'question_pending' || type == 'question_required') {
+        final data = msg['data'] as Map<String, dynamic>? ?? const {};
+        final q = StreamDeltaParser.parseQuestionMap(data, cascadeId: (msg['cascadeId'] ?? data['cascadeId']) as String? ?? targetSessionId);
+        if (q != null) {
+          _addQuestion(q);
         }
       } else if (type == 'approval_expired') {
         final data = msg['data'] as Map<String, dynamic>? ?? const {};
@@ -1867,7 +1912,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       },
     );
 
-    if (_messages.isEmpty && _currentApproval == null) {
+    if (_messages.isEmpty && _currentApproval == null && _currentSessionQuestions.isEmpty) {
       return Column(
         children: [
           connectivityBanner,
@@ -2316,6 +2361,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                 api: widget.api,
                 workspacePath: widget.activeProjectName,
                 onLocalFile: _openLocalFile,
+                onOpenArtifact: _openArtifactByName,
                 isThoughtExpanded: _expandedThoughts.contains(msg.id),
                 onToggleThought: () => setState(() {
                   if (_expandedThoughts.contains(msg.id)) {
@@ -2917,7 +2963,7 @@ class _MessageBubble extends StatelessWidget {
                 initiallyExpanded: isThoughtExpanded,
                 onToggleExpand: onToggleThought,
                 onStop: onStop,
-                onOpenArtifact: _openArtifactByName,
+                onOpenArtifact: onOpenArtifact,
               ),
             ],
             if (isError && (message.text.length < 120 && !message.text.contains('\n') && !message.text.startsWith('#')))

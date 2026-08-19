@@ -290,6 +290,53 @@ class StreamDeltaParser {
     }
     return null;
   }
+
+  /// Parses a standalone approval payload (e.g. from reactive approval_pending push).
+  static ToolApproval? parseApprovalMap(Map<String, dynamic> map, {String cascadeId = ''}) {
+    final callId = map['callId'] as String? ?? map['approvalId'] as String? ?? '';
+    if (callId.isEmpty) return null;
+    final tool = map['toolName'] as String? ?? map['tool'] as String? ?? 'tool';
+    final detail = map['detail'] as String? ?? map['command'] as String? ?? '';
+    final targetCascade = (map['cascadeId'] as String?)?.isNotEmpty == true
+        ? map['cascadeId'] as String
+        : cascadeId;
+    final trajectoryId = map['trajectoryId'] as String? ?? '';
+    final stepIndex = map['stepIndex'] is num ? (map['stepIndex'] as num).toInt() : -1;
+    final approvalType = map['approvalType'] as String? ?? (tool == 'run_command' ? 'run_command' : 'approval');
+
+    return ToolApproval(
+      callId: callId,
+      tool: tool,
+      detail: detail,
+      cascadeId: targetCascade,
+      trajectoryId: trajectoryId,
+      stepIndex: stepIndex,
+      approvalType: approvalType,
+    );
+  }
+
+  /// Parses a standalone question payload (e.g. from reactive question_pending push).
+  static AskQuestionChoiceRequest? parseQuestionMap(Map<String, dynamic> map, {String cascadeId = ''}) {
+    final callId = map['callId'] as String? ?? map['requestId'] as String? ?? '';
+    final targetCascade = (map['cascadeId'] as String?)?.isNotEmpty == true
+        ? map['cascadeId'] as String
+        : cascadeId;
+    final trajectoryId = map['trajectoryId'] as String? ?? '';
+    final stepIndex = map['stepIndex'] is num ? (map['stepIndex'] as num).toInt() : -1;
+
+    try {
+      if (map.containsKey('questions') || map.containsKey('question')) {
+        return AskQuestionChoiceRequest.fromJson({
+          ...map,
+          'callId': callId,
+          'cascadeId': targetCascade,
+          'trajectoryId': trajectoryId,
+          'stepIndex': stepIndex,
+        });
+      }
+    } catch (_) {}
+    return null;
+  }
 }
 
 class ToolApproval {
