@@ -28,6 +28,20 @@ class StreamDeltaParser {
     return buffer.toString();
   }
 
+  /// Extracts user_input deltas from a stream_delta message (when prompt initiated on Desktop).
+  static String userInputOf(Map<String, dynamic> message) {
+    final data = message['data'];
+    if (data is! Map) return '';
+    final events = data['events'];
+    if (events is! List) return '';
+    for (final e in events) {
+      if (e is Map && e['kind'] == 'user_input') {
+        return (e['text'] ?? '').toString();
+      }
+    }
+    return '';
+  }
+
   /// Extracts thinking and live tool execution deltas from a stream_delta message.
   static String thinkingOf(Map<String, dynamic> message) {
     final data = message['data'];

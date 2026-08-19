@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import '../../config/env_config.dart';
 import '../../core/discovery/lan_discovery.dart';
+import '../../services/saved_connections_store.dart';
 import '../../services/settings_store.dart';
 import 'qr_scanner_screen.dart';
 import 'package:mobile/theme/app_colors.dart';
@@ -26,6 +27,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
 
   final LanDiscoveryService _lanDiscovery = LanDiscoveryService();
   List<DiscoveredDaemon> _discoveredDaemons = [];
+  List<SavedConnection> _savedConnections = [];
 
   bool _isConnecting = false;
   String? _errorMessage;
@@ -35,28 +37,55 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
   void initState() {
     super.initState();
     _startLanDiscovery();
+    _loadSavedConnections();
     _prefillFromSession();
   }
 
-  /// Pré-remplit hôte/port/token depuis la session sauvegardée (< 24 h) et
-  /// tente une connexion directe : l'utilisateur qui revient dans l'app n'a
-  /// pas besoin de re-scanner le QR (l'URL Cloudflare a pu changer).
+  Future<void> _loadSavedConnections() async {
+    final list = await SavedConnectionsStore.getSavedConnections();
+    if (mounted) {
+      setState(() {
+        _savedConnections = list;
+      });
+    }
+  }
+
+  /// Pré-remplit hôte/port/token/PIN depuis la session sauvegardée ou la dernière
+  /// connexion mémorisée. Même si l'app a été fermée, toutes les informations
+  /// sont restaurées.
   Future<void> _prefillFromSession() async {
     final s = await SettingsStore.loadSession();
-    if (!mounted || s.isEmpty) return;
-    final url = s['wsUrl'] as String? ?? '';
-    if (url.isEmpty) return;
-    final uri = Uri.tryParse(url);
-    if (uri == null) return;
+    final lastConn = await SavedConnectionsStore.getLastConnection();
+    if (!mounted) return;
+
+    final url = s['wsUrl'] as String? ?? lastConn?.wsUrl ?? '';
     final token = (s['token'] as String? ?? '').isNotEmpty
         ? s['token'] as String
-        : _csrfController.text;
-    setState(() {
-      _hostController.text = uri.host;
-      _portController.text = uri.port.toString();
-      if (token.isNotEmpty) _csrfController.text = token;
-    });
-    await _connect();
+        : (lastConn?.authToken ?? '');
+    final pin = (s['pin'] as String? ?? '').isNotEmpty
+        ? s['pin'] as String
+        : (lastConn?.pin ?? '');
+    final host = (s['host'] as String? ?? '').isNotEmpty
+        ? s['host'] as String
+        : (lastConn?.host ?? '');
+    final port = (s['port'] as int? ?? 0) > 0
+        ? s['port'] as int
+        : (lastConn?.port ?? EnvConfig.daemonPort);
+
+    if (host.isNotEmpty) _hostController.text = host;
+    if (port > 0) _portController.text = port.toString();
+    if (token.isNotEmpty) _csrfController.text = token;
+    if (pin.isNotEmpty) _pinController.text = pin;
+
+    if (url.isNotEmpty) {
+      final uri = Uri.tryParse(url);
+      if (uri != null && uri.host.isNotEmpty) {
+        _hostController.text = uri.host;
+        if (uri.port > 0) _portController.text = uri.port.toString();
+      }
+    }
+
+    setState(() {});
   }
 
   void _startLanDiscovery() {
@@ -106,32 +135,66 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
     await _connect();
   }
 
-  Future<void> _connect() async {
+  Future<void> _connectWithSavedConnection(SavedConnection c) async {
+    setState(() {
+      _hostController.text = c.host;
+      _portController.text = c.port.toString();
+      if (c.authToken.isNotEmpty) _csrfController.text = c.authToken;
+      if (c.pin.isNotEmpty) _pinController.text = c.pin;
+    });
+    await _connect();
+  }
+
+  Future<void> _deleteSavedConnection(String id) async {
+    await SavedConnectionsStore.removeConnection(id);
+    await _loadSavedConnections();
+  }
+
+  Future<void> _connect({bool silent = false}) async {
     final host = _hostController.text.trim();
     final port = int.tryParse(_portController.text.trim());
     if (host.isEmpty || port == null) {
-      setState(() => _errorMessage = 'Veuillez saisir un hôte et un port valides.');
+      if (!silent) {
+        setState(() => _errorMessage = 'Veuillez saisir un hôte et un port valides.');
+      }
       return;
     }
+    final token = _csrfController.text.trim();
+    final pin = _pinController.text.trim();
+
     setState(() {
       _isConnecting = true;
       _errorMessage = null;
       _successMessage = null;
     });
-    await Future.delayed(const Duration(milliseconds: 600));
+    await Future.delayed(const Duration(milliseconds: 300));
     if (!mounted) return;
 
-    final ok = widget.onConnect == null || await widget.onConnect!(host, port, _csrfController.text.trim());
+    final ok = widget.onConnect == null || await widget.onConnect!(host, port, token);
     if (!mounted) return;
     setState(() {
       _isConnecting = false;
       if (ok) {
+        final isSsl = host.startsWith('https') || host.startsWith('wss') || port == 443;
+        final cleanHost = host.replaceAll(RegExp(r'^https?://|^wss?://'), '').replaceAll(RegExp(r'/.*$'), '');
+        final wsUrl = '${isSsl ? 'wss' : 'ws'}://$cleanHost:$port/ws';
+        SettingsStore.saveSession(
+          wsUrl: wsUrl,
+          token: token,
+          pin: pin,
+          host: cleanHost,
+          port: port,
+          ssl: isSsl,
+        );
+        _loadSavedConnections();
         _successMessage = 'Appairé avec succès : $host:$port';
         Future.delayed(const Duration(milliseconds: 800), () {
           if (mounted) Navigator.of(context).pop(true);
         });
       } else {
-        _errorMessage = 'Connexion refusée. Vérifiez le port et le Token Auth.';
+        if (!silent) {
+          _errorMessage = 'Connexion refusée. Vérifiez le port et le Token Auth ou PIN.';
+        }
       }
     });
   }
@@ -183,6 +246,176 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
     }
   }
 
+  String _formatRelativeTime(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inSeconds < 60) return 'À l\'instant';
+    if (diff.inMinutes < 60) return 'Il y a ${diff.inMinutes} min';
+    if (diff.inHours < 24) return 'Il y a ${diff.inHours} h';
+    if (diff.inDays == 1) return 'Hier';
+    return 'Il y a ${diff.inDays} j';
+  }
+
+  Widget _buildSavedConnectionsSection() {
+    if (_savedConnections.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+          child: Row(
+            children: [
+              Icon(Icons.history, size: 14, color: Theme.of(context).colorScheme.primary),
+              const SizedBox(width: 6),
+              Text(
+                'DERNIÈRES CONNEXIONS SAUVEGARDÉES',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                  color: Theme.of(context).colorScheme.primary,
+                  letterSpacing: 0.8,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 6),
+        Column(
+          children: _savedConnections.map((c) {
+            final isCurrent = _hostController.text.trim() == c.host &&
+                _portController.text.trim() == c.port.toString();
+            final isTunnel = c.host.contains('trycloudflare') || c.host.contains('pinggy') || c.ssl;
+
+            return Card(
+              key: Key('saved-conn-${c.id}'),
+              margin: const EdgeInsets.only(bottom: 8),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: (isTunnel ? const Color(0xFF8B5CF6) : const Color(0xFF3B82F6))
+                            .withValues(alpha: 0.12),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        isTunnel ? Icons.cloud_done_outlined : Icons.computer_outlined,
+                        size: 20,
+                        color: isTunnel ? const Color(0xFF8B5CF6) : const Color(0xFF3B82F6),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  c.label.isNotEmpty ? c.label : '${c.host}:${c.port}',
+                                  style: TextStyle(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: Theme.of(context).colorScheme.onSurface,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (isCurrent) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    'Actuel',
+                                    style: TextStyle(
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: Theme.of(context).colorScheme.primary,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 3),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 2,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(
+                                '${c.host}:${c.port}',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                              if (c.authToken.isNotEmpty)
+                                const Text(
+                                  '• 🔑 Token',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                    color: Color(0xFF10B981),
+                                  ),
+                                ),
+                              if (c.pin.isNotEmpty)
+                                Text(
+                                  '• PIN: ${c.pin}',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              Text(
+                                '• ${_formatRelativeTime(c.lastConnectedAt)}',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      key: Key('btn-connect-${c.id}'),
+                      onPressed: _isConnecting ? null : () => _connectWithSavedConnection(c),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        minimumSize: const Size(60, 32),
+                      ),
+                      child: const Text('1-Tap', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600)),
+                    ),
+                    IconButton(
+                      key: Key('btn-delete-${c.id}'),
+                      icon: const Icon(Icons.delete_outline, size: 18),
+                      color: Theme.of(context).colorScheme.error.withValues(alpha: 0.8),
+                      tooltip: 'Supprimer cette connexion',
+                      onPressed: () => _deleteSavedConnection(c.id),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+
   @override
   void dispose() {
     _lanDiscovery.dispose();
@@ -206,6 +439,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
             tooltip: 'Relancer la recherche réseau',
             onPressed: () {
               _startLanDiscovery();
+              _loadSavedConnections();
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Recherche réseau relancée…'), duration: Duration(seconds: 1)),
               );
@@ -216,6 +450,9 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
         children: [
+          // ── Section Connexions Sauvegardées
+          _buildSavedConnectionsSection(),
+
           // ── Intro Card
           Card(
             margin: EdgeInsets.zero,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile/theme/app_colors.dart';
+import '../../../widgets/skeleton_loader.dart';
 
 class OverviewPanelView extends StatelessWidget {
   final String sessionTitle;
@@ -9,6 +10,7 @@ class OverviewPanelView extends StatelessWidget {
   final List<String> artifacts;
   final List<String> backgroundTasks;
   final int subagentsCount;
+  final bool isLoading;
   final VoidCallback onOpenReview;
   final VoidCallback onOpenPlan;
   final VoidCallback onOpenSubagents;
@@ -21,18 +23,18 @@ class OverviewPanelView extends StatelessWidget {
     this.artifacts = const [],
     this.backgroundTasks = const [],
     this.subagentsCount = 0,
+    this.isLoading = false,
     required this.onOpenReview,
     required this.onOpenPlan,
     required this.onOpenSubagents,
   });
 
   @override
-  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return ListView(
+    final content = ListView(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       children: [
         // Session info card
@@ -88,15 +90,17 @@ class OverviewPanelView extends StatelessWidget {
           iconColor: isDark ? AppColors.warning : const Color(0xFF9A6700),
           actionText: 'Voir',
           onAction: onOpenSubagents,
-          child: subagentsCount == 0
-              ? Text(
-                  'Aucun sous-agent actif dans cette session.',
-                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                )
-              : Text(
-                  '$subagentsCount sous-agent(s) en cours ou terminés.',
-                  style: TextStyle(fontSize: 12, color: scheme.onSurface),
-                ),
+          child: isLoading
+              ? const SkeletonSubagentItem()
+              : subagentsCount == 0
+                  ? Text(
+                      'Aucun sous-agent actif dans cette session.',
+                      style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                    )
+                  : Text(
+                      '$subagentsCount sous-agent(s) en cours ou terminés.',
+                      style: TextStyle(fontSize: 12, color: scheme.onSurface),
+                    ),
         ),
 
         const SizedBox(height: 12),
@@ -108,36 +112,38 @@ class OverviewPanelView extends StatelessWidget {
           iconColor: isDark ? AppColors.positive : const Color(0xFF1A7F37),
           actionText: modifiedFiles.isNotEmpty ? 'Revoir' : null,
           onAction: onOpenReview,
-          child: modifiedFiles.isEmpty
-              ? Text(
-                  'Aucun fichier modifié pour le moment.',
-                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                )
-              : Column(
-                  children: modifiedFiles.take(5).map((f) {
-                    final name = f.split(RegExp(r'[\\/]')).last;
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 3),
-                      child: Row(
-                        children: [
-                          Icon(Icons.insert_drive_file_outlined, size: 12, color: scheme.onSurfaceVariant),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              name,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: scheme.onSurface,
-                                fontFamily: 'monospace',
+          child: isLoading
+              ? const SkeletonDiffFileItem()
+              : modifiedFiles.isEmpty
+                  ? Text(
+                      'Aucun fichier modifié pour le moment.',
+                      style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                    )
+                  : Column(
+                      children: modifiedFiles.take(5).map((f) {
+                        final name = f.split(RegExp(r'[\\/]')).last;
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 3),
+                          child: Row(
+                            children: [
+                              Icon(Icons.insert_drive_file_outlined, size: 12, color: scheme.onSurfaceVariant),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  name,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: scheme.onSurface,
+                                    fontFamily: 'monospace',
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                            ],
                           ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                ),
+                        );
+                      }).toList(),
+                    ),
         ),
 
         const SizedBox(height: 12),
@@ -149,31 +155,36 @@ class OverviewPanelView extends StatelessWidget {
           iconColor: scheme.primary,
           actionText: artifacts.isNotEmpty ? 'Plan' : null,
           onAction: onOpenPlan,
-          child: artifacts.isEmpty
-              ? Text(
-                  'Aucun artéfact généré.',
-                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+          child: isLoading
+              ? const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: SkeletonLine(width: 150, height: 12),
                 )
-              : Column(
-                  children: artifacts.take(4).map((a) {
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 3),
-                      child: Row(
-                        children: [
-                          Icon(Icons.description_outlined, size: 12, color: scheme.primary),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              a,
-                              style: TextStyle(fontSize: 12, color: scheme.onSurface),
-                              overflow: TextOverflow.ellipsis,
-                            ),
+              : artifacts.isEmpty
+                  ? Text(
+                      'Aucun artéfact généré.',
+                      style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                    )
+                  : Column(
+                      children: artifacts.take(4).map((a) {
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 3),
+                          child: Row(
+                            children: [
+                              Icon(Icons.description_outlined, size: 12, color: scheme.primary),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  a,
+                                  style: TextStyle(fontSize: 12, color: scheme.onSurface),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                ),
+                        );
+                      }).toList(),
+                    ),
         ),
 
         const SizedBox(height: 12),
@@ -183,48 +194,58 @@ class OverviewPanelView extends StatelessWidget {
           title: 'Tâches d\'arrière-plan (${backgroundTasks.length})',
           icon: Icons.terminal_outlined,
           iconColor: scheme.secondary,
-          child: backgroundTasks.isEmpty
-              ? Text(
-                  'Aucun processus ou serveur actif.',
-                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+          child: isLoading
+              ? const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: SkeletonLine(width: 150, height: 12),
                 )
-              : Column(
-                  children: backgroundTasks.map((t) {
-                    return Container(
-                      margin: const EdgeInsets.symmetric(vertical: 3),
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(AppRadius.sm),
-                      ),
-                      child: Row(
-                        children: [
-                          SizedBox(
-                            width: 10,
-                            height: 10,
-                            child: CircularProgressIndicator(strokeWidth: 1.5, color: scheme.primary),
+              : backgroundTasks.isEmpty
+                  ? Text(
+                      'Aucun processus ou serveur actif.',
+                      style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                    )
+                  : Column(
+                      children: backgroundTasks.map((t) {
+                        return Container(
+                          margin: const EdgeInsets.symmetric(vertical: 3),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(AppRadius.sm),
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              t,
-                              style: TextStyle(
-                                fontSize: 11.5,
-                                color: scheme.onSurface,
-                                fontFamily: 'monospace',
+                          child: Row(
+                            children: [
+                              SizedBox(
+                                width: 10,
+                                height: 10,
+                                child: CircularProgressIndicator(strokeWidth: 1.5, color: scheme.primary),
                               ),
-                            ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  t,
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: scheme.onSurface,
+                                    fontFamily: 'monospace',
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                ),
+                        );
+                      }).toList(),
+                    ),
         ),
 
         const SizedBox(height: 24),
       ],
     );
+
+    if (isLoading) {
+      return SkeletonLoader(child: content);
+    }
+    return content;
   }
 }
 

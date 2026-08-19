@@ -385,11 +385,12 @@ func NewServer(client RPCClient, authToken string) *Server {
 	}
 	s.terminals.onBroadcast = s.broadcast
 	s.runningTasks.onBroadcast = s.broadcast
-	// Recharge les t├óches planifi├®es persist├®es au red├®marrage (non-fatal :
+	// Recharge les tâches planifiées persistées au redémarrage (non-fatal :
 	// un fichier absent ou corrompu repart avec une liste vide).
 	if err := s.LoadScheduledTasks(); err != nil {
 		logJSON.Warn("scheduled_tasks_load_failed", "error", err.Error())
 	}
+	s.startTranscriptWatchdog()
 	return s
 }
 
@@ -481,6 +482,10 @@ func (s *Server) jetboxSyncUpdates(updates map[string]connectrpc.JetboxSummary, 
 				"status": sum.Status,
 			},
 		})
+		st := strings.ToUpper(sum.Status)
+		if strings.Contains(st, "RUNNING") || strings.Contains(st, "BUSY") {
+			s.startExternalTurnStreamer(id)
+		}
 	}
 
 	// Push focus si la session IDE active a changé.
@@ -5704,6 +5709,7 @@ func (m *runningTaskManager) startTask(id, command, cascadeID string, cancel con
 	if id == "" {
 		id = fmt.Sprintf("task_%d", time.Now().UnixNano())
 	}
+	id = normalizeTaskID(id)
 	var outMsg OutgoingMessage
 	var shouldBroadcast bool
 	var task *RunningTaskInfo
@@ -5752,6 +5758,7 @@ func (m *runningTaskManager) appendOutput(id, delta string) {
 	if delta == "" {
 		return
 	}
+	id = normalizeTaskID(id)
 	var outMsg OutgoingMessage
 	var shouldBroadcast bool
 
@@ -5786,6 +5793,7 @@ func (m *runningTaskManager) appendOutput(id, delta string) {
 }
 
 func (m *runningTaskManager) finishTask(id, status string) {
+	id = normalizeTaskID(id)
 	var outMsg OutgoingMessage
 	var shouldBroadcast bool
 
@@ -5829,6 +5837,55 @@ func (m *runningTaskManager) finishTask(id, status string) {
 	}
 }
 
+func (m *runningTaskManager) syncTasksForCascade(cascadeID string, activeTasks map[string]string) {
+	var endedTasks []RunningTaskInfo
+	m.mu.Lock()
+	// 1. Terminer les tâches de cette cascade qui ne sont plus dans activeTasks
+	for id, task := range m.tasks {
+		if task.CascadeID == cascadeID && task.Status == "running" {
+			cleanID := normalizeTaskID(id)
+			if _, isActive := activeTasks[cleanID]; !isActive {
+				task.Status = "completed"
+				task.EndedAt = time.Now()
+				endedTasks = append(endedTasks, *task)
+			}
+		}
+	}
+	// 2. Démarrer / rafraîchir les tâches actives
+	for cleanID, cmd := range activeTasks {
+		if existing, exists := m.tasks[cleanID]; exists {
+			if existing.Status != "running" {
+				existing.Status = "running"
+				existing.EndedAt = time.Time{}
+			}
+		} else {
+			m.tasks[cleanID] = &RunningTaskInfo{
+				ID:        cleanID,
+				Command:   cmd,
+				CascadeID: cascadeID,
+				Status:    "running",
+				StartedAt: time.Now(),
+			}
+		}
+	}
+	m.mu.Unlock()
+
+	// Broadcast des fins de tâches détectées
+	if m.onBroadcast != nil {
+		for _, t := range endedTasks {
+			m.onBroadcast(OutgoingMessage{
+				Type: "task_ended",
+				Data: map[string]interface{}{
+					"id":        t.ID,
+					"command":   t.Command,
+					"cascadeId": t.CascadeID,
+					"status":    "completed",
+				},
+			})
+		}
+	}
+}
+
 func (m *runningTaskManager) listTasks(onlyRunning bool) []RunningTaskInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -5842,6 +5899,7 @@ func (m *runningTaskManager) listTasks(onlyRunning bool) []RunningTaskInfo {
 }
 
 func (m *runningTaskManager) killTask(id string) bool {
+	id = normalizeTaskID(id)
 	var outMsg OutgoingMessage
 	var shouldBroadcast bool
 	var cancel context.CancelFunc
@@ -5890,17 +5948,45 @@ func (m *runningTaskManager) killTask(id string) bool {
 	return true
 }
 
+func normalizeTaskID(id string) string {
+	id = strings.TrimSpace(id)
+	id = strings.Trim(id, "\"'`\t\r\n")
+	if idx := strings.LastIndex(id, "/"); idx >= 0 {
+		id = id[idx+1:]
+	}
+	return id
+}
+
 var (
-	reTaskID  = regexp.MustCompile(`(?i)(?:task id:? "?|sender=)(?:[a-zA-Z0-9_-]+/)?(task-[0-9a-zA-Z_-]+)`)
+	reTaskID  = regexp.MustCompile(`(?i)(?:task(?:\s+id)?:?\s*["'\\]*|sender=)(?:[a-zA-Z0-9_-]+/)?(task-[0-9a-zA-Z_-]+)`)
 	reTaskCmd = regexp.MustCompile(`(?i)(?:Task Description|CommandLine):\s*([^\r\n]+)`)
 )
 
 func extractTaskIDFromText(text string) string {
 	m := reTaskID.FindStringSubmatch(text)
 	if len(m) > 1 {
-		return m[1]
+		return normalizeTaskID(m[1])
 	}
 	return ""
+}
+
+func extractAllTaskIDsFromText(text string) []string {
+	matches := reTaskID.FindAllStringSubmatch(text, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	res := make([]string, 0, len(matches))
+	seen := make(map[string]bool)
+	for _, m := range matches {
+		if len(m) > 1 {
+			tid := normalizeTaskID(m[1])
+			if tid != "" && !seen[tid] {
+				seen[tid] = true
+				res = append(res, tid)
+			}
+		}
+	}
+	return res
 }
 
 func extractTaskCmdFromText(text string) string {
@@ -5915,10 +6001,7 @@ func findTaskLogPath(cascadeID, taskID string) string {
 	if cascadeID == "" || taskID == "" {
 		return ""
 	}
-	cleanTaskID := taskID
-	if idx := strings.LastIndex(cleanTaskID, "/"); idx >= 0 {
-		cleanTaskID = cleanTaskID[idx+1:]
-	}
+	cleanTaskID := normalizeTaskID(taskID)
 	if !strings.HasSuffix(cleanTaskID, ".log") {
 		cleanTaskID += ".log"
 	}
@@ -5942,6 +6025,7 @@ func findTaskLogPath(cascadeID, taskID string) string {
 }
 
 func (s *Server) getTaskLog(cascadeID, taskID string) (string, string, string) {
+	taskID = normalizeTaskID(taskID)
 	s.runningTasks.mu.RLock()
 	t, ok := s.runningTasks.tasks[taskID]
 	s.runningTasks.mu.RUnlock()
@@ -6000,36 +6084,57 @@ func (s *Server) scanRunningTasksFromTranscript(cascadeID string) {
 		if json.Unmarshal(line, &entry) != nil {
 			continue
 		}
-		if strings.Contains(entry.Content, "running as a background task") || strings.Contains(entry.Content, "Tool is running as a background task") {
-			tID := extractTaskIDFromText(entry.Content)
-			tCmd := extractTaskCmdFromText(entry.Content)
-			if tID != "" {
-				if tCmd == "" {
-					tCmd = tID
+		content := entry.Content
+
+		// Détection de démarrage
+		if strings.Contains(content, "running as a background task") || strings.Contains(content, "Tool is running as a background task") {
+			tIDs := extractAllTaskIDsFromText(content)
+			tCmd := extractTaskCmdFromText(content)
+			for _, tID := range tIDs {
+				if tID != "" {
+					if tCmd == "" {
+						tCmd = tID
+					}
+					activeTasks[tID] = tCmd
 				}
-				activeTasks[tID] = tCmd
 			}
 		}
-		if strings.Contains(entry.Content, "finished with result:") || strings.Contains(entry.Content, "The command exited with code") {
-			tID := extractTaskIDFromText(entry.Content)
-			if tID != "" {
+
+		// Détection de fin / annulation / résultat / timeout
+		isFinished := strings.Contains(content, "finished with result:") ||
+			strings.Contains(content, "was canceled with result:") ||
+			strings.Contains(content, "The command exited with code") ||
+			strings.Contains(content, "cancelled") ||
+			strings.Contains(content, "canceled") ||
+			strings.Contains(content, "Status: DONE") ||
+			strings.Contains(content, "Wait cancelled")
+
+		if isFinished || strings.Contains(content, "sender=") {
+			tIDs := extractAllTaskIDsFromText(content)
+			for _, tID := range tIDs {
 				delete(activeTasks, tID)
-				s.runningTasks.finishTask(tID, "completed")
 			}
 		}
 	}
 
-	for tID, tCmd := range activeTasks {
+	// Vérification physique sur disque des logs des tâches restantes
+	for tID := range activeTasks {
 		logP := findTaskLogPath(cascadeID, tID)
 		if logP != "" {
 			if data, err := os.ReadFile(logP); err == nil {
-				if strings.Contains(string(data), "The command exited with code") {
-					continue
+				logStr := string(data)
+				if strings.Contains(logStr, "The command exited with code") ||
+					strings.Contains(logStr, "Task finished") ||
+					strings.Contains(logStr, "finished with result") ||
+					strings.Contains(logStr, "was canceled") {
+					delete(activeTasks, tID)
 				}
 			}
 		}
-		s.runningTasks.startTask(tID, tCmd, cascadeID, nil)
 	}
+
+	// Synchronisation avec l'état en mémoire
+	s.runningTasks.syncTasksForCascade(cascadeID, activeTasks)
 }
 
 // ---------------------------------------------------------------------------
@@ -6371,8 +6476,11 @@ func (s *Server) runLiveTurnStreamer(ctx context.Context, cascadeID, requestID s
 	transcriptPath := findTranscriptPath(cascadeID)
 	var lastOffset int64
 	if transcriptPath != "" {
-		if fi, err := os.Stat(transcriptPath); err == nil {
-			lastOffset = fi.Size()
+		lastOffset = findLastTurnOffset(transcriptPath)
+		if lastOffset == 0 {
+			if fi, err := os.Stat(transcriptPath); err == nil {
+				lastOffset = fi.Size()
+			}
 		}
 	}
 
@@ -6398,8 +6506,11 @@ func (s *Server) runLiveTurnStreamer(ctx context.Context, cascadeID, requestID s
 				transcriptPath = findTranscriptPath(cascadeID)
 				nextTranscriptLookup = time.Now().Add(500 * time.Millisecond)
 				if transcriptPath != "" && lastOffset == 0 {
-					if fi, err := os.Stat(transcriptPath); err == nil {
-						lastOffset = fi.Size()
+					lastOffset = findLastTurnOffset(transcriptPath)
+					if lastOffset == 0 {
+						if fi, err := os.Stat(transcriptPath); err == nil {
+							lastOffset = fi.Size()
+						}
 					}
 				}
 			}
@@ -6435,6 +6546,17 @@ func (s *Server) runLiveTurnStreamer(ctx context.Context, cascadeID, requestID s
 								}
 
 								var events []map[string]interface{}
+
+								// 2-zero. User input from Desktop mirror
+								if entry.Type == "USER_INPUT" {
+									cleaned := extractUserRequest(entry.Content)
+									if cleaned != "" {
+										events = append(events, map[string]interface{}{
+											"kind": "user_input",
+											"text": cleaned,
+										})
+									}
+								}
 
 								// 2a. Tool calls
 								if len(entry.ToolCalls) > 0 {
@@ -6538,18 +6660,28 @@ func (s *Server) runLiveTurnStreamer(ctx context.Context, cascadeID, requestID s
 								// 2e. Background tasks detection
 								if len(entry.Content) > 0 {
 									if strings.Contains(entry.Content, "running as a background task") || strings.Contains(entry.Content, "Tool is running as a background task") {
-										tID := extractTaskIDFromText(entry.Content)
+										tIDs := extractAllTaskIDsFromText(entry.Content)
 										tCmd := extractTaskCmdFromText(entry.Content)
-										if tID != "" {
-											if tCmd == "" {
-												tCmd = tID
+										for _, tID := range tIDs {
+											if tID != "" {
+												if tCmd == "" {
+													tCmd = tID
+												}
+												s.runningTasks.startTask(tID, tCmd, cascadeID, nil)
 											}
-											s.runningTasks.startTask(tID, tCmd, cascadeID, nil)
 										}
 									}
-									if strings.Contains(entry.Content, "finished with result:") || strings.Contains(entry.Content, "The command exited with code") {
-										tID := extractTaskIDFromText(entry.Content)
-										if tID != "" {
+									isFinished := strings.Contains(entry.Content, "finished with result:") ||
+										strings.Contains(entry.Content, "was canceled with result:") ||
+										strings.Contains(entry.Content, "The command exited with code") ||
+										strings.Contains(entry.Content, "cancelled") ||
+										strings.Contains(entry.Content, "canceled") ||
+										strings.Contains(entry.Content, "Status: DONE") ||
+										strings.Contains(entry.Content, "Wait cancelled")
+
+									if isFinished || strings.Contains(entry.Content, "sender=") {
+										tIDs := extractAllTaskIDsFromText(entry.Content)
+										for _, tID := range tIDs {
 											s.runningTasks.finishTask(tID, "completed")
 										}
 									}
@@ -6650,5 +6782,175 @@ func (s *Server) startLiveStepWatcher(ctx context.Context, cascadeID, requestID 
 	doneChan := make(chan struct{})
 	go s.runLiveTurnStreamer(ctx, cascadeID, requestID, frameIndex, &delivered, doneChan)
 }
+
+// findLastTurnOffset calcule l'offset d'octet de la dernière ligne USER_INPUT dans transcript.jsonl.
+// Cela permet au streamer en direct de rejouer et diffuser les étapes du tour en cours même
+// si la commande/prompt a été initiée depuis Antigravity Desktop quelques millisecondes plus tôt.
+func findLastTurnOffset(transcriptPath string) int64 {
+	f, err := os.Open(transcriptPath)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+
+	var lastUserOffset int64
+	var currentOffset int64
+	scanner := bufio.NewScanner(f)
+	hBuf := AcquireHistoryBuffer()
+	defer ReleaseHistoryBuffer(hBuf)
+	scanner.Buffer(*hBuf, len(*hBuf))
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		lineLen := int64(len(line)) + 1 // + newline
+		if bytes.Contains(line, []byte(`"type":"USER_INPUT"`)) || bytes.Contains(line, []byte(`"type": "USER_INPUT"`)) {
+			lastUserOffset = currentOffset
+		}
+		currentOffset += lineLen
+	}
+	return lastUserOffset
+}
+
+// startExternalTurnStreamer démarre un streamer en temps réel pour une cascade
+// dont le prompt a été initié depuis l'IDE Desktop Antigravity (ou un sous-agent).
+// Il diffuse stream_start, stream_delta (pensées, outils, texte) et stream_end au mobile.
+func (s *Server) startExternalTurnStreamer(cascadeID string) {
+	if cascadeID == "" {
+		return
+	}
+	s.mu.Lock()
+	if s.activeCascades[cascadeID] {
+		s.mu.Unlock()
+		return
+	}
+	s.activeCascades[cascadeID] = true
+	reqID := fmt.Sprintf("desktop-%d", time.Now().UnixMilli())
+	s.activeRequestIDs[cascadeID] = reqID
+	ctx, cancel := context.WithCancel(context.Background())
+	if s.activeCancels[cascadeID] == nil {
+		s.activeCancels[cascadeID] = make(map[string]context.CancelFunc)
+	}
+	s.activeCancels[cascadeID][reqID] = cancel
+	s.mu.Unlock()
+
+	go func() {
+		defer func() {
+			s.mu.Lock()
+			delete(s.activeCascades, cascadeID)
+			delete(s.activeRequestIDs, cascadeID)
+			if m, ok := s.activeCancels[cascadeID]; ok {
+				delete(m, reqID)
+				if len(m) == 0 {
+					delete(s.activeCancels, cascadeID)
+				}
+			}
+			s.mu.Unlock()
+
+			// Clôture du stream côté mobile
+			endData := map[string]interface{}{
+				"cascadeId": cascadeID,
+				"requestId": reqID,
+				"status":    "DONE",
+				"outcome":   "completed",
+			}
+			s.broadcast(OutgoingMessage{
+				Type:      "stream_end",
+				RequestID: reqID,
+				CascadeID: cascadeID,
+				Data:      endData,
+			})
+			s.broadcast(OutgoingMessage{
+				Type:      "session_status_update",
+				CascadeID: cascadeID,
+				Data: map[string]interface{}{
+					"status":    "CASCADE_STATUS_READY",
+					"cascadeId": cascadeID,
+				},
+			})
+		}()
+
+		// 1. Démarre le flux visuel sur le mobile
+		startData := map[string]interface{}{
+			"cascadeId": cascadeID,
+			"requestId": reqID,
+			"model":     "Gemini 3.7 Flash",
+		}
+		s.broadcast(OutgoingMessage{
+			Type:      "stream_start",
+			RequestID: reqID,
+			CascadeID: cascadeID,
+			Data:      startData,
+		})
+		s.broadcast(OutgoingMessage{
+			Type:      "session_status_update",
+			CascadeID: cascadeID,
+			Data: map[string]interface{}{
+				"status":    "CASCADE_STATUS_RUNNING",
+				"cascadeId": cascadeID,
+			},
+		})
+
+		var frameIndex int64
+		var hasTextDelivered bool
+		doneChan := make(chan struct{})
+
+		s.runLiveTurnStreamer(ctx, cascadeID, reqID, &frameIndex, &hasTextDelivered, doneChan)
+		select {
+		case <-doneChan:
+		case <-ctx.Done():
+		}
+	}()
+}
+
+// startTranscriptWatchdog surveille en continu les sessions actives de l'IDE Desktop Antigravity
+// et déclenche automatiquement le streaming en direct vers le mobile sans intervention manuelle.
+func (s *Server) startTranscriptWatchdog() {
+	go func() {
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+
+		lastSizes := make(map[string]int64)
+
+		for range ticker.C {
+			s.mu.Lock()
+			hasClients := len(s.clients) > 0
+			s.mu.Unlock()
+			if !hasClients {
+				continue
+			}
+
+			sessions := s.snapshotSummaries()
+			if len(sessions) == 0 {
+				continue
+			}
+
+			now := time.Now()
+			for cascadeID, sum := range sessions {
+				st := strings.ToUpper(sum.Status)
+				if (strings.Contains(st, "RUNNING") || strings.Contains(st, "BUSY")) && !s.IsCascadeActive(cascadeID) {
+					s.startExternalTurnStreamer(cascadeID)
+					continue
+				}
+
+				tPath := findTranscriptPath(cascadeID)
+				if tPath == "" {
+					continue
+				}
+				fi, err := os.Stat(tPath)
+				if err != nil {
+					continue
+				}
+				if now.Sub(fi.ModTime()) < 6*time.Second {
+					prevSize, seen := lastSizes[cascadeID]
+					lastSizes[cascadeID] = fi.Size()
+					if seen && fi.Size() > prevSize && !s.IsCascadeActive(cascadeID) {
+						s.startExternalTurnStreamer(cascadeID)
+					}
+				}
+			}
+		}
+	}()
+}
+
 
 

@@ -47,9 +47,13 @@ class _BackgroundTasksBarState extends State<BackgroundTasksBar> with SingleTick
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final count = widget.runningTasks.length;
     final taskLabel = count == 1 ? '1 task running' : '$count tasks running';
+    final viewInsets = MediaQuery.of(context).viewInsets;
+    final rawInsetsBottom = View.of(context).viewInsets.bottom / MediaQuery.of(context).devicePixelRatio;
+    final hasKeyboard = viewInsets.bottom > 50 || rawInsetsBottom > 50;
+    final isActuallyExpanded = _expanded && !hasKeyboard;
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      margin: EdgeInsets.symmetric(horizontal: 12, vertical: hasKeyboard ? 2 : 4),
       decoration: BoxDecoration(
         color: isDark ? AppColors.surfaceRaised : const Color(0xFF21262D),
         borderRadius: BorderRadius.circular(AppRadius.md),
@@ -74,7 +78,7 @@ class _BackgroundTasksBarState extends State<BackgroundTasksBar> with SingleTick
               }
             },
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: hasKeyboard ? 4 : 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
@@ -92,14 +96,14 @@ class _BackgroundTasksBarState extends State<BackgroundTasksBar> with SingleTick
                       ),
                       const Spacer(),
                       Icon(
-                        _expanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+                        isActuallyExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
                         size: 16,
                         color: isDark ? AppColors.inkMuted : const Color(0xFF8B949E),
                       ),
                     ],
                   ),
-                  if (!_expanded) ...[
-                    const SizedBox(height: 6),
+                  if (!isActuallyExpanded) ...[
+                    SizedBox(height: hasKeyboard ? 3 : 6),
                     // Ligne 2 : Spinner + commande
                     Row(
                       children: [
@@ -153,7 +157,7 @@ class _BackgroundTasksBarState extends State<BackgroundTasksBar> with SingleTick
           ),
 
           // Liste déroulante multi-tâches
-          if (_expanded && count > 1) ...[
+          if (isActuallyExpanded && count > 1) ...[
             const Divider(height: 1, color: Color(0xFF26282E)),
             ...widget.runningTasks.map((task) {
               return InkWell(

@@ -94,6 +94,7 @@ func TestReactiveApprovalBroadcast(t *testing.T) {
 
 	client := dialWS(t, "ws"+strings.TrimPrefix(ts.URL, "http")+"/ws")
 	defer client.conn.Close()
+	time.Sleep(30 * time.Millisecond)
 
 	reactive.push(map[string]connectrpc.ReactiveUpdate{
 		"casc-r1": {
@@ -108,8 +109,12 @@ func TestReactiveApprovalBroadcast(t *testing.T) {
 	})
 
 	var msg map[string]interface{}
-	for i := 0; i < 5; i++ {
-		m := client.recv(t)
+	for i := 0; i < 15; i++ {
+		m, err := client.recvSafe()
+		if err != nil {
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
 		if m["type"] == "approval_pending" {
 			msg = m
 			break

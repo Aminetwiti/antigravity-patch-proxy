@@ -890,7 +890,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
     final scheme = Theme.of(context).colorScheme;
     final isQueued = _sendMode == SendMode.queued;
     final viewInsets = MediaQuery.of(context).viewInsets;
-    final hasKeyboard = viewInsets.bottom > 0;
+    final rawInsetsBottom = View.of(context).viewInsets.bottom / MediaQuery.of(context).devicePixelRatio;
+    final hasKeyboard = viewInsets.bottom > 50 || rawInsetsBottom > 50;
 
     return SafeArea(
       top: false,
@@ -901,9 +902,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (widget.projectName != null && widget.projectName!.isNotEmpty)
+            if (widget.projectName != null && widget.projectName!.isNotEmpty && !hasKeyboard)
               Padding(
-                padding: EdgeInsets.only(bottom: hasKeyboard ? 3 : 6, left: 4),
+                padding: const EdgeInsets.only(bottom: 6, left: 4),
                 child: InkWell(
                   onTap: widget.onSelectProject,
                   borderRadius: BorderRadius.circular(8),
@@ -953,7 +954,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
             Container(
               padding: EdgeInsets.symmetric(
                 horizontal: 12,
-                vertical: hasKeyboard ? 8 : 12,
+                vertical: hasKeyboard ? 6 : 12,
               ),
               decoration: BoxDecoration(
                 color: scheme.surfaceContainerHighest,
@@ -1128,7 +1129,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  SizedBox(height: hasKeyboard ? 4 : 10),
 
                   // Bottom Action Bar
                   Row(

@@ -567,6 +567,7 @@ func (c *wsTestClient) sendRaw(t *testing.T, raw string) {
 
 func (c *wsTestClient) recv(t *testing.T) map[string]interface{} {
 	t.Helper()
+	_ = c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	_, b, err := c.conn.ReadMessage()
 	if err != nil {
 		t.Fatalf("Réception WebSocket échouée: %v", err)
@@ -582,6 +583,7 @@ func (c *wsTestClient) recv(t *testing.T) map[string]interface{} {
 // (deadline non lue) : utilisé pour observer des broadcasts asynchrones
 // (devices_updated) sans introduire de course dans le test.
 func (c *wsTestClient) recvSafe() (map[string]interface{}, error) {
+	_ = c.conn.SetReadDeadline(time.Now().Add(1 * time.Second))
 	_, b, err := c.conn.ReadMessage()
 	if err != nil {
 		return nil, err

@@ -87,5 +87,35 @@ void main() {
 
       expect(stopped, isTrue);
     });
+
+    testWidgets('does not overflow on narrow mobile screen with long command', (tester) async {
+      tester.view.physicalSize = const Size(320, 640);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: BackgroundTaskOutputSheet(
+              taskId: 'task-long-id-12345',
+              command: 'flutter test --exclude-tags=live --coverage --branch-coverage',
+              initialOutput: 'Running long analysis command...\nStep 1/10\nStep 2/10',
+              status: 'running',
+              onStop: () {},
+            ),
+          ),
+        ),
+      );
+
+      await tester.pump();
+
+      expect(find.text('Background Task Output'), findsOneWidget);
+      expect(find.byIcon(Icons.copy_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.stop_circle_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.close_rounded), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
   });
 }

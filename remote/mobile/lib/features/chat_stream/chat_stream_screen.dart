@@ -418,6 +418,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     _loadPersistedDraft();
     _loadOfflineOutbox(widget.activeSessionId);
     _refreshRunningTasks();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _scrollToBottomSettled();
+      }
+    });
   }
 
   /// Recharge les messages en attente hors-ligne pour la session active
@@ -482,6 +487,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   void _scrollToBottomSettled({int maxAttempts = 4}) {
     if (!mounted) return;
     _isInitialScrollSettling = true;
+    _userScrollLocked = false;
+    _showJumpToBottom = false;
+    _hiddenNewCount = 0;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scrollController.hasClients) {
         _isInitialScrollSettling = false;
@@ -539,6 +547,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         final cached = SessionHistoryCacheStore.instance.getInMemory(targetSession);
         if (cached != null && cached.isNotEmpty) {
           buf.addAll(cached);
+          if (targetSession == widget.activeSessionId) {
+            _scrollToBottomSettled();
+          }
         } else {
           _loadingHistorySessions.add(targetSession);
           SessionHistoryCacheStore.instance.loadSessionHistory(targetSession).then((cachedList) {
@@ -546,6 +557,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               setState(() {
                 _sessionMessages.putIfAbsent(targetSession, () => []).addAll(cachedList);
               });
+              if (targetSession == widget.activeSessionId) {
+                _scrollToBottomSettled();
+              }
             }
           });
         }
@@ -848,6 +862,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     // les approbations/notifications même écran éteint. Le throttle 100ms
     // évite toute surconsommation CPU en fond.
     if (state == AppLifecycleState.resumed && mounted) {
+      _userScrollLocked = false;
+      _showJumpToBottom = false;
+      _hiddenNewCount = 0;
       setState(() {});
       _scrollToBottomSettled();
     }
@@ -862,6 +879,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         () => _currentSessionApprovals.isEmpty ? -1 : 0,
       );
       _visibleCounts[widget.activeSessionId] = _pageSize;
+      _userScrollLocked = false;
+      _showJumpToBottom = false;
+      _hiddenNewCount = 0;
       if (!_activeStreamingSessions.contains(widget.activeSessionId)) {
         _stillWorkingTimer?.cancel();
         _stillWorkingTimer = null;
@@ -1300,6 +1320,18 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           }
         }
       } else if (type == 'stream_delta') {
+        final userInput = StreamDeltaParser.userInputOf(msg);
+        if (userInput.isNotEmpty) {
+          final hasUserMsg = buf.any((m) => m.sender == 'user' && m.text.trim() == userInput.trim());
+          if (!hasUserMsg) {
+            buf.add(ChatMessage(
+              id: 'user-ext-$requestId',
+              sender: 'user',
+              text: userInput,
+              timestamp: _timestamp(),
+            ));
+          }
+        }
         final textDelta = StreamDeltaParser.textOf(msg);
         final thoughtDelta = StreamDeltaParser.thinkingOf(msg);
         final approval = StreamDeltaParser.approvalOf(msg);
@@ -1402,6 +1434,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         _externalThoughts.remove(thKey);
         _streamRequestToMessageId.remove(thKey);
         SessionHistoryCacheStore.instance.saveSessionHistory(targetSessionId, buf);
+        _refreshRunningTasks();
 
         if (isActiveSession && mounted) {
           setState(() {});
@@ -1416,6 +1449,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             _onStreamStarted(cascadeId);
           } else if (status.contains('IDLE') || status.contains('READY') || status.contains('DONE')) {
             _onStreamEnded(cascadeId);
+            _refreshRunningTasks();
           }
           if (mounted && cascadeId == widget.activeSessionId) {
             setState(() {});
@@ -1605,7 +1639,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       _activeStreamingSessions.add(targetSession);
     });
     if (targetSession == widget.activeSessionId) {
-      _scrollToBottom();
+      _userScrollLocked = false;
+      _showJumpToBottom = false;
+      _hiddenNewCount = 0;
+      _scrollToBottomSettled();
     }
 
     var thoughtBuffer = StringBuffer();
@@ -2018,7 +2055,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final hasKeyboard = MediaQuery.of(context).viewInsets.bottom > 0;
+    final viewInsets = MediaQuery.of(context).viewInsets;
+    final rawInsetsBottom = View.of(context).viewInsets.bottom / MediaQuery.of(context).devicePixelRatio;
+    final hasKeyboard = viewInsets.bottom > 50 || rawInsetsBottom > 50;
+
     Widget connectivityBanner = AnimatedSize(
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeOutQuart,
@@ -2052,7 +2092,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     return Column(
       children: [
         connectivityBanner,
-        breadcrumb,
+        if (!hasKeyboard) breadcrumb,
         SessionTopTabs(
           activeTab: _currentTab,
           onTabChanged: (tab) {
@@ -2157,11 +2197,14 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             },
           ),
         if ((_sessionMessageQueues[widget.activeSessionId]?.isNotEmpty ?? false))
-          QueuedMessagesCard(
-            queuedMessages: _sessionMessageQueues[widget.activeSessionId]!,
-            onSendNow: _handleQueueSendNow,
-            onEdit: _handleQueueEdit,
-            onDelete: _handleQueueDelete,
+          ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: hasKeyboard ? 80 : 160),
+            child: QueuedMessagesCard(
+              queuedMessages: _sessionMessageQueues[widget.activeSessionId]!,
+              onSendNow: _handleQueueSendNow,
+              onEdit: _handleQueueEdit,
+              onDelete: _handleQueueDelete,
+            ),
           ),
         if (_hasCurrentActiveStream && !hasKeyboard)
           _buildLiveAgentActivityDock(scheme),
@@ -2339,6 +2382,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     switch (_currentTab) {
       case SessionTabType.overview:
         return OverviewPanelView(
+          isLoading: _loadingHistorySessions.contains(widget.activeSessionId) || _isVcsLoading,
           sessionTitle: widget.activeProjectName.isNotEmpty ? widget.activeProjectName : 'Session',
           workspacePath: widget.activeProjectName,
           modifiedFiles: _modifiedFiles.toList(),
@@ -3605,6 +3649,9 @@ class _SuggestionChip extends StatelessWidget {
         },
         borderRadius: BorderRadius.circular(AppRadius.md),
         child: Container(
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width > 60 ? MediaQuery.of(context).size.width - 60 : 300,
+          ),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
             color: scheme.surfaceContainerHighest,
@@ -3616,12 +3663,16 @@ class _SuggestionChip extends StatelessWidget {
             children: [
               Icon(icon, size: 14, color: scheme.primary),
               const SizedBox(width: 8),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  color: scheme.onSurface,
+              Flexible(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: scheme.onSurface,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],

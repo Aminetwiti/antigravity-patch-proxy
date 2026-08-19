@@ -174,54 +174,57 @@ class _BackgroundTaskOutputSheetState extends State<BackgroundTaskOutputSheet> {
 
           // En-tête Antigravity 2.0
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Row(
               children: [
-                // Tab pill avec icône terminal
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: isDark ? AppColors.surfaceRaised : AppColors.surfaceBase,
-                    borderRadius: BorderRadius.circular(AppRadius.md),
-                    border: Border.all(color: isDark ? AppColors.borderStrong : AppColors.borderSubtle),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.terminal_rounded, size: 14, color: AppColors.accentBlue),
-                      const SizedBox(width: 6),
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 180),
-                        child: Text(
-                          widget.command,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            fontFamily: 'monospace',
-                            color: isDark ? AppColors.inkPrimary : Colors.black87,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (isRunning) ...[
-                        const SizedBox(width: 8),
-                        const SizedBox(
-                          width: 10,
-                          height: 10,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 1.5,
-                            color: AppColors.accentBlue,
+                // Tab pill avec icône terminal flexible
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: isDark ? AppColors.surfaceRaised : AppColors.surfaceBase,
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                      border: Border.all(color: isDark ? AppColors.borderStrong : AppColors.borderSubtle),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.terminal_rounded, size: 14, color: AppColors.accentBlue),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            widget.command,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              fontFamily: 'monospace',
+                              color: isDark ? AppColors.inkPrimary : Colors.black87,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
+                        if (isRunning) ...[
+                          const SizedBox(width: 8),
+                          const SizedBox(
+                            width: 10,
+                            height: 10,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.5,
+                              color: AppColors.accentBlue,
+                            ),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 ),
-                const Spacer(),
+                const SizedBox(width: 6),
 
                 // Copier
                 IconButton(
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  padding: const EdgeInsets.all(6),
                   icon: const Icon(Icons.copy_rounded, size: 16),
                   tooltip: 'Copier la sortie',
                   color: isDark ? AppColors.inkMuted : const Color(0xFF8B949E),
@@ -239,6 +242,9 @@ class _BackgroundTaskOutputSheetState extends State<BackgroundTaskOutputSheet> {
                 // Arrêter la tâche
                 if (isRunning && widget.onStop != null) ...[
                   IconButton(
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    padding: const EdgeInsets.all(6),
                     icon: const Icon(Icons.stop_circle_rounded, size: 18, color: AppColors.danger),
                     tooltip: 'Arrêter la tâche',
                     onPressed: () {
@@ -251,6 +257,9 @@ class _BackgroundTaskOutputSheetState extends State<BackgroundTaskOutputSheet> {
 
                 // Fermer
                 IconButton(
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  padding: const EdgeInsets.all(6),
                   icon: const Icon(Icons.close_rounded, size: 18),
                   tooltip: 'Fermer',
                   color: isDark ? AppColors.inkMuted : const Color(0xFF8B949E),
@@ -265,12 +274,16 @@ class _BackgroundTaskOutputSheetState extends State<BackgroundTaskOutputSheet> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             child: Row(
               children: [
-                Text(
-                  'Background Task Output',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? AppColors.inkPrimary : Colors.black87,
+                Flexible(
+                  child: Text(
+                    'Background Task Output',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? AppColors.inkPrimary : Colors.black87,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 const SizedBox(width: 8),

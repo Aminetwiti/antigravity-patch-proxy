@@ -148,30 +148,13 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     _wsClient.onSessionEstablished = (url, token) {
       SettingsStore.saveSession(wsUrl: url, token: token, sessionId: _activeSessionId);
     };
-    // Token obsolète (daemon redémarré avec un nouveau --auth-token) :
-    // on efface la session persistée ET le csrf des réglages (le serveur
-    // vient de rejeter ce token : il est définitivement invalide), puis on
-    // retente immédiatement — sinon ~30 s de 401 en boucle.
+    // Token rejeté ou endpoint injoignable : on retente sur les réglages LAN
+    // sans effacer les informations mémorisées (token & PIN restent intacts).
     _wsClient.onAuthRejected = () async {
-      final hadSession = (await SettingsStore.loadSession()).isNotEmpty;
-      SettingsStore.clearSession();
-      SettingsStore.save({'csrf': ''});
-      // Garde anti-boucle : si aucune session n'existait, on ne relance pas
-      // (le backoff de _handleDisconnect s'en charge) pour ne pas créer une
-      // boucle infinie de reconnexions 401.
-      if (hadSession) {
-        _connectWithSavedSettings();
-      }
+      _connectWithSavedSettings();
     };
-    // URL de tunnel morte (530/502 Cloudflare, daemon redémarré avec un
-    // nouveau tunnel) : on efface la session obsolète et on retente sur le
-    // fallback LAN (réglages host/port) — le daemon répond toujours en local.
     _wsClient.onEndpointDead = () async {
-      final hadSession = (await SettingsStore.loadSession()).isNotEmpty;
-      SettingsStore.clearSession();
-      if (hadSession) {
-        _connectWithSavedSettings();
-      }
+      _connectWithSavedSettings();
     };
     ApprovalNotifier.instance.init();
     _notifTapSub = ApprovalNotifier.instance.taps.listen((tap) {

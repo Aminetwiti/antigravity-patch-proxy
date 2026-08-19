@@ -1,6 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/env_config.dart';
+import 'saved_connections_store.dart';
 
 /// Persistance des réglages utilisateur via `shared_preferences`.
 /// Écriture atomique par clé, lecture paresseuse au démarrage (initState).
@@ -11,6 +12,7 @@ class SettingsStore {
   static const _kPort = 'settings.daemonPort';
   static const _kSsl = 'settings.useSsl';
   static const _kCsrf = 'settings.csrfToken';
+  static const _kPin = 'settings.pin';
   static const _kThemeMode = 'settings.themeMode';
   static const _kDefaultModel = 'settings.defaultModel';
   static const _kDisplayName = 'settings.displayName';
@@ -29,12 +31,16 @@ class SettingsStore {
   static const _kActiveBranch = 'settings.activeBranch';
   static const _kAutoFollow = 'settings.autoFollowEnabled';
 
-  // Session persistée : URL ws complète + token + sessionId actif. Sauvegardée
+  // Session persistée : URL ws complète + token + pin + sessionId actif. Sauvegardée
   // à chaque connexion réussie (le tunnel Cloudflare change d'URL à chaque
   // redémarrage du daemon → on re-sauvegarde systématiquement).
   static const _kLastWsUrl = 'session.lastWsUrl';
   static const _kLastWsToken = 'session.lastWsToken';
   static const _kLastSessionId = 'session.lastSessionId';
+  static const _kLastPin = 'session.lastPin';
+  static const _kLastHost = 'session.lastHost';
+  static const _kLastPort = 'session.lastPort';
+  static const _kLastSsl = 'session.lastSsl';
   static const _kSessionSavedAt = 'session.savedAt';
 
   static const _kVerboseAgentChat = 'settings.verboseAgentChat';
@@ -57,6 +63,7 @@ class SettingsStore {
       'port': prefs.getInt(_kPort) ?? EnvConfig.daemonPort,
       'ssl': prefs.getBool(_kSsl) ?? false,
       'csrf': prefs.getString(_kCsrf) ?? '',
+      'pin': prefs.getString(_kPin) ?? '',
       'themeMode': prefs.getInt(_kThemeMode) ?? 0,
       'defaultModel': prefs.getString(_kDefaultModel) ?? 'Gemini 3.6 Flash Medium',
       'displayName': prefs.getString(_kDisplayName) ?? 'Developer',
@@ -99,6 +106,8 @@ class SettingsStore {
           await prefs.setBool(_kSsl, entry.value as bool);
         case 'csrf':
           await prefs.setString(_kCsrf, entry.value as String);
+        case 'pin':
+          await prefs.setString(_kPin, entry.value as String);
         case 'themeMode':
           await prefs.setInt(_kThemeMode, entry.value as int);
         case 'defaultModel':
@@ -160,35 +169,95 @@ class SettingsStore {
     await prefs.clear();
   }
 
-  /// Dernière session connectée : `{wsUrl, token, sessionId, savedAt}`.
-  /// Retourne une carte vide si absente ou expirée (24 h).
+  /// Dernière session connectée : `{wsUrl, token, sessionId, pin, host, port, ssl, savedAt}`.
+  /// Persiste indéfiniment après fermeture et réouverture de l'application.
   static Future<Map<String, dynamic>> loadSession() async {
     final prefs = await SharedPreferences.getInstance();
     final url = prefs.getString(_kLastWsUrl) ?? '';
+    final lastToken = prefs.getString(_kLastWsToken);
+    final lastHost = prefs.getString(_kLastHost);
     final savedAt = DateTime.tryParse(prefs.getString(_kSessionSavedAt) ?? '');
-    final fresh = url.isNotEmpty &&
-        savedAt != null &&
-        DateTime.now().difference(savedAt) < const Duration(hours: 24);
-    if (!fresh) return const {};
+
+    if (url.isEmpty && lastToken == null && lastHost == null) {
+      return const {};
+    }
+
+    final token = lastToken ?? prefs.getString(_kCsrf) ?? '';
+    final host = lastHost ?? prefs.getString(_kHost) ?? '';
+    final port = prefs.getInt(_kLastPort) ?? prefs.getInt(_kPort) ?? EnvConfig.daemonPort;
+    final ssl = prefs.getBool(_kLastSsl) ?? prefs.getBool(_kSsl) ?? false;
+    final pin = prefs.getString(_kLastPin) ?? prefs.getString(_kPin) ?? '';
+    final sessionId = prefs.getString(_kLastSessionId) ?? '';
+
     return {
       'wsUrl': url,
-      'token': prefs.getString(_kLastWsToken) ?? '',
-      'sessionId': prefs.getString(_kLastSessionId) ?? '',
-      'savedAt': savedAt,
+      'token': token,
+      'sessionId': sessionId,
+      'pin': pin,
+      'host': host,
+      'port': port,
+      'ssl': ssl,
+      'savedAt': savedAt ?? DateTime.now(),
     };
   }
 
-  /// Persiste la session courante (appelée à chaque connexion réussie).
+  /// Persiste la session courante et l'ajoute à l'historique des connexions.
   static Future<void> saveSession({
     required String wsUrl,
     String token = '',
     String sessionId = '',
+    String pin = '',
+    String host = '',
+    int? port,
+    bool? ssl,
+    String? label,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kLastWsUrl, wsUrl);
-    await prefs.setString(_kLastWsToken, token);
-    await prefs.setString(_kLastSessionId, sessionId);
+    if (token.isNotEmpty) {
+      await prefs.setString(_kLastWsToken, token);
+      await prefs.setString(_kCsrf, token);
+    }
+    if (sessionId.isNotEmpty) {
+      await prefs.setString(_kLastSessionId, sessionId);
+    }
+    if (pin.isNotEmpty) {
+      await prefs.setString(_kLastPin, pin);
+      await prefs.setString(_kPin, pin);
+    }
+    if (host.isNotEmpty) {
+      await prefs.setString(_kLastHost, host);
+      await prefs.setString(_kHost, host);
+    }
+    if (port != null) {
+      await prefs.setInt(_kLastPort, port);
+      await prefs.setInt(_kPort, port);
+    }
+    if (ssl != null) {
+      await prefs.setBool(_kLastSsl, ssl);
+      await prefs.setBool(_kSsl, ssl);
+    }
     await prefs.setString(_kSessionSavedAt, DateTime.now().toIso8601String());
+
+    // Mémorise dans la liste des connexions sauvegardées
+    final resolvedHost = host.isNotEmpty ? host : (Uri.tryParse(wsUrl)?.host ?? '127.0.0.1');
+    final resolvedPort = port ?? Uri.tryParse(wsUrl)?.port ?? EnvConfig.daemonPort;
+    final resolvedSsl = ssl ?? (wsUrl.startsWith('wss') || wsUrl.startsWith('https'));
+    final effectiveToken = token.isNotEmpty ? token : (prefs.getString(_kLastWsToken) ?? '');
+    final effectivePin = pin.isNotEmpty ? pin : (prefs.getString(_kLastPin) ?? '');
+
+    final conn = SavedConnection(
+      id: '$resolvedHost:$resolvedPort',
+      label: label ?? (resolvedHost == '127.0.0.1' ? 'PC Local (127.0.0.1)' : resolvedHost),
+      host: resolvedHost,
+      port: resolvedPort,
+      ssl: resolvedSsl,
+      authToken: effectiveToken,
+      pin: effectivePin,
+      wsUrl: wsUrl,
+      lastConnectedAt: DateTime.now(),
+    );
+    await SavedConnectionsStore.saveConnection(conn);
   }
 
   /// Efface la session persistée (déconnexion manuelle explicite).
@@ -197,6 +266,10 @@ class SettingsStore {
     await prefs.remove(_kLastWsUrl);
     await prefs.remove(_kLastWsToken);
     await prefs.remove(_kLastSessionId);
+    await prefs.remove(_kLastPin);
+    await prefs.remove(_kLastHost);
+    await prefs.remove(_kLastPort);
+    await prefs.remove(_kLastSsl);
     await prefs.remove(_kSessionSavedAt);
   }
 }
