@@ -958,12 +958,17 @@ class _ChatInputBarState extends State<ChatInputBar> {
                 vertical: hasKeyboard ? 6 : 12,
               ),
               decoration: BoxDecoration(
-                color: scheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(20),
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? AppColors.surfaceRaised
+                    : scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(16),
                 border: Border.all(
                   color: isQueued
                       ? scheme.primary.withValues(alpha: 0.6)
-                      : scheme.outlineVariant.withValues(alpha: 0.4),
+                      : (Theme.of(context).brightness == Brightness.dark
+                          ? AppColors.borderSubtle
+                          : scheme.outlineVariant.withValues(alpha: 0.4)),
+                  width: 1,
                 ),
               ),
               child: Column(
@@ -1111,13 +1116,13 @@ class _ChatInputBarState extends State<ChatInputBar> {
                           hintText:
                               widget.isConnected
                                   ? (isQueued
-                                      ? "Message en file — sera exécuté après la tâche en cours"
-                                      : 'Poser une question, @ mentionner, / actions…')
-                                  : 'Hors ligne — le message sera envoyé à la reconnexion',
+                                      ? "Message queued — sends after agent finishes working"
+                                      : 'Ask anything, @ to mention, / for actions')
+                                  : 'Offline — message will be sent when reconnected',
                           hintStyle: TextStyle(
                             color:
-                                widget.isConnected ? scheme.onSurfaceVariant : scheme.error,
-                            fontSize: 14,
+                                widget.isConnected ? scheme.onSurfaceVariant.withValues(alpha: 0.8) : scheme.error,
+                            fontSize: 13.5,
                           ),
                           border: InputBorder.none,
                           enabledBorder: InputBorder.none,

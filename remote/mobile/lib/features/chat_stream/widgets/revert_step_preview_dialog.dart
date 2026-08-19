@@ -88,7 +88,10 @@ class _RevertStepPreviewDialogState extends State<RevertStepPreviewDialog> {
   }
 
   Future<void> _handleConfirmRevert() async {
-    if (widget.api == null) return;
+    if (widget.api == null) {
+      setState(() => _errorMessage = 'Rollback impossible en mode hors ligne.');
+      return;
+    }
     setState(() {
       _isReverting = true;
       _errorMessage = null;

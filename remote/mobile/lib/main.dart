@@ -1165,6 +1165,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       projects: _projects,
       onSelectProject: (p) => _createNewConversation(p),
       onNewConversation: _createNewConversation,
+      onOpenSessionsDrawer: () => _scaffoldKey.currentState?.openDrawer(),
       isConnected: isConnected,
       wsClient: _wsClient,
       onStreamingSessionChanged: (sessionId, isStreaming) {

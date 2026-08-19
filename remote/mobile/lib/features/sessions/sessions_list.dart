@@ -107,6 +107,14 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
   }
 
   @override
+  void didUpdateWidget(covariant LeftSidebarDrawer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.sessions != oldWidget.sessions) {
+      _loadPins();
+    }
+  }
+
+  @override
   void dispose() {
     _scrollController.dispose();
     _filterController.dispose();

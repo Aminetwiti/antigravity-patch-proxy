@@ -60,6 +60,9 @@ class ChatStreamScreen extends StatefulWidget {
   /// (main.dart) : il connaît la liste des sessions et le workspace actif.
   final VoidCallback? onNewConversation;
 
+  /// Callback pour ouvrir le drawer des sessions depuis le breadcrumb
+  final VoidCallback? onOpenSessionsDrawer;
+
   /// Workspace racine pour la détection VCS et fichiers modifiés.
   final String? workspacePath;
 
@@ -83,6 +86,7 @@ class ChatStreamScreen extends StatefulWidget {
     this.onStreamingSessionChanged,
     this.onStreamingStateChanged,
     this.onNewConversation,
+    this.onOpenSessionsDrawer,
   });
 
   @override
@@ -450,30 +454,37 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     }
   }
 
-  /// Expédie automatiquement le premier message en attente dès reconnexion
+  /// Expédie automatiquement les messages en attente dès reconnexion
   void _checkAndFlushOfflineOutbox() {
-    final sessionId = widget.activeSessionId;
-    final queue = _sessionMessageQueues[sessionId];
-    if (queue == null || queue.isEmpty) return;
-    final isStreaming = _activeStreamingSessions.contains(sessionId);
-    if (widget.isConnected && !isStreaming) {
-      HapticFeedback.mediumImpact();
-      final next = queue.removeAt(0);
-      OfflineOutboxStore.saveQueuedMessages(sessionId, queue);
-      final text = next['text'] as String? ?? '';
-      if (text.isEmpty) return;
-      final modelUID = next['modelUID'] as String?;
-      final modelEnum = next['modelEnum'] as int?;
-      final buf = _sessionMessages.putIfAbsent(sessionId, () => []);
-      setState(() {
-        buf.add(ChatMessage(
-          id: 'm${++_messageCounter}',
-          sender: 'user',
-          text: text,
-          timestamp: _timestamp(),
-        ));
-      });
-      _sendPromptToDaemon(text, targetSessionOverride: sessionId, modelUID: modelUID, modelEnum: modelEnum);
+    final isConnected = (widget.wsClient?.status == ConnectionStatus.connected) ||
+        (_status == ConnectionStatus.connected) ||
+        widget.isConnected;
+    if (!isConnected) return;
+
+    for (final entry in _sessionMessageQueues.entries.toList()) {
+      final sessionId = entry.key;
+      final queue = entry.value;
+      if (queue.isEmpty) continue;
+      final isStreaming = _activeStreamingSessions.contains(sessionId);
+      if (!isStreaming) {
+        HapticFeedback.mediumImpact();
+        final next = queue.removeAt(0);
+        OfflineOutboxStore.saveQueuedMessages(sessionId, queue);
+        final text = next['text'] as String? ?? '';
+        if (text.isEmpty) continue;
+        final modelUID = next['modelUID'] as String?;
+        final modelEnum = next['modelEnum'] as int?;
+        final buf = _sessionMessages.putIfAbsent(sessionId, () => []);
+        setState(() {
+          buf.add(ChatMessage(
+            id: 'm${++_messageCounter}',
+            sender: 'user',
+            text: text,
+            timestamp: _timestamp(),
+          ));
+        });
+        _sendPromptToDaemon(text, targetSessionOverride: sessionId, modelUID: modelUID, modelEnum: modelEnum);
+      }
     }
   }
 
@@ -838,6 +849,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         _loadHistoryIfEmpty(widget.activeSessionId);
       }
       _refreshQuotaSummary();
+      _checkAndFlushOfflineOutbox();
     }
 
     setState(() {
@@ -951,7 +963,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   void _onStreamStarted(String sessionId) {
-    _streamStartTimes.putIfAbsent(sessionId, () => DateTime.now());
+    _streamStartTimes[sessionId] = DateTime.now();
     final wasEmpty = _activeStreamingSessions.isEmpty;
     _activeStreamingSessions.add(sessionId);
     widget.onStreamingSessionChanged?.call(sessionId, true);
@@ -984,7 +996,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final queue = _sessionMessageQueues[sessionId] ?? [];
     final lastEnd = _sessionLastStreamEnds[sessionId];
     final outcome = lastEnd?['data']?['outcome'] as String? ?? 'done';
-    if (outcome == 'done' && queue.isNotEmpty) {
+    final isSuccessOutcome = outcome == 'done' || outcome == 'completed' || outcome == 'success';
+    if (isSuccessOutcome && queue.isNotEmpty) {
       final next = queue.removeAt(0);
       OfflineOutboxStore.saveQueuedMessages(sessionId, queue);
       final text = next['text'] as String;
@@ -1215,8 +1228,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           _runningBackgroundTasks.remove(cmd);
           _runningBackgroundTasks.remove(taskId);
           _runningBackgroundTasks.removeWhere((t) =>
-              t == cmd ||
-              t == taskId ||
+              (cmd.isNotEmpty && t == cmd) ||
+              (taskId.isNotEmpty && t == taskId) ||
               (cmd.isNotEmpty && t.contains(cmd)) ||
               (taskId.isNotEmpty && t.contains(taskId)));
           _taskStatuses[cmd] = status;
@@ -1423,8 +1436,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         }
       } else if (type == 'stream_end') {
         final startTime = _streamStartTimes[targetSessionId];
+        _sessionLastStreamEnds[targetSessionId] = msg;
         _onStreamEnded(targetSessionId);
         _handleStreamEnded(msg, targetSessionId);
+        _streamStartTimes.remove(targetSessionId);
         final targetId = _streamRequestToMessageId[thKey] ?? 'ext-$requestId';
         final idx = buf.indexWhere((m) => m.id == targetId);
 
@@ -1437,7 +1452,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         final workedDurationStr = _computeWorkedDuration(startTime);
         final currentThought = (_externalThoughts[thKey] != null && _externalThoughts[thKey]!.isNotEmpty)
             ? _externalThoughts[thKey]!.trim()
-            : ((idx >= 0 ? buf[idx].thought : null) ?? '');
+            : ((idx >= 0 ? buf[idx].thought?.trim() : null) ?? '');
 
         String finalThought;
         if (currentThought.trim().isEmpty) {
@@ -2125,7 +2140,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           ? () => _showProjectSelector(context)
           : null,
       onSelectSession: () {
-        Scaffold.maybeOf(context)?.openDrawer();
+        if (widget.onOpenSessionsDrawer != null) {
+          widget.onOpenSessionsDrawer!();
+        } else {
+          Scaffold.maybeOf(context)?.openDrawer();
+        }
       },
       onOpenIde: () {
         AppToast.show(context, message: 'Session synchronisée avec Antigravity Desktop IDE');
@@ -3196,30 +3215,23 @@ class _MessageBubble extends StatelessWidget {
     if (isUser) {
       return RepaintBoundary(
         child: Container(
-          margin: const EdgeInsets.only(bottom: 16, left: 48),
-          alignment: Alignment.centerRight,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(16),
-                topRight: Radius.circular(4),
-                bottomLeft: Radius.circular(16),
-                bottomRight: Radius.circular(16),
-              ),
-              border: Border.all(
-                color: isDark ? AppColors.borderStrong : scheme.outlineVariant,
-                width: 0.8,
-              ),
+          margin: const EdgeInsets.only(bottom: 16),
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+            border: Border.all(
+              color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.5),
+              width: 1,
             ),
-            child: SelectableText(
-              message.text,
-              style: TextStyle(
-                fontSize: 13.5,
-                height: 1.35,
-                color: isDark ? AppColors.inkPrimary : scheme.onSurface,
-              ),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: SelectableText(
+            message.text,
+            style: TextStyle(
+              fontSize: 13.5,
+              height: 1.4,
+              color: isDark ? AppColors.inkPrimary : scheme.onSurface,
             ),
           ),
         ),

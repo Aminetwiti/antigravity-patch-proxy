@@ -48,14 +48,20 @@ class _BattleArenaScreenState extends State<BattleArenaScreen> {
       return;
     }
 
+    if (widget.api == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Impossible de lancer le duel en mode hors ligne.')),
+      );
+      return;
+    }
+
     setState(() {
       _isRunning = true;
       _statusMessage = 'Initialisation des worktrees éphémères...';
     });
 
     try {
-      final api = widget.api;
-      if (api == null) return;
+      final api = widget.api!;
       final selectedA = _availableModels.firstWhere((m) => m['uid'] == _modelA);
       final selectedB = _availableModels.firstWhere((m) => m['uid'] == _modelB);
 

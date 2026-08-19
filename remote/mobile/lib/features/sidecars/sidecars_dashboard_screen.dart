@@ -105,7 +105,12 @@ class _SidecarsDashboardScreenState extends State<SidecarsDashboardScreen> {
   Future<void> _sendSidecarAction(int action, String actionName) async {
     if (_selectedSidecar == null) return;
     final api = widget.api;
-    if (api == null) return;
+    if (api == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Action impossible en mode hors ligne.')),
+      );
+      return;
+    }
     try {
       await api.manageSidecar(_selectedSidecar!, action: action);
       if (!mounted) return;

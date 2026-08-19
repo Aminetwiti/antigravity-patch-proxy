@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../theme/app_colors.dart';
+import 'file_change_diff_card.dart';
 
 /// Type d'étape d'exécution fidèle à Antigravity 2.0 Desktop.
 enum ExecutionStepType {
@@ -19,6 +20,7 @@ enum ExecutionStepType {
   narrativeText,
   thought,
   search,
+  processingGroup,
 }
 
 class ExecutionStepItem {
@@ -545,7 +547,59 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
       ));
     }
 
-    return items;
+    return _groupConsecutiveToolSteps(items);
+  }
+
+  List<ExecutionStepItem> _groupConsecutiveToolSteps(List<ExecutionStepItem> source) {
+    if (source.length < 2) return source;
+
+    final result = <ExecutionStepItem>[];
+    final currentToolGroup = <ExecutionStepItem>[];
+
+    bool isToolStep(ExecutionStepType type) {
+      return type == ExecutionStepType.command ||
+          type == ExecutionStepType.fileEdit ||
+          type == ExecutionStepType.fileAnalysis ||
+          type == ExecutionStepType.search ||
+          type == ExecutionStepType.exploredGroup;
+    }
+
+    void flushGroup() {
+      if (currentToolGroup.isEmpty) return;
+      if (currentToolGroup.length >= 2) {
+        final counts = <String, int>{};
+        for (final item in currentToolGroup) {
+          final label = item.action.isNotEmpty ? item.action : item.type.name;
+          counts[label] = (counts[label] ?? 0) + 1;
+        }
+        final summary = counts.entries
+            .map((e) => e.value > 1 ? '${e.value}× ${e.key}' : e.key)
+            .join(' · ');
+
+        result.add(ExecutionStepItem(
+          type: ExecutionStepType.processingGroup,
+          action: 'Tools',
+          title: '${currentToolGroup.length} tools executed ($summary)',
+          subItems: List.from(currentToolGroup),
+          isExpandable: true,
+        ));
+      } else {
+        result.addAll(currentToolGroup);
+      }
+      currentToolGroup.clear();
+    }
+
+    for (final item in source) {
+      if (isToolStep(item.type)) {
+        currentToolGroup.add(item);
+      } else {
+        flushGroup();
+        result.add(item);
+      }
+    }
+    flushGroup();
+
+    return result;
   }
 
   Widget _buildPulsingDot({Color? color}) {

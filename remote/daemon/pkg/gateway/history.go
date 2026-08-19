@@ -106,15 +106,33 @@ func isSessionArchived(home, cascadeID string) bool {
 			continue
 		}
 		s := strings.ToLower(string(data))
+		if strings.Contains(s, "deleted: true") || strings.Contains(s, "deleted:true") {
+			return true
+		}
 		if strings.Contains(s, "archived: false") || strings.Contains(s, "archived:false") {
 			continue
 		}
-		if strings.Contains(s, "archived: true") || strings.Contains(s, "archived:true") ||
-			strings.Contains(s, "deleted: true") || strings.Contains(s, "deleted:true") {
+		if strings.Contains(s, "archived: true") || strings.Contains(s, "archived:true") {
 			return true
 		}
 	}
 	return false
+}
+
+// resolveGeminiSubDir détermine si la session réside dans antigravity-ide ou antigravity
+func resolveGeminiSubDir(home, cascadeID string) string {
+	for _, sub := range []string{"antigravity-ide", "antigravity"} {
+		if _, err := os.Stat(filepath.Join(home, ".gemini", sub, "annotations", cascadeID+".pbtxt")); err == nil {
+			return sub
+		}
+		if _, err := os.Stat(filepath.Join(home, ".gemini", sub, "brain", cascadeID)); err == nil {
+			return sub
+		}
+		if _, err := os.Stat(filepath.Join(home, ".gemini", sub, "conversations", cascadeID+".db")); err == nil {
+			return sub
+		}
+	}
+	return "antigravity"
 }
 
 // renameSessionOnDisk persiste le titre personnalisé d'une session dans annotations/<cascadeID>.pbtxt
@@ -126,7 +144,7 @@ func renameSessionOnDisk(home, cascadeID, title string) error {
 	if title == "" {
 		return fmt.Errorf("title requis")
 	}
-	annoDir := filepath.Join(home, ".gemini", "antigravity", "annotations")
+	annoDir := filepath.Join(home, ".gemini", resolveGeminiSubDir(home, cascadeID), "annotations")
 	_ = os.MkdirAll(annoDir, 0o755)
 	annoPath := filepath.Join(annoDir, cascadeID+".pbtxt")
 
@@ -153,7 +171,7 @@ func pinSessionOnDisk(home, cascadeID string, pinned bool) error {
 	if cascadeID == "" {
 		return fmt.Errorf("cascadeId requis")
 	}
-	annoDir := filepath.Join(home, ".gemini", "antigravity", "annotations")
+	annoDir := filepath.Join(home, ".gemini", resolveGeminiSubDir(home, cascadeID), "annotations")
 	_ = os.MkdirAll(annoDir, 0o755)
 	annoPath := filepath.Join(annoDir, cascadeID+".pbtxt")
 
@@ -189,7 +207,7 @@ func archiveSessionOnDisk(home, cascadeID string, archived bool) error {
 	if cascadeID == "" {
 		return fmt.Errorf("cascadeId requis")
 	}
-	annoDir := filepath.Join(home, ".gemini", "antigravity", "annotations")
+	annoDir := filepath.Join(home, ".gemini", resolveGeminiSubDir(home, cascadeID), "annotations")
 	_ = os.MkdirAll(annoDir, 0o755)
 	annoPath := filepath.Join(annoDir, cascadeID+".pbtxt")
 
@@ -220,38 +238,38 @@ func archiveSessionOnDisk(home, cascadeID string, archived bool) error {
 	return os.WriteFile(annoPath, []byte(s), 0o644)
 }
 
-// isSessionPinned vérifie si la session est épinglée dans ~/.gemini/antigravity/annotations/<cascadeID>.pbtxt
+// isSessionPinned vérifie si la session est épinglée dans annotations/<cascadeID>.pbtxt (antigravity ou antigravity-ide)
 func isSessionPinned(home, cascadeID string) bool {
 	if cascadeID == "" {
 		return false
 	}
-	annoPath := filepath.Join(home, ".gemini", "antigravity", "annotations", cascadeID+".pbtxt")
-	data, err := os.ReadFile(annoPath)
-	if err != nil {
-		return false
+	for _, sub := range []string{"antigravity", "antigravity-ide"} {
+		annoPath := filepath.Join(home, ".gemini", sub, "annotations", cascadeID+".pbtxt")
+		if data, err := os.ReadFile(annoPath); err == nil {
+			s := strings.ToLower(string(data))
+			if strings.Contains(s, "pinned: true") || strings.Contains(s, "pinned:true") {
+				return true
+			}
+		}
 	}
-	s := strings.ToLower(string(data))
-	return strings.Contains(s, "pinned: true") || strings.Contains(s, "pinned:true")
+	return false
 }
-
 
 // deleteSessionFromDisk supprime les artefacts résiduels d'une session sur disque (.pbtxt, .db, brain/)
 func deleteSessionFromDisk(home, cascadeID string) error {
 	if cascadeID == "" {
 		return nil
 	}
-	annoPath := filepath.Join(home, ".gemini", "antigravity", "annotations", cascadeID+".pbtxt")
-	_ = os.Remove(annoPath)
+	for _, sub := range []string{"antigravity", "antigravity-ide"} {
+		annoPath := filepath.Join(home, ".gemini", sub, "annotations", cascadeID+".pbtxt")
+		_ = os.Remove(annoPath)
 
-	dbPath := filepath.Join(home, ".gemini", "antigravity", "conversations", cascadeID+".db")
-	_ = os.Remove(dbPath)
+		dbPath := filepath.Join(home, ".gemini", sub, "conversations", cascadeID+".db")
+		_ = os.Remove(dbPath)
 
-	brainDir := filepath.Join(home, ".gemini", "antigravity", "brain", cascadeID)
-	_ = os.RemoveAll(brainDir)
-
-	ideBrainDir := filepath.Join(home, ".gemini", "antigravity-ide", "brain", cascadeID)
-	_ = os.RemoveAll(ideBrainDir)
-
+		brainDir := filepath.Join(home, ".gemini", sub, "brain", cascadeID)
+		_ = os.RemoveAll(brainDir)
+	}
 	return nil
 }
 
