@@ -83,59 +83,62 @@ class _SubagentTreeCardState extends State<SubagentTreeCard> {
   Widget build(BuildContext context) {
     if (widget.subagents.isEmpty) return const SizedBox.shrink();
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final scheme = Theme.of(context).colorScheme;
-    final activeCount = widget.subagents.where((s) => s.status.toLowerCase() == 'running').length;
+    final count = widget.subagents.length;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerHigh.withValues(alpha: 0.65),
+        color: isDark ? const Color(0xFF161B22) : const Color(0xFFF6F8FA),
         borderRadius: BorderRadius.circular(AppRadius.md),
-        border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
+        border: Border.all(
+          color: isDark ? const Color(0xFF30363D) : const Color(0xFFD0D7DE),
+          width: 1,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Header Bar
+          // Header Bar: "Subagents  4  v"
           InkWell(
             onTap: () => setState(() => _isExpanded = !_isExpanded),
             borderRadius: BorderRadius.circular(AppRadius.md),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               child: Row(
                 children: [
-                  Icon(
-                    Icons.account_tree_outlined,
-                    size: 16,
-                    color: activeCount > 0 ? scheme.primary : scheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 8),
                   Text(
-                    'Arborescence Sous-Agents (${widget.subagents.length})',
+                    'Subagents',
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: scheme.onSurface,
+                      color: isDark ? const Color(0xFFE6EDF3) : Colors.black87,
                     ),
                   ),
                   const SizedBox(width: 8),
-                  if (activeCount > 0)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: scheme.primary.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        '$activeCount actif(s)',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: scheme.primary,
-                        ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1.5),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF21262D) : const Color(0xFFE5E7EB),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '$count',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? const Color(0xFF8B949E) : const Color(0xFF4B5563),
                       ),
                     ),
+                  ),
+                  const SizedBox(width: 6),
+                  Icon(
+                    _isExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+                    size: 16,
+                    color: isDark ? const Color(0xFF8B949E) : const Color(0xFF6E7681),
+                  ),
                   const Spacer(),
                   if (widget.onOpenFullTree != null)
                     IconButton(
@@ -143,108 +146,85 @@ class _SubagentTreeCardState extends State<SubagentTreeCard> {
                       onPressed: widget.onOpenFullTree,
                       tooltip: 'Ouvrir le DAG complet',
                       padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                      constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                      color: isDark ? const Color(0xFF8B949E) : const Color(0xFF6E7681),
                     ),
-                  Icon(
-                    _isExpanded ? Icons.expand_less : Icons.expand_more,
-                    size: 18,
-                    color: scheme.onSurfaceVariant,
-                  ),
                 ],
               ),
             ),
           ),
 
-          // Tree nodes
+          // Subagents List
           if (_isExpanded) ...[
-            const Divider(height: 1),
+            const Divider(height: 1, color: Color(0xFF30363D)),
             ListView.separated(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+              padding: const EdgeInsets.symmetric(vertical: 6),
               itemCount: widget.subagents.length,
               separatorBuilder: (_, __) => const SizedBox(height: 4),
               itemBuilder: (context, index) {
                 final subagent = widget.subagents[index];
-                final isLast = index == widget.subagents.length - 1;
-                final statusColor = _getStatusColor(subagent.status, scheme);
                 final isRunning = subagent.status.toLowerCase() == 'running';
+                final isErrored = subagent.status.toLowerCase() == 'errored' || subagent.status.toLowerCase() == 'canceling';
 
                 return InkWell(
                   onTap: () => widget.onSelectSubagent?.call(subagent),
-                  borderRadius: BorderRadius.circular(AppRadius.sm),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                     child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        // Tree branch prefix
-                        Text(
-                          isLast ? '└─ ' : '├─ ',
-                          style: TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 13,
-                            color: scheme.outline,
-                          ),
-                        ),
-                        // Status icon
-                        Icon(
-                          _getStatusIcon(subagent.status),
-                          size: 14,
-                          color: statusColor,
-                        ),
-                        const SizedBox(width: 8),
-                        // Role & Detail
+                        // Left: Role Title & Worked duration
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Row(
-                                children: [
-                                  Text(
-                                    subagent.role,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                      color: scheme.onSurface,
-                                    ),
-                                  ),
-                                  if (subagent.typeName != null && subagent.typeName != subagent.role) ...[
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      '(${subagent.typeName})',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: scheme.onSurfaceVariant,
-                                      ),
-                                    ),
-                                  ],
-                                  const Spacer(),
-                                  Text(
-                                    _formatStatusLabel(subagent.status),
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: isRunning ? FontWeight.bold : FontWeight.normal,
-                                      color: statusColor,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              if (subagent.stateDetail != null && subagent.stateDetail!.isNotEmpty) ...[
-                                const SizedBox(height: 2),
-                                Text(
-                                  subagent.stateDetail!,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: scheme.onSurfaceVariant,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                              Text(
+                                subagent.role,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: isDark ? const Color(0xFFF4F4F5) : Colors.black87,
                                 ),
-                              ],
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                isRunning ? 'Working...' : subagent.displayWorkedFor,
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: isDark ? const Color(0xFF8B949E) : const Color(0xFF6E7681),
+                                ),
+                              ),
                             ],
                           ),
                         ),
+
+                        const SizedBox(width: 10),
+
+                        // Right: Status Icon (checkmark circle / spinner / error)
+                        if (isRunning)
+                          const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.5,
+                              color: AppColors.accentBlueBright,
+                            ),
+                          )
+                        else if (isErrored)
+                          const Icon(
+                            Icons.error_outline_rounded,
+                            size: 16,
+                            color: AppColors.danger,
+                          )
+                        else
+                          Icon(
+                            Icons.check_circle_outline_rounded,
+                            size: 16,
+                            color: isDark ? const Color(0xFF8B949E) : const Color(0xFF6E7681),
+                          ),
                       ],
                     ),
                   ),

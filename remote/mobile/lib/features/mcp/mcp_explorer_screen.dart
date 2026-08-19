@@ -83,28 +83,30 @@ class _McpExplorerScreenState extends State<McpExplorerScreen> {
             const Text('Inspecter un Sidecar', style: TextStyle(fontSize: 16)),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Entrez l\'identifiant du plugin ou sidecar à inspecter :',
-              style: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: textController,
-              autofocus: true,
-              style: const TextStyle(fontSize: 13),
-              decoration: InputDecoration(
-                hintText: 'ex: github-mcp, filesystem, sc-1...',
-                isDense: true,
-                filled: true,
-                fillColor: scheme.surfaceContainerHighest,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Entrez l\'identifiant du plugin ou sidecar à inspecter :',
+                style: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant),
               ),
-            ),
-          ],
+              const SizedBox(height: 12),
+              TextField(
+                controller: textController,
+                autofocus: true,
+                style: const TextStyle(fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: 'ex: github-mcp, filesystem, sc-1...',
+                  isDense: true,
+                  filled: true,
+                  fillColor: scheme.surfaceContainerHighest,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(

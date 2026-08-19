@@ -18,8 +18,11 @@ class StreamDeltaParser {
     if (events is! List) return '';
     final buffer = StringBuffer();
     for (final e in events) {
-      if (e is Map && e['kind'] == 'text') {
-        buffer.write(e['delta'] ?? '');
+      if (e is Map) {
+        final kind = e['kind']?.toString();
+        if (kind == 'text' || (kind == null && e['delta'] != null)) {
+          buffer.write(e['delta'] ?? '');
+        }
       }
     }
     return buffer.toString();
@@ -117,7 +120,26 @@ class StreamDeltaParser {
         return arg.isNotEmpty ? 'Ran $arg' : 'Ran command';
       case 'read_file':
       case 'view_file':
-        return arg.isNotEmpty ? 'Viewed $arg' : 'Viewed file';
+        String lineRange = '';
+        if (detail.isNotEmpty) {
+          try {
+            final start = detail.indexOf('{');
+            final end = detail.lastIndexOf('}');
+            if (start >= 0 && end > start) {
+              final jsonMap = json.decode(detail.substring(start, end + 1));
+              if (jsonMap is Map) {
+                final sLine = jsonMap['StartLine'] ?? jsonMap['startLine'] ?? jsonMap['start_line'];
+                final eLine = jsonMap['EndLine'] ?? jsonMap['endLine'] ?? jsonMap['end_line'];
+                if (sLine != null && eLine != null) {
+                  lineRange = ' #L$sLine-$eLine';
+                } else if (sLine != null) {
+                  lineRange = ' #L$sLine';
+                }
+              }
+            }
+          } catch (_) {}
+        }
+        return arg.isNotEmpty ? 'Viewed $arg$lineRange' : 'Viewed file';
       case 'write_to_file':
       case 'edit_file':
       case 'replace_file_content':
@@ -136,7 +158,47 @@ class StreamDeltaParser {
       case 'invoke_subagent':
       case 'define_subagent':
       case 'subagent':
-        return arg.isNotEmpty ? 'Subagent $arg' : 'Spawned subagent';
+        String subName = arg;
+        if (detail.isNotEmpty) {
+          try {
+            final start = detail.indexOf('{');
+            final end = detail.lastIndexOf('}');
+            if (start >= 0 && end > start) {
+              final jsonMap = json.decode(detail.substring(start, end + 1));
+              if (jsonMap is Map) {
+                final role = jsonMap['Role'] ?? jsonMap['role'] ?? jsonMap['TypeName'] ?? jsonMap['typeName'];
+                if (role != null && role.toString().trim().isNotEmpty) {
+                  subName = role.toString().trim();
+                }
+              }
+            }
+          } catch (_) {}
+        }
+        return subName.isNotEmpty ? 'Subagent $subName' : 'Spawned subagent';
+      case 'manage_task':
+      case 'task':
+        if (detail.isNotEmpty) {
+          try {
+            final start = detail.indexOf('{');
+            final end = detail.lastIndexOf('}');
+            if (start >= 0 && end > start) {
+              final jsonMap = json.decode(detail.substring(start, end + 1));
+              if (jsonMap is Map) {
+                final taskId = (jsonMap['TaskId'] ?? jsonMap['taskId'] ?? '').toString();
+                if (taskId.isNotEmpty) {
+                  final cleanId = taskId.contains('/') ? taskId.split('/').last : taskId;
+                  final shortId = cleanId.replaceFirst(RegExp(r'^task-'), '');
+                  final action = (jsonMap['Action'] ?? jsonMap['action'] ?? '').toString();
+                  if (action == 'status' || action == 'list' || action.isEmpty) {
+                    return 'Task $shortId finished';
+                  }
+                  return 'Task $shortId $action';
+                }
+              }
+            }
+          } catch (_) {}
+        }
+        return arg.isNotEmpty ? 'Task $arg' : 'Task finished';
       case 'send_message':
         return arg.isNotEmpty ? 'Sent to $arg' : 'Sent message';
       case 'generate_image':

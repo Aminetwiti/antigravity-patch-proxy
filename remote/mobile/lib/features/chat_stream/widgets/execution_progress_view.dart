@@ -468,8 +468,7 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
 
     flushConsole();
 
-    // Grouping: Si on a un exploredGroup suivi d'analyses ou des analyses isolées,
-    // on regroupe les analyses sous le groupe Explored comme sur Desktop.
+    // Grouping: Si on a un exploredGroup suivi d'analyses, on les regroupe sous le groupe Explored
     final items = <ExecutionStepItem>[];
     for (int i = 0; i < rawItems.length; i++) {
       final current = rawItems[i];
@@ -491,15 +490,6 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
           i = j - 1;
           continue;
         }
-      } else if (current.type == ExecutionStepType.fileAnalysis) {
-        items.add(ExecutionStepItem(
-          type: ExecutionStepType.exploredGroup,
-          action: 'Explored',
-          title: '1 file',
-          subItems: [current],
-          isExpandable: true,
-        ));
-        continue;
       }
       items.add(current);
     }
@@ -729,7 +719,8 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
       return const SizedBox.shrink();
     }
 
-    final displaySteps = (!widget.isStreaming && steps.length > 8 && !_showAllSteps)
+    final showAll = _showAllSteps || widget.initiallyExpanded;
+    final displaySteps = (!widget.isStreaming && steps.length > 8 && !showAll)
         ? steps.take(6).toList()
         : steps;
     final hiddenCount = steps.length - displaySteps.length;

@@ -75,7 +75,7 @@ void main() {
       await tester.enterText(find.byType(TextField), 'Premier message');
       await tester.pump(const Duration(milliseconds: 50));
       await tester.tap(find.byIcon(Icons.arrow_forward));
-      await tester.pump(const Duration(milliseconds: 50));
+      await tester.pump(const Duration(milliseconds: 350));
 
       expect(out.any((m) => m['type'] == 'send_prompt' && m['prompt'] == 'Premier message'), isTrue);
       final reqId = out.firstWhere((m) => m['type'] == 'send_prompt')['requestId'] as String;
@@ -87,7 +87,7 @@ void main() {
         'cascadeId': 'c1',
         'data': {
           'events': [
-            {'delta': 'Traitement en cours...'}
+            {'kind': 'text', 'delta': 'Traitement en cours...'}
           ]
         }
       }));
@@ -136,7 +136,7 @@ void main() {
       await tester.enterText(find.byType(TextField), 'Tâche longue');
       await tester.pump(const Duration(milliseconds: 50));
       await tester.tap(find.byIcon(Icons.arrow_forward));
-      await tester.pump(const Duration(milliseconds: 50));
+      await tester.pump(const Duration(milliseconds: 350));
 
       final reqId = out.firstWhere((m) => m['type'] == 'send_prompt')['requestId'] as String;
 
@@ -183,7 +183,7 @@ void main() {
       await tester.enterText(find.byType(TextField), 'Prompt 1');
       await tester.pump(const Duration(milliseconds: 50));
       await tester.tap(find.byIcon(Icons.arrow_forward));
-      await tester.pump(const Duration(milliseconds: 50));
+      await tester.pump(const Duration(milliseconds: 350));
 
       // Prompt 2 en file
       await tester.enterText(find.byType(TextField), 'Prompt 2 avec fote');
@@ -211,7 +211,7 @@ void main() {
       await tester.enterText(find.byType(TextField), 'Prompt 1');
       await tester.pump(const Duration(milliseconds: 50));
       await tester.tap(find.byIcon(Icons.arrow_forward));
-      await tester.pump(const Duration(milliseconds: 50));
+      await tester.pump(const Duration(milliseconds: 350));
 
       final reqId = out.firstWhere((m) => m['type'] == 'send_prompt')['requestId'] as String;
 

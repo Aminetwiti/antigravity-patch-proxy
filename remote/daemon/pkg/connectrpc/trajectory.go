@@ -21,6 +21,7 @@ type TrajectorySummary struct {
 	Archived     bool      `json:"archived,omitempty"` // annotations.archived (field 15→4)
 	Killed       bool      `json:"killed,omitempty"`   // field 23
 	Source       int       `json:"source,omitempty"`   // field 20 (1=CASCADE_CLIENT, 16=SUBAGENT)
+	IsSubagent   bool      `json:"isSubagent,omitempty"`
 }
 
 var (
@@ -94,6 +95,11 @@ func trajectoryFromBlob(blob []byte) TrajectorySummary {
 						if mf.Num == 18 && mf.WireType == 2 {
 							t.ProjectID = string(mf.Bytes)
 						}
+						if mf.Num == 17 && mf.WireType == 2 {
+							// Sous-agent / branche d'exécution subagent Antigravity
+							t.IsSubagent = true
+							t.Source = 16
+						}
 					}
 				}
 			case 3: // timestamp
@@ -108,6 +114,9 @@ func trajectoryFromBlob(blob []byte) TrajectorySummary {
 				}
 			case 20: // source (1=CASCADE_CLIENT, 16=SUBAGENT, 17=CLI, ...)
 				t.Source = int(f.Varint)
+				if t.Source == 16 {
+					t.IsSubagent = true
+				}
 			case 22:
 				t.Status = statusName(int(f.Varint))
 			case 23: // killed
@@ -145,7 +154,7 @@ func trajectoryFromBlob(blob []byte) TrajectorySummary {
 	if t.Status == "" {
 		t.Status = "CASCADE_STATUS_READY"
 	}
-	// Archived / killed override le run status pour que les filtres aval
+	// Archived / killed / subagent override le run status pour que les filtres aval
 	// (daemon + mobile) puissent les exclure uniformément.
 	if t.Archived {
 		t.Status = "CASCADE_STATUS_ARCHIVED"

@@ -967,7 +967,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         builder: (context) => ScheduledTasksScreen(
           tasks: const [],
           api: _api,
-          workspaces: workspaces.isNotEmpty ? workspaces : ['antigravity-add-model-main'],
+          workspaces: workspaces.isNotEmpty ? workspaces : const ['Workspace'],
           onTriggerNow: (id) => _api?.triggerScheduledTask(id),
           onCancelTask: (id) => _api?.cancelScheduledTask(id),
           onToggleTask: (id, enabled) => _api?.toggleScheduledTask(id, enabled),
@@ -1155,7 +1155,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
 
     final activeProjectDisplayName = WorkspacePath.displayName(
       activeWs,
-      fallback: _projects.isNotEmpty ? _projects.first.name : 'antigravity-add-model-main',
+      fallback: _projects.isNotEmpty ? _projects.first.name : 'Workspace',
     );
 
     final chatStream = ChatStreamScreen(

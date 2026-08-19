@@ -193,7 +193,7 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final wsName = _task.workspaceName ?? 'antigravity-add-model-main';
+    final wsName = _task.workspaceName ?? 'Workspace';
 
     return Scaffold(
       backgroundColor: scheme.surface,

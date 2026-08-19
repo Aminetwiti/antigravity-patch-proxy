@@ -530,7 +530,7 @@ func (s *Server) sessionsFromSummariesLocked(jetbox map[string]connectrpc.Jetbox
 
 	items := make([]map[string]interface{}, 0, len(jetbox))
 	for _, sum := range jetbox {
-		if sum.Archived || sum.Killed || sum.Source == 16 {
+		if sum.Archived || sum.Killed || sum.Source == 16 || sum.IsSubagent {
 			continue
 		}
 		if home != "" && isSessionArchived(home, sum.CascadeID) {
@@ -2699,7 +2699,7 @@ func (s *Server) sessionsOutWithLimit(raw []byte, limitPerProject int) interface
 	}
 	var items []sessionWithTime
 	for _, sum := range summaries {
-		if sum.Archived || sum.Killed || sum.Source == 16 {
+		if sum.Archived || sum.Killed || sum.Source == 16 || sum.IsSubagent {
 			continue
 		}
 		if home != "" && isSessionArchived(home, sum.CascadeID) {
@@ -3238,11 +3238,44 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		return
 
 	case "list_running_tasks":
+		cascadeID := msg.CascadeID
+		if cascadeID == "" {
+			cascadeID = s.focusedCascadeID
+		}
+		if cascadeID != "" {
+			s.scanRunningTasksFromTranscript(cascadeID)
+		}
 		s.writeJSON(conn, OutgoingMessage{
 			Type:      "response",
 			RequestID: msg.RequestID,
 			Data: map[string]interface{}{
 				"tasks": s.runningTasks.listTasks(true),
+			},
+		})
+		return
+
+	case "get_task_log":
+		cascadeID := msg.CascadeID
+		if cascadeID == "" {
+			cascadeID = s.focusedCascadeID
+		}
+		taskId := msg.TaskID
+		if taskId == "" {
+			if tid, ok := msg.Data["taskId"].(string); ok && tid != "" {
+				taskId = tid
+			} else if tid, ok := msg.Data["id"].(string); ok && tid != "" {
+				taskId = tid
+			}
+		}
+		logContent, cmd, status := s.getTaskLog(cascadeID, taskId)
+		s.writeJSON(conn, OutgoingMessage{
+			Type:      "response",
+			RequestID: msg.RequestID,
+			Data: map[string]interface{}{
+				"taskId":  taskId,
+				"command": cmd,
+				"status":  status,
+				"log":     logContent,
 			},
 		})
 		return
@@ -4701,7 +4734,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				prompt = p
 			}
 		}
-		wsName := "antigravity-add-model-main"
+		wsName := "Workspace"
 		if msg.Data != nil {
 			if w, ok := msg.Data["workspaceName"].(string); ok && w != "" {
 				wsName = w
@@ -5876,6 +5909,148 @@ func (m *runningTaskManager) killTask(id string) bool {
 	return true
 }
 
+var (
+	reTaskID  = regexp.MustCompile(`(?i)(?:task id:? "?|sender=)(?:[a-zA-Z0-9_-]+/)?(task-[0-9a-zA-Z_-]+)`)
+	reTaskCmd = regexp.MustCompile(`(?i)(?:Task Description|CommandLine):\s*([^\r\n]+)`)
+)
+
+func extractTaskIDFromText(text string) string {
+	m := reTaskID.FindStringSubmatch(text)
+	if len(m) > 1 {
+		return m[1]
+	}
+	return ""
+}
+
+func extractTaskCmdFromText(text string) string {
+	m := reTaskCmd.FindStringSubmatch(text)
+	if len(m) > 1 {
+		return strings.TrimSpace(m[1])
+	}
+	return ""
+}
+
+func findTaskLogPath(cascadeID, taskID string) string {
+	if cascadeID == "" || taskID == "" {
+		return ""
+	}
+	cleanTaskID := taskID
+	if idx := strings.LastIndex(cleanTaskID, "/"); idx >= 0 {
+		cleanTaskID = cleanTaskID[idx+1:]
+	}
+	if !strings.HasSuffix(cleanTaskID, ".log") {
+		cleanTaskID += ".log"
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	candidates := []string{
+		filepath.Join(home, ".gemini", "antigravity", "brain", cascadeID, ".system_generated", "tasks", cleanTaskID),
+		filepath.Join(home, ".gemini", "antigravity-ide", "brain", cascadeID, ".system_generated", "tasks", cleanTaskID),
+		filepath.Join(home, ".gemini", "antigravity", "brain", cascadeID, ".system_generated", "tasks", strings.TrimSuffix(cleanTaskID, ".log")),
+		filepath.Join(home, ".gemini", "antigravity-ide", "brain", cascadeID, ".system_generated", "tasks", strings.TrimSuffix(cleanTaskID, ".log")),
+	}
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+func (s *Server) getTaskLog(cascadeID, taskID string) (string, string, string) {
+	s.runningTasks.mu.RLock()
+	t, ok := s.runningTasks.tasks[taskID]
+	s.runningTasks.mu.RUnlock()
+
+	cmd := ""
+	status := "done"
+	if ok {
+		cmd = t.Command
+		status = t.Status
+	}
+
+	logPath := findTaskLogPath(cascadeID, taskID)
+	if logPath != "" {
+		data, err := os.ReadFile(logPath)
+		if err == nil && len(data) > 0 {
+			return string(data), cmd, status
+		}
+	}
+
+	if ok && t.Output != "" {
+		return t.Output, cmd, status
+	}
+
+	return "", cmd, status
+}
+
+func (s *Server) scanRunningTasksFromTranscript(cascadeID string) {
+	if cascadeID == "" {
+		return
+	}
+	tPath := findTranscriptPath(cascadeID)
+	if tPath == "" {
+		return
+	}
+	f, err := os.Open(tPath)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	activeTasks := make(map[string]string)
+	scanner := bufio.NewScanner(f)
+	buf := make([]byte, 1024*1024)
+	scanner.Buffer(buf, 10*1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var entry struct {
+			Type    string `json:"type"`
+			Status  string `json:"status"`
+			Content string `json:"content"`
+		}
+		if json.Unmarshal(line, &entry) != nil {
+			continue
+		}
+		if strings.Contains(entry.Content, "running as a background task") || strings.Contains(entry.Content, "Tool is running as a background task") {
+			tID := extractTaskIDFromText(entry.Content)
+			tCmd := extractTaskCmdFromText(entry.Content)
+			if tID != "" {
+				if tCmd == "" {
+					tCmd = tID
+				}
+				activeTasks[tID] = tCmd
+			}
+		}
+		if strings.Contains(entry.Content, "finished with result:") || strings.Contains(entry.Content, "The command exited with code") {
+			tID := extractTaskIDFromText(entry.Content)
+			if tID != "" {
+				delete(activeTasks, tID)
+				s.runningTasks.finishTask(tID, "completed")
+			}
+		}
+	}
+
+	for tID, tCmd := range activeTasks {
+		logP := findTaskLogPath(cascadeID, tID)
+		if logP != "" {
+			if data, err := os.ReadFile(logP); err == nil {
+				if strings.Contains(string(data), "The command exited with code") {
+					continue
+				}
+			}
+		}
+		s.runningTasks.startTask(tID, tCmd, cascadeID, nil)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Terminal PTY (P3)
 //
@@ -6360,14 +6535,42 @@ func (s *Server) runLiveTurnStreamer(ctx context.Context, cascadeID, requestID s
 
 								// 2d. Texte de l'assistant (PLANNER_RESPONSE)
 								if entry.Type == "PLANNER_RESPONSE" && len(entry.Content) > 0 {
-									events = append(events, map[string]interface{}{
-										"kind":  "text",
-										"delta": entry.Content,
-									})
-									*hasTextDelivered = true
-									deliveredTextLen += len(entry.Content)
+									chunk := entry.Content
+									if deliveredTextLen > 0 && deliveredTextLen < len(entry.Content) {
+										chunk = entry.Content[deliveredTextLen:]
+									} else if *hasTextDelivered && deliveredTextLen >= len(entry.Content) {
+										chunk = ""
+									}
+									if len(chunk) > 0 {
+										events = append(events, map[string]interface{}{
+											"kind":  "text",
+											"delta": chunk,
+										})
+										*hasTextDelivered = true
+										deliveredTextLen = len(entry.Content)
+									}
 									if len(entry.ToolCalls) == 0 && entry.Status == "DONE" {
 										turnCompleted = true
+									}
+								}
+
+								// 2e. Background tasks detection
+								if len(entry.Content) > 0 {
+									if strings.Contains(entry.Content, "running as a background task") || strings.Contains(entry.Content, "Tool is running as a background task") {
+										tID := extractTaskIDFromText(entry.Content)
+										tCmd := extractTaskCmdFromText(entry.Content)
+										if tID != "" {
+											if tCmd == "" {
+												tCmd = tID
+											}
+											s.runningTasks.startTask(tID, tCmd, cascadeID, nil)
+										}
+									}
+									if strings.Contains(entry.Content, "finished with result:") || strings.Contains(entry.Content, "The command exited with code") {
+										tID := extractTaskIDFromText(entry.Content)
+										if tID != "" {
+											s.runningTasks.finishTask(tID, "completed")
+										}
 									}
 								}
 

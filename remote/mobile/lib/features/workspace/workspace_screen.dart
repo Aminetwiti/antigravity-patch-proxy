@@ -86,10 +86,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     super.dispose();
   }
 
-  // Basename réel du workspace (antigravity-add-model-main, pas le path complet).
+  // Basename réel du workspace (nom du dossier, pas le path complet).
   String get _workspaceLabel {
     final p = widget.workspacePath.trim();
-    if (p.isEmpty || p == '.') return 'antigravity-add-model-main';
+    if (p.isEmpty || p == '.') return 'Workspace';
     final cleaned = p.endsWith('/') ? p.substring(0, p.length - 1) : p;
     final i = cleaned.lastIndexOf(RegExp(r'[/\\]'));
     return i >= 0 ? cleaned.substring(i + 1) : cleaned;
@@ -897,16 +897,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           shrinkWrap: true,
           padding: EdgeInsets.zero,
           children: [
-            _buildWorkspaceItem('antigravity-add-model-main', true, scheme),
-            _buildWorkspaceItem('www - Copie', false, scheme),
-            _buildWorkspaceItem('sols-pro-vision', false, scheme),
-            _buildWorkspaceItem(
-              r'c:\Users\amine\Desktop\ooredoo\posweb',
-              false,
-              scheme,
-            ),
-            _buildWorkspaceItem(r'c:\Users\amine\OmniRoute', false, scheme),
-            _buildWorkspaceItem('mo7i', false, scheme),
+            _buildWorkspaceItem(_workspaceLabel, true, scheme),
             Divider(color: scheme.outlineVariant, height: 1),
             _buildWorkspaceActionItem(
               Icons.create_new_folder_outlined,

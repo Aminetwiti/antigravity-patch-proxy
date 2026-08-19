@@ -4131,27 +4131,72 @@ const remoteConsole = $('#remoteConsole') as HTMLTextAreaElement;
 
 let isDaemonRunning = false;
 
+async function syncDaemonUiStatus(port?: number) {
+  try {
+    const currentPort = port || parseInt(remotePort?.value || '8090');
+    const token = remoteAuthToken?.value?.trim() || '11';
+    const status = await window.ag?.getDaemonStatus?.(currentPort);
+    if (status && status.running) {
+      isDaemonRunning = true;
+      if (startRemoteBtn) {
+        startRemoteBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg> Stop Remote Server';
+        startRemoteBtn.classList.add('btn-danger');
+        startRemoteBtn.removeAttribute('disabled');
+      }
+      if (status.publicUrl && status.publicUrl.length > 0) {
+        const cleanHost = status.publicUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+        const wsUrl = `wss://${cleanHost}/ws?token=${token}`;
+        const dataUrl = await window.ag.generateQr(wsUrl);
+        if (remoteQrImage) remoteQrImage.src = dataUrl;
+        if (remoteQrPlaceholder) remoteQrPlaceholder.style.display = 'none';
+        if (remoteQrContainer) remoteQrContainer.style.display = 'block';
+        if (remoteStatusText) remoteStatusText.innerHTML = `Tunnel ready: <b>${wsUrl}</b>`;
+      } else {
+        const ip = await window.ag.getLocalIp();
+        const wsUrl = `ws://${ip}:${status.port || currentPort}/ws?token=${token}`;
+        const dataUrl = await window.ag.generateQr(wsUrl);
+        if (remoteQrImage) remoteQrImage.src = dataUrl;
+        if (remoteQrPlaceholder) remoteQrPlaceholder.style.display = 'none';
+        if (remoteQrContainer) remoteQrContainer.style.display = 'block';
+        if (remoteStatusText) {
+          remoteStatusText.innerHTML = `Server listening on <b>${ip}:${status.port || currentPort}</b> (Local Network)`;
+        }
+      }
+    }
+  } catch { /* ignore */ }
+}
+
 if (window.ag && window.ag.onDaemonLog) {
   window.ag.onDaemonLog((data: string) => {
     if (remoteConsole) {
       remoteConsole.value += data;
       remoteConsole.scrollTop = remoteConsole.scrollHeight;
 
-      // Extract tunnel URL (Pinggy or Cloudflare) from logs to generate QR Code dynamically!
-      // Looking for wss://...
-      const match = data.match(/wss:\/\/[^\s]+/);
-      if (match && remoteQrImage) {
-        const tunnelUrl = match[0];
-        window.ag.generateQr(tunnelUrl).then((dataUrl) => {
+      // Extract tunnel URL (Pinggy or Cloudflare or wss://) from logs to generate QR Code dynamically!
+      let wsUrl = '';
+      const wssMatch = data.match(/wss:\/\/[^\s"'<>|┌┐└┘│]+/);
+      if (wssMatch) {
+        wsUrl = wssMatch[0];
+      } else {
+        const httpsMatch = data.match(/https:\/\/([a-zA-Z0-9.-]+\.trycloudflare\.com|[a-zA-Z0-9.-]+\.pinggy\.link)/);
+        if (httpsMatch) {
+          const host = httpsMatch[1];
+          const token = remoteAuthToken?.value?.trim() || '11';
+          wsUrl = `wss://${host}/ws?token=${token}`;
+        }
+      }
+
+      if (wsUrl && remoteQrImage) {
+        window.ag.generateQr(wsUrl).then((dataUrl) => {
           remoteQrImage.src = dataUrl;
           if (remoteQrPlaceholder) remoteQrPlaceholder.style.display = 'none';
           if (remoteQrContainer) remoteQrContainer.style.display = 'block';
-          if (remoteStatusText) remoteStatusText.innerHTML = `Tunnel ready: <b>${tunnelUrl}</b>`;
+          if (remoteStatusText) remoteStatusText.innerHTML = `Tunnel ready: <b>${wsUrl}</b>`;
         });
       } else if (data.includes('Échec') || data.includes('Tunnel non démarré') || data.includes('introuvable')) {
-          if (remoteStatusText) remoteStatusText.innerHTML = `<span style="color: var(--bs-danger);">Tunnel Failed. Check console.</span>`;
-          if (remoteQrPlaceholder) remoteQrPlaceholder.style.display = 'flex';
-          if (remoteQrContainer) remoteQrContainer.style.display = 'none';
+        if (remoteStatusText) remoteStatusText.innerHTML = `<span style="color: var(--bs-danger);">Tunnel Failed. Check console.</span>`;
+        if (remoteQrPlaceholder) remoteQrPlaceholder.style.display = 'flex';
+        if (remoteQrContainer) remoteQrContainer.style.display = 'none';
       }
     }
   });
@@ -4177,14 +4222,17 @@ if (startRemoteBtn) {
       if (remoteConsole) remoteConsole.value = ''; // clear console
       
       const port = parseInt(remotePort?.value || '8090');
-      const tunnel = remoteTunnel?.value || 'none';
-      let token = remoteAuthToken?.value || '';
+      const tunnel = remoteTunnel?.value || 'cloudflare';
+      let token = remoteAuthToken?.value?.trim() || '11';
+      if (remoteAuthToken && (!remoteAuthToken.value || remoteAuthToken.value.trim().length === 0)) {
+        remoteAuthToken.value = '11';
+      }
 
+      const res = await window.ag.startDaemon({ port, tunnel, token });
 
-      await window.ag.startDaemon({ port, tunnel, token });
-
-      // If tunnel is "none", we generate a local IP QR code immediately
-      if (tunnel === 'none') {
+      if (res && res.alreadyRunning) {
+        await syncDaemonUiStatus(port);
+      } else if (tunnel === 'none') {
         const ip = await window.ag.getLocalIp();
         const wsUrl = `ws://${ip}:${port}/ws?token=${token}`;
         const dataUrl = await window.ag.generateQr(wsUrl);
@@ -4192,7 +4240,7 @@ if (startRemoteBtn) {
         if (remoteQrPlaceholder) remoteQrPlaceholder.style.display = 'none';
         if (remoteQrContainer) remoteQrContainer.style.display = 'block';
         if (remoteStatusText) {
-            remoteStatusText.innerHTML = `Server listening on <b>${ip}:${port}</b> (Local Network)`;
+          remoteStatusText.innerHTML = `Server listening on <b>${ip}:${port}</b> (Local Network)`;
         }
       }
 
@@ -4206,3 +4254,6 @@ if (startRemoteBtn) {
     }
   });
 }
+
+// Auto-détection de l'état du daemon au chargement
+void syncDaemonUiStatus();

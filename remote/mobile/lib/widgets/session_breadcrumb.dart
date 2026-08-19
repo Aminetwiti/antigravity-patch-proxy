@@ -29,7 +29,7 @@ class SessionBreadcrumb extends StatelessWidget {
 
     final displayProject = projectName.trim().isNotEmpty
         ? projectName.trim()
-        : 'antigravity-add-model-main';
+        : 'Workspace';
 
     final displayTitle = sessionTitle.trim().isNotEmpty
         ? sessionTitle.trim()

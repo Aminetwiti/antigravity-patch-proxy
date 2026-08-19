@@ -251,6 +251,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       status: status,
       outputStream: ctrl.stream,
       onStop: () => _handleStopBackgroundTask(taskNameOrId),
+      api: widget.api,
+      cascadeId: widget.activeSessionId,
     );
   }
 
@@ -260,6 +262,32 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       _runningBackgroundTasks.remove(taskNameOrId);
       _taskStatuses[taskNameOrId] = 'killed';
     });
+  }
+
+  Future<void> _refreshRunningTasks() async {
+    if (widget.api == null) return;
+    try {
+      final tasks = await widget.api!.listRunningTasks();
+      if (mounted) {
+        final active = <String>[];
+        for (final t in tasks) {
+          final id = t['id']?.toString() ?? '';
+          final cmd = t['command']?.toString() ?? id;
+          final status = t['status']?.toString() ?? 'running';
+          if (status == 'running' && cmd.isNotEmpty) {
+            active.add(cmd);
+            _taskStatuses[cmd] = 'running';
+            _taskStatuses[id] = 'running';
+          }
+        }
+        if (active.length != _runningBackgroundTasks.length || !active.every((e) => _runningBackgroundTasks.contains(e))) {
+          setState(() {
+            _runningBackgroundTasks.clear();
+            _runningBackgroundTasks.addAll(active);
+          });
+        }
+      }
+    } catch (_) {}
   }
 
   // ── Sync & Catch-up status ─────────────────────────────────────────
@@ -375,6 +403,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       if (mounted) _refreshQuotaSummary();
     });
     _loadPersistedDraft();
+    _refreshRunningTasks();
   }
 
   /// P6 : recharge le brouillon persisté de la session courante dans le cache
@@ -774,6 +803,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       }
       _loadHistoryIfEmpty();
       _loadPersistedDraft();
+      _refreshRunningTasks();
       _scrollToBottomSettled();
     }
     if (oldWidget.api != widget.api) {
@@ -1104,24 +1134,29 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         _onStreamStarted(targetSessionId);
         if (isActiveSession && _showJumpToBottom) _hiddenNewCount++;
 
-        if (buf.isNotEmpty && buf.last.sender == 'assistant') {
+        final msgId = 'ext-$requestId';
+        _streamRequestToMessageId[thKey] = msgId;
+        final existingIdx = buf.indexWhere((m) => m.id == msgId);
+        if (existingIdx >= 0) {
+          buf[existingIdx] = buf[existingIdx].copyWith(
+            isStreaming: true,
+            modelLabel: msg['data']?['model']?.toString() ?? buf[existingIdx].modelLabel,
+          );
+        } else if (buf.isNotEmpty && buf.last.isStreaming && buf.last.sender == 'assistant') {
           _streamRequestToMessageId[thKey] = buf.last.id;
-          buf.last = buf.last.copyWith(isStreaming: true);
         } else {
-          final msgId = 'ext-$requestId';
-          _streamRequestToMessageId[thKey] = msgId;
-          if (!buf.any((m) => m.id == msgId)) {
-            buf.add(ChatMessage(
-              id: msgId,
-              sender: 'assistant',
-              text: '',
-              timestamp: _timestamp(),
-              isStreaming: true,
-            ));
-          }
+          buf.add(ChatMessage(
+            id: msgId,
+            sender: 'assistant',
+            text: '',
+            timestamp: _timestamp(),
+            isStreaming: true,
+            modelLabel: msg['data']?['model']?.toString() ?? 'Gemini 3.7 Flash',
+          ));
         }
         if (isActiveSession && mounted) {
           setState(() {});
+          _scrollToBottom();
         }
       } else if (type == 'sync_catchup') {
         setState(() => _isSyncing = true);
@@ -1192,12 +1227,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           if (lastStreamingIdx >= 0) {
             idx = lastStreamingIdx;
             _streamRequestToMessageId[thKey] = buf[idx].id;
-          } else if (buf.isNotEmpty && buf.last.sender == 'assistant') {
-            idx = buf.length - 1;
-            _streamRequestToMessageId[thKey] = buf.last.id;
-          } else if (textDelta.isNotEmpty || thoughtDelta.isNotEmpty) {
+          } else {
             _onStreamStarted(targetSessionId);
-            final msgId = 'ext-$requestId';
+            final msgId = targetId;
             _streamRequestToMessageId[thKey] = msgId;
             buf.add(ChatMessage(
               id: msgId,
@@ -1205,19 +1237,26 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               text: '',
               timestamp: _timestamp(),
               isStreaming: true,
+              modelLabel: msg['data']?['model']?.toString() ?? 'Gemini 3.7 Flash',
             ));
             idx = buf.length - 1;
           }
         }
         if (idx >= 0) {
           final current = buf[idx];
-          _externalThoughts[thKey] =
-              (_externalThoughts[thKey] ?? '') + thoughtDelta;
+          if (thoughtDelta.isNotEmpty) {
+            final prev = _externalThoughts[thKey] ?? '';
+            _externalThoughts[thKey] = prev.isEmpty
+                ? thoughtDelta
+                : (prev.endsWith('\n') ? '$prev$thoughtDelta' : '$prev\n$thoughtDelta');
+          }
+          final newText = textDelta.isNotEmpty ? current.text + textDelta : current.text;
+          final newThought = (_externalThoughts[thKey] != null && _externalThoughts[thKey]!.isNotEmpty)
+              ? _externalThoughts[thKey]!.trim()
+              : current.thought;
           buf[idx] = current.copyWith(
-            text: current.text + textDelta,
-            thought: _externalThoughts[thKey]!.isNotEmpty
-                ? _externalThoughts[thKey]!.trim()
-                : current.thought,
+            text: newText,
+            thought: newThought,
             isStreaming: true,
           );
         }
@@ -1500,7 +1539,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           final idx = buf.indexWhere((m) => m.id == assistantId);
           if (idx >= 0) {
             final current = buf[idx];
-            thoughtBuffer.write(thoughtDelta);
+            if (thoughtDelta.isNotEmpty) {
+              if (thoughtBuffer.isNotEmpty && !thoughtBuffer.toString().endsWith('\n')) {
+                thoughtBuffer.writeln();
+              }
+              thoughtBuffer.writeln(thoughtDelta.trim());
+            }
             buf[idx] = current.copyWith(
               text: current.text + textDelta,
               thought: thoughtBuffer.isNotEmpty
@@ -1912,62 +1956,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       },
     );
 
-    if (_messages.isEmpty && _currentApproval == null && _currentSessionQuestions.isEmpty) {
-      return Column(
-        children: [
-          connectivityBanner,
-          breadcrumb,
-          if (!hasKeyboard) ...[
-            _buildSyncStatusBadge(scheme),
-            _buildQuotaBadge(scheme),
-          ],
-          Expanded(
-            child: Center(
-              child: SingleChildScrollView(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _WelcomeEmptyState(
-                        projectName: widget.activeProjectName,
-                        onSuggestionTap: (text) => _handleSendMessage(text, queued: false),
-                        onSelectProject: (widget.projects != null && widget.projects!.length > 1)
-                            ? () => _showProjectSelector(context)
-                            : null,
-                      ),
-                      const SizedBox(height: 32),
-                      if ((_sessionMessageQueues[widget.activeSessionId]?.isNotEmpty ?? false))
-                        QueuedMessagesCard(
-                          queuedMessages: _sessionMessageQueues[widget.activeSessionId]!,
-                          onSendNow: _handleQueueSendNow,
-                          onEdit: _handleQueueEdit,
-                          onDelete: _handleQueueDelete,
-                        ),
-                      ChatInputBar(
-                        onSend: _handleSendMessage,
-                        isConnected: isConnected,
-                        hasActiveStream: _activeStreamCount > 0,
-                        onStop: _handleStopGeneration,
-                        api: widget.api,
-                        cascadeId: widget.activeSessionId,
-                        initialText: currentDraft,
-                        onDraftChanged: setDraft,
-                      ),
-                      const SizedBox(height: 48),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-
     return Column(
       children: [
         connectivityBanner,
+        breadcrumb,
         SessionTopTabs(
           activeTab: _currentTab,
           onTabChanged: (tab) {
@@ -2078,7 +2070,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             onEdit: _handleQueueEdit,
             onDelete: _handleQueueDelete,
           ),
-        if (_hasCurrentActiveStream)
+        if (_hasCurrentActiveStream && !hasKeyboard)
           _buildLiveAgentActivityDock(scheme),
         ChatInputBar(
           onSend: _handleSendMessage,
@@ -2096,99 +2088,125 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
   Widget _buildLiveAgentActivityDock(ColorScheme scheme) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF131722) : scheme.primaryContainer.withValues(alpha: 0.35),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: isDark ? const Color(0xFF232D42) : scheme.primary.withValues(alpha: 0.3),
-          width: 1,
+    return Semantics(
+      container: true,
+      label: 'Agent en cours d\'exécution. Toucher pour suivre les actions en direct.',
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF131722) : scheme.primaryContainer.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isDark ? const Color(0xFF232D42) : scheme.primary.withValues(alpha: 0.3),
+            width: 1,
+          ),
         ),
-      ),
-      child: InkWell(
-        onTap: () {
-          _scrollToBottomSettled();
-          HapticFeedback.selectionClick();
-        },
-        borderRadius: BorderRadius.circular(8),
         child: Row(
           children: [
-            Container(
-              width: 8,
-              height: 8,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppColors.accentBlueBright,
-                boxShadow: [
-                  BoxShadow(
-                    color: Color(0x6638BDF8),
-                    blurRadius: 5,
-                    spreadRadius: 1.5,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 9),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Agent en cours d\'exécution…',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? AppColors.accentBlueBright : scheme.primary,
-                      letterSpacing: -0.1,
-                    ),
-                  ),
-                  Text(
-                    'Toucher pour suivre les actions en direct',
-                    style: TextStyle(
-                      fontSize: 10.5,
-                      color: isDark ? const Color(0xFF8B8D98) : scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 6),
-            GestureDetector(
-              onTap: () {
-                HapticFeedback.heavyImpact();
-                _handleStopGeneration();
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF381519) : scheme.errorContainer,
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(
-                    color: isDark ? const Color(0xFF7F1D1D) : scheme.error,
-                    width: 0.8,
+              child: InkWell(
+                onTap: () {
+                  _scrollToBottomSettled();
+                  HapticFeedback.selectionClick();
+                },
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 1),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: AppColors.accentBlueBright,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Color(0x6638BDF8),
+                              blurRadius: 5,
+                              spreadRadius: 1.5,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 9),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Agent en cours d\'exécution…',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: isDark ? AppColors.accentBlueBright : scheme.primary,
+                                letterSpacing: -0.1,
+                              ),
+                            ),
+                            Text(
+                              'Toucher pour suivre les actions en direct',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                color: isDark ? const Color(0xFF8B8D98) : scheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.stop_rounded,
-                      size: 12,
-                      color: isDark ? const Color(0xFFFCA5A5) : scheme.onErrorContainer,
-                    ),
-                    const SizedBox(width: 3),
-                    Text(
-                      'Arrêter',
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? const Color(0xFFFCA5A5) : scheme.onErrorContainer,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Tooltip(
+              message: 'Arrêter la génération',
+              child: Semantics(
+                button: true,
+                label: 'Arrêter la génération de l\'agent',
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () {
+                      HapticFeedback.heavyImpact();
+                      _handleStopGeneration();
+                    },
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF381519) : scheme.errorContainer,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: isDark ? const Color(0xFF7F1D1D) : scheme.error,
+                          width: 0.8,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.stop_rounded,
+                            size: 13,
+                            color: isDark ? const Color(0xFFFCA5A5) : scheme.onErrorContainer,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Arrêter',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? const Color(0xFFFCA5A5) : scheme.onErrorContainer,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -2261,6 +2279,27 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         final hiddenCount = _hiddenOlderCount;
         final isDark = Theme.of(context).brightness == Brightness.dark;
         final scheme = Theme.of(context).colorScheme;
+
+        if (visibleList.isEmpty && _currentApproval == null && _currentSessionQuestions.isEmpty) {
+          return Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _WelcomeEmptyState(
+                    projectName: widget.activeProjectName,
+                    onSuggestionTap: (text) => _handleSendMessage(text, queued: false),
+                    onSelectProject: (widget.projects != null && widget.projects!.length > 1)
+                        ? () => _showProjectSelector(context)
+                        : null,
+                  ),
+                  const SizedBox(height: 32),
+                ],
+              ),
+            ),
+          );
+        }
 
         final headerWidgets = <Widget>[
           if (hiddenCount > 0)
@@ -2570,18 +2609,25 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               .toList(),
       onOpenFileDiff: (file) {
         _openUnifiedDiffViewer(
+          filePath: file.path,
           fileName: file.fileName,
           diffContent: file.diffContent,
         );
       },
       onSplitDiffView: () {
+        final firstPath = _modifiedFiles.firstOrNull;
+        final firstName = firstPath?.split(RegExp(r'[/\\]')).last;
         _openUnifiedDiffViewer(
-          fileName: _modifiedFiles.isNotEmpty ? _modifiedFiles.first : null,
+          filePath: firstPath,
+          fileName: firstName,
         );
       },
       onExpandAll: () {
+        final firstPath = _modifiedFiles.firstOrNull;
+        final firstName = firstPath?.split(RegExp(r'[/\\]')).last;
         _openUnifiedDiffViewer(
-          fileName: _modifiedFiles.isNotEmpty ? _modifiedFiles.first : null,
+          filePath: firstPath,
+          fileName: firstName,
         );
       },
       onAcceptAll: () => _confirmBulkAction(
@@ -2613,17 +2659,92 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     );
   }
 
-  Future<void> _openUnifiedDiffViewer({String? fileName, String? diffContent}) async {
+  String _buildUnifiedDiffFromStrings(String path, String orig, String mod) {
+    if (orig == mod) {
+      final lines = mod.split('\n');
+      final buf = StringBuffer();
+      buf.writeln('--- a/$path');
+      buf.writeln('+++ b/$path');
+      buf.writeln('@@ -1,${lines.length} +1,${lines.length} @@');
+      for (final l in lines) {
+        buf.writeln(' $l');
+      }
+      return buf.toString();
+    }
+    final origLines = orig.isEmpty ? <String>[] : orig.split('\n');
+    final modLines = mod.isEmpty ? <String>[] : mod.split('\n');
+    final buf = StringBuffer();
+    buf.writeln('--- a/$path');
+    buf.writeln('+++ b/$path');
+    buf.writeln('@@ -1,${origLines.length} +1,${modLines.length} @@');
+    for (final l in origLines) {
+      if (!modLines.contains(l)) {
+        buf.writeln('-$l');
+      }
+    }
+    for (final l in modLines) {
+      if (!origLines.contains(l)) {
+        buf.writeln('+$l');
+      } else {
+        buf.writeln(' $l');
+      }
+    }
+    return buf.toString();
+  }
+
+  Future<void> _openUnifiedDiffViewer({
+    String? filePath,
+    String? fileName,
+    String? diffContent,
+  }) async {
+    final effectivePath = filePath ?? fileName;
+    final effectiveName = fileName ?? (effectivePath != null ? effectivePath.split('/').last.split('\\').last : 'Code Changes');
     String diff = diffContent ?? '';
-    if (diff.isEmpty && fileName != null && widget.api != null) {
+
+    // 1. Tenter la récupération via get_turn_diff du daemon
+    if (diff.isEmpty && widget.api != null && widget.activeSessionId.isNotEmpty) {
       try {
-        final res = await widget.api!.readFile(fileName);
+        final res = await widget.api!.getTurnDiff(cascadeId: widget.activeSessionId);
+        final fileDiffs = res['fileDiffs'];
+        if (fileDiffs is List) {
+          for (final fd in fileDiffs) {
+            if (fd is Map) {
+              final p = (fd['path'] as String? ?? '').replaceAll('\\', '/');
+              final target = (effectivePath ?? '').replaceAll('\\', '/');
+              if (target.isNotEmpty && (p == target || p.endsWith(target) || target.endsWith(p))) {
+                final d = fd['diff'];
+                if (d is Map) {
+                  final orig = d['originalContents'] as String? ?? '';
+                  final mod = d['modifiedContents'] as String? ?? '';
+                  if (orig.isNotEmpty || mod.isNotEmpty) {
+                    diff = _buildUnifiedDiffFromStrings(effectiveName, orig, mod);
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 2. Tenter la lecture directe du fichier avec le workspacePath
+    if (diff.isEmpty && effectivePath != null && widget.api != null) {
+      try {
+        final ws = widget.workspacePath?.isNotEmpty == true
+            ? widget.workspacePath
+            : (widget.activeProjectName.isNotEmpty ? widget.activeProjectName : null);
+        final res = await widget.api!.readFile(
+          effectivePath,
+          workspacePath: ws,
+          cascadeId: widget.activeSessionId.isNotEmpty ? widget.activeSessionId : null,
+        );
         final fileContent = res['content'] as String? ?? '';
         if (fileContent.isNotEmpty) {
           final lines = fileContent.split('\n');
           final buf = StringBuffer();
-          buf.writeln('--- a/$fileName');
-          buf.writeln('+++ b/$fileName');
+          buf.writeln('--- a/$effectiveName');
+          buf.writeln('+++ b/$effectiveName');
           buf.writeln('@@ -1,${lines.length} +1,${lines.length} @@');
           for (final l in lines) {
             buf.writeln(' $l');
@@ -2632,27 +2753,25 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         }
       } catch (_) {}
     }
-    if (diff.isEmpty) {
-      diff = '''--- a/${fileName ?? 'workspace/file.dart'}
-+++ b/${fileName ?? 'workspace/file.dart'}
-@@ -1,1 +1,1 @@
- // Aucun diff disponible pour ce fichier
-''';
-    }
 
     if (!mounted) return;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => UnifiedDiffViewer(
-        diffContent: diff,
-        fileName: fileName,
-        onClose: () => Navigator.of(ctx).pop(),
-        onSendReview: (comments) {
-          Navigator.of(ctx).pop();
-          _handleSendMessage('Revue de code sur ${fileName ?? "les modifications"} :\n$comments', queued: false);
-        },
+      builder: (ctx) => FractionallySizedBox(
+        heightFactor: 0.90,
+        child: UnifiedDiffViewer(
+          diffContent: diff,
+          fileName: effectiveName,
+          filePath: effectivePath,
+          onClose: () => Navigator.of(ctx).pop(),
+          onSendReview: (comments) {
+            Navigator.of(ctx).pop();
+            _handleSendMessage('Revue de code sur $effectiveName :\n$comments', queued: false);
+          },
+        ),
       ),
     );
   }

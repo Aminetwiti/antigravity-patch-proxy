@@ -94,25 +94,27 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Nouveau Git Worktree', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Crée une copie isolée du dépôt pour exécuter des tâches ou des agents en parallèle sans conflits.',
-              style: TextStyle(fontSize: 12),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: branchCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Nom de la branche / worktree',
-                hintText: 'feat-refactor-auth',
-                border: OutlineInputBorder(),
-                isDense: true,
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Crée une copie isolée du dépôt pour exécuter des tâches ou des agents en parallèle sans conflits.',
+                style: TextStyle(fontSize: 12),
               ),
-            ),
-          ],
+              const SizedBox(height: 12),
+              TextField(
+                controller: branchCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Nom de la branche / worktree',
+                  hintText: 'feat-refactor-auth',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Annuler')),

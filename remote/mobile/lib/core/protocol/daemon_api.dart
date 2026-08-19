@@ -519,6 +519,16 @@ class DaemonApi {
     if (cascadeId != null) 'cascadeId': cascadeId,
   });
 
+  /// C9 — Récupère le diff unifié et structuré d'un tour (ou de la session si stepIndex=-1)
+  Future<Map<String, dynamic>> getTurnDiff({
+    required String cascadeId,
+    int stepIndex = -1,
+  }) => rpc('get_turn_diff', {
+    'conversationId': cascadeId,
+    'cascadeId': cascadeId,
+    if (stepIndex >= 0) 'stepIndex': stepIndex,
+  });
+
   Future<Map<String, dynamic>> getContext({String? cascadeId, String? workspacePath}) =>
       rpc('get_context', {
         if (cascadeId != null && cascadeId.isNotEmpty) 'cascadeId': cascadeId,
@@ -1112,6 +1122,22 @@ class DaemonApi {
       return res['success'] == true || (res['data'] is Map && res['data']['success'] == true);
     } catch (_) {
       return false;
+    }
+  }
+
+  /// Récupère le contenu des logs d'une tâche d'arrière-plan (get_task_log).
+  Future<Map<String, dynamic>> getTaskLog(String cascadeId, String taskId) async {
+    try {
+      final res = await rpc('get_task_log', {
+        'cascadeId': cascadeId,
+        'taskId': taskId,
+      });
+      if (res['data'] is Map) {
+        return Map<String, dynamic>.from(res['data'] as Map);
+      }
+      return res;
+    } catch (_) {
+      return {};
     }
   }
 

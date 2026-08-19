@@ -49,6 +49,7 @@ export const DOCTOR_IPC_CHANNELS = {
   NETWORK_GENERATE_QR: 'ag:network:generateQr',
   NETWORK_START_DAEMON: 'ag:network:startDaemon',
   NETWORK_STOP_DAEMON: 'ag:network:stopDaemon',
+  NETWORK_GET_DAEMON_STATUS: 'ag:network:getDaemonStatus',
   NETWORK_DAEMON_LOG: 'ag:network:daemonLog',
 
   // Antigravity Lifecycle

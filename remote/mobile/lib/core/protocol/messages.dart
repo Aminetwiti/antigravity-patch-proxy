@@ -63,9 +63,11 @@ class CascadeSession {
         st.contains('DELET') ||
         st.contains('TRASH') ||
         st.contains('KILLED') ||
+        st.contains('SUBAGENT') ||
         st == 'CASCADE_STATUS_ARCHIVED' ||
         st == 'CASCADE_STATUS_DELETED' ||
-        st == 'CASCADE_STATUS_KILLED') {
+        st == 'CASCADE_STATUS_KILLED' ||
+        st == 'CASCADE_STATUS_SUBAGENT') {
       return false;
     }
     final lowerTitle = title.toLowerCase();

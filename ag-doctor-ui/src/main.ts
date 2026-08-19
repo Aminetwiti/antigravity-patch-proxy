@@ -628,19 +628,32 @@ function killOrphanDaemonProcesses(): void {
   } catch { /* ignore */ }
 }
 
+ipcMain.handle(DOCTOR_IPC_CHANNELS.NETWORK_GET_DAEMON_STATUS, async (_event, customPort?: number) => {
+  const port = customPort || EnvironmentConfig.daemonPort || 8090;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/health/diagnostic`, { signal: AbortSignal.timeout(1200) });
+    if (res.ok) {
+      const data: any = await res.json();
+      return { running: true, port, ...data };
+    }
+  } catch { /* offline */ }
+  return { running: false, port };
+});
+
 ipcMain.handle(DOCTOR_IPC_CHANNELS.NETWORK_START_DAEMON, async (event, options: { port: number; tunnel: string; token: string }) => {
-  const port = options.port || EnvironmentConfig.daemonPort;
+  const port = options.port || EnvironmentConfig.daemonPort || 8090;
+  const token = (options.token && options.token.trim().length > 0) ? options.token.trim() : '11';
 
   // Vérifie si un daemon est déjà actif et répond sur ce port (évite conflits et double-lancement)
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/health/diagnostic`, { signal: AbortSignal.timeout(1000) });
+    const res = await fetch(`http://127.0.0.1:${port}/health/diagnostic`, { signal: AbortSignal.timeout(1200) });
     if (res.ok) {
       const data: any = await res.json();
       event.sender.send(DOCTOR_IPC_CHANNELS.NETWORK_DAEMON_LOG, `> Daemon déjà actif et opérationnel sur le port ${port} (PID ${data.pid || 'actif'})\n`);
       if (data.publicUrl) {
         event.sender.send(DOCTOR_IPC_CHANNELS.NETWORK_DAEMON_LOG, `🚀 Tunnel public actif : ${data.publicUrl}\n`);
       }
-      return;
+      return { success: true, alreadyRunning: true, port, token, ...data };
     }
   } catch { /* Daemon non démarré sur ce port, lancement normal */ }
 
@@ -653,16 +666,18 @@ ipcMain.handle(DOCTOR_IPC_CHANNELS.NETWORK_START_DAEMON, async (event, options: 
 
   const daemonExePath = path.join(__dirname, '..', '..', 'remote', 'daemon', 'daemon.exe');
   const args = ['--port', port.toString()];
-  if (options.tunnel) {
+  if (options.tunnel && options.tunnel !== 'none') {
     args.push('--tunnel', options.tunnel);
   }
-  if (options.token) {
-    args.push('--auth-token', options.token);
-  }
+  args.push('--auth-token', token);
 
   event.sender.send(DOCTOR_IPC_CHANNELS.NETWORK_DAEMON_LOG, `> Lancement de daemon.exe ${args.join(' ')}\n`);
 
-  daemonProcess = spawn(daemonExePath, args, { cwd: path.dirname(daemonExePath) });
+  daemonProcess = spawn(daemonExePath, args, {
+    cwd: path.dirname(daemonExePath),
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
 
   daemonProcess.stdout?.on('data', (data: Buffer) => {
     event.sender.send(DOCTOR_IPC_CHANNELS.NETWORK_DAEMON_LOG, data.toString());
@@ -676,6 +691,8 @@ ipcMain.handle(DOCTOR_IPC_CHANNELS.NETWORK_START_DAEMON, async (event, options: 
     event.sender.send(DOCTOR_IPC_CHANNELS.NETWORK_DAEMON_LOG, `[Daemon terminé avec le code ${code}]\n`);
     daemonProcess = null;
   });
+
+  return { success: true, alreadyRunning: false, port, token };
 });
 
 ipcMain.handle(DOCTOR_IPC_CHANNELS.NETWORK_STOP_DAEMON, async (event) => {
@@ -685,6 +702,7 @@ ipcMain.handle(DOCTOR_IPC_CHANNELS.NETWORK_STOP_DAEMON, async (event) => {
   }
   killOrphanDaemonProcesses();
   event.sender.send(DOCTOR_IPC_CHANNELS.NETWORK_DAEMON_LOG, `> Daemon arrêté manuellement.\n`);
+  return { success: true };
 });
 
 ipcMain.handle(DOCTOR_IPC_CHANNELS.OPEN_EXTERNAL, async (_event, url: string) => {

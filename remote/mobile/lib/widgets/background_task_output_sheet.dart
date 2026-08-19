@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile/theme/app_colors.dart';
+import '../core/protocol/daemon_api.dart';
 
 /// Modal / BottomSheet affichant la sortie d'une tâche de fond en temps réel
 /// inspiré de l'interface "Background Task Output" d'Antigravity IDE.
@@ -11,6 +13,8 @@ class BackgroundTaskOutputSheet extends StatefulWidget {
   final String status;
   final Stream<String>? outputStream;
   final VoidCallback? onStop;
+  final DaemonApi? api;
+  final String? cascadeId;
 
   const BackgroundTaskOutputSheet({
     super.key,
@@ -20,6 +24,8 @@ class BackgroundTaskOutputSheet extends StatefulWidget {
     this.status = 'running',
     this.outputStream,
     this.onStop,
+    this.api,
+    this.cascadeId,
   });
 
   static Future<void> show(
@@ -30,6 +36,8 @@ class BackgroundTaskOutputSheet extends StatefulWidget {
     String status = 'running',
     Stream<String>? outputStream,
     VoidCallback? onStop,
+    DaemonApi? api,
+    String? cascadeId,
   }) {
     return showModalBottomSheet(
       context: context,
@@ -42,6 +50,8 @@ class BackgroundTaskOutputSheet extends StatefulWidget {
         status: status,
         outputStream: outputStream,
         onStop: onStop,
+        api: api,
+        cascadeId: cascadeId,
       ),
     );
   }
@@ -53,12 +63,19 @@ class BackgroundTaskOutputSheet extends StatefulWidget {
 class _BackgroundTaskOutputSheetState extends State<BackgroundTaskOutputSheet> {
   final ScrollController _scrollController = ScrollController();
   late StringBuffer _outputBuffer;
+  late String _currentStatus;
+  Timer? _pollTimer;
   final bool _autoScroll = true;
 
   @override
   void initState() {
     super.initState();
+    _currentStatus = widget.status;
     _outputBuffer = StringBuffer(widget.initialOutput);
+    _fetchLog();
+    if (_currentStatus == 'running') {
+      _pollTimer = Timer.periodic(const Duration(milliseconds: 1200), (_) => _fetchLog());
+    }
     widget.outputStream?.listen((delta) {
       if (mounted) {
         setState(() {
@@ -79,8 +96,46 @@ class _BackgroundTaskOutputSheetState extends State<BackgroundTaskOutputSheet> {
     });
   }
 
+  Future<void> _fetchLog() async {
+    if (widget.api != null && widget.cascadeId != null && widget.cascadeId!.isNotEmpty) {
+      final res = await widget.api!.getTaskLog(widget.cascadeId!, widget.taskId);
+      if (mounted && res.isNotEmpty) {
+        final log = res['log']?.toString() ?? '';
+        final st = res['status']?.toString() ?? _currentStatus;
+        bool changed = false;
+        if (log.isNotEmpty && log != _outputBuffer.toString()) {
+          _outputBuffer.clear();
+          _outputBuffer.write(log);
+          changed = true;
+        }
+        if (st != _currentStatus) {
+          _currentStatus = st;
+          changed = true;
+          if (_currentStatus != 'running') {
+            _pollTimer?.cancel();
+          }
+        }
+        if (changed) {
+          setState(() {});
+          if (_autoScroll) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (_scrollController.hasClients) {
+                _scrollController.animateTo(
+                  _scrollController.position.maxScrollExtent,
+                  duration: const Duration(milliseconds: 150),
+                  curve: Curves.easeOut,
+                );
+              }
+            });
+          }
+        }
+      }
+    }
+  }
+
   @override
   void dispose() {
+    _pollTimer?.cancel();
     _scrollController.dispose();
     super.dispose();
   }
@@ -88,7 +143,7 @@ class _BackgroundTaskOutputSheetState extends State<BackgroundTaskOutputSheet> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final isRunning = widget.status == 'running';
+    final isRunning = _currentStatus == 'running';
     final outputText = _outputBuffer.toString();
     final lines = outputText.isEmpty ? <String>['(En attente de la sortie de la commande...)'] : outputText.split('\n');
 

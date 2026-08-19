@@ -28,6 +28,7 @@ type JetboxSummary struct {
 	UpdatedAt    time.Time `json:"updatedAt,omitempty"`
 	StepCount    int       `json:"stepCount,omitempty"`
 	Source       int       `json:"source,omitempty"` // 16 = SUBAGENT
+	IsSubagent   bool      `json:"isSubagent,omitempty"`
 	Archived     bool      `json:"archived,omitempty"`
 	Killed       bool      `json:"killed,omitempty"`
 	Waiting      bool      `json:"waiting,omitempty"`
@@ -52,7 +53,9 @@ type jetboxSummaryJSON struct {
 		Archived bool `json:"archived"`
 	} `json:"annotations"`
 	TrajectoryMetadata *struct {
-		ProjectID string `json:"projectId"`
+		ProjectID        string `json:"projectId"`
+		SubagentMetadata any    `json:"subagentMetadata"`
+		WorktreeMetadata any    `json:"worktreeMetadata"`
 	} `json:"trajectoryMetadata"`
 	Workspaces []struct {
 		WorkspaceFolderAbsoluteURI string `json:"workspaceFolderAbsoluteUri"`
@@ -92,11 +95,18 @@ func (j jetboxSummaryJSON) toSummary(id string) JetboxSummary {
 		Killed:       j.Killed,
 		Waiting:      len(j.WaitingSteps) > 0 || j.NotFullyIdle,
 	}
+	if s.Source == 16 {
+		s.IsSubagent = true
+	}
 	if j.Annotations != nil && j.Annotations.Archived {
 		s.Archived = true
 	}
 	if j.TrajectoryMetadata != nil {
 		s.ProjectID = j.TrajectoryMetadata.ProjectID
+		if j.TrajectoryMetadata.SubagentMetadata != nil || j.TrajectoryMetadata.WorktreeMetadata != nil {
+			s.IsSubagent = true
+			s.Source = 16
+		}
 	}
 	if len(j.Workspaces) > 0 {
 		s.Workspace = j.Workspaces[0].WorkspaceFolderAbsoluteURI

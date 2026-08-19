@@ -111,5 +111,67 @@ Task 424 finished
       expect(find.text('Task 424 finished'), findsOneWidget);
       expect(find.text('for 19m'), findsOneWidget);
     });
+
+    testWidgets('Renders full granular steps (Analyzed #L, Viewed #L, Edited +X -Y, Ran command, Subagent, Search)', (tester) async {
+      const detailedThought = '''
+Viewed execution_progress_view.dart #L151-300
+Analyzed history.go #L800-930
+Edited stream_parser.dart +25 -5
+Explored ExecutionProgressView
+Search *.dart
+Subagent Codebase Researcher
+Ran flutter test test/widgets/execution_progress_view_test.dart
+```console
+> flutter test test/widgets/execution_progress_view_test.dart
+00:02 +2: All tests passed!
+```
+Task 838 finished
+''';
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(),
+          home: const Scaffold(
+            body: SingleChildScrollView(
+              child: ExecutionProgressView(
+                messageId: 'msg-detailed-steps',
+                thoughtText: detailedThought,
+                isStreaming: false,
+                initiallyExpanded: true,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pump();
+
+      // File Analysis with Line Ranges
+      expect(find.text('execution_progress_view.dart'), findsOneWidget);
+      expect(find.text('#L151-300'), findsOneWidget);
+      expect(find.text('history.go'), findsOneWidget);
+      expect(find.text('#L800-930'), findsOneWidget);
+
+      // File Edit with diffs
+      expect(find.text('stream_parser.dart'), findsOneWidget);
+      expect(find.text('+25'), findsOneWidget);
+      expect(find.text('-5'), findsOneWidget);
+
+      // Exploration & Search
+      expect(find.text('ExecutionProgressView'), findsOneWidget);
+      expect(find.text('*.dart'), findsOneWidget);
+
+      // Subagent
+      expect(find.text('Codebase Researcher'), findsOneWidget);
+
+      // Command & Task Finished
+      expect(find.text('flutter test test/widgets/execution_progress_view_test.dart'), findsOneWidget);
+      expect(find.text('Task 838 finished'), findsOneWidget);
+
+      // Tap on command to expand console output
+      await tester.tap(find.text('flutter test test/widgets/execution_progress_view_test.dart'));
+      await tester.pump();
+      expect(find.textContaining('00:02 +2: All tests passed!'), findsOneWidget);
+    });
   });
 }

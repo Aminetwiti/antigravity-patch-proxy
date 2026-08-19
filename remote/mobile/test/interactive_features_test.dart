@@ -217,5 +217,61 @@ void main() {
       expect(sentReview, contains('Code Review Feedback for `main.go`'));
       expect(sentReview, contains('Add unit tests for this function'));
     });
+
+    testWidgets('UnifiedDiffViewer displays clean empty state when diff is empty or fallback', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              height: 400,
+              child: UnifiedDiffViewer(
+                diffContent: '// Aucun diff disponible pour ce fichier',
+                fileName: 'empty.dart',
+                filePath: 'lib/src/empty.dart',
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('empty.dart'), findsOneWidget);
+      expect(find.text('lib/src/empty.dart'), findsOneWidget);
+      expect(find.text('Aucune modification détaillée'), findsOneWidget);
+      // Ensure no fake line numbers are rendered
+      expect(find.text('1'), findsNothing);
+    });
+
+    testWidgets('UnifiedDiffViewer toggles word wrap mode on button tap', (tester) async {
+      const diff = '''
+--- a/config.dart
++++ b/config.dart
+@@ -1,1 +1,1 @@
++final longString = "This is a very long string that should wrap or scroll properly";
+''';
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              height: 400,
+              child: UnifiedDiffViewer(
+                diffContent: diff,
+                fileName: 'config.dart',
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('config.dart'), findsOneWidget);
+      expect(find.byIcon(Icons.wrap_text_rounded), findsOneWidget);
+
+      // Tap wrap toggle button
+      await tester.tap(find.byIcon(Icons.wrap_text_rounded));
+      await tester.pumpAndSettle();
+
+      // Icon should change to format_align_left_rounded
+      expect(find.byIcon(Icons.format_align_left_rounded), findsOneWidget);
+    });
   });
 }

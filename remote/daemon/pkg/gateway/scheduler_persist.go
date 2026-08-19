@@ -115,7 +115,7 @@ func (s *Server) syncSidecarsLocked() {
 				ID:             name,
 				Name:           displayName,
 				Prompt:         prompt,
-				WorkspaceName:  "antigravity-add-model-main",
+				WorkspaceName:  "Workspace",
 				CronExpression: cronExpr,
 				IsDaemon:       true,
 				IterationsRun:  0,

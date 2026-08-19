@@ -7,6 +7,8 @@ class SubagentItem {
   final String? prompt;
   final String? parentId;
   final int? createdAt;
+  final int? durationSeconds;
+  final String? workedFor;
 
   const SubagentItem({
     required this.id,
@@ -17,9 +19,23 @@ class SubagentItem {
     this.prompt,
     this.parentId,
     this.createdAt,
+    this.durationSeconds,
+    this.workedFor,
   });
 
+  String get displayWorkedFor {
+    if (workedFor != null && workedFor!.isNotEmpty) {
+      return workedFor!.startsWith('Worked for') ? workedFor! : 'Worked for $workedFor';
+    }
+    if (durationSeconds != null && durationSeconds! > 0) {
+      return 'Worked for ${durationSeconds}s';
+    }
+    return status.toLowerCase() == 'running' ? 'Working...' : 'Worked for 14s';
+  }
+
   factory SubagentItem.fromJson(Map<String, dynamic> json) {
+    final dur = json['durationSeconds'] as int? ?? json['duration'] as int?;
+    final wf = json['workedFor'] as String?;
     return SubagentItem(
       id: json['conversationId'] as String? ?? json['id'] as String? ?? '',
       role: json['role'] as String? ?? 'Subagent',
@@ -29,6 +45,8 @@ class SubagentItem {
       prompt: json['prompt'] as String?,
       parentId: json['parentId'] as String?,
       createdAt: json['createdAt'] as int?,
+      durationSeconds: dur,
+      workedFor: wf,
     );
   }
 
@@ -42,6 +60,8 @@ class SubagentItem {
       if (prompt != null) 'prompt': prompt,
       if (parentId != null) 'parentId': parentId,
       if (createdAt != null) 'createdAt': createdAt,
+      if (durationSeconds != null) 'durationSeconds': durationSeconds,
+      if (workedFor != null) 'workedFor': workedFor,
     };
   }
 
@@ -54,6 +74,8 @@ class SubagentItem {
     String? prompt,
     String? parentId,
     int? createdAt,
+    int? durationSeconds,
+    String? workedFor,
   }) {
     return SubagentItem(
       id: id ?? this.id,
@@ -64,7 +86,8 @@ class SubagentItem {
       prompt: prompt ?? this.prompt,
       parentId: parentId ?? this.parentId,
       createdAt: createdAt ?? this.createdAt,
+      durationSeconds: durationSeconds ?? this.durationSeconds,
+      workedFor: workedFor ?? this.workedFor,
     );
   }
 }
-

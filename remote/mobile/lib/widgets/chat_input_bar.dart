@@ -174,6 +174,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   void _onTextChanged() {
+    _isSending = false;
     final text = _controller.text;
     // P6 : notifier le parent uniquement si le contenu textuel a réellement changé
     // (évite d'écrire sur disque à chaque déplacement de curseur ou sélection).
@@ -267,11 +268,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
     setState(() {
       _attachedFileName = null;
       _attachedFileContent = null;
-    });
-
-    _sendDebounceTimer?.cancel();
-    _sendDebounceTimer = Timer(const Duration(milliseconds: 300), () {
-      if (mounted) _isSending = false;
+      _isSending = false;
     });
   }
 
@@ -352,28 +349,30 @@ class _ChatInputBarState extends State<ChatInputBar> {
               color: scheme.onSurface,
             ),
           ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameCtrl,
-                style: TextStyle(fontSize: 13, color: scheme.onSurface),
-                decoration: const InputDecoration(
-                  labelText: 'Nom du fichier (ex: data.json, doc.md)',
-                  isDense: true,
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameCtrl,
+                  style: TextStyle(fontSize: 13, color: scheme.onSurface),
+                  decoration: const InputDecoration(
+                    labelText: 'Nom du fichier (ex: data.json, doc.md)',
+                    isDense: true,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: contentCtrl,
-                maxLines: 6,
-                style: TextStyle(fontSize: 13, color: scheme.onSurface),
-                decoration: const InputDecoration(
-                  labelText: 'Contenu',
-                  isDense: true,
+                const SizedBox(height: 12),
+                TextField(
+                  controller: contentCtrl,
+                  maxLines: 6,
+                  style: TextStyle(fontSize: 13, color: scheme.onSurface),
+                  decoration: const InputDecoration(
+                    labelText: 'Contenu',
+                    isDense: true,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -424,37 +423,39 @@ class _ChatInputBarState extends State<ChatInputBar> {
               color: scheme.onSurface,
             ),
           ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameCtrl,
-                style: TextStyle(fontSize: 13, color: scheme.onSurface),
-                decoration: const InputDecoration(
-                  labelText: 'Nom du fichier (ex: photo.png, img.jpg)',
-                  isDense: true,
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameCtrl,
+                  style: TextStyle(fontSize: 13, color: scheme.onSurface),
+                  decoration: const InputDecoration(
+                    labelText: 'Nom du fichier (ex: photo.png, img.jpg)',
+                    isDense: true,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: mimeCtrl,
-                style: TextStyle(fontSize: 13, color: scheme.onSurface),
-                decoration: const InputDecoration(
-                  labelText: 'Type MIME (ex: image/png, image/jpeg)',
-                  isDense: true,
+                const SizedBox(height: 12),
+                TextField(
+                  controller: mimeCtrl,
+                  style: TextStyle(fontSize: 13, color: scheme.onSurface),
+                  decoration: const InputDecoration(
+                    labelText: 'Type MIME (ex: image/png, image/jpeg)',
+                    isDense: true,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: base64Ctrl,
-                maxLines: 4,
-                style: TextStyle(fontSize: 13, color: scheme.onSurface),
-                decoration: const InputDecoration(
-                  labelText: 'Données Base64',
-                  isDense: true,
+                const SizedBox(height: 12),
+                TextField(
+                  controller: base64Ctrl,
+                  maxLines: 4,
+                  style: TextStyle(fontSize: 13, color: scheme.onSurface),
+                  decoration: const InputDecoration(
+                    labelText: 'Données Base64',
+                    isDense: true,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -537,11 +538,13 @@ class _ChatInputBarState extends State<ChatInputBar> {
   void _showQueueSettings(BuildContext context) {
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder:
-          (ctx) => Padding(
+          (ctx) => SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -937,14 +940,15 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   ),
                 ),
               ),
-            Padding(
-              padding: EdgeInsets.only(bottom: hasKeyboard ? 3 : 6),
-              child: ActionPillsBar(
-                onActionSelected: (cmd) {
-                  _insertTextAtCursor(cmd);
-                },
+            if (!hasKeyboard)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: ActionPillsBar(
+                  onActionSelected: (cmd) {
+                    _insertTextAtCursor(cmd);
+                  },
+                ),
               ),
-            ),
             Container(
               padding: EdgeInsets.symmetric(
                 horizontal: 12,

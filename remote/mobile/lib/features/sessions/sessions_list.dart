@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/protocol/messages.dart';
 import '../../core/protocol/workspace_path.dart';
 import '../../core/protocol/daemon_api.dart';
+import '../../widgets/project_selector_bottom_sheet.dart';
 import 'package:mobile/theme/app_colors.dart';
 import 'display_options.dart';
 
@@ -150,76 +151,15 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
       return;
     }
 
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainer,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.workspaces_outlined, size: 18, color: scheme.primary),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Sélectionner un projet de travail',
-                      style: TextStyle(
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w600,
-                        color: scheme.onSurface,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                ...projs.map((p) => ListTile(
-                      leading: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: scheme.primary.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Icon(Icons.folder_outlined, size: 18, color: scheme.primary),
-                      ),
-                      title: Text(
-                        p.name,
-                        style: TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w600,
-                          color: scheme.onSurface,
-                        ),
-                      ),
-                      subtitle: Text(
-                        p.path,
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          color: scheme.onSurfaceVariant,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      onTap: () {
-                        Navigator.of(ctx).pop();
-                        if (Navigator.of(context).canPop()) {
-                          Navigator.of(context).pop();
-                        }
-                        _callNewConversation(p);
-                      },
-                    )),
-              ],
-            ),
-          ),
-        );
+    ProjectSelectorBottomSheet.show(
+      context,
+      projects: projs,
+      activeProjectPath: null,
+      onSelectProject: (p) {
+        if (Navigator.of(context).canPop()) {
+          Navigator.of(context).pop();
+        }
+        _callNewConversation(p);
       },
     );
   }
@@ -943,7 +883,7 @@ class _SessionRowItemState extends State<_SessionRowItem> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
       ),
       builder: (ctx) => SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(vertical: 12),
           child: Column(
             mainAxisSize: MainAxisSize.min,

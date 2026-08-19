@@ -149,7 +149,7 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => _NewScheduledTaskModal(
-        workspaces: widget.workspaces ?? ['antigravity-add-model-main'],
+        workspaces: widget.workspaces ?? const ['Workspace'],
         onAdd: (newTask) {
           setState(() {
             _localTasks.insert(0, newTask);
@@ -599,7 +599,7 @@ class _NewScheduledTaskModalState extends State<_NewScheduledTaskModal> {
   @override
   void initState() {
     super.initState();
-    _selectedProject = widget.workspaces.isNotEmpty ? widget.workspaces.first : 'antigravity-add-model-main';
+    _selectedProject = widget.workspaces.isNotEmpty ? widget.workspaces.first : 'Workspace';
   }
 
   @override

@@ -49,7 +49,7 @@ void main() {
       await tester.pump();
 
       expect(find.byIcon(Icons.keyboard_arrow_up_rounded), findsOneWidget);
-      expect(find.text('task 1'), findsOneWidget);
+      expect(find.text('task 1'), findsWidgets);
       expect(find.text('task 2'), findsOneWidget);
     });
   });

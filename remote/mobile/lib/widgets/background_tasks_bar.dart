@@ -75,82 +75,76 @@ class _BackgroundTasksBarState extends State<BackgroundTasksBar> with SingleTick
             },
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Spinner animé
-                  RotationTransition(
-                    turns: _spinController,
-                    child: const Icon(
-                      Icons.sync,
-                      size: 14,
-                      color: AppColors.accentBlue,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-
-                  // Titre "1 task running"
-                  Text(
-                    taskLabel,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? AppColors.inkPrimary : const Color(0xFFE6EDF3),
-                    ),
-                  ),
-
-                  if (count == 1) ...[
-                    const SizedBox(width: 8),
-                    Text(
-                      '•',
-                      style: TextStyle(
-                        color: isDark ? AppColors.inkMuted : const Color(0xFF8B949E),
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        widget.runningTasks.first,
+                  // Ligne 1 : "1 task running" + chevron
+                  Row(
+                    children: [
+                      Text(
+                        taskLabel,
                         style: TextStyle(
-                          fontSize: 11.5,
-                          fontFamily: 'monospace',
-                          color: isDark ? AppColors.inkMuted : const Color(0xFF8B949E),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? AppColors.inkPrimary : const Color(0xFFE6EDF3),
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
-                  ] else
-                    const Spacer(),
-
-                  // Action stop rapide pour tâche unique
-                  if (count == 1 && widget.onStopTask != null) ...[
-                    const SizedBox(width: 6),
-                    GestureDetector(
-                      onTap: () {
-                        HapticFeedback.mediumImpact();
-                        widget.onStopTask!(widget.runningTasks.first);
-                      },
-                      child: const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                        child: Text(
-                          'Stop',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.danger,
+                      const Spacer(),
+                      Icon(
+                        _expanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+                        size: 16,
+                        color: isDark ? AppColors.inkMuted : const Color(0xFF8B949E),
+                      ),
+                    ],
+                  ),
+                  if (!_expanded) ...[
+                    const SizedBox(height: 6),
+                    // Ligne 2 : Spinner + commande
+                    Row(
+                      children: [
+                        RotationTransition(
+                          turns: _spinController,
+                          child: const Icon(
+                            Icons.sync,
+                            size: 13,
+                            color: AppColors.accentBlue,
                           ),
                         ),
-                      ),
-                    ),
-                  ],
-
-                  if (count > 1) ...[
-                    const SizedBox(width: 6),
-                    Icon(
-                      _expanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
-                      size: 16,
-                      color: isDark ? AppColors.inkMuted : const Color(0xFF8B949E),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            widget.runningTasks.first,
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontFamily: 'monospace',
+                              color: isDark ? AppColors.inkMuted : const Color(0xFF8B949E),
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (count == 1 && widget.onStopTask != null) ...[
+                          const SizedBox(width: 6),
+                          GestureDetector(
+                            onTap: () {
+                              HapticFeedback.mediumImpact();
+                              widget.onStopTask!(widget.runningTasks.first);
+                            },
+                            child: const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                              child: Text(
+                                'Stop',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.danger,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ],
                 ],

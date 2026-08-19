@@ -70,9 +70,11 @@ const api = {
   // Network Utils
   getLocalIp: (): Promise<string> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.NETWORK_GET_LOCAL_IP),
   generateQr: (text: string): Promise<string> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.NETWORK_GENERATE_QR, text),
-  startDaemon: (options: { port: number; tunnel: string; token: string }): Promise<void> => 
+  startDaemon: (options: { port: number; tunnel: string; token: string }): Promise<any> => 
     ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.NETWORK_START_DAEMON, options),
-  stopDaemon: (): Promise<void> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.NETWORK_STOP_DAEMON),
+  stopDaemon: (): Promise<any> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.NETWORK_STOP_DAEMON),
+  getDaemonStatus: (port?: number): Promise<any> =>
+    ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.NETWORK_GET_DAEMON_STATUS, port),
   onDaemonLog: (callback: (data: string) => void) => {
     const handler = (_event: any, data: string) => callback(data);
     ipcRenderer.on(DOCTOR_IPC_CHANNELS.NETWORK_DAEMON_LOG, handler);

@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../features/code_review/models/code_comment.dart';
-import '../features/code_review/widgets/add_comment_dialog.dart';
-import '../theme/app_colors.dart';
+import 'package:mobile/features/code_review/models/code_comment.dart';
+import 'package:mobile/features/code_review/widgets/add_comment_dialog.dart';
 
 /// Unifié et interactif : affiche un diff de code et permet d'annoter
 /// des lignes spécifiques pour envoyer une revue de code groupée à l'agent.
-/// Inspiré du Code Review de AG2R.
+/// Inspiré du Code Review Antigravity 2.0.
 class UnifiedDiffViewer extends StatefulWidget {
   final String diffContent;
   final String? fileName;
+  final String? filePath;
   final VoidCallback? onClose;
   final Function(String reviewComments)? onSendReview;
   final ValueChanged<CodeComment>? onCommentAdded;
@@ -18,6 +18,7 @@ class UnifiedDiffViewer extends StatefulWidget {
     super.key,
     required this.diffContent,
     this.fileName,
+    this.filePath,
     this.onClose,
     this.onSendReview,
     this.onCommentAdded,
@@ -32,6 +33,8 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
   int _deletions = 0;
   List<_DiffLine> _lines = [];
   final Map<int, String> _annotations = {}; // lineIndex -> comment
+  bool _wrapLines = true;
+  bool _hasRealDiff = true;
 
   @override
   void initState() {
@@ -54,6 +57,17 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
 
     int oldLineNum = 0;
     int newLineNum = 0;
+
+    final trimmed = widget.diffContent.trim();
+    if (trimmed.isEmpty || trimmed.contains('// Aucun diff disponible pour ce fichier')) {
+      setState(() {
+        _additions = 0;
+        _deletions = 0;
+        _lines = [];
+        _hasRealDiff = false;
+      });
+      return;
+    }
 
     final rawLines = widget.diffContent.split('\n');
     for (final raw in rawLines) {
@@ -81,7 +95,7 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
           content: raw.substring(1),
           oldLine: oldLineNum++,
         ));
-      } else if (raw.startsWith('---') || raw.startsWith('+++') || raw.startsWith('diff --git')) {
+      } else if (raw.startsWith('---') || raw.startsWith('+++') || raw.startsWith('diff --git') || raw.startsWith('index ')) {
         parsed.add(_DiffLine(
           type: _DiffLineType.meta,
           content: raw,
@@ -100,6 +114,7 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
       _additions = adds;
       _deletions = dels;
       _lines = parsed;
+      _hasRealDiff = parsed.isNotEmpty;
     });
   }
 
@@ -108,13 +123,14 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
     HapticFeedback.selectionClick();
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Diff copied to clipboard'),
+        content: Text('Diff copié dans le presse-papiers'),
         duration: Duration(seconds: 2),
       ),
     );
   }
 
   void _addAnnotation(int lineIndex) {
+    if (lineIndex < 0 || lineIndex >= _lines.length) return;
     final line = _lines[lineIndex];
     final ctrl = TextEditingController(text: _annotations[lineIndex] ?? '');
 
@@ -136,7 +152,7 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(
-                line.content.trim(),
+                line.content.trim().isEmpty ? '(ligne vide)' : line.content.trim(),
                 style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
@@ -175,7 +191,7 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
                 setState(() => _annotations[lineIndex] = text);
                 widget.onCommentAdded?.call(CodeComment(
                   id: 'comment_${DateTime.now().millisecondsSinceEpoch}_$lineIndex',
-                  filePath: widget.fileName ?? 'code',
+                  filePath: widget.filePath ?? widget.fileName ?? 'code',
                   snippet: line.content.trim(),
                   commentText: text,
                 ));
@@ -195,11 +211,14 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
     if (_annotations.isEmpty || widget.onSendReview == null) return;
 
     final buffer = StringBuffer();
-    buffer.writeln('Code Review Feedback for `${widget.fileName ?? "files"}`:');
+    final targetName = widget.fileName ?? widget.filePath ?? "files";
+    buffer.writeln('Code Review Feedback for `$targetName`:');
     _annotations.forEach((lineIdx, comment) {
-      final line = _lines[lineIdx];
-      final lineNum = line.newLine ?? line.oldLine ?? (lineIdx + 1);
-      buffer.writeln('- Line $lineNum (`${line.content.trim()}`): $comment');
+      if (lineIdx < _lines.length) {
+        final line = _lines[lineIdx];
+        final lineNum = line.newLine ?? line.oldLine ?? (lineIdx + 1);
+        buffer.writeln('- Line $lineNum (`${line.content.trim()}`): $comment');
+      }
     });
 
     widget.onSendReview!(buffer.toString());
@@ -207,194 +226,374 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
     setState(() => _annotations.clear());
   }
 
+  IconData _iconForName(String name) {
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.dart')) return Icons.flutter_dash_outlined;
+    if (lower.endsWith('.go')) return Icons.code_rounded;
+    if (lower.endsWith('.json') || lower.endsWith('.yaml') || lower.endsWith('.yml') || lower.endsWith('.toml')) {
+      return Icons.settings_suggest_outlined;
+    }
+    if (lower.endsWith('.md') || lower.endsWith('.txt')) return Icons.article_outlined;
+    if (lower.endsWith('.sh') || lower.endsWith('.bat') || lower.endsWith('.ps1')) return Icons.terminal_rounded;
+    if (lower.endsWith('.gitignore') || lower.startsWith('.git')) return Icons.alt_route_rounded;
+    if (lower.endsWith('.js') || lower.endsWith('.ts') || lower.endsWith('.tsx') || lower.endsWith('.jsx')) {
+      return Icons.javascript_rounded;
+    }
+    return Icons.insert_drive_file_outlined;
+  }
+
+  Color _colorForName(String name) {
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.dart')) return const Color(0xFF29B6F6);
+    if (lower.endsWith('.go')) return const Color(0xFF00ADD8);
+    if (lower.endsWith('.json') || lower.endsWith('.yaml') || lower.endsWith('.yml') || lower.endsWith('.toml')) {
+      return const Color(0xFFEAB308);
+    }
+    if (lower.endsWith('.md')) return const Color(0xFFA855F7);
+    if (lower.endsWith('.sh') || lower.endsWith('.bat')) return const Color(0xFF22C55E);
+    if (lower.endsWith('.gitignore')) return const Color(0xFFF43F5E);
+    if (lower.endsWith('.ts') || lower.endsWith('.tsx')) return const Color(0xFF3178C6);
+    if (lower.endsWith('.js') || lower.endsWith('.jsx')) return const Color(0xFFF7DF1E);
+    return const Color(0xFF9E9FA9);
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Container(
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: scheme.outlineVariant),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Header
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainer,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(11)),
-              border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.difference_outlined, size: 16, color: scheme.onSurfaceVariant),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    widget.fileName ?? 'Code Changes',
-                    style: TextStyle(
-                      color: scheme.onSurface,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      fontFamily: 'monospace',
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: scheme.primary.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    '+$_additions',
-                    style: TextStyle(
-                      color: scheme.primary,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: scheme.error.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    '-$_deletions',
-                    style: TextStyle(
-                      color: scheme.error,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton(
-                  icon: Icon(Icons.copy_rounded, size: 16, color: scheme.outline),
-                  onPressed: _copyDiff,
-                  tooltip: 'Copy Diff',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                ),
-                if (widget.onClose != null) ...[
-                  const SizedBox(width: 10),
-                  IconButton(
-                    icon: Icon(Icons.close_rounded, size: 16, color: scheme.outline),
-                    onPressed: widget.onClose,
-                    tooltip: 'Close',
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                  ),
-                ],
-              ],
-            ),
-          ),
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final displayName = widget.fileName ?? 'Code Changes';
+    final subPath = widget.filePath != null && widget.filePath != widget.fileName ? widget.filePath! : '';
 
-          // Diff content list
-          Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: SizedBox(
-                width: 700,
-                child: ListView.builder(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  itemCount: _lines.length,
-                  itemBuilder: (context, index) {
-                    final line = _lines[index];
-                    final hasComment = _annotations.containsKey(index);
-                    return InkWell(
-                      onTap: () => _addAnnotation(index),
-                      onLongPress: () {
-                        showDialog(
-                          context: context,
-                          builder: (ctx) => AddCommentDialog(
-                            filePath: widget.fileName ?? 'code',
-                            selectedSnippet: line.content.trim(),
-                            lineNumber: line.newLine ?? line.oldLine ?? (index + 1),
-                            initialComment: _annotations[index],
-                            onDelete: () {
-                              setState(() => _annotations.remove(index));
-                            },
-                            onCommentAdded: (c) {
-                              setState(() => _annotations[index] = c.commentText);
-                              widget.onCommentAdded?.call(c);
-                            },
-                          ),
-                        );
-                      },
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _buildLineRow(line, hasComment, scheme),
-                          if (hasComment)
-                            Container(
-                              margin: const EdgeInsets.only(left: 80, right: 16, bottom: 4),
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: scheme.primary.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: scheme.primary.withValues(alpha: 0.3)),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(Icons.comment_outlined, size: 14, color: scheme.primary),
-                                  const SizedBox(width: 6),
-                                  Expanded(
-                                    child: Text(
-                                      _annotations[index]!,
-                                      style: TextStyle(
-                                        color: scheme.primary,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                        ],
-                      ),
-                    );
-                  },
+    return SafeArea(
+      top: false,
+      bottom: true,
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF13151A) : scheme.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          border: Border.all(color: isDark ? const Color(0xFF272A30) : scheme.outlineVariant),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.5 : 0.15),
+              blurRadius: 16,
+              offset: const Offset(0, -4),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Drag handle pill
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 8, bottom: 6),
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF3B3E47) : scheme.outlineVariant,
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
             ),
-          ),
 
-          // Bottom Review Queue bar
-          if (_annotations.isNotEmpty && widget.onSendReview != null)
+            // Header
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              padding: const EdgeInsets.fromLTRB(14, 4, 12, 10),
               decoration: BoxDecoration(
-                color: scheme.surfaceContainer,
-                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(11)),
-                border: Border(top: BorderSide(color: scheme.outlineVariant)),
+                border: Border(
+                  bottom: BorderSide(
+                    color: isDark ? const Color(0xFF23262D) : scheme.outlineVariant,
+                  ),
+                ),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.rate_review_outlined, size: 16, color: scheme.primary),
-                  const SizedBox(width: 8),
-                  Text(
-                    '${_annotations.length} note(s) de revue',
-                    style: TextStyle(
-                      color: scheme.onSurface,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: _colorForName(displayName).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(
+                      _iconForName(displayName),
+                      size: 17,
+                      color: _colorForName(displayName),
                     ),
                   ),
-                  const Spacer(),
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.send_rounded, size: 14),
-                    label: const Text('Envoyer à l\'Agent', style: TextStyle(fontSize: 12)),
-                    onPressed: _sendReviewQueue,
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          displayName,
+                          style: TextStyle(
+                            color: scheme.onSurface,
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.2,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (subPath.isNotEmpty)
+                          Text(
+                            subPath,
+                            style: TextStyle(
+                              color: isDark ? const Color(0xFF7E808A) : scheme.onSurfaceVariant,
+                              fontSize: 11,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+
+                  // Additions / Deletions pills
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF22C55E).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      '+$_additions',
+                      style: const TextStyle(
+                        color: Color(0xFF22C55E),
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEF4444).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      '-$_deletions',
+                      style: const TextStyle(
+                        color: Color(0xFFEF4444),
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+
+                  // Toggle Wrap lines
+                  IconButton(
+                    icon: Icon(
+                      _wrapLines ? Icons.wrap_text_rounded : Icons.format_align_left_rounded,
+                      size: 18,
+                      color: _wrapLines ? scheme.primary : scheme.onSurfaceVariant,
+                    ),
+                    onPressed: () {
+                      HapticFeedback.selectionClick();
+                      setState(() => _wrapLines = !_wrapLines);
+                    },
+                    tooltip: _wrapLines ? 'Désactiver le retour à la ligne' : 'Activer le retour à la ligne',
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  ),
+
+                  // Copy diff
+                  IconButton(
+                    icon: Icon(Icons.copy_rounded, size: 16, color: scheme.onSurfaceVariant),
+                    onPressed: _copyDiff,
+                    tooltip: 'Copier le diff',
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  ),
+
+                  if (widget.onClose != null) ...[
+                    IconButton(
+                      icon: Icon(Icons.close_rounded, size: 18, color: scheme.onSurfaceVariant),
+                      onPressed: widget.onClose,
+                      tooltip: 'Fermer',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+
+            // Diff content or Empty State
+            Expanded(
+              child: !_hasRealDiff || _lines.isEmpty
+                  ? _buildEmptyState(context, isDark, scheme)
+                  : _wrapLines
+                      ? ListView.builder(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          itemCount: _lines.length,
+                          itemBuilder: (context, index) => _buildDiffItem(index, scheme),
+                        )
+                      : LayoutBuilder(
+                          builder: (context, constraints) {
+                            return SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: SizedBox(
+                                width: 800,
+                                height: constraints.maxHeight,
+                                child: ListView.builder(
+                                  padding: const EdgeInsets.symmetric(vertical: 4),
+                                  itemCount: _lines.length,
+                                  itemBuilder: (context, index) => _buildDiffItem(index, scheme),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+            ),
+
+            // Bottom Review Queue bar
+            if (_annotations.isNotEmpty && widget.onSendReview != null)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainer,
+                  border: Border(
+                    top: BorderSide(
+                      color: isDark ? const Color(0xFF272A30) : scheme.outlineVariant,
+                    ),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.rate_review_outlined, size: 16, color: scheme.primary),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${_annotations.length} note(s) de revue',
+                      style: TextStyle(
+                        color: scheme.onSurface,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const Spacer(),
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.send_rounded, size: 14),
+                      label: const Text('Envoyer à l\'Agent', style: TextStyle(fontSize: 12)),
+                      onPressed: _sendReviewQueue,
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(BuildContext context, bool isDark, ColorScheme scheme) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E2026) : scheme.surfaceContainerHighest,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.difference_outlined,
+                size: 28,
+                color: isDark ? const Color(0xFF6B6E7B) : scheme.outline,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Aucune modification détaillée',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: scheme.onSurface,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Ce fichier a été mentionné dans la session mais ne comporte aucun delta non validé ou son contenu n\'a pas pu être chargé.',
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? const Color(0xFF8F909A) : scheme.onSurfaceVariant,
+                height: 1.4,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDiffItem(int index, ColorScheme scheme) {
+    final line = _lines[index];
+    final hasComment = _annotations.containsKey(index);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return InkWell(
+      onTap: () => _addAnnotation(index),
+      hoverColor: isDark ? const Color(0xFF1E2128) : scheme.surfaceContainerHighest,
+      splashColor: scheme.primary.withValues(alpha: 0.12),
+      highlightColor: scheme.primary.withValues(alpha: 0.08),
+      onLongPress: () {
+        showDialog(
+          context: context,
+          builder: (ctx) => AddCommentDialog(
+            filePath: widget.filePath ?? widget.fileName ?? 'code',
+            selectedSnippet: line.content.trim(),
+            lineNumber: line.newLine ?? line.oldLine ?? (index + 1),
+            initialComment: _annotations[index],
+            onDelete: () {
+              setState(() => _annotations.remove(index));
+            },
+            onCommentAdded: (c) {
+              setState(() => _annotations[index] = c.commentText);
+              widget.onCommentAdded?.call(c);
+            },
+          ),
+        );
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildLineRow(line, hasComment, scheme),
+          if (hasComment)
+            Container(
+              margin: const EdgeInsets.only(left: 68, right: 14, bottom: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: scheme.primary.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: scheme.primary.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.comment_outlined, size: 14, color: scheme.primary),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      _annotations[index]!,
+                      style: TextStyle(
+                        color: scheme.primary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
                 ],
@@ -413,22 +612,22 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     switch (line.type) {
       case _DiffLineType.addition:
-        bg = isDark ? AppColors.diffInsertedLine : const Color(0x221A7F37);
-        textColor = isDark ? const Color(0xFF4ADE80) : const Color(0xFF1A7F37);
+        bg = isDark ? const Color(0x2222C55E) : const Color(0x1816A34A);
+        textColor = isDark ? const Color(0xFF4ADE80) : const Color(0xFF15803D);
         prefix = '+';
         break;
       case _DiffLineType.deletion:
-        bg = isDark ? AppColors.diffRemovedLine : const Color(0x22CF222E);
-        textColor = isDark ? const Color(0xFFF87171) : const Color(0xFFCF222E);
+        bg = isDark ? const Color(0x22EF4444) : const Color(0x18DC2626);
+        textColor = isDark ? const Color(0xFFF87171) : const Color(0xFFB91C1C);
         prefix = '-';
         break;
       case _DiffLineType.hunkHeader:
-        bg = scheme.primary.withValues(alpha: 0.08);
+        bg = scheme.primary.withValues(alpha: 0.10);
         textColor = scheme.primary;
         prefix = ' ';
         break;
       case _DiffLineType.meta:
-        textColor = scheme.outline;
+        textColor = isDark ? const Color(0xFF7E808A) : scheme.outline;
         prefix = ' ';
         break;
       case _DiffLineType.context:
@@ -439,46 +638,52 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
 
     return Container(
       color: bg,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 32,
+            width: 28,
             child: Text(
               line.oldLine?.toString() ?? '',
               textAlign: TextAlign.right,
               style: TextStyle(
-                color: scheme.outline,
+                color: isDark ? const Color(0xFF5E606A) : scheme.outline,
                 fontSize: 11,
                 fontFamily: 'monospace',
+                height: 1.4,
               ),
             ),
           ),
           const SizedBox(width: 4),
           SizedBox(
-            width: 32,
+            width: 28,
             child: Text(
               line.newLine?.toString() ?? '',
               textAlign: TextAlign.right,
               style: TextStyle(
-                color: scheme.outline,
+                color: isDark ? const Color(0xFF5E606A) : scheme.outline,
                 fontSize: 11,
                 fontFamily: 'monospace',
+                height: 1.4,
               ),
             ),
           ),
-          const SizedBox(width: 8),
-          Text(
-            prefix,
-            style: TextStyle(
-              color: textColor,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              fontFamily: 'monospace',
+          const SizedBox(width: 6),
+          SizedBox(
+            width: 12,
+            child: Text(
+              prefix,
+              style: TextStyle(
+                color: textColor,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'monospace',
+                height: 1.4,
+              ),
             ),
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 4),
           Expanded(
             child: Text(
               line.content,
@@ -486,13 +691,13 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
                 color: textColor,
                 fontSize: 12,
                 fontFamily: 'monospace',
-                height: 1.3,
+                height: 1.4,
               ),
             ),
           ),
           if (hasComment)
             Padding(
-              padding: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.only(left: 6, right: 4),
               child: Icon(Icons.comment, size: 14, color: scheme.primary),
             ),
         ],

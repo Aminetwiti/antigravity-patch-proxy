@@ -57,17 +57,16 @@ function Test-TunnelOk {
 }
 
 # Tue tout daemon/cloudflared (mauvais token ou orphelins) puis relance proprement
-# via WMI avec le bon token. CWD = dossier daemon pour que cloudflared.exe soit trouvé.
+# en arrière-plan sans ouvrir de fenêtre cmd/terminal.
 function Start-Daemon {
     Get-CimInstance Win32_Process -Filter "Name='daemon.exe'" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
     Get-CimInstance Win32_Process -Filter "Name='cloudflared.exe'" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
     Start-Sleep -Seconds 1
-    $cmd = "cmd /c cd /d `"$DaemonDir`" && set AG_REMOTE_LOG_FILE=$DmnLog && `"$DaemonExe`" --port $Port --tunnel cloudflare --auth-token $Token"
-    $r = ([wmiclass]"Win32_Process").Create($cmd)
-    if ($r.ReturnValue -eq 0) {
-        Write-Log "relance WMI OK (wrapper PID $($r.ProcessId), token=$Token)"
+    $proc = Start-Process -FilePath $DaemonExe -ArgumentList "--port $Port --tunnel cloudflare --auth-token $Token" -WorkingDirectory $DaemonDir -WindowStyle Hidden -PassThru
+    if ($proc) {
+        Write-Log "relance Start-Process OK (PID $($proc.Id), token=$Token)"
     } else {
-        Write-Log "ECHEC WMI Create ReturnValue=$($r.ReturnValue)"
+        Write-Log "ECHEC Start-Process"
     }
 }
 

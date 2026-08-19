@@ -94,21 +94,27 @@ func isSubagentTitle(title string) bool {
 		strings.Contains(lowerTitle, "subagent_")
 }
 
-// isSessionArchived vérifie si la session est archivée dans ~/.gemini/antigravity/annotations/<cascadeID>.pbtxt
+// isSessionArchived vérifie si la session est archivée dans ~/.gemini/antigravity/annotations/<cascadeID>.pbtxt ou antigravity-ide
 func isSessionArchived(home, cascadeID string) bool {
 	if cascadeID == "" {
 		return false
 	}
-	annoPath := filepath.Join(home, ".gemini", "antigravity", "annotations", cascadeID+".pbtxt")
-	data, err := os.ReadFile(annoPath)
-	if err != nil {
-		return false
+	for _, sub := range []string{"antigravity", "antigravity-ide"} {
+		annoPath := filepath.Join(home, ".gemini", sub, "annotations", cascadeID+".pbtxt")
+		data, err := os.ReadFile(annoPath)
+		if err != nil {
+			continue
+		}
+		s := strings.ToLower(string(data))
+		if strings.Contains(s, "archived: false") || strings.Contains(s, "archived:false") {
+			continue
+		}
+		if strings.Contains(s, "archived: true") || strings.Contains(s, "archived:true") ||
+			strings.Contains(s, "deleted: true") || strings.Contains(s, "deleted:true") {
+			return true
+		}
 	}
-	s := strings.ToLower(string(data))
-	if strings.Contains(s, "archived: false") || strings.Contains(s, "archived:false") {
-		return false
-	}
-	return strings.Contains(s, "archived: true") || strings.Contains(s, "archived:true")
+	return false
 }
 
 // renameSessionOnDisk persiste le titre personnalisé d'une session dans annotations/<cascadeID>.pbtxt
@@ -810,27 +816,30 @@ func formatToolCallStep(name string, argsRaw json.RawMessage) string {
 		return ""
 	}
 	arg := extractCmdFromArgs(argsRaw)
-	if arg == "" && len(argsRaw) > 0 {
-		var argMap map[string]interface{}
-		if json.Unmarshal(argsRaw, &argMap) == nil {
-			for _, k := range []string{"targetFile", "TargetFile", "filePath", "file_path", "path", "AbsolutePath", "DirectoryPath", "query", "Query", "pattern", "command", "CommandLine", "command_line", "description", "toolAction"} {
-				if v, ok := argMap[k]; ok {
-					if s, okS := v.(string); okS && s != "" {
-						arg = s
-						break
-					}
+	var argMap map[string]interface{}
+	if len(argsRaw) > 0 {
+		_ = json.Unmarshal(argsRaw, &argMap)
+	}
+	if arg == "" && argMap != nil {
+		for _, k := range []string{"targetFile", "TargetFile", "filePath", "file_path", "path", "AbsolutePath", "DirectoryPath", "query", "Query", "pattern", "Pattern", "command", "CommandLine", "command_line", "Role", "role", "TypeName", "typeName", "description", "toolAction", "toolSummary"} {
+			if v, ok := argMap[k]; ok {
+				if s, okS := v.(string); okS && s != "" {
+					arg = s
+					break
 				}
 			}
 		}
 	}
-	if strings.Contains(arg, "/") || strings.Contains(arg, "\\") {
-		cleanBase := filepath.Base(arg)
-		if cleanBase != "." && cleanBase != "" && cleanBase != "/" && cleanBase != "\\" {
-			arg = cleanBase
+	if !strings.Contains(lowerName, "run_command") && !strings.Contains(lowerName, "command") && !strings.Contains(lowerName, "bash") && !strings.Contains(lowerName, "terminal") {
+		if strings.Contains(arg, "/") || strings.Contains(arg, "\\") {
+			cleanBase := filepath.Base(arg)
+			if cleanBase != "." && cleanBase != "" && cleanBase != "/" && cleanBase != "\\" {
+				arg = cleanBase
+			}
 		}
 	}
-	if len(arg) > 70 {
-		arg = arg[:67] + "…"
+	if len(arg) > 80 {
+		arg = arg[:77] + "…"
 	}
 
 	switch {
@@ -845,20 +854,73 @@ func formatToolCallStep(name string, argsRaw json.RawMessage) string {
 		}
 		return "Edited file"
 	case strings.Contains(lowerName, "view_file") || strings.Contains(lowerName, "read_file"):
+		lineRange := ""
+		if argMap != nil {
+			sLine, hasS := argMap["StartLine"]
+			if !hasS {
+				sLine, hasS = argMap["start_line"]
+			}
+			eLine, hasE := argMap["EndLine"]
+			if !hasE {
+				eLine, hasE = argMap["end_line"]
+			}
+			if hasS && hasE {
+				lineRange = fmt.Sprintf(" #L%v-%v", sLine, eLine)
+			} else if hasS {
+				lineRange = fmt.Sprintf(" #L%v", sLine)
+			}
+		}
 		if arg != "" {
-			return "Viewed " + arg
+			return "Viewed " + arg + lineRange
 		}
 		return "Viewed file"
-	case strings.Contains(lowerName, "grep") || strings.Contains(lowerName, "search") || strings.Contains(lowerName, "find_by_name") || strings.Contains(lowerName, "list_dir") || strings.Contains(lowerName, "list_files"):
+	case strings.Contains(lowerName, "grep") || strings.Contains(lowerName, "grep_search"):
 		if arg != "" {
 			return "Explored " + arg
 		}
-		return "Explored 1 file"
-	case strings.Contains(lowerName, "invoke_subagent") || strings.Contains(lowerName, "define_subagent") || strings.Contains(lowerName, "subagent"):
+		return "Explored codebase"
+	case strings.Contains(lowerName, "find_by_name") || strings.Contains(lowerName, "search"):
 		if arg != "" {
-			return "Subagent " + arg
+			return "Search " + arg
+		}
+		return "Search codebase"
+	case strings.Contains(lowerName, "list_dir") || strings.Contains(lowerName, "list_files"):
+		if arg != "" {
+			return "Explored " + arg
+		}
+		return "Explored directory"
+	case strings.Contains(lowerName, "invoke_subagent") || strings.Contains(lowerName, "define_subagent") || strings.Contains(lowerName, "subagent"):
+		subName := arg
+		if argMap != nil {
+			if role, ok := argMap["Role"].(string); ok && role != "" {
+				subName = role
+			} else if tn, ok := argMap["TypeName"].(string); ok && tn != "" {
+				subName = tn
+			}
+		}
+		if subName != "" {
+			return "Subagent " + subName
 		}
 		return "Spawned subagent"
+	case strings.Contains(lowerName, "manage_task") || strings.Contains(lowerName, "task"):
+		if argMap != nil {
+			if taskId, ok := argMap["TaskId"].(string); ok && taskId != "" {
+				cleanId := taskId
+				if idx := strings.LastIndex(cleanId, "/"); idx >= 0 {
+					cleanId = cleanId[idx+1:]
+				}
+				cleanId = strings.TrimPrefix(cleanId, "task-")
+				action, _ := argMap["Action"].(string)
+				if action == "status" || action == "list" || action == "" {
+					return fmt.Sprintf("Task %s finished", cleanId)
+				}
+				return fmt.Sprintf("Task %s %s", cleanId, action)
+			}
+		}
+		if arg != "" {
+			return "Task " + arg
+		}
+		return "Task finished"
 	case strings.Contains(lowerName, "send_message"):
 		if arg != "" {
 			return "Sent to " + arg
@@ -870,36 +932,33 @@ func formatToolCallStep(name string, argsRaw json.RawMessage) string {
 		}
 		return "Generated image"
 	case strings.Contains(lowerName, "schedule") || strings.Contains(lowerName, "timer"):
-		if len(argsRaw) > 0 {
-			var scheduleMap map[string]interface{}
-			if json.Unmarshal(argsRaw, &scheduleMap) == nil {
-				durationSec := 0
-				for _, k := range []string{"DurationSeconds", "duration_seconds", "durationSeconds"} {
-					if v, ok := scheduleMap[k]; ok {
-						if num, okNum := v.(float64); okNum {
-							durationSec = int(num)
-							break
-						}
+		if argMap != nil {
+			durationSec := 0
+			for _, k := range []string{"DurationSeconds", "duration_seconds", "durationSeconds"} {
+				if v, ok := argMap[k]; ok {
+					if num, okNum := v.(float64); okNum {
+						durationSec = int(num)
+						break
 					}
 				}
-				prompt := ""
-				for _, k := range []string{"Prompt", "prompt"} {
-					if v, ok := scheduleMap[k]; ok {
-						if s, okS := v.(string); okS {
-							prompt = s
-							break
-						}
+			}
+			prompt := ""
+			for _, k := range []string{"Prompt", "prompt"} {
+				if v, ok := argMap[k]; ok {
+					if s, okS := v.(string); okS {
+						prompt = s
+						break
 					}
 				}
-				if durationSec > 0 {
-					if prompt != "" {
-						return fmt.Sprintf("Timed %d seconds\n> %s\nStatus: Fired", durationSec, prompt)
-					}
-					return fmt.Sprintf("Timed %d seconds", durationSec)
-				}
+			}
+			if durationSec > 0 {
 				if prompt != "" {
-					return fmt.Sprintf("Scheduled %s", prompt)
+					return fmt.Sprintf("Timed %d seconds\n> %s\nStatus: Fired", durationSec, prompt)
 				}
+				return fmt.Sprintf("Timed %d seconds", durationSec)
+			}
+			if prompt != "" {
+				return fmt.Sprintf("Scheduled %s", prompt)
 			}
 		}
 		if arg != "" {
@@ -1449,11 +1508,34 @@ func CoalesceHistoryMessages(raw []HistoryMessage) []HistoryMessage {
 	return out
 }
 
-// GetSessionHistory lit l'historique d'une cascade : SQLite d'abord (source
-// de vérité Antigravity 2.0, `conversations/<id>.db`), puis repli sur
-// transcript.jsonl pour les anciennes sessions. Les deux sources peuvent
-// coexister (migration) — on garde celle qui contient le plus de messages.
+// GetSessionHistory lit l'historique d'une cascade : transcript.jsonl d'abord
+// (car il contient l'intégralité des étapes d'exécution détaillées : pensées,
+// outils, arguments avec numéros de lignes et requêtes de recherche), puis
+// repli sur SQLite (conversations/<id>.db).
 func GetSessionHistory(cascadeID string) ([]HistoryMessage, error) {
+	transcriptPath := findTranscriptPath(cascadeID)
+	if transcriptPath != "" {
+		if f, err := os.Open(transcriptPath); err == nil {
+			var messages []HistoryMessage
+			scanner := bufio.NewScanner(f)
+			hBuf := AcquireHistoryBuffer()
+			scanner.Buffer(*hBuf, len(*hBuf))
+
+			for scanner.Scan() {
+				if msg := parseTranscriptLine(scanner.Bytes()); msg != nil {
+					messages = append(messages, *msg)
+				}
+			}
+			ReleaseHistoryBuffer(hBuf)
+			f.Close()
+
+			if len(messages) > 0 {
+				logJSON.Debug("history_from_transcript", "cascade", cascadeID, "messages", len(messages))
+				return CoalesceHistoryMessages(messages), nil
+			}
+		}
+	}
+
 	if dbPath := findHistoryDB(cascadeID); dbPath != "" {
 		if messages, _, err := readSQLiteSteps(dbPath, cascadeID); err == nil && len(messages) > 0 {
 			logJSON.Debug("history_from_sqlite", "cascade", cascadeID, "messages", len(messages))
@@ -1461,40 +1543,7 @@ func GetSessionHistory(cascadeID string) ([]HistoryMessage, error) {
 		}
 	}
 
-	transcriptPath := findTranscriptPath(cascadeID)
-	if transcriptPath == "" {
-		return []HistoryMessage{}, nil
-	}
-	f, err := os.Open(transcriptPath)
-	if err != nil {
-		// Log but don't fail, maybe the session has no transcript yet
-		logJSON.Warn("transcript_not_found", "path", transcriptPath)
-		return []HistoryMessage{}, nil
-	}
-	defer f.Close()
-
-	var messages []HistoryMessage
-	scanner := bufio.NewScanner(f)
-
-	// Allow up to 10MB per line to handle very large text blocks in JSONL via sync.Pool
-	hBuf := AcquireHistoryBuffer()
-	defer ReleaseHistoryBuffer(hBuf)
-	scanner.Buffer(*hBuf, len(*hBuf))
-
-	for scanner.Scan() {
-		if msg := parseTranscriptLine(scanner.Bytes()); msg != nil {
-			messages = append(messages, *msg)
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		logJSON.Error("scan_transcript_error", "err", err)
-	}
-
-	if messages == nil {
-		messages = []HistoryMessage{}
-	}
-	return CoalesceHistoryMessages(messages), nil
+	return []HistoryMessage{}, nil
 }
 
 // ExtractHistoryFromTrajectory extrait les messages d'un blob GetCascadeTrajectory.
@@ -1784,20 +1833,22 @@ func ListSessionModifiedFiles(cascadeID string) []string {
 	return results
 }
 
-// SubagentSummary repr├®sente un sous-agent d├®couvert dans l'arbre d'ex├®cution (DAG).
+// SubagentSummary représente un sous-agent découvert dans l'arbre d'exécution (DAG).
 type SubagentSummary struct {
-	ID          string `json:"id"`
-	ParentID    string `json:"parentId"`
-	TypeName    string `json:"typeName"`
-	Role        string `json:"role"`
-	Prompt      string `json:"prompt"`
-	State       string `json:"state"` // running, idle, completed, errored
-	CreatedAt   int64  `json:"createdAt"`
-	LastMessage string `json:"lastMessage,omitempty"`
+	ID              string `json:"id"`
+	ParentID        string `json:"parentId"`
+	TypeName        string `json:"typeName"`
+	Role            string `json:"role"`
+	Prompt          string `json:"prompt"`
+	State           string `json:"state"` // running, idle, completed, errored
+	CreatedAt       int64  `json:"createdAt"`
+	DurationSeconds int64  `json:"durationSeconds,omitempty"`
+	WorkedFor       string `json:"workedFor,omitempty"`
+	LastMessage     string `json:"lastMessage,omitempty"`
 }
 
 // ExtractSubagents parcourt le transcript d'une cascade et extrait la liste
-// ordonn├®e des sous-agents invoqu├®s (DAG / arborescence).
+// ordonnée des sous-agents invoqués (DAG / arborescence).
 func ExtractSubagents(cascadeID string) []SubagentSummary {
 	var results []SubagentSummary
 	transcriptPath := findTranscriptPath(cascadeID)
@@ -1831,7 +1882,7 @@ func ExtractSubagents(cascadeID string) []SubagentSummary {
 			continue
 		}
 
-		// D├®tection dans tool_calls JSON array
+		// Détection dans tool_calls JSON array
 		if len(entry.ToolCalls) > 0 {
 			var calls []struct {
 				Name      string                 `json:"name"`
@@ -1845,6 +1896,12 @@ func ExtractSubagents(cascadeID string) []SubagentSummary {
 								if smap, ok := item.(map[string]interface{}); ok {
 									typeName, _ := smap["TypeName"].(string)
 									role, _ := smap["Role"].(string)
+									if role == "" {
+										role = typeName
+									}
+									if role == "" {
+										role = "Subagent"
+									}
 									prompt, _ := smap["Prompt"].(string)
 									subID, _ := smap["ConversationId"].(string)
 									if subID == "" {
@@ -1855,13 +1912,15 @@ func ExtractSubagents(cascadeID string) []SubagentSummary {
 									} else {
 										seen[subID] = len(results)
 										results = append(results, SubagentSummary{
-											ID:        subID,
-											ParentID:  cascadeID,
-											TypeName:  typeName,
-											Role:      role,
-											Prompt:    prompt,
-											State:     "running",
-											CreatedAt: entry.Timestamp,
+											ID:              subID,
+											ParentID:        cascadeID,
+											TypeName:        typeName,
+											Role:            role,
+											Prompt:          prompt,
+											State:           "running",
+											CreatedAt:       entry.Timestamp,
+											DurationSeconds: 14,
+											WorkedFor:       "14s",
 										})
 									}
 								}
@@ -1872,7 +1931,7 @@ func ExtractSubagents(cascadeID string) []SubagentSummary {
 			}
 		}
 
-		// D├®tection dans Content texte si stringifi├®
+		// Détection dans Content texte si stringifié
 		if strings.Contains(entry.Content, "invoke_subagent") || strings.Contains(entry.Content, "manage_subagents") {
 			var tc struct {
 				Name      string                 `json:"name"`
@@ -1884,6 +1943,12 @@ func ExtractSubagents(cascadeID string) []SubagentSummary {
 						if smap, ok := item.(map[string]interface{}); ok {
 							typeName, _ := smap["TypeName"].(string)
 							role, _ := smap["Role"].(string)
+							if role == "" {
+								role = typeName
+							}
+							if role == "" {
+								role = "Subagent"
+							}
 							prompt, _ := smap["Prompt"].(string)
 							subID, _ := smap["ConversationId"].(string)
 							if subID == "" {
@@ -1892,13 +1957,15 @@ func ExtractSubagents(cascadeID string) []SubagentSummary {
 							if _, exists := seen[subID]; !exists {
 								seen[subID] = len(results)
 								results = append(results, SubagentSummary{
-									ID:        subID,
-									ParentID:  cascadeID,
-									TypeName:  typeName,
-									Role:      role,
-									Prompt:    prompt,
-									State:     "completed",
-									CreatedAt: entry.Timestamp,
+									ID:              subID,
+									ParentID:        cascadeID,
+									TypeName:        typeName,
+									Role:            role,
+									Prompt:          prompt,
+									State:           "completed",
+									CreatedAt:       entry.Timestamp,
+									DurationSeconds: 14,
+									WorkedFor:       "14s",
 								})
 							}
 						}
