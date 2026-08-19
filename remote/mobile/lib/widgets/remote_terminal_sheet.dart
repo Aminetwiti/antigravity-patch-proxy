@@ -225,7 +225,7 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
     }
 
     try {
-      final res = await api.sendCommand(cmd);
+      final res = await api.sendCommand(cmd, workspacePath: widget.workspacePath);
       String output = '';
       bool isErr = false;
 

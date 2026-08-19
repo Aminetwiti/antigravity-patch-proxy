@@ -338,6 +338,101 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     }
   }
 
+  void _showBranchSelectorBottomSheet(BuildContext context) {
+    if (_gitBranches.isEmpty) return;
+    final scheme = Theme.of(context).colorScheme;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: scheme.surfaceContainer,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Icon(Icons.alt_route, size: 20, color: scheme.primary),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Changer de branche Git',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: _gitBranches.length,
+                  itemBuilder: (context, idx) {
+                    final branch = _gitBranches[idx];
+                    final isCurrent = branch == _currentGitBranch;
+                    return ListTile(
+                      leading: Icon(
+                        isCurrent ? Icons.check_circle : Icons.radio_button_unchecked,
+                        color: isCurrent ? AppColors.positive : scheme.outline,
+                        size: 18,
+                      ),
+                      title: Text(
+                        branch,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+                          color: scheme.onSurface,
+                        ),
+                      ),
+                      onTap: () async {
+                        Navigator.of(ctx).pop();
+                        if (isCurrent || widget.api == null) return;
+                        final messenger = ScaffoldMessenger.of(context);
+                        try {
+                          await widget.api!.sendCommand(
+                            'git checkout $branch',
+                            workspacePath: _workspaceResolved,
+                          );
+                          await _loadGitBranches();
+                          await _loadGitState();
+                          await _loadFiles();
+                          if (mounted) {
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text('Branche basculée sur $branch'),
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          if (mounted) {
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text('Erreur changement de branche: $e'),
+                              ),
+                            );
+                          }
+                        }
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -401,39 +496,43 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                       ],
                       if (_currentGitBranch != null) ...[
                         const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.secondaryContainer,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.alt_route,
-                                size: 10,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSecondaryContainer,
-                              ),
-                              const SizedBox(width: 3),
-                              Text(
-                                _currentGitBranch!,
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w600,
+                        InkWell(
+                          onTap: () => _showBranchSelectorBottomSheet(context),
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.secondaryContainer,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.alt_route,
+                                  size: 10,
                                   color: Theme.of(
                                     context,
                                   ).colorScheme.onSecondaryContainer,
                                 ),
-                              ),
-                            ],
+                                const SizedBox(width: 3),
+                                Text(
+                                  _currentGitBranch!,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSecondaryContainer,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ],

@@ -28,16 +28,17 @@ class _SubagentTreeCardState extends State<SubagentTreeCard> {
   Widget build(BuildContext context) {
     if (widget.subagents.isEmpty) return const SizedBox.shrink();
 
+    final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final count = widget.subagents.length;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF161B22) : const Color(0xFFF6F8FA),
+        color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(AppRadius.md),
         border: Border.all(
-          color: isDark ? const Color(0xFF30363D) : const Color(0xFFD0D7DE),
+          color: isDark ? AppColors.borderStrong : scheme.outlineVariant.withValues(alpha: 0.5),
           width: 1,
         ),
       ),
@@ -58,14 +59,14 @@ class _SubagentTreeCardState extends State<SubagentTreeCard> {
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: isDark ? const Color(0xFFE6EDF3) : Colors.black87,
+                      color: isDark ? AppColors.inkPrimary : scheme.onSurface,
                     ),
                   ),
                   const SizedBox(width: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1.5),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF21262D) : const Color(0xFFE5E7EB),
+                      color: isDark ? AppColors.surfaceHover : scheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
@@ -73,7 +74,7 @@ class _SubagentTreeCardState extends State<SubagentTreeCard> {
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
-                        color: isDark ? const Color(0xFF8B949E) : const Color(0xFF4B5563),
+                        color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
                       ),
                     ),
                   ),
@@ -81,7 +82,7 @@ class _SubagentTreeCardState extends State<SubagentTreeCard> {
                   Icon(
                     _isExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
                     size: 16,
-                    color: isDark ? const Color(0xFF8B949E) : const Color(0xFF6E7681),
+                    color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
                   ),
                   const Spacer(),
                   if (widget.onOpenFullTree != null)
@@ -91,7 +92,7 @@ class _SubagentTreeCardState extends State<SubagentTreeCard> {
                       tooltip: 'Ouvrir le DAG complet',
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
-                      color: isDark ? const Color(0xFF8B949E) : const Color(0xFF6E7681),
+                      color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
                     ),
                 ],
               ),
@@ -100,7 +101,10 @@ class _SubagentTreeCardState extends State<SubagentTreeCard> {
 
           // Subagents List
           if (_isExpanded) ...[
-            const Divider(height: 1, color: Color(0xFF30363D)),
+            Divider(
+              height: 1,
+              color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.3),
+            ),
             ListView.separated(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -111,6 +115,7 @@ class _SubagentTreeCardState extends State<SubagentTreeCard> {
                 final subagent = widget.subagents[index];
                 final isRunning = subagent.status.toLowerCase() == 'running';
                 final isErrored = subagent.status.toLowerCase() == 'errored' || subagent.status.toLowerCase() == 'canceling';
+                final currentTool = subagent.stateDetail;
 
                 return InkWell(
                   onTap: () => widget.onSelectSubagent?.call(subagent),
@@ -119,7 +124,7 @@ class _SubagentTreeCardState extends State<SubagentTreeCard> {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        // Left: Role Title & Worked duration
+                        // Left: Role Title & Worked duration / Current tool
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -130,17 +135,42 @@ class _SubagentTreeCardState extends State<SubagentTreeCard> {
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w500,
-                                  color: isDark ? const Color(0xFFF4F4F5) : Colors.black87,
+                                  color: isDark ? AppColors.inkPrimary : scheme.onSurface,
                                 ),
                               ),
                               const SizedBox(height: 2),
-                              Text(
-                                isRunning ? 'Working...' : subagent.displayWorkedFor,
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  color: isDark ? const Color(0xFF8B949E) : const Color(0xFF6E7681),
+                              if (isRunning && currentTool != null && currentTool.isNotEmpty) ...[
+                                Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.code_rounded,
+                                      size: 11,
+                                      color: AppColors.accentBlueBright,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Flexible(
+                                      child: Text(
+                                        currentTool,
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          fontFamily: 'monospace',
+                                          color: AppColors.accentBlueBright,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ),
+                              ] else ...[
+                                Text(
+                                  isRunning ? 'Working...' : subagent.displayWorkedFor,
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),
@@ -199,7 +229,7 @@ class _SubagentTreeCardState extends State<SubagentTreeCard> {
                           Icon(
                             Icons.check_circle_outline_rounded,
                             size: 16,
-                            color: isDark ? const Color(0xFF8B949E) : const Color(0xFF6E7681),
+                            color: isDark ? AppColors.inkMuted : scheme.outline,
                           ),
                       ],
                     ),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile/core/protocol/daemon_api.dart';
@@ -54,12 +55,43 @@ class _ModelsSettingsSectionState extends State<ModelsSettingsSection> {
     'DeepSeek R1',
   ];
 
+  StreamSubscription<Map<String, dynamic>>? _eventsSub;
+
   @override
   void initState() {
     super.initState();
     _selectedModel = widget.currentDefaultModel;
     _loadSettings();
     _fetchAccountAndQuotas();
+    if (widget.api != null) {
+      _eventsSub = widget.api!.events.listen(_onWsEvent);
+    }
+  }
+
+  @override
+  void dispose() {
+    _eventsSub?.cancel();
+    super.dispose();
+  }
+
+  void _onWsEvent(Map<String, dynamic> event) {
+    if (event['type'] == 'quota_update' && event['data'] is Map) {
+      _applyQuotaData(Map<String, dynamic>.from(event['data'] as Map));
+    }
+  }
+
+  void _applyQuotaData(Map<String, dynamic> q) {
+    if (!mounted) return;
+    setState(() {
+      if (q['weeklyPercent'] is int) _geminiWeeklyPercent = q['weeklyPercent'] as int;
+      if (q['geminiWeekly'] is int) _geminiWeeklyPercent = q['geminiWeekly'] as int;
+      if (q['fiveHourPercent'] is int) _gemini5HourPercent = q['fiveHourPercent'] as int;
+      if (q['gemini5Hour'] is int) _gemini5HourPercent = q['gemini5Hour'] as int;
+      if (q['weeklyPercentClaude'] is int) _claudeWeeklyPercent = q['weeklyPercentClaude'] as int;
+      if (q['claudeWeekly'] is int) _claudeWeeklyPercent = q['claudeWeekly'] as int;
+      if (q['fiveHourPercentClaude'] is int) _claude5HourPercent = q['fiveHourPercentClaude'] as int;
+      if (q['claude5Hour'] is int) _claude5HourPercent = q['claude5Hour'] as int;
+    });
   }
 
   Future<void> _loadSettings() async {
@@ -76,15 +108,16 @@ class _ModelsSettingsSectionState extends State<ModelsSettingsSection> {
     if (widget.api == null) return;
     setState(() => _isLoadingQuotas = true);
     try {
+      try {
+        final quotaSummary = await widget.api!.getUserQuotaSummary();
+        if (mounted && quotaSummary.isNotEmpty) {
+          _applyQuotaData(quotaSummary);
+        }
+      } catch (_) {}
+
       final info = await widget.api!.getAccountInfo();
       if (mounted && info['quotas'] is Map) {
-        final q = info['quotas'] as Map<String, dynamic>;
-        setState(() {
-          if (q['geminiWeekly'] is int) _geminiWeeklyPercent = q['geminiWeekly'] as int;
-          if (q['gemini5Hour'] is int) _gemini5HourPercent = q['gemini5Hour'] as int;
-          if (q['claudeWeekly'] is int) _claudeWeeklyPercent = q['claudeWeekly'] as int;
-          if (q['claude5Hour'] is int) _claude5HourPercent = q['claude5Hour'] as int;
-        });
+        _applyQuotaData(Map<String, dynamic>.from(info['quotas'] as Map));
       }
       try {
         final statuses = await widget.api!.getModelStatuses();

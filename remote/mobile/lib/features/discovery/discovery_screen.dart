@@ -188,9 +188,6 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
         );
         _loadSavedConnections();
         _successMessage = 'Appairé avec succès : $host:$port';
-        Future.delayed(const Duration(milliseconds: 800), () {
-          if (mounted) Navigator.of(context).pop(true);
-        });
       } else {
         if (!silent) {
           _errorMessage = 'Connexion refusée. Vérifiez le port et le Token Auth ou PIN.';
@@ -787,17 +784,40 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
 
                   if (_successMessage != null) ...[
                     Container(
-                      padding: const EdgeInsets.all(10),
+                      padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(6),
+                        color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
                       ),
-                      child: Row(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(Icons.check_circle_outline, size: 16, color: Theme.of(context).colorScheme.primary),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(_successMessage!, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.primary)),
+                          Row(
+                            children: [
+                              const Icon(Icons.check_circle_rounded, size: 18, color: Color(0xFF10B981)),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  _successMessage!,
+                                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF10B981)),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: () => Navigator.of(context).pop(true),
+                              icon: const Icon(Icons.chat_bubble_outline_rounded, size: 16),
+                              label: const Text('Accéder au Chat', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFF10B981),
+                                side: const BorderSide(color: Color(0xFF10B981)),
+                                padding: const EdgeInsets.symmetric(vertical: 8),
+                              ),
+                            ),
                           ),
                         ],
                       ),

@@ -385,6 +385,7 @@ func NewServer(client RPCClient, authToken string) *Server {
 		clientSessions:   make(map[*websocket.Conn]discovery.SessionInfo),
 	}
 	s.terminals.onBroadcast = s.broadcast
+	s.terminals.onSendToOwner = s.writeJSON
 	s.runningTasks.onBroadcast = s.broadcast
 	// Recharge les tâches planifiées persistées au redémarrage (non-fatal :
 	// un fichier absent ou corrompu repart avec une liste vide).
@@ -6160,8 +6161,11 @@ type terminalPtyManager struct {
 	nextID    int
 	shellPath string
 	// onBroadcast : hook vers le Server (s.broadcast) pour diffuser la
-	// sortie terminal ├á tous les clients connect├®s.
+	// sortie terminal si aucun propriétaire n'est défini.
 	onBroadcast func(OutgoingMessage)
+	// onSendToOwner : hook vers Server.writeJSON pour router la sortie terminal
+	// UNIQUEMENT vers la connexion du client propriétaire (isolation multi-clients).
+	onSendToOwner func(*websocket.Conn, OutgoingMessage) error
 }
 
 func newTerminalPtyManager() *terminalPtyManager {
@@ -6178,8 +6182,8 @@ func newTerminalPtyManager() *terminalPtyManager {
 }
 
 // create lance un shell interactif dans dir pour le client owner et retourne
-// son id. La session est retir├®e de la map quand le shell sort tout seul
-// (commande exit) ÔÇö pas seulement via kill().
+// son id. La session est retirée de la map quand le shell sort tout seul
+// (commande exit) — pas seulement via kill().
 func (m *terminalPtyManager) create(owner *websocket.Conn, dir string) (string, error) {
 	if dir == "" {
 		dir = "."
@@ -6213,7 +6217,7 @@ func (m *terminalPtyManager) create(owner *websocket.Conn, dir string) (string, 
 	m.sessions[id] = sess
 	m.mu.Unlock()
 
-	// Deux goroutines de lecture (stdout + stderr) qui broadcastent.
+	// Deux goroutines de lecture (stdout + stderr) qui routent vers le propriétaire.
 	go m.pump(sess, stdout, "stdout")
 	go m.pump(sess, stderr, "stderr")
 
@@ -6222,8 +6226,8 @@ func (m *terminalPtyManager) create(owner *websocket.Conn, dir string) (string, 
 		m.mu.Lock()
 		still := m.sessions[sess.id] == sess
 		if still {
-			// Sortie spontan├®e (exit) : retire la session de la map ÔÇö sinon
-			// elle resterait zombie jusqu'au killAllFor de la d├®connexion.
+			// Sortie spontanée (exit) : retire la session de la map — sinon
+			// elle resterait zombie jusqu'au killAllFor de la déconnexion.
 			delete(m.sessions, sess.id)
 		}
 		m.mu.Unlock()
@@ -6253,36 +6257,41 @@ func (m *terminalPtyManager) pump(sess *terminalSession, r io.Reader, kind strin
 	}
 }
 
-// broadcastOutput émet terminal_output {id, terminalId, data, output, kind} à tous les clients.
+// broadcastOutput émet terminal_output {id, terminalId, data, output, kind} au client propriétaire (ou broadcast si absent).
 func (m *terminalPtyManager) broadcastOutput(sess *terminalSession, data []byte, kind string) {
-	// Le broadcast se fait via le Server ; on expose un hook.
-	if m.onBroadcast != nil {
-		outStr := string(data)
-		m.onBroadcast(OutgoingMessage{
-			Type: "terminal_output",
-			Data: map[string]interface{}{
-				"id":         sess.id,
-				"terminalId": sess.id,
-				"data":       outStr,
-				"output":     outStr,
-				"kind":       kind,
-			},
-		})
+	outStr := string(data)
+	msg := OutgoingMessage{
+		Type: "terminal_output",
+		Data: map[string]interface{}{
+			"id":         sess.id,
+			"terminalId": sess.id,
+			"data":       outStr,
+			"output":     outStr,
+			"kind":       kind,
+		},
+	}
+	if m.onSendToOwner != nil && sess.owner != nil {
+		m.onSendToOwner(sess.owner, msg)
+	} else if m.onBroadcast != nil {
+		m.onBroadcast(msg)
 	}
 }
 
 func (m *terminalPtyManager) broadcastExit(sess *terminalSession) {
-	if m.onBroadcast != nil {
-		m.onBroadcast(OutgoingMessage{
-			Type: "terminal_output",
-			Data: map[string]interface{}{
-				"id":         sess.id,
-				"terminalId": sess.id,
-				"data":       "",
-				"output":     "",
-				"kind":       "exit",
-			},
-		})
+	msg := OutgoingMessage{
+		Type: "terminal_output",
+		Data: map[string]interface{}{
+			"id":         sess.id,
+			"terminalId": sess.id,
+			"data":       "",
+			"output":     "",
+			"kind":       "exit",
+		},
+	}
+	if m.onSendToOwner != nil && sess.owner != nil {
+		m.onSendToOwner(sess.owner, msg)
+	} else if m.onBroadcast != nil {
+		m.onBroadcast(msg)
 	}
 }
 

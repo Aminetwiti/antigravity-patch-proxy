@@ -842,14 +842,14 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
           res.on('end', () => {
             if (res.statusCode === 200) {
               try {
-                const parsed = JSON.parse(body) as { data?: Array<{ id: string; object?: string; input_modalities?: string[] }> };
+                const parsed = JSON.parse(body) as { data?: Array<{ id: string; name?: string; object?: string; input_modalities?: string[] }> };
                 
                 if (parsed.data && Array.isArray(parsed.data)) {
                   const models = parsed.data
                     .filter((m) => m.id && m.object === 'model')
                     .map((m) => ({
                       id: m.id,
-                      name: m.id,
+                      name: (m.name as string) || m.id,
                       inputModalities: m.input_modalities || ['text'], // Default to text-only if not specified
                     }));
                   

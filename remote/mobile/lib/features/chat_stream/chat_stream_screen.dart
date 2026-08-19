@@ -2124,6 +2124,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       onSelectProject: (widget.projects != null && widget.projects!.length > 1)
           ? () => _showProjectSelector(context)
           : null,
+      onSelectSession: () {
+        Scaffold.maybeOf(context)?.openDrawer();
+      },
       onOpenIde: () {
         AppToast.show(context, message: 'Session synchronisée avec Antigravity Desktop IDE');
       },

@@ -60,10 +60,10 @@ class ActionPillsBar extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF141518) : scheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(20),
+                      color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
                       border: Border.all(
-                        color: isDark ? const Color(0xFF27272A) : scheme.outlineVariant,
+                        color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.5),
                         width: 0.8,
                       ),
                     ),

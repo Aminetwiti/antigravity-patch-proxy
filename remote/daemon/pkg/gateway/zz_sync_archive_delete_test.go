@@ -108,14 +108,21 @@ func TestJetboxArchiveBroadcastExcludesArchived(t *testing.T) {
 
 	client := dialWS(t, "ws"+strings.TrimPrefix(ts.URL, "http")+"/ws")
 	defer client.conn.Close()
+	time.Sleep(30 * time.Millisecond)
 
 	recvSessionsUpdated := func() map[string]interface{} {
-		for {
-			m := client.recv(t)
+		for i := 0; i < 15; i++ {
+			m, err := client.recvSafe()
+			if err != nil {
+				time.Sleep(50 * time.Millisecond)
+				continue
+			}
 			if m["type"] == "sessions_updated" {
 				return m
 			}
 		}
+		t.Fatalf("attendu sessions_updated, aucun reçu")
+		return nil
 	}
 
 	// Snapshot initial : 2 sessions actives.

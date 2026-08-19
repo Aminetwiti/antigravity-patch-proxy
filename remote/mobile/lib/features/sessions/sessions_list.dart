@@ -471,7 +471,9 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                             });
                           },
                           onSessionTap: (id) {
-                            Navigator.of(context).pop();
+                            if (Navigator.of(context).canPop()) {
+                              Navigator.of(context).pop();
+                            }
                             widget.onSessionSelected(id);
                           },
                           onNewConversation: (ProjectItem? p) {

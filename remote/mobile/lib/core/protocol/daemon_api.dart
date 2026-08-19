@@ -1023,8 +1023,12 @@ class DaemonApi {
   /// Sends a slash command (e.g. `/model`, `/compact`) to the daemon, which
   /// routes it to the language server via HandleStreamingCommand (terminal
   /// source). Unary call: resolves with the `response` message data.
-  Future<Map<String, dynamic>> sendCommand(String command) {
-    return rpc('send_command', {'command': command});
+  Future<Map<String, dynamic>> sendCommand(String command, {String? workspacePath}) {
+    final payload = <String, dynamic>{'command': command};
+    if (workspacePath != null && workspacePath.isNotEmpty) {
+      payload['workspacePath'] = workspacePath;
+    }
+    return rpc('send_command', payload);
   }
 
   /// Récupère la liste des tâches planifiées gérées par le daemon.

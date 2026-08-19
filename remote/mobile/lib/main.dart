@@ -782,6 +782,11 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
               _activeSessionTitle = s.title;
             });
             _refreshContext();
+            SettingsStore.saveSession(
+              wsUrl: _wsClient.targetUrl,
+              token: _wsClient.authToken ?? '',
+              sessionId: id,
+            );
           },
           onDeleteSession: _deleteSession,
         ),
@@ -1007,8 +1012,12 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           final s = _sessions.firstWhere((s) => s.id == id, orElse: () => const CascadeSession(id: '', workspacePath: '', title: 'Session', status: '', time: ''));
           _activeSessionTitle = s.title;
         });
-        // Bug #2 : rafraîchir le contexte pour la nouvelle session.
         _refreshContext();
+        SettingsStore.saveSession(
+          wsUrl: _wsClient.targetUrl,
+          token: _wsClient.authToken ?? '',
+          sessionId: id,
+        );
       },
       onNewConversation: _createNewConversation,
       onDeleteSession: _deleteSession,

@@ -132,7 +132,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
   @override
   void didUpdateWidget(covariant ChatInputBar oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.initialText != widget.initialText && widget.initialText != _controller.text) {
+    if ((oldWidget.cascadeId != widget.cascadeId || oldWidget.initialText != widget.initialText) &&
+        widget.initialText != _controller.text) {
       _controller.text = widget.initialText;
       _lastDraftText = widget.initialText;
       _controller.selection = TextSelection.collapsed(
@@ -912,12 +913,12 @@ class _ChatInputBarState extends State<ChatInputBar> {
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
                     decoration: BoxDecoration(
                       color: Theme.of(context).brightness == Brightness.dark
-                          ? const Color(0xFF1B1D22)
+                          ? AppColors.surfaceRaised
                           : scheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(AppRadius.md),
                       border: Border.all(
                         color: Theme.of(context).brightness == Brightness.dark
-                            ? const Color(0xFF2C2F36)
+                            ? AppColors.borderSubtle
                             : scheme.outlineVariant.withValues(alpha: 0.5),
                         width: 1,
                       ),

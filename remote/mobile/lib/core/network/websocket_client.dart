@@ -267,8 +267,16 @@ class DaemonWebSocketClient {
 
   bool _isCompleteJson(String s) {
     if (s.isEmpty) return false;
-    return (s.startsWith('{') && s.endsWith('}')) ||
-        (s.startsWith('[') && s.endsWith(']'));
+    if (!((s.startsWith('{') && s.endsWith('}')) ||
+          (s.startsWith('[') && s.endsWith(']')))) {
+      return false;
+    }
+    try {
+      jsonDecode(s);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   void send(dynamic data) {

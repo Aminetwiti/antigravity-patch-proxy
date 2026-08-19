@@ -156,7 +156,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                     style: TextStyle(color: scheme.onSurface, fontWeight: FontWeight.bold, fontSize: 13),
                   ),
                   const SizedBox(height: 12),
-                  _buildMetricRow('Statut Language Server', 'Connecté (Hub :62103)', AppColors.positive, scheme),
+                  _buildMetricRow('Statut Language Server', 'Connecté (Session Active)', AppColors.positive, scheme),
                   Divider(color: isDark ? AppColors.borderSubtle : scheme.outlineVariant),
                   _buildMetricRow('Protocole Wire', 'ConnectRPC / gRPC-Web', AppColors.info, scheme),
                   Divider(color: isDark ? AppColors.borderSubtle : scheme.outlineVariant),

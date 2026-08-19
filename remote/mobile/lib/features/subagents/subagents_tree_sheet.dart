@@ -312,113 +312,171 @@ class _SubagentsTreeSheetState extends State<SubagentsTreeSheet> {
                                 itemBuilder: (context, index) {
                                   final agent = _subagents[index];
                                   final statusColor = _getStatusColor(agent.status, scheme);
+                                  final isChild = agent.parentId != null && agent.parentId!.isNotEmpty;
+                                  final isRunning = agent.status.toLowerCase() == 'running';
+                                  final currentTool = agent.stateDetail;
 
-                                  return Container(
-                                    decoration: BoxDecoration(
-                                      color: scheme.surfaceContainer,
-                                      borderRadius: BorderRadius.circular(AppRadius.md),
-                                      border: Border.all(
-                                        color: scheme.outlineVariant.withValues(alpha: 0.4),
-                                        width: 1,
-                                      ),
-                                    ),
-                                    child: InkWell(
-                                      borderRadius: BorderRadius.circular(AppRadius.md),
-                                      onTap: widget.onSelectSubagent != null
-                                          ? () => widget.onSelectSubagent!(agent)
-                                          : null,
-                                      child: Padding(
-                                        padding: const EdgeInsets.all(12),
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Row(
-                                              children: [
-                                                Container(
-                                                  padding: const EdgeInsets.symmetric(
-                                                    horizontal: 8,
-                                                    vertical: 3,
-                                                  ),
-                                                  decoration: BoxDecoration(
-                                                    color: scheme.primary.withValues(alpha: 0.1),
-                                                    borderRadius: BorderRadius.circular(6),
-                                                  ),
-                                                  child: Text(
-                                                    agent.typeName ?? 'agent',
-                                                    style: TextStyle(
-                                                      fontSize: 10,
-                                                      fontWeight: FontWeight.w700,
-                                                      fontFamily: 'monospace',
-                                                      color: scheme.primary,
-                                                    ),
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 8),
-                                                Expanded(
-                                                  child: Text(
-                                                    agent.role,
-                                                    style: TextStyle(
-                                                      fontWeight: FontWeight.w700,
-                                                      fontSize: 13,
-                                                      color: scheme.onSurface,
-                                                    ),
-                                                    maxLines: 1,
-                                                    overflow: TextOverflow.ellipsis,
-                                                  ),
-                                                ),
-                                                Container(
-                                                  padding: const EdgeInsets.symmetric(
-                                                    horizontal: 8,
-                                                    vertical: 2,
-                                                  ),
-                                                  decoration: BoxDecoration(
-                                                    color: statusColor.withValues(alpha: 0.15),
-                                                    borderRadius: BorderRadius.circular(10),
-                                                    border: Border.all(
-                                                      color: statusColor.withValues(alpha: 0.3),
-                                                      width: 1,
-                                                    ),
-                                                  ),
-                                                  child: Row(
-                                                    mainAxisSize: MainAxisSize.min,
-                                                    children: [
-                                                      Container(
-                                                        width: 6,
-                                                        height: 6,
-                                                        decoration: BoxDecoration(
-                                                          color: statusColor,
-                                                          shape: BoxShape.circle,
+                                  return Padding(
+                                    padding: EdgeInsets.only(left: isChild ? 20.0 : 0.0),
+                                    child: Row(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        if (isChild)
+                                          Padding(
+                                            padding: const EdgeInsets.only(top: 14, right: 6),
+                                            child: Icon(
+                                              Icons.subdirectory_arrow_right_rounded,
+                                              size: 14,
+                                              color: scheme.outlineVariant,
+                                            ),
+                                          ),
+                                        Expanded(
+                                          child: Container(
+                                            decoration: BoxDecoration(
+                                              color: scheme.surfaceContainer,
+                                              borderRadius: BorderRadius.circular(AppRadius.md),
+                                              border: Border.all(
+                                                color: isRunning
+                                                    ? AppColors.accentBlue.withValues(alpha: 0.3)
+                                                    : scheme.outlineVariant.withValues(alpha: 0.4),
+                                                width: 1,
+                                              ),
+                                            ),
+                                            child: InkWell(
+                                              borderRadius: BorderRadius.circular(AppRadius.md),
+                                              onTap: widget.onSelectSubagent != null
+                                                  ? () => widget.onSelectSubagent!(agent)
+                                                  : null,
+                                              child: Padding(
+                                                padding: const EdgeInsets.all(12),
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Row(
+                                                      children: [
+                                                        Container(
+                                                          padding: const EdgeInsets.symmetric(
+                                                            horizontal: 8,
+                                                            vertical: 3,
+                                                          ),
+                                                          decoration: BoxDecoration(
+                                                            color: scheme.primary.withValues(alpha: 0.1),
+                                                            borderRadius: BorderRadius.circular(6),
+                                                          ),
+                                                          child: Text(
+                                                            agent.typeName ?? 'agent',
+                                                            style: TextStyle(
+                                                              fontSize: 10,
+                                                              fontWeight: FontWeight.w700,
+                                                              fontFamily: 'monospace',
+                                                              color: scheme.primary,
+                                                            ),
+                                                          ),
                                                         ),
-                                                      ),
-                                                      const SizedBox(width: 5),
-                                                      Text(
-                                                        _formatStatusLabel(agent.status),
-                                                        style: TextStyle(
-                                                          fontSize: 10,
-                                                          fontWeight: FontWeight.w600,
-                                                          color: statusColor,
+                                                        const SizedBox(width: 8),
+                                                        Expanded(
+                                                          child: Text(
+                                                            agent.role,
+                                                            style: TextStyle(
+                                                              fontWeight: FontWeight.w700,
+                                                              fontSize: 13,
+                                                              color: scheme.onSurface,
+                                                            ),
+                                                            maxLines: 1,
+                                                            overflow: TextOverflow.ellipsis,
+                                                          ),
                                                         ),
+                                                        Container(
+                                                          padding: const EdgeInsets.symmetric(
+                                                            horizontal: 8,
+                                                            vertical: 2,
+                                                          ),
+                                                          decoration: BoxDecoration(
+                                                            color: statusColor.withValues(alpha: 0.15),
+                                                            borderRadius: BorderRadius.circular(10),
+                                                            border: Border.all(
+                                                              color: statusColor.withValues(alpha: 0.3),
+                                                              width: 1,
+                                                            ),
+                                                          ),
+                                                          child: Row(
+                                                            mainAxisSize: MainAxisSize.min,
+                                                            children: [
+                                                              Container(
+                                                                width: 6,
+                                                                height: 6,
+                                                                decoration: BoxDecoration(
+                                                                  color: statusColor,
+                                                                  shape: BoxShape.circle,
+                                                                ),
+                                                              ),
+                                                              const SizedBox(width: 5),
+                                                              Text(
+                                                                _formatStatusLabel(agent.status),
+                                                                style: TextStyle(
+                                                                  fontSize: 10,
+                                                                  fontWeight: FontWeight.w600,
+                                                                  color: statusColor,
+                                                                ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    if (isRunning && currentTool != null && currentTool.isNotEmpty) ...[
+                                                      const SizedBox(height: 6),
+                                                      Row(
+                                                        children: [
+                                                          const Icon(
+                                                            Icons.terminal_rounded,
+                                                            size: 12,
+                                                            color: AppColors.accentBlueBright,
+                                                          ),
+                                                          const SizedBox(width: 4),
+                                                          Expanded(
+                                                            child: Text(
+                                                              currentTool,
+                                                              style: const TextStyle(
+                                                                fontSize: 11,
+                                                                fontFamily: 'monospace',
+                                                                color: AppColors.accentBlueBright,
+                                                              ),
+                                                              maxLines: 1,
+                                                              overflow: TextOverflow.ellipsis,
+                                                            ),
+                                                          ),
+                                                        ],
                                                       ),
                                                     ],
-                                                  ),
+                                                    if (agent.prompt != null && agent.prompt!.isNotEmpty) ...[
+                                                      const SizedBox(height: 8),
+                                                      Text(
+                                                        agent.prompt!,
+                                                        style: TextStyle(
+                                                          fontSize: 12,
+                                                          color: scheme.onSurfaceVariant,
+                                                        ),
+                                                        maxLines: 2,
+                                                        overflow: TextOverflow.ellipsis,
+                                                      ),
+                                                    ],
+                                                    const SizedBox(height: 6),
+                                                    Text(
+                                                      agent.displayWorkedFor,
+                                                      style: TextStyle(
+                                                        fontSize: 10.5,
+                                                        fontFamily: 'monospace',
+                                                        color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                                                      ),
+                                                    ),
+                                                  ],
                                                 ),
-                                              ],
-                                            ),
-                                            if (agent.prompt != null && agent.prompt!.isNotEmpty) ...[
-                                              const SizedBox(height: 8),
-                                              Text(
-                                                agent.prompt!,
-                                                style: TextStyle(
-                                                  fontSize: 12,
-                                                  color: scheme.onSurfaceVariant,
-                                                ),
-                                                maxLines: 2,
-                                                overflow: TextOverflow.ellipsis,
                                               ),
-                                            ],
-                                          ],
+                                            ),
+                                          ),
                                         ),
-                                      ),
+                                      ],
                                     ),
                                   );
                                 },
