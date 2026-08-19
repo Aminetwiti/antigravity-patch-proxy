@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -107,13 +108,14 @@ func (c *Client) Call(method string, payload []byte) ([]byte, error) {
 		return raw, fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(string(raw), 200))
 	}
 
+	if st := resp.Header.Get("grpc-status"); st != "" && st != "0" {
+		msg := resp.Header.Get("grpc-message")
+		return raw, fmt.Errorf("gRPC status %s: %s", st, msg)
+	}
+
 	// Découper les frames gRPC-Web : flags(1) + longueur BE(4) + message
-	// Le Hub répond parfois « frame de données vide (0 octet) + frame trailer »
-	// (ex: GetAllCascadeTrajectories d'une instance sans session) — on ne garde
-	// que les frames de DONNÉES non vides (flags 0x00), sinon la première frame
-	// retournée serait le trailer et le parseur protobuf recevrait du vide
-	// (« aucune frame gRPC-Web »).
 	var frames [][]byte
+	var trailerErr error
 	offset := 0
 	for offset+5 <= len(raw) {
 		flags := raw[offset]
@@ -122,13 +124,28 @@ func (c *Client) Call(method string, payload []byte) ([]byte, error) {
 		if offset+length > len(raw) {
 			break // trailer tronqué
 		}
-		if length > 0 && flags&0x80 == 0 { // frame de données non vide seulement
+		if flags&0x80 != 0 {
+			trailerText := string(raw[offset : offset+length])
+			if strings.Contains(trailerText, "grpc-status:") {
+				for _, line := range strings.Split(trailerText, "\r\n") {
+					line = strings.TrimSpace(line)
+					if strings.HasPrefix(line, "grpc-status:") {
+						st := strings.TrimSpace(strings.TrimPrefix(line, "grpc-status:"))
+						if st != "" && st != "0" {
+							trailerErr = fmt.Errorf("gRPC trailer error: %s", trailerText)
+						}
+					}
+				}
+			}
+		} else if length > 0 {
 			frames = append(frames, raw[offset:offset+length])
 		}
 		offset += length
 	}
 	if len(frames) == 0 {
-		// Réponse sans frame de données (ex: réponse vide DeleteCascade/Empty protobuf avec trailer seul).
+		if trailerErr != nil {
+			return nil, trailerErr
+		}
 		return []byte{}, nil
 	}
 	return frames[0], nil

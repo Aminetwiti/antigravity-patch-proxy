@@ -282,8 +282,8 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
         continue;
       }
 
-      // 3. Task <id> finished / Task finished / Task <id> completed
-      if (lower.startsWith('task ') &&
+      // 3. Task <id> finished / Task finished / Running ... finished / Task <id> completed
+      if ((lower.startsWith('task ') || lower.startsWith('running ') || lower.startsWith('run ')) &&
           (lower.contains('finished') || lower.contains('completed') || lower.contains('done'))) {
         var clean = line;
         if (clean.endsWith('>')) clean = clean.substring(0, clean.length - 1).trim();
@@ -1041,8 +1041,8 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
                     ),
                   ],
 
-                  // Command Icon Badge (⬛ dark terminal icon)
-                  if (item.type == ExecutionStepType.command) ...[
+                  // Command / Task Finished Icon Badge (⬛ dark terminal icon)
+                  if (item.type == ExecutionStepType.command || item.type == ExecutionStepType.taskFinished) ...[
                     Container(
                       margin: const EdgeInsets.only(right: 5),
                       width: 13,

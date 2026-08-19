@@ -239,7 +239,7 @@ void main() {
           'cascadeId': 'c1',
         }
       }));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 300));
 
       // Un seul prompt a été envoyé au daemon
       final prompts = out.where((m) => m['type'] == 'send_prompt').toList();

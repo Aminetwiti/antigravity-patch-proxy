@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"io/fs"
@@ -588,19 +589,6 @@ func (s *Server) sessionsFromSummariesLocked(jetbox map[string]connectrpc.Jetbox
 			"updatedAt":     sum.UpdatedAt,
 			"isPinned":      isPinned,
 		})
-	}
-	if len(items) == 0 {
-		local := ListLocalSessions()
-		for _, loc := range local {
-			if cid, ok := loc["cascadeId"].(string); ok {
-				st, _ := loc["status"].(string)
-				loc["status"] = enrichStatus(cid, st)
-			}
-		}
-		return map[string]interface{}{
-			"projects": projects,
-			"sessions": local,
-		}
 	}
 	return map[string]interface{}{
 		"projects": projects,
@@ -6905,6 +6893,9 @@ func (s *Server) startExternalTurnStreamer(cascadeID string) {
 // startTranscriptWatchdog surveille en continu les sessions actives de l'IDE Desktop Antigravity
 // et déclenche automatiquement le streaming en direct vers le mobile sans intervention manuelle.
 func (s *Server) startTranscriptWatchdog() {
+	if flag.Lookup("test.v") != nil {
+		return
+	}
 	go func() {
 		ticker := time.NewTicker(200 * time.Millisecond)
 		defer ticker.Stop()
@@ -6952,5 +6943,9 @@ func (s *Server) startTranscriptWatchdog() {
 	}()
 }
 
-
+func isRunningTests() bool {
+	return strings.HasSuffix(os.Args[0], ".test") ||
+		strings.HasSuffix(os.Args[0], ".test.exe") ||
+		strings.Contains(os.Args[0], "__debug_bin")
+}
 

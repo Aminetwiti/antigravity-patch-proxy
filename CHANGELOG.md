@@ -5,6 +5,22 @@ All notable changes to Antigravity will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0] - 2026-08-19
+
+### Added
+- **Dynamic Workspace & Project Discovery**: Full live resolution of workspaces, projects, and active sessions directly from the Language Server and Daemon scan processes, removing all static/mock fallbacks.
+- **Smart Speech-to-Code Formatter** (`CodeSpeechFormatter`): Intelligent developer dictation formatting that automatically parses CLI commands, file paths, and camelCase symbols into formatted markdown backticks with French/English spoken punctuation conversion.
+- **Subagent DAG Visualization & Skeleton Loaders**: Real-time multi-agent execution hierarchy viewer with responsive shimmer loading states (`SkeletonLoader`, `SkeletonSubagentItem`).
+- **Antigravity 2.0 Desktop Fidelity Alignment**: Standardized live tool execution badges and action verbs (`Analyzed <file>`, `Searched <query>`, `Ran <cmd>`).
+
+### Changed
+- **Zero Hardcoded Identifiers**: Neutral user profiles (`Developer`) and generic fallbacks across both mobile client and Go daemon bridge.
+- **PTY Terminal Bridge Resiliency**: Streamlined live ANSI terminal sheet with PTY data framing and direct host execution.
+
+### Fixed
+- **Subagents RPC Parser**: Consolidated and deduplicated `getSubagents` RPC framing in `DaemonApi`.
+- **Stream Parser Boundaries**: Resolved regex token precedence preventing CLI match collisions on file extensions.
+
 ## [3.1.0] - 2026-08-14
 
 ### Added

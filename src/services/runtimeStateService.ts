@@ -26,7 +26,7 @@ export class RuntimeStateService {
         daemonPort: state.daemonPort ?? current?.daemonPort,
         pid: state.pid ?? process.pid,
         timestamp: new Date().toISOString(),
-        version: state.version ?? current?.version ?? '3.1.0',
+        version: state.version ?? current?.version ?? '3.2.0',
       };
       await fs.writeFile(filePath, JSON.stringify(merged, null, 2), 'utf8');
     } catch {

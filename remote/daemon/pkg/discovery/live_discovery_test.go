@@ -14,6 +14,8 @@ func TestLiveDiscovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Discovery failed: %v", err)
 	}
+	t.Logf("DISCOVERED: PID=%d Name=%s Port=%d Subclient=%s WorkspaceID=%s CSRF=%s",
+		info.PID, info.ProcessName, info.ConnectRPCPort, info.SubclientType, info.WorkspaceID, info.CSRFToken)
 	if info.PID <= 0 {
 		t.Errorf("PID invalide: %d", info.PID)
 	}

@@ -95,7 +95,7 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
       _TerminalEntry(
         command: 'init',
         output:
-            'Antigravity Remote Terminal Bridge v3.1.0\nProjet: ${widget.projectName} ($displayPath)\nConnecté au PC hôte — prêt pour exécution.',
+            'Antigravity Remote Terminal Bridge v3.2.0\nProjet: ${widget.projectName} ($displayPath)\nConnecté au PC hôte — prêt pour exécution.',
       ),
     );
     if (widget.initialCommand.isNotEmpty) {

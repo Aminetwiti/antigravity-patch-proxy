@@ -4,7 +4,7 @@
   <img src="assets/antigravity_patch_proxy_logo.png" width="180" alt="Google Antigravity Custom Model Proxy Logo" />
 </p>
 
-[![Version](https://img.shields.io/badge/version-3.1.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-3.2.0-blue.svg)](package.json)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue?logo=typescript)](tsconfig.json)
 [![Tests](https://img.shields.io/badge/tests-2565%20passed-brightgreen.svg)](src/__tests__)

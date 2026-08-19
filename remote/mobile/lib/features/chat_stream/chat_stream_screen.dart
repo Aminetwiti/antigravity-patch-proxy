@@ -240,6 +240,19 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   final Map<String, StringBuffer> _taskOutputs = {};
   final Map<String, String> _taskStatuses = {};
   final Map<String, StreamController<String>> _taskOutputControllers = {};
+  final Map<String, DateTime> _streamStartTimes = {};
+
+  String _computeWorkedDuration(DateTime? startTime) {
+    if (startTime == null) return 'Worked for 1s';
+    final elapsed = DateTime.now().difference(startTime);
+    final totalSecs = elapsed.inSeconds > 0 ? elapsed.inSeconds : 1;
+    final mins = totalSecs ~/ 60;
+    final secs = totalSecs % 60;
+    if (mins > 0) {
+      return secs > 0 ? 'Worked for ${mins}m ${secs}s' : 'Worked for ${mins}m';
+    }
+    return 'Worked for ${secs}s';
+  }
 
   void _openTaskOutputSheet(String taskNameOrId) {
     final initialOut = _taskOutputs[taskNameOrId]?.toString() ?? '';
@@ -938,6 +951,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   void _onStreamStarted(String sessionId) {
+    _streamStartTimes.putIfAbsent(sessionId, () => DateTime.now());
     final wasEmpty = _activeStreamingSessions.isEmpty;
     _activeStreamingSessions.add(sessionId);
     widget.onStreamingSessionChanged?.call(sessionId, true);
@@ -1200,9 +1214,15 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         setState(() {
           _runningBackgroundTasks.remove(cmd);
           _runningBackgroundTasks.remove(taskId);
+          _runningBackgroundTasks.removeWhere((t) =>
+              t == cmd ||
+              t == taskId ||
+              (cmd.isNotEmpty && t.contains(cmd)) ||
+              (taskId.isNotEmpty && t.contains(taskId)));
           _taskStatuses[cmd] = status;
           _taskStatuses[taskId] = status;
         });
+        _refreshRunningTasks();
         return;
       }
 
@@ -1402,6 +1422,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           _scheduleThrottledUpdate();
         }
       } else if (type == 'stream_end') {
+        final startTime = _streamStartTimes[targetSessionId];
         _onStreamEnded(targetSessionId);
         _handleStreamEnded(msg, targetSessionId);
         final targetId = _streamRequestToMessageId[thKey] ?? 'ext-$requestId';
@@ -1413,9 +1434,27 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         final totalAdded = modFileList.fold(0, (s, f) => s + f.additions);
         final totalRemoved = modFileList.fold(0, (s, f) => s + f.deletions);
 
+        final workedDurationStr = _computeWorkedDuration(startTime);
+        final currentThought = (_externalThoughts[thKey] != null && _externalThoughts[thKey]!.isNotEmpty)
+            ? _externalThoughts[thKey]!.trim()
+            : ((idx >= 0 ? buf[idx].thought : null) ?? '');
+
+        String finalThought;
+        if (currentThought.trim().isEmpty) {
+          finalThought = workedDurationStr;
+        } else if (!currentThought.startsWith('Worked for') &&
+            !currentThought.startsWith('Thought for') &&
+            !currentThought.startsWith('Thinking for') &&
+            !currentThought.startsWith('Working')) {
+          finalThought = '$workedDurationStr\n$currentThought';
+        } else {
+          finalThought = currentThought;
+        }
+
         if (idx >= 0) {
           buf[idx] = buf[idx].copyWith(
             isStreaming: false,
+            thought: finalThought,
             filesChanged: changedFiles.isNotEmpty ? changedFiles : null,
             additions: changedFiles.isNotEmpty ? totalAdded : null,
             deletions: changedFiles.isNotEmpty ? totalRemoved : null,
@@ -1425,6 +1464,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           if (lastStreamingIdx >= 0) {
             buf[lastStreamingIdx] = buf[lastStreamingIdx].copyWith(
               isStreaming: false,
+              thought: finalThought,
               filesChanged: changedFiles.isNotEmpty ? changedFiles : null,
               additions: changedFiles.isNotEmpty ? totalAdded : null,
               deletions: changedFiles.isNotEmpty ? totalRemoved : null,
