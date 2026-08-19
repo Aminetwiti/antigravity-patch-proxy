@@ -6,7 +6,7 @@ import '../../services/settings_store.dart';
 class ProfileSettingsSection extends StatefulWidget {
   const ProfileSettingsSection({
     super.key,
-    this.initialName = 'Amine Developer',
+    this.initialName = 'Developer',
     this.initialRole = 'Remote Host Controller',
     this.initialStatus = 'Online',
   });

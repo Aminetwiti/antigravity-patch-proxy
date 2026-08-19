@@ -59,7 +59,7 @@ class SettingsStore {
       'csrf': prefs.getString(_kCsrf) ?? '',
       'themeMode': prefs.getInt(_kThemeMode) ?? 0,
       'defaultModel': prefs.getString(_kDefaultModel) ?? 'Gemini 3.6 Flash Medium',
-      'displayName': prefs.getString(_kDisplayName) ?? 'Amine Developer',
+      'displayName': prefs.getString(_kDisplayName) ?? 'Developer',
       'role': prefs.getString(_kRole) ?? 'Remote Host Controller',
       'status': prefs.getString(_kStatus) ?? 'Online',
       'toolNotifications': prefs.getBool(_kToolNotifications) ?? true,

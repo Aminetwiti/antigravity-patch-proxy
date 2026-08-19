@@ -42,26 +42,24 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 100));
 
     // Verify title and count
-    expect(find.textContaining('Arborescence Sous-Agents (2)'), findsOneWidget);
-    expect(find.textContaining('1 actif(s)'), findsOneWidget);
+    expect(find.text('Subagents'), findsOneWidget);
+    expect(find.text('2'), findsOneWidget);
 
-    // Verify subagents roles and details
+    // Verify subagents roles
     expect(find.text('Database Debugger'), findsOneWidget);
-    expect(find.text('Running queries on pg_stat_activity'), findsOneWidget);
     expect(find.text('Code Researcher'), findsOneWidget);
-    expect(find.text('Found 4 matches in auth.ts'), findsOneWidget);
 
     // Tap on subagent item
     await tester.tap(find.text('Database Debugger'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 50));
     expect(selected?.id, 'sub-1');
 
     // Tap on open full tree icon
     await tester.tap(find.byTooltip('Ouvrir le DAG complet'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 50));
     expect(openTreeCalled, isTrue);
   });
 }

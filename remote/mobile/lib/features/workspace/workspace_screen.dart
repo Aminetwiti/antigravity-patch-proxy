@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/protocol/daemon_api.dart';
+import '../../core/protocol/messages.dart';
 import '../../widgets/custom_dropdown_overlay.dart';
 import 'git_commit_dialog.dart';
 import 'package:mobile/theme/app_colors.dart';
@@ -13,8 +14,16 @@ import 'package:mobile/theme/app_colors.dart';
 class WorkspaceScreen extends StatefulWidget {
   final DaemonApi? api;
   final String workspacePath;
+  final List<ProjectItem> projects;
+  final ValueChanged<String>? onSelectWorkspace;
 
-  const WorkspaceScreen({super.key, this.api, this.workspacePath = '.'});
+  const WorkspaceScreen({
+    super.key,
+    this.api,
+    this.workspacePath = '.',
+    this.projects = const [],
+    this.onSelectWorkspace,
+  });
 
   @override
   State<WorkspaceScreen> createState() => _WorkspaceScreenState();
@@ -51,6 +60,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   // État Git & conflits (P3)
   bool _inConflict = false;
   List<String> _conflicts = [];
+  Map<String, String> _fileGitStatuses = {};
 
   /// Normalise le workspace en chemin absolu exploitable par le daemon.
   static String resolveWorkspace(String raw) {
@@ -186,14 +196,43 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             }
           }
         }
-        final bool isConflict =
+        final isConflict =
             conflictState['inConflict'] == true ||
             state['inConflict'] == true ||
             conflictList.isNotEmpty;
 
+        final fileStatuses = <String, String>{};
+        void addStatusList(dynamic list, String status) {
+          if (list is List) {
+            for (final item in list) {
+              if (item is String && item.isNotEmpty) {
+                fileStatuses[item] = status;
+                final base = item.split(RegExp(r'[/\\]')).last;
+                fileStatuses[base] = status;
+              } else if (item is Map && item['path'] != null) {
+                final p = item['path'].toString();
+                final s = item['status']?.toString() ?? status;
+                fileStatuses[p] = s;
+                final base = p.split(RegExp(r'[/\\]')).last;
+                fileStatuses[base] = s;
+              }
+            }
+          }
+        }
+
+        addStatusList(state['modifiedFiles'], 'M');
+        addStatusList(state['untrackedFiles'], '?');
+        addStatusList(state['stagedFiles'], '+');
+        addStatusList(state['deletedFiles'], 'D');
+        addStatusList(rawConflicts, '!');
+        if (state['files'] is List) {
+          addStatusList(state['files'], 'M');
+        }
+
         setState(() {
           _inConflict = isConflict;
           _conflicts = conflictList;
+          _fileGitStatuses = fileStatuses;
           if (state['currentRef'] is String &&
               (state['currentRef'] as String).isNotEmpty) {
             _currentGitBranch = state['currentRef'] as String;
@@ -887,6 +926,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
 
   void _showWorkspaceDropdown(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final projects = widget.projects;
+
     CustomDropdownOverlay.show(
       context: context,
       targetKey: _workspaceButtonKey,
@@ -897,7 +938,32 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           shrinkWrap: true,
           padding: EdgeInsets.zero,
           children: [
-            _buildWorkspaceItem(_workspaceLabel, true, scheme),
+            if (projects.isNotEmpty)
+              ...projects.map((proj) {
+                final name = proj.name.isNotEmpty ? proj.name : WorkspacePath.extractWorkspaceName(proj.path);
+                final isSelected = proj.name == _workspaceLabel ||
+                    proj.path == _workspaceResolved ||
+                    WorkspacePath.extractWorkspaceName(proj.path) == _workspaceLabel;
+                return _buildWorkspaceItem(
+                  name,
+                  isSelected,
+                  scheme,
+                  onTap: () {
+                    CustomDropdownOverlay.hide();
+                    final chosenPath = proj.path.isNotEmpty ? proj.path : proj.folderUri;
+                    widget.onSelectWorkspace?.call(chosenPath);
+                    setState(() {
+                      _workspaceResolved = resolveWorkspace(chosenPath);
+                      _selectedFilePath = '';
+                      _codeContent = '// Sélectionnez un fichier';
+                      _isLoadingTree = true;
+                    });
+                    _loadFiles();
+                  },
+                );
+              })
+            else
+              _buildWorkspaceItem(_workspaceLabel, true, scheme),
             Divider(color: scheme.outlineVariant, height: 1),
             _buildWorkspaceActionItem(
               Icons.create_new_folder_outlined,
@@ -924,12 +990,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   Widget _buildWorkspaceItem(
     String title,
     bool isSelected,
-    ColorScheme scheme,
-  ) {
+    ColorScheme scheme, {
+    VoidCallback? onTap,
+  }) {
     return InkWell(
-      onTap: () {
+      onTap: onTap ?? () {
         CustomDropdownOverlay.hide();
-        // Here we would actually change the workspace
       },
       child: Container(
         color: isSelected ? scheme.surfaceContainerHighest : Colors.transparent,
@@ -1135,10 +1201,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         if (isDir) {
           return _TreeFolder(title: name, depth: depth);
         } else {
+          final status = _fileGitStatuses[fullPath] ?? _fileGitStatuses[name];
           return _TreeFile(
             title: name,
             depth: depth,
             isSelected: isSelected,
+            gitStatus: status,
             onTap: () {
               // Mobile : le drawer reste ouvert après sélection sinon.
               final scaffold = Scaffold.maybeOf(context);
@@ -1624,6 +1692,7 @@ class _TreeFile extends StatelessWidget {
   final String title;
   final int depth;
   final bool isSelected;
+  final String? gitStatus;
   final VoidCallback onTap;
 
   const _TreeFile({
@@ -1631,6 +1700,7 @@ class _TreeFile extends StatelessWidget {
     required this.depth,
     required this.onTap,
     this.isSelected = false,
+    this.gitStatus,
   });
 
   IconData _iconForName(String name) {
@@ -1681,6 +1751,42 @@ class _TreeFile extends StatelessWidget {
     return isSelected ? scheme.primary : scheme.onSurfaceVariant;
   }
 
+  Color _gitBadgeBgColor(String status, ColorScheme scheme) {
+    switch (status.toUpperCase()) {
+      case 'M':
+        return AppColors.warning.withValues(alpha: 0.2);
+      case '+':
+      case 'A':
+        return AppColors.success.withValues(alpha: 0.2);
+      case '?':
+        return AppColors.accent.withValues(alpha: 0.2);
+      case '!':
+        return AppColors.error.withValues(alpha: 0.2);
+      case 'D':
+        return Colors.grey.withValues(alpha: 0.2);
+      default:
+        return scheme.surfaceContainerHighest;
+    }
+  }
+
+  Color _gitBadgeTextColor(String status, ColorScheme scheme) {
+    switch (status.toUpperCase()) {
+      case 'M':
+        return AppColors.warning;
+      case '+':
+      case 'A':
+        return AppColors.success;
+      case '?':
+        return AppColors.accent;
+      case '!':
+        return AppColors.error;
+      case 'D':
+        return Colors.grey;
+      default:
+        return scheme.onSurfaceVariant;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -1728,6 +1834,24 @@ class _TreeFile extends StatelessWidget {
                 maxLines: 1,
               ),
             ),
+            if (gitStatus != null && gitStatus!.isNotEmpty) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                decoration: BoxDecoration(
+                  color: _gitBadgeBgColor(gitStatus!, scheme),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: Text(
+                  gitStatus!,
+                  style: TextStyle(
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w700,
+                    color: _gitBadgeTextColor(gitStatus!, scheme),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),

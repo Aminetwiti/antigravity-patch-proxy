@@ -1117,6 +1117,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
             builder: (context) => WorkspaceScreen(
               api: _api,
               workspacePath: path,
+              projects: _projects,
             ),
           ),
         );

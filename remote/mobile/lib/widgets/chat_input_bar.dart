@@ -10,6 +10,7 @@ import '../features/chat_stream/models/mention_item.dart';
 import '../features/chat_stream/widgets/action_pills_bar.dart';
 import '../features/chat_stream/widgets/mention_autocomplete_overlay.dart';
 import 'custom_dropdown_overlay.dart';
+import 'voice_prompt_dialog.dart';
 import '../theme/app_colors.dart';
 
 /// Modes d'envoi : immédiat ou mis en file pour exécution séquentielle.
@@ -1199,25 +1200,29 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
                       const Spacer(),
 
-                      // Voice (placeholder — pas de backend audio : retour haptique
-                      // et notification claire au lieu d'un contrôle silencieux)
+                      // Voice / Dictée vocale avec formatage intelligent de code
                       IconButton(
                         icon: Icon(
-                          Icons.mic_none,
+                          Icons.mic_rounded,
                           size: 20,
-                          color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
+                          color: scheme.onSurfaceVariant.withValues(alpha: 0.9),
                         ),
                         onPressed: () {
                           HapticFeedback.lightImpact();
-                          ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Saisie vocale — bientôt disponible dans Antigravity Remote'),
-                              duration: Duration(seconds: 2),
-                            ),
+                          VoicePromptDialog.show(
+                            context,
+                            onInsert: (formattedText) {
+                              final current = _controller.text;
+                              final newText = current.isEmpty
+                                  ? formattedText
+                                  : '$current $formattedText';
+                              _controller.text = newText;
+                              _controller.selection = TextSelection.collapsed(offset: newText.length);
+                              widget.onDraftChanged?.call(newText);
+                            },
                           );
                         },
-                        tooltip: 'Saisie vocale — bientôt disponible',
+                        tooltip: 'Dictée vocale & formatage code',
                       ),
                       // If streaming and user has typed text, show both Stop and Queue/Send buttons
                       if (widget.hasActiveStream && _controller.text.trim().isNotEmpty) ...[

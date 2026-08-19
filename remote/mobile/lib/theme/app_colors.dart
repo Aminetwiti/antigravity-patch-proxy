@@ -31,10 +31,13 @@ abstract class AppColors {
 
   // ── Status (PC --ok / --warn / --err / --info)
   static const Color positive = Color(0xFF22C55E);       // #22c55e (approve / connected — #7aae66)
+  static const Color success = positive;
   static const Color warning = Color(0xFFEAB308);        // #eab308 (tool approval pending — #f3c949)
   static const Color danger = Color(0xFFEF4444);         // #ef4444 (refuse / error — #de5555)
+  static const Color error = danger;
   static const Color dangerDeep = Color(0xFFDC2626);     // #dc2626
   static const Color info = Color(0xFF3B82F6);           // #3b82f6 (informational — #59a4f9)
+  static const Color accent = accentBlue;
 
   // ── Diff Editor Tokens (--vscode-diffEditor-*)
   static const Color diffInsertedLine = Color(0x339BB955); // rgba(155, 185, 85, 0.2)
@@ -83,7 +86,7 @@ abstract class AppColors {
   static Color borderStrongContext(BuildContext context) =>
       Theme.of(context).brightness == Brightness.dark ? borderStrong : const Color(0xFFAFB8C1);
 
-  static Color accent(BuildContext context) =>
+  static Color accentContext(BuildContext context) =>
       Theme.of(context).brightness == Brightness.dark ? accentBlue : const Color(0xFF0969DA);
 }
 

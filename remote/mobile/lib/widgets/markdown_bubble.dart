@@ -7,6 +7,7 @@ import '../core/protocol/markdown_renderer.dart';
 import '../core/protocol/workspace_path.dart';
 import '../theme/app_colors.dart';
 import 'remote_terminal_sheet.dart';
+import 'syntax_highlighter.dart';
 import 'unified_diff_viewer.dart';
 
 /// Renders an assistant message with Markdown: fenced code blocks get a
@@ -408,13 +409,19 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.all(12),
-              child: Text(
-                (isLong && !_expanded) ? displayLines.join('\n') : widget.code.code,
-                style: TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 12,
-                  height: 1.5,
-                  color: scheme.onSurface,
+              child: RichText(
+                text: TextSpan(
+                  style: TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 12,
+                    height: 1.5,
+                    color: scheme.onSurface,
+                  ),
+                  children: SyntaxHighlighter.highlight(
+                    (isLong && !_expanded) ? displayLines.join('\n') : widget.code.code,
+                    widget.code.language,
+                    defaultTextColor: scheme.onSurface,
+                  ),
                 ),
               ),
             ),

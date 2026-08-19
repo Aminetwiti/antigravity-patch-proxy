@@ -24,67 +24,11 @@ class SubagentTreeCard extends StatefulWidget {
 class _SubagentTreeCardState extends State<SubagentTreeCard> {
   bool _isExpanded = true;
 
-  Color _getStatusColor(String status, ColorScheme scheme) {
-    switch (status.toLowerCase()) {
-      case 'running':
-        return scheme.primary;
-      case 'waiting_for_input':
-      case 'waiting_for_dependents':
-      case 'waiting_for_message':
-        return scheme.tertiary;
-      case 'errored':
-      case 'canceling':
-        return scheme.error;
-      case 'completed':
-        return AppColors.positive;
-      case 'idle':
-      default:
-        return scheme.outline;
-    }
-  }
-
-  IconData _getStatusIcon(String status) {
-    switch (status.toLowerCase()) {
-      case 'running':
-        return Icons.autorenew;
-      case 'waiting_for_input':
-      case 'waiting_for_dependents':
-      case 'waiting_for_message':
-        return Icons.pause_circle_outline;
-      case 'errored':
-      case 'canceling':
-        return Icons.error_outline;
-      case 'completed':
-        return Icons.check_circle_outline;
-      case 'idle':
-      default:
-        return Icons.radio_button_unchecked;
-    }
-  }
-
-  String _formatStatusLabel(String status) {
-    switch (status.toLowerCase()) {
-      case 'running':
-        return 'En cours';
-      case 'waiting_for_input':
-        return 'En attente';
-      case 'completed':
-        return 'Terminé';
-      case 'errored':
-        return 'Erreur';
-      case 'idle':
-        return 'Inactif';
-      default:
-        return status;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     if (widget.subagents.isEmpty) return const SizedBox.shrink();
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final scheme = Theme.of(context).colorScheme;
     final count = widget.subagents.length;
 
     return Container(

@@ -12,6 +12,7 @@ class UnifiedDiffViewer extends StatefulWidget {
   final String? filePath;
   final VoidCallback? onClose;
   final Function(String reviewComments)? onSendReview;
+  final Function(String patchContent, List<int> selectedHunkIndices)? onApplySelectedHunks;
   final ValueChanged<CodeComment>? onCommentAdded;
 
   const UnifiedDiffViewer({
@@ -21,6 +22,7 @@ class UnifiedDiffViewer extends StatefulWidget {
     this.filePath,
     this.onClose,
     this.onSendReview,
+    this.onApplySelectedHunks,
     this.onCommentAdded,
   });
 
@@ -32,6 +34,7 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
   int _additions = 0;
   int _deletions = 0;
   List<_DiffLine> _lines = [];
+  final List<_DiffHunk> _hunks = [];
   final Map<int, String> _annotations = {}; // lineIndex -> comment
   bool _wrapLines = true;
   bool _hasRealDiff = true;
@@ -54,6 +57,7 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
     int adds = 0;
     int dels = 0;
     final List<_DiffLine> parsed = [];
+    _hunks.clear();
 
     int oldLineNum = 0;
     int newLineNum = 0;
@@ -64,6 +68,7 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
         _additions = 0;
         _deletions = 0;
         _lines = [];
+        _hunks.clear();
         _hasRealDiff = false;
       });
       return;
@@ -72,9 +77,19 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
     final rawLines = widget.diffContent.split('\n');
     for (final raw in rawLines) {
       if (raw.startsWith('@@')) {
+        final hunkIndex = _hunks.length;
+        final hunk = _DiffHunk(
+          index: hunkIndex,
+          header: raw,
+          lineIndices: [parsed.length],
+          isSelected: true,
+        );
+        _hunks.add(hunk);
+
         parsed.add(_DiffLine(
           type: _DiffLineType.hunkHeader,
           content: raw,
+          hunkIndex: hunkIndex,
         ));
         final match = RegExp(r'@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@').firstMatch(raw);
         if (match != null) {
@@ -83,17 +98,23 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
         }
       } else if (raw.startsWith('+') && !raw.startsWith('+++')) {
         adds++;
+        final hunkIdx = _hunks.isNotEmpty ? _hunks.length - 1 : null;
+        if (hunkIdx != null) _hunks[hunkIdx].lineIndices.add(parsed.length);
         parsed.add(_DiffLine(
           type: _DiffLineType.addition,
           content: raw.substring(1),
           newLine: newLineNum++,
+          hunkIndex: hunkIdx,
         ));
       } else if (raw.startsWith('-') && !raw.startsWith('---')) {
         dels++;
+        final hunkIdx = _hunks.isNotEmpty ? _hunks.length - 1 : null;
+        if (hunkIdx != null) _hunks[hunkIdx].lineIndices.add(parsed.length);
         parsed.add(_DiffLine(
           type: _DiffLineType.deletion,
           content: raw.substring(1),
           oldLine: oldLineNum++,
+          hunkIndex: hunkIdx,
         ));
       } else if (raw.startsWith('---') || raw.startsWith('+++') || raw.startsWith('diff --git') || raw.startsWith('index ')) {
         parsed.add(_DiffLine(
@@ -101,11 +122,14 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
           content: raw,
         ));
       } else {
+        final hunkIdx = _hunks.isNotEmpty ? _hunks.length - 1 : null;
+        if (hunkIdx != null) _hunks[hunkIdx].lineIndices.add(parsed.length);
         parsed.add(_DiffLine(
           type: _DiffLineType.context,
           content: raw.startsWith(' ') ? raw.substring(1) : raw,
           oldLine: oldLineNum > 0 ? oldLineNum++ : null,
           newLine: newLineNum > 0 ? newLineNum++ : null,
+          hunkIndex: hunkIdx,
         ));
       }
     }
@@ -116,6 +140,51 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
       _lines = parsed;
       _hasRealDiff = parsed.isNotEmpty;
     });
+  }
+
+  String generateSelectedPatch() {
+    final sb = StringBuffer();
+    for (final l in _lines) {
+      if (l.type == _DiffLineType.meta) {
+        sb.writeln(l.content);
+      }
+    }
+    for (final hunk in _hunks) {
+      if (!hunk.isSelected) continue;
+      for (final idx in hunk.lineIndices) {
+        final l = _lines[idx];
+        if (l.type == _DiffLineType.hunkHeader) {
+          sb.writeln(l.content);
+        } else if (l.type == _DiffLineType.addition) {
+          sb.writeln('+${l.content}');
+        } else if (l.type == _DiffLineType.deletion) {
+          sb.writeln('-${l.content}');
+        } else if (l.type == _DiffLineType.context) {
+          sb.writeln(' ${l.content}');
+        }
+      }
+    }
+    return sb.toString().trim();
+  }
+
+  void _applySelectedHunks() {
+    final patch = generateSelectedPatch();
+    final selectedIndices = _hunks
+        .where((h) => h.isSelected)
+        .map((h) => h.index)
+        .toList();
+    HapticFeedback.mediumImpact();
+    if (widget.onApplySelectedHunks != null) {
+      widget.onApplySelectedHunks!(patch, selectedIndices);
+    } else if (widget.onSendReview != null) {
+      widget.onSendReview!('Patch partiel sélectionné (${selectedIndices.length}/${_hunks.length} hunks):\n```diff\n$patch\n```');
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${selectedIndices.length}/${_hunks.length} hunk(s) validé(s)'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   void _copyDiff() {
@@ -454,6 +523,60 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
                         ),
             ),
 
+            // Bottom Hunks selection bar
+            if (_hunks.isNotEmpty)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF181B20) : scheme.surfaceContainer,
+                  border: Border(
+                    top: BorderSide(
+                      color: isDark ? const Color(0xFF272A30) : scheme.outlineVariant,
+                    ),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.checklist_rounded, size: 16, color: scheme.primary),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${_hunks.where((h) => h.isSelected).length}/${_hunks.length} hunk(s) sélectionné(s)',
+                      style: TextStyle(
+                        color: scheme.onSurface,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: () {
+                        final allSelected = _hunks.every((h) => h.isSelected);
+                        setState(() {
+                          for (final h in _hunks) {
+                            h.isSelected = !allSelected;
+                          }
+                        });
+                      },
+                      child: Text(
+                        _hunks.every((h) => h.isSelected) ? 'Tout décocher' : 'Tout cocher',
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.done_all_rounded, size: 14),
+                      label: const Text('Valider sélection', style: TextStyle(fontSize: 12)),
+                      onPressed: _applySelectedHunks,
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        backgroundColor: scheme.primary,
+                        foregroundColor: scheme.onPrimary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
             // Bottom Review Queue bar
             if (_annotations.isNotEmpty && widget.onSendReview != null)
               Container(
@@ -546,7 +669,86 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
     final hasComment = _annotations.containsKey(index);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return InkWell(
+    if (line.type == _DiffLineType.hunkHeader && line.hunkIndex != null && line.hunkIndex! < _hunks.length) {
+      final hunk = _hunks[line.hunkIndex!];
+      return Container(
+        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: scheme.primary.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: scheme.primary.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          children: [
+            Checkbox(
+              value: hunk.isSelected,
+              activeColor: scheme.primary,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
+              onChanged: (val) {
+                HapticFeedback.selectionClick();
+                setState(() => hunk.isSelected = val ?? true);
+              },
+            ),
+            const SizedBox(width: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: hunk.isSelected ? scheme.primary : scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                'Hunk #${hunk.index + 1}',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                  color: hunk.isSelected ? scheme.onPrimary : scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                line.content,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                  fontWeight: FontWeight.w600,
+                  color: scheme.primary,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            InkWell(
+              onTap: () {
+                HapticFeedback.selectionClick();
+                setState(() => hunk.isSelected = !hunk.isSelected);
+              },
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                child: Text(
+                  hunk.isSelected ? 'Inclus' : 'Exclu',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: hunk.isSelected ? const Color(0xFF22C55E) : scheme.outline,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final isHunkExcluded = line.hunkIndex != null &&
+        line.hunkIndex! < _hunks.length &&
+        !_hunks[line.hunkIndex!].isSelected;
+
+    final contentWidget = InkWell(
       onTap: () => _addAnnotation(index),
       hoverColor: isDark ? const Color(0xFF1E2128) : scheme.surfaceContainerHighest,
       splashColor: scheme.primary.withValues(alpha: 0.12),
@@ -602,6 +804,14 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
         ],
       ),
     );
+
+    if (isHunkExcluded) {
+      return Opacity(
+        opacity: 0.38,
+        child: contentWidget,
+      );
+    }
+    return contentWidget;
   }
 
   Widget _buildLineRow(_DiffLine line, bool hasComment, ColorScheme scheme) {
@@ -706,6 +916,20 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
   }
 }
 
+class _DiffHunk {
+  final int index;
+  final String header;
+  final List<int> lineIndices;
+  bool isSelected;
+
+  _DiffHunk({
+    required this.index,
+    required this.header,
+    required this.lineIndices,
+    this.isSelected = true,
+  });
+}
+
 enum _DiffLineType { hunkHeader, addition, deletion, context, meta }
 
 class _DiffLine {
@@ -713,11 +937,13 @@ class _DiffLine {
   final String content;
   final int? oldLine;
   final int? newLine;
+  final int? hunkIndex;
 
   _DiffLine({
     required this.type,
     required this.content,
     this.oldLine,
     this.newLine,
+    this.hunkIndex,
   });
 }

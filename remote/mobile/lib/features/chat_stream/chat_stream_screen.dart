@@ -30,6 +30,7 @@ import 'widgets/execution_progress_view.dart';
 import 'widgets/overview_panel_view.dart';
 import 'widgets/session_review_view.dart';
 import 'widgets/queued_messages_card.dart';
+import '../../services/offline_outbox_store.dart';
 import '../subagents/subagents_tree_sheet.dart';
 import '../subagents/models/subagent_item.dart';
 import '../subagents/widgets/subagent_tree_card.dart';
@@ -403,7 +404,47 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       if (mounted) _refreshQuotaSummary();
     });
     _loadPersistedDraft();
+    _loadOfflineOutbox(widget.activeSessionId);
     _refreshRunningTasks();
+  }
+
+  /// Recharge les messages en attente hors-ligne pour la session active
+  Future<void> _loadOfflineOutbox(String sessionId) async {
+    if (sessionId.isEmpty) return;
+    final loaded = await OfflineOutboxStore.loadQueuedMessages(sessionId);
+    if (loaded.isNotEmpty && mounted) {
+      setState(() {
+        _sessionMessageQueues[sessionId] = loaded;
+      });
+      _checkAndFlushOfflineOutbox();
+    }
+  }
+
+  /// Expédie automatiquement le premier message en attente dès reconnexion
+  void _checkAndFlushOfflineOutbox() {
+    final sessionId = widget.activeSessionId;
+    final queue = _sessionMessageQueues[sessionId];
+    if (queue == null || queue.isEmpty) return;
+    final isStreaming = _activeStreamingSessions.contains(sessionId);
+    if (widget.isConnected && !isStreaming) {
+      HapticFeedback.mediumImpact();
+      final next = queue.removeAt(0);
+      OfflineOutboxStore.saveQueuedMessages(sessionId, queue);
+      final text = next['text'] as String? ?? '';
+      if (text.isEmpty) return;
+      final modelUID = next['modelUID'] as String?;
+      final modelEnum = next['modelEnum'] as int?;
+      final buf = _sessionMessages.putIfAbsent(sessionId, () => []);
+      setState(() {
+        buf.add(ChatMessage(
+          id: 'm${++_messageCounter}',
+          sender: 'user',
+          text: text,
+          timestamp: _timestamp(),
+        ));
+      });
+      _sendPromptToDaemon(text, targetSessionOverride: sessionId, modelUID: modelUID, modelEnum: modelEnum);
+    }
   }
 
   /// P6 : recharge le brouillon persisté de la session courante dans le cache
@@ -803,8 +844,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       }
       _loadHistoryIfEmpty();
       _loadPersistedDraft();
+      _loadOfflineOutbox(widget.activeSessionId);
       _refreshRunningTasks();
       _scrollToBottomSettled();
+    }
+    if (!oldWidget.isConnected && widget.isConnected) {
+      _checkAndFlushOfflineOutbox();
     }
     if (oldWidget.api != widget.api) {
       // Reconnexion : réinitialiser l'état
@@ -812,6 +857,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       _stillWorkingTimer?.cancel();
       if (mounted && _showStillWorking) setState(() => _showStillWorking = false);
       _watchBroadcastStreams();
+      if (widget.isConnected) {
+        _checkAndFlushOfflineOutbox();
+      }
     }
   }
 
@@ -876,6 +924,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final outcome = lastEnd?['data']?['outcome'] as String? ?? 'done';
     if (outcome == 'done' && queue.isNotEmpty) {
       final next = queue.removeAt(0);
+      OfflineOutboxStore.saveQueuedMessages(sessionId, queue);
       final text = next['text'] as String;
       final modelUID = next['modelUID'] as String?;
       final modelEnum = next['modelEnum'] as int?;
@@ -889,6 +938,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         ));
       });
       _sendPromptToDaemon(text, targetSessionOverride: sessionId, modelUID: modelUID, modelEnum: modelEnum);
+    } else {
+      OfflineOutboxStore.saveQueuedMessages(sessionId, queue);
     }
   }
 
