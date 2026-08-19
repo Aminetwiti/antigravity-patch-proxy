@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // scheduledTasksPath : chemin du fichier JSON de persistance des tâches
@@ -90,6 +91,9 @@ func (s *Server) syncSidecarsLocked() {
 		prompt := ""
 		if len(sc.Args) > 3 {
 			prompt = sc.Args[3]
+		}
+		if strings.TrimSpace(prompt) == "" {
+			continue
 		}
 		displayName := sc.DisplayName
 		if displayName == "" {

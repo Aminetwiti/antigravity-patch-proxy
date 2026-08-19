@@ -121,3 +121,43 @@ abstract class AppMotion {
     return !MediaQuery.disableAnimationsOf(context);
   }
 }
+
+/// Atmospheric background gradients
+abstract class AppGradients {
+  /// Subtle studio-lit radial glow from top center into deep dark canvas
+  static const RadialGradient zenithal = RadialGradient(
+    center: Alignment(0.0, -1.25),
+    radius: 1.45,
+    colors: [
+      Color(0xFF202028),
+      Color(0xFF09090B),
+    ],
+    stops: [0.0, 0.65],
+  );
+}
+
+/// Typography scale matching Antigravity 2.0 & DESIGN.md
+abstract class AppTypography {
+  /// Section headers (uppercase, tracking 0.8px, Zinc-500)
+  static const TextStyle sectionHeader = TextStyle(
+    fontSize: 11,
+    fontWeight: FontWeight.w600,
+    letterSpacing: 0.8,
+    color: AppColors.inkMuted,
+  );
+
+  /// Monospace technical metadata (file paths, line numbers, IDs)
+  static const TextStyle monoMetadata = TextStyle(
+    fontSize: 11,
+    fontFamily: 'monospace',
+    fontWeight: FontWeight.w400,
+    color: AppColors.inkSecondary,
+  );
+
+  /// Compact uppercase pill label
+  static const TextStyle pillLabel = TextStyle(
+    fontSize: 10,
+    fontWeight: FontWeight.w600,
+    letterSpacing: 0.5,
+  );
+}
