@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../theme/app_colors.dart';
-import 'file_change_diff_card.dart';
 
 /// Type d'étape d'exécution fidèle à Antigravity 2.0 Desktop.
 enum ExecutionStepType {
@@ -330,21 +329,37 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
                 ? 6
                 : (lower.startsWith('writing to file') ? 15 : 12));
         final rest = line.substring(prefixLen).trim();
-        final match = RegExp(r'^(?:(TS|JS|Dart|Go|Py|>_|JSON|MD|HTML|CSS|YAML|SQL)\s+)?(\S+)(?:\s+\+(\d+)\s+-(\d+))?', caseSensitive: false).firstMatch(rest);
-        if (match != null) {
-          final extTag = match.group(1);
-          final fileName = match.group(2) ?? rest;
-          final add = match.group(3);
-          final del = match.group(4);
-          rawItems.add(ExecutionStepItem(
-            type: ExecutionStepType.fileEdit,
-            action: isEdit ? 'Edited' : 'Wrote',
-            title: extTag != null ? '$extTag $fileName' : fileName,
-            diffAdded: add != null ? '+$add' : '+1',
-            diffRemoved: del != null ? '-$del' : '-0',
-          ));
-          continue;
+        final parts = rest.split(RegExp(r'\s+'));
+        String fileName = rest;
+        String? add;
+        String? del;
+        String? extTag;
+        int idx = 0;
+        if (parts.isNotEmpty && RegExp(r'^(TS|JS|Dart|Go|Py|>_|JSON|MD|HTML|CSS|YAML|SQL)$', caseSensitive: false).hasMatch(parts[0])) {
+          extTag = parts[0];
+          idx = 1;
         }
+        if (idx < parts.length) {
+          fileName = parts[idx];
+          idx++;
+        }
+        while (idx < parts.length) {
+          final p = parts[idx];
+          if (p.startsWith('+')) {
+            add = p;
+          } else if (p.startsWith('-')) {
+            del = p;
+          }
+          idx++;
+        }
+        rawItems.add(ExecutionStepItem(
+          type: ExecutionStepType.fileEdit,
+          action: isEdit ? 'Edited' : 'Wrote',
+          title: extTag != null ? '$extTag $fileName' : fileName,
+          diffAdded: add ?? '+1',
+          diffRemoved: del ?? '-0',
+        ));
+        continue;
       }
 
       // 6. Analyzed / Viewed / Reading <ext> <file> #L123-456
@@ -372,15 +387,16 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
         continue;
       }
 
-      // 6b. Searched <query> <count> results
-      if (lower.startsWith('searched ')) {
-        final rest = line.substring(9).trim();
+      // 6b. Searched / Search <query> <count> results
+      if (lower.startsWith('searched ') || lower.startsWith('search ')) {
+        final prefixLen = lower.startsWith('searched ') ? 9 : 7;
+        final rest = line.substring(prefixLen).trim();
         final match = RegExp(r'^(.*?)(?:\s+(\d+)\s+results?)?$', caseSensitive: false).firstMatch(rest);
         final query = match?.group(1)?.trim() ?? rest;
         final count = match?.group(2);
         rawItems.add(ExecutionStepItem(
           type: ExecutionStepType.search,
-          action: 'Searched',
+          action: 'Search',
           title: query,
           diffAdded: count != null ? '$count results' : null,
           isExpandable: true,
@@ -691,45 +707,6 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
               ],
             ),
           ),
-          if (widget.onStop != null) ...[
-            const SizedBox(width: 6),
-            GestureDetector(
-              onTap: () {
-                HapticFeedback.heavyImpact();
-                widget.onStop?.call();
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
-                decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF3B151A) : scheme.errorContainer,
-                  borderRadius: BorderRadius.circular(5),
-                  border: Border.all(
-                    color: isDark ? const Color(0xFF7F1D1D) : scheme.error,
-                    width: 0.7,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.stop_rounded,
-                      size: 11,
-                      color: isDark ? const Color(0xFFFCA5A5) : scheme.onErrorContainer,
-                    ),
-                    const SizedBox(width: 3),
-                    Text(
-                      'Arrêter',
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? const Color(0xFFFCA5A5) : scheme.onErrorContainer,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
         ],
       ),
     );
@@ -987,7 +964,10 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
 
     final isExpanded = _expandedIndices.contains(index) ||
         (widget.initiallyExpanded &&
-            (item.type == ExecutionStepType.thought || item.type == ExecutionStepType.timer));
+            (item.type == ExecutionStepType.thought ||
+             item.type == ExecutionStepType.timer ||
+             item.type == ExecutionStepType.processingGroup ||
+             item.type == ExecutionStepType.exploredGroup));
 
     final isThoughtType = item.type == ExecutionStepType.thought || item.type == ExecutionStepType.workedDuration;
 
@@ -1015,11 +995,9 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
                     }
                   }
                 : null,
-            borderRadius: BorderRadius.circular(4),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2.5),
               child: Row(
-                mainAxisSize: MainAxisSize.min,
                 children: [
                   // Action verb: "Explored", "Edited", "Run", "Thought", "Worked", "Timed", "Subagent"
                   if (item.action.isNotEmpty) ...[
@@ -1209,11 +1187,6 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
                     const SizedBox(width: 6),
                     const SizedBox(
                       width: 10,
-                      height: 10,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 1.5,
-                        valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF0284C7)),
-                      ),
                     ),
                   ],
 
@@ -1289,6 +1262,28 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
                                 fontSize: 11,
                                 fontFamily: 'monospace',
                                 color: Color(0xFF71717A),
+                              ),
+                            ),
+                          ],
+                          if (sub.diffAdded != null) ...[
+                            const SizedBox(width: 6),
+                            Text(
+                              sub.diffAdded!,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontFamily: 'monospace',
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF4ADE80),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              sub.diffRemoved ?? '-0',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontFamily: 'monospace',
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFFF87171),
                               ),
                             ),
                           ],

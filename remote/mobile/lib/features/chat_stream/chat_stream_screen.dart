@@ -622,7 +622,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           ));
         }
 
-        if (!isStreamingLive) {
+        if (!isStreamingLive || !isStreaming) {
           if (parsed.isNotEmpty || buf.isEmpty) {
             buf
               ..clear()
@@ -638,6 +638,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             }
           } else {
             _onStreamEnded(targetSession);
+            _refreshRunningTasks();
           }
           setState(() {});
           _scrollToBottomSettled();
@@ -1357,12 +1358,19 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         if (userInput.isNotEmpty) {
           final hasUserMsg = buf.any((m) => m.sender == 'user' && m.text.trim() == userInput.trim());
           if (!hasUserMsg) {
-            buf.add(ChatMessage(
+            final userMsg = ChatMessage(
               id: 'user-ext-$requestId',
               sender: 'user',
               text: userInput,
               timestamp: _timestamp(),
-            ));
+            );
+            final targetId = _streamRequestToMessageId[thKey] ?? 'ext-$requestId';
+            final assistantIdx = buf.indexWhere((m) => m.id == targetId || (m.isStreaming && m.sender == 'assistant'));
+            if (assistantIdx >= 0) {
+              buf.insert(assistantIdx, userMsg);
+            } else {
+              buf.add(userMsg);
+            }
           }
         }
         final textDelta = StreamDeltaParser.textOf(msg);
@@ -2064,8 +2072,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     if (gVal == null && cVal == null) return const SizedBox.shrink();
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 1),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHighest.withValues(alpha: 0.6),
         borderRadius: BorderRadius.circular(AppRadius.pill),
@@ -2268,8 +2276,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               onDelete: _handleQueueDelete,
             ),
           ),
-        if (_hasCurrentActiveStream && !hasKeyboard)
-          _buildLiveAgentActivityDock(scheme),
         ChatInputBar(
           onSend: _handleSendMessage,
           isConnected: isConnected,
@@ -2281,136 +2287,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           onDraftChanged: setDraft,
         ),
       ],
-    );
-  }
-
-  Widget _buildLiveAgentActivityDock(ColorScheme scheme) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Semantics(
-      container: true,
-      label: 'Agent en cours d\'exécution. Toucher pour suivre les actions en direct.',
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOutCubic,
-        margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF131722) : scheme.primaryContainer.withValues(alpha: 0.35),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: isDark ? const Color(0xFF232D42) : scheme.primary.withValues(alpha: 0.3),
-            width: 1,
-          ),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: InkWell(
-                onTap: () {
-                  _scrollToBottomSettled();
-                  HapticFeedback.selectionClick();
-                },
-                borderRadius: BorderRadius.circular(8),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 1),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: const BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: AppColors.accentBlueBright,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Color(0x6638BDF8),
-                              blurRadius: 5,
-                              spreadRadius: 1.5,
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 9),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              'Agent en cours d\'exécution…',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: isDark ? AppColors.accentBlueBright : scheme.primary,
-                                letterSpacing: -0.1,
-                              ),
-                            ),
-                            Text(
-                              'Toucher pour suivre les actions en direct',
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                color: isDark ? const Color(0xFF8B8D98) : scheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Tooltip(
-              message: 'Arrêter la génération',
-              child: Semantics(
-                button: true,
-                label: 'Arrêter la génération de l\'agent',
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () {
-                      HapticFeedback.heavyImpact();
-                      _handleStopGeneration();
-                    },
-                    borderRadius: BorderRadius.circular(6),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF381519) : scheme.errorContainer,
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(
-                          color: isDark ? const Color(0xFF7F1D1D) : scheme.error,
-                          width: 0.8,
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.stop_rounded,
-                            size: 13,
-                            color: isDark ? const Color(0xFFFCA5A5) : scheme.onErrorContainer,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Arrêter',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: isDark ? const Color(0xFFFCA5A5) : scheme.onErrorContainer,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -3296,7 +3172,6 @@ class _MessageBubble extends StatelessWidget {
                 modelLabel: message.modelLabel,
                 initiallyExpanded: isThoughtExpanded,
                 onToggleExpand: onToggleThought,
-                onStop: onStop,
                 onOpenArtifact: onOpenArtifact,
               ),
             ],

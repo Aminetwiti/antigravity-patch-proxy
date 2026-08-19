@@ -6104,6 +6104,12 @@ func (s *Server) scanRunningTasksFromTranscript(cascadeID string) {
 				delete(activeTasks, tID)
 			}
 		}
+
+		if strings.Contains(content, "All your subagents and background tasks have been stopped") ||
+			strings.Contains(content, "stopped due to server restart") ||
+			strings.Contains(content, "server restart") {
+			activeTasks = make(map[string]string)
+		}
 	}
 
 	// Vérification physique sur disque des logs des tâches restantes
@@ -6680,6 +6686,33 @@ func (s *Server) runLiveTurnStreamer(ctx context.Context, cascadeID, requestID s
 										tIDs := extractAllTaskIDsFromText(entry.Content)
 										for _, tID := range tIDs {
 											s.runningTasks.finishTask(tID, "completed")
+										}
+									}
+
+									if strings.Contains(entry.Content, "All your subagents and background tasks have been stopped") ||
+										strings.Contains(entry.Content, "stopped due to server restart") {
+										s.runningTasks.mu.Lock()
+										var stopped []RunningTaskInfo
+										for _, t := range s.runningTasks.tasks {
+											if t.CascadeID == cascadeID && t.Status == "running" {
+												t.Status = "completed"
+												t.EndedAt = time.Now()
+												stopped = append(stopped, *t)
+											}
+										}
+										s.runningTasks.mu.Unlock()
+										if s.runningTasks.onBroadcast != nil {
+											for _, t := range stopped {
+												s.runningTasks.onBroadcast(OutgoingMessage{
+													Type: "task_ended",
+													Data: map[string]interface{}{
+														"id":        t.ID,
+														"command":   t.Command,
+														"cascadeId": t.CascadeID,
+														"status":    "completed",
+													},
+												})
+											}
 										}
 									}
 								}
