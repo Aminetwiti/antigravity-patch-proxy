@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../core/protocol/messages.dart';
+import '../theme/app_colors.dart';
 
 /// Barre de fil d'Ariane (Breadcrumb) élégante et compacte affichée entre
 /// le Header (AppBar) et la barre d'onglets (Nav : Chat, Review, Overview...).
@@ -41,10 +42,10 @@ class SessionBreadcrumb extends StatelessWidget {
       height: 30,
       width: double.infinity,
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF141518) : scheme.surfaceContainerLowest,
+        color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerLowest,
         border: Border(
           bottom: BorderSide(
-            color: isDark ? const Color(0xFF222429) : scheme.outlineVariant.withValues(alpha: 0.5),
+            color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.5),
             width: 1,
           ),
         ),
@@ -72,7 +73,7 @@ class SessionBreadcrumb extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w400,
-                          color: isDark ? const Color(0xFF9E9FA9) : scheme.onSurfaceVariant,
+                          color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
                           letterSpacing: -0.1,
                         ),
                         maxLines: 1,
@@ -84,7 +85,7 @@ class SessionBreadcrumb extends StatelessWidget {
                       Icon(
                         Icons.arrow_drop_down,
                         size: 14,
-                        color: isDark ? const Color(0xFF6B6E77) : scheme.outline,
+                        color: isDark ? AppColors.inkMuted : scheme.outline,
                       ),
                     ],
                   ],
@@ -102,7 +103,7 @@ class SessionBreadcrumb extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w400,
-                  color: isDark ? const Color(0xFF5A5D66) : scheme.outline,
+                  color: isDark ? AppColors.inkMuted : scheme.outline,
                 ),
               ),
             ),
@@ -119,7 +120,7 @@ class SessionBreadcrumb extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w400,
-                      color: isDark ? const Color(0xFF9E9FA9) : scheme.onSurfaceVariant,
+                      color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
                       letterSpacing: -0.1,
                     ),
                     maxLines: 1,
@@ -137,10 +138,10 @@ class SessionBreadcrumb extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF1F2430) : scheme.surfaceContainerHighest,
+                  color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(4),
                   border: Border.all(
-                    color: isDark ? const Color(0xFF2A3142) : scheme.outlineVariant.withValues(alpha: 0.4),
+                    color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.4),
                     width: 0.6,
                   ),
                 ),
@@ -150,7 +151,7 @@ class SessionBreadcrumb extends StatelessWidget {
                     Icon(
                       Icons.open_in_new_rounded,
                       size: 11,
-                      color: isDark ? const Color(0xFF60A5FA) : scheme.primary,
+                      color: isDark ? AppColors.accentBlue : scheme.primary,
                     ),
                     const SizedBox(width: 4),
                     Text(
@@ -158,7 +159,7 @@ class SessionBreadcrumb extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 10.5,
                         fontWeight: FontWeight.w500,
-                        color: isDark ? const Color(0xFFD4D4D8) : scheme.onSurface,
+                        color: isDark ? AppColors.inkPrimary : scheme.onSurface,
                       ),
                     ),
                   ],

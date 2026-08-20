@@ -6,6 +6,7 @@ import '../theme/app_colors.dart';
 class StatusDotBadge extends StatelessWidget {
   final String label;
   final Color color;
+  final IconData? icon;
   final VoidCallback? onTap;
   final bool isPulsing;
 
@@ -13,6 +14,7 @@ class StatusDotBadge extends StatelessWidget {
     super.key,
     required this.label,
     required this.color,
+    this.icon,
     this.onTap,
     this.isPulsing = false,
   });
@@ -29,22 +31,27 @@ class StatusDotBadge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 5.5,
-            height: 5.5,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: color.withValues(alpha: 0.55),
-                  blurRadius: 3.5,
-                  spreadRadius: 0.8,
-                ),
-              ],
+          if (icon != null) ...[
+            Icon(icon, size: 10, color: color),
+            const SizedBox(width: 4),
+          ] else ...[
+            Container(
+              width: 5.5,
+              height: 5.5,
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: color.withValues(alpha: 0.55),
+                    blurRadius: 3.5,
+                    spreadRadius: 0.8,
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: 5.5),
+            const SizedBox(width: 5.5),
+          ],
           Text(
             label.toUpperCase(),
             style: TextStyle(
