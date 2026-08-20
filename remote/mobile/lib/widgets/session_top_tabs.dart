@@ -89,7 +89,7 @@ class SessionTopTabs extends StatelessWidget {
                   icon: Icons.dashboard_outlined,
                   label: 'Overview',
                   isSelected: activeTab == SessionTabType.overview && activeArtifact == null,
-                  badge: runningTasksCount > 0 ? '$runningTasksCount active' : null,
+                  badge: runningTasksCount > 0 ? '$runningTasksCount' : null,
                   badgeColor: isDark ? AppColors.accentBlue : scheme.primary,
                   onTap: () => onTabChanged(SessionTabType.overview),
                 ),

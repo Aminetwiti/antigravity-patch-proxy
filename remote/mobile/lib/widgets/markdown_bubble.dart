@@ -97,12 +97,133 @@ class _MarkdownBubbleState extends State<MarkdownBubble> {
               _CodeBlockView(code: block.code!, api: widget.api, workspacePath: widget.workspacePath)
             else if (block.toolCall != null)
               _ToolCallPill(call: block.toolCall!)
+            else if (block.table != null)
+              _MarkdownTableView(table: block.table!, onLocalFile: widget.onLocalFile)
             else
               _ParagraphView(block: block, onLocalFile: widget.onLocalFile),
             const SizedBox(height: 10),
           ],
           if (widget.isStreaming) const _StreamingCursor(),
         ],
+      ),
+    );
+  }
+}
+
+class _MarkdownTableView extends StatelessWidget {
+  final TableBlock table;
+  final LocalFileTap? onLocalFile;
+
+  const _MarkdownTableView({
+    required this.table,
+    this.onLocalFile,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final scheme = Theme.of(context).colorScheme;
+
+    final borderColor = isDark
+        ? AppColors.borderSubtle
+        : scheme.outlineVariant.withValues(alpha: 0.6);
+    final headerBg = isDark
+        ? AppColors.surfaceRaised
+        : scheme.surfaceContainerHigh;
+    final alternateRowBg = isDark
+        ? AppColors.surfaceBase.withValues(alpha: 0.4)
+        : scheme.surfaceContainerLow;
+
+    TextAlign alignmentFor(int colIndex) {
+      if (colIndex < table.alignments.length) {
+        switch (table.alignments[colIndex]) {
+          case TableCellAlignment.center:
+            return TextAlign.center;
+          case TableCellAlignment.right:
+            return TextAlign.right;
+          case TableCellAlignment.left:
+            return TextAlign.left;
+        }
+      }
+      return TextAlign.left;
+    }
+
+    final headerStyle = TextStyle(
+      fontSize: 12.5,
+      fontWeight: FontWeight.w700,
+      color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+    );
+    final cellStyle = TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.w400,
+      color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+    );
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.surfaceBase : scheme.surface,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: borderColor, width: 1),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        child: Table(
+          defaultColumnWidth: const IntrinsicColumnWidth(),
+          border: TableBorder(
+            horizontalInside: BorderSide(color: borderColor, width: 0.8),
+            verticalInside: BorderSide(color: borderColor.withValues(alpha: 0.5), width: 0.8),
+          ),
+          children: [
+            // En-tête
+            TableRow(
+              decoration: BoxDecoration(color: headerBg),
+              children: [
+                for (var i = 0; i < table.headers.length; i++)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Text.rich(
+                      TextSpan(
+                        children: MarkdownRenderer.inlineSpans(
+                          table.headers[i],
+                          headerStyle,
+                          scheme: scheme,
+                          onLocalFile: onLocalFile,
+                        ),
+                      ),
+                      textAlign: alignmentFor(i),
+                    ),
+                  ),
+              ],
+            ),
+            // Lignes de données
+            for (var r = 0; r < table.rows.length; r++)
+              TableRow(
+                decoration: BoxDecoration(
+                  color: r.isOdd ? alternateRowBg : Colors.transparent,
+                ),
+                children: [
+                  for (var c = 0; c < table.headers.length; c++)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                      child: Text.rich(
+                        TextSpan(
+                          children: MarkdownRenderer.inlineSpans(
+                            c < table.rows[r].length ? table.rows[r][c] : '',
+                            cellStyle,
+                            scheme: scheme,
+                            onLocalFile: onLocalFile,
+                          ),
+                        ),
+                        textAlign: alignmentFor(c),
+                      ),
+                    ),
+                ],
+              ),
+          ],
+        ),
       ),
     );
   }

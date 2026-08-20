@@ -691,6 +691,7 @@ class _WorkspaceFolderSection extends StatelessWidget {
   final Function(CascadeSession session)? onExportSession;
   final Set<String> pinnedIds;
   final ValueChanged<String>? onTogglePin;
+  final Set<String> readIds;
 
   const _WorkspaceFolderSection({
     required this.folderName,
@@ -710,6 +711,7 @@ class _WorkspaceFolderSection extends StatelessWidget {
     this.onExportSession,
     required this.pinnedIds,
     this.onTogglePin,
+    this.readIds = const {},
   });
 
   @override
@@ -850,6 +852,7 @@ class _WorkspaceFolderSection extends StatelessWidget {
                   session: s,
                   isSelected: s.id == activeSessionId,
                   showSubtitle: showSubtitle,
+                  isUnread: (s.hasUnread || (s.stepCount >= 1 && !s.isRunning)) && !readIds.contains(s.id) && s.id != activeSessionId,
                   onTap: () => onSessionTap(s.id),
                   onDelete: onDeleteSession != null
                       ? () => onDeleteSession!(s.id)
@@ -881,6 +884,7 @@ class _SessionRowItem extends StatefulWidget {
   final CascadeSession session;
   final bool isSelected;
   final bool showSubtitle;
+  final bool isUnread;
   final VoidCallback onTap;
   final VoidCallback? onDelete;
   final VoidCallback? onArchive;
@@ -895,6 +899,7 @@ class _SessionRowItem extends StatefulWidget {
     required this.session,
     required this.isSelected,
     this.showSubtitle = true,
+    this.isUnread = false,
     required this.onTap,
     this.onDelete,
     this.onArchive,
@@ -1113,6 +1118,7 @@ class _SessionRowItemState extends State<_SessionRowItem> {
   Widget build(BuildContext context) {
     final isSelected = widget.isSelected;
     final isRunning = widget.session.isRunning;
+    final isUnread = (widget.isUnread || widget.session.hasUnread) && !isSelected && !isRunning;
     final subtitleText = widget.session.worktree ?? WorkspacePath.displayName(widget.session.workspacePath);
 
     Widget item = Semantics(
@@ -1233,19 +1239,40 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                                       ),
                                     ),
                                   )
-                                : widget.session.time.isNotEmpty
-                                    ? Text(
-                                        widget.session.time,
-                                        key: ValueKey('time_${widget.session.time}'),
-                                        style: TextStyle(
-                                          fontSize: 11.5,
-                                          color: isSelected
-                                              ? const Color(0xFF9E9FA9)
-                                              : const Color(0xFF7E818D),
-                                          fontWeight: FontWeight.w400,
+                                : isUnread
+                                    ? Tooltip(
+                                        key: const ValueKey('unread_blue_dot'),
+                                        message: 'Session terminée — non lue',
+                                        child: Container(
+                                          width: 7,
+                                          height: 7,
+                                          margin: const EdgeInsets.symmetric(horizontal: 2),
+                                          decoration: const BoxDecoration(
+                                            color: Color(0xFF1A73E8),
+                                            shape: BoxShape.circle,
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Color(0x661A73E8),
+                                                blurRadius: 4,
+                                                spreadRadius: 0.5,
+                                              ),
+                                            ],
+                                          ),
                                         ),
                                       )
-                                    : const SizedBox.shrink(key: ValueKey('empty')),
+                                    : widget.session.time.isNotEmpty
+                                        ? Text(
+                                            widget.session.time,
+                                            key: ValueKey('time_${widget.session.time}'),
+                                            style: TextStyle(
+                                              fontSize: 11.5,
+                                              color: isSelected
+                                                  ? const Color(0xFF9E9FA9)
+                                                  : const Color(0xFF7E818D),
+                                              fontWeight: FontWeight.w400,
+                                            ),
+                                          )
+                                        : const SizedBox.shrink(key: ValueKey('empty')),
               ),
               if (widget.isPinned)
                 Padding(

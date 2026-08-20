@@ -667,20 +667,23 @@ class _ConversationHistoryRow extends StatelessWidget {
                     ),
                   ),
                 )
-              else if (isActive)
-                Container(
-                  width: 7,
-                  height: 7,
-                  decoration: BoxDecoration(
-                    color: scheme.primary,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: scheme.primary,
-                        blurRadius: 4,
-                        spreadRadius: 1,
-                      ),
-                    ],
+              else if (session.hasUnread && !isActive)
+                Tooltip(
+                  message: 'Session terminée — non lue',
+                  child: Container(
+                    width: 7,
+                    height: 7,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF1A73E8),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Color(0x661A73E8),
+                          blurRadius: 4,
+                          spreadRadius: 0.5,
+                        ),
+                      ],
+                    ),
                   ),
                 )
               else if (session.time.isNotEmpty)

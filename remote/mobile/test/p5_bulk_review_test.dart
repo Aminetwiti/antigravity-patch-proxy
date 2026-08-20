@@ -4,55 +4,28 @@ import 'package:mobile/features/chat_stream/widgets/session_review_view.dart';
 import 'package:mobile/widgets/markdown_bubble.dart';
 
 void main() {
-  group('P5 — SessionReviewView bulk actions', () {
+  group('SessionReviewView', () {
     const files = [
       SessionModifiedFile(path: 'lib/a.dart', additions: 2, deletions: 0),
       SessionModifiedFile(path: 'lib/b.dart', additions: 0, deletions: 1),
     ];
 
-    testWidgets('bar hidden when callbacks are null', (tester) async {
+    testWidgets('renders modified files list and no bulk accept/discard buttons', (tester) async {
+      SessionModifiedFile? openedFile;
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: SessionReviewView(
             files: files,
-            onOpenFileDiff: (_) {},
+            onOpenFileDiff: (f) => openedFile = f,
           ),
         ),
       ));
       expect(find.text('Tout accepter'), findsNothing);
       expect(find.text('Tout rejeter'), findsNothing);
-    });
-
-    testWidgets('tap Tout accepter fires onAcceptAll', (tester) async {
-      var accepted = 0;
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: SessionReviewView(
-            files: files,
-            onOpenFileDiff: (_) {},
-            onAcceptAll: () => accepted++,
-          ),
-        ),
-      ));
-      expect(find.text('Tout accepter'), findsOneWidget);
-      await tester.tap(find.text('Tout accepter'));
-      expect(accepted, 1);
-    });
-
-    testWidgets('tap Tout rejeter fires onDiscardAll', (tester) async {
-      var discarded = 0;
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: SessionReviewView(
-            files: files,
-            onOpenFileDiff: (_) {},
-            onDiscardAll: () => discarded++,
-          ),
-        ),
-      ));
-      expect(find.text('Tout rejeter'), findsOneWidget);
-      await tester.tap(find.text('Tout rejeter'));
-      expect(discarded, 1);
+      expect(find.text('a.dart'), findsOneWidget);
+      expect(find.text('b.dart'), findsOneWidget);
+      await tester.tap(find.text('a.dart'));
+      expect(openedFile?.fileName, 'a.dart');
     });
   });
 

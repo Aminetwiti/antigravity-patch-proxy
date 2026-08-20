@@ -31,10 +31,25 @@ class ToolCallBlock {
   const ToolCallBlock(this.toolName, this.summary, this.raw);
 }
 
+enum TableCellAlignment { left, center, right }
+
+class TableBlock {
+  final List<String> headers;
+  final List<List<String>> rows;
+  final List<TableCellAlignment> alignments;
+
+  const TableBlock({
+    required this.headers,
+    required this.rows,
+    required this.alignments,
+  });
+}
+
 class MarkdownBlock {
-  final String? paragraph; // null when this block is a code block
+  final String? paragraph; // null when this block is a code block or table
   final CodeBlock? code;
   final ToolCallBlock? toolCall;
+  final TableBlock? table;
   final bool isListItem;
   final int headerLevel;
   final bool isDivider;
@@ -47,11 +62,13 @@ class MarkdownBlock {
     this.isDivider = false,
     this.isQuote = false,
   })  : code = null,
-        toolCall = null;
+        toolCall = null,
+        table = null;
 
   const MarkdownBlock.codeBlock(this.code)
       : paragraph = null,
         toolCall = null,
+        table = null,
         isListItem = false,
         headerLevel = 0,
         isDivider = false,
@@ -60,6 +77,16 @@ class MarkdownBlock {
   const MarkdownBlock.toolCall(this.toolCall)
       : paragraph = null,
         code = null,
+        table = null,
+        isListItem = false,
+        headerLevel = 0,
+        isDivider = false,
+        isQuote = false;
+
+  const MarkdownBlock.table(this.table)
+      : paragraph = null,
+        code = null,
+        toolCall = null,
         isListItem = false,
         headerLevel = 0,
         isDivider = false,
@@ -129,26 +156,61 @@ class MarkdownRenderer {
         blocks.add(MarkdownBlock.toolCall(parsed));
         return;
       }
-      for (final line in raw.split('\n')) {
+      final rawLines = raw.split('\n');
+      var i = 0;
+      while (i < rawLines.length) {
+        final line = rawLines[i];
         final trimmed = line.trim();
-        if (trimmed.isEmpty) continue;
+        if (trimmed.isEmpty) {
+          i++;
+          continue;
+        }
+
+        // Détection de tableau GFM (en-tête + ligne de délimitation |---|)
+        if (trimmed.startsWith('|') && trimmed.endsWith('|') && i + 1 < rawLines.length) {
+          final nextTrimmed = rawLines[i + 1].trim();
+          if (_isTableDelimiter(nextTrimmed)) {
+            final headers = _parseTableRow(trimmed);
+            final alignments = _parseTableAlignments(nextTrimmed);
+            final rows = <List<String>>[];
+            i += 2;
+            while (i < rawLines.length) {
+              final rowTrimmed = rawLines[i].trim();
+              if (rowTrimmed.startsWith('|') && rowTrimmed.endsWith('|')) {
+                rows.add(_parseTableRow(rowTrimmed));
+                i++;
+              } else {
+                break;
+              }
+            }
+            blocks.add(MarkdownBlock.table(TableBlock(
+              headers: headers,
+              rows: rows,
+              alignments: alignments,
+            )));
+            continue;
+          }
+        }
 
         final headMatch = _headingRe.firstMatch(trimmed);
         if (headMatch != null) {
           final level = headMatch.group(1)!.length;
           final content = headMatch.group(2)!.trim();
           blocks.add(MarkdownBlock.paragraph(content, headerLevel: level));
+          i++;
           continue;
         }
 
         if (_dividerRe.hasMatch(trimmed)) {
           blocks.add(const MarkdownBlock.paragraph('', isDivider: true));
+          i++;
           continue;
         }
 
         final quoteMatch = _quoteRe.firstMatch(trimmed);
         if (quoteMatch != null) {
           blocks.add(MarkdownBlock.paragraph(quoteMatch.group(1)!.trim(), isQuote: true));
+          i++;
           continue;
         }
 
@@ -162,13 +224,10 @@ class MarkdownRenderer {
             line.replaceFirst(_numberedListRe, ''),
             isListItem: true,
           ));
-        } else if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
-          // Table row: convert pipe separators to formatted columns
-          final cells = trimmed.split('|').where((c) => c.trim().isNotEmpty).map((c) => c.trim()).join('  │  ');
-          blocks.add(MarkdownBlock.paragraph('│ $cells │'));
         } else {
           blocks.add(MarkdownBlock.paragraph(line));
         }
+        i++;
       }
     }
 
@@ -212,6 +271,35 @@ class MarkdownRenderer {
     final summary = _toolArgRe.firstMatch(raw)?.group(2) ??
         raw.replaceAll(_whitespaceRe, ' ').substring(0, raw.length > 80 ? 80 : raw.length);
     return ToolCallBlock(name, summary, raw);
+  }
+
+  static bool _isTableDelimiter(String line) {
+    final trimmed = line.trim();
+    if (!trimmed.startsWith('|') || !trimmed.endsWith('|')) return false;
+    final cells = trimmed.substring(1, trimmed.length - 1).split('|');
+    if (cells.isEmpty) return false;
+    return cells.every((c) {
+      final t = c.trim();
+      return RegExp(r'^:?-+:?$').hasMatch(t) && t.replaceAll(':', '').replaceAll('-', '').isEmpty;
+    });
+  }
+
+  static List<String> _parseTableRow(String line) {
+    final trimmed = line.trim();
+    final content = trimmed.startsWith('|') && trimmed.endsWith('|')
+        ? trimmed.substring(1, trimmed.length - 1)
+        : trimmed;
+    return content.split('|').map((c) => c.trim()).toList();
+  }
+
+  static List<TableCellAlignment> _parseTableAlignments(String delimiterLine) {
+    final cells = _parseTableRow(delimiterLine);
+    return cells.map((c) {
+      final t = c.trim();
+      if (t.startsWith(':') && t.endsWith(':')) return TableCellAlignment.center;
+      if (t.endsWith(':')) return TableCellAlignment.right;
+      return TableCellAlignment.left;
+    }).toList();
   }
 
   /// Builds inline [TextSpan]s for a paragraph, resolving bold/italic/code.

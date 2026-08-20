@@ -1222,10 +1222,18 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     if (msg['data']?['hostActive'] == true) return;
     final outcome = data['outcome'] as String? ?? 'done';
     final cascadeId = targetSessionId ?? data['cascadeId'] as String? ?? widget.activeSessionId;
-    final message = data['message'] as String? ?? '';
+    if (outcome == 'done' || outcome == 'cancelled') {
+      HapticFeedback.lightImpact();
+    }
 
-    // Ne pas notifier "Tâche terminée" si des tâches en arrière-plan, sous-agents
-    // ou approbations/questions sont encore en cours ou en attente pour cette session.
+    // Si l'utilisateur est DÉJÀ dans la session active et au premier plan, NE PAS envoyer de notification.
+    final isViewingThisSessionInForeground = _appInForeground && cascadeId == widget.activeSessionId;
+    if (isViewingThisSessionInForeground) {
+      return;
+    }
+
+    // Ne notifier QUE si tout le travail est TOTALEMENT terminé :
+    // Pas de tâches d'arrière-plan en cours, pas de sous-agents actifs, pas d'approbations ou de questions en attente.
     final hasActiveBackgroundTasks = _runningBackgroundTasks.isNotEmpty ||
         _taskStatuses.values.any((st) => st == 'running');
     final hasSubagentsRunning = (_sessionSubagents[cascadeId] ?? []).any((sa) => sa.status.toLowerCase() == 'running');
@@ -1237,14 +1245,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       return;
     }
 
+    final message = (data['message'] ?? msg['message'] ?? 'Tâche terminée').toString();
     ApprovalNotifier.instance.notifyTaskEnded(
       cascadeId: cascadeId,
       outcome: outcome,
       message: message,
     );
-    if (outcome == 'done' || outcome == 'cancelled') {
-      HapticFeedback.lightImpact();
-    }
   }
 
 
@@ -1477,14 +1483,17 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         });
         _refreshRunningTasks();
 
-        // Si toutes les tâches d'arrière-plan sont terminées et que le stream est inactif,
-        // notifier la véritable fin d'exécution.
-        if (_runningBackgroundTasks.isEmpty &&
+        // Si toutes les tâches d'arrière-plan sont terminées, que le stream est inactif,
+        // et que l'utilisateur N'EST PAS sur cette session au premier plan, notifier la fin définitive.
+        final targetCId = eventCascadeId.isNotEmpty ? eventCascadeId : widget.activeSessionId;
+        final isViewingThisSessionInForeground = _appInForeground && targetCId == widget.activeSessionId;
+        if (!isViewingThisSessionInForeground &&
+            _runningBackgroundTasks.isEmpty &&
             !_hasCurrentActiveStream &&
-            !(_sessionApprovals[widget.activeSessionId]?.isNotEmpty ?? false) &&
-            !_sessionQuestions.containsKey(widget.activeSessionId)) {
+            !(_sessionApprovals[targetCId]?.isNotEmpty ?? false) &&
+            !_sessionQuestions.containsKey(targetCId)) {
           ApprovalNotifier.instance.notifyTaskEnded(
-            cascadeId: widget.activeSessionId,
+            cascadeId: targetCId,
             outcome: status == 'error' ? 'error' : 'done',
             message: cmd.isNotEmpty ? 'Tâche terminée : $cmd' : 'Travail terminé',
           );
@@ -1499,20 +1508,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       }
 
       final targetSessionId = sessionId;
-
-      // P1 : notification « Tâche démarrée » — uniquement quand l'app est en
-      // arrière-plan/verrouillée ET que personne n'est actif sur le PC hôte
-      // (le daemon fournit hostActive sur stream_start, idle detection Go).
-      // Couvre les prompts envoyés depuis le PC, les autres surfaces et les
-      // envois locaux si l'utilisateur a verrouillé juste après.
-      if (type == 'stream_start' &&
-          !_appInForeground &&
-          msg['data']?['hostActive'] != true) {
-        ApprovalNotifier.instance.notifyTaskStarted(
-          cascadeId: targetSessionId,
-          prompt: 'Une tâche a démarré sur le PC hôte',
-        );
-      }
 
       // Bug tâches arrière-plan : si l'évènement concerne une autre session,
       // on le bufferise dans _sessionMessages[targetSessionId] au lieu de le jeter.
@@ -2587,14 +2582,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               },
             ),
           if ((_sessionMessageQueues[widget.activeSessionId]?.isNotEmpty ?? false))
-            ConstrainedBox(
-              constraints: BoxConstraints(maxHeight: hasKeyboard ? 80 : 160),
-              child: QueuedMessagesCard(
-                queuedMessages: _sessionMessageQueues[widget.activeSessionId]!,
-                onSendNow: _handleQueueSendNow,
-                onEdit: _handleQueueEdit,
-                onDelete: _handleQueueDelete,
-              ),
+            QueuedMessagesCard(
+              queuedMessages: _sessionMessageQueues[widget.activeSessionId]!,
+              onSendNow: _handleQueueSendNow,
+              onEdit: _handleQueueEdit,
+              onDelete: _handleQueueDelete,
             ),
           if (_topActiveBanner != null)
             AppNotificationBanner(
@@ -2997,78 +2989,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     }
   }
 
-  /// P5 : exécute une commande shell sur le workspace hôte via le daemon
-  /// (mode legacy send_command — aucun besoin de PTY pour git apply).
-  Future<void> _runWorkspaceCommand(String command) async {
-    final api = widget.api;
-    if (api == null) return;
-    try {
-      await api.sendCommand(command);
-    } catch (_) {
-      // Silencieux : le terminal / logs affichent déjà l'erreur côté daemon.
-    }
-  }
 
-  /// P5 : confirmation avant action groupée (accepter / rejeter tout).
-  Future<void> _confirmBulkAction({
-    required String title,
-    required String message,
-    required String confirmLabel,
-    required String command,
-  }) async {
-    final scheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainer,
-        title: Text(title, style: TextStyle(fontSize: 15, color: scheme.onSurface)),
-        content: Text(
-          message,
-          style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text('Annuler', style: TextStyle(color: scheme.onSurfaceVariant)),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: confirmLabel == 'Tout rejeter'
-                  ? AppColors.danger
-                  : scheme.primary,
-            ),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: Text(confirmLabel),
-          ),
-        ],
-      ),
-    );
-    if (ok == true) {
-      await _runWorkspaceCommand(command);
-      if (confirmLabel == 'Tout rejeter') {
-        setState(() {
-          _modifiedFileList.clear();
-          _sessionModifiedFiles[widget.activeSessionId]?.clear();
-        });
-      }
-      await Future.delayed(const Duration(milliseconds: 600));
-      if (!mounted) return;
-      await _fetchVcsChanges();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            confirmLabel == 'Tout rejeter'
-                ? 'Modifications rejetées — workspace restauré.'
-                : 'Modifications acceptées — modifications appliquées.',
-          ),
-          duration: const Duration(seconds: 2),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
-  }
 
   Future<void> _fetchVcsChanges() async {
     final api = widget.api;
@@ -3217,20 +3138,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           fileName: firstName,
         );
       },
-      onAcceptAll: () => _confirmBulkAction(
-        title: 'Accepter toutes les modifications ?',
-        message:
-            'Les changements de cette session seront appliqués au workspace (git apply).',
-        confirmLabel: 'Tout accepter',
-        command: 'git apply --3way',
-      ),
-      onDiscardAll: () => _confirmBulkAction(
-        title: 'Rejeter toutes les modifications ?',
-        message:
-            'Les changements de cette session seront annulés dans le workspace (git checkout).',
-        confirmLabel: 'Tout rejeter',
-        command: 'git checkout -- .',
-      ),
     );
   }
 

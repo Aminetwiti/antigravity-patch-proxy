@@ -133,7 +133,7 @@ class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
             imgBytes = base64Decode(contentStr);
           } catch (_) {
             try {
-              imgBytes = Uint8List.fromList(contentStr.codeUnits);
+              imgBytes = Uint8List.fromList(latin1.encode(contentStr));
             } catch (_) {}
           }
         }

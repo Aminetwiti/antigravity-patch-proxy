@@ -51,8 +51,63 @@ class _BackgroundTasksBarState extends State<BackgroundTasksBar> with SingleTick
     final viewInsets = MediaQuery.of(context).viewInsets;
     final rawInsetsBottom = View.of(context).viewInsets.bottom / MediaQuery.of(context).devicePixelRatio;
     final hasKeyboard = viewInsets.bottom > 50 || rawInsetsBottom > 50;
-    // Par défaut étendu si non forcé par clavier
-    final isActuallyExpanded = (!_expanded ? true : _expanded) && !hasKeyboard;
+    final isActuallyExpanded = (count == 1 || _expanded) && !hasKeyboard;
+
+    Widget buildTaskItem(String task) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(6),
+          onTap: () => widget.onTapTask?.call(task),
+          child: Row(
+            children: [
+              // Arc spinner rotatif élégant
+              RotationTransition(
+                turns: _spinController,
+                child: Icon(
+                  Icons.sync,
+                  size: 13,
+                  color: isDark ? const Color(0xFF8E8E93) : scheme.outline,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  task,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                    color: isDark ? const Color(0xFFD4D4D4) : scheme.onSurface,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (widget.onStopTask != null) ...[
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: () {
+                    HapticFeedback.mediumImpact();
+                    widget.onStopTask!(task);
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                    child: Text(
+                      'Stop',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.danger.withValues(alpha: 0.85),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
 
     return Container(
       margin: EdgeInsets.symmetric(horizontal: 12, vertical: hasKeyboard ? 2 : 4),
@@ -73,6 +128,7 @@ class _BackgroundTasksBarState extends State<BackgroundTasksBar> with SingleTick
           InkWell(
             borderRadius: BorderRadius.circular(8),
             onTap: () {
+              HapticFeedback.selectionClick();
               setState(() => _expanded = !_expanded);
               if (count == 1 && widget.onTapTask != null) {
                 widget.onTapTask!(widget.runningTasks.first);
@@ -103,61 +159,19 @@ class _BackgroundTasksBarState extends State<BackgroundTasksBar> with SingleTick
           // Liste des tâches actives style Antigravity 2.0 (image 2)
           if (isActuallyExpanded) ...[
             SizedBox(height: hasKeyboard ? 4 : 8),
-            ...widget.runningTasks.map((task) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 3),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(6),
-                  onTap: () => widget.onTapTask?.call(task),
-                  child: Row(
-                    children: [
-                      // Arc spinner rotatif élégant
-                      RotationTransition(
-                        turns: _spinController,
-                        child: Icon(
-                          Icons.sync,
-                          size: 13,
-                          color: isDark ? const Color(0xFF8E8E93) : scheme.outline,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          task,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontFamily: 'monospace',
-                            color: isDark ? const Color(0xFFD4D4D4) : scheme.onSurface,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (widget.onStopTask != null) ...[
-                        const SizedBox(width: 8),
-                        GestureDetector(
-                          onTap: () {
-                            HapticFeedback.mediumImpact();
-                            widget.onStopTask!(task);
-                          },
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                            child: Text(
-                              'Stop',
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.danger.withValues(alpha: 0.85),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
+            if (count > 3)
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 120),
+                child: ListView(
+                  shrinkWrap: true,
+                  physics: const BouncingScrollPhysics(),
+                  children: [
+                    for (final task in widget.runningTasks) buildTaskItem(task),
+                  ],
                 ),
-              );
-            }),
+              )
+            else
+              for (final task in widget.runningTasks) buildTaskItem(task),
           ],
         ],
       ),

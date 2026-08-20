@@ -665,7 +665,10 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           setState(() {
             _sessions = _sessions.map((s) {
               if (s.id == cascadeId) {
-                return s.copyWith(status: 'CASCADE_STATUS_READY');
+                return s.copyWith(
+                  status: 'CASCADE_STATUS_READY',
+                  hasUnread: cascadeId != _activeSessionId,
+                );
               }
               return s;
             }).toList();
@@ -1009,6 +1012,12 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       onSessionSelected: (id) {
         setState(() {
           _activeSessionId = id;
+          _sessions = _sessions.map((s) {
+            if (s.id == id) {
+              return s.copyWith(hasUnread: false);
+            }
+            return s;
+          }).toList();
           final s = _sessions.firstWhere((s) => s.id == id, orElse: () => const CascadeSession(id: '', workspacePath: '', title: 'Session', status: '', time: ''));
           _activeSessionTitle = s.title;
         });
