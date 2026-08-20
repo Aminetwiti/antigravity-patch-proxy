@@ -12,7 +12,9 @@ void main() {
             filesChangedCount: 3,
             artifactsCount: 2,
             backgroundTasksCount: 1,
-            uploadsCount: 0,
+            scheduledTasksCount: 4,
+            uploadsCount: 6,
+            mcpServersCount: 7,
           ),
           body: Center(child: Text('Home')),
         ),
@@ -28,12 +30,20 @@ void main() {
     expect(find.text('CONTEXTE'), findsOneWidget);
     expect(find.text('Subagents'), findsOneWidget);
     expect(find.text('5'), findsOneWidget);
+    expect(find.text('Files Changed'), findsOneWidget);
+    expect(find.text('3'), findsOneWidget);
+    expect(find.text('Artifacts'), findsOneWidget);
+    expect(find.text('2'), findsOneWidget);
+    expect(find.text('Uploads'), findsOneWidget);
+    expect(find.text('6'), findsOneWidget);
     
     expect(find.text('Scheduled Tasks'), findsOneWidget);
+    expect(find.text('4'), findsOneWidget);
     expect(find.text('Background Tasks'), findsOneWidget);
-    expect(find.text('1'), findsNWidgets(2));
+    expect(find.text('1'), findsOneWidget);
 
     expect(find.text('MCP Servers'), findsOneWidget);
+    expect(find.text('7'), findsOneWidget);
 
     // Verify interaction
     await tester.tap(find.text('Subagents'));

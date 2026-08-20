@@ -460,43 +460,50 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
     required VoidCallback onTap,
     required ColorScheme scheme,
   }) {
+    final semanticLabel = label ?? (icon == Icons.arrow_upward ? 'Haut' : icon == Icons.arrow_downward ? 'Bas' : icon == Icons.arrow_back ? 'Gauche' : icon == Icons.arrow_forward ? 'Droite' : 'Touche');
+
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2.5, vertical: 3),
-      child: Material(
-        color: isAccent
-            ? AppColors.danger.withValues(alpha: 0.15)
-            : scheme.surfaceContainer,
-        borderRadius: BorderRadius.circular(4),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(4),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(
-                color: isAccent
-                    ? AppColors.danger.withValues(alpha: 0.4)
-                    : scheme.outlineVariant.withValues(alpha: 0.6),
-                width: 0.8,
+      padding: const EdgeInsets.symmetric(horizontal: 2.5, vertical: 2),
+      child: Semantics(
+        button: true,
+        label: semanticLabel,
+        child: Material(
+          color: isAccent
+              ? AppColors.danger.withValues(alpha: 0.15)
+              : scheme.surfaceContainer,
+          borderRadius: BorderRadius.circular(5),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(5),
+            child: Container(
+              constraints: const BoxConstraints(minWidth: 38, minHeight: 32),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(5),
+                border: Border.all(
+                  color: isAccent
+                      ? AppColors.danger.withValues(alpha: 0.4)
+                      : scheme.outlineVariant.withValues(alpha: 0.6),
+                  width: 0.8,
+                ),
               ),
-            ),
-            child: icon != null
-                ? Icon(
-                    icon,
-                    size: 13,
-                    color: scheme.onSurfaceVariant,
-                  )
-                : Text(
-                    label ?? '',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      fontFamily: 'monospace',
-                      color: isAccent ? AppColors.danger : scheme.onSurface,
+              child: icon != null
+                  ? Icon(
+                      icon,
+                      size: 14,
+                      color: scheme.onSurfaceVariant,
+                    )
+                  : Text(
+                      label ?? '',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        fontFamily: 'monospace',
+                        color: isAccent ? AppColors.danger : scheme.onSurface,
+                      ),
                     ),
-                  ),
+            ),
           ),
         ),
       ),
@@ -508,36 +515,44 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
     final mq = MediaQuery.of(context);
     final bottomInset = mq.viewInsets.bottom;
     final bottomPadding = mq.padding.bottom;
-    final height = (mq.size.height * 0.85).clamp(380.0, 750.0);
     final scheme = Theme.of(context).colorScheme;
 
     // Détermination de l'état de connexion du terminal
     final bool isOffline = widget.api == null;
     final bool isPtyActive = _ptyId != null && !_ptyClosed;
 
-    return Container(
-      height: height + bottomInset,
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-        border: Border(
-          top: BorderSide(color: scheme.outlineVariant, width: 1),
-          left: BorderSide(color: scheme.outlineVariant, width: 1),
-          right: BorderSide(color: scheme.outlineVariant, width: 1),
-        ),
-      ),
-      child: Column(
-        children: [
-          // Drag handle
-          Container(
-            margin: const EdgeInsets.only(top: 8, bottom: 4),
-            width: 36,
-            height: 4,
-            decoration: BoxDecoration(
-              color: scheme.outline.withValues(alpha: 0.5),
-              borderRadius: BorderRadius.circular(2),
+    return DraggableScrollableSheet(
+      initialChildSize: 0.75,
+      minChildSize: 0.35,
+      maxChildSize: 0.95,
+      snap: true,
+      snapSizes: const [0.35, 0.70, 0.95],
+      builder: (context, scrollSheetController) {
+        return Container(
+          decoration: BoxDecoration(
+            color: scheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+            border: Border(
+              top: BorderSide(color: scheme.outlineVariant, width: 1),
+              left: BorderSide(color: scheme.outlineVariant, width: 1),
+              right: BorderSide(color: scheme.outlineVariant, width: 1),
             ),
           ),
+          child: Column(
+            children: [
+              // Drag handle tactile
+              GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                child: Container(
+                  margin: const EdgeInsets.only(top: 8, bottom: 4),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: scheme.outline.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
 
           // Header
           Padding(
@@ -738,67 +753,67 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
                       }
 
                       final entry = _entries[index];
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (entry.command != 'init')
-                              Row(
-                                children: [
-                                  const Text(
-                                    r'$ ',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
-                                      color: AppColors.positive,
-                                      fontFamily: 'monospace',
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: SelectableText(
-                                      entry.command,
+                      return RepaintBoundary(
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (entry.command != 'init')
+                                Row(
+                                  children: [
+                                    const Text(
+                                      r'$ ',
                                       style: TextStyle(
                                         fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                        color: scheme.onSurface,
+                                        fontWeight: FontWeight.bold,
+                                        color: AppColors.positive,
                                         fontFamily: 'monospace',
                                       ),
                                     ),
+                                    Expanded(
+                                      child: SelectableText(
+                                        entry.command,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: scheme.onSurface,
+                                          fontFamily: 'monospace',
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              if (entry.output.isNotEmpty) ...[
+                                const SizedBox(height: 3),
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: scheme.surfaceContainerHighest,
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: entry.isError
+                                          ? AppColors.danger.withValues(alpha: 0.3)
+                                          : scheme.outlineVariant,
+                                      width: 0.8,
+                                    ),
                                   ),
-                                ],
-                              ),
-                            if (entry.output.isNotEmpty) ...[
-                              const SizedBox(height: 3),
-                              Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.all(9),
-                                decoration: BoxDecoration(
-                                  color: scheme.surfaceContainerHighest,
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(
-                                    color: entry.isError
-                                        ? scheme.error.withValues(
-                                            alpha: 0.4,
-                                          )
-                                        : scheme.outlineVariant,
-                                    width: 1,
+                                  child: SelectableText(
+                                    entry.output,
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontFamily: 'monospace',
+                                      color: entry.isError
+                                          ? AppColors.danger
+                                          : scheme.onSurfaceVariant,
+                                      height: 1.35,
+                                    ),
                                   ),
                                 ),
-                                child: SelectableText(
-                                  entry.output,
-                                  style: TextStyle(
-                                    fontSize: 11.5,
-                                    fontFamily: 'monospace',
-                                    color: entry.isError
-                                        ? scheme.error
-                                        : const Color(0xFFE4E4E7),
-                                    height: 1.35,
-                                  ),
-                                ),
-                              ),
+                              ],
                             ],
-                          ],
+                          ),
                         ),
                       );
                     },
@@ -877,6 +892,8 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
           ),
         ],
       ),
+    );
+      },
     );
   }
 }

@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -6,6 +5,8 @@ import '../../core/protocol/messages.dart';
 import '../../core/protocol/workspace_path.dart';
 import '../../core/protocol/daemon_api.dart';
 import '../../widgets/project_selector_bottom_sheet.dart';
+import '../../widgets/antigravity_logo.dart';
+import '../../widgets/antigravity_spinning_arc.dart';
 import 'package:mobile/theme/app_colors.dart';
 import 'display_options.dart';
 
@@ -71,10 +72,14 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
   // P4 : sessions épinglées — synchronisées localement et avec le daemon.
   final Set<String> _pinnedIds = {};
 
+  // Suivi des sessions consultées pour afficher le point bleu (activité terminée non lue)
+  final Set<String> _readSessionIds = {};
+
   @override
   void initState() {
     super.initState();
     _loadPins();
+    _loadReadSessions();
   }
 
   Future<void> _loadPins() async {
@@ -88,6 +93,29 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
         ..addAll(ids)
         ..addAll(fromSessions);
     });
+  }
+
+  Future<void> _loadReadSessions() async {
+    final prefs = await SharedPreferences.getInstance();
+    final ids = prefs.getStringList('read_session_ids') ?? const [];
+    if (!mounted) return;
+    setState(() {
+      _readSessionIds
+        ..clear()
+        ..addAll(ids);
+      if (widget.activeSessionId.isNotEmpty) {
+        _readSessionIds.add(widget.activeSessionId);
+      }
+    });
+  }
+
+  void _markSessionAsRead(String id) {
+    if (_readSessionIds.contains(id)) return;
+    setState(() {
+      _readSessionIds.add(id);
+    });
+    SharedPreferences.getInstance().then((prefs) =>
+        prefs.setStringList('read_session_ids', _readSessionIds.toList()));
   }
 
   void _togglePin(String id) {
@@ -111,6 +139,10 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
     super.didUpdateWidget(oldWidget);
     if (widget.sessions != oldWidget.sessions) {
       _loadPins();
+      _loadReadSessions();
+    }
+    if (widget.activeSessionId != oldWidget.activeSessionId && widget.activeSessionId.isNotEmpty) {
+      _markSessionAsRead(widget.activeSessionId);
     }
   }
 
@@ -217,31 +249,18 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
           children: [
             const SizedBox(height: 6),
 
-            // ── Top Navigation Bar: Icons [◫ Sidebar toggle] [← Back] [→ Forward]
+            // ── Top Navigation Bar: Antigravity Brand Lockup + Action Buttons
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
               child: Row(
                 children: [
-                  _HeaderIconBtn(
-                    icon: Icons.dock_outlined,
-                    tooltip: 'Masquer la barre',
-                    onTap: () {
-                      if (Navigator.of(context).canPop()) {
-                        Navigator.of(context).pop();
-                      }
-                    },
+                  AntigravityLogo.wordmark(
+                    iconSize: 24,
+                    title: 'Antigravity',
+                    subtitle: 'REMOTE',
+                    showGlow: true,
                   ),
-                  const SizedBox(width: 8),
-                  _HeaderIconBtn(
-                    icon: Icons.arrow_back,
-                    tooltip: 'Retour',
-                    onTap: () {
-                      if (Navigator.of(context).canPop()) {
-                        Navigator.of(context).pop();
-                      }
-                    },
-                  ),
-                  const SizedBox(width: 8),
+                  const Spacer(),
                   _HeaderIconBtn(
                     icon: Icons.history,
                     tooltip: 'Historique des conversations',
@@ -251,6 +270,16 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                           Navigator.of(context).pop();
                         }
                         widget.onConversationHistory!();
+                      }
+                    },
+                  ),
+                  const SizedBox(width: 6),
+                  _HeaderIconBtn(
+                    icon: Icons.dock_outlined,
+                    tooltip: 'Masquer la barre',
+                    onTap: () {
+                      if (Navigator.of(context).canPop()) {
+                        Navigator.of(context).pop();
                       }
                     },
                   ),
@@ -479,6 +508,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                             });
                           },
                           onSessionTap: (id) {
+                            _markSessionAsRead(id);
                             if (Navigator.of(context).canPop()) {
                               Navigator.of(context).pop();
                             }
@@ -500,6 +530,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                           onExportSession: widget.onExportSession,
                           pinnedIds: _pinnedIds,
                           onTogglePin: _togglePin,
+                          readIds: _readSessionIds,
                         );
                       }),
                     const SizedBox(height: 16),
@@ -660,6 +691,7 @@ class _WorkspaceFolderSection extends StatelessWidget {
   final Function(CascadeSession session)? onExportSession;
   final Set<String> pinnedIds;
   final ValueChanged<String>? onTogglePin;
+  final Set<String> readIds;
 
   const _WorkspaceFolderSection({
     required this.folderName,
@@ -679,6 +711,7 @@ class _WorkspaceFolderSection extends StatelessWidget {
     this.onExportSession,
     required this.pinnedIds,
     this.onTogglePin,
+    this.readIds = const {},
   });
 
   @override
@@ -819,6 +852,7 @@ class _WorkspaceFolderSection extends StatelessWidget {
                   session: s,
                   isSelected: s.id == activeSessionId,
                   showSubtitle: showSubtitle,
+                  isUnread: (s.hasUnread || (s.stepCount >= 1 && !s.isRunning)) && !readIds.contains(s.id) && s.id != activeSessionId,
                   onTap: () => onSessionTap(s.id),
                   onDelete: onDeleteSession != null
                       ? () => onDeleteSession!(s.id)
@@ -850,6 +884,7 @@ class _SessionRowItem extends StatefulWidget {
   final CascadeSession session;
   final bool isSelected;
   final bool showSubtitle;
+  final bool isUnread;
   final VoidCallback onTap;
   final VoidCallback? onDelete;
   final VoidCallback? onArchive;
@@ -864,6 +899,7 @@ class _SessionRowItem extends StatefulWidget {
     required this.session,
     required this.isSelected,
     this.showSubtitle = true,
+    this.isUnread = false,
     required this.onTap,
     this.onDelete,
     this.onArchive,
@@ -1082,6 +1118,7 @@ class _SessionRowItemState extends State<_SessionRowItem> {
   Widget build(BuildContext context) {
     final isSelected = widget.isSelected;
     final isRunning = widget.session.isRunning;
+    final isUnread = (widget.isUnread || widget.session.hasUnread) && !isSelected && !isRunning;
     final subtitleText = widget.session.worktree ?? WorkspacePath.displayName(widget.session.workspacePath);
 
     Widget item = Semantics(
@@ -1158,52 +1195,91 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                     ? Tooltip(
                         key: const ValueKey('running'),
                         message: 'En cours d\'exécution',
-                        child: _AntigravitySpinningArc(
+                        child: AntigravitySpinningArc(
                           size: 13.5,
                           color: isSelected
                               ? const Color(0xFFB4B8C5)
                               : const Color(0xFF8E929E),
                         ),
                       )
-                    : widget.session.isWaitingAction
+                    : widget.session.isBackgroundTask
                         ? Tooltip(
-                            key: const ValueKey('waiting'),
-                            message: 'Action requise',
-                            child: Container(
-                              width: 5,
-                              height: 5,
-                              decoration: const BoxDecoration(
-                                color: Color(0xFFE5A93C),
-                                shape: BoxShape.circle,
-                              ),
+                            key: const ValueKey('background_task'),
+                            message: 'Tâche d\'arrière-plan en cours',
+                            child: AntigravitySpinningArc(
+                              size: 13.5,
+                              color: isSelected
+                                  ? const Color(0xFF8AB4F8)
+                                  : const Color(0xFF669DF6),
                             ),
                           )
-                        : widget.session.isError
+                        : widget.session.isWaitingAction
                             ? Tooltip(
-                                key: const ValueKey('error'),
-                                message: 'Erreur',
+                                key: const ValueKey('waiting'),
+                                message: 'Action ou approbation requise',
                                 child: Container(
-                                  width: 5,
-                                  height: 5,
+                                  width: 6,
+                                  height: 6,
                                   decoration: const BoxDecoration(
-                                    color: Color(0xFFE5534B),
+                                    color: Color(0xFFE5A93C),
                                     shape: BoxShape.circle,
                                   ),
                                 ),
                               )
-                            : widget.session.time.isNotEmpty
-                                ? Text(
-                                    widget.session.time,
-                                    key: ValueKey('time_${widget.session.time}'),
-                                    style: TextStyle(
-                                      fontSize: 11.5,
-                                      color: isSelected
-                                          ? const Color(0xFF9E9FA9)
-                                          : const Color(0xFF7E818D),
-                                      fontWeight: FontWeight.w400,
+                            : widget.session.isError
+                                ? Tooltip(
+                                    key: const ValueKey('error'),
+                                    message: 'Erreur',
+                                    child: Container(
+                                      width: 6,
+                                      height: 6,
+                                      decoration: const BoxDecoration(
+                                        color: Color(0xFFE5534B),
+                                        shape: BoxShape.circle,
+                                      ),
                                     ),
                                   )
-                                : const SizedBox.shrink(key: ValueKey('empty')),
+                                : isUnread
+                                    ? const Tooltip(
+                                        key: ValueKey('unread_blue_dot'),
+                                        message: 'Session terminée — non lue',
+                                        child: _PulsingBlueDot(),
+                                      )
+                                    : (isSelected || _hovered)
+                                        ? Tooltip(
+                                            key: const ValueKey('session_menu_btn'),
+                                            message: 'Options de la conversation',
+                                            child: InkWell(
+                                              borderRadius: BorderRadius.circular(4),
+                                              onTap: () {
+                                                HapticFeedback.selectionClick();
+                                                _showSessionContextMenu(context);
+                                              },
+                                              child: Padding(
+                                                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                                                child: Icon(
+                                                  Icons.more_horiz_rounded,
+                                                  size: 15,
+                                                  color: isSelected
+                                                      ? const Color(0xFFB0B0BA)
+                                                      : const Color(0xFF8F909A),
+                                                ),
+                                              ),
+                                            ),
+                                          )
+                                        : widget.session.time.isNotEmpty
+                                            ? Text(
+                                                widget.session.time,
+                                                key: ValueKey('time_${widget.session.time}'),
+                                                style: TextStyle(
+                                                  fontSize: 11.5,
+                                                  color: isSelected
+                                                      ? const Color(0xFF9E9FA9)
+                                                      : const Color(0xFF7E818D),
+                                                  fontWeight: FontWeight.w400,
+                                                ),
+                                              )
+                                            : const SizedBox.shrink(key: ValueKey('empty')),
               ),
               if (widget.isPinned)
                 Padding(
@@ -1452,33 +1528,25 @@ class _ConnectionRowState extends State<_ConnectionRow> {
   }
 }
 
-/// Indicateur de chargement minimaliste et élégant (arc fin en rotation)
-/// identique à l'interface officielle Antigravity 2.0 Desktop IDE.
-class _AntigravitySpinningArc extends StatefulWidget {
-  final Color color;
-  final double size;
-
-  const _AntigravitySpinningArc({
-    this.color = const Color(0xFF9AA0AD),
-    this.size = 13.5,
-  });
+/// Animated "session terminée — non lue" indicator: a soft pulsing blue dot
+/// that gently fades its glow in/out so a finished-but-unread session stands
+/// out from static state dots (running spinner, waiting orange, error red).
+class _PulsingBlueDot extends StatefulWidget {
+  const _PulsingBlueDot();
 
   @override
-  State<_AntigravitySpinningArc> createState() => _AntigravitySpinningArcState();
+  State<_PulsingBlueDot> createState() => _PulsingBlueDotState();
 }
 
-class _AntigravitySpinningArcState extends State<_AntigravitySpinningArc>
+class _PulsingBlueDotState extends State<_PulsingBlueDot>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1400),
+  )..repeat(reverse: true);
 
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 950),
-    )..repeat();
-  }
+  late final Animation<double> _glow = Tween<double>(begin: 0.35, end: 1.0)
+      .animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
 
   @override
   void dispose() {
@@ -1488,47 +1556,25 @@ class _AntigravitySpinningArcState extends State<_AntigravitySpinningArc>
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (_, __) => Transform.rotate(
-        angle: _controller.value * 2 * math.pi,
-        child: SizedBox(
-          width: widget.size,
-          height: widget.size,
-          child: CustomPaint(
-            painter: _ArcPainter(color: widget.color),
-          ),
+    return FadeTransition(
+      opacity: _glow,
+      child: Container(
+        width: 7,
+        height: 7,
+        margin: const EdgeInsets.symmetric(horizontal: 2),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A73E8),
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF1A73E8).withValues(alpha: 0.6),
+              blurRadius: 4,
+              spreadRadius: 0.5,
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _ArcPainter extends CustomPainter {
-  final Color color;
-  const _ArcPainter({required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = 1.3
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = (size.width - 1.3) / 2;
-    // Arc circulaire de ~270 degrés identique à la capture Antigravity 2.0
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius),
-      0,
-      4.8,
-      false,
-      paint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _ArcPainter oldDelegate) =>
-      oldDelegate.color != color;
-}

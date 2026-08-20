@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/app_colors.dart';
 
+enum BouncingHapticType { selection, light, medium, heavy, none }
+
 /// Micro-interaction container that applies a subtle physical compression (`scale: 0.975`)
 /// on tap down and emits tactile haptic feedback.
 class BouncingTap extends StatefulWidget {
@@ -10,6 +12,7 @@ class BouncingTap extends StatefulWidget {
   final VoidCallback? onLongPress;
   final double scaleFactor;
   final bool enableHaptics;
+  final BouncingHapticType hapticType;
 
   const BouncingTap({
     super.key,
@@ -18,6 +21,7 @@ class BouncingTap extends StatefulWidget {
     this.onLongPress,
     this.scaleFactor = 0.975,
     this.enableHaptics = true,
+    this.hapticType = BouncingHapticType.selection,
   });
 
   @override
@@ -64,7 +68,22 @@ class _BouncingTapState extends State<BouncingTap> with SingleTickerProviderStat
         _controller.reverse();
       }
       if (widget.enableHaptics) {
-        HapticFeedback.selectionClick();
+        switch (widget.hapticType) {
+          case BouncingHapticType.selection:
+            HapticFeedback.selectionClick();
+            break;
+          case BouncingHapticType.light:
+            HapticFeedback.lightImpact();
+            break;
+          case BouncingHapticType.medium:
+            HapticFeedback.mediumImpact();
+            break;
+          case BouncingHapticType.heavy:
+            HapticFeedback.heavyImpact();
+            break;
+          case BouncingHapticType.none:
+            break;
+        }
       }
       widget.onTap?.call();
     }

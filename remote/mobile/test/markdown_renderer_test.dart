@@ -136,5 +136,27 @@ Hello user, here is your result:
       final tooltip = span.child as Tooltip;
       (tooltip.child as GestureDetector).onTap!();
     });
+
+    test('parses GFM markdown table with alignments', () {
+      const md = '''
+| Amélioration | Impact | Effort |
+| --- | :---: | ---: |
+| Micro-buffering | 100% fluide | Faible |
+| Micro-Haptics | Physique | Très faible |
+''';
+      final blocks = MarkdownRenderer.blocksOf(md);
+      expect(blocks.length, 1);
+      final table = blocks[0].table;
+      expect(table, isNotNull);
+      expect(table!.headers, ['Amélioration', 'Impact', 'Effort']);
+      expect(table.alignments, [
+        TableCellAlignment.left,
+        TableCellAlignment.center,
+        TableCellAlignment.right,
+      ]);
+      expect(table.rows.length, 2);
+      expect(table.rows[0], ['Micro-buffering', '100% fluide', 'Faible']);
+      expect(table.rows[1], ['Micro-Haptics', 'Physique', 'Très faible']);
+    });
   });
 }

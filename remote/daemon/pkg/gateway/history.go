@@ -27,6 +27,7 @@ type HistoryMessage struct {
 	Timestamp   string `json:"timestamp"`
 	IsStreaming bool   `json:"isStreaming"`
 	IsError     bool   `json:"isError"`
+	StepIndex   int64  `json:"stepIndex,omitempty"`
 }
 
 var (
@@ -1257,6 +1258,7 @@ func parseTranscriptFullTurns(transcriptPath string) ([]HistoryMessage, error) {
 					Sender:    "user",
 					Text:      cleaned,
 					Timestamp: ts,
+					StepIndex: int64(entry.StepIndex),
 				}
 				messages = append(messages, userMsg)
 				currentTurnUser = &userMsg
@@ -1824,6 +1826,7 @@ func readSQLiteSteps(dbPath, cascadeID string) ([]HistoryMessage, string, error)
 				Sender:    "user",
 				Text:      text,
 				Timestamp: ts,
+				StepIndex: int64(idx),
 			})
 		case stepTypeAssistant:
 			text, thought := assistantTextFromPayload(payload)
@@ -1956,6 +1959,7 @@ func ExtractHistoryFromTrajectory(raw []byte) []HistoryMessage {
 													Sender:    "user",
 													Text:      cleaned,
 													Timestamp: time.Now().Format("15:04"),
+													StepIndex: int64(len(messages)),
 												})
 												break
 											}
@@ -2046,7 +2050,7 @@ func countTranscriptActivity(cascadeID string) map[string]int {
 			continue
 		}
 
-		// Subagents : comptage depuis tool_calls ou entry.Content
+		// Subagents & Tasks : comptage depuis tool_calls ou entry.Content
 		if len(entry.ToolCalls) > 0 {
 			var calls []struct {
 				Name      string                 `json:"name"`
@@ -2066,11 +2070,13 @@ func countTranscriptActivity(cascadeID string) map[string]int {
 						} else {
 							out["subagents"]++
 						}
+					} else if c.Name == "manage_task" || c.Name == "schedule" {
+						out["tasks"]++
 					}
 				}
 			}
 		}
-		if entry.Type == "TOOL_CALL" || strings.Contains(entry.Content, "invoke_subagent") {
+		if entry.Type == "TOOL_CALL" || strings.Contains(entry.Content, "invoke_subagent") || strings.Contains(entry.Content, "manage_task") || strings.Contains(entry.Content, "schedule") {
 			var tc struct {
 				Name      string                 `json:"name"`
 				Args      map[string]interface{} `json:"args"`
@@ -2088,6 +2094,8 @@ func countTranscriptActivity(cascadeID string) map[string]int {
 					} else {
 						out["subagents"]++
 					}
+				} else if tc.Name == "manage_task" || tc.Name == "schedule" {
+					out["tasks"]++
 				}
 			}
 		}
@@ -2107,7 +2115,8 @@ func countTranscriptActivity(cascadeID string) map[string]int {
 				}
 			}
 		}
-		if strings.Contains(entry.Content, "background") && strings.Contains(entry.Content, "task") {
+		if strings.Contains(entry.Content, "Tool is running as a background task with task id:") ||
+			strings.Contains(entry.Content, "running as a background task with task id") {
 			key := entry.Content
 			if !seenTasks[key] {
 				seenTasks[key] = true
@@ -2507,43 +2516,116 @@ func cleanAssistantText(s string) string {
 	return trimmed
 }
 
+var (
+	artifactMediaRe = regexp.MustCompile(`(?i)\[ARTIFACT:\s*([^\]]+)\]\s*\r?\n\s*Path:\s*([^\r\n]+)`)
+	userUploadedRe  = regexp.MustCompile(`(?i)(?:file:///|[a-zA-Z]:[\\/]|/)[^\r\n\t\"'<>]+\.(?:png|jpg|jpeg|gif|webp|svg)`)
+)
+
+func extractMediaArtifacts(content string) []string {
+	var images []string
+	seen := make(map[string]bool)
+
+	// 1. [ARTIFACT: media_xxx]\nPath: file:///...
+	matches := artifactMediaRe.FindAllStringSubmatch(content, -1)
+	for _, m := range matches {
+		if len(m) >= 3 {
+			name := strings.ToLower(strings.TrimSpace(m[1]))
+			p := strings.TrimSpace(m[2])
+			lowerP := strings.ToLower(p)
+			isMedia := strings.HasPrefix(name, "media_") ||
+				strings.HasPrefix(name, "upload_") ||
+				strings.HasPrefix(name, "img_") ||
+				strings.HasSuffix(lowerP, ".png") ||
+				strings.HasSuffix(lowerP, ".jpg") ||
+				strings.HasSuffix(lowerP, ".jpeg") ||
+				strings.HasSuffix(lowerP, ".gif") ||
+				strings.HasSuffix(lowerP, ".webp") ||
+				strings.HasSuffix(lowerP, ".svg")
+
+			if isMedia && !seen[p] {
+				seen[p] = true
+				images = append(images, p)
+			}
+		}
+	}
+
+	// 2. Direct paths in .user_uploaded or scratch or tempmediaStorage
+	for _, match := range userUploadedRe.FindAllString(content, -1) {
+		p := strings.TrimSpace(match)
+		lower := strings.ToLower(p)
+		if (strings.Contains(lower, ".user_uploaded") ||
+			strings.Contains(lower, "tempmediastorage") ||
+			strings.Contains(lower, "scratch/upload_") ||
+			strings.Contains(lower, "scratch\\upload_")) && !seen[p] {
+			seen[p] = true
+			images = append(images, p)
+		}
+	}
+
+	return images
+}
+
 func extractUserRequest(content string) string {
 	startTag := "<USER_REQUEST>"
 	endTag := "</USER_REQUEST>"
 
+	var userReq string
 	startIdx := strings.Index(content, startTag)
 	if startIdx >= 0 {
 		endIdx := strings.Index(content, endTag)
 		if endIdx > startIdx {
-			return cleanRawContent(content[startIdx+len(startTag) : endIdx])
+			userReq = cleanRawContent(content[startIdx+len(startTag) : endIdx])
 		}
 	}
 
-	trimmed := strings.TrimSpace(content)
-	if strings.HasPrefix(trimmed, "<SYSTEM_MESSAGE>") ||
-		strings.HasPrefix(trimmed, "<system_message>") ||
-		strings.HasPrefix(trimmed, "<identity>") ||
-		strings.HasPrefix(trimmed, "<user_information>") ||
-		strings.HasPrefix(trimmed, "<skills>") ||
-		strings.HasPrefix(trimmed, "<subagents>") ||
-		strings.HasPrefix(trimmed, "<messaging>") ||
-		strings.HasPrefix(trimmed, "<artifacts>") ||
-		strings.HasPrefix(trimmed, "<slash_commands>") ||
-		strings.HasPrefix(trimmed, "<planning_mode>") ||
-		strings.HasPrefix(trimmed, "<guidelines>") ||
-		strings.HasPrefix(trimmed, "<communication_style>") ||
-		strings.HasPrefix(trimmed, "<conversation_transcript>") ||
-		strings.HasPrefix(trimmed, "[Message] timestamp=") {
-		return ""
+	if userReq == "" && startIdx < 0 {
+		trimmed := strings.TrimSpace(content)
+		if !strings.HasPrefix(trimmed, "<SYSTEM_MESSAGE>") &&
+			!strings.HasPrefix(trimmed, "<system_message>") &&
+			!strings.HasPrefix(trimmed, "<identity>") &&
+			!strings.HasPrefix(trimmed, "<user_information>") &&
+			!strings.HasPrefix(trimmed, "<skills>") &&
+			!strings.HasPrefix(trimmed, "<subagents>") &&
+			!strings.HasPrefix(trimmed, "<messaging>") &&
+			!strings.HasPrefix(trimmed, "<artifacts>") &&
+			!strings.HasPrefix(trimmed, "<slash_commands>") &&
+			!strings.HasPrefix(trimmed, "<planning_mode>") &&
+			!strings.HasPrefix(trimmed, "<guidelines>") &&
+			!strings.HasPrefix(trimmed, "<communication_style>") &&
+			!strings.HasPrefix(trimmed, "<conversation_transcript>") &&
+			!strings.HasPrefix(trimmed, "[Message] timestamp=") {
+			userReq = cleanRawContent(trimmed)
+		}
 	}
 
-	return cleanRawContent(trimmed)
+	// Extraire les pièces jointes / images uploadées (ex. depuis Antigravity Desktop)
+	mediaArtifacts := extractMediaArtifacts(content)
+	if len(mediaArtifacts) > 0 {
+		for _, imgPath := range mediaArtifacts {
+			if !strings.Contains(userReq, imgPath) {
+				cleanP := imgPath
+				if !strings.HasPrefix(cleanP, "file://") && (strings.HasPrefix(cleanP, "/") || (len(cleanP) >= 2 && cleanP[1] == ':')) {
+					cleanP = "file:///" + filepath.ToSlash(cleanP)
+				}
+				imgTag := fmt.Sprintf("![Image](%s)", cleanP)
+				if userReq == "" {
+					userReq = imgTag
+				} else {
+					userReq = userReq + "\n\n" + imgTag
+				}
+			}
+		}
+	}
+
+	return userReq
 }
 
 func cleanPromptTitle(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.ReplaceAll(s, "\r\n", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
+	imgMdRe := regexp.MustCompile(`!\[([^\]]*)\]\([^)]+\)`)
+	s = imgMdRe.ReplaceAllString(s, "[Image]")
 	// Remplacer les longs chemins absolus Windows par leur dossier de base
 	pathRe := regexp.MustCompile(`[a-zA-Z]:\\[^ \t\r\n]+`)
 	s = pathRe.ReplaceAllStringFunc(s, func(p string) string {

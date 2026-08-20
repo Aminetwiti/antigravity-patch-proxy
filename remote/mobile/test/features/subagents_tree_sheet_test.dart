@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/core/protocol/daemon_api.dart';
 import 'package:mobile/features/subagents/subagents_tree_sheet.dart';
+import 'package:mobile/features/subagents/widgets/subagent_detail_modal.dart';
 import 'package:mobile/widgets/skeleton_loader.dart';
 
 void main() {
@@ -106,5 +107,60 @@ void main() {
 
     await tester.pumpAndSettle();
     expect(find.text('Aucun sous-agent actif'), findsOneWidget);
+  });
+
+  testWidgets('SubagentsTreeSheet opens SubagentDetailModal on subagent card tap', (tester) async {
+    final ctrl = StreamController<dynamic>();
+    final api = DaemonApi(
+      incoming: ctrl.stream,
+      send: (d) {
+        final map = d is String ? jsonDecode(d) as Map<String, dynamic> : Map<String, dynamic>.from(d as Map);
+        if (map['type'] == 'get_subagents') {
+          ctrl.add(jsonEncode({
+            'type': 'response',
+            'requestId': map['requestId'],
+            'data': {
+              'cascadeId': 'test-cascade-detail',
+              'subagents': [
+                {
+                  'id': 'sub-detailed-1',
+                  'name': 'Performance Auditor',
+                  'type': 'auditor',
+                  'status': 'completed',
+                  'prompt': 'Analyze memory leaks in WebSocket bridge',
+                },
+              ],
+            },
+          }));
+        }
+      },
+    );
+    addTearDown(ctrl.close);
+    addTearDown(api.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SubagentsTreeSheet(
+            api: api,
+            cascadeId: 'test-cascade-detail',
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+    expect(find.text('Performance Auditor'), findsOneWidget);
+
+    // Tap on the card
+    await tester.tap(find.text('Performance Auditor'));
+    await tester.pumpAndSettle();
+
+    // Verify SubagentDetailModal content
+    expect(find.byType(SubagentDetailModal), findsOneWidget);
+    expect(find.text('ID DU SOUS-AGENT'), findsOneWidget);
+    expect(find.text('sub-detailed-1'), findsOneWidget);
+    expect(find.text('Mission / Instructions'), findsOneWidget);
+    expect(find.text('Copier Mission'), findsOneWidget);
   });
 }

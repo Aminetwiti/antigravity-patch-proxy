@@ -35,6 +35,11 @@ func (c *Client) SendMessageStreamModel(cascadeID, text, modelUID string, modelE
 	return c.CallStream("SendUserCascadeMessage", BuildSendMessage(cascadeID, text, c.APIKey, c.SessionID, modelUID, modelEnum, noTools...), 120*time.Second, onFrame)
 }
 
+// SendMessageStreamModelWithMedia transmet un prompt avec pièces jointes (media/images) au Language Server.
+func (c *Client) SendMessageStreamModelWithMedia(cascadeID, text, modelUID string, modelEnum uint64, media []MediaAttachment, onFrame func([]byte) error, noTools ...bool) error {
+	return c.CallStream("SendUserCascadeMessage", BuildSendMessageWithMedia(cascadeID, text, c.APIKey, c.SessionID, modelUID, modelEnum, media, noTools...), 120*time.Second, onFrame)
+}
+
 // SubmitToolApproval approuve/refuse une interaction d'outil via le RPC officiel
 // HandleCascadeUserInteraction (trajectory_id + step_index + oneof décision).
 func (c *Client) SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error) {

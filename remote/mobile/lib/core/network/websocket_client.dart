@@ -51,6 +51,11 @@ class DaemonWebSocketClient {
   /// savoir quand l'état distant doit être rejoué.
   final ValueNotifier<int> reconnectVersion = ValueNotifier(0);
 
+  /// Latence aller-retour mesurée en millisecondes vers le daemon.
+  final ValueNotifier<int?> latencyMsNotifier = ValueNotifier(null);
+  int? get latencyMs => latencyMsNotifier.value;
+  int? _lastPingTimestamp;
+
   Stream<dynamic> get stream =>
       _messageController?.stream ?? const Stream.empty();
 
@@ -261,6 +266,12 @@ class DaemonWebSocketClient {
     if (_isCompleteJson(trimmed)) {
       _inPartialMessage = false;
       _textBuffer = '';
+      if (_lastPingTimestamp != null && (trimmed.contains('"pong"') || trimmed.contains('"type":"pong"') || trimmed.contains('"status":"ok"'))) {
+        final rtt = DateTime.now().millisecondsSinceEpoch - _lastPingTimestamp!;
+        if (rtt >= 0 && rtt < 10000) {
+          latencyMsNotifier.value = rtt;
+        }
+      }
       _messageController?.add(trimmed);
     }
   }
@@ -296,6 +307,7 @@ class DaemonWebSocketClient {
       return;
     }
     statusNotifier.value = ConnectionStatus.disconnected;
+    latencyMsNotifier.value = null;
     _socket?.close();
     _socket = null;
     _stopKeepAlive();
@@ -316,7 +328,8 @@ class DaemonWebSocketClient {
         return;
       }
       try {
-        sock.add('{"type":"ping"}');
+        _lastPingTimestamp = DateTime.now().millisecondsSinceEpoch;
+        sock.add('{"type":"ping","ts":$_lastPingTimestamp}');
       } catch (_) {
         _stopKeepAlive();
       }

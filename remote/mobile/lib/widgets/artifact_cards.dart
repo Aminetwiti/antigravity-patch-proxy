@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile/theme/app_colors.dart';
+import 'bouncing_tap.dart';
 
 /// Carte interactive d'Implementation Plan dans le chat avec bouton d'action Proceed
 class ImplementationPlanCard extends StatelessWidget {
@@ -23,11 +24,15 @@ class ImplementationPlanCard extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 6),
+      margin: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
         color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
+        gradient: AppGradients.cardCool(isDark: isDark),
         borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: isDark ? AppColors.borderStrong : scheme.outlineVariant, width: 1),
+        border: Border.all(
+          color: isDark ? const Color(0xFF3186FF).withValues(alpha: 0.3) : scheme.primary.withValues(alpha: 0.25),
+          width: 1,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -40,17 +45,38 @@ class ImplementationPlanCard extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
               child: Row(
                 children: [
-                  Icon(Icons.description_outlined, size: 16, color: scheme.primary),
-                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.all(5),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF3186FF).withValues(alpha: isDark ? 0.18 : 0.12),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Icon(Icons.assignment_outlined, size: 16, color: Color(0xFF3186FF)),
+                  ),
+                  const SizedBox(width: 10),
                   Expanded(
-                    child: Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: scheme.onSurface,
-                        letterSpacing: -0.1,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                            color: scheme.onSurface,
+                            letterSpacing: -0.1,
+                          ),
+                        ),
+                        Text(
+                          'PLAN D\'EXÉCUTION AGENT',
+                          style: TextStyle(
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.6,
+                            color: isDark ? const Color(0xFF749BFF) : const Color(0xFF3186FF),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   Icon(Icons.chevron_right, size: 16, color: scheme.onSurfaceVariant),
@@ -61,15 +87,15 @@ class ImplementationPlanCard extends StatelessWidget {
 
           // Summary
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
             child: Text(
               summary,
               style: TextStyle(
-                fontSize: 12,
-                color: scheme.onSurfaceVariant,
-                height: 1.4,
+                fontSize: 12.5,
+                color: isDark ? const Color(0xFFD4D4D8) : scheme.onSurfaceVariant,
+                height: 1.45,
               ),
-              maxLines: 3,
+              maxLines: 4,
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -79,26 +105,34 @@ class ImplementationPlanCard extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
             child: Row(
               children: [
-                GestureDetector(
-                  onTap: () {
-                    HapticFeedback.mediumImpact();
-                    onProceed();
-                  },
+                BouncingTap(
+                  hapticType: BouncingHapticType.heavy,
+                  onTap: onProceed,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
                     decoration: BoxDecoration(
-                      color: scheme.primary,
-                      borderRadius: BorderRadius.circular(AppRadius.sm),
+                      gradient: AppGradients.accentCta,
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF3186FF).withValues(alpha: isDark ? 0.35 : 0.2),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
                     ),
                     child: const Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        Icon(Icons.play_arrow_rounded, size: 15, color: Colors.white),
+                        SizedBox(width: 4),
                         Text(
                           'Proceed ⌘↵',
                           style: TextStyle(
                             fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.onAccent,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                            letterSpacing: 0.2,
                           ),
                         ),
                       ],
@@ -106,22 +140,33 @@ class ImplementationPlanCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                GestureDetector(
+                BouncingTap(
+                  hapticType: BouncingHapticType.selection,
                   onTap: onViewPlan,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                     decoration: BoxDecoration(
                       color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(AppRadius.sm),
-                      border: Border.all(color: isDark ? AppColors.borderSubtle : scheme.outlineVariant, width: 1),
-                    ),
-                    child: Text(
-                      'Lire le plan',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        color: scheme.onSurface,
-                        fontWeight: FontWeight.w500,
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
+                      border: Border.all(
+                        color: isDark ? AppColors.borderSubtle : scheme.outlineVariant,
+                        width: 0.8,
                       ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.menu_book_outlined, size: 13.5, color: scheme.onSurfaceVariant),
+                        const SizedBox(width: 5),
+                        Text(
+                          'Lire le plan',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: scheme.onSurface,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -134,7 +179,7 @@ class ImplementationPlanCard extends StatelessWidget {
   }
 }
 
-/// Carte interactive de Walkthrough dans le chat
+/// Carte interactive de Walkthrough dans le chat (Antigravity 2.0 Desktop Style)
 class WalkthroughCard extends StatelessWidget {
   final String title;
   final String summary;
@@ -153,14 +198,21 @@ class WalkthroughCard extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 6),
+      margin: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
         color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
+        gradient: AppGradients.cardCool(isDark: isDark),
         borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: isDark ? AppColors.borderStrong : scheme.outlineVariant, width: 1),
+        border: Border.all(
+          color: isDark ? const Color(0xFF00B95C).withValues(alpha: 0.3) : const Color(0xFF00B95C).withValues(alpha: 0.25),
+          width: 1,
+        ),
       ),
       child: InkWell(
-        onTap: onViewWalkthrough,
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onViewWalkthrough();
+        },
         borderRadius: BorderRadius.circular(AppRadius.lg),
         child: Padding(
           padding: const EdgeInsets.all(14),
@@ -169,31 +221,84 @@ class WalkthroughCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  const Icon(Icons.menu_book_outlined, size: 16, color: AppColors.positive),
-                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.all(5),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF00B95C).withValues(alpha: isDark ? 0.18 : 0.12),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Icon(Icons.verified_outlined, size: 16, color: Color(0xFF00B95C)),
+                  ),
+                  const SizedBox(width: 10),
                   Expanded(
-                    child: Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: scheme.onSurface,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                            color: scheme.onSurface,
+                            letterSpacing: -0.1,
+                          ),
+                        ),
+                        const Text(
+                          'RÉSUMÉ DES CHANGEMENTS & VALIDATION',
+                          style: TextStyle(
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.6,
+                            color: Color(0xFF00B95C),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   Icon(Icons.chevron_right, size: 16, color: scheme.onSurfaceVariant),
                 ],
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 8),
               Text(
                 summary,
                 style: TextStyle(
-                  fontSize: 12,
-                  color: scheme.onSurfaceVariant,
-                  height: 1.4,
+                  fontSize: 12.5,
+                  color: isDark ? const Color(0xFFD4D4D8) : scheme.onSurfaceVariant,
+                  height: 1.45,
                 ),
-                maxLines: 3,
+                maxLines: 4,
                 overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF14241B) : const Color(0xFFE6F7EC),
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
+                      border: Border.all(
+                        color: const Color(0xFF00B95C).withValues(alpha: isDark ? 0.4 : 0.3),
+                        width: 0.8,
+                      ),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.menu_book_outlined, size: 13, color: Color(0xFF00B95C)),
+                        SizedBox(width: 5),
+                        Text(
+                          'Consulter le Walkthrough',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF00B95C),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -211,6 +316,7 @@ class FilesChangedCard extends StatefulWidget {
   final int additions;
   final int deletions;
   final VoidCallback onReview;
+  final ValueChanged<String>? onOpenFile;
 
   const FilesChangedCard({
     super.key,
@@ -218,6 +324,7 @@ class FilesChangedCard extends StatefulWidget {
     this.additions = 0,
     this.deletions = 0,
     required this.onReview,
+    this.onOpenFile,
   });
 
   @override
@@ -226,7 +333,7 @@ class FilesChangedCard extends StatefulWidget {
 
 class _FilesChangedCardState extends State<FilesChangedCard>
     with SingleTickerProviderStateMixin {
-  bool _expanded = false;
+  bool _expanded = true;
   late final AnimationController _anim;
   late final Animation<double> _sizeFactor;
 
@@ -236,6 +343,7 @@ class _FilesChangedCardState extends State<FilesChangedCard>
     _anim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 200),
+      value: 1.0,
     );
     _sizeFactor = CurvedAnimation(parent: _anim, curve: Curves.easeOut);
   }
@@ -265,6 +373,20 @@ class _FilesChangedCardState extends State<FilesChangedCard>
     }
   }
 
+  Color _iconColorFor(String name, bool isDark) {
+    final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+    switch (ext) {
+      case 'dart': return const Color(0xFF29B6F6);
+      case 'go': return const Color(0xFF00ADD8);
+      case 'ts': case 'tsx': return const Color(0xFF3178C6);
+      case 'js': case 'jsx': return const Color(0xFFF7DF1E);
+      case 'json': case 'yaml': case 'yml': case 'toml': return const Color(0xFFA074C4);
+      case 'md': case 'txt': return const Color(0xFF519ABA);
+      case 'sh': case 'bat': case 'ps1': return const Color(0xFF4CAF50);
+      default: return isDark ? const Color(0xFF9E9FA9) : const Color(0xFF6E707A);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -272,116 +394,128 @@ class _FilesChangedCardState extends State<FilesChangedCard>
     final count = widget.files.length;
     final label = '$count ${count > 1 ? 'files changed' : 'file changed'}';
 
-    final positiveColor = isDark ? AppColors.positive : const Color(0xFF1A7F37);
-    final negativeColor = isDark ? AppColors.danger : const Color(0xFFCF222E);
+    const positiveColor = Color(0xFF22C55E);
+    const negativeColor = Color(0xFFEF4444);
 
     return Container(
+      margin: const EdgeInsets.only(top: 8, bottom: 4),
       decoration: BoxDecoration(
-        color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
-        borderRadius: BorderRadius.circular(AppRadius.lg),
+        color: isDark ? const Color(0xFF14161B) : scheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isDark ? AppColors.borderStrong : scheme.outlineVariant,
+          color: isDark ? const Color(0xFF262930) : scheme.outlineVariant,
           width: 1,
         ),
       ),
       clipBehavior: Clip.hardEdge,
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // ── Header row ───────────────────────────────────────────────
-          InkWell(
-            onTap: _toggle,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Row(
-                children: [
-                  // File-count label
-                  Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w500,
-                      color: scheme.onSurface,
-                      letterSpacing: -0.1,
+          // ── Header row (Antigravity 2.0 exact UI) ───────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                InkWell(
+                  onTap: _toggle,
+                  borderRadius: BorderRadius.circular(4),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // File-count label
+                        Text(
+                          label,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? const Color(0xFFE4E4E7) : scheme.onSurface,
+                          ),
+                        ),
+                        // Additions & Deletions
+                        if (widget.additions > 0 || widget.deletions > 0) ...[
+                          const SizedBox(width: 6),
+                          if (widget.additions > 0) ...[
+                            Text(
+                              '+${widget.additions}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: positiveColor,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          ],
+                          if (widget.deletions > 0) ...[
+                            if (widget.additions > 0) const SizedBox(width: 4),
+                            Text(
+                              '-${widget.deletions}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: negativeColor,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          ],
+                        ],
+                        const SizedBox(width: 4),
+                        // Chevron
+                        AnimatedRotation(
+                          turns: _expanded ? 0 : -0.25,
+                          duration: const Duration(milliseconds: 180),
+                          child: Icon(
+                            Icons.keyboard_arrow_down_rounded,
+                            size: 16,
+                            color: isDark ? const Color(0xFF8E929E) : scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  // Additions
-                  if (widget.additions > 0) ...[
-                    Text(
-                      '+${widget.additions}',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
-                        color: positiveColor,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                    const SizedBox(width: 5),
-                  ],
-                  // Deletions
-                  if (widget.deletions > 0)
-                    Text(
-                      '-${widget.deletions}',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
-                        color: negativeColor,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                  const Spacer(),
-                  // Expand chevron
-                  AnimatedRotation(
-                    turns: _expanded ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 200),
-                    child: Icon(
-                      Icons.keyboard_arrow_down_rounded,
-                      size: 16,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  // Review button
-                  GestureDetector(
-                    onTap: () {
-                      HapticFeedback.lightImpact();
-                      widget.onReview();
-                    },
+                ),
+                const Spacer(),
+                // Review button (Desktop Antigravity pill style)
+                Material(
+                  color: isDark ? const Color(0xFF1F2228) : scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(6),
+                  child: InkWell(
+                    onTap: widget.onReview,
+                    borderRadius: BorderRadius.circular(6),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: isDark
-                            ? AppColors.surfaceInput
-                            : scheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(AppRadius.sm),
+                        borderRadius: BorderRadius.circular(6),
                         border: Border.all(
-                          color: isDark
-                              ? AppColors.borderSubtle
-                              : scheme.outlineVariant,
-                          width: 1,
+                          color: isDark ? const Color(0xFF333742) : scheme.outlineVariant,
+                          width: 0.8,
                         ),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.rate_review_outlined,
-                              size: 12, color: scheme.primary),
-                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.difference_outlined,
+                            size: 13,
+                            color: isDark ? const Color(0xFFB0B4C0) : scheme.onSurfaceVariant,
+                          ),
+                          const SizedBox(width: 4.5),
                           Text(
                             'Review',
                             style: TextStyle(
                               fontSize: 11.5,
                               fontWeight: FontWeight.w600,
-                              color: scheme.onSurface,
+                              color: isDark ? const Color(0xFFE4E4E7) : scheme.onSurface,
                             ),
                           ),
                         ],
                       ),
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
 
@@ -391,7 +525,6 @@ class _FilesChangedCardState extends State<FilesChangedCard>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Divider(height: 1, color: scheme.outlineVariant),
                 ...widget.files.map((file) {
                   final normalized = file.replaceAll('\\', '/');
                   final lastSlash = normalized.lastIndexOf('/');
@@ -402,50 +535,58 @@ class _FilesChangedCardState extends State<FilesChangedCard>
                       ? normalized.substring(0, lastSlash)
                       : '';
 
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 5),
-                    child: Row(
-                      children: [
-                        Icon(
-                          _iconFor(fileName),
-                          size: 13,
-                          color: scheme.primary.withValues(alpha: 0.75),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: RichText(
-                            overflow: TextOverflow.ellipsis,
-                            text: TextSpan(
-                              children: [
-                                TextSpan(
-                                  text: fileName,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                    color: scheme.onSurface,
-                                    fontFamily: 'monospace',
-                                  ),
-                                ),
-                                if (dirPath.isNotEmpty)
-                                  TextSpan(
-                                    text: '  $dirPath',
-                                    style: TextStyle(
-                                      fontSize: 10.5,
-                                      color: scheme.onSurfaceVariant
-                                          .withValues(alpha: 0.6),
-                                      fontFamily: 'monospace',
-                                    ),
-                                  ),
-                              ],
+                  return Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () => widget.onOpenFile?.call(file),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 4.5),
+                        child: Row(
+                          children: [
+                            Icon(
+                              _iconFor(fileName),
+                              size: 13,
+                              color: _iconColorFor(fileName, isDark),
                             ),
-                          ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: RichText(
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                                text: TextSpan(
+                                  children: [
+                                    TextSpan(
+                                      text: fileName,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: isDark ? const Color(0xFFE4E4E7) : scheme.onSurface,
+                                        fontFamily: 'monospace',
+                                      ),
+                                    ),
+                                    if (dirPath.isNotEmpty)
+                                      TextSpan(
+                                        text: '  ...$dirPath',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: isDark
+                                              ? const Color(0xFF7E818D)
+                                              : scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                                          fontFamily: 'monospace',
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                   );
                 }),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
               ],
             ),
           ),

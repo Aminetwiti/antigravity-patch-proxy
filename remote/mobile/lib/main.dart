@@ -494,8 +494,10 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           _activeSessionId = newId;
           _activeSessionTitle = 'Nouvelle conversation';
           _sessions = [newSession, ..._sessions.where((s) => s.id != newId)];
+          _contextStats = {};
         });
         await _refreshSessions();
+        await _refreshContext();
       }
     } catch (e) {
       debugPrint('createCascade failed: $e');
@@ -665,7 +667,10 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           setState(() {
             _sessions = _sessions.map((s) {
               if (s.id == cascadeId) {
-                return s.copyWith(status: 'CASCADE_STATUS_READY');
+                return s.copyWith(
+                  status: 'CASCADE_STATUS_READY',
+                  hasUnread: cascadeId != _activeSessionId,
+                );
               }
               return s;
             }).toList();
@@ -769,6 +774,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           onSessionSelected: (id) {
             setState(() {
               _activeSessionId = id;
+              _contextStats = {};
               final s = _sessions.firstWhere(
                 (s) => s.id == id,
                 orElse: () => const CascadeSession(
@@ -1009,6 +1015,13 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       onSessionSelected: (id) {
         setState(() {
           _activeSessionId = id;
+          _contextStats = {};
+          _sessions = _sessions.map((s) {
+            if (s.id == id) {
+              return s.copyWith(hasUnread: false);
+            }
+            return s;
+          }).toList();
           final s = _sessions.firstWhere((s) => s.id == id, orElse: () => const CascadeSession(id: '', workspacePath: '', title: 'Session', status: '', time: ''));
           _activeSessionTitle = s.title;
         });
@@ -1024,12 +1037,8 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       onArchiveSession: _archiveSession,
       onRenameSession: _renameSession,
       onExportSession: _exportSession,
-      onConversationHistory: () {
-        _showSessionHistory();
-      },
-      onScheduledTasks: () {
-        _showScheduledTasks();
-      },
+      onConversationHistory: _showSessionHistory,
+      onScheduledTasks: _showScheduledTasks,
       onOpenBattleArena: () {
         if (_api == null) return;
         final s = _sessions.firstWhere(
@@ -1190,6 +1199,8 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       artifactsCount: _contextStats['artifactsCount'] as int? ?? 0,
       uploadsCount: _contextStats['uploadsCount'] as int? ?? 0,
       backgroundTasksCount: _contextStats['backgroundTasksCount'] as int? ?? 0,
+      scheduledTasksCount: _contextStats['scheduledTasksCount'] as int? ?? 0,
+      mcpServersCount: _contextStats['mcpServersCount'] as int? ?? 0,
     );
 
     final scaffold = Scaffold(
@@ -1210,50 +1221,71 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                 tooltip: 'Ouvrir le menu gauche',
               ),
         title: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              'Antigravity',
-              style: TextStyle(
-                fontSize: 14.5,
-                fontWeight: FontWeight.w600,
-                color: Theme.of(context).colorScheme.onSurface,
-                letterSpacing: -0.2,
+            Flexible(
+              child: Text(
+                'Antigravity',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).colorScheme.onSurface,
+                  letterSpacing: -0.2,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-            const Spacer(),
+            const SizedBox(width: 8),
             InkWell(
               onTap: () {
                 if (isConnected) {
                   _wsClient.disconnect();
-                  // Déconnexion manuelle explicite : la session persistée est
-                  // oubliée pour ne pas se reconnecter toute seule au tunnel.
                   SettingsStore.clearSession();
                 } else {
                   _wsClient.connect();
                 }
               },
-              borderRadius: BorderRadius.circular(4),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              borderRadius: BorderRadius.circular(AppRadius.pill),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                decoration: BoxDecoration(
+                  color: (isConnected ? AppColors.positive : AppColors.danger).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                  border: Border.all(
+                    color: (isConnected ? AppColors.positive : AppColors.danger).withValues(alpha: 0.25),
+                    width: 0.8,
+                  ),
+                ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
-                      width: 8,
-                      height: 8,
+                      width: 6,
+                      height: 6,
                       decoration: BoxDecoration(
                         color: isConnected ? AppColors.positive : AppColors.danger,
                         shape: BoxShape.circle,
                       ),
                     ),
-                    const SizedBox(width: 6),
-                    Text(
-                      isConnected ? 'Connecté' : 'Hors ligne',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        color: isConnected ? AppColors.positive : AppColors.danger,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    const SizedBox(width: 5),
+                    ValueListenableBuilder<int?>(
+                      valueListenable: _wsClient.latencyMsNotifier,
+                      builder: (context, latency, _) {
+                        final label = isConnected
+                            ? (latency != null ? '${latency}ms' : 'Connecté')
+                            : 'Hors ligne';
+                        return Text(
+                          label,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isConnected ? AppColors.positive : AppColors.danger,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        );
+                      },
                     ),
                   ],
                 ),

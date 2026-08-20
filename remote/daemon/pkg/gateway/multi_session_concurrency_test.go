@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/antigravity/remote-daemon/pkg/connectrpc"
 )
 
 // multiSessionMockClient gère plusieurs cascades en parallèle de manière isolée.
@@ -19,6 +21,16 @@ func newMultiSessionMockClient() *multiSessionMockClient {
 	return &multiSessionMockClient{
 		streaming: make(map[string]bool),
 	}
+}
+
+func (m *multiSessionMockClient) SendMessageStreamModelWithMedia(
+	cascadeID, prompt, modelUID string,
+	modelEnum uint64,
+	media []connectrpc.MediaAttachment,
+	onFrame func([]byte) error,
+	noTools ...bool,
+) error {
+	return m.SendMessageStreamModel(cascadeID, prompt, modelUID, modelEnum, onFrame, noTools...)
 }
 
 func (m *multiSessionMockClient) SendMessageStreamModel(

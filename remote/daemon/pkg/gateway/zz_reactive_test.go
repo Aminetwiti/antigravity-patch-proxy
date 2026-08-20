@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -237,4 +238,39 @@ func TestReactiveRespectsApprovalGuards(t *testing.T) {
 			t.Fatalf("broadcast inattendu pour une interaction inconnue: %v", msg)
 		}
 	})
+
+	t.Run("404_not_found_handling", func(t *testing.T) {
+		old := reactiveNotFoundBackoff
+		reactiveNotFoundBackoff = 10 * time.Millisecond
+		defer func() { reactiveNotFoundBackoff = old }()
+
+		ts, gw := newTestServerWithGW(&fakeRPCClient{})
+		defer ts.Close()
+
+		called := make(chan struct{}, 1)
+		gw.RunReactiveSubscription(&errReactiveStreamer{
+			err:    errors.New("HTTP 404: 404 page not found"),
+			called: called,
+		})
+
+		select {
+		case <-called:
+			// L'appel s'est bien déroulé et l'erreur 404 a été gérée proprement sans panique
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("RunReactiveSubscription n'a pas été appelé")
+		}
+	})
+}
+
+type errReactiveStreamer struct {
+	err    error
+	called chan struct{}
+	once   sync.Once
+}
+
+func (e *errReactiveStreamer) RunReactiveSubscription(onUpdate func(updates map[string]connectrpc.ReactiveUpdate)) error {
+	e.once.Do(func() {
+		close(e.called)
+	})
+	return e.err
 }

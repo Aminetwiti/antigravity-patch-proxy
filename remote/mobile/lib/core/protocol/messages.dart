@@ -85,17 +85,27 @@ class CascadeSession {
 
   bool get isRunning {
     final st = status.toUpperCase();
-    return st.contains('RUNNING');
+    return st.contains('RUNNING') || st.contains('BUSY') || st.contains('STREAMING');
+  }
+
+  bool get isBackgroundTask {
+    final st = status.toUpperCase();
+    return st.contains('BACKGROUND') || st.contains('TASK') || st.contains('EXECUTING');
   }
 
   bool get isWaitingAction {
     final st = status.toUpperCase();
-    return st.contains('WAIT') || st.contains('APPROVAL') || st.contains('QUESTION');
+    return st.contains('WAIT') || st.contains('APPROVAL') || st.contains('QUESTION') || st.contains('USER_ACTION');
   }
 
   bool get isError {
     final st = status.toUpperCase();
     return st.contains('ERROR') || st.contains('FAIL');
+  }
+
+  bool get isReady {
+    final st = status.toUpperCase();
+    return st.contains('READY') || st.contains('IDLE') || st.contains('PAUSE');
   }
 
   CascadeSession copyWith({
@@ -189,6 +199,7 @@ class ChatMessage {
   // true quand le message est en attente d'envoi dans l'outbox hors-ligne.
   final bool isQueued;
   final String? modelLabel;
+  final int? stepIndex;
 
   /// Session result: list of modified file paths, populated at stream_end.
   final List<String> filesChanged;
@@ -205,6 +216,7 @@ class ChatMessage {
     this.isError = false,
     this.isQueued = false,
     this.modelLabel,
+    this.stepIndex,
     this.filesChanged = const [],
     this.additions = 0,
     this.deletions = 0,
@@ -217,6 +229,7 @@ class ChatMessage {
     bool? isError,
     bool? isQueued,
     String? modelLabel,
+    int? stepIndex,
     List<String>? filesChanged,
     int? additions,
     int? deletions,
@@ -231,6 +244,7 @@ class ChatMessage {
       isError: isError ?? this.isError,
       isQueued: isQueued ?? this.isQueued,
       modelLabel: modelLabel ?? this.modelLabel,
+      stepIndex: stepIndex ?? this.stepIndex,
       filesChanged: filesChanged ?? this.filesChanged,
       additions: additions ?? this.additions,
       deletions: deletions ?? this.deletions,
@@ -247,6 +261,7 @@ class ChatMessage {
         'isError': isError,
         'isQueued': isQueued,
         if (modelLabel != null) 'modelLabel': modelLabel,
+        if (stepIndex != null) 'stepIndex': stepIndex,
         'filesChanged': filesChanged,
         'additions': additions,
         'deletions': deletions,
@@ -262,6 +277,7 @@ class ChatMessage {
         isError: json['isError'] == true,
         isQueued: json['isQueued'] == true,
         modelLabel: json['modelLabel']?.toString(),
+        stepIndex: (json['stepIndex'] as num?)?.toInt(),
         filesChanged: (json['filesChanged'] as List?)?.map((e) => e.toString()).toList() ?? const [],
         additions: json['additions'] is int ? json['additions'] as int : int.tryParse(json['additions']?.toString() ?? '0') ?? 0,
         deletions: json['deletions'] is int ? json['deletions'] as int : int.tryParse(json['deletions']?.toString() ?? '0') ?? 0,
@@ -320,6 +336,10 @@ class ToolApprovalRequest {
   final String approvalType;
   final String? filePath;
   final String? url;
+  final String? mcpServer;
+  final String? mcpTool;
+  final String? mcpArgs;
+  final bool isDestructive;
 
   /// Portée sélectionnée pour l'approbation.
   final ApprovalScope scope;
@@ -335,22 +355,76 @@ class ToolApprovalRequest {
     this.approvalType = 'approval',
     this.filePath,
     this.url,
+    this.mcpServer,
+    this.mcpTool,
+    this.mcpArgs,
+    this.isDestructive = false,
     this.scope = ApprovalScope.once,
   });
 
+  bool get isFileApproval =>
+      approvalType == 'file_permission' ||
+      approvalType == 'permission' ||
+      filePath != null;
+
+  bool get isUrlApproval =>
+      approvalType == 'read_url_content' ||
+      approvalType == 'open_browser_url' ||
+      url != null;
+
+  bool get isMcpApproval =>
+      approvalType == 'mcp_tool' ||
+      mcpServer != null;
+
+  bool get isStdinApproval =>
+      approvalType == 'send_command_input' ||
+      toolName.toLowerCase().contains('stdin');
+
+  bool get isDeployApproval =>
+      approvalType == 'deploy' ||
+      toolName.toLowerCase().contains('deploy');
+
+  bool get isSubagentApproval =>
+      approvalType == 'invoke_subagent' ||
+      toolName.toLowerCase().contains('subagent');
+
+  bool get checkDestructive {
+    if (isDestructive) return true;
+    final cmd = command.toLowerCase();
+    final tool = toolName.toLowerCase();
+    return tool.contains('delete') ||
+        cmd.contains('rm -rf') ||
+        cmd.contains('rmdir') ||
+        cmd.contains('drop database') ||
+        cmd.contains('git reset --hard') ||
+        cmd.contains('git push --force') ||
+        cmd.contains('git push -f');
+  }
+
   factory ToolApprovalRequest.fromJson(Map<String, dynamic> json) {
+    final cmd = json['command'] ?? '';
+    final tool = json['toolName'] ?? json['tool'] ?? 'run_command';
+    final appType = json['approvalType'] ?? 'approval';
+    final isDestruct = json['isDestructive'] == true ||
+        tool.toString().toLowerCase().contains('delete') ||
+        cmd.toString().toLowerCase().contains('rm -rf');
+
     return ToolApprovalRequest(
-      callId: json['callId'] ?? '',
-      toolName: json['toolName'] ?? 'run_command',
-      command: json['command'] ?? '',
+      callId: json['callId'] ?? json['approvalId'] ?? '',
+      toolName: tool,
+      command: cmd,
       description: json['description'] ??
           'An agent tool requires user confirmation',
       cascadeId: json['cascadeId'] ?? '',
       trajectoryId: json['trajectoryId'] ?? '',
       stepIndex: (json['stepIndex'] as num?)?.toInt() ?? -1,
-      approvalType: json['approvalType'] ?? 'approval',
-      filePath: json['filePath'],
-      url: json['url'] ?? json['targetUrl'],
+      approvalType: appType,
+      filePath: json['filePath'] ?? json['path'] ?? json['file_path'],
+      url: json['url'] ?? json['targetUrl'] ?? json['target_url'],
+      mcpServer: json['mcpServer'] ?? json['serverName'] ?? json['server_name'],
+      mcpTool: json['mcpTool'] ?? json['tool_name'],
+      mcpArgs: json['mcpArgs'] ?? json['argumentsJson'] ?? json['arguments_json'],
+      isDestructive: isDestruct,
       scope: ApprovalScope.fromWire(json['scope']?.toString()),
     );
   }

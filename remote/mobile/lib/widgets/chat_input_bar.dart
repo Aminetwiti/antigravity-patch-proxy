@@ -11,7 +11,6 @@ import '../core/protocol/daemon_api.dart';
 import '../core/protocol/model_catalog.dart';
 import '../services/settings_store.dart';
 import '../features/chat_stream/models/mention_item.dart';
-import '../features/chat_stream/widgets/action_pills_bar.dart';
 import '../features/chat_stream/widgets/mention_autocomplete_overlay.dart';
 import 'bouncing_tap.dart';
 import 'custom_dropdown_overlay.dart';
@@ -73,6 +72,10 @@ class ChatInputBar extends StatefulWidget {
     bool queued,
     String? modelUID,
     int? modelEnum,
+    List<String>? images,
+    String? base64Data,
+    String? fileName,
+    List<Map<String, dynamic>>? media,
   }) onSend;
   final bool isConnected;
 
@@ -94,6 +97,12 @@ class ChatInputBar extends StatefulWidget {
   final String? projectName;
   final VoidCallback? onSelectProject;
 
+  /// Actions rapides & plan actif
+  final bool hasPlan;
+  final VoidCallback? onProceedPlan;
+  final VoidCallback? onRunTests;
+  final VoidCallback? onViewDiff;
+
   const ChatInputBar({
     super.key,
     required this.onSend,
@@ -107,24 +116,77 @@ class ChatInputBar extends StatefulWidget {
     this.onDraftChanged,
     this.projectName,
     this.onSelectProject,
+    this.hasPlan = false,
+    this.onProceedPlan,
+    this.onRunTests,
+    this.onViewDiff,
   });
 
   @override
   State<ChatInputBar> createState() => ChatInputBarState();
 }
 
-class ChatInputBarState extends State<ChatInputBar> {
+class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver {
   void openModelSelector() {
     if (mounted) {
       _showModelDropdown(context);
     }
   }
 
+  /// Insère une citation markdown formatée (> texte) dans le champ de saisie
+  void insertQuote(String quoteText) {
+    if (!mounted) return;
+    final lines = quoteText.trim().split('\n');
+    final formattedQuote = lines.take(6).map((l) => '> $l').join('\n');
+    final current = _controller.text;
+    final newContent = current.isEmpty
+        ? '$formattedQuote\n\n'
+        : '$current\n\n$formattedQuote\n\n';
+    _controller.text = newContent;
+    _controller.selection = TextSelection.collapsed(offset: newContent.length);
+  }
+
+  /// Remplace le texte de la barre de saisie
+  void setText(String text) {
+    if (!mounted) return;
+    _controller.text = text;
+    _controller.selection = TextSelection.collapsed(offset: text.length);
+  }
+
   final TextEditingController _controller = TextEditingController();
+  final FocusNode _focusNode = FocusNode();
   String _selectedModel = 'Gemini 3.7 Flash';
   String? _selectedModelId = 'gemini-3.7-flash';
   int? _selectedModelEnum = 312;
   List<AntigravityModel> _availableModels = ModelCatalog.standardModels;
+
+  String get _displayModelName {
+    var name = _selectedModel.trim();
+    if (name.contains('/')) {
+      name = name.split('/').last.trim();
+    }
+    return name;
+  }
+
+  Color _getModelProviderColor(String modelName, ColorScheme scheme) {
+    final lower = modelName.toLowerCase();
+    if (lower.contains('claude') || lower.contains('anthropic')) {
+      return AppColors.providerAnthropic;
+    }
+    if (lower.contains('gpt') || lower.contains('openai') || lower.contains('codex')) {
+      return AppColors.providerOpenAI;
+    }
+    if (lower.contains('deepseek')) {
+      return AppColors.providerCustom;
+    }
+    if (lower.contains('ollama')) {
+      return AppColors.providerOllama;
+    }
+    if (lower.contains('gemini') || lower.contains('google')) {
+      return AppColors.accentBlue;
+    }
+    return scheme.primary;
+  }
 
   bool _isSendPressed = false;
   SendMode _sendMode = SendMode.immediate;
@@ -133,6 +195,7 @@ class ChatInputBarState extends State<ChatInputBar> {
   // Feature multi-attachements fichiers et images (Quiet Console)
   final List<_AttachedItem> _attachments = [];
   double? _uploadProgress;
+  String? _clipboardPreviewText;
 
   final GlobalKey _modelButtonKey = GlobalKey();
   final GlobalKey _textFieldKey = GlobalKey();
@@ -148,6 +211,8 @@ class ChatInputBarState extends State<ChatInputBar> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _focusNode.addListener(_onFocusChanged);
     if (widget.initialText.isNotEmpty) {
       // P6 : restaure le brouillon persisté avant d'écouter les frappes.
       _controller.text = widget.initialText;
@@ -159,6 +224,49 @@ class ChatInputBarState extends State<ChatInputBar> {
     _controller.addListener(_onTextChanged);
     widget.onDraftChanged?.call(_controller.text);
     _loadModelsAndPreferences();
+    _checkClipboard();
+  }
+
+  void _onFocusChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkClipboard();
+    }
+  }
+
+  Future<void> _checkClipboard() async {
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      final text = data?.text?.trim();
+      if (text != null &&
+          text.isNotEmpty &&
+          text.length > 2 &&
+          text.length < 3000 &&
+          text != _controller.text.trim()) {
+        if (mounted) {
+          setState(() => _clipboardPreviewText = text);
+        }
+      } else {
+        if (mounted && _clipboardPreviewText != null) {
+          setState(() => _clipboardPreviewText = null);
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _pasteClipboard() {
+    if (_clipboardPreviewText == null) return;
+    HapticFeedback.selectionClick();
+    final current = _controller.text;
+    final newText = current.isEmpty ? _clipboardPreviewText! : '$current\n${_clipboardPreviewText!}';
+    _controller.text = newText;
+    _controller.selection = TextSelection.collapsed(offset: newText.length);
+    widget.onDraftChanged?.call(newText);
+    setState(() => _clipboardPreviewText = null);
   }
 
   @override
@@ -247,7 +355,10 @@ class ChatInputBarState extends State<ChatInputBar> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _sendDebounceTimer?.cancel();
+    _focusNode.removeListener(_onFocusChanged);
+    _focusNode.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -276,49 +387,102 @@ class ChatInputBarState extends State<ChatInputBar> {
       finalPayload = '$cmd $args'.trim();
     }
 
+    if (finalPayload.isNotEmpty && (_promptHistory.isEmpty || _promptHistory.last != finalPayload)) {
+      _promptHistory.add(finalPayload);
+      if (_promptHistory.length > 50) _promptHistory.removeAt(0);
+    }
+
     // Traitement et upload des attachements vers le daemon si connecté
-    if (widget.api != null && widget.cascadeId != null && _attachments.isNotEmpty) {
+    final uploadedPaths = <String, String>{};
+    final failedImages = <_AttachedItem>[];
+    var hadUploadError = false;
+
+    String effectiveCascadeId = widget.cascadeId ?? '';
+    if (effectiveCascadeId.isEmpty) {
+      effectiveCascadeId = 'cascade-${DateTime.now().millisecondsSinceEpoch}';
+    }
+
+    if (widget.api != null && _attachments.isNotEmpty) {
       setState(() => _uploadProgress = 0.05);
       for (int i = 0; i < _attachments.length; i++) {
         final att = _attachments[i];
         if (att.base64Data != null) {
           try {
             if (att.isImage) {
-              await widget.api!.uploadMedia(
-                cascadeId: widget.cascadeId!,
+              final res = await widget.api!.uploadMedia(
+                cascadeId: effectiveCascadeId,
                 fileName: att.name,
                 mimeType: att.mimeType ?? 'image/jpeg',
                 base64Data: att.base64Data!,
               );
+              final fp = res['filePath'] as String? ?? res['path'] as String?;
+              if (fp != null && fp.isNotEmpty) {
+                uploadedPaths[att.name] = fp;
+              } else {
+                failedImages.add(att);
+              }
             } else {
-              await widget.api!.uploadChunk(
+              final res = await widget.api!.uploadChunk(
                 uploadId: 'up_${DateTime.now().millisecondsSinceEpoch}_$i',
-                cascadeId: widget.cascadeId!,
+                cascadeId: effectiveCascadeId,
                 fileName: att.name,
                 chunkIndex: 0,
                 totalChunks: 1,
                 totalBytes: att.size,
                 base64Data: att.base64Data!,
               );
+              final fp = res['filePath'] as String? ?? res['path'] as String?;
+              if (fp != null && fp.isNotEmpty) {
+                uploadedPaths[att.name] = fp;
+              }
             }
-          } catch (_) {}
+          } catch (_) {
+            hadUploadError = true;
+            if (att.isImage) {
+              failedImages.add(att);
+            }
+          }
         }
         if (mounted) {
           setState(() => _uploadProgress = (i + 1) / _attachments.length);
         }
       }
+    } else if (_attachments.any((a) => a.isImage)) {
+      failedImages.addAll(_attachments.where((a) => a.isImage));
     }
 
-    // Construction du payload textuel combiné
+    if (hadUploadError && mounted) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(
+          content: Text('Upload direct vers le PC incomplet — transmission des images via le prompt.'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
+
+    // Construction du payload textuel et de la liste des pièces jointes
     final buffer = StringBuffer();
     final images = _attachments.where((a) => a.isImage).toList();
     final files = _attachments.where((a) => !a.isImage).toList();
+    final mediaList = <Map<String, dynamic>>[];
 
     if (images.isNotEmpty) {
-      if (images.length == 1) {
-        buffer.writeln('[Image jointe: ${images.first.name}]');
-      } else {
-        buffer.writeln('[Images jointes: ${images.map((img) => img.name).join(', ')}]');
+      for (final img in images) {
+        final fp = uploadedPaths[img.name];
+        var clean = '';
+        if (fp != null && fp.isNotEmpty) {
+          clean = fp.replaceAll(r'\', '/');
+          if (!clean.startsWith('file:///')) {
+            clean = clean.startsWith('/') ? 'file://$clean' : 'file:///$clean';
+          }
+        }
+        mediaList.add({
+          'uri': clean,
+          'mimeType': img.mimeType ?? 'image/jpeg',
+          'description': img.name,
+          'name': img.name,
+          if (img.base64Data != null) 'base64Data': img.base64Data,
+        });
       }
     }
 
@@ -326,7 +490,16 @@ class ChatInputBarState extends State<ChatInputBar> {
       if (f.textContent != null) {
         buffer.writeln('[Fichier: ${f.name}]\n${f.textContent}\n');
       } else {
-        buffer.writeln('[Fichier joint: ${f.name} (${_formatBytes(f.size)})]');
+        final fp = uploadedPaths[f.name];
+        if (fp != null && fp.isNotEmpty) {
+          var clean = fp.replaceAll(r'\', '/');
+          if (!clean.startsWith('file:///')) {
+            clean = clean.startsWith('/') ? 'file://$clean' : 'file:///$clean';
+          }
+          buffer.writeln('[Fichier: $clean]');
+        } else {
+          buffer.writeln('[Fichier joint: ${f.name} (${_formatBytes(f.size)})]');
+        }
       }
     }
 
@@ -337,11 +510,29 @@ class ChatInputBarState extends State<ChatInputBar> {
 
     final fullMessage = buffer.toString().trim();
 
+    List<String>? fallbackImages;
+    String? fallbackBase64;
+    String? fallbackFileName;
+
+    if (failedImages.length == 1) {
+      fallbackBase64 = failedImages.first.base64Data;
+      fallbackFileName = failedImages.first.name;
+    } else if (failedImages.length > 1) {
+      fallbackImages = failedImages
+          .map((f) => f.base64Data)
+          .whereType<String>()
+          .toList();
+    }
+
     widget.onSend(
       fullMessage,
       queued: _sendMode == SendMode.queued || widget.hasActiveStream,
       modelUID: _selectedModelId,
       modelEnum: _selectedModelEnum,
+      images: fallbackImages,
+      base64Data: fallbackBase64,
+      fileName: fallbackFileName,
+      media: mediaList.isNotEmpty ? mediaList : null,
     );
     _controller.clear();
     _lastDraftText = '';
@@ -667,16 +858,28 @@ class ChatInputBarState extends State<ChatInputBar> {
     if (result != null && result['content']!.isNotEmpty) {
       final name = result['name']!.isEmpty ? 'fichier.txt' : result['name']!;
       final content = result['content']!;
-      final bytes = Uint8List.fromList(utf8.encode(content));
+      final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+      final isImg = ['png', 'jpg', 'jpeg', 'webp', 'gif'].contains(ext);
+      Uint8List? bytes;
+      if (isImg) {
+        try {
+          bytes = base64Decode(content);
+        } catch (_) {
+          bytes = Uint8List.fromList(utf8.encode(content));
+        }
+      } else {
+        bytes = Uint8List.fromList(utf8.encode(content));
+      }
+      final b64 = isImg ? base64Encode(bytes) : base64Encode(bytes);
       setState(() {
         _attachments.add(_AttachedItem(
           name: name,
-          size: bytes.length,
-          mimeType: 'text/plain',
+          size: bytes!.length,
+          mimeType: isImg ? (ext == 'png' ? 'image/png' : 'image/jpeg') : 'text/plain',
           bytes: bytes,
-          base64Data: base64Encode(bytes),
-          isImage: false,
-          textContent: content,
+          base64Data: b64,
+          isImage: isImg,
+          textContent: isImg ? null : content,
         ));
       });
     }
@@ -804,7 +1007,7 @@ class ChatInputBarState extends State<ChatInputBar> {
                       child: LinearProgressIndicator(
                         value: _uploadProgress,
                         minHeight: 3,
-                        backgroundColor: isDark ? const Color(0xFF26282E) : scheme.surfaceContainerHighest,
+                        backgroundColor: isDark ? AppColors.surfaceHover : scheme.surfaceContainerHighest,
                         valueColor: AlwaysStoppedAnimation<Color>(scheme.primary),
                       ),
                     ),
@@ -944,7 +1147,7 @@ class ChatInputBarState extends State<ChatInputBar> {
               child: att.isImage && att.bytes != null
                   ? Container(
                       constraints: const BoxConstraints(maxHeight: 380),
-                      color: isDark ? const Color(0xFF101216) : scheme.surfaceContainerLow,
+                      color: isDark ? AppColors.editorBackground : scheme.surfaceContainerLow,
                       child: InteractiveViewer(
                         minScale: 0.5,
                         maxScale: 4.0,
@@ -959,7 +1162,7 @@ class ChatInputBarState extends State<ChatInputBar> {
                   : Container(
                       constraints: const BoxConstraints(maxHeight: 300),
                       padding: const EdgeInsets.all(12),
-                      color: isDark ? const Color(0xFF101216) : scheme.surfaceContainerLow,
+                      color: isDark ? AppColors.editorBackground : scheme.surfaceContainerLow,
                       child: SingleChildScrollView(
                         child: SelectableText(
                           att.textContent ?? '[Fichier binaire (${_formatBytes(att.size)})]',
@@ -1085,7 +1288,7 @@ class ChatInputBarState extends State<ChatInputBar> {
             child: Container(
               padding: const EdgeInsets.all(5),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF26282E) : scheme.surfaceContainer,
+                color: isDark ? AppColors.surfaceHover : scheme.surfaceContainer,
                 shape: BoxShape.circle,
               ),
               child: Icon(
@@ -1628,6 +1831,135 @@ class ChatInputBarState extends State<ChatInputBar> {
     );
   }
 
+  static final List<String> _promptHistory = [];
+  int _historyNavIndex = -1;
+
+  void _navigatePromptHistory(int direction) {
+    if (_promptHistory.isEmpty) return;
+    HapticFeedback.selectionClick();
+    if (direction > 0) {
+      // Plus ancien dans l'historique
+      if (_historyNavIndex < _promptHistory.length - 1) {
+        _historyNavIndex++;
+        final prompt = _promptHistory[_promptHistory.length - 1 - _historyNavIndex];
+        _controller.text = prompt;
+        _controller.selection = TextSelection.collapsed(offset: prompt.length);
+        widget.onDraftChanged?.call(prompt);
+      }
+    } else {
+      // Plus récent
+      if (_historyNavIndex > 0) {
+        _historyNavIndex--;
+        final prompt = _promptHistory[_promptHistory.length - 1 - _historyNavIndex];
+        _controller.text = prompt;
+        _controller.selection = TextSelection.collapsed(offset: prompt.length);
+        widget.onDraftChanged?.call(prompt);
+      } else if (_historyNavIndex == 0) {
+        _historyNavIndex = -1;
+        _controller.clear();
+        widget.onDraftChanged?.call('');
+      }
+    }
+  }
+
+  void _showPromptHistoryMenu(BuildContext context) {
+    if (_promptHistory.isEmpty) return;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final scheme = Theme.of(context).colorScheme;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.5,
+        ),
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.surfaceBase : AppColors.surfaceInput,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+          border: Border(
+            top: BorderSide(
+              color: isDark ? AppColors.borderStrong : AppColors.borderSubtle,
+            ),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 8, bottom: 6),
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: isDark ? AppColors.borderStrong : AppColors.borderSubtle,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.history_rounded, size: 16, color: AppColors.accentBlue),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Historique des messages envoyés',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? AppColors.inkPrimary : Colors.black87,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.close_rounded, size: 16),
+                    onPressed: () => Navigator.of(ctx).pop(),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                itemCount: _promptHistory.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (context, idx) {
+                  final item = _promptHistory[_promptHistory.length - 1 - idx];
+                  return ListTile(
+                    dense: true,
+                    title: Text(
+                      item,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: const Icon(Icons.north_west_rounded, size: 14, color: AppColors.inkMuted),
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      _controller.text = item;
+                      _controller.selection = TextSelection.collapsed(offset: item.length);
+                      widget.onDraftChanged?.call(item);
+                      Navigator.of(ctx).pop();
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -1637,14 +1969,22 @@ class ChatInputBarState extends State<ChatInputBar> {
     final viewPadding = MediaQuery.of(context).viewPadding;
     final rawInsetsBottom = View.of(context).viewInsets.bottom / MediaQuery.of(context).devicePixelRatio;
     final hasKeyboard = viewInsets.bottom > 50 || rawInsetsBottom > 50;
+    final isIdle = !_focusNode.hasFocus && _controller.text.isEmpty && _attachments.isEmpty && !hasKeyboard;
     final bottomMargin = hasKeyboard
         ? 2.0
         : (viewPadding.bottom > 0 ? 4.0 : 8.0);
 
+    final providerColor = _getModelProviderColor(_selectedModel, scheme);
+    final isThinking = _selectedModel.toLowerCase().contains('thinking') ||
+        _selectedModel.toLowerCase().contains('high') ||
+        _reasoningEffort == 'Élevé';
+
     return SafeArea(
       top: false,
       bottom: !hasKeyboard,
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
         margin: EdgeInsets.fromLTRB(12, 2, 12, bottomMargin),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1690,19 +2030,61 @@ class ChatInputBarState extends State<ChatInputBar> {
                   ),
                 ),
               ),
-            if (!hasKeyboard)
+            if (_clipboardPreviewText != null && _clipboardPreviewText!.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: ActionPillsBar(
-                  onActionSelected: (cmd) {
-                    _insertTextAtCursor(cmd);
-                  },
+                padding: const EdgeInsets.only(bottom: 6, left: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    BouncingTap(
+                      hapticType: BouncingHapticType.selection,
+                      onTap: _pasteClipboard,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(AppRadius.pill),
+                          border: Border.all(
+                            color: AppColors.accentBlue.withValues(alpha: isDark ? 0.4 : 0.3),
+                            width: 0.8,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.content_paste_rounded, size: 12, color: AppColors.accentBlue),
+                            const SizedBox(width: 5),
+                            Text(
+                              'Coller : ${_clipboardPreviewText!.replaceAll('\n', ' ').length > 24 ? '${_clipboardPreviewText!.replaceAll('\n', ' ').substring(0, 24)}…' : _clipboardPreviewText!.replaceAll('\n', ' ')}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: scheme.onSurface,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 2),
+                    InkWell(
+                      onTap: () => setState(() => _clipboardPreviewText = null),
+                      borderRadius: BorderRadius.circular(16),
+                      child: Container(
+                        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                        alignment: Alignment.center,
+                        child: Icon(Icons.close_rounded, size: 14, color: isDark ? AppColors.inkMuted : scheme.outline),
+                      ),
+                    ),
+                  ],
                 ),
               ),
+            if (!hasKeyboard && !isIdle)
+              _buildQuickActionPills(scheme, isDark),
             Container(
               padding: EdgeInsets.symmetric(
                 horizontal: 12,
-                vertical: hasKeyboard ? 6 : 12,
+                vertical: hasKeyboard ? 6 : (isIdle ? 7 : 10),
               ),
               decoration: BoxDecoration(
                 color: isDark
@@ -1711,11 +2093,13 @@ class ChatInputBarState extends State<ChatInputBar> {
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
                   color: isQueued
-                      ? scheme.primary.withValues(alpha: 0.6)
-                      : (isDark
-                          ? AppColors.borderSubtle
-                          : AppColors.border(context)),
-                  width: 1,
+                      ? scheme.primary.withValues(alpha: 0.8)
+                      : (_focusNode.hasFocus
+                          ? (isDark ? AppColors.accentBlue : scheme.primary)
+                          : (isDark
+                              ? AppColors.borderSubtle
+                              : AppColors.border(context))),
+                  width: _focusNode.hasFocus ? 1.2 : 1.0,
                 ),
               ),
               child: Column(
@@ -1787,100 +2171,137 @@ class ChatInputBarState extends State<ChatInputBar> {
                           ):
                           _quoteSelectedText,
                     },
-                    child: Container(
-                      key: _textFieldKey,
-                      child: TextField(
-                        controller: _controller,
-                        autofocus: false,
-                        maxLines: 6,
-                        minLines: 1,
-                        style: TextStyle(fontSize: 14, color: scheme.onSurface),
-                        decoration: InputDecoration(
-                          hintText:
-                              widget.isConnected
-                                  ? (isQueued
-                                      ? "Message queued — sends after agent finishes working"
-                                      : 'Ask anything, @ to mention, / for actions')
-                                  : 'Offline — message will be sent when reconnected',
-                          hintStyle: TextStyle(
-                            color:
-                                widget.isConnected ? scheme.onSurfaceVariant.withValues(alpha: 0.8) : scheme.error,
-                            fontSize: 13.5,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onHorizontalDragEnd: (details) {
+                        final vx = details.primaryVelocity ?? 0;
+                        if (vx > 200) {
+                          // Glissement vers la droite -> prompt plus ancien
+                          _navigatePromptHistory(1);
+                        } else if (vx < -200) {
+                          // Glissement vers la gauche -> prompt plus récent
+                          _navigatePromptHistory(-1);
+                        }
+                      },
+                      child: Container(
+                        key: _textFieldKey,
+                        child: TextField(
+                          focusNode: _focusNode,
+                          controller: _controller,
+                          autofocus: false,
+                          maxLines: isIdle ? 1 : 6,
+                          minLines: 1,
+                          style: TextStyle(fontSize: 14, color: scheme.onSurface),
+                          decoration: InputDecoration(
+                            hintText:
+                                widget.isConnected
+                                    ? (isQueued
+                                        ? "Message en file d'attente (envoi automatique)..."
+                                        : 'Poser une question, @ pour mentionner...')
+                                    : 'Hors ligne — message mis en attente locale',
+                            hintStyle: TextStyle(
+                              color:
+                                  widget.isConnected ? scheme.onSurfaceVariant.withValues(alpha: 0.8) : scheme.error,
+                              fontSize: 13.5,
+                            ),
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            disabledBorder: InputBorder.none,
+                            contentPadding: EdgeInsets.zero,
+                            fillColor: Colors.transparent,
+                            filled: false,
                           ),
-                          border: InputBorder.none,
-                          enabledBorder: InputBorder.none,
-                          focusedBorder: InputBorder.none,
-                          disabledBorder: InputBorder.none,
-                          contentPadding: EdgeInsets.zero,
-                          fillColor: Colors.transparent,
-                          filled: false,
                         ),
                       ),
                     ),
                   ),
-                  SizedBox(height: hasKeyboard ? 4 : 10),
+                  SizedBox(height: isIdle ? 4 : (hasKeyboard ? 4 : 8)),
 
                   // Bottom Action Bar
                   Row(
                     children: [
                       // Attach media/file
-                      InkWell(
+                      BouncingTap(
+                        hapticType: BouncingHapticType.selection,
                         onTap: _showAttachmentMenu,
-                        borderRadius: BorderRadius.circular(8),
-                        child: Padding(
-                          padding: const EdgeInsets.all(8),
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHigh,
+                            shape: BoxShape.circle,
+                          ),
+                          alignment: Alignment.center,
                           child: Icon(
                             Icons.add,
                             size: 20,
-                            color: scheme.onSurfaceVariant,
+                            color: isDark ? AppColors.inkPrimary : scheme.onSurface,
                           ),
                         ),
                       ),
-                      const SizedBox(width: 2),
+                      const SizedBox(width: 8),
 
-                      // Model & Reasoning Effort Pill
+                      // Model & Reasoning Effort Pill with Brand Dot & Thinking Badge
                       Flexible(
                         fit: FlexFit.loose,
-                        child: InkWell(
+                        child: BouncingTap(
                           key: _modelButtonKey,
+                          hapticType: BouncingHapticType.selection,
                           onTap: () => _showModelDropdown(context),
-                          borderRadius: BorderRadius.circular(6),
-                          child: Padding(
+                          child: Container(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 6,
+                              horizontal: 8,
+                              vertical: 4.5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHigh,
+                              borderRadius: BorderRadius.circular(AppRadius.pill),
+                              border: Border.all(
+                                color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.5),
+                                width: 0.8,
+                              ),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(
-                                  isQueued
-                                      ? Icons.playlist_add_check_outlined
-                                      : Icons.psychology_outlined,
-                                  size: 15,
-                                  color:
-                                      isQueued
-                                          ? scheme.primary
-                                          : scheme.onSurfaceVariant,
+                                Container(
+                                  width: 7,
+                                  height: 7,
+                                  decoration: BoxDecoration(
+                                    color: isQueued ? scheme.primary : providerColor,
+                                    shape: BoxShape.circle,
+                                  ),
                                 ),
-                                const SizedBox(width: 4),
+                                const SizedBox(width: 5),
                                 Flexible(
-                                  child: Text(
-                                    _selectedModel,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: scheme.onSurface,
-                                      fontWeight: FontWeight.w500,
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(maxWidth: 130),
+                                    child: Text(
+                                      _displayModelName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                                        fontWeight: FontWeight.w600,
+                                      ),
                                     ),
                                   ),
                                 ),
+                                if (isThinking) ...[
+                                  const SizedBox(width: 4),
+                                  Icon(
+                                    Icons.psychology_outlined,
+                                    size: 13,
+                                    color: isDark ? AppColors.accentBlue : scheme.primary,
+                                  ),
+                                ],
                                 const SizedBox(width: 2),
                                 Icon(
-                                  Icons.keyboard_arrow_up,
-                                  size: 15,
-                                  color: scheme.onSurfaceVariant,
+                                  Icons.keyboard_arrow_up_rounded,
+                                  size: 14,
+                                  color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
                                 ),
                               ],
                             ),
@@ -1890,15 +2311,33 @@ class ChatInputBarState extends State<ChatInputBar> {
 
                       const Spacer(),
 
-                      // Voice / Dictée vocale avec formatage intelligent de code
-                      IconButton(
-                        icon: Icon(
-                          Icons.mic_rounded,
-                          size: 20,
-                          color: scheme.onSurfaceVariant.withValues(alpha: 0.9),
+                      // Clear text button (when text is typed)
+                      if (_controller.text.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 2),
+                          child: BouncingTap(
+                            hapticType: BouncingHapticType.selection,
+                            onTap: () {
+                              _controller.clear();
+                              widget.onDraftChanged?.call('');
+                            },
+                            child: Container(
+                              width: 30,
+                              height: 30,
+                              alignment: Alignment.center,
+                              child: Icon(
+                                Icons.close_rounded,
+                                size: 16,
+                                color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
                         ),
-                        onPressed: () {
-                          HapticFeedback.lightImpact();
+
+                      // Voice / Dictée vocale avec formatage intelligent de code
+                      BouncingTap(
+                        hapticType: BouncingHapticType.selection,
+                        onTap: () {
                           VoicePromptDialog.show(
                             context,
                             onInsert: (formattedText) {
@@ -1912,16 +2351,48 @@ class ChatInputBarState extends State<ChatInputBar> {
                             },
                           );
                         },
-                        tooltip: 'Dictée vocale & formatage code',
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          alignment: Alignment.center,
+                          child: Icon(
+                            Icons.mic_rounded,
+                            size: 19,
+                            color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
+                          ),
+                        ),
                       ),
+                      const SizedBox(width: 2),
+
+                      // Historique des messages envoyés
+                      if (_promptHistory.isNotEmpty) ...[
+                        BouncingTap(
+                          hapticType: BouncingHapticType.selection,
+                          onTap: () => _showPromptHistoryMenu(context),
+                          child: Container(
+                            width: 32,
+                            height: 32,
+                            alignment: Alignment.center,
+                            child: Icon(
+                              Icons.history_rounded,
+                              size: 19,
+                              color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 2),
+                      ],
+
                       // If streaming and user has typed text, show both Stop and Queue/Send buttons
                       if (widget.hasActiveStream && _controller.text.trim().isNotEmpty) ...[
-                        // Dedicated Stop button
-                        IconButton(
+                        BouncingTap(
                           key: const Key('stop-generation-button'),
-                          icon: Container(
-                            width: 26,
-                            height: 26,
+                          hapticType: BouncingHapticType.heavy,
+                          onTap: () => widget.onStop?.call(),
+                          child: Container(
+                            width: 30,
+                            height: 30,
+                            margin: const EdgeInsets.only(right: 6),
                             decoration: BoxDecoration(
                               color: scheme.error,
                               shape: BoxShape.circle,
@@ -1932,13 +2403,7 @@ class ChatInputBarState extends State<ChatInputBar> {
                               color: AppColors.onDanger,
                             ),
                           ),
-                          tooltip: 'Arrêter la génération (Emergency Stop)',
-                          onPressed: () {
-                            HapticFeedback.heavyImpact();
-                            widget.onStop?.call();
-                          },
                         ),
-                        const SizedBox(width: 4),
                       ],
 
                       // Primary action button (Send / Queue / Stop)
@@ -1974,7 +2439,7 @@ class ChatInputBarState extends State<ChatInputBar> {
                             onTapCancel:
                                 () => setState(() => _isSendPressed = false),
                             child: ConstrainedBox(
-                              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
                               child: Center(
                                 child: AnimatedScale(
                                   scale: _isSendPressed ? 0.85 : 1.0,
@@ -1983,16 +2448,23 @@ class ChatInputBarState extends State<ChatInputBar> {
                                   child: GestureDetector(
                                     onLongPress: () => _showQueueSettings(context),
                                     child: Container(
-                                      width: 28,
-                                      height: 28,
+                                      width: 30,
+                                      height: 30,
                                       decoration: BoxDecoration(
                                         color: widget.hasActiveStream && _controller.text.trim().isEmpty
                                             ? scheme.error
                                             : ((_controller.text.trim().isNotEmpty || _attachments.isNotEmpty) &&
                                                     widget.isConnected
-                                                ? scheme.primary
-                                                : scheme.surfaceContainerHighest),
+                                                ? (isDark ? AppColors.accentBlue : scheme.primary)
+                                                : (isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest)),
                                         shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: ((_controller.text.trim().isNotEmpty || _attachments.isNotEmpty) &&
+                                                  widget.isConnected)
+                                              ? Colors.transparent
+                                              : (isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.5)),
+                                          width: 0.8,
+                                        ),
                                       ),
                                       child: Icon(
                                         (isQueued || (widget.hasActiveStream && _controller.text.trim().isNotEmpty))
@@ -2000,12 +2472,12 @@ class ChatInputBarState extends State<ChatInputBar> {
                                             : (widget.hasActiveStream && _controller.text.trim().isEmpty
                                                 ? Icons.stop_rounded
                                                 : Icons.arrow_forward),
-                                        size: 15,
+                                        size: 16,
                                         color: ((_controller.text.trim().isNotEmpty || _attachments.isNotEmpty) &&
                                                     widget.isConnected) ||
                                                 (widget.hasActiveStream && _controller.text.trim().isEmpty)
                                             ? AppColors.onAccent
-                                            : scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                                            : (isDark ? AppColors.inkMuted : scheme.onSurfaceVariant),
                                       ),
                                     ),
                                   ),
@@ -2020,15 +2492,139 @@ class ChatInputBarState extends State<ChatInputBar> {
                 ],
               ),
             ),
-
-
           ],
         ),
       ),
     );
   }
 
+  Widget _buildQuickActionPills(ColorScheme scheme, bool isDark) {
+    return Container(
+      height: 30,
+      margin: const EdgeInsets.only(bottom: 6),
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        children: [
+          if (widget.hasPlan)
+            _buildActionPill(
+              icon: Icons.play_arrow_rounded,
+              label: 'Proceed ⌘↵',
+              color: AppColors.positive,
+              isDark: isDark,
+              scheme: scheme,
+              onTap: () {
+                HapticFeedback.selectionClick();
+                if (widget.onProceedPlan != null) {
+                  widget.onProceedPlan!();
+                } else {
+                  widget.onSend('proceed');
+                }
+              },
+            ),
+          _buildActionPill(
+            icon: Icons.play_circle_outline,
+            label: 'Tests',
+            color: scheme.primary,
+            isDark: isDark,
+            scheme: scheme,
+            onTap: () {
+              HapticFeedback.selectionClick();
+              if (widget.onRunTests != null) {
+                widget.onRunTests!();
+              } else {
+                widget.onSend('Exécute les tests unitaires du projet');
+              }
+            },
+          ),
+          _buildActionPill(
+            icon: Icons.difference_outlined,
+            label: 'Diff Git',
+            color: scheme.secondary,
+            isDark: isDark,
+            scheme: scheme,
+            onTap: () {
+              HapticFeedback.selectionClick();
+              if (widget.onViewDiff != null) {
+                widget.onViewDiff!();
+              } else {
+                widget.onSend('Affiche le diff git des changements récents');
+              }
+            },
+          ),
+          _buildActionPill(
+            icon: Icons.help_outline,
+            label: 'Expliquer',
+            color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
+            isDark: isDark,
+            scheme: scheme,
+            onTap: () {
+              HapticFeedback.selectionClick();
+              _controller.text = 'Explique le code récent et ce qui a changé';
+              _controller.selection = TextSelection.collapsed(offset: _controller.text.length);
+              widget.onDraftChanged?.call(_controller.text);
+            },
+          ),
+          _buildActionPill(
+            icon: Icons.build_outlined,
+            label: 'Corriger',
+            color: scheme.error,
+            isDark: isDark,
+            scheme: scheme,
+            onTap: () {
+              HapticFeedback.selectionClick();
+              _controller.text = 'Analyse l\'erreur et applique le correctif';
+              _controller.selection = TextSelection.collapsed(offset: _controller.text.length);
+              widget.onDraftChanged?.call(_controller.text);
+            },
+          ),
+        ],
+      ),
+    );
+  }
 
+  Widget _buildActionPill({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required bool isDark,
+    required ColorScheme scheme,
+    required VoidCallback onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+          decoration: BoxDecoration(
+            color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.6),
+              width: 0.8,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 13, color: color),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// Tile de sélection du mode d'envoi dans le bottom sheet.
@@ -2369,10 +2965,10 @@ class _ModelDropdownMenuContentState extends State<_ModelDropdownMenuContent> {
           ),
           ...widget.standardModels.map((m) => _buildStandardModelRow(m, isDark, scheme, textTheme)),
           if (widget.customModels.isNotEmpty) ...[
-            Divider(color: isDark ? const Color(0xFF2B2D31) : scheme.outlineVariant, height: 1),
+            Divider(color: isDark ? AppColors.borderSubtle : scheme.outlineVariant, height: 1),
             ...widget.customModels.map((m) => _buildCustomModelRow(m, isDark, scheme, textTheme)),
           ],
-          Divider(color: isDark ? const Color(0xFF2B2D31) : scheme.outlineVariant, height: 1),
+          Divider(color: isDark ? AppColors.borderSubtle : scheme.outlineVariant, height: 1),
           _buildViewUsageRow(isDark, scheme, textTheme),
         ],
       ),
@@ -2418,7 +3014,7 @@ class _ModelDropdownMenuContentState extends State<_ModelDropdownMenuContent> {
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
                   color: isSelected && !isExpanded
-                      ? (isDark ? const Color(0xFF26282E) : scheme.surfaceContainerHighest)
+                      ? (isDark ? AppColors.surfaceHover : scheme.surfaceContainerHighest)
                       : Colors.transparent,
                   borderRadius: BorderRadius.circular(AppRadius.md),
                 ),
@@ -2455,7 +3051,7 @@ class _ModelDropdownMenuContentState extends State<_ModelDropdownMenuContent> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: isDark ? const Color(0xFF26282E) : scheme.surfaceContainerHighest,
+                          color: isDark ? AppColors.surfaceHover : scheme.surfaceContainerHighest,
                           borderRadius: BorderRadius.circular(AppRadius.sm),
                         ),
                         child: Row(
@@ -2503,10 +3099,10 @@ class _ModelDropdownMenuContentState extends State<_ModelDropdownMenuContent> {
             margin: const EdgeInsets.only(left: 20, right: 10, top: 2, bottom: 4),
             padding: const EdgeInsets.symmetric(vertical: 4),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF181A1D) : scheme.surfaceContainer,
+              color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
               borderRadius: BorderRadius.circular(AppRadius.md),
               border: Border.all(
-                color: isDark ? const Color(0xFF2B2D31) : scheme.outlineVariant,
+                color: isDark ? AppColors.borderSubtle : scheme.outlineVariant,
                 width: 0.8,
               ),
             ),
@@ -2539,7 +3135,7 @@ class _ModelDropdownMenuContentState extends State<_ModelDropdownMenuContent> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
         decoration: BoxDecoration(
-          color: isTierActive ? (isDark ? const Color(0xFF26282E) : scheme.surfaceContainerHighest) : Colors.transparent,
+          color: isTierActive ? (isDark ? AppColors.surfaceHover : scheme.surfaceContainerHighest) : Colors.transparent,
           borderRadius: BorderRadius.circular(4),
         ),
         child: Row(
@@ -2573,11 +3169,11 @@ class _ModelDropdownMenuContentState extends State<_ModelDropdownMenuContent> {
 
     Color statusColor = scheme.primary;
     if (model.status == 'degraded') {
-      statusColor = const Color(0xFFFFCC00);
+      statusColor = AppColors.warning;
     } else if (model.status == 'offline') {
       statusColor = scheme.error;
     } else {
-      statusColor = const Color(0xFFFFCC00);
+      statusColor = AppColors.positive;
     }
 
     return Semantics(
@@ -2592,7 +3188,7 @@ class _ModelDropdownMenuContentState extends State<_ModelDropdownMenuContent> {
             margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: isSelected ? (isDark ? const Color(0xFF26282E) : scheme.surfaceContainerHighest) : Colors.transparent,
+              color: isSelected ? (isDark ? AppColors.surfaceHover : scheme.surfaceContainerHighest) : Colors.transparent,
               borderRadius: BorderRadius.circular(AppRadius.md),
             ),
             child: Row(

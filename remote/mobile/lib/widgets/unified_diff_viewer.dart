@@ -74,7 +74,7 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
       return;
     }
 
-    final rawLines = widget.diffContent.split('\n');
+    final rawLines = widget.diffContent.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n');
     for (final raw in rawLines) {
       if (raw.startsWith('@@')) {
         final hunkIndex = _hunks.length;

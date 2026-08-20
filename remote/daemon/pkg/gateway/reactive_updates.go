@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"strings"
 	"time"
 
 	"github.com/antigravity/remote-daemon/pkg/connectrpc"
@@ -24,6 +25,9 @@ import (
 // réactif (le LS peut être en cours de redémarrage — même logique que jetbox).
 const reactiveBackoff = 30 * time.Second
 
+// reactiveNotFoundBackoff temporise 5 minutes si le LS répond 404 (endpoint non implémenté).
+var reactiveNotFoundBackoff = 5 * time.Minute
+
 // ReactiveStreamer est la portion minimale du client LS nécessaire au flux
 // réactif. Interface étroite : les tests injectent un faux sans réimplémenter
 // RPCClient (même pattern que JetboxStreamer).
@@ -38,8 +42,21 @@ type ReactiveStreamer interface {
 func (s *Server) RunReactiveSubscription(rpc ReactiveStreamer) {
 	go func() {
 		backoff := 2 * time.Second
+		warned404 := false
 		for {
 			err := rpc.RunReactiveSubscription(s.reactiveSyncUpdates)
+			is404 := err != nil && (strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "unimplemented"))
+			if is404 {
+				if !warned404 {
+					logJSON.Info("reactive_stream_unavailable", "reason", "endpoint not supported by current IDE version, backed off", "retry_in", reactiveNotFoundBackoff)
+					warned404 = true
+				} else {
+					logJSON.Debug("reactive_stream_end", "err", err, "retry_in", reactiveNotFoundBackoff)
+				}
+				time.Sleep(reactiveNotFoundBackoff)
+				continue
+			}
+			warned404 = false
 			logJSON.Warn("reactive_stream_end", "err", err, "retry_in", backoff)
 			time.Sleep(backoff)
 			if backoff < reactiveBackoff {
@@ -135,6 +152,18 @@ func interactionToolName(t int) string {
 		return "open_browser_url"
 	case connectrpc.InteractionReadUrlContent:
 		return "read_url_content"
+	case connectrpc.InteractionMcp:
+		return "mcp_tool"
+	case connectrpc.InteractionDeploy:
+		return "deploy"
+	case connectrpc.InteractionSendCommandInput:
+		return "send_command_input"
+	case connectrpc.InteractionInvokeSubagent:
+		return "invoke_subagent"
+	case connectrpc.InteractionDeleteDirectory:
+		return "delete_directory"
+	case connectrpc.InteractionCloudSQL:
+		return "cloudsql"
 	default:
 		return "approval"
 	}

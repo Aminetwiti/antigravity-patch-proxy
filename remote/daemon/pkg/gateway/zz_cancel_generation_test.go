@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/antigravity/remote-daemon/pkg/connectrpc"
 	"github.com/gorilla/websocket"
 )
 
@@ -23,6 +24,10 @@ func (s *slowCancelRPCClient) SendMessageStream(cascadeID, text string, onFrame 
 // comportement bloquant est contourné et le test de cancellation devient
 // inopérant (outcome=done au lieu de cancelled).
 func (s *slowCancelRPCClient) SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error, noTools ...bool) error {
+	return s.slowStream(onFrame)
+}
+
+func (s *slowCancelRPCClient) SendMessageStreamModelWithMedia(cascadeID, text, modelUID string, modelEnum uint64, media []connectrpc.MediaAttachment, onFrame func([]byte) error, noTools ...bool) error {
 	return s.slowStream(onFrame)
 }
 

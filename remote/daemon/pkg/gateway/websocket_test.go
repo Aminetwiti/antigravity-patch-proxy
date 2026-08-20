@@ -186,6 +186,10 @@ func (f *fakeRPCClient) SendMessageStreamModel(cascadeID, text, modelUID string,
 	return f.streamLoop(onFrame)
 }
 
+func (f *fakeRPCClient) SendMessageStreamModelWithMedia(cascadeID, text, modelUID string, modelEnum uint64, media []connectrpc.MediaAttachment, onFrame func([]byte) error, noTools ...bool) error {
+	return f.SendMessageStreamModel(cascadeID, text, modelUID, modelEnum, onFrame, noTools...)
+}
+
 func (f *fakeRPCClient) streamLoop(onFrame func([]byte) error) error {
 	for _, delta := range f.streamDeltas {
 		if err := onFrame(f.approvalFrame(delta)); err != nil {
@@ -964,18 +968,17 @@ func TestWebSocketApprovalExpiry(t *testing.T) {
 			"cascadeId": "casc-1", "prompt": "travaille",
 		})
 
-		// Consomme stream_start + stream_delta + stream_end(outcome=approval)
-		for {
+		// Consomme stream_start, stream_delta, stream_end et attend approval_expired
+		var expired map[string]interface{}
+		for i := 0; i < 10; i++ {
 			msg := client.recv(t)
-			if msg["type"] == "stream_end" {
+			if msg["type"] == "approval_expired" {
+				expired = msg
 				break
 			}
 		}
-
-		// Le timer expire → auto-refus + broadcast approval_expired (bloquant).
-		expired := client.recv(t)
-		if expired["type"] != "approval_expired" {
-			t.Fatalf("Attendu approval_expired après expiration, reçu %v", expired)
+		if expired == nil {
+			t.Fatal("Attendu approval_expired après expiration")
 		}
 		data, _ := expired["data"].(map[string]interface{})
 		if data == nil || data["cascadeId"] != "casc-1" {

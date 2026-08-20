@@ -31,10 +31,25 @@ class ToolCallBlock {
   const ToolCallBlock(this.toolName, this.summary, this.raw);
 }
 
+enum TableCellAlignment { left, center, right }
+
+class TableBlock {
+  final List<String> headers;
+  final List<List<String>> rows;
+  final List<TableCellAlignment> alignments;
+
+  const TableBlock({
+    required this.headers,
+    required this.rows,
+    required this.alignments,
+  });
+}
+
 class MarkdownBlock {
-  final String? paragraph; // null when this block is a code block
+  final String? paragraph; // null when this block is a code block or table
   final CodeBlock? code;
   final ToolCallBlock? toolCall;
+  final TableBlock? table;
   final bool isListItem;
   final int headerLevel;
   final bool isDivider;
@@ -47,11 +62,13 @@ class MarkdownBlock {
     this.isDivider = false,
     this.isQuote = false,
   })  : code = null,
-        toolCall = null;
+        toolCall = null,
+        table = null;
 
   const MarkdownBlock.codeBlock(this.code)
       : paragraph = null,
         toolCall = null,
+        table = null,
         isListItem = false,
         headerLevel = 0,
         isDivider = false,
@@ -60,6 +77,16 @@ class MarkdownBlock {
   const MarkdownBlock.toolCall(this.toolCall)
       : paragraph = null,
         code = null,
+        table = null,
+        isListItem = false,
+        headerLevel = 0,
+        isDivider = false,
+        isQuote = false;
+
+  const MarkdownBlock.table(this.table)
+      : paragraph = null,
+        code = null,
+        toolCall = null,
         isListItem = false,
         headerLevel = 0,
         isDivider = false,
@@ -129,26 +156,61 @@ class MarkdownRenderer {
         blocks.add(MarkdownBlock.toolCall(parsed));
         return;
       }
-      for (final line in raw.split('\n')) {
+      final rawLines = raw.split('\n');
+      var i = 0;
+      while (i < rawLines.length) {
+        final line = rawLines[i];
         final trimmed = line.trim();
-        if (trimmed.isEmpty) continue;
+        if (trimmed.isEmpty) {
+          i++;
+          continue;
+        }
+
+        // Détection de tableau GFM (en-tête + ligne de délimitation |---|)
+        if (trimmed.startsWith('|') && trimmed.endsWith('|') && i + 1 < rawLines.length) {
+          final nextTrimmed = rawLines[i + 1].trim();
+          if (_isTableDelimiter(nextTrimmed)) {
+            final headers = _parseTableRow(trimmed);
+            final alignments = _parseTableAlignments(nextTrimmed);
+            final rows = <List<String>>[];
+            i += 2;
+            while (i < rawLines.length) {
+              final rowTrimmed = rawLines[i].trim();
+              if (rowTrimmed.startsWith('|') && rowTrimmed.endsWith('|')) {
+                rows.add(_parseTableRow(rowTrimmed));
+                i++;
+              } else {
+                break;
+              }
+            }
+            blocks.add(MarkdownBlock.table(TableBlock(
+              headers: headers,
+              rows: rows,
+              alignments: alignments,
+            )));
+            continue;
+          }
+        }
 
         final headMatch = _headingRe.firstMatch(trimmed);
         if (headMatch != null) {
           final level = headMatch.group(1)!.length;
           final content = headMatch.group(2)!.trim();
           blocks.add(MarkdownBlock.paragraph(content, headerLevel: level));
+          i++;
           continue;
         }
 
         if (_dividerRe.hasMatch(trimmed)) {
           blocks.add(const MarkdownBlock.paragraph('', isDivider: true));
+          i++;
           continue;
         }
 
         final quoteMatch = _quoteRe.firstMatch(trimmed);
         if (quoteMatch != null) {
           blocks.add(MarkdownBlock.paragraph(quoteMatch.group(1)!.trim(), isQuote: true));
+          i++;
           continue;
         }
 
@@ -162,13 +224,10 @@ class MarkdownRenderer {
             line.replaceFirst(_numberedListRe, ''),
             isListItem: true,
           ));
-        } else if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
-          // Table row: convert pipe separators to formatted columns
-          final cells = trimmed.split('|').where((c) => c.trim().isNotEmpty).map((c) => c.trim()).join('  │  ');
-          blocks.add(MarkdownBlock.paragraph('│ $cells │'));
         } else {
           blocks.add(MarkdownBlock.paragraph(line));
         }
+        i++;
       }
     }
 
@@ -212,6 +271,35 @@ class MarkdownRenderer {
     final summary = _toolArgRe.firstMatch(raw)?.group(2) ??
         raw.replaceAll(_whitespaceRe, ' ').substring(0, raw.length > 80 ? 80 : raw.length);
     return ToolCallBlock(name, summary, raw);
+  }
+
+  static bool _isTableDelimiter(String line) {
+    final trimmed = line.trim();
+    if (!trimmed.startsWith('|') || !trimmed.endsWith('|')) return false;
+    final cells = trimmed.substring(1, trimmed.length - 1).split('|');
+    if (cells.isEmpty) return false;
+    return cells.every((c) {
+      final t = c.trim();
+      return RegExp(r'^:?-+:?$').hasMatch(t) && t.replaceAll(':', '').replaceAll('-', '').isEmpty;
+    });
+  }
+
+  static List<String> _parseTableRow(String line) {
+    final trimmed = line.trim();
+    final content = trimmed.startsWith('|') && trimmed.endsWith('|')
+        ? trimmed.substring(1, trimmed.length - 1)
+        : trimmed;
+    return content.split('|').map((c) => c.trim()).toList();
+  }
+
+  static List<TableCellAlignment> _parseTableAlignments(String delimiterLine) {
+    final cells = _parseTableRow(delimiterLine);
+    return cells.map((c) {
+      final t = c.trim();
+      if (t.startsWith(':') && t.endsWith(':')) return TableCellAlignment.center;
+      if (t.endsWith(':')) return TableCellAlignment.right;
+      return TableCellAlignment.left;
+    }).toList();
   }
 
   /// Builds inline [TextSpan]s for a paragraph, resolving bold/italic/code.
@@ -279,7 +367,85 @@ class MarkdownRenderer {
         continue;
       }
 
-      // 3. Link with tooltip showing full target path/URL on hover.
+      // 3. Bracketed Attachment Tag [Images jointes: ...], [Image: ...], [Fichier: ...]
+      final attachmentRe = RegExp(r'^\[(Images? jointes?|Image|Fichier|File|Pièce jointe|Piece jointe):\s*([^\]]+)\]', caseSensitive: false);
+      final attachmentMatch = attachmentRe.firstMatch(remaining);
+      if (attachmentMatch != null) {
+        final label = attachmentMatch.group(1) ?? 'Fichier';
+        final pathsStr = attachmentMatch.group(2) ?? '';
+        final paths = pathsStr.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty);
+
+        for (final p in paths) {
+          final isLocalFile = p.startsWith('file://') || p.contains(':\\') || p.startsWith('/');
+          final filePath = isLocalFile ? _filePathOf(p) : p;
+          final lower = filePath.toLowerCase();
+          final isImg = lower.endsWith('.png') ||
+              lower.endsWith('.jpg') ||
+              lower.endsWith('.jpeg') ||
+              lower.endsWith('.gif') ||
+              lower.endsWith('.webp') ||
+              lower.endsWith('.svg');
+
+          if (isImg) {
+            spans.add(WidgetSpan(
+              alignment: PlaceholderAlignment.middle,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: _buildImageWidget(
+                  url: p,
+                  alt: label,
+                  filePath: filePath,
+                  isLocalFile: isLocalFile,
+                  isDataUri: p.startsWith('data:image/'),
+                  scheme: scheme,
+                  onLocalFile: onLocalFile,
+                ),
+              ),
+            ));
+          } else {
+            final fileName = filePath.split(RegExp(r'[\\/]')).last;
+            spans.add(WidgetSpan(
+              alignment: PlaceholderAlignment.middle,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: InkWell(
+                  onTap: onLocalFile == null ? null : () => onLocalFile(filePath),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.6)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.insert_drive_file_outlined, size: 16, color: scheme.primary),
+                        const SizedBox(width: 6),
+                        Text(
+                          fileName.isNotEmpty ? fileName : filePath,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: scheme.onSurface,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(Icons.open_in_new, size: 13, color: scheme.onSurfaceVariant),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ));
+          }
+        }
+        remaining = remaining.substring(attachmentMatch.end);
+        continue;
+      }
+
+      // 4. Link with tooltip showing full target path/URL on hover.
       // P5 : un lien file:/// devient tappable (ouvre le fichier côté hôte)
       // quand onLocalFile est fourni ; sinon comportement historique.
       final linkMatch = linkRe.firstMatch(remaining);
@@ -329,7 +495,7 @@ class MarkdownRenderer {
         continue;
       }
 
-      // 4. Bold.
+      // 5. Bold.
       final boldMatch = boldRe.firstMatch(remaining);
       if (boldMatch != null && boldMatch.start == 0) {
         spans.add(TextSpan(
@@ -340,7 +506,7 @@ class MarkdownRenderer {
         continue;
       }
 
-      // 5. Italic.
+      // 6. Italic.
       final italicMatch = italicRe.firstMatch(remaining);
       if (italicMatch != null && italicMatch.start == 0) {
         spans.add(TextSpan(
@@ -351,9 +517,10 @@ class MarkdownRenderer {
         continue;
       }
 
-      // 6. Plain text up to the next markdown token.
+      // 7. Plain text up to the next markdown token.
+      final matchAttach = RegExp(r'\[(Images? jointes?|Image|Fichier|File|Pièce jointe|Piece jointe):\s*[^\]]+\]', caseSensitive: false);
       final nextIndex = <int>[
-        for (final r in [codeRe, imageRe, linkRe, boldRe, italicRe])
+        for (final r in [codeRe, imageRe, linkRe, matchAttach, boldRe, italicRe])
           r.firstMatch(remaining)?.start ?? remaining.length,
       ].reduce((a, b) => a < b ? a : b);
       if (nextIndex == 0) {

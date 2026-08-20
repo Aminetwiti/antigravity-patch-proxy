@@ -37,21 +37,23 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
   Timer? _submitTimeout;
   final TextEditingController _denyReasonController = TextEditingController();
 
-  bool get _isUrlApproval {
-    final lowerTool = widget.request.toolName.toLowerCase();
-    final lowerType = widget.request.approvalType.toLowerCase();
-    return lowerTool.contains('url') ||
-        lowerTool == 'browse' ||
-        lowerTool == 'open_browser_url' ||
-        lowerTool == 'read_url_content' ||
-        lowerType.contains('url') ||
-        lowerType == 'browse' ||
-        lowerType == 'open_browser_url' ||
-        widget.request.url != null;
-  }
+  bool _showMcpArgs = false;
+  bool _destructiveConfirmed = false;
+
+  bool get _isUrlApproval => widget.request.isUrlApproval;
+  bool get _isFileApproval => widget.request.isFileApproval;
+  bool get _isScopedApproval =>
+      _isUrlApproval || _isFileApproval || widget.request.approvalType == 'permission';
+  bool get _isDestructive => widget.request.checkDestructive;
 
   String _extractTargetDisplay(String raw) {
-    if (raw.isEmpty) return widget.request.description;
+    if (raw.isEmpty) {
+      if (widget.request.filePath != null) return widget.request.filePath!;
+      if (widget.request.mcpServer != null) {
+        return '${widget.request.mcpServer} -> ${widget.request.mcpTool ?? widget.request.toolName}';
+      }
+      return widget.request.description;
+    }
     final trimmed = raw.trim();
     if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
       final uri = Uri.tryParse(trimmed);
@@ -63,7 +65,13 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
   }
 
   IconData _iconForTool(String toolName) {
+    if (_isDestructive) return Icons.warning_amber_rounded;
     if (_isUrlApproval) return Icons.lock_outline;
+    if (_isFileApproval) return Icons.folder_open_outlined;
+    if (widget.request.isMcpApproval) return Icons.extension_outlined;
+    if (widget.request.isStdinApproval) return Icons.keyboard_outlined;
+    if (widget.request.isSubagentApproval) return Icons.smart_toy_outlined;
+    if (widget.request.isDeployApproval) return Icons.cloud_upload_outlined;
     final lower = toolName.toLowerCase();
     if (lower.contains('bash') || lower.contains('command') || lower.contains('run')) {
       return Icons.terminal;
@@ -76,8 +84,27 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
   }
 
   String _titleForTool() {
+    if (_isDestructive) {
+      return 'Action Destructive / Risque Élevé';
+    }
     if (_isUrlApproval) {
       return 'Allow reading this URL?';
+    }
+    if (_isFileApproval) {
+      return 'Allow file access outside workspace?';
+    }
+    if (widget.request.isMcpApproval) {
+      final srv = widget.request.mcpServer != null ? ' (${widget.request.mcpServer})' : '';
+      return 'Allow MCP tool execution$srv?';
+    }
+    if (widget.request.isStdinApproval) {
+      return 'Send terminal input (stdin)';
+    }
+    if (widget.request.isSubagentApproval) {
+      return 'Allow subagent delegation?';
+    }
+    if (widget.request.isDeployApproval) {
+      return 'Allow cloud deployment?';
     }
     final lower = widget.request.toolName.toLowerCase();
     if (lower.contains('run') || lower.contains('command')) {
@@ -90,6 +117,22 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    _triggerArrivalHaptic();
+  }
+
+  void _triggerArrivalHaptic() {
+    if (!widget.isExpired) {
+      if (_isDestructive) {
+        HapticFeedback.heavyImpact();
+      } else {
+        HapticFeedback.mediumImpact();
+      }
+    }
+  }
+
+  @override
   void didUpdateWidget(ToolApprovalCard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.request.callId != widget.request.callId) {
@@ -97,8 +140,11 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
       _selectedOption = 1;
       _alwaysAllow = false;
       _showDenyReason = false;
+      _showMcpArgs = false;
+      _destructiveConfirmed = false;
       _denyReasonController.clear();
       _submitTimeout?.cancel();
+      _triggerArrivalHaptic();
     }
   }
 
@@ -131,7 +177,7 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
 
   void _handleSubmitSelected() {
     if (_isSubmitting || widget.isExpired) return;
-    if (_isUrlApproval) {
+    if (_isScopedApproval) {
       switch (_selectedOption) {
         case 1:
           _handleDecision(ToolDecision.allow, scope: ApprovalScope.once);
@@ -355,8 +401,194 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
             ),
             const SizedBox(height: 8),
 
-            // ── Choix d'approbation (5 options si URL, switch si Commande standard)
-            if (_isUrlApproval) ...[
+            // ── Inspecteur de Paramètres MCP
+            if (widget.request.isMcpApproval &&
+                widget.request.mcpArgs != null &&
+                widget.request.mcpArgs!.isNotEmpty) ...[
+              InkWell(
+                key: const Key('toggle-mcp-args-btn'),
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  setState(() => _showMcpArgs = !_showMcpArgs);
+                },
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  margin: const EdgeInsets.only(bottom: 8),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? AppColors.surfaceHover
+                        : scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: isDark ? AppColors.borderSubtle : scheme.outlineVariant,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.data_object,
+                        size: 14,
+                        color: isDark ? AppColors.accentBlueBright : scheme.primary,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          _showMcpArgs ? 'Masquer les paramètres' : 'Inspecter les paramètres JSON',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                          ),
+                        ),
+                      ),
+                      Icon(
+                        _showMcpArgs ? Icons.expand_less : Icons.expand_more,
+                        size: 16,
+                        color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (_showMcpArgs) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  margin: const EdgeInsets.only(bottom: 8),
+                  decoration: BoxDecoration(
+                    color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: isDark ? AppColors.borderSubtle : scheme.outlineVariant,
+                    ),
+                  ),
+                  child: SelectableText(
+                    widget.request.mcpArgs!,
+                    style: TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 11,
+                      height: 1.3,
+                      color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+
+            // ── Quick chips Stdin
+            if (widget.request.isStdinApproval) ...[
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    ActionChip(
+                      label: const Text('y (Yes)', style: TextStyle(fontSize: 11)),
+                      onPressed: _isSubmitting || widget.isExpired
+                          ? null
+                          : () {
+                              _handleDecision(ToolDecision.allow, scope: ApprovalScope.once, denyReason: 'y');
+                            },
+                    ),
+                    ActionChip(
+                      label: const Text('n (No)', style: TextStyle(fontSize: 11)),
+                      onPressed: _isSubmitting || widget.isExpired
+                          ? null
+                          : () {
+                              _handleDecision(ToolDecision.allow, scope: ApprovalScope.once, denyReason: 'n');
+                            },
+                    ),
+                    ActionChip(
+                      label: const Text('↵ Enter', style: TextStyle(fontSize: 11)),
+                      onPressed: _isSubmitting || widget.isExpired
+                          ? null
+                          : () {
+                              _handleDecision(ToolDecision.allow, scope: ApprovalScope.once, denyReason: '\n');
+                            },
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            // ── Avertissement Action Destructive si détectée
+            if (_isDestructive) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                margin: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(
+                  color: (isDark ? AppColors.danger : scheme.error).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: (isDark ? AppColors.danger : scheme.error).withValues(alpha: 0.5),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.warning_amber_rounded,
+                          size: 16,
+                          color: isDark ? AppColors.danger : scheme.error,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Attention : Cette opération risque de supprimer ou modifier irrémédiablement des données.',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? AppColors.danger : scheme.error,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    InkWell(
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        setState(() => _destructiveConfirmed = !_destructiveConfirmed);
+                      },
+                      child: Row(
+                        children: [
+                          Checkbox(
+                            key: const Key('destructive-confirm-checkbox'),
+                            value: _destructiveConfirmed,
+                            onChanged: (v) {
+                              HapticFeedback.lightImpact();
+                              setState(() => _destructiveConfirmed = v ?? false);
+                            },
+                            activeColor: isDark ? AppColors.danger : scheme.error,
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              'Je confirme le risque irréversible',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: isDark ? AppColors.danger : scheme.error,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            // ── Choix d'approbation (5 options si Scoped/URL/File, switch si Commande standard)
+            if (_isScopedApproval) ...[
               _buildOptionRow(
                 index: 1,
                 label: 'Yes, allow this time',
@@ -567,6 +799,8 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
                   ),
                   child: Text(
                     'Refuser',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
                       fontSize: 12.5,
@@ -579,7 +813,9 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
                 Expanded(
                   child: ElevatedButton.icon(
                     key: const Key('allow-btn'),
-                    onPressed: _isSubmitting || widget.isExpired
+                    onPressed: _isSubmitting ||
+                            widget.isExpired ||
+                            (_isDestructive && !_destructiveConfirmed && !(_isUrlApproval && _selectedOption == 5))
                         ? null
                         : _handleSubmitSelected,
                     icon: _isSubmitting
@@ -600,6 +836,8 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
                       _isSubmitting
                           ? 'En cours...'
                           : ((_isUrlApproval && _selectedOption == 5) ? 'Refuser' : 'Approuver'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,

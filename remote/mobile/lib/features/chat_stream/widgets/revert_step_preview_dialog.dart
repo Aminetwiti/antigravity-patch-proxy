@@ -281,8 +281,11 @@ class _RevertStepPreviewDialogState extends State<RevertStepPreviewDialog> {
                   ),
               ],
               const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+              Wrap(
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 8,
                 children: [
                   TextButton(
                     onPressed: _isReverting ? null : () => Navigator.of(context).pop(false),
@@ -291,7 +294,6 @@ class _RevertStepPreviewDialogState extends State<RevertStepPreviewDialog> {
                       style: TextStyle(color: textSecondary, fontSize: 13),
                     ),
                   ),
-                  const SizedBox(width: 8),
                   ElevatedButton.icon(
                     onPressed: _isReverting ? null : _handleConfirmRevert,
                     icon: _isReverting
@@ -302,13 +304,13 @@ class _RevertStepPreviewDialogState extends State<RevertStepPreviewDialog> {
                           )
                         : const Icon(Icons.undo_rounded, size: 16),
                     label: Text(
-                      _isReverting ? 'Rollback en cours...' : 'Confirmer le Rollback',
+                      _isReverting ? 'Rollback en cours...' : 'Confirmer le rollback',
                       style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFD97706),
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(AppRadius.md),
                       ),

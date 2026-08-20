@@ -60,21 +60,15 @@ class DaemonApi {
   int _nextRequestId = 0;
 
   /// Résolution et migration automatique des anciens chemins de stockage 1.x vers Antigravity 2.0
-  /// Prise en charge explicite des caractères CJK (Chinois/Japonais/Coréen) et accents.
   static String resolveWorkspacePath(String rawPath) {
-    try {
-      final decoded = utf8.decode(rawPath.codeUnits, allowMalformed: true);
-      if (decoded.contains('.gemini/antigravity') &&
-          !decoded.contains('antigravity-ide')) {
-        return decoded.replaceAll(
-          '.gemini/antigravity',
-          '.gemini/antigravity-ide',
-        );
-      }
-      return decoded;
-    } catch (_) {
-      return rawPath;
+    if (rawPath.contains('.gemini/antigravity') &&
+        !rawPath.contains('antigravity-ide')) {
+      return rawPath.replaceAll(
+        '.gemini/antigravity',
+        '.gemini/antigravity-ide',
+      );
     }
+    return rawPath;
   }
 
   /// Broadcast de chaque message daemon décodé (UI listeners, logging).
@@ -959,6 +953,7 @@ class DaemonApi {
     List<String>? images,
     String? modelUID,
     int? modelEnum,
+    List<Map<String, dynamic>>? media,
   }) {
     final id = _newRequestId();
     final controller = StreamController<Map<String, dynamic>>();
@@ -973,6 +968,7 @@ class DaemonApi {
       if (images != null) 'images': images,
       if (modelUID != null && modelUID.isNotEmpty) 'modelUID': modelUID,
       if (modelEnum != null && modelEnum > 0) 'modelEnum': modelEnum,
+      if (media != null && media.isNotEmpty) 'media': media,
     };
     final outbox = _outbox;
     if (outbox != null) {

@@ -12,8 +12,10 @@ import 'unified_diff_viewer.dart';
 
 /// Renders an assistant message with Markdown: fenced code blocks get a
 /// console-style dark surface with a copy button; paragraphs get inline
+/// Renders an assistant message with Markdown: fenced code blocks get a
+/// console-style dark surface with a copy button; paragraphs get inline
 /// bold/italic/code/link styling. Streaming text re-renders cheaply.
-class MarkdownBubble extends StatelessWidget {
+class MarkdownBubble extends StatefulWidget {
   final String text;
   final bool isStreaming;
 
@@ -37,8 +39,54 @@ class MarkdownBubble extends StatelessWidget {
   });
 
   @override
+  State<MarkdownBubble> createState() => _MarkdownBubbleState();
+}
+
+class _MarkdownBubbleState extends State<MarkdownBubble> {
+  late List<MarkdownBlock> _blocks;
+  Timer? _throttleTimer;
+  String _lastRenderedText = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _lastRenderedText = widget.text;
+    _blocks = MarkdownRenderer.blocksOf(widget.text);
+  }
+
+  @override
+  void didUpdateWidget(covariant MarkdownBubble oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.text != oldWidget.text || widget.isStreaming != oldWidget.isStreaming) {
+      if (!widget.isStreaming) {
+        _throttleTimer?.cancel();
+        _lastRenderedText = widget.text;
+        _blocks = MarkdownRenderer.blocksOf(widget.text);
+      } else {
+        // Throttling à 30ms pendant le streaming intensif pour garantir 60/120 FPS
+        if (_throttleTimer == null || !_throttleTimer!.isActive) {
+          _throttleTimer = Timer(const Duration(milliseconds: 30), () {
+            if (mounted && _lastRenderedText != widget.text) {
+              setState(() {
+                _lastRenderedText = widget.text;
+                _blocks = MarkdownRenderer.blocksOf(widget.text);
+              });
+            }
+          });
+        }
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _throttleTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final blocks = MarkdownRenderer.blocksOf(text);
+    final blocks = _blocks;
 
     return RepaintBoundary(
       child: Column(
@@ -46,15 +94,136 @@ class MarkdownBubble extends StatelessWidget {
         children: [
           for (final block in blocks) ...[
             if (block.code != null)
-              _CodeBlockView(code: block.code!, api: api, workspacePath: workspacePath)
+              _CodeBlockView(code: block.code!, api: widget.api, workspacePath: widget.workspacePath)
             else if (block.toolCall != null)
               _ToolCallPill(call: block.toolCall!)
+            else if (block.table != null)
+              _MarkdownTableView(table: block.table!, onLocalFile: widget.onLocalFile)
             else
-              _ParagraphView(block: block, onLocalFile: onLocalFile),
+              _ParagraphView(block: block, onLocalFile: widget.onLocalFile),
             const SizedBox(height: 10),
           ],
-          if (isStreaming) const _StreamingCursor(),
+          if (widget.isStreaming) const _StreamingCursor(),
         ],
+      ),
+    );
+  }
+}
+
+class _MarkdownTableView extends StatelessWidget {
+  final TableBlock table;
+  final LocalFileTap? onLocalFile;
+
+  const _MarkdownTableView({
+    required this.table,
+    this.onLocalFile,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final scheme = Theme.of(context).colorScheme;
+
+    final borderColor = isDark
+        ? AppColors.borderSubtle
+        : scheme.outlineVariant.withValues(alpha: 0.6);
+    final headerBg = isDark
+        ? AppColors.surfaceRaised
+        : scheme.surfaceContainerHigh;
+    final alternateRowBg = isDark
+        ? AppColors.surfaceBase.withValues(alpha: 0.4)
+        : scheme.surfaceContainerLow;
+
+    TextAlign alignmentFor(int colIndex) {
+      if (colIndex < table.alignments.length) {
+        switch (table.alignments[colIndex]) {
+          case TableCellAlignment.center:
+            return TextAlign.center;
+          case TableCellAlignment.right:
+            return TextAlign.right;
+          case TableCellAlignment.left:
+            return TextAlign.left;
+        }
+      }
+      return TextAlign.left;
+    }
+
+    final headerStyle = TextStyle(
+      fontSize: 12.5,
+      fontWeight: FontWeight.w700,
+      color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+    );
+    final cellStyle = TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.w400,
+      color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+    );
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.surfaceBase : scheme.surface,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: borderColor, width: 1),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        child: Table(
+          defaultColumnWidth: const IntrinsicColumnWidth(),
+          border: TableBorder(
+            horizontalInside: BorderSide(color: borderColor, width: 0.8),
+            verticalInside: BorderSide(color: borderColor.withValues(alpha: 0.5), width: 0.8),
+          ),
+          children: [
+            // En-tête
+            TableRow(
+              decoration: BoxDecoration(color: headerBg),
+              children: [
+                for (var i = 0; i < table.headers.length; i++)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Text.rich(
+                      TextSpan(
+                        children: MarkdownRenderer.inlineSpans(
+                          table.headers[i],
+                          headerStyle,
+                          scheme: scheme,
+                          onLocalFile: onLocalFile,
+                        ),
+                      ),
+                      textAlign: alignmentFor(i),
+                    ),
+                  ),
+              ],
+            ),
+            // Lignes de données
+            for (var r = 0; r < table.rows.length; r++)
+              TableRow(
+                decoration: BoxDecoration(
+                  color: r.isOdd ? alternateRowBg : Colors.transparent,
+                ),
+                children: [
+                  for (var c = 0; c < table.headers.length; c++)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                      child: Text.rich(
+                        TextSpan(
+                          children: MarkdownRenderer.inlineSpans(
+                            c < table.rows[r].length ? table.rows[r][c] : '',
+                            cellStyle,
+                            scheme: scheme,
+                            onLocalFile: onLocalFile,
+                          ),
+                        ),
+                        textAlign: alignmentFor(c),
+                      ),
+                    ),
+                ],
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -148,8 +317,9 @@ class _ParagraphView extends StatelessWidget {
       onLocalFile: onLocalFile,
     );
 
+    Widget childWidget;
     if (block.isQuote) {
-      return Container(
+      childWidget = Container(
         margin: const EdgeInsets.symmetric(vertical: 4),
         padding: const EdgeInsets.only(left: 10, top: 3, bottom: 3),
         decoration: BoxDecoration(
@@ -162,10 +332,8 @@ class _ParagraphView extends StatelessWidget {
         ),
         child: Text.rich(TextSpan(children: spans)),
       );
-    }
-
-    if (block.isListItem) {
-      return Padding(
+    } else if (block.isListItem) {
+      childWidget = Padding(
         padding: const EdgeInsets.only(left: 4, bottom: 2),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -186,9 +354,11 @@ class _ParagraphView extends StatelessWidget {
           ],
         ),
       );
+    } else {
+      childWidget = Text.rich(TextSpan(children: spans));
     }
 
-    return Text.rich(TextSpan(children: spans));
+    return childWidget;
   }
 }
 
@@ -226,6 +396,22 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
     return shells.contains(widget.code.language.toLowerCase());
   }
 
+  void _copyCode(BuildContext context) {
+    HapticFeedback.lightImpact();
+    Clipboard.setData(ClipboardData(text: widget.code.code));
+    setState(() => _copied = true);
+    _copyTimer?.cancel();
+    _copyTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (mounted) setState(() => _copied = false);
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Code copié dans le presse-papiers'),
+        duration: Duration(seconds: 1),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -234,164 +420,153 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
     final isLong = lines.length > 15;
     final displayLines = (isLong && !_expanded) ? lines.take(12).toList() : lines;
 
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: scheme.outlineVariant),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header row: language badge + review trigger + copy button
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            color: scheme.surfaceContainer,
-            child: Row(
-              children: [
-                Icon(
-                  isDiff ? Icons.difference_outlined : Icons.code,
-                  size: 13,
-                  color: isDiff ? scheme.primary : scheme.onSurfaceVariant,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  widget.code.language.isEmpty ? 'code' : widget.code.language,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                    fontWeight: isDiff ? FontWeight.w600 : FontWeight.normal,
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onDoubleTap: () => _copyCode(context),
+      child: Container(
+        width: double.infinity,
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: scheme.outlineVariant),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header row: language badge + review trigger + copy button
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              color: scheme.surfaceContainer,
+              child: Row(
+                children: [
+                  Icon(
+                    isDiff ? Icons.difference_outlined : Icons.code,
+                    size: 13,
                     color: isDiff ? scheme.primary : scheme.onSurfaceVariant,
                   ),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  '(${lines.length} lines)',
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: scheme.outline,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-                const Spacer(),
-                if (isDiff) ...[
-                  Semantics(
-                    label: 'Examiner les modifications du code diff',
-                    button: true,
-                    child: InkWell(
-                      onTap: () {
-                        HapticFeedback.lightImpact();
-                        showModalBottomSheet(
-                          context: context,
-                          isScrollControlled: true,
-                          backgroundColor: Colors.transparent,
-                          builder: (ctx) => FractionallySizedBox(
-                            heightFactor: 0.9,
-                            child: UnifiedDiffViewer(
-                              diffContent: widget.code.code,
-                              fileName: 'Code Diff',
-                              onClose: () => Navigator.of(ctx).pop(),
-                            ),
-                          ),
-                        );
-                      },
-                      borderRadius: BorderRadius.circular(6),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        child: Row(
-                          children: [
-                            Icon(Icons.rate_review_outlined, size: 14, color: scheme.primary),
-                            const SizedBox(width: 4),
-                            Text('Review', style: TextStyle(fontSize: 11.5, color: scheme.primary, fontWeight: FontWeight.w600)),
-                          ],
-                        ),
-                      ),
+                  const SizedBox(width: 6),
+                  Text(
+                    widget.code.language.isEmpty ? 'code' : widget.code.language,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                      fontWeight: isDiff ? FontWeight.w600 : FontWeight.normal,
+                      color: isDiff ? scheme.primary : scheme.onSurfaceVariant,
                     ),
                   ),
                   const SizedBox(width: 6),
-                ],
-                if (_isShell) ...[
-                  // P3 : « Exécuter » — ouvre le terminal distant pré-rempli
-                  // avec le contenu du bloc shell (multi-ligne collé d'un coup).
-                  Semantics(
-                    label: 'Exécuter ce bloc de commande dans le terminal distant',
-                    button: true,
-                    child: InkWell(
-                      key: const Key('run-in-terminal'),
-                      onTap: () {
-                        HapticFeedback.lightImpact();
-                        RemoteTerminalSheet.show(
-                          context,
-                          api: widget.api,
-                          projectName: WorkspacePath.displayName(widget.workspacePath),
-                          workspacePath: widget.workspacePath,
-                          initialCommand: widget.code.code.trim(),
-                        );
-                      },
-                      borderRadius: BorderRadius.circular(6),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        child: Row(
-                          children: [
-                            Icon(Icons.play_arrow_rounded, size: 15, color: scheme.primary),
-                            const SizedBox(width: 4),
-                            Text('Exécuter', style: TextStyle(fontSize: 11.5, color: scheme.primary, fontWeight: FontWeight.w600)),
-                          ],
-                        ),
-                      ),
+                  Text(
+                    '(${lines.length} lines)',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: scheme.outline,
+                      fontFamily: 'monospace',
                     ),
                   ),
-                  const SizedBox(width: 6),
-                ],
-                Semantics(
-                  label: _copied ? 'Code copié' : 'Copier le code dans le presse-papiers',
-                  button: true,
-                  child: InkWell(
-                    onTap: () {
-                      HapticFeedback.lightImpact();
-                      Clipboard.setData(ClipboardData(text: widget.code.code));
-                      setState(() => _copied = true);
-                      _copyTimer?.cancel();
-                      _copyTimer = Timer(const Duration(milliseconds: 1500), () {
-                        if (mounted) setState(() => _copied = false);
-                      });
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Code copié dans le presse-papiers'),
-                          duration: Duration(seconds: 1),
-                        ),
-                      );
-                    },
-                    borderRadius: BorderRadius.circular(6),
-                    child: Padding(
-                      padding: const EdgeInsets.all(6),
-                      child: AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 180),
-                        transitionBuilder: (child, anim) =>
-                            ScaleTransition(scale: anim, child: child),
-                        child: _copied
-                            ? const Icon(
-                                Icons.check_rounded,
-                                key: ValueKey('copied'),
-                                size: 15,
-                                color: AppColors.positive,
-                              )
-                            : Icon(
-                                Icons.copy_outlined,
-                                key: const ValueKey('copy'),
-                                size: 15,
-                                color: scheme.onSurfaceVariant,
+                  const Spacer(),
+                  if (isDiff) ...[
+                    // Review trigger
+                    Semantics(
+                      label: 'Ouvrir le diff interactif complet',
+                      button: true,
+                      child: InkWell(
+                        key: const Key('open-diff-viewer'),
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          showModalBottomSheet(
+                            context: context,
+                            isScrollControlled: true,
+                            backgroundColor: Colors.transparent,
+                            builder: (ctx) => FractionallySizedBox(
+                              heightFactor: 0.9,
+                              child: UnifiedDiffViewer(
+                                diffContent: widget.code.code,
+                                fileName: 'Code Diff',
+                                onClose: () => Navigator.of(ctx).pop(),
                               ),
+                            ),
+                          );
+                        },
+                        borderRadius: BorderRadius.circular(6),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          child: Row(
+                            children: [
+                              Icon(Icons.rate_review_outlined, size: 14, color: scheme.primary),
+                              const SizedBox(width: 4),
+                              Text('Review', style: TextStyle(fontSize: 11.5, color: scheme.primary, fontWeight: FontWeight.w600)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  if (_isShell) ...[
+                    Semantics(
+                      label: 'Exécuter ce bloc de commande dans le terminal distant',
+                      button: true,
+                      child: InkWell(
+                        key: const Key('run-in-terminal'),
+                        onTap: () {
+                          HapticFeedback.lightImpact();
+                          RemoteTerminalSheet.show(
+                            context,
+                            api: widget.api,
+                            projectName: WorkspacePath.displayName(widget.workspacePath),
+                            workspacePath: widget.workspacePath,
+                            initialCommand: widget.code.code.trim(),
+                          );
+                        },
+                        borderRadius: BorderRadius.circular(6),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          child: Row(
+                            children: [
+                              Icon(Icons.play_arrow_rounded, size: 15, color: scheme.primary),
+                              const SizedBox(width: 4),
+                              Text('Exécuter', style: TextStyle(fontSize: 11.5, color: scheme.primary, fontWeight: FontWeight.w600)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  Semantics(
+                    label: _copied ? 'Code copié' : 'Copier le code dans le presse-papiers',
+                    button: true,
+                    child: InkWell(
+                      onTap: () => _copyCode(context),
+                      borderRadius: BorderRadius.circular(6),
+                      child: Padding(
+                        padding: const EdgeInsets.all(6),
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 180),
+                          transitionBuilder: (child, anim) =>
+                              ScaleTransition(scale: anim, child: child),
+                          child: _copied
+                              ? const Icon(
+                                  Icons.check_rounded,
+                                  key: ValueKey('copied'),
+                                  size: 15,
+                                  color: AppColors.positive,
+                                )
+                              : Icon(
+                                  Icons.copy_outlined,
+                                  key: const ValueKey('copy'),
+                                  size: 15,
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
           // Code body with line-by-line diff formatting if diff
           if (isDiff)
             Container(
@@ -406,21 +581,25 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
               ),
             )
           else
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.all(12),
-              child: RichText(
-                text: TextSpan(
-                  style: TextStyle(
-                    fontFamily: 'monospace',
-                    fontSize: 12,
-                    height: 1.5,
-                    color: scheme.onSurface,
-                  ),
-                  children: SyntaxHighlighter.highlight(
-                    (isLong && !_expanded) ? displayLines.join('\n') : widget.code.code,
-                    widget.code.language,
-                    defaultTextColor: scheme.onSurface,
+            Scrollbar(
+              thumbVisibility: false,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                padding: const EdgeInsets.all(12),
+                child: RichText(
+                  text: TextSpan(
+                    style: TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                      height: 1.5,
+                      color: scheme.onSurface,
+                    ),
+                    children: SyntaxHighlighter.highlight(
+                      (isLong && !_expanded) ? displayLines.join('\n') : widget.code.code,
+                      widget.code.language,
+                      defaultTextColor: scheme.onSurface,
+                    ),
                   ),
                 ),
               ),
@@ -462,6 +641,7 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
             ),
         ],
       ),
+    ),
     );
   }
 }

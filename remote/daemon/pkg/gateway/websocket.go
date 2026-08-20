@@ -55,10 +55,9 @@ type RPCClient interface {
 	CreateCascade(uri string, projectID string, modelUID string, modelEnum uint64) ([]byte, error)
 	GetAllCascades() ([]byte, error)
 	SendMessageStream(cascadeID, text string, onFrame func([]byte) error) error
-	// SendMessageStreamModel : variante avec mod├¿le explicite (s├®lection
-	// mobile par message) ÔÇö le daemon laisse le t├®l├®phone choisir le mod├¿le.
-	// noTools force planner_mode = 3 (NO_TOOL) dans le cascade_config.
 	SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error, noTools ...bool) error
+	// SendMessageStreamModelWithMedia : transmet le prompt avec pièces jointes (media/images).
+	SendMessageStreamModelWithMedia(cascadeID, text, modelUID string, modelEnum uint64, media []connectrpc.MediaAttachment, onFrame func([]byte) error, noTools ...bool) error
 	SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error)
 	SetBrowserOpenConversation(cascadeID string) ([]byte, error)
 	SendCommand(commandText string) ([]byte, error)
@@ -319,6 +318,7 @@ type Server struct {
 		ListSessions() []discovery.SessionInfo
 		RevokeDevice(deviceID string) bool
 	}
+	scheduler *Scheduler
 }
 
 // ScheduledTask repr├®sente une t├óche planifi├®e / cron job g├®r├®e par le daemon.
@@ -384,6 +384,7 @@ func NewServer(client RPCClient, authToken string) *Server {
 		runningTasks:     newRunningTaskManager(),
 		clientSessions:   make(map[*websocket.Conn]discovery.SessionInfo),
 	}
+	s.scheduler = NewScheduler(s)
 	s.terminals.onBroadcast = s.broadcast
 	s.terminals.onSendToOwner = s.writeJSON
 	s.runningTasks.onBroadcast = s.broadcast
@@ -1267,7 +1268,15 @@ func (s *Server) writeJSON(conn *websocket.Conn, msg OutgoingMessage) error {
 	defer mu.Unlock()
 	conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 	if err := conn.WriteJSON(msg); err != nil {
-		logJSON.Warn("write_error", "err", err)
+		errStr := err.Error()
+		if strings.Contains(errStr, "use of closed network connection") ||
+			strings.Contains(errStr, "broken pipe") ||
+			strings.Contains(errStr, "connection reset by peer") ||
+			strings.Contains(errStr, "websocket: close sent") {
+			logJSON.Debug("write_closed_connection", "err", err)
+		} else {
+			logJSON.Warn("write_error", "err", err)
+		}
 		return err
 	}
 	return nil
@@ -1506,10 +1515,12 @@ type IncomingMessage struct {
 	TerminalID    string `json:"terminalId,omitempty"`
 	TerminalIDAlt string `json:"id,omitempty"`
 	Input         string `json:"input,omitempty"`
-	// NoTools : mode ┬½ r├®ponse directe sans boucle d'outils ┬╗ (planner_mode 3
-	// = NO_TOOL c├┤t├® LS). Port├® par le message send_prompt ÔÇö le mobile d├®cide
-	// par prompt si l'agent peut utiliser des outils (toggle d├®di├®).
+	// NoTools : mode « réponse directe sans boucle d'outils » (planner_mode 3
+	// = NO_TOOL côté LS). Porté par le message send_prompt — le mobile décide
+	// par prompt si l'agent peut utiliser des outils (toggle dédié).
 	NoTools bool `json:"noTools,omitempty"`
+	// Media : liste structurée de pièces jointes (images/fichiers).
+	Media []connectrpc.MediaAttachment `json:"media,omitempty"`
 	// CommitID : identifiant de commit pour git_commit_details / vcs.get_commit_details.
 	CommitID string `json:"commitId,omitempty"`
 	// SidecarID : identifiant de sidecar pour les RPC sidecar.* (logs, gestion).
@@ -2193,6 +2204,21 @@ func buildApprovalPayload(approvalType string, confirm bool, command, filePath, 
 	case "ask_question":
 		oneofField = connectrpc.InteractionAskQuestion
 		oneofPayload = connectrpc.BuildAskQuestionInteraction(nil, denyReason, !confirm)
+	case "send_command_input", "send_input":
+		oneofField = connectrpc.InteractionSendCommandInput
+		oneofPayload = connectrpc.BuildSendCommandInputInteraction(command, !confirm)
+	case "mcp_tool", "call_mcp_tool", "mcp":
+		oneofField = connectrpc.InteractionMcp
+		oneofPayload = connectrpc.BuildMcpInteraction(confirm, filePath, command, denyReason)
+	case "deploy", "deploy_firebase":
+		oneofField = connectrpc.InteractionDeploy
+		oneofPayload = connectrpc.BuildDeployInteraction(confirm, command)
+	case "invoke_subagent", "subagent":
+		oneofField = connectrpc.InteractionInvokeSubagent
+		oneofPayload = connectrpc.BuildSubagentSpawnInteraction(confirm, command)
+	case "run_extension_code":
+		oneofField = connectrpc.InteractionRunExtensionCode
+		oneofPayload = connectrpc.BuildApprovalInteraction(confirm)
 	default:
 		oneofPayload = connectrpc.BuildApprovalInteraction(confirm)
 	}
@@ -2560,19 +2586,22 @@ func fileDiffData(blob []byte) map[string]interface{} {
 	return d
 }
 
-// uuidRe : les cascadeId sont des UUID v4 (36 chars, hex + tirets) ├®mis par
-// le language server. Validation stricte = pas de traversal via "../".
+// uuidRe : les cascadeId sont des UUID v4 (36 chars, hex + tirets) émis par
+// le language server.
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// saveUploadedImage d├®code une image base64 et la sauvegarde dans le dossier scratch de la cascade.
+// safeCascadeIDRe : accepte les UUID v4 ainsi que les identifiants de session sûrs
+// (lettres, chiffres, tirets, underscores). Validation stricte = pas de traversal via "../", "/" ou "\".
+var safeCascadeIDRe = regexp.MustCompile(`^[a-zA-Z0-9_\-\.]{1,64}$`)
+
+// saveUploadedImage décode une image base64 et la sauvegarde dans le dossier scratch de la cascade.
 func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, error) {
 	if cascadeID == "" {
 		return "", "", fmt.Errorf("cascadeId requis")
 	}
-	// Fronti├¿re de confiance : cascadeID vient du mobile (send_prompt/upload_media).
-	// Un UUID v4 strict ne peut contenir ni ".." ni "/" ni "\" ÔÇö un seul test
-	// regex suffit ├á bloquer tout path traversal.
-	if !uuidRe.MatchString(cascadeID) {
+	// Frontière de confiance : cascadeID vient du mobile (send_prompt/upload_media).
+	// Validation stricte anti-traversal : pas de "..", ni "/" ni "\".
+	if !safeCascadeIDRe.MatchString(cascadeID) || strings.Contains(cascadeID, "..") {
 		return "", "", fmt.Errorf("cascadeId invalide: %q", cascadeID)
 	}
 	if base64Data == "" {
@@ -2599,8 +2628,11 @@ func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, 
 
 	scratchDir := filepath.Join(home, ".gemini", "antigravity", "brain", cascadeID, "scratch")
 	if err := os.MkdirAll(scratchDir, 0755); err != nil {
-		return "", "", fmt.Errorf("erreur de cr├®ation du dossier scratch: %w", err)
+		return "", "", fmt.Errorf("erreur de création du dossier scratch: %w", err)
 	}
+
+	userUploadDir := filepath.Join(home, ".gemini", "antigravity", "brain", cascadeID, ".user_uploaded")
+	_ = os.MkdirAll(userUploadDir, 0755)
 
 	ext := ".png"
 	lower := strings.ToLower(fileName)
@@ -2612,12 +2644,24 @@ func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, 
 		ext = ".gif"
 	}
 
-	timestamp := time.Now().UnixMilli()
-	safeName := fmt.Sprintf("upload_%d%s", timestamp, ext)
-	targetPath := filepath.Join(scratchDir, safeName)
+	base := filepath.Base(fileName)
+	if base == "." || base == "/" || base == "\\" || base == "" {
+		timestamp := time.Now().UnixMilli()
+		base = fmt.Sprintf("upload_%d%s", timestamp, ext)
+	} else if !strings.HasSuffix(strings.ToLower(base), ext) {
+		base += ext
+	}
 
+	targetPath := filepath.Join(userUploadDir, base)
 	if err := os.WriteFile(targetPath, rawBytes, 0644); err != nil {
-		return "", "", fmt.Errorf("erreur d'├®criture du fichier image: %w", err)
+		// Fallback to scratchDir
+		targetPath = filepath.Join(scratchDir, base)
+		if err2 := os.WriteFile(targetPath, rawBytes, 0644); err2 != nil {
+			return "", "", fmt.Errorf("erreur d'écriture du fichier image: %w", err2)
+		}
+	} else {
+		// Mirror in scratchDir for dual lookup
+		_ = os.WriteFile(filepath.Join(scratchDir, base), rawBytes, 0644)
 	}
 
 	absPath := filepath.ToSlash(targetPath)
@@ -3616,15 +3660,146 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		logJSON.Info("stream_start", "requestId", msg.RequestID, "cascadeId", msg.CascadeID)
 
 		promptText := msg.Prompt
-		if msg.Base64Data != "" {
-			if _, mdRef, errImg := saveUploadedImage(msg.CascadeID, msg.FileName, msg.Base64Data); errImg == nil {
-				promptText += "\n\n" + mdRef
+		base64Data := msg.Base64Data
+		fileName := msg.FileName
+		images := msg.Images
+		var mediaAttachments []connectrpc.MediaAttachment
+
+		if msg.Data != nil {
+			if b64, ok := msg.Data["base64Data"].(string); ok && base64Data == "" {
+				base64Data = b64
+			}
+			if fn, ok := msg.Data["fileName"].(string); ok && fileName == "" {
+				fileName = fn
+			}
+			if imgs, ok := msg.Data["images"].([]interface{}); ok && len(images) == 0 {
+				for _, img := range imgs {
+					if str, ok := img.(string); ok && str != "" {
+						images = append(images, str)
+					}
+				}
+			}
+			if mList, ok := msg.Data["media"].([]interface{}); ok {
+				for _, mItem := range mList {
+					if mObj, ok := mItem.(map[string]interface{}); ok {
+						var uri, mime, desc, b64 string
+						if u, ok := mObj["uri"].(string); ok {
+							uri = u
+						}
+						if m, ok := mObj["mimeType"].(string); ok {
+							mime = m
+						}
+						if d, ok := mObj["description"].(string); ok {
+							desc = d
+						} else if n, ok := mObj["name"].(string); ok {
+							desc = n
+						}
+						if b, ok := mObj["base64Data"].(string); ok {
+							b64 = b
+						}
+						if b64 != "" && uri == "" {
+							if targetPath, _, errImg := saveUploadedImage(msg.CascadeID, desc, b64); errImg == nil {
+								uri = "file:///" + filepath.ToSlash(targetPath)
+							}
+						}
+						if uri != "" || b64 != "" {
+							mediaAttachments = append(mediaAttachments, connectrpc.MediaAttachment{
+								URI:         uri,
+								MimeType:    mime,
+								Description: desc,
+								Base64Data:  b64,
+							})
+						}
+					}
+				}
 			}
 		}
-		for i, b64 := range msg.Images {
-			if _, mdRef, errImg := saveUploadedImage(msg.CascadeID, fmt.Sprintf("img_%d.png", i), b64); errImg == nil {
-				promptText += "\n\n" + mdRef
+
+		if len(msg.Media) > 0 {
+			for _, m := range msg.Media {
+				uri := m.URI
+				if m.Base64Data != "" && uri == "" {
+					if targetPath, _, errImg := saveUploadedImage(msg.CascadeID, m.Description, m.Base64Data); errImg == nil {
+						uri = "file:///" + filepath.ToSlash(targetPath)
+					}
+				}
+				if uri != "" || m.Base64Data != "" {
+					mediaAttachments = append(mediaAttachments, connectrpc.MediaAttachment{
+						URI:         uri,
+						MimeType:    m.MimeType,
+						Description: m.Description,
+						Base64Data:  m.Base64Data,
+						Data:        m.Data,
+					})
+				}
 			}
+		}
+
+		if base64Data != "" {
+			if targetPath, _, errImg := saveUploadedImage(msg.CascadeID, fileName, base64Data); errImg == nil {
+				uri := "file:///" + filepath.ToSlash(targetPath)
+				mime := "image/jpeg"
+				if strings.HasSuffix(strings.ToLower(targetPath), ".png") {
+					mime = "image/png"
+				}
+				mediaAttachments = append(mediaAttachments, connectrpc.MediaAttachment{
+					URI:         uri,
+					MimeType:    mime,
+					Description: filepath.Base(targetPath),
+					Base64Data:  base64Data,
+				})
+			}
+		}
+		for i, b64 := range images {
+			fn := fmt.Sprintf("img_%d.png", i)
+			if targetPath, _, errImg := saveUploadedImage(msg.CascadeID, fn, b64); errImg == nil {
+				uri := "file:///" + filepath.ToSlash(targetPath)
+				mediaAttachments = append(mediaAttachments, connectrpc.MediaAttachment{
+					URI:         uri,
+					MimeType:    "image/png",
+					Description: filepath.Base(targetPath),
+					Base64Data:  b64,
+				})
+			}
+		}
+
+		// Backward-compat: si promptText contient des tags markdown d'images ![name](file:///path) ou ![name](C:/path),
+		// on les extrait vers mediaAttachments et on nettoie promptText pour que l'IDE Antigravity affiche
+		// un texte propre sans code markdown brut.
+		imgTagRe := regexp.MustCompile(`!\[([^\]]*)\]\((?:file:///)?([a-zA-Z]:[^\)\r\n]+|/[^\)\r\n]+)\)`)
+		if imgMatches := imgTagRe.FindAllStringSubmatch(promptText, -1); len(imgMatches) > 0 {
+			for _, m := range imgMatches {
+				if len(m) >= 3 {
+					desc := strings.TrimSpace(m[1])
+					rawPath := strings.TrimSpace(m[2])
+					cleanURI := rawPath
+					if !strings.HasPrefix(cleanURI, "file:///") {
+						cleanURI = "file:///" + filepath.ToSlash(cleanURI)
+					}
+					mime := "image/jpeg"
+					if strings.HasSuffix(strings.ToLower(rawPath), ".png") {
+						mime = "image/png"
+					}
+					if desc == "" {
+						desc = filepath.Base(rawPath)
+					}
+					alreadyAdded := false
+					for _, existing := range mediaAttachments {
+						if existing.URI == cleanURI {
+							alreadyAdded = true
+							break
+						}
+					}
+					if !alreadyAdded {
+						mediaAttachments = append(mediaAttachments, connectrpc.MediaAttachment{
+							URI:         cleanURI,
+							MimeType:    mime,
+							Description: desc,
+						})
+					}
+				}
+			}
+			promptText = strings.TrimSpace(imgTagRe.ReplaceAllString(promptText, ""))
 		}
 
 		// Offline buffering (3.2) : le prompt part vers le hub → on le persiste
@@ -3739,7 +3914,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		// Démarre le streaming temps réel (transcript.jsonl + trajectoire)
 		go s.runLiveTurnStreamer(watcherCtx, msg.CascadeID, msg.RequestID, &frameIndex, &hasTextDelivered, doneChan)
 
-		err = s.RPCClient.SendMessageStreamModel(msg.CascadeID, promptText, modelUID, modelEnum, onFrameHandler, noTools)
+		err = s.RPCClient.SendMessageStreamModelWithMedia(msg.CascadeID, promptText, modelUID, modelEnum, mediaAttachments, onFrameHandler, noTools)
 
 		if err != nil {
 			cancelWatcher()
@@ -3958,10 +4133,19 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		// 1. Direct local file check (e.g. brain artifacts, absolute file paths, file:// URIs)
 		cleanPath := strings.TrimPrefix(msg.FilePath, "file:///")
 		cleanPath = strings.TrimPrefix(cleanPath, "file://")
-		if len(cleanPath) >= 3 && cleanPath[0] == '/' && cleanPath[2] == ':' {
+		if len(cleanPath) >= 3 && (cleanPath[0] == '/' || cleanPath[0] == '\\') && cleanPath[2] == ':' {
 			cleanPath = cleanPath[1:]
 		}
-		cleanPath = filepath.Clean(cleanPath)
+
+		isDriveLetterAbs := len(cleanPath) >= 2 && ((cleanPath[0] >= 'a' && cleanPath[0] <= 'z') || (cleanPath[0] >= 'A' && cleanPath[0] <= 'Z')) && cleanPath[1] == ':'
+		isUNCAbs := strings.HasPrefix(cleanPath, `\\`) || strings.HasPrefix(cleanPath, `//`)
+		isUnixAbs := runtime.GOOS != "windows" && strings.HasPrefix(cleanPath, "/")
+
+		relCleanPath := cleanPath
+		if !isDriveLetterAbs && !isUNCAbs && !isUnixAbs {
+			relCleanPath = strings.TrimLeft(cleanPath, "/\\")
+		}
+		baseFileName := filepath.Base(cleanPath)
 
 		respondWithFileContent := func(content []byte) {
 			lower := strings.ToLower(cleanPath)
@@ -3988,14 +4172,14 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: data})
 		}
 
-		if filepath.IsAbs(cleanPath) {
-			if content, errRead := os.ReadFile(cleanPath); errRead == nil {
+		if isDriveLetterAbs || isUNCAbs || isUnixAbs {
+			if content, errRead := os.ReadFile(filepath.Clean(cleanPath)); errRead == nil {
 				respondWithFileContent(content)
 				return
 			}
 		}
-		if strings.HasPrefix(msg.FilePath, ".gemini") || strings.HasPrefix(cleanPath, ".gemini") {
-			abs := homeRoot(cleanPath)
+		if strings.HasPrefix(msg.FilePath, ".gemini") || strings.HasPrefix(relCleanPath, ".gemini") {
+			abs := homeRoot(relCleanPath)
 			if content, errRead := os.ReadFile(abs); errRead == nil {
 				respondWithFileContent(content)
 				return
@@ -4010,9 +4194,12 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		if cascadeID != "" {
 			if bDir := findBrainDir(cascadeID); bDir != "" {
 				candidates := []string{
-					filepath.Join(bDir, cleanPath),
-					filepath.Join(bDir, ".user_uploaded", cleanPath),
-					filepath.Join(bDir, "scratch", cleanPath),
+					filepath.Join(bDir, relCleanPath),
+					filepath.Join(bDir, ".user_uploaded", relCleanPath),
+					filepath.Join(bDir, "scratch", relCleanPath),
+					filepath.Join(bDir, ".user_uploaded", baseFileName),
+					filepath.Join(bDir, "scratch", baseFileName),
+					filepath.Join(bDir, baseFileName),
 				}
 				for _, cand := range candidates {
 					if content, errRead := os.ReadFile(cand); errRead == nil {
@@ -4021,33 +4208,36 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 					}
 				}
 			}
-		} else {
-			// Scan active sessions or brain directories if cascadeID was not specified
-			if home, errHome := os.UserHomeDir(); errHome == nil {
-				brainRoots := []string{
-					filepath.Join(home, ".gemini", "antigravity", "brain"),
-					filepath.Join(home, ".gemini", "antigravity-ide", "brain"),
+		}
+
+		// Scan active sessions or brain directories if not found in specific cascade
+		if home, errHome := os.UserHomeDir(); errHome == nil {
+			brainRoots := []string{
+				filepath.Join(home, ".gemini", "antigravity", "brain"),
+				filepath.Join(home, ".gemini", "antigravity-ide", "brain"),
+			}
+			for _, bRoot := range brainRoots {
+				entries, errEntries := os.ReadDir(bRoot)
+				if errEntries != nil {
+					continue
 				}
-				for _, bRoot := range brainRoots {
-					entries, errEntries := os.ReadDir(bRoot)
-					if errEntries != nil {
+				for _, e := range entries {
+					if !e.IsDir() {
 						continue
 					}
-					for _, e := range entries {
-						if !e.IsDir() {
-							continue
-						}
-						bDir := filepath.Join(bRoot, e.Name())
-						cands := []string{
-							filepath.Join(bDir, cleanPath),
-							filepath.Join(bDir, ".user_uploaded", cleanPath),
-							filepath.Join(bDir, "scratch", cleanPath),
-						}
-						for _, cand := range cands {
-							if content, errRead := os.ReadFile(cand); errRead == nil {
-								respondWithFileContent(content)
-								return
-							}
+					bDir := filepath.Join(bRoot, e.Name())
+					cands := []string{
+						filepath.Join(bDir, relCleanPath),
+						filepath.Join(bDir, ".user_uploaded", relCleanPath),
+						filepath.Join(bDir, "scratch", relCleanPath),
+						filepath.Join(bDir, ".user_uploaded", baseFileName),
+						filepath.Join(bDir, "scratch", baseFileName),
+						filepath.Join(bDir, baseFileName),
+					}
+					for _, cand := range cands {
+						if content, errRead := os.ReadFile(cand); errRead == nil {
+							respondWithFileContent(content)
+							return
 						}
 					}
 				}
@@ -4080,6 +4270,14 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		if targetCascadeID == "" && msg.Data != nil {
 			targetCascadeID, _ = msg.Data["cascadeId"].(string)
 		}
+		if targetCascadeID == "" {
+			targetCascadeID = s.focusedCascadeID
+		}
+
+		s.mu.Lock()
+		scheduledCount := len(s.scheduledTasks)
+		s.mu.Unlock()
+
 		if targetCascadeID != "" {
 			// Scoped to a single session
 			counts := countTranscriptActivity(targetCascadeID)
@@ -4098,13 +4296,18 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			if uploadsCount < counts["uploads"] {
 				uploadsCount = counts["uploads"]
 			}
+			runningCount := 0
+			if s.runningTasks != nil {
+				runningCount = len(s.runningTasks.listTasksForCascade(targetCascadeID, false))
+			}
 			stats := map[string]interface{}{
 				"cascadeId":            targetCascadeID,
 				"subagentsCount":       counts["subagents"],
 				"filesChangedCount":    filesChangedCount,
 				"artifactsCount":       artifactsCount,
 				"uploadsCount":         uploadsCount,
-				"backgroundTasksCount": counts["tasks"],
+				"backgroundTasksCount": runningCount,
+				"scheduledTasksCount":  scheduledCount,
 				"artifacts":            artifacts,
 				"uploads":              uploads,
 				"modifiedFiles":        modifiedFiles,
@@ -4113,18 +4316,31 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 
-		// Global aggregate fallback when no cascadeId is provided
+		// Fallback when no cascadeId is provided: aggregate across sessions
 		var cascadeIDs []string
-		if raw, ok := s.cachedSessions(); ok && len(raw) > 0 {
-			for _, sum := range connectrpc.ParseTrajectories(raw) {
-				cascadeIDs = append(cascadeIDs, sum.CascadeID)
+		s.mu.Lock()
+		if s.jetboxSummaries != nil {
+			for cid := range s.jetboxSummaries {
+				cascadeIDs = append(cascadeIDs, cid)
+			}
+		}
+		s.mu.Unlock()
+		if len(cascadeIDs) == 0 {
+			raw := s.fetchSessionsSingleFlight()
+			if len(raw) > 0 {
+				for _, sum := range connectrpc.ParseTrajectories(raw) {
+					if sum.CascadeID != "" {
+						cascadeIDs = append(cascadeIDs, sum.CascadeID)
+					}
+				}
 			}
 		}
 		if len(cascadeIDs) == 0 {
-			s.fetchSessionsSingleFlight()
 			if raw, ok := s.cachedSessions(); ok && len(raw) > 0 {
 				for _, sum := range connectrpc.ParseTrajectories(raw) {
-					cascadeIDs = append(cascadeIDs, sum.CascadeID)
+					if sum.CascadeID != "" {
+						cascadeIDs = append(cascadeIDs, sum.CascadeID)
+					}
 				}
 			}
 		}
@@ -4135,31 +4351,33 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				}
 			}
 		}
-		stats := map[string]interface{}{
-			"subagentsCount":       0,
-			"filesChangedCount":    0,
-			"artifactsCount":       0,
-			"uploadsCount":         0,
-			"backgroundTasksCount": 0,
-		}
+		artifactsTotal := 0
 		subagentsTotal := 0
 		filesTotal := 0
-		artifactsTotal := 0
 		uploadsTotal := 0
-		tasksTotal := 0
 		for _, cid := range cascadeIDs {
 			counts := countTranscriptActivity(cid)
 			subagentsTotal += counts["subagents"]
 			filesTotal += counts["files"]
 			artifactsTotal += counts["artifacts"]
 			uploadsTotal += counts["uploads"]
-			tasksTotal += counts["tasks"]
 		}
-		stats["subagentsCount"] = subagentsTotal
-		stats["filesChangedCount"] = filesTotal
-		stats["artifactsCount"] = artifactsTotal
-		stats["uploadsCount"] = uploadsTotal
-		stats["backgroundTasksCount"] = tasksTotal
+		globalRunningCount := 0
+		if s.runningTasks != nil {
+			globalRunningCount = len(s.runningTasks.listTasks(false))
+		}
+		stats := map[string]interface{}{
+			"cascadeId":            "",
+			"subagentsCount":       subagentsTotal,
+			"filesChangedCount":    filesTotal,
+			"artifactsCount":       artifactsTotal,
+			"uploadsCount":         uploadsTotal,
+			"backgroundTasksCount": globalRunningCount,
+			"scheduledTasksCount":  scheduledCount,
+			"artifacts":            []map[string]interface{}{},
+			"uploads":              []map[string]interface{}{},
+			"modifiedFiles":        []string{},
+		}
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: stats})
 		return
 
@@ -6080,19 +6298,67 @@ func findTaskLogPath(cascadeID, taskID string) string {
 }
 
 func (s *Server) getTaskLog(cascadeID, taskID string) (string, string, string) {
-	taskID = normalizeTaskID(taskID)
+	cleanTaskID := normalizeTaskID(taskID)
 	s.runningTasks.mu.RLock()
-	t, ok := s.runningTasks.tasks[taskID]
+	t, ok := s.runningTasks.tasks[cleanTaskID]
+	if !ok {
+		// Recherche par commande exacte ou préfixe dans la cascade
+		for _, candidate := range s.runningTasks.tasks {
+			if candidate.CascadeID == cascadeID || cascadeID == "" {
+				if candidate.ID == cleanTaskID ||
+					strings.EqualFold(candidate.Command, taskID) ||
+					strings.HasPrefix(candidate.Command, taskID) ||
+					strings.HasPrefix(taskID, candidate.Command) {
+					t = candidate
+					ok = true
+					break
+				}
+			}
+		}
+	}
 	s.runningTasks.mu.RUnlock()
 
 	cmd := ""
 	status := "done"
+	actualTaskID := cleanTaskID
 	if ok {
 		cmd = t.Command
 		status = t.Status
+		actualTaskID = t.ID
 	}
 
-	logPath := findTaskLogPath(cascadeID, taskID)
+	// 1. Recherche via le chemin de log standard avec actualTaskID et cleanTaskID
+	logPath := findTaskLogPath(cascadeID, actualTaskID)
+	if logPath == "" && actualTaskID != cleanTaskID {
+		logPath = findTaskLogPath(cascadeID, cleanTaskID)
+	}
+
+	// 2. Si non trouvé et cascadeId présent, scanner le dossier .system_generated/tasks
+	if logPath == "" && cascadeID != "" {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			tasksDirs := []string{
+				filepath.Join(home, ".gemini", "antigravity", "brain", cascadeID, ".system_generated", "tasks"),
+				filepath.Join(home, ".gemini", "antigravity-ide", "brain", cascadeID, ".system_generated", "tasks"),
+			}
+			for _, dir := range tasksDirs {
+				if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
+					for _, entry := range entries {
+						name := entry.Name()
+						base := strings.TrimSuffix(name, ".log")
+						if base == actualTaskID || base == cleanTaskID || strings.Contains(taskID, base) || (ok && base == t.ID) {
+							logPath = filepath.Join(dir, name)
+							break
+						}
+					}
+					if logPath != "" {
+						break
+					}
+				}
+			}
+		}
+	}
+
 	if logPath != "" {
 		data, err := os.ReadFile(logPath)
 		if err == nil && len(data) > 0 {

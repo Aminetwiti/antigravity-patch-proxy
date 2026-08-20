@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -30,16 +33,19 @@ import 'widgets/execution_progress_view.dart';
 import 'widgets/overview_panel_view.dart';
 import 'widgets/session_review_view.dart';
 import 'widgets/queued_messages_card.dart';
+import 'widgets/revert_step_preview_dialog.dart';
 import '../../services/offline_outbox_store.dart';
 import '../../services/session_history_cache_store.dart';
 import '../../widgets/skeleton_loader.dart';
 import '../subagents/subagents_tree_sheet.dart';
 import '../subagents/models/subagent_item.dart';
 import '../subagents/widgets/subagent_tree_card.dart';
+import '../subagents/widgets/subagent_detail_modal.dart';
 import '../../widgets/zenithal_canvas.dart';
 import '../../widgets/status_dot_badge.dart';
 import '../../widgets/bouncing_tap.dart';
 import '../../widgets/app_notification_banner.dart';
+import '../../widgets/antigravity_logo.dart';
 import 'models/banner_notification.dart';
 import '../settings/models_settings_section.dart';
 import 'package:mobile/theme/app_colors.dart';
@@ -245,11 +251,99 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
   bool get _isSideQuestionLoading => _sessionSideQuestionLoadings[widget.activeSessionId] ?? false;
   set _isSideQuestionLoading(bool l) => _sessionSideQuestionLoadings[widget.activeSessionId] = l;
+  Timer? _sideQuestionTimer;
+  Timer? _loadOlderTimer;
 
   final List<String> _runningBackgroundTasks = [];
+  bool _isFullscreen = false;
+  bool _isHeaderVisible = true;
+  bool _isSearching = false;
+  final TextEditingController _searchController = TextEditingController();
+  List<int> _searchMatches = [];
+  int _currentSearchMatchIndex = 0;
+
+  void _toggleSearch() {
+    HapticFeedback.selectionClick();
+    setState(() {
+      _isSearching = !_isSearching;
+      if (!_isSearching) {
+        _searchController.clear();
+        _searchMatches.clear();
+        _currentSearchMatchIndex = 0;
+      }
+    });
+  }
+
+  void _onSearchQueryChanged(String query) {
+    final q = query.trim().toLowerCase();
+    final msgs = _sessionMessages[widget.activeSessionId] ?? [];
+    if (q.isEmpty) {
+      setState(() {
+        _searchMatches = [];
+        _currentSearchMatchIndex = 0;
+      });
+      return;
+    }
+    final matches = <int>[];
+    for (var i = 0; i < msgs.length; i++) {
+      final m = msgs[i];
+      if (m.text.toLowerCase().contains(q) || m.sender.toLowerCase().contains(q)) {
+        matches.add(i);
+      }
+    }
+    setState(() {
+      _searchMatches = matches;
+      _currentSearchMatchIndex = matches.isNotEmpty ? matches.length - 1 : 0;
+    });
+    _jumpToSearchMatch();
+  }
+
+  void _jumpToSearchMatch() {
+    if (_searchMatches.isEmpty || !_scrollController.hasClients) return;
+    final msgs = _sessionMessages[widget.activeSessionId] ?? [];
+    if (msgs.isEmpty) return;
+    final targetIndex = _searchMatches[_currentSearchMatchIndex];
+    final fraction = (targetIndex / (msgs.isNotEmpty ? msgs.length : 1)).clamp(0.0, 1.0);
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    _scrollController.animateTo(
+      fraction * maxScroll,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+    );
+    HapticFeedback.selectionClick();
+  }
+
+  void _nextSearchMatch() {
+    if (_searchMatches.isEmpty) return;
+    setState(() {
+      _currentSearchMatchIndex = (_currentSearchMatchIndex + 1) % _searchMatches.length;
+    });
+    _jumpToSearchMatch();
+  }
+
+  void _prevSearchMatch() {
+    if (_searchMatches.isEmpty) return;
+    setState(() {
+      _currentSearchMatchIndex = (_currentSearchMatchIndex - 1 + _searchMatches.length) % _searchMatches.length;
+    });
+    _jumpToSearchMatch();
+  }
+
+  void _closeSearch() {
+    HapticFeedback.selectionClick();
+    setState(() {
+      _isSearching = false;
+      _searchController.clear();
+      _searchMatches.clear();
+      _currentSearchMatchIndex = 0;
+    });
+  }
+
   final Map<String, StringBuffer> _taskOutputs = {};
   final Map<String, String> _taskStatuses = {};
   final Map<String, StreamController<String>> _taskOutputControllers = {};
+  final Map<String, String> _taskCommandToId = {};
+  final Map<String, String> _taskIdToCommand = {};
   final Map<String, DateTime> _streamStartTimes = {};
 
   String _computeWorkedDuration(DateTime? startTime) {
@@ -265,17 +359,28 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   void _openTaskOutputSheet(String taskNameOrId) {
-    final initialOut = _taskOutputs[taskNameOrId]?.toString() ?? '';
-    final status = _taskStatuses[taskNameOrId] ?? 'running';
+    final realTaskId = _taskCommandToId[taskNameOrId] ?? taskNameOrId;
+    final realCommand = _taskIdToCommand[taskNameOrId] ??
+        (_taskIdToCommand[realTaskId] ?? taskNameOrId);
+
+    final initialOut = (_taskOutputs[taskNameOrId]?.isNotEmpty == true)
+        ? _taskOutputs[taskNameOrId]!.toString()
+        : ((_taskOutputs[realTaskId]?.isNotEmpty == true)
+            ? _taskOutputs[realTaskId]!.toString()
+            : (_taskOutputs[realCommand]?.toString() ?? ''));
+    final status = _taskStatuses[taskNameOrId] ??
+        _taskStatuses[realTaskId] ??
+        _taskStatuses[realCommand] ??
+        'running';
     final ctrl = _taskOutputControllers.putIfAbsent(
-      taskNameOrId,
+      realTaskId,
       () => StreamController<String>.broadcast(),
     );
 
     BackgroundTaskOutputSheet.show(
       context,
-      taskId: taskNameOrId,
-      command: taskNameOrId,
+      taskId: realTaskId,
+      command: realCommand,
       initialOutput: initialOut,
       status: status,
       outputStream: ctrl.stream,
@@ -286,10 +391,13 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   void _handleStopBackgroundTask(String taskNameOrId) {
-    widget.api?.killRunningTask(taskNameOrId);
+    final realTaskId = _taskCommandToId[taskNameOrId] ?? taskNameOrId;
+    widget.api?.killRunningTask(realTaskId);
     setState(() {
       _runningBackgroundTasks.remove(taskNameOrId);
+      _runningBackgroundTasks.remove(realTaskId);
       _taskStatuses[taskNameOrId] = 'killed';
+      _taskStatuses[realTaskId] = 'killed';
     });
   }
 
@@ -305,6 +413,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           final id = t['id']?.toString() ?? '';
           final cmd = t['command']?.toString() ?? id;
           final status = t['status']?.toString() ?? 'running';
+          if (id.isNotEmpty) {
+            _taskCommandToId[cmd] = id;
+            _taskIdToCommand[id] = cmd;
+          }
           if (status == 'running' && cmd.isNotEmpty) {
             active.add(cmd);
             _taskStatuses[cmd] = 'running';
@@ -433,6 +545,14 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         if (nearBottom) _hiddenNewCount = 0;
       });
     }
+
+    // Auto-hide du header au défilement vers le bas pour maximiser l'espace de lecture
+    if (pos.userScrollDirection == ScrollDirection.reverse && _isHeaderVisible && pos.pixels > 60) {
+      setState(() => _isHeaderVisible = false);
+    } else if (pos.userScrollDirection == ScrollDirection.forward && !_isHeaderVisible) {
+      setState(() => _isHeaderVisible = true);
+    }
+
     if (!_isLoadingMoreOlder && pos.pixels <= 80 && _hiddenOlderCount > 0 && pos.maxScrollExtent > 100) {
       _loadMoreOlderMessages();
     }
@@ -461,7 +581,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       final current = _visibleCounts[widget.activeSessionId] ?? _pageSize;
       _visibleCounts[widget.activeSessionId] = current + _pageSize;
     });
-    Future.delayed(const Duration(milliseconds: 250), () {
+    _loadOlderTimer?.cancel();
+    _loadOlderTimer = Timer(const Duration(milliseconds: 250), () {
       if (mounted) {
         setState(() {
           _isLoadingMoreOlder = false;
@@ -674,6 +795,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                 text: m['text']?.toString() ?? '',
                 thought: m['thought']?.toString(),
                 timestamp: m['timestamp']?.toString() ?? '',
+                stepIndex: (m['stepIndex'] as num?)?.toInt(),
                 isError: m['isError'] == true && (m['text']?.toString().trim().isEmpty ?? true),
               ));
             }
@@ -1018,11 +1140,14 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     _stillWorkingTimer?.cancel();
     _syncTimer?.cancel();
     _quotaTimer?.cancel();
+    _sideQuestionTimer?.cancel();
+    _loadOlderTimer?.cancel();
     for (final t in _settleTimers) {
       t.cancel();
     }
     _settleTimers.clear();
     _scrollController.dispose();
+    _searchController.dispose();
     final client = widget.wsClient;
     client?.statusNotifier.removeListener(_onConnectionStatusChanged);
     client?.retryInfo.removeListener(_onRetryInfoChanged);
@@ -1065,6 +1190,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         setState(() => _showStillWorking = false);
       }
     }
+    if (sessionId == widget.activeSessionId) {
+      HapticFeedback.lightImpact();
+    }
     final queue = _sessionMessageQueues[sessionId] ?? [];
     final lastEnd = _sessionLastStreamEnds[sessionId];
     final outcome = lastEnd?['data']?['outcome'] as String? ?? 'done';
@@ -1096,16 +1224,35 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     if (msg['data']?['hostActive'] == true) return;
     final outcome = data['outcome'] as String? ?? 'done';
     final cascadeId = targetSessionId ?? data['cascadeId'] as String? ?? widget.activeSessionId;
-    final message = data['message'] as String? ?? '';
+    if (outcome == 'done' || outcome == 'cancelled') {
+      HapticFeedback.lightImpact();
+    }
 
+    // Si l'utilisateur est DÉJÀ dans la session active et au premier plan, NE PAS envoyer de notification.
+    final isViewingThisSessionInForeground = _appInForeground && cascadeId == widget.activeSessionId;
+    if (isViewingThisSessionInForeground) {
+      return;
+    }
+
+    // Ne notifier QUE si tout le travail est TOTALEMENT terminé :
+    // Pas de tâches d'arrière-plan en cours, pas de sous-agents actifs, pas d'approbations ou de questions en attente.
+    final hasActiveBackgroundTasks = _runningBackgroundTasks.isNotEmpty ||
+        _taskStatuses.values.any((st) => st == 'running');
+    final hasSubagentsRunning = (_sessionSubagents[cascadeId] ?? []).any((sa) => sa.status.toLowerCase() == 'running');
+    final isAwaitingUserAction = (_sessionApprovals[cascadeId]?.isNotEmpty ?? false) ||
+        _sessionQuestions.containsKey(cascadeId);
+
+    if (hasActiveBackgroundTasks || hasSubagentsRunning || isAwaitingUserAction) {
+      // L'agent n'a pas fini son travail : on évite la fausse notification de fin
+      return;
+    }
+
+    final message = (data['message'] ?? msg['message'] ?? 'Tâche terminée').toString();
     ApprovalNotifier.instance.notifyTaskEnded(
       cascadeId: cascadeId,
       outcome: outcome,
       message: message,
     );
-    if (outcome == 'done' || outcome == 'cancelled') {
-      HapticFeedback.lightImpact();
-    }
   }
 
 
@@ -1236,7 +1383,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           type == 'approval_expired' ||
           type == 'session_status_update' ||
           type == 'quota_update' ||
-          type == 'sessions_updated';
+          type == 'sessions_updated' ||
+          type == 'cascade_reverted';
       if (!isBroadcast || !mounted) return;
       final requestId = msg['requestId'] as String? ?? '';
       String? sessionId = (msg['cascadeId'] ?? msg['data']?['cascadeId']) as String?;
@@ -1248,6 +1396,25 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             sessionId = events.first['cascadeId'] as String?;
           }
         }
+      }
+
+      if (type == 'cascade_reverted') {
+        final cascId = (msg['cascadeId'] ?? msg['data']?['cascadeId'])?.toString() ?? widget.activeSessionId;
+        if (mounted && cascId.isNotEmpty) {
+          SessionHistoryCacheStore.instance.saveSessionHistory(cascId, const []);
+          _loadHistoryIfEmpty(cascId);
+          _fetchVcsChanges();
+          _refreshRunningTasks();
+          if (cascId == widget.activeSessionId) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Modifications annulées jusqu\'à cette étape'),
+                duration: Duration(seconds: 2),
+              ),
+            );
+          }
+        }
+        return;
       }
 
       if (type == 'quota_update') {
@@ -1286,6 +1453,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         }
         final cmd = data['command'] as String? ?? data['id'] as String? ?? 'Task';
         final taskId = data['id'] as String? ?? cmd;
+        if (taskId.isNotEmpty && cmd.isNotEmpty) {
+          _taskCommandToId[cmd] = taskId;
+          _taskIdToCommand[taskId] = cmd;
+        }
         if (!_runningBackgroundTasks.contains(cmd)) {
           setState(() {
             _runningBackgroundTasks.add(cmd);
@@ -1333,6 +1504,22 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           _taskStatuses[taskId] = status;
         });
         _refreshRunningTasks();
+
+        // Si toutes les tâches d'arrière-plan sont terminées, que le stream est inactif,
+        // et que l'utilisateur N'EST PAS sur cette session au premier plan, notifier la fin définitive.
+        final targetCId = eventCascadeId.isNotEmpty ? eventCascadeId : widget.activeSessionId;
+        final isViewingThisSessionInForeground = _appInForeground && targetCId == widget.activeSessionId;
+        if (!isViewingThisSessionInForeground &&
+            _runningBackgroundTasks.isEmpty &&
+            !_hasCurrentActiveStream &&
+            !(_sessionApprovals[targetCId]?.isNotEmpty ?? false) &&
+            !_sessionQuestions.containsKey(targetCId)) {
+          ApprovalNotifier.instance.notifyTaskEnded(
+            cascadeId: targetCId,
+            outcome: status == 'error' ? 'error' : 'done',
+            message: cmd.isNotEmpty ? 'Tâche terminée : $cmd' : 'Travail terminé',
+          );
+        }
         return;
       }
 
@@ -1343,20 +1530,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       }
 
       final targetSessionId = sessionId;
-
-      // P1 : notification « Tâche démarrée » — uniquement quand l'app est en
-      // arrière-plan/verrouillée ET que personne n'est actif sur le PC hôte
-      // (le daemon fournit hostActive sur stream_start, idle detection Go).
-      // Couvre les prompts envoyés depuis le PC, les autres surfaces et les
-      // envois locaux si l'utilisateur a verrouillé juste après.
-      if (type == 'stream_start' &&
-          !_appInForeground &&
-          msg['data']?['hostActive'] != true) {
-        ApprovalNotifier.instance.notifyTaskStarted(
-          cascadeId: targetSessionId,
-          prompt: 'Une tâche a démarré sur le PC hôte',
-        );
-      }
 
       // Bug tâches arrière-plan : si l'évènement concerne une autre session,
       // on le bufferise dans _sessionMessages[targetSessionId] au lieu de le jeter.
@@ -1594,6 +1767,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         _streamRequestToMessageId.remove(thKey);
         SessionHistoryCacheStore.instance.saveSessionHistory(targetSessionId, buf);
         _refreshRunningTasks();
+        _fetchVcsChanges(targetSessionId);
 
         if (isActiveSession && mounted) {
           setState(() {});
@@ -1678,6 +1852,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     bool queued = false,
     String? modelUID,
     int? modelEnum,
+    List<String>? images,
+    String? base64Data,
+    String? fileName,
+    List<Map<String, dynamic>>? media,
   }) {
     if (text.trim().startsWith('/btw ') || text.trim().startsWith('/btw')) {
       final sideQ = text.trim().replaceFirst(RegExp(r'^/btw\s*'), '');
@@ -1686,7 +1864,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         _isSideQuestionLoading = true;
         _sideQuestionAnswer = null;
       });
-      Future.delayed(const Duration(milliseconds: 1200), () {
+      _sideQuestionTimer?.cancel();
+      _sideQuestionTimer = Timer(const Duration(milliseconds: 1200), () {
         if (mounted) {
           setState(() {
             _isSideQuestionLoading = false;
@@ -1709,6 +1888,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           'activeSessionId': targetSession,
           'modelUID': modelUID,
           'modelEnum': modelEnum,
+          if (images != null) 'images': images,
+          if (base64Data != null) 'base64Data': base64Data,
+          if (fileName != null) 'fileName': fileName,
+          if (media != null) 'media': media,
           'timestamp': DateTime.now().millisecondsSinceEpoch,
         });
       });
@@ -1729,7 +1912,16 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final api = widget.api;
     if (api == null) return;
 
-    _sendPromptToDaemon(text, targetSessionOverride: targetSession, modelUID: modelUID, modelEnum: modelEnum);
+    _sendPromptToDaemon(
+      text,
+      targetSessionOverride: targetSession,
+      modelUID: modelUID,
+      modelEnum: modelEnum,
+      images: images,
+      base64Data: base64Data,
+      fileName: fileName,
+      media: media,
+    );
   }
 
   void _handleQueueSendNow(int index) {
@@ -1740,6 +1932,14 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final text = item['text'] as String? ?? '';
     final modelUID = item['modelUID'] as String?;
     final modelEnum = item['modelEnum'] as int?;
+    final images = (item['images'] is List)
+        ? (item['images'] as List).map((e) => '$e').toList()
+        : null;
+    final base64Data = item['base64Data'] as String?;
+    final fileName = item['fileName'] as String?;
+    final media = (item['media'] is List)
+        ? (item['media'] as List).whereType<Map<String, dynamic>>().toList()
+        : null;
     final targetSession = widget.activeSessionId;
 
     final buf = _sessionMessages.putIfAbsent(targetSession, () => []);
@@ -1751,7 +1951,16 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         timestamp: _timestamp(),
       ));
     });
-    _sendPromptToDaemon(text, targetSessionOverride: targetSession, modelUID: modelUID, modelEnum: modelEnum);
+    _sendPromptToDaemon(
+      text,
+      targetSessionOverride: targetSession,
+      modelUID: modelUID,
+      modelEnum: modelEnum,
+      images: images,
+      base64Data: base64Data,
+      fileName: fileName,
+      media: media,
+    );
   }
 
   void _handleQueueEdit(int index) {
@@ -1774,7 +1983,16 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     OfflineOutboxStore.saveQueuedMessages(widget.activeSessionId, queue);
   }
 
-  void _sendPromptToDaemon(String text, {String? targetSessionOverride, String? modelUID, int? modelEnum}) {
+  void _sendPromptToDaemon(
+    String text, {
+    String? targetSessionOverride,
+    String? modelUID,
+    int? modelEnum,
+    List<String>? images,
+    String? base64Data,
+    String? fileName,
+    List<Map<String, dynamic>>? media,
+  }) {
     final api = widget.api;
     if (api == null) return;
 
@@ -1809,8 +2027,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     api.sendPrompt(
       targetSession,
       text,
+      base64Data: base64Data,
+      fileName: fileName,
+      images: images,
       modelUID: modelUID,
       modelEnum: modelEnum,
+      media: media,
     ).listen(
       (msg) {
         if (msg['type'] == 'stream_end') {
@@ -2048,77 +2270,83 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final expired = _expiredCallIds.contains(approval.callId);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 0),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 280),
+        child: SingleChildScrollView(
+          physics: const ClampingScrollPhysics(),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (total > 1)
-                IconButton(
-                  key: const Key('approval-prev'),
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                  padding: EdgeInsets.zero,
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.chevron_left, size: 18),
-                  tooltip: 'Approbation précédente',
-                  onPressed: () => setState(() {
-                    _approvalIndex =
-                        (_approvalIndex - 1 + total) % total;
-                  }),
-                ),
-              Text(
-                'Approbation ${_approvalIndex + 1}/$total',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+              Row(
+                children: [
+                  if (total > 1)
+                    IconButton(
+                      key: const Key('approval-prev'),
+                      constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+                      padding: EdgeInsets.zero,
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.chevron_left, size: 16),
+                      tooltip: 'Approbation précédente',
+                      onPressed: () => setState(() {
+                        _approvalIndex =
+                            (_approvalIndex - 1 + total) % total;
+                      }),
+                    ),
+                  Text(
+                    'Approbation ${_approvalIndex + 1}/$total',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  if (total > 1)
+                    IconButton(
+                      key: const Key('approval-next'),
+                      constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+                      padding: EdgeInsets.zero,
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.chevron_right, size: 16),
+                      tooltip: 'Approbation suivante',
+                      onPressed: () => setState(() {
+                        _approvalIndex = (_approvalIndex + 1) % total;
+                      }),
+                    ),
+                  const Spacer(),
+                  IconButton(
+                    key: const Key('approval-dismiss'),
+                    constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+                    padding: EdgeInsets.zero,
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.close, size: 14),
+                    tooltip: 'Fermer cette approbation',
+                    onPressed: () => _removeApproval(approval.callId),
+                  ),
+                ],
               ),
-              if (total > 1)
-                IconButton(
-                  key: const Key('approval-next'),
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                  padding: EdgeInsets.zero,
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.chevron_right, size: 18),
-                  tooltip: 'Approbation suivante',
-                  onPressed: () => setState(() {
-                    _approvalIndex = (_approvalIndex + 1) % total;
-                  }),
+              TweenAnimationBuilder<double>(
+                key: ValueKey('approval-${approval.callId}'),
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOutQuart,
+                tween: Tween(begin: 0.0, end: 1.0),
+                builder: (context, value, child) => Opacity(
+                  opacity: value,
+                  child: Transform.translate(
+                    offset: Offset(0, 8 * (1 - value)),
+                    child: child,
+                  ),
                 ),
-              const Spacer(),
-              IconButton(
-                key: const Key('approval-dismiss'),
-                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                padding: EdgeInsets.zero,
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.close, size: 16),
-                tooltip: 'Fermer cette approbation',
-                onPressed: () => _removeApproval(approval.callId),
+                child: ToolApprovalCard(
+                  request: approval,
+                  onDecision: _handleToolDecision,
+                  isExpired: expired,
+                ),
               ),
             ],
           ),
-          TweenAnimationBuilder<double>(
-            key: ValueKey('approval-${approval.callId}'),
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOutQuart,
-            tween: Tween(begin: 0.0, end: 1.0),
-            builder: (context, value, child) => Opacity(
-              opacity: value,
-              child: Transform.translate(
-                offset: Offset(0, 8 * (1 - value)),
-                child: child,
-              ),
-            ),
-            child: ToolApprovalCard(
-              request: approval,
-              onDecision: _handleToolDecision,
-              isExpired: expired,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -2203,6 +2431,49 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     );
   }
 
+  Future<void> _handleRevertStep(ChatMessage message) async {
+    final api = widget.api;
+    if (api == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Rollback impossible en mode hors ligne.')),
+      );
+      return;
+    }
+
+    final targetSession = widget.activeSessionId;
+    if (targetSession.isEmpty) return;
+
+    // Détermine le stepIndex
+    int stepIndex = message.stepIndex ?? -1;
+    if (stepIndex < 0) {
+      final buf = _sessionMessages[targetSession] ?? [];
+      final idx = buf.indexOf(message);
+      stepIndex = idx >= 0 ? idx : 0;
+    }
+
+    final reverted = await RevertStepPreviewDialog.show(
+      context,
+      api: api,
+      cascadeId: targetSession,
+      stepIndex: stepIndex,
+      stepDescription: message.text,
+    );
+
+    if (reverted == true && mounted) {
+      HapticFeedback.mediumImpact();
+      SessionHistoryCacheStore.instance.saveSessionHistory(targetSession, const []);
+      _loadHistoryIfEmpty(targetSession);
+      _fetchVcsChanges();
+      _refreshRunningTasks();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Modifications annulées jusqu\'à cette étape'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -2242,48 +2513,78 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           Scaffold.maybeOf(context)?.openDrawer();
         }
       },
-      onOpenIde: () {
-        AppToast.show(context, message: 'Session synchronisée avec Antigravity Desktop IDE');
+      isFullscreen: _isFullscreen,
+      onToggleFullscreen: () {
+        HapticFeedback.selectionClick();
+        setState(() {
+          _isFullscreen = !_isFullscreen;
+        });
       },
+      onToggleSearch: _toggleSearch,
+      isSearching: _isSearching,
+      isStreaming: _hasCurrentActiveStream,
+      hasRunningTasks: _runningBackgroundTasks.isNotEmpty,
+      hasWaitingApproval: _currentSessionApprovals.isNotEmpty,
+      isError: false,
     );
 
     return ZenithalCanvas(
-      child: Column(
-        children: [
-          connectivityBanner,
-          if (!hasKeyboard) breadcrumb,
-          SessionTopTabs(
-            activeTab: _currentTab,
-            onTabChanged: (tab) {
-              setState(() {
-                _activeArtifact = null;
-                _currentTab = tab;
-              });
-              if (tab == SessionTabType.review) {
-                _fetchVcsChanges();
-              }
-            },
-            filesChangedCount: _modifiedFiles.length,
-            hasPlan: _latestPlanText != null,
-            hasTasks: false,
-            runningTasksCount: _activeStreamCount,
-            artifactTabs: _artifacts,
-            activeArtifact: _activeArtifact,
-            onOpenArtifact: (art) => setState(() {
-              _activeArtifact = art;
-            }),
-            onNewTab: () {
-              final projs = widget.projects ?? [];
-              if (projs.length > 1) {
-                _showProjectSelector(context);
-              } else {
-                widget.onNewConversation?.call();
-              }
-            },
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 920),
+          child: Column(
+            children: [
+              connectivityBanner,
+          if (!hasKeyboard && (_isHeaderVisible || _isFullscreen)) breadcrumb,
+          AnimatedSize(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            child: _isSearching
+                ? _ChatSearchBar(
+                    controller: _searchController,
+                    matchCount: _searchMatches.length,
+                    currentIndex: _currentSearchMatchIndex,
+                    onQueryChanged: _onSearchQueryChanged,
+                    onNext: _nextSearchMatch,
+                    onPrev: _prevSearchMatch,
+                    onClose: _closeSearch,
+                  )
+                : const SizedBox.shrink(),
           ),
-          if (!hasKeyboard) ...[
-            _buildSyncStatusBadge(scheme),
-            _buildQuotaBadge(scheme),
+          if (!_isFullscreen && _isHeaderVisible) ...[
+            SessionTopTabs(
+              activeTab: _currentTab,
+              onTabChanged: (tab) {
+                setState(() {
+                  _activeArtifact = null;
+                  _currentTab = tab;
+                });
+                if (tab == SessionTabType.review) {
+                  _fetchVcsChanges();
+                }
+              },
+              filesChangedCount: _modifiedFiles.length,
+              hasPlan: _latestPlanText != null,
+              hasTasks: false,
+              runningTasksCount: _activeStreamCount,
+              artifactTabs: _artifacts,
+              activeArtifact: _activeArtifact,
+              onOpenArtifact: (art) => setState(() {
+                _activeArtifact = art;
+              }),
+              onNewTab: () {
+                final projs = widget.projects ?? [];
+                if (projs.length > 1) {
+                  _showProjectSelector(context);
+                } else {
+                  widget.onNewConversation?.call();
+                }
+              },
+            ),
+            if (!hasKeyboard) ...[
+              _buildSyncStatusBadge(scheme),
+              _buildQuotaBadge(scheme),
+            ],
           ],
           Expanded(
             child: Stack(
@@ -2355,15 +2656,37 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                 }
               },
             ),
+          if (_subagents.isNotEmpty)
+            SubagentTreeCard(
+              subagents: _subagents,
+              projectName: widget.activeProjectName,
+              sessionTitle: widget.activeSessionTitle,
+              onOpenFullTree: () {
+                SubagentsTreeSheet.show(
+                  context,
+                  api: widget.api,
+                  cascadeId: widget.activeSessionId,
+                  sessionTitle: widget.activeSessionTitle,
+                );
+              },
+              onSelectSubagent: (sub) {
+                SubagentDetailModal.show(
+                  context,
+                  agent: sub,
+                  api: widget.api,
+                  cascadeId: widget.activeSessionId,
+                  projectName: widget.activeProjectName,
+                  sessionTitle: widget.activeSessionTitle,
+                  onKill: () => _fetchSubagentsForSession(widget.activeSessionId),
+                );
+              },
+            ),
           if ((_sessionMessageQueues[widget.activeSessionId]?.isNotEmpty ?? false))
-            ConstrainedBox(
-              constraints: BoxConstraints(maxHeight: hasKeyboard ? 80 : 160),
-              child: QueuedMessagesCard(
-                queuedMessages: _sessionMessageQueues[widget.activeSessionId]!,
-                onSendNow: _handleQueueSendNow,
-                onEdit: _handleQueueEdit,
-                onDelete: _handleQueueDelete,
-              ),
+            QueuedMessagesCard(
+              queuedMessages: _sessionMessageQueues[widget.activeSessionId]!,
+              onSendNow: _handleQueueSendNow,
+              onEdit: _handleQueueEdit,
+              onDelete: _handleQueueDelete,
             ),
           if (_topActiveBanner != null)
             AppNotificationBanner(
@@ -2380,10 +2703,16 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             cascadeId: widget.activeSessionId,
             initialText: currentDraft,
             onDraftChanged: setDraft,
+            hasPlan: _latestPlanText != null,
+            onProceedPlan: () => _handleSendMessage('proceed'),
+            onRunTests: () => _handleSendMessage('Exécute les tests unitaires du projet'),
+            onViewDiff: () => setState(() => _currentTab = SessionTabType.review),
           ),
         ],
       ),
-    );
+    ),
+  ),
+);
   }
 
   void _handleStopGeneration() {
@@ -2532,27 +2861,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               ),
             ),
           _buildReminderBanners(),
-          if (_subagents.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: SubagentTreeCard(
-                subagents: _subagents,
-                onOpenFullTree: () {
-                  SubagentsTreeSheet.show(
-                    context,
-                    api: widget.api,
-                    cascadeId: widget.activeSessionId,
-                  );
-                },
-                onSelectSubagent: (sub) {
-                  SubagentsTreeSheet.show(
-                    context,
-                    api: widget.api,
-                    cascadeId: widget.activeSessionId,
-                  );
-                },
-              ),
-            ),
         ];
 
         final totalCount = headerWidgets.length + visibleList.length;
@@ -2598,8 +2906,21 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                 onProceedPlan: () => _handleSendMessage('Proceed', queued: false),
                 onViewPlan: () => setState(() => _currentTab = SessionTabType.plan),
                 onViewReview: () => setState(() => _currentTab = SessionTabType.review),
+                onOpenFile: (file) {
+                  final fileName = file.split(RegExp(r'[/\\]')).last;
+                  final matching = _modifiedFileList
+                      .where((f) => _pathsMatch(f.path, file))
+                      .firstOrNull;
+                  _openUnifiedDiffViewer(
+                    filePath: file,
+                    fileName: fileName,
+                    diffContent: matching?.diffContent,
+                  );
+                },
                 onStop: _handleStopGeneration,
                 onSwitchModel: _showModelSelector,
+                onEditPrompt: (text) => _chatInputKey.currentState?.setText(text),
+                onRevertStep: _handleRevertStep,
                 onResend: (m) {
                   final reqId = m.id.startsWith('pending-')
                       ? m.id.substring('pending-'.length)
@@ -2617,6 +2938,35 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                   );
                 },
               );
+
+              final semanticBubble = Semantics(
+                customSemanticsActions: {
+                  const CustomSemanticsAction(label: 'Citer ce message'): () {
+                    HapticFeedback.mediumImpact();
+                    _chatInputKey.currentState?.insertQuote(msg.text);
+                    AppToast.show(
+                      context,
+                      message: 'Message cité dans la barre de saisie',
+                      icon: Icons.format_quote_rounded,
+                      type: ToastType.info,
+                    );
+                  },
+                  const CustomSemanticsAction(label: 'Copier le texte'): () {
+                    HapticFeedback.lightImpact();
+                    Clipboard.setData(ClipboardData(text: msg.text));
+                    AppToast.show(
+                      context,
+                      message: 'Message copié dans le presse-papiers',
+                      icon: Icons.copy_outlined,
+                      type: ToastType.success,
+                    );
+                  },
+                },
+                child: bubbleWidget,
+              );
+
+              // Wrap individual bubbles in RepaintBoundary for 60/120fps streaming isolation
+              final isolatedBubble = RepaintBoundary(child: semanticBubble);
 
               // N'anime l'entrée que pour le dernier message en cours et uniquement si Reduce Motion est inactif
               if (isLatest && ctx.shouldAnimate) {
@@ -2636,14 +2986,14 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                         ),
                       );
                     },
-                    child: bubbleWidget,
+                    child: isolatedBubble,
                   ),
                 );
               }
 
               return Padding(
                 padding: const EdgeInsets.only(bottom: 16),
-                child: bubbleWidget,
+                child: isolatedBubble,
               );
             },
           ),
@@ -2652,131 +3002,109 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     }
   }
 
-  /// P5 : exécute une commande shell sur le workspace hôte via le daemon
-  /// (mode legacy send_command — aucun besoin de PTY pour git apply).
-  Future<void> _runWorkspaceCommand(String command) async {
+
+
+  Future<void> _fetchVcsChanges([String? forSessionId]) async {
     final api = widget.api;
     if (api == null) return;
-    try {
-      await api.sendCommand(command);
-    } catch (_) {
-      // Silencieux : le terminal / logs affichent déjà l'erreur côté daemon.
-    }
-  }
-
-  /// P5 : confirmation avant action groupée (accepter / rejeter tout).
-  Future<void> _confirmBulkAction({
-    required String title,
-    required String message,
-    required String confirmLabel,
-    required String command,
-  }) async {
-    final scheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainer,
-        title: Text(title, style: TextStyle(fontSize: 15, color: scheme.onSurface)),
-        content: Text(
-          message,
-          style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text('Annuler', style: TextStyle(color: scheme.onSurfaceVariant)),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: confirmLabel == 'Tout rejeter'
-                  ? AppColors.danger
-                  : scheme.primary,
-            ),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: Text(confirmLabel),
-          ),
-        ],
-      ),
-    );
-    if (ok == true) {
-      await _runWorkspaceCommand(command);
+    final targetSession = forSessionId ?? widget.activeSessionId;
+    if (targetSession.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              confirmLabel == 'Tout rejeter'
-                  ? 'Modifications rejetées — commande envoyée au workspace.'
-                  : 'Modifications acceptées — commande envoyée au workspace.',
-            ),
-            duration: const Duration(seconds: 2),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        setState(() {
+          _modifiedFileList.clear();
+          _modifiedFiles.clear();
+          _isVcsLoading = false;
+        });
       }
+      return;
     }
-  }
 
-  Future<void> _fetchVcsChanges() async {
-    final api = widget.api;
-    if (api == null) return;
-    if (_modifiedFileList.isEmpty && mounted) {
+    if (_modifiedFileList.isEmpty && mounted && targetSession == widget.activeSessionId) {
       setState(() => _isVcsLoading = true);
     }
+
     try {
       final ws = widget.workspacePath?.isNotEmpty == true
           ? widget.workspacePath
           : (widget.activeProjectName.isNotEmpty ? widget.activeProjectName : null);
 
-      // Priorité 1 : get_context.modifiedFiles (parsés du transcript) —
-      // même source que le badge filesChangedCount. Toujours cohérent.
       final ctx = await api.getContext(
-        cascadeId: widget.activeSessionId.isNotEmpty ? widget.activeSessionId : null,
+        cascadeId: targetSession,
         workspacePath: ws,
       );
       final ctxFiles = ctx['modifiedFiles'];
       final list = <SessionModifiedFile>[];
+      final targetModFiles = _sessionModifiedFiles.putIfAbsent(targetSession, () => {});
+
       if (ctxFiles is List && ctxFiles.isNotEmpty) {
         for (final item in ctxFiles) {
           if (item is! String || item.isEmpty) continue;
           var clean = item.replaceAll('\\', '/');
           if (clean.startsWith('file:///')) clean = clean.substring(8);
           if (clean.startsWith('file://')) clean = clean.substring(7);
-          if (!_modifiedFiles.contains(clean)) _modifiedFiles.add(clean);
+          if (!targetModFiles.contains(clean)) targetModFiles.add(clean);
           if (!list.any((f) => f.path == clean)) {
             list.add(SessionModifiedFile(path: clean, additions: 1, deletions: 0));
           }
         }
       }
 
-      // Fallback : git status (staged + working tree)
-      if (list.isEmpty) {
-        final res = await api.getVcsState(workspacePath: ws);
-        for (final key in const ['workingDirectoryChanges', 'stagedChanges']) {
-          final entries = res[key];
-          if (entries is List) {
-            for (final item in entries) {
-              String path = '';
-              if (item is String && item.isNotEmpty) {
-                path = item;
-              } else if (item is Map && item['uri'] is String) {
-                path = item['uri'] as String;
-              }
-              if (path.isNotEmpty) {
-                var clean = path.replaceAll('\\', '/');
-                if (clean.startsWith('file:///')) clean = clean.substring(8);
-                if (clean.startsWith('file://')) clean = clean.substring(7);
-                if (!_modifiedFiles.contains(clean)) _modifiedFiles.add(clean);
-                if (!list.any((f) => f.path == clean)) {
-                  list.add(SessionModifiedFile(path: clean, additions: 1, deletions: 0));
+      // Enrichir avec les diffs réels et comptes d'additions / suppressions (getTurnDiff)
+      try {
+        final diffRes = await api.getTurnDiff(cascadeId: targetSession);
+        final fileDiffs = diffRes['fileDiffs'];
+        if (fileDiffs is List) {
+          for (final fd in fileDiffs) {
+            if (fd is Map) {
+              final p = (fd['path'] as String? ?? '').replaceAll('\\', '/');
+              final d = fd['diff'];
+              if (d is Map) {
+                final orig = d['originalContents'] as String? ?? '';
+                final mod = d['modifiedContents'] as String? ?? '';
+                final adds = d['additions'] as int? ?? (d['totalAdditions'] as int? ?? 0);
+                final dels = d['deletions'] as int? ?? (d['totalDeletions'] as int? ?? 0);
+                final fileDiff = _buildUnifiedDiffFromStrings(p.split('/').last, orig, mod);
+                final idx = list.indexWhere((f) => _pathsMatch(f.path, p));
+                if (idx >= 0) {
+                  list[idx] = SessionModifiedFile(
+                    path: list[idx].path,
+                    additions: adds > 0 ? adds : list[idx].additions,
+                    deletions: dels > 0 ? dels : list[idx].deletions,
+                    diffContent: fileDiff.isNotEmpty ? fileDiff : list[idx].diffContent,
+                  );
+                } else if (p.isNotEmpty) {
+                  targetModFiles.add(p);
+                  list.add(SessionModifiedFile(
+                    path: p,
+                    additions: adds > 0 ? adds : 1,
+                    deletions: dels,
+                    diffContent: fileDiff.isNotEmpty ? fileDiff : null,
+                  ));
                 }
               }
             }
           }
         }
+      } catch (_) {}
+
+      _sessionModifiedFileList[targetSession] = list;
+
+      // Update the last assistant message's filesChanged / additions / deletions
+      final buf = _sessionMessages[targetSession];
+      if (buf != null && buf.isNotEmpty && list.isNotEmpty) {
+        final totalAdded = list.fold(0, (s, f) => s + f.additions);
+        final totalRemoved = list.fold(0, (s, f) => s + f.deletions);
+        final lastAssistantIdx = buf.lastIndexWhere((m) => m.sender != 'user');
+        if (lastAssistantIdx >= 0) {
+          buf[lastAssistantIdx] = buf[lastAssistantIdx].copyWith(
+            filesChanged: list.map((f) => f.path).toList(),
+            additions: totalAdded,
+            deletions: totalRemoved,
+          );
+        }
       }
 
-      if (mounted) {
+      if (mounted && targetSession == widget.activeSessionId) {
         setState(() {
           _modifiedFileList
             ..clear()
@@ -2784,7 +3112,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         });
       }
     } catch (_) {} finally {
-      if (mounted && _isVcsLoading) {
+      if (mounted && _isVcsLoading && targetSession == widget.activeSessionId) {
         setState(() => _isVcsLoading = false);
       }
     }
@@ -2825,20 +3153,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           fileName: firstName,
         );
       },
-      onAcceptAll: () => _confirmBulkAction(
-        title: 'Accepter toutes les modifications ?',
-        message:
-            'Les changements de cette session seront appliqués au workspace (git apply).',
-        confirmLabel: 'Tout accepter',
-        command: 'git apply --3way',
-      ),
-      onDiscardAll: () => _confirmBulkAction(
-        title: 'Rejeter toutes les modifications ?',
-        message:
-            'Les changements de cette session seront annulés dans le workspace (git checkout).',
-        confirmLabel: 'Tout rejeter',
-        command: 'git checkout -- .',
-      ),
     );
   }
 
@@ -2854,36 +3168,188 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     );
   }
 
-  String _buildUnifiedDiffFromStrings(String path, String orig, String mod) {
-    if (orig == mod) {
-      final lines = mod.split('\n');
+  bool _pathsMatch(String a, String b) {
+    if (a.isEmpty || b.isEmpty) return false;
+    final cleanA = a.replaceAll('\\', '/').toLowerCase();
+    final cleanB = b.replaceAll('\\', '/').toLowerCase();
+    if (cleanA == cleanB) return true;
+    if (cleanA.endsWith('/$cleanB') || cleanB.endsWith('/$cleanA')) return true;
+    final nameA = cleanA.split('/').last;
+    final nameB = cleanB.split('/').last;
+    return nameA.isNotEmpty && nameA == nameB;
+  }
+
+  String _buildUnifiedDiffFromStrings(String path, String orig, String mod, {int contextLines = 3}) {
+    final cleanOrig = orig.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    final cleanMod = mod.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    if (cleanOrig == cleanMod) {
+      return '';
+    }
+
+    final a = cleanOrig.isEmpty ? <String>[] : cleanOrig.split('\n');
+    final b = cleanMod.isEmpty ? <String>[] : cleanMod.split('\n');
+
+    if (a.isEmpty) {
       final buf = StringBuffer();
-      buf.writeln('--- a/$path');
+      buf.writeln('--- /dev/null');
       buf.writeln('+++ b/$path');
-      buf.writeln('@@ -1,${lines.length} +1,${lines.length} @@');
-      for (final l in lines) {
-        buf.writeln(' $l');
+      buf.writeln('@@ -0,0 +1,${b.length} @@');
+      for (final l in b) {
+        buf.writeln('+$l');
       }
       return buf.toString();
     }
-    final origLines = orig.isEmpty ? <String>[] : orig.split('\n');
-    final modLines = mod.isEmpty ? <String>[] : mod.split('\n');
+
+    if (b.isEmpty) {
+      final buf = StringBuffer();
+      buf.writeln('--- a/$path');
+      buf.writeln('+++ /dev/null');
+      buf.writeln('@@ -1,${a.length} +0,0 @@');
+      for (final l in a) {
+        buf.writeln('-$l');
+      }
+      return buf.toString();
+    }
+
+    // Dynamic programming LCS sur la section modifiée (après élimination des préfixes/suffixes communs)
+    int start = 0;
+    while (start < a.length && start < b.length && a[start] == b[start]) {
+      start++;
+    }
+
+    int endA = a.length - 1;
+    int endB = b.length - 1;
+    while (endA >= start && endB >= start && a[endA] == b[endB]) {
+      endA--;
+      endB--;
+    }
+
+    final subA = a.sublist(start, endA + 1);
+    final subB = b.sublist(start, endB + 1);
+    final n = subA.length;
+    final m = subB.length;
+
+    final dp = List.generate(n + 1, (_) => List.filled(m + 1, 0));
+    for (int i = 0; i < n; i++) {
+      for (int j = 0; j < m; j++) {
+        if (subA[i] == subB[j]) {
+          dp[i + 1][j + 1] = dp[i][j] + 1;
+        } else {
+          dp[i + 1][j + 1] = dp[i + 1][j] > dp[i][j + 1] ? dp[i + 1][j] : dp[i][j + 1];
+        }
+      }
+    }
+
+    int i = n;
+    int j = m;
+    final middleOps = <_UnifiedDiffOp>[];
+    while (i > 0 || j > 0) {
+      if (i > 0 && j > 0 && subA[i - 1] == subB[j - 1]) {
+        middleOps.add(_UnifiedDiffOp(_UnifiedDiffOpType.equal, subA[i - 1]));
+        i--;
+        j--;
+      } else if (j > 0 && (i == 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+        middleOps.add(_UnifiedDiffOp(_UnifiedDiffOpType.insert, subB[j - 1]));
+        j--;
+      } else {
+        middleOps.add(_UnifiedDiffOp(_UnifiedDiffOpType.delete, subA[i - 1]));
+        i--;
+      }
+    }
+
+    final allOps = <_UnifiedDiffOp>[];
+    for (int k = 0; k < start; k++) {
+      allOps.add(_UnifiedDiffOp(_UnifiedDiffOpType.equal, a[k]));
+    }
+    allOps.addAll(middleOps.reversed);
+    for (int k = endA + 1; k < a.length; k++) {
+      allOps.add(_UnifiedDiffOp(_UnifiedDiffOpType.equal, a[k]));
+    }
+
+    final changeIndices = <int>[];
+    for (int idx = 0; idx < allOps.length; idx++) {
+      if (allOps[idx].type != _UnifiedDiffOpType.equal) {
+        changeIndices.add(idx);
+      }
+    }
+
+    if (changeIndices.isEmpty) {
+      return '';
+    }
+
+    final hunkRanges = <List<int>>[];
+    int rangeStart = changeIndices.first;
+    int rangeEnd = changeIndices.first;
+
+    for (int c = 1; c < changeIndices.length; c++) {
+      final idx = changeIndices[c];
+      if (idx - rangeEnd <= 2 * contextLines) {
+        rangeEnd = idx;
+      } else {
+        hunkRanges.add([rangeStart, rangeEnd]);
+        rangeStart = idx;
+        rangeEnd = idx;
+      }
+    }
+    hunkRanges.add([rangeStart, rangeEnd]);
+
+    final oldLineNums = List<int>.filled(allOps.length + 1, 1);
+    final newLineNums = List<int>.filled(allOps.length + 1, 1);
+    int curOld = 1;
+    int curNew = 1;
+    for (int idx = 0; idx < allOps.length; idx++) {
+      oldLineNums[idx] = curOld;
+      newLineNums[idx] = curNew;
+      final op = allOps[idx];
+      if (op.type == _UnifiedDiffOpType.equal) {
+        curOld++;
+        curNew++;
+      } else if (op.type == _UnifiedDiffOpType.delete) {
+        curOld++;
+      } else if (op.type == _UnifiedDiffOpType.insert) {
+        curNew++;
+      }
+    }
+    oldLineNums[allOps.length] = curOld;
+    newLineNums[allOps.length] = curNew;
+
     final buf = StringBuffer();
     buf.writeln('--- a/$path');
     buf.writeln('+++ b/$path');
-    buf.writeln('@@ -1,${origLines.length} +1,${modLines.length} @@');
-    for (final l in origLines) {
-      if (!modLines.contains(l)) {
-        buf.writeln('-$l');
+
+    for (final hr in hunkRanges) {
+      final hStart = (hr[0] - contextLines).clamp(0, allOps.length);
+      final hEnd = (hr[1] + contextLines + 1).clamp(0, allOps.length);
+
+      final hunkOps = allOps.sublist(hStart, hEnd);
+      int oldLinesCount = 0;
+      int newLinesCount = 0;
+      for (final op in hunkOps) {
+        if (op.type == _UnifiedDiffOpType.equal) {
+          oldLinesCount++;
+          newLinesCount++;
+        } else if (op.type == _UnifiedDiffOpType.delete) {
+          oldLinesCount++;
+        } else if (op.type == _UnifiedDiffOpType.insert) {
+          newLinesCount++;
+        }
+      }
+
+      final oldStartLine = oldLineNums[hStart];
+      final newStartLine = newLineNums[hStart];
+
+      buf.writeln('@@ -$oldStartLine,$oldLinesCount +$newStartLine,$newLinesCount @@');
+      for (final op in hunkOps) {
+        if (op.type == _UnifiedDiffOpType.equal) {
+          buf.writeln(' ${op.line}');
+        } else if (op.type == _UnifiedDiffOpType.delete) {
+          buf.writeln('-${op.line}');
+        } else if (op.type == _UnifiedDiffOpType.insert) {
+          buf.writeln('+${op.line}');
+        }
       }
     }
-    for (final l in modLines) {
-      if (!origLines.contains(l)) {
-        buf.writeln('+$l');
-      } else {
-        buf.writeln(' $l');
-      }
-    }
+
     return buf.toString();
   }
 
@@ -2906,7 +3372,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             if (fd is Map) {
               final p = (fd['path'] as String? ?? '').replaceAll('\\', '/');
               final target = (effectivePath ?? '').replaceAll('\\', '/');
-              if (target.isNotEmpty && (p == target || p.endsWith(target) || target.endsWith(p))) {
+              if (_pathsMatch(p, target)) {
                 final d = fd['diff'];
                 if (d is Map) {
                   final orig = d['originalContents'] as String? ?? '';
@@ -2919,32 +3385,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               }
             }
           }
-        }
-      } catch (_) {}
-    }
-
-    // 2. Tenter la lecture directe du fichier avec le workspacePath
-    if (diff.isEmpty && effectivePath != null && widget.api != null) {
-      try {
-        final ws = widget.workspacePath?.isNotEmpty == true
-            ? widget.workspacePath
-            : (widget.activeProjectName.isNotEmpty ? widget.activeProjectName : null);
-        final res = await widget.api!.readFile(
-          effectivePath,
-          workspacePath: ws,
-          cascadeId: widget.activeSessionId.isNotEmpty ? widget.activeSessionId : null,
-        );
-        final fileContent = res['content'] as String? ?? '';
-        if (fileContent.isNotEmpty) {
-          final lines = fileContent.split('\n');
-          final buf = StringBuffer();
-          buf.writeln('--- a/$effectiveName');
-          buf.writeln('+++ b/$effectiveName');
-          buf.writeln('@@ -1,${lines.length} +1,${lines.length} @@');
-          for (final l in lines) {
-            buf.writeln(' $l');
-          }
-          diff = buf.toString();
         }
       } catch (_) {}
     }
@@ -3161,10 +3601,13 @@ class _MessageBubble extends StatelessWidget {
   final VoidCallback? onStop;
   final ValueChanged<ChatMessage>? onResend;
   final VoidCallback? onSwitchModel;
+  final ValueChanged<String>? onEditPrompt;
+  final ValueChanged<String>? onOpenFile;
 
   /// P5 : tap sur un lien markdown file:/// → ouvre le fichier distant.
   final LocalFileTap? onLocalFile;
   final ValueChanged<String>? onOpenArtifact;
+  final ValueChanged<ChatMessage>? onRevertStep;
 
   const _MessageBubble({
     required this.message,
@@ -3180,6 +3623,9 @@ class _MessageBubble extends StatelessWidget {
     this.onStop,
     this.onResend,
     this.onSwitchModel,
+    this.onEditPrompt,
+    this.onOpenFile,
+    this.onRevertStep,
   });
 
   @override
@@ -3189,25 +3635,126 @@ class _MessageBubble extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     if (isUser) {
+      final parsed = _extractMediaAndCleanText(message.text);
+      final hasMedia = parsed.media.isNotEmpty;
+
       return RepaintBoundary(
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 16),
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerLow,
-            borderRadius: BorderRadius.circular(AppRadius.lg),
-            border: Border.all(
-              color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.5),
-              width: 1,
+        child: GestureDetector(
+          onDoubleTap: onEditPrompt != null ? () => onEditPrompt!(message.text) : null,
+          onLongPress: () {
+            HapticFeedback.lightImpact();
+            Clipboard.setData(ClipboardData(text: message.text));
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Prompt copié dans le presse-papiers'),
+                duration: Duration(seconds: 1),
+              ),
+            );
+          },
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerLow,
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(AppRadius.lg),
+                bottomLeft: Radius.circular(AppRadius.lg),
+                bottomRight: Radius.circular(AppRadius.xs),
+                topRight: Radius.circular(AppRadius.lg),
+              ),
+              border: Border(
+                left: BorderSide(
+                  color: isDark ? AppColors.accentBlue.withValues(alpha: 0.3) : scheme.primary.withValues(alpha: 0.3),
+                  width: 3,
+                ),
+              ),
             ),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: SelectableText(
-            message.text,
-            style: TextStyle(
-              fontSize: 13.5,
-              height: 1.4,
-              color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (hasMedia) ...[
+                  _MediaGalleryRow(
+                    media: parsed.media,
+                    api: api,
+                    workspacePath: workspacePath,
+                    onLocalFile: onLocalFile,
+                  ),
+                  if (parsed.cleanText.isNotEmpty) const SizedBox(height: 10),
+                ],
+                if (parsed.cleanText.isNotEmpty)
+                  MarkdownBubble(
+                    text: parsed.cleanText,
+                    isStreaming: false,
+                    api: api,
+                    workspacePath: workspacePath,
+                    onLocalFile: onLocalFile,
+                  ),
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    if (message.timestamp.isNotEmpty)
+                      Text(
+                        message.timestamp,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isDark ? AppColors.inkMuted : scheme.outline,
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                    const SizedBox(width: 8),
+                    // Bouton Copier
+                    Tooltip(
+                      message: 'Copier le message',
+                      child: InkWell(
+                        onTap: () {
+                          HapticFeedback.lightImpact();
+                          Clipboard.setData(ClipboardData(text: message.text));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Prompt copié dans le presse-papiers'),
+                              duration: Duration(seconds: 1),
+                            ),
+                          );
+                        },
+                        borderRadius: BorderRadius.circular(4),
+                        child: Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: Icon(
+                            Icons.copy_rounded,
+                            size: 14,
+                            color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (onRevertStep != null) ...[
+                      const SizedBox(width: 4),
+                      // Bouton Revert / Undo changes up to this point
+                      Tooltip(
+                        message: 'Undo changes up to this point',
+                        child: InkWell(
+                          onTap: () {
+                            HapticFeedback.lightImpact();
+                            onRevertStep!(message);
+                          },
+                          borderRadius: BorderRadius.circular(4),
+                          child: Padding(
+                            padding: const EdgeInsets.all(4),
+                            child: Icon(
+                              Icons.undo_rounded,
+                              size: 15,
+                              color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
             ),
           ),
         ),
@@ -3232,38 +3779,48 @@ class _MessageBubble extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (message.modelLabel != null && message.modelLabel!.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
-                  decoration: BoxDecoration(
-                    color: scheme.surfaceContainerHighest.withValues(alpha: 0.8),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: scheme.outlineVariant, width: 0.6),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.auto_awesome,
-                        size: 11,
-                        color: scheme.primary,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        message.modelLabel!,
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontFamily: 'monospace',
-                          fontWeight: FontWeight.w600,
-                          color: scheme.primary,
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AntigravityLogo.avatar(radius: 8, showGlow: true),
+                  const SizedBox(width: 6),
+                  if (message.modelLabel != null && message.modelLabel!.isNotEmpty)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                      decoration: BoxDecoration(
+                        gradient: AppGradients.cardCool(isDark: isDark),
+                        borderRadius: BorderRadius.circular(AppRadius.pill),
+                        border: Border.all(
+                          color: const Color(0xFF3186FF).withValues(alpha: isDark ? 0.35 : 0.25),
+                          width: 0.8,
                         ),
                       ),
-                    ],
-                  ),
-                ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.auto_awesome,
+                            size: 11,
+                            color: scheme.primary,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            message.modelLabel!,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontFamily: 'monospace',
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? AppColors.inkPrimary : scheme.primary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
               ),
+            ),
             if (hasThought || message.isStreaming) ...[
               ExecutionProgressView(
                 messageId: message.id,
@@ -3382,6 +3939,7 @@ class _MessageBubble extends StatelessWidget {
                     additions: message.additions,
                     deletions: message.deletions,
                     onReview: onViewReview ?? () {},
+                    onOpenFile: onOpenFile,
                   ),
                 ),
             ],
@@ -3522,6 +4080,108 @@ class _MessageBubble extends StatelessWidget {
   }
 }
 
+class _ChatSearchBar extends StatelessWidget {
+  final TextEditingController controller;
+  final int matchCount;
+  final int currentIndex;
+  final ValueChanged<String> onQueryChanged;
+  final VoidCallback onNext;
+  final VoidCallback onPrev;
+  final VoidCallback onClose;
+
+  const _ChatSearchBar({
+    required this.controller,
+    required this.matchCount,
+    required this.currentIndex,
+    required this.onQueryChanged,
+    required this.onNext,
+    required this.onPrev,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
+        border: Border(
+          bottom: BorderSide(
+            color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.5),
+            width: 1,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.search_rounded,
+            size: 16,
+            color: isDark ? AppColors.accentBlue : scheme.primary,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              key: const Key('chat-search-input'),
+              controller: controller,
+              autofocus: true,
+              style: TextStyle(fontSize: 13, color: scheme.onSurface),
+              decoration: InputDecoration(
+                hintText: 'Rechercher dans cette session...',
+                hintStyle: TextStyle(
+                  fontSize: 12.5,
+                  color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                ),
+                isDense: true,
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(vertical: 6),
+              ),
+              onChanged: onQueryChanged,
+            ),
+          ),
+          if (controller.text.isNotEmpty) ...[
+            Text(
+              matchCount > 0 ? '${currentIndex + 1} / $matchCount' : '0 résultat',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: matchCount > 0
+                    ? (isDark ? AppColors.accentBlue : scheme.primary)
+                    : scheme.error,
+              ),
+            ),
+            const SizedBox(width: 4),
+            IconButton(
+              key: const Key('search-prev-btn'),
+              icon: const Icon(Icons.keyboard_arrow_up_rounded, size: 18),
+              onPressed: matchCount > 1 ? onPrev : null,
+              visualDensity: VisualDensity.compact,
+              tooltip: 'Résultat précédent',
+            ),
+            IconButton(
+              key: const Key('search-next-btn'),
+              icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 18),
+              onPressed: matchCount > 1 ? onNext : null,
+              visualDensity: VisualDensity.compact,
+              tooltip: 'Résultat suivant',
+            ),
+          ],
+          IconButton(
+            key: const Key('close-search-btn'),
+            icon: const Icon(Icons.close_rounded, size: 16),
+            onPressed: onClose,
+            visualDensity: VisualDensity.compact,
+            tooltip: 'Fermer la recherche',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _JumpToBottomButton extends StatelessWidget {
   final int count;
   final VoidCallback onTap;
@@ -3601,24 +4261,9 @@ class _WelcomeEmptyState extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(AppRadius.lg),
-            border: Border.all(
-              color: isDark ? AppColors.borderSubtle : scheme.outlineVariant,
-              width: 1,
-            ),
-          ),
-          child: Center(
-            child: Icon(
-              Icons.terminal_rounded,
-              size: 26,
-              color: scheme.primary,
-            ),
-          ),
+        const AntigravityLogo(
+          size: 64,
+          showGlow: true,
         ),
         const SizedBox(height: 18),
         Text(
@@ -3920,3 +4565,278 @@ class _ArtifactTabContentState extends State<_ArtifactTabContent> {
     );
   }
 }
+
+class _ExtractedMedia {
+  final String path;
+  final String name;
+  final bool isImage;
+  final String? dataUri;
+
+  const _ExtractedMedia({
+    required this.path,
+    required this.name,
+    this.isImage = true,
+    this.dataUri,
+  });
+}
+
+({List<_ExtractedMedia> media, String cleanText}) _extractMediaAndCleanText(String rawText) {
+  final mediaList = <_ExtractedMedia>[];
+  var text = rawText;
+
+  // 1. Markdown images: ![alt](url)
+  final imageRe = RegExp(r'!\[([^\]]*)\]\(([^)\s]+)\)');
+  for (final match in imageRe.allMatches(text)) {
+    final alt = match.group(1) ?? '';
+    final url = match.group(2) ?? '';
+    final isDataUri = url.startsWith('data:image/');
+    final name = alt.isNotEmpty ? alt : (isDataUri ? 'image.png' : url.split(RegExp(r'[\\/]')).last);
+    mediaList.add(_ExtractedMedia(
+      path: url,
+      name: name,
+      isImage: true,
+      dataUri: isDataUri ? url : null,
+    ));
+  }
+  text = text.replaceAll(imageRe, '').trim();
+
+  // 2. Bracketed attachment tags: [Images jointes: ...], [Fichier: ...]
+  final attachRe = RegExp(r'\[(Images? jointes?|Image|Fichier|File|Pièce jointe|Piece jointe):\s*([^\]]+)\]', caseSensitive: false);
+  for (final match in attachRe.allMatches(text)) {
+    final label = match.group(1) ?? 'Image';
+    final pathsStr = match.group(2) ?? '';
+    final paths = pathsStr.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty);
+    for (final p in paths) {
+      final cleanP = p.startsWith('file://') ? p.substring(7) : p;
+      final name = cleanP.split(RegExp(r'[\\/]')).last;
+      final lower = cleanP.toLowerCase();
+      final isImg = lower.endsWith('.png') ||
+          lower.endsWith('.jpg') ||
+          lower.endsWith('.jpeg') ||
+          lower.endsWith('.gif') ||
+          lower.endsWith('.webp') ||
+          cleanP.startsWith('data:image/');
+      mediaList.add(_ExtractedMedia(
+        path: p,
+        name: name.isNotEmpty ? name : label,
+        isImage: isImg,
+        dataUri: cleanP.startsWith('data:image/') ? cleanP : null,
+      ));
+    }
+  }
+  text = text.replaceAll(attachRe, '').trim();
+
+  return (media: mediaList, cleanText: text);
+}
+
+class _MediaGalleryRow extends StatelessWidget {
+  final List<_ExtractedMedia> media;
+  final DaemonApi? api;
+  final String workspacePath;
+  final LocalFileTap? onLocalFile;
+
+  const _MediaGalleryRow({
+    required this.media,
+    this.api,
+    this.workspacePath = '',
+    this.onLocalFile,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: media.map((item) => _MediaThumbnailItem(
+        item: item,
+        api: api,
+        workspacePath: workspacePath,
+        onTap: () {
+          if (onLocalFile != null) {
+            var p = item.path;
+            if (p.startsWith('file:///')) {
+              p = p.substring(8);
+            } else if (p.startsWith('file://')) {
+              p = p.substring(7);
+            }
+            onLocalFile!(p);
+          }
+        },
+      )).toList(),
+    );
+  }
+}
+
+class _MediaThumbnailItem extends StatefulWidget {
+  final _ExtractedMedia item;
+  final DaemonApi? api;
+  final String workspacePath;
+  final VoidCallback onTap;
+
+  const _MediaThumbnailItem({
+    required this.item,
+    this.api,
+    this.workspacePath = '',
+    required this.onTap,
+  });
+
+  @override
+  State<_MediaThumbnailItem> createState() => _MediaThumbnailItemState();
+}
+
+class _MediaThumbnailItemState extends State<_MediaThumbnailItem> {
+  static final Map<String, Uint8List> _thumbnailMemoryCache = {};
+  Uint8List? _bytes;
+  bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadThumbnail();
+  }
+
+  void _loadThumbnail() async {
+    final cacheKey = widget.item.dataUri ?? widget.item.path;
+    if (_thumbnailMemoryCache.containsKey(cacheKey)) {
+      setState(() => _bytes = _thumbnailMemoryCache[cacheKey]);
+      return;
+    }
+
+    if (widget.item.dataUri != null) {
+      try {
+        final comma = widget.item.dataUri!.indexOf(',');
+        if (comma != -1) {
+          final b = base64Decode(widget.item.dataUri!.substring(comma + 1));
+          _thumbnailMemoryCache[cacheKey] = b;
+          setState(() {
+            _bytes = b;
+          });
+        }
+      } catch (_) {}
+      return;
+    }
+
+    var p = widget.item.path;
+    if (p.startsWith('file:///')) {
+      p = p.substring(8);
+    } else if (p.startsWith('file://')) {
+      p = p.substring(7);
+    }
+
+    // Try reading directly from local filesystem if accessible
+    try {
+      final f = File(p);
+      if (f.existsSync()) {
+        final b = await f.readAsBytes();
+        _thumbnailMemoryCache[cacheKey] = b;
+        if (mounted) setState(() => _bytes = b);
+        return;
+      }
+    } catch (_) {}
+
+    // Otherwise load via Daemon RPC
+    if (widget.api != null && widget.item.isImage) {
+      if (mounted) setState(() => _isLoading = true);
+      try {
+        final res = await widget.api!.readFile(p, workspacePath: widget.workspacePath);
+        final b64 = res['base64Data'] as String?;
+        if (b64 != null && b64.isNotEmpty && mounted) {
+          final b = base64Decode(b64);
+          _thumbnailMemoryCache[cacheKey] = b;
+          setState(() {
+            _bytes = b;
+            _isLoading = false;
+          });
+        }
+      } catch (_) {
+        if (mounted) setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return InkWell(
+      onTap: widget.onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.6),
+            width: 1,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Thumbnail preview box
+            Container(
+              width: 76,
+              height: 76,
+              color: isDark ? const Color(0xFF141518) : scheme.surfaceContainerLow,
+              child: _bytes != null
+                  ? Image.memory(
+                      _bytes!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => _buildPlaceholder(scheme),
+                    )
+                  : (_isLoading
+                      ? Center(
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.5,
+                              valueColor: AlwaysStoppedAnimation(scheme.primary),
+                            ),
+                          ),
+                        )
+                      : _buildPlaceholder(scheme)),
+            ),
+            // Filename label chip
+            Container(
+              width: 76,
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+              color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerHighest,
+              child: Text(
+                widget.item.name,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlaceholder(ColorScheme scheme) {
+    return Icon(
+      widget.item.isImage ? Icons.image_outlined : Icons.insert_drive_file_outlined,
+      size: 24,
+      color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
+    );
+  }
+}
+
+enum _UnifiedDiffOpType { equal, insert, delete }
+
+class _UnifiedDiffOp {
+  final _UnifiedDiffOpType type;
+  final String line;
+  const _UnifiedDiffOp(this.type, this.line);
+}
+

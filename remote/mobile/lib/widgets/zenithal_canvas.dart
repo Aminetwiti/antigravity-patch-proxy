@@ -32,34 +32,41 @@ class ZenithalCanvas extends StatelessWidget {
       ),
       child: Stack(
         children: [
-          // Blue orb — top right (like the AGY logo's primary blue ellipse)
-          Positioned(
-            top: -80,
-            right: -60,
-            width: 280,
-            height: 280,
-            child: IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: AppGradients.orbBlue(isDark: true),
+          // RepaintBoundary isolates background atmospheric rendering from active child rebuilds
+          RepaintBoundary(
+            child: Stack(
+              children: [
+                // Blue orb — top right (like the AGY logo's primary blue ellipse)
+                Positioned(
+                  top: -80,
+                  right: -60,
+                  width: 280,
+                  height: 280,
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: AppGradients.orbBlue(isDark: true),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-            ),
-          ),
-          // Green orb — bottom left (like the AGY logo's green ellipse)
-          Positioned(
-            bottom: -100,
-            left: -70,
-            width: 260,
-            height: 260,
-            child: IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: AppGradients.orbGreen(isDark: true),
+                // Green orb — bottom left (like the AGY logo's green ellipse)
+                Positioned(
+                  bottom: -100,
+                  left: -70,
+                  width: 260,
+                  height: 260,
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: AppGradients.orbGreen(isDark: true),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
           ),
           child,
