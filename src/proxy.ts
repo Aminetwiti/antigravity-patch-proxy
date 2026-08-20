@@ -1483,6 +1483,10 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
             );
 
             const googleJson = JSON.parse(googleBody) as Record<string, unknown>;
+            // DEBUG: dump raw upstream fetchAvailableModels response for diagnosis
+            fs.promises
+              .writeFile(path.join(os.tmpdir(), 'ag-fetchAvailableModels-dump.json'), JSON.stringify(googleJson, null, 2))
+              .catch(() => {});
             const customModels = loadCustomModels();
 
             log.info(`[Proxy] Loaded custom models count: ${customModels.length}`);

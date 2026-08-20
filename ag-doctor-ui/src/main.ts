@@ -1450,8 +1450,6 @@ ipcMain.handle('ag:test-model', async (_evt, name: string) => {
 // (Separate from main Antigravity proxy on <MAIN_PROXY_PORT> to avoid port conflicts)
 // ───────────────────────────────────────────────────────────────────────��─────
 
-const STUB_PORT = parseInt(process.env.AG_PROXY_STUB_PORT || '51999', 10);
-
 /**
  * Check if the main Antigravity proxy port is already in use.
  * Used to warn the user when ag-doctor-ui stub might conflict.
@@ -1509,6 +1507,7 @@ ipcMain.handle('ag:proxy:start-stub', async () => {
 
 // NOTE: 'ag:proxy:status' handler is already registered above (line ~591) via proxyManager.getStatus().
 
+/**
  * Check if the main Antigravity proxy port is occupied.
  * Useful to detect conflicts when launching Antigravity.
  */
