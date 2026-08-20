@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/antigravity/remote-daemon/pkg/connectrpc"
 )
 
 // C1 — idempotence : un requestId déjà traité ne rejoue pas le tour. Le mobile
@@ -150,6 +152,10 @@ func (b *blockingStreamClient) SendMessageStream(cascadeID, text string, onFrame
 	return nil
 }
 func (b *blockingStreamClient) SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error, noTools ...bool) error {
+	<-b.release
+	return nil
+}
+func (b *blockingStreamClient) SendMessageStreamModelWithMedia(cascadeID, text, modelUID string, modelEnum uint64, media []connectrpc.MediaAttachment, onFrame func([]byte) error, noTools ...bool) error {
 	<-b.release
 	return nil
 }

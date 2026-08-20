@@ -34,7 +34,7 @@ void main() {
                 ChatInputBar(
                   projectName: 'MyProject',
                   isConnected: true,
-                  onSend: (text, {bool queued = false, String? modelUID, int? modelEnum, List<String>? images, String? base64Data, String? fileName}) {},
+                  onSend: (text, {bool queued = false, String? modelUID, int? modelEnum, List<String>? images, String? base64Data, String? fileName, List<Map<String, dynamic>>? media}) {},
                 ),
               ],
             ),

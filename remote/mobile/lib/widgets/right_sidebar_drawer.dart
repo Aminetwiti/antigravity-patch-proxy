@@ -19,6 +19,7 @@ class RightSidebarDrawer extends StatefulWidget {
   final int uploadsCount;
   final int backgroundTasksCount;
   final int scheduledTasksCount;
+  final int mcpServersCount;
 
   const RightSidebarDrawer({
     super.key,
@@ -31,6 +32,7 @@ class RightSidebarDrawer extends StatefulWidget {
     this.uploadsCount = 0,
     this.backgroundTasksCount = 0,
     this.scheduledTasksCount = 0,
+    this.mcpServersCount = 0,
   });
 
   @override
@@ -53,6 +55,29 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
   bool _isLoadingWorktrees = false;
   List<Map<String, dynamic>> _worktrees = [];
   bool _worktreesExpanded = false;
+  int _mcpCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchInitialCounts();
+  }
+
+  Future<void> _fetchInitialCounts() async {
+    if (widget.api == null) return;
+    try {
+      final mcp = await widget.api!.getMcpServers();
+      final wt = await widget.api!.listGitWorktrees(
+        workspacePath: widget.workspacePath.isNotEmpty ? widget.workspacePath : null,
+      );
+      if (mounted) {
+        setState(() {
+          _mcpCount = mcp.length;
+          _worktrees = wt;
+        });
+      }
+    } catch (_) {}
+  }
 
   @override
   void didUpdateWidget(covariant RightSidebarDrawer oldWidget) {
@@ -68,6 +93,7 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
         _filesChangedExpanded = false;
         _worktreesExpanded = false;
       });
+      _fetchInitialCounts();
     }
   }
 
@@ -140,9 +166,7 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
     if (widget.api == null) return;
     setState(() => _isLoadingFilesChanged = true);
     try {
-      // Priorité 1 : get_context retourne modifiedFiles (fichiers écrits par
-      // l'agent dans la session, parsés du transcript) — cohérent avec le badge.
-      // Priorité 2 : getVcsState (git status) en fallback si get_context vide.
+      // Uniquement les fichiers modifiés par l'agent dans la session active
       final ctx = await widget.api!.getContext(
         cascadeId: widget.activeSessionId.isNotEmpty ? widget.activeSessionId : null,
         workspacePath: widget.workspacePath.isEmpty ? null : widget.workspacePath,
@@ -152,25 +176,6 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
       if (ctxFiles is List && ctxFiles.isNotEmpty) {
         for (final item in ctxFiles) {
           if (item is String && item.isNotEmpty) files.add(_relPath(item));
-        }
-      }
-      if (files.isEmpty) {
-        // Fallback : git status (staged + working tree)
-        final res = await widget.api!.getVcsState(
-          workspacePath: widget.workspacePath.isEmpty ? null : widget.workspacePath,
-        );
-        for (final key in const ['workingDirectoryChanges', 'stagedChanges']) {
-          final list = res[key];
-          if (list is List) {
-            for (final item in list) {
-              if (item is String && item.isNotEmpty) {
-                files.add(item);
-              } else if (item is Map) {
-                final uri = item['uri'];
-                if (uri is String && uri.isNotEmpty) files.add(_relPath(uri));
-              }
-            }
-          }
         }
       }
       if (mounted) setState(() => _filesChanged = files.toList());
@@ -396,7 +401,7 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
                     children: [
                       _ContextItemRow(
                         title: 'Files Changed',
-                        badgeCount: widget.filesChangedCount > 0 ? widget.filesChangedCount : _filesChanged.length,
+                        badgeCount: _filesChangedExpanded ? _filesChanged.length : widget.filesChangedCount,
                         onTap: () {
                           setState(() {
                             _filesChangedExpanded = !_filesChangedExpanded;
@@ -448,7 +453,7 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
                     children: [
                       _ContextItemRow(
                         title: 'Artifacts',
-                        badgeCount: widget.artifactsCount > 0 ? widget.artifactsCount : _artifacts.length,
+                        badgeCount: _artifactsExpanded ? _artifacts.length : widget.artifactsCount,
                         onTap: () {
                           setState(() {
                             _artifactsExpanded = !_artifactsExpanded;
@@ -504,7 +509,7 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
                     children: [
                       _ContextItemRow(
                         title: 'Uploads',
-                        badgeCount: widget.uploadsCount > 0 ? widget.uploadsCount : _uploads.length,
+                        badgeCount: _uploadsExpanded ? _uploads.length : widget.uploadsCount,
                         onTap: () {
                           setState(() {
                             _uploadsExpanded = !_uploadsExpanded;
@@ -699,7 +704,7 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
                   ),
                   _ContextItemRow(
                     title: 'Scheduled Tasks',
-                    badgeCount: widget.scheduledTasksCount > 0 ? widget.scheduledTasksCount : widget.backgroundTasksCount,
+                    badgeCount: widget.scheduledTasksCount,
                     onTap: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(
@@ -717,13 +722,13 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
                   ),
                   _ContextItemRow(
                     title: 'MCP Servers',
-                    badgeCount: 0,
+                    badgeCount: widget.mcpServersCount > 0 ? widget.mcpServersCount : _mcpCount,
                     onTap: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(
                           builder: (ctx) => McpExplorerScreen(api: widget.api),
                         ),
-                      );
+                      ).then((_) => _fetchInitialCounts());
                     },
                   ),
                   _ContextItemRow(

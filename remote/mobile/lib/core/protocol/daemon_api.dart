@@ -953,6 +953,7 @@ class DaemonApi {
     List<String>? images,
     String? modelUID,
     int? modelEnum,
+    List<Map<String, dynamic>>? media,
   }) {
     final id = _newRequestId();
     final controller = StreamController<Map<String, dynamic>>();
@@ -967,6 +968,7 @@ class DaemonApi {
       if (images != null) 'images': images,
       if (modelUID != null && modelUID.isNotEmpty) 'modelUID': modelUID,
       if (modelEnum != null && modelEnum > 0) 'modelEnum': modelEnum,
+      if (media != null && media.isNotEmpty) 'media': media,
     };
     final outbox = _outbox;
     if (outbox != null) {

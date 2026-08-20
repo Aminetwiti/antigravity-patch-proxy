@@ -1,14 +1,28 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/protocol/daemon_api.dart';
+import '../../../core/protocol/messages.dart';
 import '../../../theme/app_colors.dart';
+import '../../../widgets/antigravity_spinning_arc.dart';
+import '../../../widgets/markdown_bubble.dart';
+import '../../../widgets/unified_diff_viewer.dart';
+import '../../chat_stream/widgets/session_review_view.dart';
 import '../models/subagent_item.dart';
 
-/// Modal affichant les détails complets d'un sous-agent (mission, prompt, statut, durée, logs).
+/// Modal affichant la vue détaillée et la session d'un sous-agent.
+/// Reproduit fidèlement le design Antigravity IDE (Screenshot 2) :
+/// - Breadcrumb en en-tête : Project / Session / Status + Role
+/// - Bulle de prompt mission initiale
+/// - Chronologie de réflexion / "Worked for 20s >"
+/// - Réponse Markdown de l'assistant
+/// - Résumé des fichiers modifiés avec bouton [Review]
+/// - Barre inférieure désactivée : "Cannot send message to subagent."
 class SubagentDetailModal extends StatefulWidget {
   final SubagentItem agent;
   final DaemonApi? api;
   final String? cascadeId;
+  final String? projectName;
+  final String? sessionTitle;
   final VoidCallback? onKill;
 
   const SubagentDetailModal({
@@ -16,6 +30,8 @@ class SubagentDetailModal extends StatefulWidget {
     required this.agent,
     this.api,
     this.cascadeId,
+    this.projectName,
+    this.sessionTitle,
     this.onKill,
   });
 
@@ -24,6 +40,8 @@ class SubagentDetailModal extends StatefulWidget {
     required SubagentItem agent,
     DaemonApi? api,
     String? cascadeId,
+    String? projectName,
+    String? sessionTitle,
     VoidCallback? onKill,
   }) {
     HapticFeedback.selectionClick();
@@ -35,6 +53,8 @@ class SubagentDetailModal extends StatefulWidget {
         agent: agent,
         api: api,
         cascadeId: cascadeId,
+        projectName: projectName,
+        sessionTitle: sessionTitle,
         onKill: onKill,
       ),
     );
@@ -44,91 +64,111 @@ class SubagentDetailModal extends StatefulWidget {
   State<SubagentDetailModal> createState() => _SubagentDetailModalState();
 }
 
-class _SubagentDetailModalState extends State<SubagentDetailModal>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _pulseController;
-  late final Animation<double> _pulseAnimation;
+class _SubagentDetailModalState extends State<SubagentDetailModal> {
+  List<ChatMessage> _messages = [];
+  bool _isLoadingHistory = true;
+  List<SessionModifiedFile> _modifiedFiles = [];
+  bool _isTimelineExpanded = false;
+  bool _feedbackGiven = false;
 
   @override
   void initState() {
     super.initState();
-    _pulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1400),
-    );
-    _pulseAnimation = Tween<double>(begin: 0.4, end: 1.0).animate(
-      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
-    );
-    if (widget.agent.status.toLowerCase() == 'running') {
-      _pulseController.repeat(reverse: true);
+    _loadSubagentHistory();
+    _loadModifiedFiles();
+  }
+
+  Future<void> _loadSubagentHistory() async {
+    if (widget.api == null || widget.agent.id.isEmpty) {
+      if (mounted) setState(() => _isLoadingHistory = false);
+      return;
+    }
+    try {
+      final history = await widget.api!.getSessionHistory(widget.agent.id);
+      final rawMessages = history['messages'] as List?;
+      if (rawMessages != null && rawMessages.isNotEmpty && mounted) {
+        final parsed = <ChatMessage>[];
+        for (final m in rawMessages) {
+          if (m is Map) {
+            parsed.add(ChatMessage(
+              id: m['id']?.toString() ?? '',
+              sender: m['sender']?.toString() ?? 'assistant',
+              text: m['text']?.toString() ?? '',
+              thought: m['thought']?.toString(),
+              timestamp: m['timestamp']?.toString() ?? '',
+              stepIndex: (m['stepIndex'] as num?)?.toInt(),
+            ));
+          }
+        }
+        setState(() {
+          _messages = parsed;
+          _isLoadingHistory = false;
+        });
+      } else if (mounted) {
+        setState(() => _isLoadingHistory = false);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isLoadingHistory = false);
     }
   }
 
-  @override
-  void dispose() {
-    _pulseController.dispose();
-    super.dispose();
-  }
-
-  Color _getStatusColor(String status, ColorScheme scheme) {
-    switch (status.toLowerCase()) {
-      case 'running':
-        return AppColors.accentBlue;
-      case 'completed':
-      case 'done':
-      case 'terminé':
-        return AppColors.positive;
-      case 'waiting_for_input':
-      case 'waiting_for_dependents':
-      case 'waiting_for_message':
-        return scheme.tertiary;
-      case 'errored':
-      case 'canceling':
-        return scheme.error;
-      case 'idle':
-      default:
-        return scheme.outline;
-    }
-  }
-
-  String _formatStatusLabel(String status) {
-    switch (status.toLowerCase()) {
-      case 'running':
-        return 'En cours';
-      case 'completed':
-      case 'done':
-      case 'terminé':
-        return 'Terminé';
-      case 'waiting_for_input':
-        return 'En attente (saisie)';
-      case 'waiting_for_dependents':
-        return 'En attente (dépendances)';
-      case 'waiting_for_message':
-        return 'En attente (message)';
-      case 'errored':
-        return 'Erreur';
-      case 'canceling':
-        return 'Annulation';
-      case 'idle':
-        return 'Inactif';
-      default:
-        return status;
-    }
+  Future<void> _loadModifiedFiles() async {
+    if (widget.api == null || widget.agent.id.isEmpty) return;
+    try {
+      final ctx = await widget.api!.getContext(cascadeId: widget.agent.id);
+      final rawFiles = ctx['modifiedFiles'] as List?;
+      if (rawFiles != null && mounted) {
+        final list = <SessionModifiedFile>[];
+        for (final item in rawFiles) {
+          if (item is! String || item.isEmpty) continue;
+          var clean = item.replaceAll('\\', '/');
+          if (clean.startsWith('file:///')) clean = clean.substring(8);
+          if (clean.startsWith('file://')) clean = clean.substring(7);
+          list.add(SessionModifiedFile(
+            path: clean,
+            additions: 1,
+            deletions: 0,
+          ));
+        }
+        setState(() => _modifiedFiles = list);
+      }
+    } catch (_) {}
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final statusColor = _getStatusColor(widget.agent.status, scheme);
     final isRunning = widget.agent.status.toLowerCase() == 'running';
+    final isErrored = widget.agent.status.toLowerCase() == 'errored' ||
+        widget.agent.status.toLowerCase() == 'canceling';
+
+    final project = widget.projectName?.isNotEmpty == true
+        ? widget.projectName!
+        : 'antigravity-add-model-main';
+    final session = widget.sessionTitle?.isNotEmpty == true
+        ? widget.sessionTitle!
+        : 'Session';
+
+    // Trouver le prompt et les messages assistants
+    final userPrompt = widget.agent.prompt?.isNotEmpty == true
+        ? widget.agent.prompt!
+        : (_messages.where((m) => m.sender == 'user').firstOrNull?.text ?? '');
+    final assistantMessages = _messages.where((m) => m.sender == 'assistant').toList();
+    final latestAssistant = assistantMessages.isNotEmpty ? assistantMessages.last : null;
+
+    final thoughtText = latestAssistant?.thought ?? widget.agent.stateDetail ?? '';
+    final assistantText = latestAssistant?.text ?? '';
+
+    final totalAdditions = _modifiedFiles.fold<int>(0, (int sum, SessionModifiedFile f) => sum + f.additions);
+    final totalDeletions = _modifiedFiles.fold<int>(0, (int sum, SessionModifiedFile f) => sum + f.deletions);
 
     return Container(
       constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.85,
+        maxHeight: MediaQuery.of(context).size.height * 0.90,
       ),
       decoration: BoxDecoration(
-        color: isDark ? AppColors.surfaceRaised : scheme.surface,
+        color: isDark ? AppColors.surfaceBase : scheme.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
         border: Border.all(
           color: isDark ? AppColors.borderSubtle : scheme.outlineVariant,
@@ -153,205 +193,308 @@ class _SubagentDetailModalState extends State<SubagentDetailModal>
               ),
             ),
 
-            // Header
+            // Top Breadcrumb Header (Screenshot 2: project / session / (icon) Subagent Role)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Row(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: scheme.primary.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(AppRadius.md),
-                    ),
-                    child: Icon(Icons.smart_toy_outlined, size: 22, color: scheme.primary),
-                  ),
-                  const SizedBox(width: 12),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: scheme.primary.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                widget.agent.typeName ?? 'agent',
-                                style: TextStyle(
-                                  fontSize: 10.5,
-                                  fontWeight: FontWeight.w700,
-                                  fontFamily: 'monospace',
-                                  color: scheme.primary,
-                                ),
-                              ),
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      physics: const BouncingScrollPhysics(),
+                      child: Row(
+                        children: [
+                          Text(
+                            project,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
                             ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                widget.agent.role,
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700,
-                                  color: scheme.onSurface,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            if (isRunning)
-                              AnimatedBuilder(
-                                animation: _pulseAnimation,
-                                builder: (context, _) => Container(
-                                  width: 7,
-                                  height: 7,
-                                  decoration: BoxDecoration(
-                                    color: statusColor.withValues(alpha: _pulseAnimation.value),
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                              )
-                            else
-                              Container(
-                                width: 7,
-                                height: 7,
-                                decoration: BoxDecoration(
-                                  color: statusColor,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                            const SizedBox(width: 5),
-                            Text(
-                              _formatStatusLabel(widget.agent.status),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            child: Text(
+                              '/',
                               style: TextStyle(
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w600,
-                                color: statusColor,
+                                fontSize: 12.5,
+                                color: isDark ? AppColors.inkMuted.withValues(alpha: 0.5) : scheme.outlineVariant,
                               ),
                             ),
-                            const SizedBox(width: 10),
-                            Text(
-                              '•  ${widget.agent.displayWorkedFor}',
+                          ),
+                          Text(
+                            session,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            child: Text(
+                              '/',
                               style: TextStyle(
-                                fontSize: 11,
-                                fontFamily: 'monospace',
-                                color: scheme.onSurfaceVariant,
+                                fontSize: 12.5,
+                                color: isDark ? AppColors.inkMuted.withValues(alpha: 0.5) : scheme.outlineVariant,
                               ),
                             ),
-                          ],
-                        ),
-                      ],
+                          ),
+                          if (isRunning)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 6),
+                              child: AntigravitySpinningArc(
+                                color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                                size: 12.5,
+                              ),
+                            )
+                          else if (isErrored)
+                            const Padding(
+                              padding: EdgeInsets.only(right: 6),
+                              child: Icon(Icons.error_outline_rounded, size: 14, color: AppColors.danger),
+                            )
+                          else
+                            const Padding(
+                              padding: EdgeInsets.only(right: 6),
+                              child: Icon(Icons.check_circle_outline_rounded, size: 14, color: AppColors.positive),
+                            ),
+                          Text(
+                            widget.agent.role,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.close, size: 20),
-                    constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                    icon: const Icon(Icons.close, size: 18),
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    padding: EdgeInsets.zero,
+                    color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
                     onPressed: () => Navigator.of(context).pop(),
                   ),
                 ],
               ),
             ),
-            const Divider(height: 1),
+            Divider(
+              height: 1,
+              thickness: 1,
+              color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.3),
+            ),
 
-            // Content body
-            Flexible(
+            // Scrollable conversation stream
+            Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Conversation / Subagent ID Card
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHigh,
-                        borderRadius: BorderRadius.circular(AppRadius.md),
-                        border: Border.all(
-                          color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.5),
+                    // 1. User Prompt Bubble (Mission from parent agent)
+                    if (userPrompt.isNotEmpty) ...[
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerHigh,
+                          borderRadius: BorderRadius.circular(AppRadius.md),
+                          border: Border.all(
+                            color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.5),
+                          ),
+                        ),
+                        child: SelectableText(
+                          userPrompt,
+                          style: TextStyle(
+                            fontSize: 13,
+                            height: 1.45,
+                            color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                          ),
                         ),
                       ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.fingerprint_rounded, size: 16, color: scheme.onSurfaceVariant),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'ID DU SOUS-AGENT',
-                                  style: TextStyle(
-                                    fontSize: 9.5,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.5,
-                                    color: scheme.onSurfaceVariant,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  widget.agent.id.isNotEmpty ? widget.agent.id : '(Généré à l\'exécution)',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontFamily: 'monospace',
-                                    fontWeight: FontWeight.w600,
-                                    color: scheme.onSurface,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
+                      const SizedBox(height: 16),
+                    ],
+
+                    // 2. Timeline / "Worked for 20s >" Collapsible Badge
+                    InkWell(
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        setState(() => _isTimelineExpanded = !_isTimelineExpanded);
+                      },
+                      borderRadius: BorderRadius.circular(6),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              widget.agent.displayWorkedFor,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                              ),
                             ),
-                          ),
-                          if (widget.agent.id.isNotEmpty)
-                            IconButton(
-                              icon: const Icon(Icons.copy_rounded, size: 16),
-                              tooltip: 'Copier l\'ID',
-                              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-                              onPressed: () {
-                                Clipboard.setData(ClipboardData(text: widget.agent.id));
-                                HapticFeedback.selectionClick();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('ID copié dans le presse-papier'),
-                                    duration: Duration(seconds: 2),
-                                  ),
-                                );
-                              },
+                            const SizedBox(width: 4),
+                            Icon(
+                              _isTimelineExpanded
+                                  ? Icons.keyboard_arrow_up_rounded
+                                  : Icons.chevron_right_rounded,
+                              size: 15,
+                              color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
                             ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
 
-                    if (widget.agent.stateDetail != null && widget.agent.stateDetail!.isNotEmpty) ...[
-                      const SizedBox(height: 12),
+                    if (_isTimelineExpanded && thoughtText.isNotEmpty) ...[
+                      const SizedBox(height: 6),
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: AppColors.accentBlue.withValues(alpha: 0.08),
+                          color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
                           borderRadius: BorderRadius.circular(AppRadius.md),
                           border: Border.all(
-                            color: AppColors.accentBlue.withValues(alpha: 0.25),
+                            color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.4),
+                          ),
+                        ),
+                        child: SelectableText(
+                          thoughtText,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontFamily: 'monospace',
+                            height: 1.4,
+                            color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 12),
+
+                    // 3. Assistant Output / Messages
+                    if (_isLoadingHistory && assistantText.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 24),
+                        child: Center(
+                          child: SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      )
+                    else if (assistantMessages.isNotEmpty)
+                      for (final m in assistantMessages) ...[
+                        if (m.text.isNotEmpty)
+                          MarkdownBubble(
+                            text: m.text,
+                            api: widget.api,
+                            workspacePath: project,
+                          ),
+                        const SizedBox(height: 12),
+                      ]
+                    else if (assistantText.isNotEmpty) ...[
+                      MarkdownBubble(
+                        text: assistantText,
+                        api: widget.api,
+                        workspacePath: project,
+                      ),
+                      const SizedBox(height: 12),
+                    ] else ...[
+                      Text(
+                        isRunning ? 'En cours d\'exécution...' : 'Sous-agent terminé avec succès.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+
+                    // 4. File changes & Review Action (Screenshot 2: "1 file changed +14 -7 > [Review]")
+                    if (_modifiedFiles.isNotEmpty) ...[
+                      Container(
+                        margin: const EdgeInsets.only(top: 8, bottom: 12),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerHigh,
+                          borderRadius: BorderRadius.circular(AppRadius.md),
+                          border: Border.all(
+                            color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.5),
                           ),
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.terminal_rounded, size: 16, color: AppColors.accentBlueBright),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                widget.agent.stateDetail!,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontFamily: 'monospace',
-                                  color: AppColors.accentBlueBright,
+                            Text(
+                              '${_modifiedFiles.length} file${_modifiedFiles.length > 1 ? 's' : ''} changed',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              '+$totalAdditions',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF4ADE80),
+                              ),
+                            ),
+                            Text(
+                              ' -$totalDeletions',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFFF87171),
+                              ),
+                            ),
+                            const Spacer(),
+                            Semantics(
+                              label: 'Ouvrir la revue du code',
+                              button: true,
+                              child: InkWell(
+                                onTap: () {
+                                  HapticFeedback.selectionClick();
+                                  showModalBottomSheet(
+                                    context: context,
+                                    isScrollControlled: true,
+                                    backgroundColor: Colors.transparent,
+                                    builder: (ctx) => FractionallySizedBox(
+                                      heightFactor: 0.9,
+                                      child: UnifiedDiffViewer(
+                                        diffContent: _modifiedFiles.map((SessionModifiedFile f) => f.diffContent ?? '').join('\n'),
+                                        fileName: _modifiedFiles.first.path,
+                                        onClose: () => Navigator.of(ctx).pop(),
+                                      ),
+                                    ),
+                                  );
+                                },
+                                borderRadius: BorderRadius.circular(6),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: scheme.surfaceContainerHighest,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.rate_review_outlined, size: 14, color: scheme.primary),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Review',
+                                        style: TextStyle(
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w600,
+                                          color: scheme.primary,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
@@ -360,93 +503,79 @@ class _SubagentDetailModalState extends State<SubagentDetailModal>
                       ),
                     ],
 
-                    const SizedBox(height: 16),
-                    Text(
-                      'Mission / Instructions',
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
-                        color: scheme.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
-                        borderRadius: BorderRadius.circular(AppRadius.md),
-                        border: Border.all(
-                          color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.5),
-                        ),
-                      ),
-                      child: SelectableText(
-                        widget.agent.prompt != null && widget.agent.prompt!.isNotEmpty
-                            ? widget.agent.prompt!
-                            : 'Aucun prompt explicite spécifié pour ce sous-agent.',
-                        style: TextStyle(
-                          fontSize: 13,
-                          height: 1.45,
-                          color: scheme.onSurface,
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-                    // Action row
+                    // 5. Feedback and Copy Actions
                     Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        if (widget.agent.prompt != null && widget.agent.prompt!.isNotEmpty)
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () {
-                                Clipboard.setData(ClipboardData(text: widget.agent.prompt!));
-                                HapticFeedback.selectionClick();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Instructions copiées'),
-                                    duration: Duration(seconds: 2),
-                                  ),
-                                );
-                              },
-                              icon: const Icon(Icons.copy_rounded, size: 15),
-                              label: const Text('Copier Mission'),
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(AppRadius.md),
-                                ),
+                        IconButton(
+                          icon: const Icon(Icons.copy_rounded, size: 15),
+                          tooltip: 'Copier la réponse',
+                          color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                          onPressed: () {
+                            HapticFeedback.selectionClick();
+                            Clipboard.setData(ClipboardData(text: assistantText.isNotEmpty ? assistantText : userPrompt));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Copié dans le presse-papiers'),
+                                duration: Duration(seconds: 1),
                               ),
-                            ),
+                            );
+                          },
+                        ),
+                        const SizedBox(width: 4),
+                        IconButton(
+                          icon: Icon(
+                            _feedbackGiven ? Icons.thumb_up_alt_rounded : Icons.thumb_up_alt_outlined,
+                            size: 15,
                           ),
-                        if (isRunning && (widget.onKill != null || widget.api != null)) ...[
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              onPressed: () {
-                                Navigator.of(context).pop();
-                                if (widget.onKill != null) {
-                                  widget.onKill!();
-                                } else if (widget.api != null && widget.agent.id.isNotEmpty) {
-                                  widget.api!.sendCommand('/stop');
-                                }
-                              },
-                              icon: const Icon(Icons.stop_circle_outlined, size: 16),
-                              label: const Text('Arrêter'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: scheme.error,
-                                foregroundColor: scheme.onError,
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(AppRadius.md),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
+                          tooltip: 'Utile',
+                          color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                          onPressed: () {
+                            HapticFeedback.lightImpact();
+                            setState(() => _feedbackGiven = true);
+                          },
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.thumb_down_alt_outlined, size: 15),
+                          tooltip: 'Pas utile',
+                          color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                          onPressed: () => HapticFeedback.lightImpact(),
+                        ),
                       ],
                     ),
                   ],
+                ),
+              ),
+            ),
+
+            // Bottom Input Area (Screenshot 2: Centered disabled "Cannot send message to subagent.")
+            Container(
+              margin: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+                border: Border.all(
+                  color: isDark
+                      ? AppColors.borderSubtle
+                      : scheme.outlineVariant.withValues(alpha: 0.5),
+                ),
+              ),
+              child: Center(
+                child: Text(
+                  'Cannot send message to subagent.',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                    fontWeight: FontWeight.w400,
+                  ),
                 ),
               ),
             ),
@@ -456,3 +585,4 @@ class _SubagentDetailModalState extends State<SubagentDetailModal>
     );
   }
 }
+

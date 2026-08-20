@@ -75,6 +75,7 @@ class ChatInputBar extends StatefulWidget {
     List<String>? images,
     String? base64Data,
     String? fileName,
+    List<Map<String, dynamic>>? media,
   }) onSend;
   final bool isConnected;
 
@@ -459,21 +460,29 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
       );
     }
 
-    // Construction du payload textuel combiné
+    // Construction du payload textuel et de la liste des pièces jointes
     final buffer = StringBuffer();
     final images = _attachments.where((a) => a.isImage).toList();
     final files = _attachments.where((a) => !a.isImage).toList();
+    final mediaList = <Map<String, dynamic>>[];
 
     if (images.isNotEmpty) {
       for (final img in images) {
         final fp = uploadedPaths[img.name];
+        var clean = '';
         if (fp != null && fp.isNotEmpty) {
-          var clean = fp.replaceAll(r'\', '/');
+          clean = fp.replaceAll(r'\', '/');
           if (!clean.startsWith('file:///')) {
             clean = clean.startsWith('/') ? 'file://$clean' : 'file:///$clean';
           }
-          buffer.writeln('![${img.name}]($clean)');
         }
+        mediaList.add({
+          'uri': clean,
+          'mimeType': img.mimeType ?? 'image/jpeg',
+          'description': img.name,
+          'name': img.name,
+          if (img.base64Data != null) 'base64Data': img.base64Data,
+        });
       }
     }
 
@@ -523,6 +532,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
       images: fallbackImages,
       base64Data: fallbackBase64,
       fileName: fallbackFileName,
+      media: mediaList.isNotEmpty ? mediaList : null,
     );
     _controller.clear();
     _lastDraftText = '';

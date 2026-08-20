@@ -494,8 +494,10 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           _activeSessionId = newId;
           _activeSessionTitle = 'Nouvelle conversation';
           _sessions = [newSession, ..._sessions.where((s) => s.id != newId)];
+          _contextStats = {};
         });
         await _refreshSessions();
+        await _refreshContext();
       }
     } catch (e) {
       debugPrint('createCascade failed: $e');
@@ -772,6 +774,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           onSessionSelected: (id) {
             setState(() {
               _activeSessionId = id;
+              _contextStats = {};
               final s = _sessions.firstWhere(
                 (s) => s.id == id,
                 orElse: () => const CascadeSession(
@@ -1012,6 +1015,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       onSessionSelected: (id) {
         setState(() {
           _activeSessionId = id;
+          _contextStats = {};
           _sessions = _sessions.map((s) {
             if (s.id == id) {
               return s.copyWith(hasUnread: false);
@@ -1033,12 +1037,8 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       onArchiveSession: _archiveSession,
       onRenameSession: _renameSession,
       onExportSession: _exportSession,
-      onConversationHistory: () {
-        _showSessionHistory();
-      },
-      onScheduledTasks: () {
-        _showScheduledTasks();
-      },
+      onConversationHistory: _showSessionHistory,
+      onScheduledTasks: _showScheduledTasks,
       onOpenBattleArena: () {
         if (_api == null) return;
         final s = _sessions.firstWhere(
@@ -1199,6 +1199,8 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       artifactsCount: _contextStats['artifactsCount'] as int? ?? 0,
       uploadsCount: _contextStats['uploadsCount'] as int? ?? 0,
       backgroundTasksCount: _contextStats['backgroundTasksCount'] as int? ?? 0,
+      scheduledTasksCount: _contextStats['scheduledTasksCount'] as int? ?? 0,
+      mcpServersCount: _contextStats['mcpServersCount'] as int? ?? 0,
     );
 
     final scaffold = Scaffold(

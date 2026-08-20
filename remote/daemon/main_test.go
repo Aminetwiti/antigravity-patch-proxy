@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/antigravity/remote-daemon/pkg/connectrpc"
 	"github.com/antigravity/remote-daemon/pkg/gateway"
 )
 
@@ -113,6 +114,10 @@ func (f *failingRPC) SendMessageStream(cascadeID, text string, onFrame func([]by
 }
 
 func (f *failingRPC) SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error, noTools ...bool) error {
+	return errFailing
+}
+
+func (f *failingRPC) SendMessageStreamModelWithMedia(cascadeID, text, modelUID string, modelEnum uint64, media []connectrpc.MediaAttachment, onFrame func([]byte) error, noTools ...bool) error {
 	return errFailing
 }
 

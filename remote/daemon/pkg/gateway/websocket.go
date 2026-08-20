@@ -55,10 +55,9 @@ type RPCClient interface {
 	CreateCascade(uri string, projectID string, modelUID string, modelEnum uint64) ([]byte, error)
 	GetAllCascades() ([]byte, error)
 	SendMessageStream(cascadeID, text string, onFrame func([]byte) error) error
-	// SendMessageStreamModel : variante avec mod├¿le explicite (s├®lection
-	// mobile par message) ÔÇö le daemon laisse le t├®l├®phone choisir le mod├¿le.
-	// noTools force planner_mode = 3 (NO_TOOL) dans le cascade_config.
 	SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error, noTools ...bool) error
+	// SendMessageStreamModelWithMedia : transmet le prompt avec pièces jointes (media/images).
+	SendMessageStreamModelWithMedia(cascadeID, text, modelUID string, modelEnum uint64, media []connectrpc.MediaAttachment, onFrame func([]byte) error, noTools ...bool) error
 	SubmitToolApproval(cascadeID, trajectoryID string, stepIndex uint32, oneofField int, oneofPayload []byte) ([]byte, error)
 	SetBrowserOpenConversation(cascadeID string) ([]byte, error)
 	SendCommand(commandText string) ([]byte, error)
@@ -319,6 +318,7 @@ type Server struct {
 		ListSessions() []discovery.SessionInfo
 		RevokeDevice(deviceID string) bool
 	}
+	scheduler *Scheduler
 }
 
 // ScheduledTask repr├®sente une t├óche planifi├®e / cron job g├®r├®e par le daemon.
@@ -384,6 +384,7 @@ func NewServer(client RPCClient, authToken string) *Server {
 		runningTasks:     newRunningTaskManager(),
 		clientSessions:   make(map[*websocket.Conn]discovery.SessionInfo),
 	}
+	s.scheduler = NewScheduler(s)
 	s.terminals.onBroadcast = s.broadcast
 	s.terminals.onSendToOwner = s.writeJSON
 	s.runningTasks.onBroadcast = s.broadcast
@@ -1514,10 +1515,12 @@ type IncomingMessage struct {
 	TerminalID    string `json:"terminalId,omitempty"`
 	TerminalIDAlt string `json:"id,omitempty"`
 	Input         string `json:"input,omitempty"`
-	// NoTools : mode ┬½ r├®ponse directe sans boucle d'outils ┬╗ (planner_mode 3
-	// = NO_TOOL c├┤t├® LS). Port├® par le message send_prompt ÔÇö le mobile d├®cide
-	// par prompt si l'agent peut utiliser des outils (toggle d├®di├®).
+	// NoTools : mode « réponse directe sans boucle d'outils » (planner_mode 3
+	// = NO_TOOL côté LS). Porté par le message send_prompt — le mobile décide
+	// par prompt si l'agent peut utiliser des outils (toggle dédié).
 	NoTools bool `json:"noTools,omitempty"`
+	// Media : liste structurée de pièces jointes (images/fichiers).
+	Media []connectrpc.MediaAttachment `json:"media,omitempty"`
 	// CommitID : identifiant de commit pour git_commit_details / vcs.get_commit_details.
 	CommitID string `json:"commitId,omitempty"`
 	// SidecarID : identifiant de sidecar pour les RPC sidecar.* (logs, gestion).
@@ -3660,6 +3663,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		base64Data := msg.Base64Data
 		fileName := msg.FileName
 		images := msg.Images
+		var mediaAttachments []connectrpc.MediaAttachment
 
 		if msg.Data != nil {
 			if b64, ok := msg.Data["base64Data"].(string); ok && base64Data == "" {
@@ -3675,17 +3679,127 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 					}
 				}
 			}
+			if mList, ok := msg.Data["media"].([]interface{}); ok {
+				for _, mItem := range mList {
+					if mObj, ok := mItem.(map[string]interface{}); ok {
+						var uri, mime, desc, b64 string
+						if u, ok := mObj["uri"].(string); ok {
+							uri = u
+						}
+						if m, ok := mObj["mimeType"].(string); ok {
+							mime = m
+						}
+						if d, ok := mObj["description"].(string); ok {
+							desc = d
+						} else if n, ok := mObj["name"].(string); ok {
+							desc = n
+						}
+						if b, ok := mObj["base64Data"].(string); ok {
+							b64 = b
+						}
+						if b64 != "" && uri == "" {
+							if targetPath, _, errImg := saveUploadedImage(msg.CascadeID, desc, b64); errImg == nil {
+								uri = "file:///" + filepath.ToSlash(targetPath)
+							}
+						}
+						if uri != "" || b64 != "" {
+							mediaAttachments = append(mediaAttachments, connectrpc.MediaAttachment{
+								URI:         uri,
+								MimeType:    mime,
+								Description: desc,
+								Base64Data:  b64,
+							})
+						}
+					}
+				}
+			}
+		}
+
+		if len(msg.Media) > 0 {
+			for _, m := range msg.Media {
+				uri := m.URI
+				if m.Base64Data != "" && uri == "" {
+					if targetPath, _, errImg := saveUploadedImage(msg.CascadeID, m.Description, m.Base64Data); errImg == nil {
+						uri = "file:///" + filepath.ToSlash(targetPath)
+					}
+				}
+				if uri != "" || m.Base64Data != "" {
+					mediaAttachments = append(mediaAttachments, connectrpc.MediaAttachment{
+						URI:         uri,
+						MimeType:    m.MimeType,
+						Description: m.Description,
+						Base64Data:  m.Base64Data,
+						Data:        m.Data,
+					})
+				}
+			}
 		}
 
 		if base64Data != "" {
-			if _, mdRef, errImg := saveUploadedImage(msg.CascadeID, fileName, base64Data); errImg == nil {
-				promptText += "\n\n" + mdRef
+			if targetPath, _, errImg := saveUploadedImage(msg.CascadeID, fileName, base64Data); errImg == nil {
+				uri := "file:///" + filepath.ToSlash(targetPath)
+				mime := "image/jpeg"
+				if strings.HasSuffix(strings.ToLower(targetPath), ".png") {
+					mime = "image/png"
+				}
+				mediaAttachments = append(mediaAttachments, connectrpc.MediaAttachment{
+					URI:         uri,
+					MimeType:    mime,
+					Description: filepath.Base(targetPath),
+					Base64Data:  base64Data,
+				})
 			}
 		}
 		for i, b64 := range images {
-			if _, mdRef, errImg := saveUploadedImage(msg.CascadeID, fmt.Sprintf("img_%d.png", i), b64); errImg == nil {
-				promptText += "\n\n" + mdRef
+			fn := fmt.Sprintf("img_%d.png", i)
+			if targetPath, _, errImg := saveUploadedImage(msg.CascadeID, fn, b64); errImg == nil {
+				uri := "file:///" + filepath.ToSlash(targetPath)
+				mediaAttachments = append(mediaAttachments, connectrpc.MediaAttachment{
+					URI:         uri,
+					MimeType:    "image/png",
+					Description: filepath.Base(targetPath),
+					Base64Data:  b64,
+				})
 			}
+		}
+
+		// Backward-compat: si promptText contient des tags markdown d'images ![name](file:///path) ou ![name](C:/path),
+		// on les extrait vers mediaAttachments et on nettoie promptText pour que l'IDE Antigravity affiche
+		// un texte propre sans code markdown brut.
+		imgTagRe := regexp.MustCompile(`!\[([^\]]*)\]\((?:file:///)?([a-zA-Z]:[^\)\r\n]+|/[^\)\r\n]+)\)`)
+		if imgMatches := imgTagRe.FindAllStringSubmatch(promptText, -1); len(imgMatches) > 0 {
+			for _, m := range imgMatches {
+				if len(m) >= 3 {
+					desc := strings.TrimSpace(m[1])
+					rawPath := strings.TrimSpace(m[2])
+					cleanURI := rawPath
+					if !strings.HasPrefix(cleanURI, "file:///") {
+						cleanURI = "file:///" + filepath.ToSlash(cleanURI)
+					}
+					mime := "image/jpeg"
+					if strings.HasSuffix(strings.ToLower(rawPath), ".png") {
+						mime = "image/png"
+					}
+					if desc == "" {
+						desc = filepath.Base(rawPath)
+					}
+					alreadyAdded := false
+					for _, existing := range mediaAttachments {
+						if existing.URI == cleanURI {
+							alreadyAdded = true
+							break
+						}
+					}
+					if !alreadyAdded {
+						mediaAttachments = append(mediaAttachments, connectrpc.MediaAttachment{
+							URI:         cleanURI,
+							MimeType:    mime,
+							Description: desc,
+						})
+					}
+				}
+			}
+			promptText = strings.TrimSpace(imgTagRe.ReplaceAllString(promptText, ""))
 		}
 
 		// Offline buffering (3.2) : le prompt part vers le hub → on le persiste
@@ -3800,7 +3914,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		// Démarre le streaming temps réel (transcript.jsonl + trajectoire)
 		go s.runLiveTurnStreamer(watcherCtx, msg.CascadeID, msg.RequestID, &frameIndex, &hasTextDelivered, doneChan)
 
-		err = s.RPCClient.SendMessageStreamModel(msg.CascadeID, promptText, modelUID, modelEnum, onFrameHandler, noTools)
+		err = s.RPCClient.SendMessageStreamModelWithMedia(msg.CascadeID, promptText, modelUID, modelEnum, mediaAttachments, onFrameHandler, noTools)
 
 		if err != nil {
 			cancelWatcher()
@@ -4160,10 +4274,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			targetCascadeID = s.focusedCascadeID
 		}
 
-		scheduledCount := 0
-		if s.scheduler != nil {
-			scheduledCount = len(s.scheduler.ListTasks())
-		}
+		s.mu.Lock()
+		scheduledCount := len(s.scheduledTasks)
+		s.mu.Unlock()
 
 		if targetCascadeID != "" {
 			// Scoped to a single session
@@ -4203,14 +4316,63 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 
-		// Fallback when no session is focused / specified: clean 0s (no global cross-session pollution)
+		// Fallback when no cascadeId is provided: aggregate across sessions
+		var cascadeIDs []string
+		s.mu.Lock()
+		if s.jetboxSummaries != nil {
+			for cid := range s.jetboxSummaries {
+				cascadeIDs = append(cascadeIDs, cid)
+			}
+		}
+		s.mu.Unlock()
+		if len(cascadeIDs) == 0 {
+			raw := s.fetchSessionsSingleFlight()
+			if len(raw) > 0 {
+				for _, sum := range connectrpc.ParseTrajectories(raw) {
+					if sum.CascadeID != "" {
+						cascadeIDs = append(cascadeIDs, sum.CascadeID)
+					}
+				}
+			}
+		}
+		if len(cascadeIDs) == 0 {
+			if raw, ok := s.cachedSessions(); ok && len(raw) > 0 {
+				for _, sum := range connectrpc.ParseTrajectories(raw) {
+					if sum.CascadeID != "" {
+						cascadeIDs = append(cascadeIDs, sum.CascadeID)
+					}
+				}
+			}
+		}
+		if len(cascadeIDs) == 0 {
+			for _, loc := range ListLocalSessions() {
+				if cid, ok := loc["cascadeId"].(string); ok && cid != "" {
+					cascadeIDs = append(cascadeIDs, cid)
+				}
+			}
+		}
+		artifactsTotal := 0
+		subagentsTotal := 0
+		filesTotal := 0
+		uploadsTotal := 0
+		for _, cid := range cascadeIDs {
+			counts := countTranscriptActivity(cid)
+			subagentsTotal += counts["subagents"]
+			filesTotal += counts["files"]
+			artifactsTotal += counts["artifacts"]
+			uploadsTotal += counts["uploads"]
+		}
+		globalRunningCount := 0
+		if s.runningTasks != nil {
+			globalRunningCount = len(s.runningTasks.listTasks(false))
+		}
 		stats := map[string]interface{}{
 			"cascadeId":            "",
-			"subagentsCount":       0,
-			"filesChangedCount":    0,
-			"artifactsCount":       0,
-			"uploadsCount":         0,
-			"backgroundTasksCount": 0,
+			"subagentsCount":       subagentsTotal,
+			"filesChangedCount":    filesTotal,
+			"artifactsCount":       artifactsTotal,
+			"uploadsCount":         uploadsTotal,
+			"backgroundTasksCount": globalRunningCount,
 			"scheduledTasksCount":  scheduledCount,
 			"artifacts":            []map[string]interface{}{},
 			"uploads":              []map[string]interface{}{},

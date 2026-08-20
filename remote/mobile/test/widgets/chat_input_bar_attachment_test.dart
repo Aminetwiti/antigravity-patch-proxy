@@ -10,7 +10,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: ChatInputBar(
-            onSend: (msg, {modelEnum, modelUID, queued = false, images, base64Data, fileName}) {
+            onSend: (msg, {modelEnum, modelUID, queued = false, images, base64Data, fileName, media}) {
               sentMessage = msg;
             },
           ),
@@ -75,7 +75,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: ChatInputBar(
-            onSend: (msg, {modelEnum, modelUID, queued = false, images, base64Data, fileName}) {
+            onSend: (msg, {modelEnum, modelUID, queued = false, images, base64Data, fileName, media}) {
               sentMessage = msg;
             },
           ),
@@ -132,7 +132,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: ChatInputBar(
-            onSend: (msg, {modelEnum, modelUID, queued = false, images, base64Data, fileName}) {
+            onSend: (msg, {modelEnum, modelUID, queued = false, images, base64Data, fileName, media}) {
               sentMsg = msg;
               sentB64 = base64Data;
               sentFile = fileName;

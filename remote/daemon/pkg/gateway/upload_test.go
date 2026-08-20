@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/antigravity/remote-daemon/pkg/connectrpc"
 )
 
 func TestSaveUploadedImage(t *testing.T) {
@@ -114,5 +116,78 @@ func TestReadFile_UploadedImageLeadingSlash(t *testing.T) {
 		t.Fatal("failed to find uploaded image using candidates with leading slash")
 	}
 }
+
+type mediaCapturingRPCClient struct {
+	fakeRPCClient
+	lastMedia   []connectrpc.MediaAttachment
+	lastPrompt  string
+	lastModel   string
+}
+
+func (m *mediaCapturingRPCClient) SendMessageStreamModelWithMedia(cascadeID, text, modelUID string, modelEnum uint64, media []connectrpc.MediaAttachment, onFrame func([]byte) error, noTools ...bool) error {
+	m.lastPrompt = text
+	m.lastMedia = media
+	m.lastModel = modelUID
+	return onFrame(pbTextFrame("delta-response"))
+}
+
+func TestSendPrompt_MediaAttachmentsAndCleanPrompt(t *testing.T) {
+	backend := &mediaCapturingRPCClient{}
+	srv := newTestServer(backend)
+	defer srv.Close()
+
+	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	// 1. Envoi d'un prompt avec pièces jointes structurées media
+	client.sendJSON(t, IncomingMessage{
+		Type:      "send_prompt",
+		RequestID: "req-media-1",
+		CascadeID: "casc-1",
+		Prompt:    "analyser cette image",
+		Media: []connectrpc.MediaAttachment{
+			{
+				URI:         "file:///C:/test/path/photo.png",
+				MimeType:    "image/png",
+				Description: "photo.png",
+			},
+		},
+	})
+	_ = client.recv(t) // stream_start
+	_ = client.recv(t) // stream_delta
+	_ = client.recv(t) // stream_end
+
+	if backend.lastPrompt != "analyser cette image" {
+		t.Errorf("expected clean prompt 'analyser cette image', got %q", backend.lastPrompt)
+	}
+	if len(backend.lastMedia) != 1 {
+		t.Fatalf("expected 1 media attachment, got %d", len(backend.lastMedia))
+	}
+	if backend.lastMedia[0].URI != "file:///C:/test/path/photo.png" {
+		t.Errorf("expected URI 'file:///C:/test/path/photo.png', got %q", backend.lastMedia[0].URI)
+	}
+
+	// 2. Envoi d'un prompt avec markdown tag legacy ![name](file:///...) -> doit être extrait et nettoyé
+	client.sendJSON(t, IncomingMessage{
+		Type:      "send_prompt",
+		RequestID: "req-media-2",
+		CascadeID: "casc-1",
+		Prompt:    "![screenshot.jpg](file:///C:/Users/test/screenshot.jpg)\n\nvoici mon texte",
+	})
+	_ = client.recv(t) // stream_start
+	_ = client.recv(t) // stream_delta
+	_ = client.recv(t) // stream_end
+
+	if backend.lastPrompt != "voici mon texte" {
+		t.Errorf("expected cleaned prompt 'voici mon texte', got %q", backend.lastPrompt)
+	}
+	if len(backend.lastMedia) != 1 {
+		t.Fatalf("expected 1 extracted media attachment from markdown, got %d", len(backend.lastMedia))
+	}
+	if backend.lastMedia[0].URI != "file:///C:/Users/test/screenshot.jpg" {
+		t.Errorf("expected URI 'file:///C:/Users/test/screenshot.jpg', got %q", backend.lastMedia[0].URI)
+	}
+}
+
 
 

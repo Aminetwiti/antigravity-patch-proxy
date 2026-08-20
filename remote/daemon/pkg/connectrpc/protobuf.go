@@ -103,8 +103,53 @@ func BuildStartCascade(workspaceURI, projectID, modelUID string, modelEnum uint6
 	return w.b
 }
 
+// MediaAttachment represents an attached image or file sent with a user prompt.
+type MediaAttachment struct {
+	URI         string `json:"uri,omitempty"`
+	MimeType    string `json:"mimeType,omitempty"`
+	Description string `json:"description,omitempty"`
+	Base64Data  string `json:"base64Data,omitempty"`
+	Data        []byte `json:"-"`
+}
+
+func buildMediaItem(m MediaAttachment) []byte {
+	mw := &writer{}
+	if m.MimeType != "" {
+		mw.stringField(1, m.MimeType)
+	}
+	if len(m.Data) > 0 {
+		mw.bytesField(2, m.Data)
+	}
+	if m.Description != "" {
+		mw.stringField(4, m.Description)
+	}
+	if m.URI != "" {
+		mw.stringField(5, m.URI)
+	}
+	return mw.b
+}
+
+func buildImageData(m MediaAttachment) []byte {
+	iw := &writer{}
+	if m.Base64Data != "" {
+		iw.stringField(1, m.Base64Data)
+	}
+	if m.MimeType != "" {
+		iw.stringField(2, m.MimeType)
+	}
+	if m.Description != "" {
+		iw.stringField(3, m.Description)
+	}
+	if m.URI != "" {
+		iw.stringField(4, m.URI)
+	}
+	return iw.b
+}
+
 // SendUserCascadeMessageRequest : field 1 cascade_id, field 2 items[]
 // où chaque item est TextOrScopeItem{ 1: chunk.text }.
+// field 6 : images[] (ImageData)
+// field 14 : media[] (Media)
 //
 // Le LS 2.5.0 refuse tout message sans cascade_config (field 5) contenant
 // requested_model_id (14) ou requested_model_uid (15) : l'exécuteur plante
@@ -112,20 +157,33 @@ func BuildStartCascade(workspaceURI, projectID, modelUID string, modelEnum uint6
 // buildSendCascadeMessageRequest de windsurf_main.js (éprouvé en prod).
 // Le modelUID est fourni par le client mobile ; s'il est vide on retombe
 // sur l'enum historique (requested_model_id).
-// BuildSendMessage construit un SendMessageRequest. noTools force
-// planner_mode = 3 (NO_TOOL) dans le cascade_config.
-func BuildSendMessage(cascadeID, text, apiKey, sessionID, modelUID string, modelEnum uint64, noTools ...bool) []byte {
+// BuildSendMessageWithMedia construit un SendMessageRequest avec pièces jointes (media/images).
+func BuildSendMessageWithMedia(cascadeID, text, apiKey, sessionID, modelUID string, modelEnum uint64, media []MediaAttachment, noTools ...bool) []byte {
 	item := &writer{}
 	item.stringField(1, text)
 
 	w := &writer{}
 	w.stringField(1, cascadeID)
 	w.bytesField(2, item.b)
+
+	for _, m := range media {
+		if m.URI != "" || len(m.Data) > 0 || m.Base64Data != "" {
+			w.bytesField(6, buildImageData(m))
+			w.bytesField(14, buildMediaItem(m))
+		}
+	}
+
 	if apiKey != "" {
 		w.bytesField(3, buildMetadata(apiKey, sessionID))
 	}
 	w.bytesField(5, BuildCascadeConfig(modelUID, modelEnum, noTools...))
 	return w.b
+}
+
+// BuildSendMessage construit un SendMessageRequest (sans pièces jointes). noTools force
+// planner_mode = 3 (NO_TOOL) dans le cascade_config.
+func BuildSendMessage(cascadeID, text, apiKey, sessionID, modelUID string, modelEnum uint64, noTools ...bool) []byte {
+	return BuildSendMessageWithMedia(cascadeID, text, apiKey, sessionID, modelUID, modelEnum, nil, noTools...)
 }
 
 // DefaultModelEnum : repli quand aucun modèle n'est demandé — enum LS

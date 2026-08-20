@@ -1855,6 +1855,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     List<String>? images,
     String? base64Data,
     String? fileName,
+    List<Map<String, dynamic>>? media,
   }) {
     if (text.trim().startsWith('/btw ') || text.trim().startsWith('/btw')) {
       final sideQ = text.trim().replaceFirst(RegExp(r'^/btw\s*'), '');
@@ -1890,6 +1891,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           if (images != null) 'images': images,
           if (base64Data != null) 'base64Data': base64Data,
           if (fileName != null) 'fileName': fileName,
+          if (media != null) 'media': media,
           'timestamp': DateTime.now().millisecondsSinceEpoch,
         });
       });
@@ -1918,6 +1920,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       images: images,
       base64Data: base64Data,
       fileName: fileName,
+      media: media,
     );
   }
 
@@ -1934,6 +1937,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         : null;
     final base64Data = item['base64Data'] as String?;
     final fileName = item['fileName'] as String?;
+    final media = (item['media'] is List)
+        ? (item['media'] as List).whereType<Map<String, dynamic>>().toList()
+        : null;
     final targetSession = widget.activeSessionId;
 
     final buf = _sessionMessages.putIfAbsent(targetSession, () => []);
@@ -1953,6 +1959,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       images: images,
       base64Data: base64Data,
       fileName: fileName,
+      media: media,
     );
   }
 
@@ -1984,6 +1991,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     List<String>? images,
     String? base64Data,
     String? fileName,
+    List<Map<String, dynamic>>? media,
   }) {
     final api = widget.api;
     if (api == null) return;
@@ -2024,6 +2032,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       images: images,
       modelUID: modelUID,
       modelEnum: modelEnum,
+      media: media,
     ).listen(
       (msg) {
         if (msg['type'] == 'stream_end') {
@@ -2647,6 +2656,31 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                 }
               },
             ),
+          if (_subagents.isNotEmpty)
+            SubagentTreeCard(
+              subagents: _subagents,
+              projectName: widget.activeProjectName,
+              sessionTitle: widget.activeSessionTitle,
+              onOpenFullTree: () {
+                SubagentsTreeSheet.show(
+                  context,
+                  api: widget.api,
+                  cascadeId: widget.activeSessionId,
+                  sessionTitle: widget.activeSessionTitle,
+                );
+              },
+              onSelectSubagent: (sub) {
+                SubagentDetailModal.show(
+                  context,
+                  agent: sub,
+                  api: widget.api,
+                  cascadeId: widget.activeSessionId,
+                  projectName: widget.activeProjectName,
+                  sessionTitle: widget.activeSessionTitle,
+                  onKill: () => _fetchSubagentsForSession(widget.activeSessionId),
+                );
+              },
+            ),
           if ((_sessionMessageQueues[widget.activeSessionId]?.isNotEmpty ?? false))
             QueuedMessagesCard(
               queuedMessages: _sessionMessageQueues[widget.activeSessionId]!,
@@ -2827,29 +2861,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               ),
             ),
           _buildReminderBanners(),
-          if (_subagents.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: SubagentTreeCard(
-                subagents: _subagents,
-                onOpenFullTree: () {
-                  SubagentsTreeSheet.show(
-                    context,
-                    api: widget.api,
-                    cascadeId: widget.activeSessionId,
-                  );
-                },
-                onSelectSubagent: (sub) {
-                  SubagentDetailModal.show(
-                    context,
-                    agent: sub,
-                    api: widget.api,
-                    cascadeId: widget.activeSessionId,
-                    onKill: () => _fetchSubagentsForSession(widget.activeSessionId),
-                  );
-                },
-              ),
-            ),
         ];
 
         final totalCount = headerWidgets.length + visibleList.length;
@@ -3643,15 +3654,22 @@ class _MessageBubble extends StatelessWidget {
           child: Container(
             margin: const EdgeInsets.only(bottom: 16),
             width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             decoration: BoxDecoration(
               color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerLow,
-              borderRadius: BorderRadius.circular(AppRadius.lg),
-              border: Border.all(
-                color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.5),
-                width: 1,
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(AppRadius.lg),
+                bottomLeft: Radius.circular(AppRadius.lg),
+                bottomRight: Radius.circular(AppRadius.xs),
+                topRight: Radius.circular(AppRadius.lg),
+              ),
+              border: Border(
+                left: BorderSide(
+                  color: isDark ? AppColors.accentBlue.withValues(alpha: 0.3) : scheme.primary.withValues(alpha: 0.3),
+                  width: 3,
+                ),
               ),
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,

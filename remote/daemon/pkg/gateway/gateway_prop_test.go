@@ -185,6 +185,9 @@ func (l *loadRPCClient) SendMessageStream(cascadeID, text string, onFrame func([
 func (l *loadRPCClient) SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error, noTools ...bool) error {
 	return l.streamLoop(onFrame)
 }
+func (l *loadRPCClient) SendMessageStreamModelWithMedia(cascadeID, text, modelUID string, modelEnum uint64, media []connectrpc.MediaAttachment, onFrame func([]byte) error, noTools ...bool) error {
+	return l.streamLoop(onFrame)
+}
 func (l *loadRPCClient) streamLoop(onFrame func([]byte) error) error {
 	if len(l.streamDeltas) == 0 {
 		return onFrame(pbTextFrame("ok"))
@@ -478,6 +481,9 @@ func (f *failingStreamClient) SendMessageStream(cascadeID, text string, onFrame 
 	return fmt.Errorf("stream interrompu par le backend")
 }
 func (f *failingStreamClient) SendMessageStreamModel(cascadeID, text, modelUID string, modelEnum uint64, onFrame func([]byte) error, noTools ...bool) error {
+	return f.SendMessageStream(cascadeID, text, onFrame)
+}
+func (f *failingStreamClient) SendMessageStreamModelWithMedia(cascadeID, text, modelUID string, modelEnum uint64, media []connectrpc.MediaAttachment, onFrame func([]byte) error, noTools ...bool) error {
 	return f.SendMessageStream(cascadeID, text, onFrame)
 }
 func (f *failingStreamClient) TrackWorkspace(workspacePath string) ([]byte, error) {

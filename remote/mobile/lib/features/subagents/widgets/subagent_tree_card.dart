@@ -1,21 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../theme/app_colors.dart';
-import '../../../theme/app_theme.dart';
+import '../../../widgets/antigravity_spinning_arc.dart';
 import '../models/subagent_item.dart';
 import 'subagent_detail_modal.dart';
 
-/// Carte visuelle affichant l'arborescence des sous-agents en temps réel
-/// directement dans l'interface de discussion (inspiré de Claude Code / Codex).
-/// Supporte l'ouverture/fermeture (collapsible) et le défilement fluide (scrollable).
+/// Carte visuelle affichant les sous-agents en temps réel (dockée au-dessus de la saisie).
+/// Reproduit fidèlement le design Antigravity IDE ("1 subagent running  v" avec spinning arc).
 class SubagentTreeCard extends StatefulWidget {
   final List<SubagentItem> subagents;
+  final String? title;
+  final String? projectName;
+  final String? sessionTitle;
   final VoidCallback? onOpenFullTree;
   final ValueChanged<SubagentItem>? onSelectSubagent;
 
   const SubagentTreeCard({
     super.key,
     required this.subagents,
+    this.title,
+    this.projectName,
+    this.sessionTitle,
     this.onOpenFullTree,
     this.onSelectSubagent,
   });
@@ -41,14 +46,22 @@ class _SubagentTreeCardState extends State<SubagentTreeCard> {
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final count = widget.subagents.length;
+    final runningCount = widget.subagents
+        .where((s) => s.status.toLowerCase() == 'running')
+        .length;
+    final statusText = runningCount > 0
+        ? (runningCount == 1 ? '1 running' : '$runningCount running')
+        : (count == 1 ? '1 completed' : '$count subagents');
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
         color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(AppRadius.md),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
         border: Border.all(
-          color: isDark ? AppColors.borderStrong : scheme.outlineVariant.withValues(alpha: 0.5),
+          color: isDark
+              ? AppColors.borderSubtle
+              : scheme.outlineVariant.withValues(alpha: 0.5),
           width: 1,
         ),
       ),
@@ -56,57 +69,95 @@ class _SubagentTreeCardState extends State<SubagentTreeCard> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Header Bar: "Subagents  4  v"
+          // Header Bar: "Subagents   2   1 running   v"
           InkWell(
             onTap: () {
               HapticFeedback.selectionClick();
               setState(() => _isExpanded = !_isExpanded);
             },
-            borderRadius: BorderRadius.circular(AppRadius.md),
+            borderRadius: BorderRadius.vertical(
+              top: const Radius.circular(AppRadius.lg),
+              bottom: _isExpanded
+                  ? Radius.zero
+                  : const Radius.circular(AppRadius.lg),
+            ),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               child: Row(
                 children: [
                   Text(
-                    'Subagents',
+                    widget.title ?? 'Subagents',
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: 12.5,
                       fontWeight: FontWeight.w600,
                       color: isDark ? AppColors.inkPrimary : scheme.onSurface,
                     ),
                   ),
                   const SizedBox(width: 8),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1.5),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
                     decoration: BoxDecoration(
-                      color: isDark ? AppColors.surfaceHover : scheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(10),
+                      color: isDark
+                          ? AppColors.surfaceHover
+                          : scheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
                     ),
                     child: Text(
                       '$count',
                       style: TextStyle(
-                        fontSize: 11,
+                        fontSize: 10.5,
                         fontWeight: FontWeight.w600,
-                        color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
+                        color: isDark
+                            ? AppColors.inkSecondary
+                            : scheme.onSurfaceVariant,
                       ),
                     ),
                   ),
-                  const SizedBox(width: 6),
-                  Icon(
-                    _isExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
-                    size: 16,
-                    color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
-                  ),
+                  if (runningCount > 0) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 1.5),
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? AppColors.accentBlue.withValues(alpha: 0.15)
+                            : scheme.primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(AppRadius.pill),
+                      ),
+                      child: Text(
+                        statusText,
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                          color: isDark
+                              ? AppColors.accentBlueBright
+                              : scheme.primary,
+                        ),
+                      ),
+                    ),
+                  ],
                   const Spacer(),
-                  if (widget.onOpenFullTree != null)
+                  if (widget.onOpenFullTree != null) ...[
                     IconButton(
                       icon: const Icon(Icons.open_in_new, size: 14),
                       onPressed: widget.onOpenFullTree,
                       tooltip: 'Ouvrir le DAG complet',
                       padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
-                      color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                      constraints:
+                          const BoxConstraints(minWidth: 24, minHeight: 24),
+                      color:
+                          isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
                     ),
+                    const SizedBox(width: 4),
+                  ],
+                  Icon(
+                    _isExpanded
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    size: 16,
+                    color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                  ),
                 ],
               ),
             ),
@@ -122,6 +173,7 @@ class _SubagentTreeCardState extends State<SubagentTreeCard> {
                     children: [
                       Divider(
                         height: 1,
+                        thickness: 1,
                         color: isDark
                             ? AppColors.borderSubtle
                             : scheme.outlineVariant.withValues(alpha: 0.3),
@@ -138,36 +190,82 @@ class _SubagentTreeCardState extends State<SubagentTreeCard> {
                           child: ListView.separated(
                             controller: _scrollController,
                             shrinkWrap: true,
-                            physics: const BouncingScrollPhysics(
-                              parent: AlwaysScrollableScrollPhysics(),
-                            ),
-                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            physics: count > 2
+                                ? const BouncingScrollPhysics(
+                                    parent: AlwaysScrollableScrollPhysics(),
+                                  )
+                                : const NeverScrollableScrollPhysics(),
+                            padding: const EdgeInsets.symmetric(vertical: 4),
                             itemCount: widget.subagents.length,
-                            separatorBuilder: (_, __) => const SizedBox(height: 4),
+                            separatorBuilder: (_, __) => Divider(
+                              height: 1,
+                              thickness: 1,
+                              color: isDark
+                                  ? AppColors.borderSubtle.withValues(alpha: 0.5)
+                                  : scheme.outlineVariant.withValues(alpha: 0.2),
+                            ),
                             itemBuilder: (context, index) {
                               final subagent = widget.subagents[index];
-                              final isRunning = subagent.status.toLowerCase() == 'running';
-                              final isErrored = subagent.status.toLowerCase() == 'errored' ||
-                                  subagent.status.toLowerCase() == 'canceling';
+                              final isRunning =
+                                  subagent.status.toLowerCase() == 'running';
+                              final isErrored =
+                                  subagent.status.toLowerCase() == 'errored' ||
+                                      subagent.status.toLowerCase() == 'canceling';
                               final currentTool = subagent.stateDetail;
 
                               return InkWell(
                                 onTap: () {
+                                  HapticFeedback.selectionClick();
                                   if (widget.onSelectSubagent != null) {
                                     widget.onSelectSubagent!(subagent);
                                   } else {
-                                    SubagentDetailModal.show(context, agent: subagent);
+                                    SubagentDetailModal.show(
+                                      context,
+                                      agent: subagent,
+                                      projectName: widget.projectName,
+                                      sessionTitle: widget.sessionTitle,
+                                    );
                                   }
                                 },
                                 child: Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 8),
                                   child: Row(
                                     crossAxisAlignment: CrossAxisAlignment.center,
                                     children: [
-                                      // Left: Role Title & Worked duration / Current tool
+                                      // Status icon (Spinning arc for running, check/error otherwise)
+                                      if (isRunning)
+                                        Container(
+                                          width: 18,
+                                          height: 18,
+                                          alignment: Alignment.center,
+                                          child: AntigravitySpinningArc(
+                                            color: isDark
+                                                ? AppColors.inkMuted
+                                                : scheme.onSurfaceVariant,
+                                            size: 13.5,
+                                          ),
+                                        )
+                                      else if (isErrored)
+                                        const Icon(
+                                          Icons.error_outline_rounded,
+                                          size: 16,
+                                          color: AppColors.danger,
+                                        )
+                                      else
+                                        const Icon(
+                                          Icons.check_circle_outline_rounded,
+                                          size: 16,
+                                          color: AppColors.positive,
+                                        ),
+
+                                      const SizedBox(width: 10),
+
+                                      // Role Title & Subtitle
                                       Expanded(
                                         child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
                                             Text(
@@ -179,40 +277,31 @@ class _SubagentTreeCardState extends State<SubagentTreeCard> {
                                                     ? AppColors.inkPrimary
                                                     : scheme.onSurface,
                                               ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
                                             ),
-                                            const SizedBox(height: 2),
                                             if (isRunning &&
                                                 currentTool != null &&
                                                 currentTool.isNotEmpty) ...[
-                                              Row(
-                                                children: [
-                                                  const Icon(
-                                                    Icons.code_rounded,
-                                                    size: 11,
-                                                    color: AppColors.accentBlueBright,
-                                                  ),
-                                                  const SizedBox(width: 4),
-                                                  Flexible(
-                                                    child: Text(
-                                                      currentTool,
-                                                      style: const TextStyle(
-                                                        fontSize: 11,
-                                                        fontFamily: 'monospace',
-                                                        color: AppColors.accentBlueBright,
-                                                      ),
-                                                      maxLines: 1,
-                                                      overflow: TextOverflow.ellipsis,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ] else ...[
+                                              const SizedBox(height: 2),
                                               Text(
-                                                isRunning
-                                                    ? 'Working...'
-                                                    : subagent.displayWorkedFor,
+                                                currentTool,
+                                                style: const TextStyle(
+                                                  fontSize: 11,
+                                                  fontFamily: 'monospace',
+                                                  color:
+                                                      AppColors.accentBlueBright,
+                                                ),
+                                                maxLines: 1,
+                                                overflow:
+                                                    TextOverflow.ellipsis,
+                                              ),
+                                            ] else if (!isRunning) ...[
+                                              const SizedBox(height: 1.5),
+                                              Text(
+                                                subagent.displayWorkedFor,
                                                 style: TextStyle(
-                                                  fontSize: 11.5,
+                                                  fontSize: 11,
                                                   color: isDark
                                                       ? AppColors.inkMuted
                                                       : scheme.onSurfaceVariant,
@@ -223,69 +312,15 @@ class _SubagentTreeCardState extends State<SubagentTreeCard> {
                                         ),
                                       ),
 
-                                      const SizedBox(width: 10),
+                                      const SizedBox(width: 8),
 
-                                      // Right: Status Icon
-                                      if (isRunning)
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 6, vertical: 2.5),
-                                          decoration: BoxDecoration(
-                                            color: isDark
-                                                ? const Color(0xFF132338)
-                                                : const Color(0xFFE0F2FE),
-                                            borderRadius:
-                                                BorderRadius.circular(AppRadius.pill),
-                                            border: Border.all(
-                                              color: AppColors.accentBlueBright
-                                                  .withValues(alpha: 0.45),
-                                              width: 0.8,
-                                            ),
-                                          ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Container(
-                                                width: 6,
-                                                height: 6,
-                                                decoration: const BoxDecoration(
-                                                  shape: BoxShape.circle,
-                                                  color: AppColors.accentBlueBright,
-                                                  boxShadow: [
-                                                    BoxShadow(
-                                                      color: Color(0x6638BDF8),
-                                                      blurRadius: 4,
-                                                      spreadRadius: 1,
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                              const SizedBox(width: 4.5),
-                                              const Text(
-                                                'Actif',
-                                                style: TextStyle(
-                                                  fontSize: 10,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: AppColors.accentBlueBright,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        )
-                                      else if (isErrored)
-                                        const Icon(
-                                          Icons.error_outline_rounded,
-                                          size: 16,
-                                          color: AppColors.danger,
-                                        )
-                                      else
-                                        Icon(
-                                          Icons.check_circle_outline_rounded,
-                                          size: 16,
-                                          color: isDark
-                                              ? AppColors.inkMuted
-                                              : scheme.outline,
-                                        ),
+                                      Icon(
+                                        Icons.chevron_right_rounded,
+                                        size: 16,
+                                        color: isDark
+                                            ? AppColors.inkMuted
+                                            : scheme.outlineVariant,
+                                      ),
                                     ],
                                   ),
                                 ),
