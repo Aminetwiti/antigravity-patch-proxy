@@ -72,6 +72,9 @@ class ChatInputBar extends StatefulWidget {
     bool queued,
     String? modelUID,
     int? modelEnum,
+    List<String>? images,
+    String? base64Data,
+    String? fileName,
   }) onSend;
   final bool isConnected;
 
@@ -281,36 +284,71 @@ class ChatInputBarState extends State<ChatInputBar> {
     }
 
     // Traitement et upload des attachements vers le daemon si connecté
-    if (widget.api != null && widget.cascadeId != null && _attachments.isNotEmpty) {
+    final uploadedPaths = <String, String>{};
+    final failedImages = <_AttachedItem>[];
+    var hadUploadError = false;
+
+    String effectiveCascadeId = widget.cascadeId ?? '';
+    if (effectiveCascadeId.isEmpty) {
+      effectiveCascadeId = 'cascade-${DateTime.now().millisecondsSinceEpoch}';
+    }
+
+    if (widget.api != null && _attachments.isNotEmpty) {
       setState(() => _uploadProgress = 0.05);
       for (int i = 0; i < _attachments.length; i++) {
         final att = _attachments[i];
         if (att.base64Data != null) {
           try {
             if (att.isImage) {
-              await widget.api!.uploadMedia(
-                cascadeId: widget.cascadeId!,
+              final res = await widget.api!.uploadMedia(
+                cascadeId: effectiveCascadeId,
                 fileName: att.name,
                 mimeType: att.mimeType ?? 'image/jpeg',
                 base64Data: att.base64Data!,
               );
+              final fp = res['filePath'] as String? ?? res['path'] as String?;
+              if (fp != null && fp.isNotEmpty) {
+                uploadedPaths[att.name] = fp;
+              } else {
+                failedImages.add(att);
+              }
             } else {
-              await widget.api!.uploadChunk(
+              final res = await widget.api!.uploadChunk(
                 uploadId: 'up_${DateTime.now().millisecondsSinceEpoch}_$i',
-                cascadeId: widget.cascadeId!,
+                cascadeId: effectiveCascadeId,
                 fileName: att.name,
                 chunkIndex: 0,
                 totalChunks: 1,
                 totalBytes: att.size,
                 base64Data: att.base64Data!,
               );
+              final fp = res['filePath'] as String? ?? res['path'] as String?;
+              if (fp != null && fp.isNotEmpty) {
+                uploadedPaths[att.name] = fp;
+              }
             }
-          } catch (_) {}
+          } catch (_) {
+            hadUploadError = true;
+            if (att.isImage) {
+              failedImages.add(att);
+            }
+          }
         }
         if (mounted) {
           setState(() => _uploadProgress = (i + 1) / _attachments.length);
         }
       }
+    } else if (_attachments.any((a) => a.isImage)) {
+      failedImages.addAll(_attachments.where((a) => a.isImage));
+    }
+
+    if (hadUploadError && mounted) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(
+          content: Text('Upload direct vers le PC incomplet — transmission des images via le prompt.'),
+          duration: Duration(seconds: 3),
+        ),
+      );
     }
 
     // Construction du payload textuel combiné
@@ -319,10 +357,15 @@ class ChatInputBarState extends State<ChatInputBar> {
     final files = _attachments.where((a) => !a.isImage).toList();
 
     if (images.isNotEmpty) {
-      if (images.length == 1) {
-        buffer.writeln('[Image jointe: ${images.first.name}]');
-      } else {
-        buffer.writeln('[Images jointes: ${images.map((img) => img.name).join(', ')}]');
+      for (final img in images) {
+        final fp = uploadedPaths[img.name];
+        if (fp != null && fp.isNotEmpty) {
+          var clean = fp.replaceAll(r'\', '/');
+          if (!clean.startsWith('file:///')) {
+            clean = clean.startsWith('/') ? 'file://$clean' : 'file:///$clean';
+          }
+          buffer.writeln('![${img.name}]($clean)');
+        }
       }
     }
 
@@ -330,7 +373,16 @@ class ChatInputBarState extends State<ChatInputBar> {
       if (f.textContent != null) {
         buffer.writeln('[Fichier: ${f.name}]\n${f.textContent}\n');
       } else {
-        buffer.writeln('[Fichier joint: ${f.name} (${_formatBytes(f.size)})]');
+        final fp = uploadedPaths[f.name];
+        if (fp != null && fp.isNotEmpty) {
+          var clean = fp.replaceAll(r'\', '/');
+          if (!clean.startsWith('file:///')) {
+            clean = clean.startsWith('/') ? 'file://$clean' : 'file:///$clean';
+          }
+          buffer.writeln('[Fichier: $clean]');
+        } else {
+          buffer.writeln('[Fichier joint: ${f.name} (${_formatBytes(f.size)})]');
+        }
       }
     }
 
@@ -341,11 +393,28 @@ class ChatInputBarState extends State<ChatInputBar> {
 
     final fullMessage = buffer.toString().trim();
 
+    List<String>? fallbackImages;
+    String? fallbackBase64;
+    String? fallbackFileName;
+
+    if (failedImages.length == 1) {
+      fallbackBase64 = failedImages.first.base64Data;
+      fallbackFileName = failedImages.first.name;
+    } else if (failedImages.length > 1) {
+      fallbackImages = failedImages
+          .map((f) => f.base64Data)
+          .whereType<String>()
+          .toList();
+    }
+
     widget.onSend(
       fullMessage,
       queued: _sendMode == SendMode.queued || widget.hasActiveStream,
       modelUID: _selectedModelId,
       modelEnum: _selectedModelEnum,
+      images: fallbackImages,
+      base64Data: fallbackBase64,
+      fileName: fallbackFileName,
     );
     _controller.clear();
     _lastDraftText = '';
@@ -671,16 +740,28 @@ class ChatInputBarState extends State<ChatInputBar> {
     if (result != null && result['content']!.isNotEmpty) {
       final name = result['name']!.isEmpty ? 'fichier.txt' : result['name']!;
       final content = result['content']!;
-      final bytes = Uint8List.fromList(utf8.encode(content));
+      final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+      final isImg = ['png', 'jpg', 'jpeg', 'webp', 'gif'].contains(ext);
+      Uint8List? bytes;
+      if (isImg) {
+        try {
+          bytes = base64Decode(content);
+        } catch (_) {
+          bytes = Uint8List.fromList(utf8.encode(content));
+        }
+      } else {
+        bytes = Uint8List.fromList(utf8.encode(content));
+      }
+      final b64 = isImg ? base64Encode(bytes) : base64Encode(bytes);
       setState(() {
         _attachments.add(_AttachedItem(
           name: name,
-          size: bytes.length,
-          mimeType: 'text/plain',
+          size: bytes!.length,
+          mimeType: isImg ? (ext == 'png' ? 'image/png' : 'image/jpeg') : 'text/plain',
           bytes: bytes,
-          base64Data: base64Encode(bytes),
-          isImage: false,
-          textContent: content,
+          base64Data: b64,
+          isImage: isImg,
+          textContent: isImg ? null : content,
         ));
       });
     }
@@ -1633,6 +1714,35 @@ class ChatInputBarState extends State<ChatInputBar> {
   }
 
   static final List<String> _promptHistory = [];
+  int _historyNavIndex = -1;
+
+  void _navigatePromptHistory(int direction) {
+    if (_promptHistory.isEmpty) return;
+    HapticFeedback.selectionClick();
+    if (direction > 0) {
+      // Plus ancien dans l'historique
+      if (_historyNavIndex < _promptHistory.length - 1) {
+        _historyNavIndex++;
+        final prompt = _promptHistory[_promptHistory.length - 1 - _historyNavIndex];
+        _controller.text = prompt;
+        _controller.selection = TextSelection.collapsed(offset: prompt.length);
+        widget.onDraftChanged?.call(prompt);
+      }
+    } else {
+      // Plus récent
+      if (_historyNavIndex > 0) {
+        _historyNavIndex--;
+        final prompt = _promptHistory[_promptHistory.length - 1 - _historyNavIndex];
+        _controller.text = prompt;
+        _controller.selection = TextSelection.collapsed(offset: prompt.length);
+        widget.onDraftChanged?.call(prompt);
+      } else if (_historyNavIndex == 0) {
+        _historyNavIndex = -1;
+        _controller.clear();
+        widget.onDraftChanged?.call('');
+      }
+    }
+  }
 
   void _showPromptHistoryMenu(BuildContext context) {
     if (_promptHistory.isEmpty) return;
@@ -1882,33 +1992,46 @@ class ChatInputBarState extends State<ChatInputBar> {
                           ):
                           _quoteSelectedText,
                     },
-                    child: Container(
-                      key: _textFieldKey,
-                      child: TextField(
-                        controller: _controller,
-                        autofocus: false,
-                        maxLines: 6,
-                        minLines: 1,
-                        style: TextStyle(fontSize: 14, color: scheme.onSurface),
-                        decoration: InputDecoration(
-                          hintText:
-                              widget.isConnected
-                                  ? (isQueued
-                                      ? "Message queued — sends after agent finishes working"
-                                      : 'Ask anything, @ to mention, / for actions')
-                                  : 'Offline — message will be sent when reconnected',
-                          hintStyle: TextStyle(
-                            color:
-                                widget.isConnected ? scheme.onSurfaceVariant.withValues(alpha: 0.8) : scheme.error,
-                            fontSize: 13.5,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onHorizontalDragEnd: (details) {
+                        final vx = details.primaryVelocity ?? 0;
+                        if (vx > 200) {
+                          // Glissement vers la droite -> prompt plus ancien
+                          _navigatePromptHistory(1);
+                        } else if (vx < -200) {
+                          // Glissement vers la gauche -> prompt plus récent
+                          _navigatePromptHistory(-1);
+                        }
+                      },
+                      child: Container(
+                        key: _textFieldKey,
+                        child: TextField(
+                          controller: _controller,
+                          autofocus: false,
+                          maxLines: 6,
+                          minLines: 1,
+                          style: TextStyle(fontSize: 14, color: scheme.onSurface),
+                          decoration: InputDecoration(
+                            hintText:
+                                widget.isConnected
+                                    ? (isQueued
+                                        ? "Message queued — sends after agent finishes working"
+                                        : 'Ask anything, @ to mention, / for actions')
+                                    : 'Offline — message will be sent when reconnected',
+                            hintStyle: TextStyle(
+                              color:
+                                  widget.isConnected ? scheme.onSurfaceVariant.withValues(alpha: 0.8) : scheme.error,
+                              fontSize: 13.5,
+                            ),
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            disabledBorder: InputBorder.none,
+                            contentPadding: EdgeInsets.zero,
+                            fillColor: Colors.transparent,
+                            filled: false,
                           ),
-                          border: InputBorder.none,
-                          enabledBorder: InputBorder.none,
-                          focusedBorder: InputBorder.none,
-                          disabledBorder: InputBorder.none,
-                          contentPadding: EdgeInsets.zero,
-                          fillColor: Colors.transparent,
-                          filled: false,
                         ),
                       ),
                     ),
@@ -2009,6 +2132,20 @@ class ChatInputBarState extends State<ChatInputBar> {
                         },
                         tooltip: 'Dictée vocale & formatage code',
                       ),
+                      // Historique des messages envoyés
+                      if (_promptHistory.isNotEmpty)
+                        IconButton(
+                          icon: Icon(
+                            Icons.history_rounded,
+                            size: 20,
+                            color: scheme.onSurfaceVariant.withValues(alpha: 0.9),
+                          ),
+                          onPressed: () {
+                            HapticFeedback.selectionClick();
+                            _showPromptHistoryMenu(context);
+                          },
+                          tooltip: 'Rappeler un message précédent',
+                        ),
                       // If streaming and user has typed text, show both Stop and Queue/Send buttons
                       if (widget.hasActiveStream && _controller.text.trim().isNotEmpty) ...[
                         // Dedicated Stop button

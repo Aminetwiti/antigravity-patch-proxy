@@ -59,83 +59,91 @@ class SessionBreadcrumb extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.max,
         children: [
-          // Segment 1 : Nom du projet / workspace
-          Flexible(
-            flex: displayTitle.isNotEmpty ? 1 : 2,
-            fit: FlexFit.loose,
-            child: InkWell(
-              onTap: canSwitchProject ? onSelectProject : null,
-              borderRadius: BorderRadius.circular(4),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Flexible(
-                      child: Text(
-                        displayProject,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w400,
-                          color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
-                          letterSpacing: -0.1,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+          // Segments projet et session
+          Expanded(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Segment 1 : Nom du projet / workspace
+                Flexible(
+                  flex: displayTitle.isNotEmpty ? 1 : 2,
+                  fit: FlexFit.loose,
+                  child: InkWell(
+                    onTap: canSwitchProject ? onSelectProject : null,
+                    borderRadius: BorderRadius.circular(4),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              displayProject,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w400,
+                                color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
+                                letterSpacing: -0.1,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (canSwitchProject) ...[
+                            const SizedBox(width: 2),
+                            Icon(
+                              Icons.arrow_drop_down,
+                              size: 14,
+                              color: isDark ? AppColors.inkMuted : scheme.outline,
+                            ),
+                          ],
+                        ],
                       ),
                     ),
-                    if (canSwitchProject) ...[
-                      const SizedBox(width: 2),
-                      Icon(
-                        Icons.arrow_drop_down,
-                        size: 14,
-                        color: isDark ? AppColors.inkMuted : scheme.outline,
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          ),
-
-          // Séparateur ' / ' et Segment 2 : Titre de la session / Contexte
-          if (displayTitle.isNotEmpty) ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Text(
-                '/',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w400,
-                  color: isDark ? AppColors.inkMuted : scheme.outline,
-                ),
-              ),
-            ),
-            Flexible(
-              flex: 2,
-              fit: FlexFit.loose,
-              child: InkWell(
-                onTap: onSelectSession,
-                borderRadius: BorderRadius.circular(4),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
-                  child: Text(
-                    displayTitle,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w400,
-                      color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
-                      letterSpacing: -0.1,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-              ),
+
+                // Séparateur ' / ' et Segment 2 : Titre de la session / Contexte
+                if (displayTitle.isNotEmpty) ...[
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Text(
+                      '/',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w400,
+                        color: isDark ? AppColors.inkMuted : scheme.outline,
+                      ),
+                    ),
+                  ),
+                  Flexible(
+                    flex: 2,
+                    fit: FlexFit.loose,
+                    child: InkWell(
+                      onTap: onSelectSession,
+                      borderRadius: BorderRadius.circular(4),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                        child: Text(
+                          displayTitle,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w400,
+                            color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
+                            letterSpacing: -0.1,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
-          ],
+          ),
           if (onToggleFullscreen != null) ...[
-            const Spacer(),
+            const SizedBox(width: 6),
             InkWell(
               onTap: onToggleFullscreen,
               borderRadius: BorderRadius.circular(4),
@@ -171,7 +179,7 @@ class SessionBreadcrumb extends StatelessWidget {
               ),
             ),
           ] else if (onOpenIde != null) ...[
-            const Spacer(),
+            const SizedBox(width: 6),
             InkWell(
               onTap: onOpenIde,
               borderRadius: BorderRadius.circular(4),

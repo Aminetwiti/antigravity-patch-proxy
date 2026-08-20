@@ -648,9 +648,10 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF14171F) : scheme.primaryContainer.withValues(alpha: 0.25),
+        gradient: AppGradients.cardCool(isDark: isDark),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: isDark ? const Color(0xFF2A3142) : scheme.primary.withValues(alpha: 0.2),
+          color: isDark ? const Color(0xFF3186FF).withValues(alpha: 0.3) : scheme.primary.withValues(alpha: 0.25),
           width: 0.8,
         ),
       ),

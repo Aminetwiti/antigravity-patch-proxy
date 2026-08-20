@@ -54,8 +54,20 @@ func TestSaveUploadedImage_Validation(t *testing.T) {
 	if _, _, err := saveUploadedImage(testUUID(), "test.png", ""); err == nil {
 		t.Fatal("expected error on empty base64Data")
 	}
-	// Path traversal : un cascadeId non-UUID (ex. ../../x) doit être rejeté.
+	// Path traversal : un cascadeId malveillant (ex. ../../evil, /etc, \windows) doit être rejeté.
 	if _, _, err := saveUploadedImage("../../evil", "test.png", "abc"); err == nil {
-		t.Fatal("expected error on non-UUID cascadeId (path traversal)")
+		t.Fatal("expected error on path traversal cascadeId")
 	}
+	if _, _, err := saveUploadedImage("/etc/passwd", "test.png", "abc"); err == nil {
+		t.Fatal("expected error on absolute path cascadeId")
+	}
+
+	// Safe session IDs (non-UUID mais sûrs, ex: cascade-12345, s3, casc-x) doivent être acceptés.
+	b64 := base64.StdEncoding.EncodeToString([]byte("test content"))
+	filePath, _, err := saveUploadedImage("cascade-1787194458484", "test.png", b64)
+	if err != nil {
+		t.Fatalf("expected safe session ID to be accepted: %v", err)
+	}
+	defer os.Remove(filePath)
 }
+

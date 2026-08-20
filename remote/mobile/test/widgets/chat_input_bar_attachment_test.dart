@@ -10,7 +10,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: ChatInputBar(
-            onSend: (msg, {modelEnum, modelUID, queued = false}) {
+            onSend: (msg, {modelEnum, modelUID, queued = false, images, base64Data, fileName}) {
               sentMessage = msg;
             },
           ),
@@ -75,7 +75,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: ChatInputBar(
-            onSend: (msg, {modelEnum, modelUID, queued = false}) {
+            onSend: (msg, {modelEnum, modelUID, queued = false, images, base64Data, fileName}) {
               sentMessage = msg;
             },
           ),
@@ -121,5 +121,48 @@ void main() {
 
     // Cleared after send
     expect(find.textContaining('pièces jointes'), findsNothing);
+  });
+
+  testWidgets('ChatInputBar passes fallback Base64 data when image upload is offline', (tester) async {
+    String? sentMsg;
+    String? sentB64;
+    String? sentFile;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ChatInputBar(
+            onSend: (msg, {modelEnum, modelUID, queued = false, images, base64Data, fileName}) {
+              sentMsg = msg;
+              sentB64 = base64Data;
+              sentFile = fileName;
+            },
+          ),
+        ),
+      ),
+    );
+
+    // Open bottom sheet
+    await tester.tap(find.byIcon(Icons.add));
+    await tester.pumpAndSettle();
+
+    // Open image dialog
+    await tester.tap(find.text('Saisie manuelle (Base64 / Texte)'));
+    await tester.pumpAndSettle();
+
+    // Switch to photo by adding base64 image
+    await tester.enterText(find.widgetWithText(TextField, 'Nom du fichier (ex: data.json, doc.md)'), 'photo.png');
+    await tester.enterText(find.widgetWithText(TextField, 'Contenu'), 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==');
+    await tester.tap(find.text('Joindre'));
+    await tester.pumpAndSettle();
+
+    // Send message
+    await tester.enterText(find.byType(TextField), 'analyser');
+    await tester.tap(find.byKey(const Key('send-message-button')));
+    await tester.pumpAndSettle();
+
+    expect(sentMsg, contains('analyser'));
+    expect(sentB64, isNotNull);
+    expect(sentFile, equals('photo.png'));
   });
 }

@@ -2583,19 +2583,22 @@ func fileDiffData(blob []byte) map[string]interface{} {
 	return d
 }
 
-// uuidRe : les cascadeId sont des UUID v4 (36 chars, hex + tirets) ├®mis par
-// le language server. Validation stricte = pas de traversal via "../".
+// uuidRe : les cascadeId sont des UUID v4 (36 chars, hex + tirets) émis par
+// le language server.
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// saveUploadedImage d├®code une image base64 et la sauvegarde dans le dossier scratch de la cascade.
+// safeCascadeIDRe : accepte les UUID v4 ainsi que les identifiants de session sûrs
+// (lettres, chiffres, tirets, underscores). Validation stricte = pas de traversal via "../", "/" ou "\".
+var safeCascadeIDRe = regexp.MustCompile(`^[a-zA-Z0-9_\-\.]{1,64}$`)
+
+// saveUploadedImage décode une image base64 et la sauvegarde dans le dossier scratch de la cascade.
 func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, error) {
 	if cascadeID == "" {
 		return "", "", fmt.Errorf("cascadeId requis")
 	}
-	// Fronti├¿re de confiance : cascadeID vient du mobile (send_prompt/upload_media).
-	// Un UUID v4 strict ne peut contenir ni ".." ni "/" ni "\" ÔÇö un seul test
-	// regex suffit ├á bloquer tout path traversal.
-	if !uuidRe.MatchString(cascadeID) {
+	// Frontière de confiance : cascadeID vient du mobile (send_prompt/upload_media).
+	// Validation stricte anti-traversal : pas de "..", ni "/" ni "\".
+	if !safeCascadeIDRe.MatchString(cascadeID) || strings.Contains(cascadeID, "..") {
 		return "", "", fmt.Errorf("cascadeId invalide: %q", cascadeID)
 	}
 	if base64Data == "" {
@@ -2622,8 +2625,11 @@ func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, 
 
 	scratchDir := filepath.Join(home, ".gemini", "antigravity", "brain", cascadeID, "scratch")
 	if err := os.MkdirAll(scratchDir, 0755); err != nil {
-		return "", "", fmt.Errorf("erreur de cr├®ation du dossier scratch: %w", err)
+		return "", "", fmt.Errorf("erreur de création du dossier scratch: %w", err)
 	}
+
+	userUploadDir := filepath.Join(home, ".gemini", "antigravity", "brain", cascadeID, ".user_uploaded")
+	_ = os.MkdirAll(userUploadDir, 0755)
 
 	ext := ".png"
 	lower := strings.ToLower(fileName)
@@ -2635,12 +2641,24 @@ func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, 
 		ext = ".gif"
 	}
 
-	timestamp := time.Now().UnixMilli()
-	safeName := fmt.Sprintf("upload_%d%s", timestamp, ext)
-	targetPath := filepath.Join(scratchDir, safeName)
+	base := filepath.Base(fileName)
+	if base == "." || base == "/" || base == "\\" || base == "" {
+		timestamp := time.Now().UnixMilli()
+		base = fmt.Sprintf("upload_%d%s", timestamp, ext)
+	} else if !strings.HasSuffix(strings.ToLower(base), ext) {
+		base += ext
+	}
 
+	targetPath := filepath.Join(userUploadDir, base)
 	if err := os.WriteFile(targetPath, rawBytes, 0644); err != nil {
-		return "", "", fmt.Errorf("erreur d'├®criture du fichier image: %w", err)
+		// Fallback to scratchDir
+		targetPath = filepath.Join(scratchDir, base)
+		if err2 := os.WriteFile(targetPath, rawBytes, 0644); err2 != nil {
+			return "", "", fmt.Errorf("erreur d'écriture du fichier image: %w", err2)
+		}
+	} else {
+		// Mirror in scratchDir for dual lookup
+		_ = os.WriteFile(filepath.Join(scratchDir, base), rawBytes, 0644)
 	}
 
 	absPath := filepath.ToSlash(targetPath)
@@ -3639,12 +3657,32 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		logJSON.Info("stream_start", "requestId", msg.RequestID, "cascadeId", msg.CascadeID)
 
 		promptText := msg.Prompt
-		if msg.Base64Data != "" {
-			if _, mdRef, errImg := saveUploadedImage(msg.CascadeID, msg.FileName, msg.Base64Data); errImg == nil {
+		base64Data := msg.Base64Data
+		fileName := msg.FileName
+		images := msg.Images
+
+		if msg.Data != nil {
+			if b64, ok := msg.Data["base64Data"].(string); ok && base64Data == "" {
+				base64Data = b64
+			}
+			if fn, ok := msg.Data["fileName"].(string); ok && fileName == "" {
+				fileName = fn
+			}
+			if imgs, ok := msg.Data["images"].([]interface{}); ok && len(images) == 0 {
+				for _, img := range imgs {
+					if str, ok := img.(string); ok && str != "" {
+						images = append(images, str)
+					}
+				}
+			}
+		}
+
+		if base64Data != "" {
+			if _, mdRef, errImg := saveUploadedImage(msg.CascadeID, fileName, base64Data); errImg == nil {
 				promptText += "\n\n" + mdRef
 			}
 		}
-		for i, b64 := range msg.Images {
+		for i, b64 := range images {
 			if _, mdRef, errImg := saveUploadedImage(msg.CascadeID, fmt.Sprintf("img_%d.png", i), b64); errImg == nil {
 				promptText += "\n\n" + mdRef
 			}

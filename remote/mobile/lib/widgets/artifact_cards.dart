@@ -381,8 +381,10 @@ class _FilesChangedCardState extends State<FilesChangedCard>
     final negativeColor = isDark ? AppColors.danger : const Color(0xFFCF222E);
 
     return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6),
       decoration: BoxDecoration(
         color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
+        gradient: AppGradients.cardCool(isDark: isDark),
         borderRadius: BorderRadius.circular(AppRadius.lg),
         border: Border.all(
           color: isDark ? AppColors.borderStrong : scheme.outlineVariant,
@@ -397,42 +399,60 @@ class _FilesChangedCardState extends State<FilesChangedCard>
           InkWell(
             onTap: _toggle,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               child: Row(
                 children: [
+                  Icon(Icons.difference_outlined, size: 16, color: scheme.primary),
+                  const SizedBox(width: 8),
                   // File-count label
                   Text(
                     label,
                     style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w500,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
                       color: scheme.onSurface,
                       letterSpacing: -0.1,
                     ),
                   ),
                   const SizedBox(width: 10),
-                  // Additions
-                  if (widget.additions > 0) ...[
-                    Text(
-                      '+${widget.additions}',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
-                        color: positiveColor,
-                        fontFamily: 'monospace',
+                  // Additions & Deletions Pill
+                  if (widget.additions > 0 || widget.deletions > 0)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF181B22) : scheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                          color: isDark ? const Color(0xFF2E3440) : scheme.outlineVariant.withValues(alpha: 0.5),
+                          width: 0.6,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 5),
-                  ],
-                  // Deletions
-                  if (widget.deletions > 0)
-                    Text(
-                      '-${widget.deletions}',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
-                        color: negativeColor,
-                        fontFamily: 'monospace',
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (widget.additions > 0) ...[
+                            Text(
+                              '+${widget.additions}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: positiveColor,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                            if (widget.deletions > 0) const SizedBox(width: 4),
+                          ],
+                          if (widget.deletions > 0)
+                            Text(
+                              '-${widget.deletions}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: negativeColor,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   const Spacer(),
@@ -442,7 +462,7 @@ class _FilesChangedCardState extends State<FilesChangedCard>
                     duration: const Duration(milliseconds: 200),
                     child: Icon(
                       Icons.keyboard_arrow_down_rounded,
-                      size: 16,
+                      size: 18,
                       color: scheme.onSurfaceVariant,
                     ),
                   ),
@@ -454,31 +474,29 @@ class _FilesChangedCardState extends State<FilesChangedCard>
                       widget.onReview();
                     },
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                       decoration: BoxDecoration(
-                        color: isDark
-                            ? AppColors.surfaceInput
-                            : scheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(AppRadius.sm),
-                        border: Border.all(
-                          color: isDark
-                              ? AppColors.borderSubtle
-                              : scheme.outlineVariant,
-                          width: 1,
-                        ),
+                        gradient: AppGradients.accentCta,
+                        borderRadius: BorderRadius.circular(AppRadius.pill),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF3186FF).withValues(alpha: isDark ? 0.25 : 0.15),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
                       ),
-                      child: Row(
+                      child: const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.rate_review_outlined,
-                              size: 12, color: scheme.primary),
-                          const SizedBox(width: 4),
+                          Icon(Icons.rate_review_outlined, size: 12.5, color: Colors.white),
+                          SizedBox(width: 4),
                           Text(
                             'Review',
                             style: TextStyle(
                               fontSize: 11.5,
-                              fontWeight: FontWeight.w600,
-                              color: scheme.onSurface,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
                             ),
                           ),
                         ],

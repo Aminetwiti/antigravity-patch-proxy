@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -251,6 +252,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
   final List<String> _runningBackgroundTasks = [];
   bool _isFullscreen = false;
+  bool _isHeaderVisible = true;
   final Map<String, StringBuffer> _taskOutputs = {};
   final Map<String, String> _taskStatuses = {};
   final Map<String, StreamController<String>> _taskOutputControllers = {};
@@ -457,6 +459,14 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         if (nearBottom) _hiddenNewCount = 0;
       });
     }
+
+    // Auto-hide du header au défilement vers le bas pour maximiser l'espace de lecture
+    if (pos.userScrollDirection == ScrollDirection.reverse && _isHeaderVisible && pos.pixels > 60) {
+      setState(() => _isHeaderVisible = false);
+    } else if (pos.userScrollDirection == ScrollDirection.forward && !_isHeaderVisible) {
+      setState(() => _isHeaderVisible = true);
+    }
+
     if (!_isLoadingMoreOlder && pos.pixels <= 80 && _hiddenOlderCount > 0 && pos.maxScrollExtent > 100) {
       _loadMoreOlderMessages();
     }
@@ -1706,6 +1716,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     bool queued = false,
     String? modelUID,
     int? modelEnum,
+    List<String>? images,
+    String? base64Data,
+    String? fileName,
   }) {
     if (text.trim().startsWith('/btw ') || text.trim().startsWith('/btw')) {
       final sideQ = text.trim().replaceFirst(RegExp(r'^/btw\s*'), '');
@@ -1737,6 +1750,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           'activeSessionId': targetSession,
           'modelUID': modelUID,
           'modelEnum': modelEnum,
+          if (images != null) 'images': images,
+          if (base64Data != null) 'base64Data': base64Data,
+          if (fileName != null) 'fileName': fileName,
           'timestamp': DateTime.now().millisecondsSinceEpoch,
         });
       });
@@ -1757,7 +1773,15 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final api = widget.api;
     if (api == null) return;
 
-    _sendPromptToDaemon(text, targetSessionOverride: targetSession, modelUID: modelUID, modelEnum: modelEnum);
+    _sendPromptToDaemon(
+      text,
+      targetSessionOverride: targetSession,
+      modelUID: modelUID,
+      modelEnum: modelEnum,
+      images: images,
+      base64Data: base64Data,
+      fileName: fileName,
+    );
   }
 
   void _handleQueueSendNow(int index) {
@@ -1768,6 +1792,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final text = item['text'] as String? ?? '';
     final modelUID = item['modelUID'] as String?;
     final modelEnum = item['modelEnum'] as int?;
+    final images = (item['images'] is List)
+        ? (item['images'] as List).map((e) => '$e').toList()
+        : null;
+    final base64Data = item['base64Data'] as String?;
+    final fileName = item['fileName'] as String?;
     final targetSession = widget.activeSessionId;
 
     final buf = _sessionMessages.putIfAbsent(targetSession, () => []);
@@ -1779,7 +1808,15 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         timestamp: _timestamp(),
       ));
     });
-    _sendPromptToDaemon(text, targetSessionOverride: targetSession, modelUID: modelUID, modelEnum: modelEnum);
+    _sendPromptToDaemon(
+      text,
+      targetSessionOverride: targetSession,
+      modelUID: modelUID,
+      modelEnum: modelEnum,
+      images: images,
+      base64Data: base64Data,
+      fileName: fileName,
+    );
   }
 
   void _handleQueueEdit(int index) {
@@ -1802,7 +1839,15 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     OfflineOutboxStore.saveQueuedMessages(widget.activeSessionId, queue);
   }
 
-  void _sendPromptToDaemon(String text, {String? targetSessionOverride, String? modelUID, int? modelEnum}) {
+  void _sendPromptToDaemon(
+    String text, {
+    String? targetSessionOverride,
+    String? modelUID,
+    int? modelEnum,
+    List<String>? images,
+    String? base64Data,
+    String? fileName,
+  }) {
     final api = widget.api;
     if (api == null) return;
 
@@ -1837,6 +1882,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     api.sendPrompt(
       targetSession,
       text,
+      base64Data: base64Data,
+      fileName: fileName,
+      images: images,
       modelUID: modelUID,
       modelEnum: modelEnum,
     ).listen(
@@ -2289,8 +2337,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       child: Column(
         children: [
           connectivityBanner,
-          if (!hasKeyboard) breadcrumb,
-          if (!_isFullscreen) ...[
+          if (!hasKeyboard && (_isHeaderVisible || _isFullscreen)) breadcrumb,
+          if (!_isFullscreen && _isHeaderVisible) ...[
             SessionTopTabs(
               activeTab: _currentTab,
               onTabChanged: (tab) {
@@ -3293,38 +3341,48 @@ class _MessageBubble extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (message.modelLabel != null && message.modelLabel!.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
-                  decoration: BoxDecoration(
-                    color: scheme.surfaceContainerHighest.withValues(alpha: 0.8),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: scheme.outlineVariant, width: 0.6),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.auto_awesome,
-                        size: 11,
-                        color: scheme.primary,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        message.modelLabel!,
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontFamily: 'monospace',
-                          fontWeight: FontWeight.w600,
-                          color: scheme.primary,
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AntigravityLogo.avatar(radius: 8, showGlow: true),
+                  const SizedBox(width: 6),
+                  if (message.modelLabel != null && message.modelLabel!.isNotEmpty)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                      decoration: BoxDecoration(
+                        gradient: AppGradients.cardCool(isDark: isDark),
+                        borderRadius: BorderRadius.circular(AppRadius.pill),
+                        border: Border.all(
+                          color: const Color(0xFF3186FF).withValues(alpha: isDark ? 0.35 : 0.25),
+                          width: 0.8,
                         ),
                       ),
-                    ],
-                  ),
-                ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.auto_awesome,
+                            size: 11,
+                            color: scheme.primary,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            message.modelLabel!,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontFamily: 'monospace',
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? AppColors.inkPrimary : scheme.primary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
               ),
+            ),
             if (hasThought || message.isStreaming) ...[
               ExecutionProgressView(
                 messageId: message.id,
@@ -3966,3 +4024,258 @@ class _ArtifactTabContentState extends State<_ArtifactTabContent> {
     );
   }
 }
+
+class _ExtractedMedia {
+  final String path;
+  final String name;
+  final bool isImage;
+  final String? dataUri;
+
+  const _ExtractedMedia({
+    required this.path,
+    required this.name,
+    this.isImage = true,
+    this.dataUri,
+  });
+}
+
+({List<_ExtractedMedia> media, String cleanText}) _extractMediaAndCleanText(String rawText) {
+  final mediaList = <_ExtractedMedia>[];
+  var text = rawText;
+
+  // 1. Markdown images: ![alt](url)
+  final imageRe = RegExp(r'!\[([^\]]*)\]\(([^)\s]+)\)');
+  for (final match in imageRe.allMatches(text)) {
+    final alt = match.group(1) ?? '';
+    final url = match.group(2) ?? '';
+    final isDataUri = url.startsWith('data:image/');
+    final name = alt.isNotEmpty ? alt : (isDataUri ? 'image.png' : url.split(RegExp(r'[\\/]')).last);
+    mediaList.add(_ExtractedMedia(
+      path: url,
+      name: name,
+      isImage: true,
+      dataUri: isDataUri ? url : null,
+    ));
+  }
+  text = text.replaceAll(imageRe, '').trim();
+
+  // 2. Bracketed attachment tags: [Images jointes: ...], [Fichier: ...]
+  final attachRe = RegExp(r'\[(Images? jointes?|Image|Fichier|File|Pièce jointe|Piece jointe):\s*([^\]]+)\]', caseSensitive: false);
+  for (final match in attachRe.allMatches(text)) {
+    final label = match.group(1) ?? 'Image';
+    final pathsStr = match.group(2) ?? '';
+    final paths = pathsStr.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty);
+    for (final p in paths) {
+      final cleanP = p.startsWith('file://') ? p.substring(7) : p;
+      final name = cleanP.split(RegExp(r'[\\/]')).last;
+      final lower = cleanP.toLowerCase();
+      final isImg = lower.endsWith('.png') ||
+          lower.endsWith('.jpg') ||
+          lower.endsWith('.jpeg') ||
+          lower.endsWith('.gif') ||
+          lower.endsWith('.webp') ||
+          cleanP.startsWith('data:image/');
+      mediaList.add(_ExtractedMedia(
+        path: p,
+        name: name.isNotEmpty ? name : label,
+        isImage: isImg,
+        dataUri: cleanP.startsWith('data:image/') ? cleanP : null,
+      ));
+    }
+  }
+  text = text.replaceAll(attachRe, '').trim();
+
+  return (media: mediaList, cleanText: text);
+}
+
+class _MediaGalleryRow extends StatelessWidget {
+  final List<_ExtractedMedia> media;
+  final DaemonApi? api;
+  final String workspacePath;
+  final LocalFileTap? onLocalFile;
+
+  const _MediaGalleryRow({
+    required this.media,
+    this.api,
+    this.workspacePath = '',
+    this.onLocalFile,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: media.map((item) => _MediaThumbnailItem(
+        item: item,
+        api: api,
+        workspacePath: workspacePath,
+        onTap: () {
+          if (onLocalFile != null) {
+            var p = item.path;
+            if (p.startsWith('file:///')) {
+              p = p.substring(8);
+            } else if (p.startsWith('file://')) {
+              p = p.substring(7);
+            }
+            onLocalFile!(p);
+          }
+        },
+      )).toList(),
+    );
+  }
+}
+
+class _MediaThumbnailItem extends StatefulWidget {
+  final _ExtractedMedia item;
+  final DaemonApi? api;
+  final String workspacePath;
+  final VoidCallback onTap;
+
+  const _MediaThumbnailItem({
+    required this.item,
+    this.api,
+    this.workspacePath = '',
+    required this.onTap,
+  });
+
+  @override
+  State<_MediaThumbnailItem> createState() => _MediaThumbnailItemState();
+}
+
+class _MediaThumbnailItemState extends State<_MediaThumbnailItem> {
+  Uint8List? _bytes;
+  bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadThumbnail();
+  }
+
+  void _loadThumbnail() async {
+    if (widget.item.dataUri != null) {
+      try {
+        final comma = widget.item.dataUri!.indexOf(',');
+        if (comma != -1) {
+          setState(() {
+            _bytes = base64Decode(widget.item.dataUri!.substring(comma + 1));
+          });
+        }
+      } catch (_) {}
+      return;
+    }
+
+    var p = widget.item.path;
+    if (p.startsWith('file:///')) {
+      p = p.substring(8);
+    } else if (p.startsWith('file://')) {
+      p = p.substring(7);
+    }
+
+    // Try reading directly from local filesystem if accessible
+    try {
+      final f = File(p);
+      if (f.existsSync()) {
+        final b = await f.readAsBytes();
+        if (mounted) setState(() => _bytes = b);
+        return;
+      }
+    } catch (_) {}
+
+    // Otherwise load via Daemon RPC
+    if (widget.api != null && widget.item.isImage) {
+      if (mounted) setState(() => _isLoading = true);
+      try {
+        final res = await widget.api!.readFile(p, workspacePath: widget.workspacePath);
+        final b64 = res['base64Data'] as String?;
+        if (b64 != null && b64.isNotEmpty && mounted) {
+          setState(() {
+            _bytes = base64Decode(b64);
+            _isLoading = false;
+          });
+        }
+      } catch (_) {
+        if (mounted) setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return InkWell(
+      onTap: widget.onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.6),
+            width: 1,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Thumbnail preview box
+            Container(
+              width: 76,
+              height: 76,
+              color: isDark ? const Color(0xFF141518) : scheme.surfaceContainerLow,
+              child: _bytes != null
+                  ? Image.memory(
+                      _bytes!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => _buildPlaceholder(scheme),
+                    )
+                  : (_isLoading
+                      ? Center(
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.5,
+                              valueColor: AlwaysStoppedAnimation(scheme.primary),
+                            ),
+                          ),
+                        )
+                      : _buildPlaceholder(scheme)),
+            ),
+            // Filename label chip
+            Container(
+              width: 76,
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+              color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerHighest,
+              child: Text(
+                widget.item.name,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlaceholder(ColorScheme scheme) {
+    return Icon(
+      widget.item.isImage ? Icons.image_outlined : Icons.insert_drive_file_outlined,
+      size: 24,
+      color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
+    );
+  }
+}
+

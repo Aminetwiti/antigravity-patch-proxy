@@ -9,7 +9,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ChatInputBar(
-              onSend: (_, {queued = false, modelUID, modelEnum}) {},
+              onSend: (_, {queued = false, modelUID, modelEnum, images, base64Data, fileName}) {},
               initialText: 'brouillon persisté',
             ),
           ),
@@ -25,7 +25,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ChatInputBar(
-              onSend: (_, {queued = false, modelUID, modelEnum}) {},
+              onSend: (_, {queued = false, modelUID, modelEnum, images, base64Data, fileName}) {},
               onDraftChanged: (d) => lastDraft = d,
             ),
           ),
@@ -44,7 +44,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ChatInputBar(
-              onSend: (m, {queued = false, modelUID, modelEnum}) => sent = m,
+              onSend: (m, {queued = false, modelUID, modelEnum, images, base64Data, fileName}) => sent = m,
               onDraftChanged: (d) => lastDraft = d,
             ),
           ),

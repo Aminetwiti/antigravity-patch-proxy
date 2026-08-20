@@ -120,7 +120,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ChatInputBar(
-              onSend: (_, {queued = false, modelUID, modelEnum}) {},
+              onSend: (_, {queued = false, modelUID, modelEnum, images, base64Data, fileName}) {},
               isConnected: true,
               api: api,
               onModelChanged: (m) => selectedModelFromCallback = m,
@@ -173,7 +173,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ChatInputBar(
-              onSend: (_, {queued = false, modelUID, modelEnum}) {},
+              onSend: (_, {queued = false, modelUID, modelEnum, images, base64Data, fileName}) {},
               isConnected: true,
               onModelChanged: (m) => selectedModelFromCallback = m,
             ),
@@ -214,7 +214,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ChatInputBar(
-              onSend: (_, {queued = false, modelUID, modelEnum}) {},
+              onSend: (_, {queued = false, modelUID, modelEnum, images, base64Data, fileName}) {},
               isConnected: true,
             ),
           ),
@@ -284,7 +284,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ChatInputBar(
-              onSend: (_, {queued = false, modelUID, modelEnum}) {},
+              onSend: (_, {queued = false, modelUID, modelEnum, images, base64Data, fileName}) {},
               api: api,
               isConnected: true,
             ),
@@ -322,7 +322,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ChatInputBar(
-              onSend: (msg, {queued = false, modelUID, modelEnum}) {
+              onSend: (msg, {queued = false, modelUID, modelEnum, images, base64Data, fileName}) {
                 sentMessage = msg;
                 sentModelUID = modelUID;
                 sentModelEnum = modelEnum;
@@ -388,7 +388,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ChatInputBar(
-              onSend: (_, {queued = false, modelUID, modelEnum}) {},
+              onSend: (_, {queued = false, modelUID, modelEnum, images, base64Data, fileName}) {},
               onStop: () => stopCalled = true,
               hasActiveStream: true,
               isConnected: true,
