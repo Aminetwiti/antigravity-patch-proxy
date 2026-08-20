@@ -1240,39 +1240,46 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                                     ),
                                   )
                                 : isUnread
-                                    ? Tooltip(
-                                        key: const ValueKey('unread_blue_dot'),
+                                    ? const Tooltip(
+                                        key: ValueKey('unread_blue_dot'),
                                         message: 'Session terminée — non lue',
-                                        child: Container(
-                                          width: 7,
-                                          height: 7,
-                                          margin: const EdgeInsets.symmetric(horizontal: 2),
-                                          decoration: const BoxDecoration(
-                                            color: Color(0xFF1A73E8),
-                                            shape: BoxShape.circle,
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: Color(0x661A73E8),
-                                                blurRadius: 4,
-                                                spreadRadius: 0.5,
-                                              ),
-                                            ],
-                                          ),
-                                        ),
+                                        child: _PulsingBlueDot(),
                                       )
-                                    : widget.session.time.isNotEmpty
-                                        ? Text(
-                                            widget.session.time,
-                                            key: ValueKey('time_${widget.session.time}'),
-                                            style: TextStyle(
-                                              fontSize: 11.5,
-                                              color: isSelected
-                                                  ? const Color(0xFF9E9FA9)
-                                                  : const Color(0xFF7E818D),
-                                              fontWeight: FontWeight.w400,
+                                    : (isSelected || _hovered)
+                                        ? Tooltip(
+                                            key: const ValueKey('session_menu_btn'),
+                                            message: 'Options de la conversation',
+                                            child: InkWell(
+                                              borderRadius: BorderRadius.circular(4),
+                                              onTap: () {
+                                                HapticFeedback.selectionClick();
+                                                _showSessionContextMenu(context);
+                                              },
+                                              child: Padding(
+                                                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                                                child: Icon(
+                                                  Icons.more_horiz_rounded,
+                                                  size: 15,
+                                                  color: isSelected
+                                                      ? const Color(0xFFB0B0BA)
+                                                      : const Color(0xFF8F909A),
+                                                ),
+                                              ),
                                             ),
                                           )
-                                        : const SizedBox.shrink(key: ValueKey('empty')),
+                                        : widget.session.time.isNotEmpty
+                                            ? Text(
+                                                widget.session.time,
+                                                key: ValueKey('time_${widget.session.time}'),
+                                                style: TextStyle(
+                                                  fontSize: 11.5,
+                                                  color: isSelected
+                                                      ? const Color(0xFF9E9FA9)
+                                                      : const Color(0xFF7E818D),
+                                                  fontWeight: FontWeight.w400,
+                                                ),
+                                              )
+                                            : const SizedBox.shrink(key: ValueKey('empty')),
               ),
               if (widget.isPinned)
                 Padding(
@@ -1520,3 +1527,54 @@ class _ConnectionRowState extends State<_ConnectionRow> {
     );
   }
 }
+
+/// Animated "session terminée — non lue" indicator: a soft pulsing blue dot
+/// that gently fades its glow in/out so a finished-but-unread session stands
+/// out from static state dots (running spinner, waiting orange, error red).
+class _PulsingBlueDot extends StatefulWidget {
+  const _PulsingBlueDot();
+
+  @override
+  State<_PulsingBlueDot> createState() => _PulsingBlueDotState();
+}
+
+class _PulsingBlueDotState extends State<_PulsingBlueDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1400),
+  )..repeat(reverse: true);
+
+  late final Animation<double> _glow = Tween<double>(begin: 0.35, end: 1.0)
+      .animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _glow,
+      child: Container(
+        width: 7,
+        height: 7,
+        margin: const EdgeInsets.symmetric(horizontal: 2),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A73E8),
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF1A73E8).withValues(alpha: 0.6),
+              blurRadius: 4,
+              spreadRadius: 0.5,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+

@@ -51,10 +51,14 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    // Pulsing animation repeats forever, so use a fixed pump instead of pumpAndSettle.
+    await tester.pump(const Duration(milliseconds: 500));
 
     // Verify unread blue dot exists for sess-unread-1
     expect(find.byKey(const ValueKey('unread_blue_dot')), findsOneWidget);
+
+    // Verify session menu button (...) exists for active session
+    expect(find.byKey(const ValueKey('session_menu_btn')), findsOneWidget);
 
     // Verify relative time is displayed for read session
     expect(find.text('1d'), findsOneWidget);
@@ -91,7 +95,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 500));
 
     // The unread session sess-1 has the blue dot container
     expect(find.byTooltip('Session terminée — non lue'), findsOneWidget);

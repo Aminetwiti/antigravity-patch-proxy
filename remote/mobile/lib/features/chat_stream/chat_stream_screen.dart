@@ -33,6 +33,7 @@ import 'widgets/execution_progress_view.dart';
 import 'widgets/overview_panel_view.dart';
 import 'widgets/session_review_view.dart';
 import 'widgets/queued_messages_card.dart';
+import 'widgets/revert_step_preview_dialog.dart';
 import '../../services/offline_outbox_store.dart';
 import '../../services/session_history_cache_store.dart';
 import '../../widgets/skeleton_loader.dart';
@@ -794,6 +795,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                 text: m['text']?.toString() ?? '',
                 thought: m['thought']?.toString(),
                 timestamp: m['timestamp']?.toString() ?? '',
+                stepIndex: (m['stepIndex'] as num?)?.toInt(),
                 isError: m['isError'] == true && (m['text']?.toString().trim().isEmpty ?? true),
               ));
             }
@@ -1381,7 +1383,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           type == 'approval_expired' ||
           type == 'session_status_update' ||
           type == 'quota_update' ||
-          type == 'sessions_updated';
+          type == 'sessions_updated' ||
+          type == 'cascade_reverted';
       if (!isBroadcast || !mounted) return;
       final requestId = msg['requestId'] as String? ?? '';
       String? sessionId = (msg['cascadeId'] ?? msg['data']?['cascadeId']) as String?;
@@ -1393,6 +1396,25 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             sessionId = events.first['cascadeId'] as String?;
           }
         }
+      }
+
+      if (type == 'cascade_reverted') {
+        final cascId = (msg['cascadeId'] ?? msg['data']?['cascadeId'])?.toString() ?? widget.activeSessionId;
+        if (mounted && cascId.isNotEmpty) {
+          SessionHistoryCacheStore.instance.saveSessionHistory(cascId, const []);
+          _loadHistoryIfEmpty(cascId);
+          _fetchVcsChanges();
+          _refreshRunningTasks();
+          if (cascId == widget.activeSessionId) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Modifications annulées jusqu\'à cette étape'),
+                duration: Duration(seconds: 2),
+              ),
+            );
+          }
+        }
+        return;
       }
 
       if (type == 'quota_update') {
@@ -1745,6 +1767,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         _streamRequestToMessageId.remove(thKey);
         SessionHistoryCacheStore.instance.saveSessionHistory(targetSessionId, buf);
         _refreshRunningTasks();
+        _fetchVcsChanges(targetSessionId);
 
         if (isActiveSession && mounted) {
           setState(() {});
@@ -2399,6 +2422,49 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     );
   }
 
+  Future<void> _handleRevertStep(ChatMessage message) async {
+    final api = widget.api;
+    if (api == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Rollback impossible en mode hors ligne.')),
+      );
+      return;
+    }
+
+    final targetSession = widget.activeSessionId;
+    if (targetSession.isEmpty) return;
+
+    // Détermine le stepIndex
+    int stepIndex = message.stepIndex ?? -1;
+    if (stepIndex < 0) {
+      final buf = _sessionMessages[targetSession] ?? [];
+      final idx = buf.indexOf(message);
+      stepIndex = idx >= 0 ? idx : 0;
+    }
+
+    final reverted = await RevertStepPreviewDialog.show(
+      context,
+      api: api,
+      cascadeId: targetSession,
+      stepIndex: stepIndex,
+      stepDescription: message.text,
+    );
+
+    if (reverted == true && mounted) {
+      HapticFeedback.mediumImpact();
+      SessionHistoryCacheStore.instance.saveSessionHistory(targetSession, const []);
+      _loadHistoryIfEmpty(targetSession);
+      _fetchVcsChanges();
+      _refreshRunningTasks();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Modifications annulées jusqu\'à cette étape'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -2829,9 +2895,21 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                 onProceedPlan: () => _handleSendMessage('Proceed', queued: false),
                 onViewPlan: () => setState(() => _currentTab = SessionTabType.plan),
                 onViewReview: () => setState(() => _currentTab = SessionTabType.review),
+                onOpenFile: (file) {
+                  final fileName = file.split(RegExp(r'[/\\]')).last;
+                  final matching = _modifiedFileList
+                      .where((f) => _pathsMatch(f.path, file))
+                      .firstOrNull;
+                  _openUnifiedDiffViewer(
+                    filePath: file,
+                    fileName: fileName,
+                    diffContent: matching?.diffContent,
+                  );
+                },
                 onStop: _handleStopGeneration,
                 onSwitchModel: _showModelSelector,
                 onEditPrompt: (text) => _chatInputKey.currentState?.setText(text),
+                onRevertStep: _handleRevertStep,
                 onResend: (m) {
                   final reqId = m.id.startsWith('pending-')
                       ? m.id.substring('pending-'.length)
@@ -2848,82 +2926,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                     type: ToastType.success,
                   );
                 },
-              );
-
-              // Swipe-to-Action : Glisser à droite pour citer, à gauche pour copier
-              final swipeableBubble = Dismissible(
-                key: Key('swipe-msg-${msg.id}'),
-                direction: msg.isStreaming ? DismissDirection.none : DismissDirection.horizontal,
-                confirmDismiss: (direction) async {
-                  if (direction == DismissDirection.startToEnd) {
-                    // Swipe Right -> Citer / Répondre
-                    HapticFeedback.mediumImpact();
-                    _chatInputKey.currentState?.insertQuote(msg.text);
-                    AppToast.show(
-                      context,
-                      message: 'Message cité dans la barre de saisie',
-                      icon: Icons.format_quote_rounded,
-                      type: ToastType.info,
-                    );
-                  } else if (direction == DismissDirection.endToStart) {
-                    // Swipe Left -> Copier dans le presse-papiers
-                    HapticFeedback.lightImpact();
-                    Clipboard.setData(ClipboardData(text: msg.text));
-                    AppToast.show(
-                      context,
-                      message: 'Message copié dans le presse-papiers',
-                      icon: Icons.copy_outlined,
-                      type: ToastType.success,
-                    );
-                  }
-                  return false; // Ne supprime pas le message
-                },
-                background: Container(
-                  alignment: Alignment.centerLeft,
-                  padding: const EdgeInsets.only(left: 16),
-                  decoration: BoxDecoration(
-                    color: scheme.primary.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(AppRadius.lg),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.reply_rounded, size: 18, color: scheme.primary),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Citer',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: scheme.primary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                secondaryBackground: Container(
-                  alignment: Alignment.centerRight,
-                  padding: const EdgeInsets.only(right: 16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF00B95C).withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(AppRadius.lg),
-                  ),
-                  child: const Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      Text(
-                        'Copier',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF00B95C),
-                        ),
-                      ),
-                      SizedBox(width: 6),
-                      Icon(Icons.copy_rounded, size: 18, color: Color(0xFF00B95C)),
-                    ],
-                  ),
-                ),
-                child: bubbleWidget,
               );
 
               final semanticBubble = Semantics(
@@ -2949,7 +2951,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                     );
                   },
                 },
-                child: swipeableBubble,
+                child: bubbleWidget,
               );
 
               // Wrap individual bubbles in RepaintBoundary for 60/120fps streaming isolation
@@ -2991,105 +2993,107 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
 
 
-  Future<void> _fetchVcsChanges() async {
+  Future<void> _fetchVcsChanges([String? forSessionId]) async {
     final api = widget.api;
     if (api == null) return;
-    if (_modifiedFileList.isEmpty && mounted) {
+    final targetSession = forSessionId ?? widget.activeSessionId;
+    if (targetSession.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _modifiedFileList.clear();
+          _modifiedFiles.clear();
+          _isVcsLoading = false;
+        });
+      }
+      return;
+    }
+
+    if (_modifiedFileList.isEmpty && mounted && targetSession == widget.activeSessionId) {
       setState(() => _isVcsLoading = true);
     }
+
     try {
       final ws = widget.workspacePath?.isNotEmpty == true
           ? widget.workspacePath
           : (widget.activeProjectName.isNotEmpty ? widget.activeProjectName : null);
 
-      // Priorité 1 : get_context.modifiedFiles (parsés du transcript) —
-      // même source que le badge filesChangedCount. Toujours cohérent.
       final ctx = await api.getContext(
-        cascadeId: widget.activeSessionId.isNotEmpty ? widget.activeSessionId : null,
+        cascadeId: targetSession,
         workspacePath: ws,
       );
       final ctxFiles = ctx['modifiedFiles'];
       final list = <SessionModifiedFile>[];
+      final targetModFiles = _sessionModifiedFiles.putIfAbsent(targetSession, () => {});
+
       if (ctxFiles is List && ctxFiles.isNotEmpty) {
         for (final item in ctxFiles) {
           if (item is! String || item.isEmpty) continue;
           var clean = item.replaceAll('\\', '/');
           if (clean.startsWith('file:///')) clean = clean.substring(8);
           if (clean.startsWith('file://')) clean = clean.substring(7);
-          if (!_modifiedFiles.contains(clean)) _modifiedFiles.add(clean);
+          if (!targetModFiles.contains(clean)) targetModFiles.add(clean);
           if (!list.any((f) => f.path == clean)) {
             list.add(SessionModifiedFile(path: clean, additions: 1, deletions: 0));
           }
         }
       }
 
-      // Fallback : git status (staged + working tree)
-      if (list.isEmpty) {
-        final res = await api.getVcsState(workspacePath: ws);
-        for (final key in const ['workingDirectoryChanges', 'stagedChanges']) {
-          final entries = res[key];
-          if (entries is List) {
-            for (final item in entries) {
-              String path = '';
-              if (item is String && item.isNotEmpty) {
-                path = item;
-              } else if (item is Map && item['uri'] is String) {
-                path = item['uri'] as String;
-              }
-              if (path.isNotEmpty) {
-                var clean = path.replaceAll('\\', '/');
-                if (clean.startsWith('file:///')) clean = clean.substring(8);
-                if (clean.startsWith('file://')) clean = clean.substring(7);
-                if (!_modifiedFiles.contains(clean)) _modifiedFiles.add(clean);
-                if (!list.any((f) => f.path == clean)) {
-                  list.add(SessionModifiedFile(path: clean, additions: 1, deletions: 0));
+      // Enrichir avec les diffs réels et comptes d'additions / suppressions (getTurnDiff)
+      try {
+        final diffRes = await api.getTurnDiff(cascadeId: targetSession);
+        final fileDiffs = diffRes['fileDiffs'];
+        if (fileDiffs is List) {
+          for (final fd in fileDiffs) {
+            if (fd is Map) {
+              final p = (fd['path'] as String? ?? '').replaceAll('\\', '/');
+              final d = fd['diff'];
+              if (d is Map) {
+                final orig = d['originalContents'] as String? ?? '';
+                final mod = d['modifiedContents'] as String? ?? '';
+                final adds = d['additions'] as int? ?? (d['totalAdditions'] as int? ?? 0);
+                final dels = d['deletions'] as int? ?? (d['totalDeletions'] as int? ?? 0);
+                final fileDiff = _buildUnifiedDiffFromStrings(p.split('/').last, orig, mod);
+                final idx = list.indexWhere((f) => _pathsMatch(f.path, p));
+                if (idx >= 0) {
+                  list[idx] = SessionModifiedFile(
+                    path: list[idx].path,
+                    additions: adds > 0 ? adds : list[idx].additions,
+                    deletions: dels > 0 ? dels : list[idx].deletions,
+                    diffContent: fileDiff.isNotEmpty ? fileDiff : list[idx].diffContent,
+                  );
+                } else if (p.isNotEmpty) {
+                  targetModFiles.add(p);
+                  list.add(SessionModifiedFile(
+                    path: p,
+                    additions: adds > 0 ? adds : 1,
+                    deletions: dels,
+                    diffContent: fileDiff.isNotEmpty ? fileDiff : null,
+                  ));
                 }
               }
             }
           }
         }
+      } catch (_) {}
+
+      _sessionModifiedFileList[targetSession] = list;
+
+      // Update the last assistant message's filesChanged / additions / deletions
+      final buf = _sessionMessages[targetSession];
+      if (buf != null && buf.isNotEmpty && list.isNotEmpty) {
+        final totalAdded = list.fold(0, (s, f) => s + f.additions);
+        final totalRemoved = list.fold(0, (s, f) => s + f.deletions);
+        final lastAssistantIdx = buf.lastIndexWhere((m) => m.sender != 'user');
+        if (lastAssistantIdx >= 0) {
+          buf[lastAssistantIdx] = buf[lastAssistantIdx].copyWith(
+            filesChanged: list.map((f) => f.path).toList(),
+            additions: totalAdded,
+            deletions: totalRemoved,
+          );
+        }
       }
 
-      // Enrichir avec les diffs réels et comptes d'additions / suppressions (getTurnDiff)
-      if (widget.activeSessionId.isNotEmpty) {
-        try {
-          final diffRes = await api.getTurnDiff(cascadeId: widget.activeSessionId);
-          final fileDiffs = diffRes['fileDiffs'];
-          if (fileDiffs is List) {
-            for (final fd in fileDiffs) {
-              if (fd is Map) {
-                final p = (fd['path'] as String? ?? '').replaceAll('\\', '/');
-                final d = fd['diff'];
-                if (d is Map) {
-                  final orig = d['originalContents'] as String? ?? '';
-                  final mod = d['modifiedContents'] as String? ?? '';
-                  final adds = d['additions'] as int? ?? (d['totalAdditions'] as int? ?? 0);
-                  final dels = d['deletions'] as int? ?? (d['totalDeletions'] as int? ?? 0);
-                  final fileDiff = _buildUnifiedDiffFromStrings(p.split('/').last, orig, mod);
-                  final idx = list.indexWhere((f) => _pathsMatch(f.path, p));
-                  if (idx >= 0) {
-                    list[idx] = SessionModifiedFile(
-                      path: list[idx].path,
-                      additions: adds > 0 ? adds : list[idx].additions,
-                      deletions: dels > 0 ? dels : list[idx].deletions,
-                      diffContent: fileDiff.isNotEmpty ? fileDiff : list[idx].diffContent,
-                    );
-                  } else if (p.isNotEmpty) {
-                    list.add(SessionModifiedFile(
-                      path: p,
-                      additions: adds > 0 ? adds : 1,
-                      deletions: dels,
-                      diffContent: fileDiff.isNotEmpty ? fileDiff : null,
-                    ));
-                  }
-                }
-              }
-            }
-          }
-        } catch (_) {}
-      }
-
-      if (mounted) {
+      if (mounted && targetSession == widget.activeSessionId) {
         setState(() {
           _modifiedFileList
             ..clear()
@@ -3097,7 +3101,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         });
       }
     } catch (_) {} finally {
-      if (mounted && _isVcsLoading) {
+      if (mounted && _isVcsLoading && targetSession == widget.activeSessionId) {
         setState(() => _isVcsLoading = false);
       }
     }
@@ -3587,10 +3591,12 @@ class _MessageBubble extends StatelessWidget {
   final ValueChanged<ChatMessage>? onResend;
   final VoidCallback? onSwitchModel;
   final ValueChanged<String>? onEditPrompt;
+  final ValueChanged<String>? onOpenFile;
 
   /// P5 : tap sur un lien markdown file:/// → ouvre le fichier distant.
   final LocalFileTap? onLocalFile;
   final ValueChanged<String>? onOpenArtifact;
+  final ValueChanged<ChatMessage>? onRevertStep;
 
   const _MessageBubble({
     required this.message,
@@ -3607,6 +3613,8 @@ class _MessageBubble extends StatelessWidget {
     this.onResend,
     this.onSwitchModel,
     this.onEditPrompt,
+    this.onOpenFile,
+    this.onRevertStep,
   });
 
   @override
@@ -3665,6 +3673,69 @@ class _MessageBubble extends StatelessWidget {
                     workspacePath: workspacePath,
                     onLocalFile: onLocalFile,
                   ),
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    if (message.timestamp.isNotEmpty)
+                      Text(
+                        message.timestamp,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isDark ? AppColors.inkMuted : scheme.outline,
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                    const SizedBox(width: 8),
+                    // Bouton Copier
+                    Tooltip(
+                      message: 'Copier le message',
+                      child: InkWell(
+                        onTap: () {
+                          HapticFeedback.lightImpact();
+                          Clipboard.setData(ClipboardData(text: message.text));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Prompt copié dans le presse-papiers'),
+                              duration: Duration(seconds: 1),
+                            ),
+                          );
+                        },
+                        borderRadius: BorderRadius.circular(4),
+                        child: Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: Icon(
+                            Icons.copy_rounded,
+                            size: 14,
+                            color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (onRevertStep != null) ...[
+                      const SizedBox(width: 4),
+                      // Bouton Revert / Undo changes up to this point
+                      Tooltip(
+                        message: 'Undo changes up to this point',
+                        child: InkWell(
+                          onTap: () {
+                            HapticFeedback.lightImpact();
+                            onRevertStep!(message);
+                          },
+                          borderRadius: BorderRadius.circular(4),
+                          child: Padding(
+                            padding: const EdgeInsets.all(4),
+                            child: Icon(
+                              Icons.undo_rounded,
+                              size: 15,
+                              color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ],
             ),
           ),
@@ -3850,6 +3921,7 @@ class _MessageBubble extends StatelessWidget {
                     additions: message.additions,
                     deletions: message.deletions,
                     onReview: onViewReview ?? () {},
+                    onOpenFile: onOpenFile,
                   ),
                 ),
             ],

@@ -4156,6 +4156,15 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		if targetCascadeID == "" && msg.Data != nil {
 			targetCascadeID, _ = msg.Data["cascadeId"].(string)
 		}
+		if targetCascadeID == "" {
+			targetCascadeID = s.focusedCascadeID
+		}
+
+		scheduledCount := 0
+		if s.scheduler != nil {
+			scheduledCount = len(s.scheduler.ListTasks())
+		}
+
 		if targetCascadeID != "" {
 			// Scoped to a single session
 			counts := countTranscriptActivity(targetCascadeID)
@@ -4174,13 +4183,18 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			if uploadsCount < counts["uploads"] {
 				uploadsCount = counts["uploads"]
 			}
+			runningCount := 0
+			if s.runningTasks != nil {
+				runningCount = len(s.runningTasks.listTasksForCascade(targetCascadeID, false))
+			}
 			stats := map[string]interface{}{
 				"cascadeId":            targetCascadeID,
 				"subagentsCount":       counts["subagents"],
 				"filesChangedCount":    filesChangedCount,
 				"artifactsCount":       artifactsCount,
 				"uploadsCount":         uploadsCount,
-				"backgroundTasksCount": counts["tasks"],
+				"backgroundTasksCount": runningCount,
+				"scheduledTasksCount":  scheduledCount,
 				"artifacts":            artifacts,
 				"uploads":              uploads,
 				"modifiedFiles":        modifiedFiles,
@@ -4189,53 +4203,19 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 
-		// Global aggregate fallback when no cascadeId is provided
-		var cascadeIDs []string
-		if raw, ok := s.cachedSessions(); ok && len(raw) > 0 {
-			for _, sum := range connectrpc.ParseTrajectories(raw) {
-				cascadeIDs = append(cascadeIDs, sum.CascadeID)
-			}
-		}
-		if len(cascadeIDs) == 0 {
-			s.fetchSessionsSingleFlight()
-			if raw, ok := s.cachedSessions(); ok && len(raw) > 0 {
-				for _, sum := range connectrpc.ParseTrajectories(raw) {
-					cascadeIDs = append(cascadeIDs, sum.CascadeID)
-				}
-			}
-		}
-		if len(cascadeIDs) == 0 {
-			for _, loc := range ListLocalSessions() {
-				if cid, ok := loc["cascadeId"].(string); ok && cid != "" {
-					cascadeIDs = append(cascadeIDs, cid)
-				}
-			}
-		}
+		// Fallback when no session is focused / specified: clean 0s (no global cross-session pollution)
 		stats := map[string]interface{}{
+			"cascadeId":            "",
 			"subagentsCount":       0,
 			"filesChangedCount":    0,
 			"artifactsCount":       0,
 			"uploadsCount":         0,
 			"backgroundTasksCount": 0,
+			"scheduledTasksCount":  scheduledCount,
+			"artifacts":            []map[string]interface{}{},
+			"uploads":              []map[string]interface{}{},
+			"modifiedFiles":        []string{},
 		}
-		subagentsTotal := 0
-		filesTotal := 0
-		artifactsTotal := 0
-		uploadsTotal := 0
-		tasksTotal := 0
-		for _, cid := range cascadeIDs {
-			counts := countTranscriptActivity(cid)
-			subagentsTotal += counts["subagents"]
-			filesTotal += counts["files"]
-			artifactsTotal += counts["artifacts"]
-			uploadsTotal += counts["uploads"]
-			tasksTotal += counts["tasks"]
-		}
-		stats["subagentsCount"] = subagentsTotal
-		stats["filesChangedCount"] = filesTotal
-		stats["artifactsCount"] = artifactsTotal
-		stats["uploadsCount"] = uploadsTotal
-		stats["backgroundTasksCount"] = tasksTotal
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: stats})
 		return
 

@@ -316,6 +316,7 @@ class FilesChangedCard extends StatefulWidget {
   final int additions;
   final int deletions;
   final VoidCallback onReview;
+  final ValueChanged<String>? onOpenFile;
 
   const FilesChangedCard({
     super.key,
@@ -323,6 +324,7 @@ class FilesChangedCard extends StatefulWidget {
     this.additions = 0,
     this.deletions = 0,
     required this.onReview,
+    this.onOpenFile,
   });
 
   @override
@@ -331,7 +333,7 @@ class FilesChangedCard extends StatefulWidget {
 
 class _FilesChangedCardState extends State<FilesChangedCard>
     with SingleTickerProviderStateMixin {
-  bool _expanded = false;
+  bool _expanded = true;
   late final AnimationController _anim;
   late final Animation<double> _sizeFactor;
 
@@ -341,6 +343,7 @@ class _FilesChangedCardState extends State<FilesChangedCard>
     _anim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 200),
+      value: 1.0,
     );
     _sizeFactor = CurvedAnimation(parent: _anim, curve: Curves.easeOut);
   }
@@ -370,6 +373,20 @@ class _FilesChangedCardState extends State<FilesChangedCard>
     }
   }
 
+  Color _iconColorFor(String name, bool isDark) {
+    final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+    switch (ext) {
+      case 'dart': return const Color(0xFF29B6F6);
+      case 'go': return const Color(0xFF00ADD8);
+      case 'ts': case 'tsx': return const Color(0xFF3178C6);
+      case 'js': case 'jsx': return const Color(0xFFF7DF1E);
+      case 'json': case 'yaml': case 'yml': case 'toml': return const Color(0xFFA074C4);
+      case 'md': case 'txt': return const Color(0xFF519ABA);
+      case 'sh': case 'bat': case 'ps1': return const Color(0xFF4CAF50);
+      default: return isDark ? const Color(0xFF9E9FA9) : const Color(0xFF6E707A);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -377,132 +394,128 @@ class _FilesChangedCardState extends State<FilesChangedCard>
     final count = widget.files.length;
     final label = '$count ${count > 1 ? 'files changed' : 'file changed'}';
 
-    final positiveColor = isDark ? AppColors.positive : const Color(0xFF1A7F37);
-    final negativeColor = isDark ? AppColors.danger : const Color(0xFFCF222E);
+    const positiveColor = Color(0xFF22C55E);
+    const negativeColor = Color(0xFFEF4444);
 
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 6),
+      margin: const EdgeInsets.only(top: 8, bottom: 4),
       decoration: BoxDecoration(
-        color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
-        gradient: AppGradients.cardCool(isDark: isDark),
-        borderRadius: BorderRadius.circular(AppRadius.lg),
+        color: isDark ? const Color(0xFF14161B) : scheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isDark ? AppColors.borderStrong : scheme.outlineVariant,
+          color: isDark ? const Color(0xFF262930) : scheme.outlineVariant,
           width: 1,
         ),
       ),
       clipBehavior: Clip.hardEdge,
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // ── Header row ───────────────────────────────────────────────
-          InkWell(
-            onTap: _toggle,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              child: Row(
-                children: [
-                  Icon(Icons.difference_outlined, size: 16, color: scheme.primary),
-                  const SizedBox(width: 8),
-                  // File-count label
-                  Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: scheme.onSurface,
-                      letterSpacing: -0.1,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  // Additions & Deletions Pill
-                  if (widget.additions > 0 || widget.deletions > 0)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF181B22) : scheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(
-                          color: isDark ? const Color(0xFF2E3440) : scheme.outlineVariant.withValues(alpha: 0.5),
-                          width: 0.6,
+          // ── Header row (Antigravity 2.0 exact UI) ───────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                InkWell(
+                  onTap: _toggle,
+                  borderRadius: BorderRadius.circular(4),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // File-count label
+                        Text(
+                          label,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? const Color(0xFFE4E4E7) : scheme.onSurface,
+                          ),
                         ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
+                        // Additions & Deletions
+                        if (widget.additions > 0 || widget.deletions > 0) ...[
+                          const SizedBox(width: 6),
                           if (widget.additions > 0) ...[
                             Text(
                               '+${widget.additions}',
-                              style: TextStyle(
-                                fontSize: 11,
+                              style: const TextStyle(
+                                fontSize: 12,
                                 fontWeight: FontWeight.w700,
                                 color: positiveColor,
                                 fontFamily: 'monospace',
                               ),
                             ),
-                            if (widget.deletions > 0) const SizedBox(width: 4),
                           ],
-                          if (widget.deletions > 0)
+                          if (widget.deletions > 0) ...[
+                            if (widget.additions > 0) const SizedBox(width: 4),
                             Text(
                               '-${widget.deletions}',
-                              style: TextStyle(
-                                fontSize: 11,
+                              style: const TextStyle(
+                                fontSize: 12,
                                 fontWeight: FontWeight.w700,
                                 color: negativeColor,
                                 fontFamily: 'monospace',
                               ),
                             ),
+                          ],
                         ],
-                      ),
-                    ),
-                  const Spacer(),
-                  // Expand chevron
-                  AnimatedRotation(
-                    turns: _expanded ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 200),
-                    child: Icon(
-                      Icons.keyboard_arrow_down_rounded,
-                      size: 18,
-                      color: scheme.onSurfaceVariant,
+                        const SizedBox(width: 4),
+                        // Chevron
+                        AnimatedRotation(
+                          turns: _expanded ? 0 : -0.25,
+                          duration: const Duration(milliseconds: 180),
+                          child: Icon(
+                            Icons.keyboard_arrow_down_rounded,
+                            size: 16,
+                            color: isDark ? const Color(0xFF8E929E) : scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  // Review button
-                  BouncingTap(
-                    hapticType: BouncingHapticType.light,
+                ),
+                const Spacer(),
+                // Review button (Desktop Antigravity pill style)
+                Material(
+                  color: isDark ? const Color(0xFF1F2228) : scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(6),
+                  child: InkWell(
                     onTap: widget.onReview,
+                    borderRadius: BorderRadius.circular(6),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        gradient: AppGradients.accentCta,
-                        borderRadius: BorderRadius.circular(AppRadius.pill),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFF3186FF).withValues(alpha: isDark ? 0.25 : 0.15),
-                            blurRadius: 4,
-                            offset: const Offset(0, 1),
-                          ),
-                        ],
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: isDark ? const Color(0xFF333742) : scheme.outlineVariant,
+                          width: 0.8,
+                        ),
                       ),
-                      child: const Row(
+                      child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.rate_review_outlined, size: 12.5, color: Colors.white),
-                          SizedBox(width: 4),
+                          Icon(
+                            Icons.difference_outlined,
+                            size: 13,
+                            color: isDark ? const Color(0xFFB0B4C0) : scheme.onSurfaceVariant,
+                          ),
+                          const SizedBox(width: 4.5),
                           Text(
                             'Review',
                             style: TextStyle(
                               fontSize: 11.5,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? const Color(0xFFE4E4E7) : scheme.onSurface,
                             ),
                           ),
                         ],
                       ),
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
 
@@ -512,7 +525,6 @@ class _FilesChangedCardState extends State<FilesChangedCard>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Divider(height: 1, color: scheme.outlineVariant),
                 ...widget.files.map((file) {
                   final normalized = file.replaceAll('\\', '/');
                   final lastSlash = normalized.lastIndexOf('/');
@@ -523,50 +535,58 @@ class _FilesChangedCardState extends State<FilesChangedCard>
                       ? normalized.substring(0, lastSlash)
                       : '';
 
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 5),
-                    child: Row(
-                      children: [
-                        Icon(
-                          _iconFor(fileName),
-                          size: 13,
-                          color: scheme.primary.withValues(alpha: 0.75),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: RichText(
-                            overflow: TextOverflow.ellipsis,
-                            text: TextSpan(
-                              children: [
-                                TextSpan(
-                                  text: fileName,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                    color: scheme.onSurface,
-                                    fontFamily: 'monospace',
-                                  ),
-                                ),
-                                if (dirPath.isNotEmpty)
-                                  TextSpan(
-                                    text: '  $dirPath',
-                                    style: TextStyle(
-                                      fontSize: 10.5,
-                                      color: scheme.onSurfaceVariant
-                                          .withValues(alpha: 0.6),
-                                      fontFamily: 'monospace',
-                                    ),
-                                  ),
-                              ],
+                  return Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () => widget.onOpenFile?.call(file),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 4.5),
+                        child: Row(
+                          children: [
+                            Icon(
+                              _iconFor(fileName),
+                              size: 13,
+                              color: _iconColorFor(fileName, isDark),
                             ),
-                          ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: RichText(
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                                text: TextSpan(
+                                  children: [
+                                    TextSpan(
+                                      text: fileName,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: isDark ? const Color(0xFFE4E4E7) : scheme.onSurface,
+                                        fontFamily: 'monospace',
+                                      ),
+                                    ),
+                                    if (dirPath.isNotEmpty)
+                                      TextSpan(
+                                        text: '  ...$dirPath',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: isDark
+                                              ? const Color(0xFF7E818D)
+                                              : scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                                          fontFamily: 'monospace',
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                   );
                 }),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
               ],
             ),
           ),

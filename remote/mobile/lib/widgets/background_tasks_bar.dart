@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile/theme/app_colors.dart';
 
-/// Barre de statut des tâches de fond (Sticky) inspirée fidèlement d'Antigravity IDE
+/// Barre de statut des tâches de fond (Sticky) inspirée fidèlement d'Antigravity IDE.
+/// Supporte l'ouverture/fermeture (collapsible) pour gagner de l'espace et le défilement
+/// fluide (scrollable) lorsqu'il y a plusieurs tâches simultanées.
 class BackgroundTasksBar extends StatefulWidget {
   final List<String> runningTasks;
   final ValueChanged<String>? onTapTask;
@@ -21,9 +23,11 @@ class BackgroundTasksBar extends StatefulWidget {
   State<BackgroundTasksBar> createState() => _BackgroundTasksBarState();
 }
 
-class _BackgroundTasksBarState extends State<BackgroundTasksBar> with SingleTickerProviderStateMixin {
+class _BackgroundTasksBarState extends State<BackgroundTasksBar>
+    with SingleTickerProviderStateMixin {
   late AnimationController _spinController;
-  bool _expanded = false;
+  late bool _expanded;
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
@@ -32,11 +36,23 @@ class _BackgroundTasksBarState extends State<BackgroundTasksBar> with SingleTick
       vsync: this,
       duration: const Duration(seconds: 2),
     )..repeat();
+    _expanded = widget.runningTasks.length == 1;
+  }
+
+  @override
+  void didUpdateWidget(covariant BackgroundTasksBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.runningTasks.length != oldWidget.runningTasks.length) {
+      if (widget.runningTasks.length == 1 && oldWidget.runningTasks.isEmpty) {
+        _expanded = true;
+      }
+    }
   }
 
   @override
   void dispose() {
     _spinController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -49,61 +65,87 @@ class _BackgroundTasksBarState extends State<BackgroundTasksBar> with SingleTick
     final count = widget.runningTasks.length;
     final taskLabel = count == 1 ? '1 task running' : '$count tasks running';
     final viewInsets = MediaQuery.of(context).viewInsets;
-    final rawInsetsBottom = View.of(context).viewInsets.bottom / MediaQuery.of(context).devicePixelRatio;
+    final rawInsetsBottom =
+        View.of(context).viewInsets.bottom / MediaQuery.of(context).devicePixelRatio;
     final hasKeyboard = viewInsets.bottom > 50 || rawInsetsBottom > 50;
-    final isActuallyExpanded = (count == 1 || _expanded) && !hasKeyboard;
+    final isActuallyExpanded = _expanded && !hasKeyboard;
 
     Widget buildTaskItem(String task) {
       return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 3),
+        padding: const EdgeInsets.symmetric(vertical: 2.5),
         child: InkWell(
           borderRadius: BorderRadius.circular(6),
-          onTap: () => widget.onTapTask?.call(task),
-          child: Row(
-            children: [
-              // Arc spinner rotatif élégant
-              RotationTransition(
-                turns: _spinController,
-                child: Icon(
-                  Icons.sync,
-                  size: 13,
-                  color: isDark ? const Color(0xFF8E8E93) : scheme.outline,
-                ),
+          onTap: () {
+            HapticFeedback.selectionClick();
+            widget.onTapTask?.call(task);
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? const Color(0xFF262930)
+                  : scheme.surfaceContainerHigh.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: isDark
+                    ? const Color(0xFF33363F)
+                    : scheme.outlineVariant.withValues(alpha: 0.3),
+                width: 0.8,
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  task,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontFamily: 'monospace',
-                    color: isDark ? const Color(0xFFD4D4D4) : scheme.onSurface,
+            ),
+            child: Row(
+              children: [
+                RotationTransition(
+                  turns: _spinController,
+                  child: Icon(
+                    Icons.sync,
+                    size: 13,
+                    color: isDark ? const Color(0xFF8AB4F8) : scheme.primary,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
-              if (widget.onStopTask != null) ...[
                 const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: () {
-                    HapticFeedback.mediumImpact();
-                    widget.onStopTask!(task);
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                    child: Text(
-                      'Stop',
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.danger.withValues(alpha: 0.85),
+                Expanded(
+                  child: Text(
+                    task,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontFamily: 'monospace',
+                      color: isDark ? const Color(0xFFD4D4D4) : scheme.onSurface,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (widget.onStopTask != null) ...[
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: () {
+                      HapticFeedback.mediumImpact();
+                      widget.onStopTask!(task);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.danger.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                          color: AppColors.danger.withValues(alpha: 0.3),
+                          width: 0.8,
+                        ),
+                      ),
+                      child: Text(
+                        'Stop',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.danger.withValues(alpha: 0.9),
+                        ),
                       ),
                     ),
                   ),
-                ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       );
@@ -113,18 +155,27 @@ class _BackgroundTasksBarState extends State<BackgroundTasksBar> with SingleTick
       margin: EdgeInsets.symmetric(horizontal: 12, vertical: hasKeyboard ? 2 : 4),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1E2024) : scheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDark ? const Color(0xFF2C2F36) : scheme.outlineVariant.withValues(alpha: 0.5),
+          color: isDark
+              ? const Color(0xFF2C2F36)
+              : scheme.outlineVariant.withValues(alpha: 0.5),
           width: 1,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.15),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      padding: EdgeInsets.fromLTRB(14, hasKeyboard ? 6 : 10, 14, hasKeyboard ? 6 : 10),
+      padding: EdgeInsets.fromLTRB(12, hasKeyboard ? 5 : 8, 12, hasKeyboard ? 5 : 8),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // En-tête : "N tasks running" + Chevron
+          // En-tête : "N tasks running" + chevron cliquable pour ouvrir/fermer
           InkWell(
             borderRadius: BorderRadius.circular(8),
             onTap: () {
@@ -136,43 +187,90 @@ class _BackgroundTasksBarState extends State<BackgroundTasksBar> with SingleTick
                 widget.onViewTasks!();
               }
             },
-            child: Row(
-              children: [
-                Text(
-                  taskLabel,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                    color: isDark ? const Color(0xFF9E9E9E) : scheme.onSurfaceVariant,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                children: [
+                  RotationTransition(
+                    turns: _spinController,
+                    child: Icon(
+                      Icons.sync,
+                      size: 13.5,
+                      color: isDark ? const Color(0xFF8AB4F8) : scheme.primary,
+                    ),
                   ),
-                ),
-                const Spacer(),
-                Icon(
-                  isActuallyExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
-                  size: 16,
-                  color: isDark ? const Color(0xFF757575) : scheme.onSurfaceVariant,
-                ),
-              ],
+                  const SizedBox(width: 7),
+                  Text(
+                    taskLabel,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? const Color(0xFFE2E2E8) : scheme.onSurface,
+                      letterSpacing: -0.1,
+                    ),
+                  ),
+                  const Spacer(),
+                  Tooltip(
+                    message: isActuallyExpanded ? 'Réduire les tâches' : 'Afficher les tâches',
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? Colors.white.withValues(alpha: 0.05)
+                            : Colors.black.withValues(alpha: 0.04),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Icon(
+                        isActuallyExpanded
+                            ? Icons.keyboard_arrow_up_rounded
+                            : Icons.keyboard_arrow_down_rounded,
+                        size: 16,
+                        color: isDark ? const Color(0xFF9E9E9E) : scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
 
-          // Liste des tâches actives style Antigravity 2.0 (image 2)
-          if (isActuallyExpanded) ...[
-            SizedBox(height: hasKeyboard ? 4 : 8),
-            if (count > 3)
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 120),
-                child: ListView(
-                  shrinkWrap: true,
-                  physics: const BouncingScrollPhysics(),
-                  children: [
-                    for (final task in widget.runningTasks) buildTaskItem(task),
-                  ],
-                ),
-              )
-            else
-              for (final task in widget.runningTasks) buildTaskItem(task),
-          ],
+          // Contenu déroulant animé et défilable (scrollable) pour supporter beaucoup de tâches
+          AnimatedSize(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOutCubic,
+            child: isActuallyExpanded
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(height: hasKeyboard ? 4 : 6),
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxHeight: hasKeyboard ? 80 : (count > 3 ? 140 : 180),
+                        ),
+                        child: Scrollbar(
+                          controller: _scrollController,
+                          thumbVisibility: count > 2,
+                          radius: const Radius.circular(4),
+                          thickness: 3,
+                          child: ListView.separated(
+                            controller: _scrollController,
+                            shrinkWrap: true,
+                            physics: const BouncingScrollPhysics(
+                              parent: AlwaysScrollableScrollPhysics(),
+                            ),
+                            padding: const EdgeInsets.only(right: 2),
+                            itemCount: widget.runningTasks.length,
+                            separatorBuilder: (_, __) => const SizedBox(height: 2),
+                            itemBuilder: (context, index) {
+                              return buildTaskItem(widget.runningTasks[index]);
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
+                  )
+                : const SizedBox.shrink(),
+          ),
         ],
       ),
     );

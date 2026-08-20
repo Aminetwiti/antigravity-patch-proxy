@@ -199,6 +199,7 @@ class ChatMessage {
   // true quand le message est en attente d'envoi dans l'outbox hors-ligne.
   final bool isQueued;
   final String? modelLabel;
+  final int? stepIndex;
 
   /// Session result: list of modified file paths, populated at stream_end.
   final List<String> filesChanged;
@@ -215,6 +216,7 @@ class ChatMessage {
     this.isError = false,
     this.isQueued = false,
     this.modelLabel,
+    this.stepIndex,
     this.filesChanged = const [],
     this.additions = 0,
     this.deletions = 0,
@@ -227,6 +229,7 @@ class ChatMessage {
     bool? isError,
     bool? isQueued,
     String? modelLabel,
+    int? stepIndex,
     List<String>? filesChanged,
     int? additions,
     int? deletions,
@@ -241,6 +244,7 @@ class ChatMessage {
       isError: isError ?? this.isError,
       isQueued: isQueued ?? this.isQueued,
       modelLabel: modelLabel ?? this.modelLabel,
+      stepIndex: stepIndex ?? this.stepIndex,
       filesChanged: filesChanged ?? this.filesChanged,
       additions: additions ?? this.additions,
       deletions: deletions ?? this.deletions,
@@ -257,6 +261,7 @@ class ChatMessage {
         'isError': isError,
         'isQueued': isQueued,
         if (modelLabel != null) 'modelLabel': modelLabel,
+        if (stepIndex != null) 'stepIndex': stepIndex,
         'filesChanged': filesChanged,
         'additions': additions,
         'deletions': deletions,
@@ -272,6 +277,7 @@ class ChatMessage {
         isError: json['isError'] == true,
         isQueued: json['isQueued'] == true,
         modelLabel: json['modelLabel']?.toString(),
+        stepIndex: (json['stepIndex'] as num?)?.toInt(),
         filesChanged: (json['filesChanged'] as List?)?.map((e) => e.toString()).toList() ?? const [],
         additions: json['additions'] is int ? json['additions'] as int : int.tryParse(json['additions']?.toString() ?? '0') ?? 0,
         deletions: json['deletions'] is int ? json['deletions'] as int : int.tryParse(json['deletions']?.toString() ?? '0') ?? 0,
