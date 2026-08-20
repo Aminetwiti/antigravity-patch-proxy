@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile/theme/app_colors.dart';
@@ -25,8 +24,6 @@ class BackgroundTasksBar extends StatefulWidget {
 class _BackgroundTasksBarState extends State<BackgroundTasksBar> with SingleTickerProviderStateMixin {
   late AnimationController _spinController;
   bool _expanded = false;
-  final Map<String, DateTime> _taskStartTimes = {};
-  Timer? _elapsedTimer;
 
   @override
   void initState() {
@@ -35,43 +32,12 @@ class _BackgroundTasksBarState extends State<BackgroundTasksBar> with SingleTick
       vsync: this,
       duration: const Duration(seconds: 2),
     )..repeat();
-    _trackTasks(widget.runningTasks);
-    _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted && widget.runningTasks.isNotEmpty) {
-        setState(() {});
-      }
-    });
-  }
-
-  void _trackTasks(List<String> tasks) {
-    final now = DateTime.now();
-    for (final t in tasks) {
-      _taskStartTimes.putIfAbsent(t, () => now);
-    }
-    _taskStartTimes.removeWhere((key, _) => !tasks.contains(key));
-  }
-
-  @override
-  void didUpdateWidget(covariant BackgroundTasksBar oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _trackTasks(widget.runningTasks);
   }
 
   @override
   void dispose() {
-    _elapsedTimer?.cancel();
     _spinController.dispose();
     super.dispose();
-  }
-
-  String _formatElapsed(String task) {
-    final start = _taskStartTimes[task];
-    if (start == null) return '';
-    final seconds = DateTime.now().difference(start).inSeconds;
-    if (seconds < 60) return '${seconds}s';
-    final mins = seconds ~/ 60;
-    final remSecs = seconds % 60;
-    return '${mins}m ${remSecs}s';
   }
 
   @override
@@ -149,7 +115,7 @@ class _BackgroundTasksBarState extends State<BackgroundTasksBar> with SingleTick
                       RotationTransition(
                         turns: _spinController,
                         child: Icon(
-                          Icons.progress_activity,
+                          Icons.sync,
                           size: 13,
                           color: isDark ? const Color(0xFF8E8E93) : scheme.outline,
                         ),

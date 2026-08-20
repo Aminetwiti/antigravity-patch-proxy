@@ -11,7 +11,6 @@ import '../core/protocol/daemon_api.dart';
 import '../core/protocol/model_catalog.dart';
 import '../services/settings_store.dart';
 import '../features/chat_stream/models/mention_item.dart';
-import '../features/chat_stream/widgets/action_pills_bar.dart';
 import '../features/chat_stream/widgets/mention_autocomplete_overlay.dart';
 import 'bouncing_tap.dart';
 import 'custom_dropdown_overlay.dart';

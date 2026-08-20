@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -47,6 +48,9 @@ func main() {
 	flag.BoolVar(&noAuth, "no-auth", false, "Disable authentication (allow any client without token)")
 	flag.IntVar(&approvalTimeoutMin, "approval-timeout", int(cfg.ApprovalTimeout.Minutes()), "Auto-deny timeout for pending approvals in minutes (0 = disabled)")
 	flag.Parse()
+
+	// Silencer le logger standard Go pour éliminer le spam brut de gorilla/websocket (qui échappe à slog)
+	log.SetOutput(io.Discard)
 
 	if noAuth {
 		authToken = "none"

@@ -1267,7 +1267,15 @@ func (s *Server) writeJSON(conn *websocket.Conn, msg OutgoingMessage) error {
 	defer mu.Unlock()
 	conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 	if err := conn.WriteJSON(msg); err != nil {
-		logJSON.Warn("write_error", "err", err)
+		errStr := err.Error()
+		if strings.Contains(errStr, "use of closed network connection") ||
+			strings.Contains(errStr, "broken pipe") ||
+			strings.Contains(errStr, "connection reset by peer") ||
+			strings.Contains(errStr, "websocket: close sent") {
+			logJSON.Debug("write_closed_connection", "err", err)
+		} else {
+			logJSON.Warn("write_error", "err", err)
+		}
 		return err
 	}
 	return nil

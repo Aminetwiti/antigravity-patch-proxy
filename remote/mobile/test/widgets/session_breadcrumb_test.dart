@@ -88,5 +88,49 @@ void main() {
 
       expect(sessionTapped, isTrue);
     });
+
+    testWidgets('renders fullscreen button and handles toggle callback', (tester) async {
+      bool toggled = false;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SessionBreadcrumb(
+              projectName: 'antigravity-add-model-main',
+              sessionTitle: 'setting',
+              isFullscreen: false,
+              onToggleFullscreen: () {
+                toggled = true;
+              },
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Plein écran'), findsOneWidget);
+      expect(find.byIcon(Icons.fullscreen_rounded), findsOneWidget);
+
+      await tester.tap(find.text('Plein écran'));
+      await tester.pumpAndSettle();
+      expect(toggled, isTrue);
+    });
+
+    testWidgets('renders Quitter when isFullscreen is true', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SessionBreadcrumb(
+              projectName: 'antigravity-add-model-main',
+              sessionTitle: 'setting',
+              isFullscreen: true,
+              onToggleFullscreen: () {},
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Quitter'), findsOneWidget);
+      expect(find.byIcon(Icons.fullscreen_exit_rounded), findsOneWidget);
+    });
   });
 }

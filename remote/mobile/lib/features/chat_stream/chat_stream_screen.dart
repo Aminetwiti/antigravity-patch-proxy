@@ -248,6 +248,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   set _isSideQuestionLoading(bool l) => _sessionSideQuestionLoadings[widget.activeSessionId] = l;
 
   final List<String> _runningBackgroundTasks = [];
+  bool _isFullscreen = false;
   final Map<String, StringBuffer> _taskOutputs = {};
   final Map<String, String> _taskStatuses = {};
   final Map<String, StreamController<String>> _taskOutputControllers = {};
@@ -2073,77 +2074,83 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final expired = _expiredCallIds.contains(approval.callId);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 0),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 280),
+        child: SingleChildScrollView(
+          physics: const ClampingScrollPhysics(),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (total > 1)
-                IconButton(
-                  key: const Key('approval-prev'),
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                  padding: EdgeInsets.zero,
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.chevron_left, size: 18),
-                  tooltip: 'Approbation précédente',
-                  onPressed: () => setState(() {
-                    _approvalIndex =
-                        (_approvalIndex - 1 + total) % total;
-                  }),
-                ),
-              Text(
-                'Approbation ${_approvalIndex + 1}/$total',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+              Row(
+                children: [
+                  if (total > 1)
+                    IconButton(
+                      key: const Key('approval-prev'),
+                      constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+                      padding: EdgeInsets.zero,
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.chevron_left, size: 16),
+                      tooltip: 'Approbation précédente',
+                      onPressed: () => setState(() {
+                        _approvalIndex =
+                            (_approvalIndex - 1 + total) % total;
+                      }),
+                    ),
+                  Text(
+                    'Approbation ${_approvalIndex + 1}/$total',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  if (total > 1)
+                    IconButton(
+                      key: const Key('approval-next'),
+                      constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+                      padding: EdgeInsets.zero,
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.chevron_right, size: 16),
+                      tooltip: 'Approbation suivante',
+                      onPressed: () => setState(() {
+                        _approvalIndex = (_approvalIndex + 1) % total;
+                      }),
+                    ),
+                  const Spacer(),
+                  IconButton(
+                    key: const Key('approval-dismiss'),
+                    constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+                    padding: EdgeInsets.zero,
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.close, size: 14),
+                    tooltip: 'Fermer cette approbation',
+                    onPressed: () => _removeApproval(approval.callId),
+                  ),
+                ],
               ),
-              if (total > 1)
-                IconButton(
-                  key: const Key('approval-next'),
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                  padding: EdgeInsets.zero,
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.chevron_right, size: 18),
-                  tooltip: 'Approbation suivante',
-                  onPressed: () => setState(() {
-                    _approvalIndex = (_approvalIndex + 1) % total;
-                  }),
+              TweenAnimationBuilder<double>(
+                key: ValueKey('approval-${approval.callId}'),
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOutQuart,
+                tween: Tween(begin: 0.0, end: 1.0),
+                builder: (context, value, child) => Opacity(
+                  opacity: value,
+                  child: Transform.translate(
+                    offset: Offset(0, 8 * (1 - value)),
+                    child: child,
+                  ),
                 ),
-              const Spacer(),
-              IconButton(
-                key: const Key('approval-dismiss'),
-                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                padding: EdgeInsets.zero,
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.close, size: 16),
-                tooltip: 'Fermer cette approbation',
-                onPressed: () => _removeApproval(approval.callId),
+                child: ToolApprovalCard(
+                  request: approval,
+                  onDecision: _handleToolDecision,
+                  isExpired: expired,
+                ),
               ),
             ],
           ),
-          TweenAnimationBuilder<double>(
-            key: ValueKey('approval-${approval.callId}'),
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOutQuart,
-            tween: Tween(begin: 0.0, end: 1.0),
-            builder: (context, value, child) => Opacity(
-              opacity: value,
-              child: Transform.translate(
-                offset: Offset(0, 8 * (1 - value)),
-                child: child,
-              ),
-            ),
-            child: ToolApprovalCard(
-              request: approval,
-              onDecision: _handleToolDecision,
-              isExpired: expired,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -2267,8 +2274,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           Scaffold.maybeOf(context)?.openDrawer();
         }
       },
-      onOpenIde: () {
-        AppToast.show(context, message: 'Session synchronisée avec Antigravity Desktop IDE');
+      isFullscreen: _isFullscreen,
+      onToggleFullscreen: () {
+        HapticFeedback.selectionClick();
+        setState(() {
+          _isFullscreen = !_isFullscreen;
+        });
       },
     );
 
@@ -2277,38 +2288,40 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         children: [
           connectivityBanner,
           if (!hasKeyboard) breadcrumb,
-          SessionTopTabs(
-            activeTab: _currentTab,
-            onTabChanged: (tab) {
-              setState(() {
-                _activeArtifact = null;
-                _currentTab = tab;
-              });
-              if (tab == SessionTabType.review) {
-                _fetchVcsChanges();
-              }
-            },
-            filesChangedCount: _modifiedFiles.length,
-            hasPlan: _latestPlanText != null,
-            hasTasks: false,
-            runningTasksCount: _activeStreamCount,
-            artifactTabs: _artifacts,
-            activeArtifact: _activeArtifact,
-            onOpenArtifact: (art) => setState(() {
-              _activeArtifact = art;
-            }),
-            onNewTab: () {
-              final projs = widget.projects ?? [];
-              if (projs.length > 1) {
-                _showProjectSelector(context);
-              } else {
-                widget.onNewConversation?.call();
-              }
-            },
-          ),
-          if (!hasKeyboard) ...[
-            _buildSyncStatusBadge(scheme),
-            _buildQuotaBadge(scheme),
+          if (!_isFullscreen) ...[
+            SessionTopTabs(
+              activeTab: _currentTab,
+              onTabChanged: (tab) {
+                setState(() {
+                  _activeArtifact = null;
+                  _currentTab = tab;
+                });
+                if (tab == SessionTabType.review) {
+                  _fetchVcsChanges();
+                }
+              },
+              filesChangedCount: _modifiedFiles.length,
+              hasPlan: _latestPlanText != null,
+              hasTasks: false,
+              runningTasksCount: _activeStreamCount,
+              artifactTabs: _artifacts,
+              activeArtifact: _activeArtifact,
+              onOpenArtifact: (art) => setState(() {
+                _activeArtifact = art;
+              }),
+              onNewTab: () {
+                final projs = widget.projects ?? [];
+                if (projs.length > 1) {
+                  _showProjectSelector(context);
+                } else {
+                  widget.onNewConversation?.call();
+                }
+              },
+            ),
+            if (!hasKeyboard) ...[
+              _buildSyncStatusBadge(scheme),
+              _buildQuotaBadge(scheme),
+            ],
           ],
           Expanded(
             child: Stack(
