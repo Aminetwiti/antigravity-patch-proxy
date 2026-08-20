@@ -3230,13 +3230,12 @@ class _MessageBubble extends StatelessWidget {
             ),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: SelectableText(
-            message.text,
-            style: TextStyle(
-              fontSize: 13.5,
-              height: 1.4,
-              color: isDark ? AppColors.inkPrimary : scheme.onSurface,
-            ),
+          child: MarkdownBubble(
+            text: message.text,
+            isStreaming: false,
+            api: api,
+            workspacePath: workspacePath,
+            onLocalFile: onLocalFile,
           ),
         ),
       );

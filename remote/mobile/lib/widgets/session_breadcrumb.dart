@@ -11,6 +11,8 @@ class SessionBreadcrumb extends StatelessWidget {
   final VoidCallback? onSelectProject;
   final VoidCallback? onSelectSession;
   final VoidCallback? onOpenIde;
+  final VoidCallback? onToggleFullscreen;
+  final bool isFullscreen;
   final List<ProjectItem>? projects;
 
   const SessionBreadcrumb({
@@ -20,6 +22,8 @@ class SessionBreadcrumb extends StatelessWidget {
     this.onSelectProject,
     this.onSelectSession,
     this.onOpenIde,
+    this.onToggleFullscreen,
+    this.isFullscreen = false,
     this.projects,
   });
 
@@ -130,7 +134,43 @@ class SessionBreadcrumb extends StatelessWidget {
               ),
             ),
           ],
-          if (onOpenIde != null) ...[
+          if (onToggleFullscreen != null) ...[
+            const Spacer(),
+            InkWell(
+              onTap: onToggleFullscreen,
+              borderRadius: BorderRadius.circular(4),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                    color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.4),
+                    width: 0.6,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isFullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
+                      size: 13,
+                      color: isDark ? AppColors.accentBlue : scheme.primary,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      isFullscreen ? 'Quitter' : 'Plein écran',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w500,
+                        color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ] else if (onOpenIde != null) ...[
             const Spacer(),
             InkWell(
               onTap: onOpenIde,

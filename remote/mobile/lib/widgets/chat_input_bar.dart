@@ -1690,15 +1690,6 @@ class ChatInputBarState extends State<ChatInputBar> {
                   ),
                 ),
               ),
-            if (!hasKeyboard)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: ActionPillsBar(
-                  onActionSelected: (cmd) {
-                    _insertTextAtCursor(cmd);
-                  },
-                ),
-              ),
             Container(
               padding: EdgeInsets.symmetric(
                 horizontal: 12,

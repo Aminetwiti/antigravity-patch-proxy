@@ -6,9 +6,6 @@ import 'package:mobile/widgets/tool_approval_card.dart';
 void main() {
   group('Comprehensive Approval Modules Tests', () {
     testWidgets('File Permission displays 5 scopes and absolute path', (tester) async {
-      ToolDecision? decision;
-      ApprovalScope? scope;
-
       final req = ToolApprovalRequest.fromJson({
         'callId': 'call-file-123',
         'toolName': 'write_to_file',
@@ -23,9 +20,7 @@ void main() {
             body: SingleChildScrollView(
               child: ToolApprovalCard(
                 request: req,
-                onDecision: (d, {scope = ApprovalScope.once, denyReason = ''}) {
-                  decision = d;
-                },
+                onDecision: (_, {scope = ApprovalScope.once, denyReason = ''}) {},
               ),
             ),
           ),

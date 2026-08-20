@@ -41,4 +41,52 @@ void main() {
 
     expect(openedFile, contains('upload_123.png'));
   });
+
+  testWidgets('MarkdownBubble renders bracketed image attachment [Images jointes: ...]', (tester) async {
+    String? openedFile;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MarkdownBubble(
+            text: '[Images jointes: file:///C:/Users/test/scratch/upload_456.png]\n\nVoici le bug UI',
+            onLocalFile: (path) => openedFile = path,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Images jointes'), findsOneWidget);
+    expect(find.text("Image enregistrée sur l'hôte"), findsOneWidget);
+    expect(find.text('Voici le bug UI'), findsOneWidget);
+
+    await tester.tap(find.text('Images jointes'));
+    await tester.pump();
+
+    expect(openedFile, contains('upload_456.png'));
+  });
+
+  testWidgets('MarkdownBubble renders bracketed file attachment [Fichier: ...]', (tester) async {
+    String? openedFile;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MarkdownBubble(
+            text: '[Fichier: file:///C:/Users/test/config.json]\n\nRegarde la config',
+            onLocalFile: (path) => openedFile = path,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('config.json'), findsOneWidget);
+    expect(find.text('Regarde la config'), findsOneWidget);
+    expect(find.byIcon(Icons.insert_drive_file_outlined), findsOneWidget);
+
+    await tester.tap(find.text('config.json'));
+    await tester.pump();
+
+    expect(openedFile, contains('config.json'));
+  });
 }

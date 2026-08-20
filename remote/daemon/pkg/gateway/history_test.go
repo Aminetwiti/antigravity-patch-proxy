@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -336,6 +337,22 @@ The current local time is: 2026-08-17T17:05:14+01:00.
 </ADDITIONAL_METADATA>`
 	if got := extractUserRequest(validUser); got != "corrige affiche de session ui ux remote sera comme antigravity desktop" {
 		t.Errorf("extractUserRequest(validUser) = %q", got)
+	}
+
+	userWithImage := `<USER_REQUEST>
+voici la capture d'ecran
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-08-19T14:46:18+01:00.
+</ADDITIONAL_METADATA>
+
+[ARTIFACT: media_1787150759648]
+Path: file:///C:/Users/amine/.gemini/antigravity/brain/test-cascade/.user_uploaded/media_1787150759648.jpg
+Last Edited: 2026-08-19T14:46:18Z`
+	gotWithImg := extractUserRequest(userWithImage)
+	if !strings.Contains(gotWithImg, "voici la capture d'ecran") ||
+		!strings.Contains(gotWithImg, "![Image](file:///C:/Users/amine/.gemini/antigravity/brain/test-cascade/.user_uploaded/media_1787150759648.jpg)") {
+		t.Errorf("extractUserRequest(userWithImage) = %q, attendu text + markdown image", gotWithImg)
 	}
 
 	rawAssistant := `<SYSTEM_MESSAGE>

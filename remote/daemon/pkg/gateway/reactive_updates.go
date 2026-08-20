@@ -135,6 +135,18 @@ func interactionToolName(t int) string {
 		return "open_browser_url"
 	case connectrpc.InteractionReadUrlContent:
 		return "read_url_content"
+	case connectrpc.InteractionMcp:
+		return "mcp_tool"
+	case connectrpc.InteractionDeploy:
+		return "deploy"
+	case connectrpc.InteractionSendCommandInput:
+		return "send_command_input"
+	case connectrpc.InteractionInvokeSubagent:
+		return "invoke_subagent"
+	case connectrpc.InteractionDeleteDirectory:
+		return "delete_directory"
+	case connectrpc.InteractionCloudSQL:
+		return "cloudsql"
 	default:
 		return "approval"
 	}

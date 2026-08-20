@@ -23,11 +23,15 @@ class ImplementationPlanCard extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 6),
+      margin: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
         color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
+        gradient: AppGradients.cardCool(isDark: isDark),
         borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: isDark ? AppColors.borderStrong : scheme.outlineVariant, width: 1),
+        border: Border.all(
+          color: isDark ? const Color(0xFF3186FF).withValues(alpha: 0.3) : scheme.primary.withValues(alpha: 0.25),
+          width: 1,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -40,17 +44,38 @@ class ImplementationPlanCard extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
               child: Row(
                 children: [
-                  Icon(Icons.description_outlined, size: 16, color: scheme.primary),
-                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.all(5),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF3186FF).withValues(alpha: isDark ? 0.18 : 0.12),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Icon(Icons.assignment_outlined, size: 16, color: Color(0xFF3186FF)),
+                  ),
+                  const SizedBox(width: 10),
                   Expanded(
-                    child: Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: scheme.onSurface,
-                        letterSpacing: -0.1,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                            color: scheme.onSurface,
+                            letterSpacing: -0.1,
+                          ),
+                        ),
+                        Text(
+                          'PLAN D\'EXÉCUTION AGENT',
+                          style: TextStyle(
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.6,
+                            color: isDark ? const Color(0xFF749BFF) : const Color(0xFF3186FF),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   Icon(Icons.chevron_right, size: 16, color: scheme.onSurfaceVariant),
@@ -61,15 +86,15 @@ class ImplementationPlanCard extends StatelessWidget {
 
           // Summary
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
             child: Text(
               summary,
               style: TextStyle(
-                fontSize: 12,
-                color: scheme.onSurfaceVariant,
-                height: 1.4,
+                fontSize: 12.5,
+                color: isDark ? const Color(0xFFD4D4D8) : scheme.onSurfaceVariant,
+                height: 1.45,
               ),
-              maxLines: 3,
+              maxLines: 4,
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -85,20 +110,30 @@ class ImplementationPlanCard extends StatelessWidget {
                     onProceed();
                   },
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
                     decoration: BoxDecoration(
-                      color: scheme.primary,
-                      borderRadius: BorderRadius.circular(AppRadius.sm),
+                      gradient: AppGradients.accentCta,
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF3186FF).withValues(alpha: isDark ? 0.35 : 0.2),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
                     ),
                     child: const Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        Icon(Icons.play_arrow_rounded, size: 15, color: Colors.white),
+                        SizedBox(width: 4),
                         Text(
                           'Proceed ⌘↵',
                           style: TextStyle(
                             fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.onAccent,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                            letterSpacing: 0.2,
                           ),
                         ),
                       ],
@@ -109,19 +144,29 @@ class ImplementationPlanCard extends StatelessWidget {
                 GestureDetector(
                   onTap: onViewPlan,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                     decoration: BoxDecoration(
                       color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(AppRadius.sm),
-                      border: Border.all(color: isDark ? AppColors.borderSubtle : scheme.outlineVariant, width: 1),
-                    ),
-                    child: Text(
-                      'Lire le plan',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        color: scheme.onSurface,
-                        fontWeight: FontWeight.w500,
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
+                      border: Border.all(
+                        color: isDark ? AppColors.borderSubtle : scheme.outlineVariant,
+                        width: 0.8,
                       ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.menu_book_outlined, size: 13.5, color: scheme.onSurfaceVariant),
+                        const SizedBox(width: 5),
+                        Text(
+                          'Lire le plan',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: scheme.onSurface,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
