@@ -1,1 +1,0 @@
-@echo off`r`ncd /d "C:\Users\amine\Downloads\antigravity-add-model-main\antigravity-add-model-main\ag-doctor"`r`nnode bin\ag-doctor.js mitm proxy-on --yes`r`necho ---STATUS---`r`nnode bin\ag-doctor.js mitm status`r`npause

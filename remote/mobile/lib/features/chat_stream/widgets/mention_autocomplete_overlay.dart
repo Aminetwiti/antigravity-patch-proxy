@@ -1,0 +1,204 @@
+import 'package:flutter/material.dart';
+import '../models/mention_item.dart';
+import 'package:mobile/theme/app_colors.dart';
+
+class MentionAutocompleteOverlay extends StatelessWidget {
+  final String query;
+  final List<MentionItem> items;
+  final ValueChanged<MentionItem> onSelected;
+  final double maxHeight;
+
+  const MentionAutocompleteOverlay({
+    super.key,
+    required this.query,
+    required this.items,
+    required this.onSelected,
+    this.maxHeight = 260.0,
+  });
+
+  List<MentionItem> get _filteredItems {
+    final clean = query.startsWith('@') ? query.substring(1).trim().toLowerCase() : query.trim().toLowerCase();
+    if (clean.isEmpty) return items;
+    return items.where((item) {
+      return item.label.toLowerCase().contains(clean) ||
+          item.detail.toLowerCase().contains(clean) ||
+          item.type.name.toLowerCase().contains(clean) ||
+          item.tag.toLowerCase().contains(clean);
+    }).toList();
+  }
+
+  IconData _iconForType(MentionType type) {
+    switch (type) {
+      case MentionType.file:
+        return Icons.insert_drive_file_outlined;
+      case MentionType.rule:
+        return Icons.rule_outlined;
+      case MentionType.mcp:
+        return Icons.extension_outlined;
+      case MentionType.conversation:
+        return Icons.chat_bubble_outline_rounded;
+      case MentionType.terminal:
+        return Icons.terminal_outlined;
+    }
+  }
+
+  Color _badgeColorForType(MentionType type, ColorScheme scheme) {
+    switch (type) {
+      case MentionType.file:
+        return scheme.primary;
+      case MentionType.rule:
+        return scheme.tertiary;
+      case MentionType.mcp:
+        return scheme.secondary;
+      case MentionType.conversation:
+        return scheme.tertiary;
+      case MentionType.terminal:
+        return scheme.outline;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = _filteredItems;
+    final scheme = Theme.of(context).colorScheme;
+
+    return Container(
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: scheme.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.25),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: Row(
+                children: [
+                  Icon(Icons.alternate_email, size: 14, color: scheme.primary),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Mentions (${filtered.length})',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Divider(color: scheme.outlineVariant, height: 1),
+            if (filtered.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                child: Text(
+                  'No matching mentions for "$query"',
+                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                ),
+              )
+            else
+              Flexible(
+                child: ListView.separated(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  shrinkWrap: true,
+                  itemCount: filtered.length,
+                  separatorBuilder: (context, index) => Divider(
+                    color: scheme.outlineVariant,
+                    height: 1,
+                    indent: 40,
+                  ),
+                  itemBuilder: (context, index) {
+                    final item = filtered[index];
+                    return InkWell(
+                      onTap: () => onSelected(item),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: _badgeColorForType(item.type, scheme).withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(AppRadius.sm),
+                              ),
+                              child: Icon(
+                                _iconForType(item.type),
+                                size: 16,
+                                color: _badgeColorForType(item.type, scheme),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          item.label,
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w500,
+                                            color: scheme.onSurface,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                                        decoration: BoxDecoration(
+                                          color: scheme.surfaceContainerHighest,
+                                          borderRadius: BorderRadius.circular(AppRadius.sm),
+                                        ),
+                                        child: Text(
+                                          item.type.name,
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600,
+                                            color: _badgeColorForType(item.type, scheme),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  if (item.detail.isNotEmpty) ...[
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      item.detail,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: scheme.onSurfaceVariant,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}

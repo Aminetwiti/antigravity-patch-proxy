@@ -14,6 +14,8 @@
 // Type definitions for the preload bridge
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { getRendererDefaultUrl } from './providers-config';
+
 // (See globals.d.ts for the window.ag interface)
 
 // (ErrorAction type is declared in error-decoder.ts)
@@ -3956,11 +3958,7 @@ if (pmFormBack2) pmFormBack2.addEventListener('click', () => showPmView('list'))
 
 pmFormType.addEventListener('change', () => {
   const t = pmFormType.value;
-  if (!pmFormUrl.value || pmFormUrl.value.includes('api.openai.com') || pmFormUrl.value.includes('api.anthropic.com')) {
-    if (t === 'openai') pmFormUrl.value = 'https://api.openai.com/v1';
-    else if (t === 'anthropic') pmFormUrl.value = 'https://api.anthropic.com/v1';
-    else if (t === 'ollama') pmFormUrl.value = 'http://localhost:11434';
-  }
+  pmFormUrl.value = getRendererDefaultUrl(t);
 });
 
 pmFormSave.addEventListener('click', async () => {
@@ -4145,3 +4143,246 @@ window.ag?.providers?.onChanged(() => {
   void renderProviderList();
   void loadModels();
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Remote Server (QR Code)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const startRemoteBtn = $('#startRemoteBtn');
+const remoteQrContainer = $('#remoteQrContainer');
+const remoteQrImage = $('#remoteQrImage') as HTMLImageElement;
+const remoteQrPlaceholder = $('#remoteQrPlaceholder');
+const remoteStatusText = $('#remoteStatusText');
+const remotePort = $('#remotePort') as HTMLInputElement;
+const remoteTunnel = $('#remoteTunnel') as HTMLSelectElement;
+const remoteAuthToken = $('#remoteAuthToken') as HTMLInputElement;
+const remoteConsole = $('#remoteConsole') as HTMLTextAreaElement;
+const regenerateTokenBtn = $('#regenerateTokenBtn');
+const tokenSavedBadge = $('#tokenSavedBadge');
+
+let isDaemonRunning = false;
+let tokenBadgeTimeout: any = null;
+
+function flashTokenSavedBadge() {
+  if (tokenSavedBadge) {
+    tokenSavedBadge.style.display = 'inline';
+    if (tokenBadgeTimeout) clearTimeout(tokenBadgeTimeout);
+    tokenBadgeTimeout = setTimeout(() => {
+      tokenSavedBadge.style.display = 'none';
+    }, 2000);
+  }
+}
+
+// ── Restauration initiale depuis localStorage ───────────────────────────────
+try {
+  const savedToken = localStorage.getItem('ag_remote_auth_token');
+  if (savedToken !== null && remoteAuthToken) {
+    remoteAuthToken.value = savedToken;
+  }
+  const savedPort = localStorage.getItem('ag_remote_port');
+  if (savedPort !== null && remotePort) {
+    remotePort.value = savedPort;
+  }
+  const savedTunnel = localStorage.getItem('ag_remote_tunnel');
+  if (savedTunnel !== null && remoteTunnel) {
+    remoteTunnel.value = savedTunnel;
+  }
+} catch { /* ignore */ }
+
+// ── Sauvegarde automatique temps-réel ───────────────────────────────────────
+remoteAuthToken?.addEventListener('input', () => {
+  try {
+    const val = remoteAuthToken.value.trim();
+    localStorage.setItem('ag_remote_auth_token', val);
+    flashTokenSavedBadge();
+    if (isDaemonRunning) {
+      void syncDaemonUiStatus();
+    }
+  } catch { /* ignore */ }
+});
+
+remotePort?.addEventListener('input', () => {
+  try {
+    localStorage.setItem('ag_remote_port', remotePort.value.trim());
+  } catch { /* ignore */ }
+});
+
+remoteTunnel?.addEventListener('change', () => {
+  try {
+    localStorage.setItem('ag_remote_tunnel', remoteTunnel.value);
+  } catch { /* ignore */ }
+});
+
+regenerateTokenBtn?.addEventListener('click', () => {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let rand = '';
+  for (let i = 0; i < 8; i++) {
+    rand += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  if (remoteAuthToken) {
+    remoteAuthToken.value = rand;
+    try {
+      localStorage.setItem('ag_remote_auth_token', rand);
+      flashTokenSavedBadge();
+    } catch { /* ignore */ }
+    if (isDaemonRunning) {
+      void syncDaemonUiStatus();
+    }
+    toast(`Nouveau token généré et sauvegardé : ${rand}`, 'ok');
+  }
+});
+
+function attachCopyButton(wsUrl: string) {
+  $('#copyRemoteWsBtn')?.addEventListener('click', () => {
+    navigator.clipboard.writeText(wsUrl).then(() => {
+      toast('URL WebSocket copiée dans le presse-papier !', 'ok');
+    }).catch(() => {
+      toast('Impossible de copier l\'URL', 'warn');
+    });
+  });
+}
+
+async function syncDaemonUiStatus(port?: number) {
+  try {
+    const currentPort = port || parseInt(remotePort?.value || localStorage.getItem('ag_remote_port') || '8090');
+    const token = remoteAuthToken?.value?.trim() || localStorage.getItem('ag_remote_auth_token') || '11';
+    const status = await window.ag?.getDaemonStatus?.(currentPort);
+    if (status && status.running) {
+      isDaemonRunning = true;
+      if (startRemoteBtn) {
+        startRemoteBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg> Stop Remote Server';
+        startRemoteBtn.classList.add('btn-danger');
+        startRemoteBtn.removeAttribute('disabled');
+      }
+      if (status.publicUrl && status.publicUrl.length > 0) {
+        const cleanHost = status.publicUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+        const wsUrl = `wss://${cleanHost}/ws?token=${token}`;
+        const dataUrl = await window.ag.generateQr(wsUrl);
+        if (remoteQrImage) remoteQrImage.src = dataUrl;
+        if (remoteQrPlaceholder) remoteQrPlaceholder.style.display = 'none';
+        if (remoteQrContainer) remoteQrContainer.style.display = 'block';
+        if (remoteStatusText) {
+          remoteStatusText.innerHTML = `Tunnel ready: <b style="word-break: break-all;">${wsUrl}</b><br/><button class="btn btn-ghost" id="copyRemoteWsBtn" type="button" style="margin-top: 8px; padding: 2px 10px; font-size: 11px;">📋 Copier l'URL</button>`;
+          attachCopyButton(wsUrl);
+        }
+      } else {
+        const ip = await window.ag.getLocalIp();
+        const wsUrl = `ws://${ip}:${status.port || currentPort}/ws?token=${token}`;
+        const dataUrl = await window.ag.generateQr(wsUrl);
+        if (remoteQrImage) remoteQrImage.src = dataUrl;
+        if (remoteQrPlaceholder) remoteQrPlaceholder.style.display = 'none';
+        if (remoteQrContainer) remoteQrContainer.style.display = 'block';
+        if (remoteStatusText) {
+          remoteStatusText.innerHTML = `Server listening on <b>${ip}:${status.port || currentPort}</b> (Local Network)<br/><button class="btn btn-ghost" id="copyRemoteWsBtn" type="button" style="margin-top: 8px; padding: 2px 10px; font-size: 11px;">📋 Copier l'URL</button>`;
+          attachCopyButton(wsUrl);
+        }
+      }
+    }
+  } catch { /* ignore */ }
+}
+
+if (window.ag && window.ag.onDaemonLog) {
+  window.ag.onDaemonLog((data: string) => {
+    if (remoteConsole) {
+      remoteConsole.value += data;
+      remoteConsole.scrollTop = remoteConsole.scrollHeight;
+
+      // Extract tunnel URL (Pinggy or Cloudflare or wss://) from logs to generate QR Code dynamically!
+      let wsUrl = '';
+      const token = remoteAuthToken?.value?.trim() || localStorage.getItem('ag_remote_auth_token') || '11';
+      const wssMatch = data.match(/wss:\/\/[^\s"'<>|┌┐└┘│]+/);
+      if (wssMatch) {
+        wsUrl = wssMatch[0];
+        if (!wsUrl.includes('token=')) {
+          wsUrl += `${wsUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
+        }
+      } else {
+        const httpsMatch = data.match(/https:\/\/([a-zA-Z0-9.-]+\.trycloudflare\.com|[a-zA-Z0-9.-]+\.pinggy\.link)/);
+        if (httpsMatch) {
+          const host = httpsMatch[1];
+          wsUrl = `wss://${host}/ws?token=${token}`;
+        }
+      }
+
+      if (wsUrl && remoteQrImage) {
+        window.ag.generateQr(wsUrl).then((dataUrl) => {
+          remoteQrImage.src = dataUrl;
+          if (remoteQrPlaceholder) remoteQrPlaceholder.style.display = 'none';
+          if (remoteQrContainer) remoteQrContainer.style.display = 'block';
+          if (remoteStatusText) {
+            remoteStatusText.innerHTML = `Tunnel ready: <b style="word-break: break-all;">${wsUrl}</b><br/><button class="btn btn-ghost" id="copyRemoteWsBtn" type="button" style="margin-top: 8px; padding: 2px 10px; font-size: 11px;">📋 Copier l'URL</button>`;
+            attachCopyButton(wsUrl);
+          }
+        });
+      } else if (data.includes('Échec') || data.includes('Tunnel non démarré') || data.includes('introuvable')) {
+        if (remoteStatusText) remoteStatusText.innerHTML = `<span style="color: var(--bs-danger, #ef4444);">Tunnel Failed. Check console.</span>`;
+        if (remoteQrPlaceholder) remoteQrPlaceholder.style.display = 'flex';
+        if (remoteQrContainer) remoteQrContainer.style.display = 'none';
+      }
+    }
+  });
+}
+
+if (startRemoteBtn) {
+  startRemoteBtn.addEventListener('click', async () => {
+    if (isDaemonRunning) {
+      // Arrêter le démon
+      await window.ag.stopDaemon();
+      isDaemonRunning = false;
+      startRemoteBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Start Remote Server';
+      startRemoteBtn.classList.remove('btn-danger');
+      if (remoteStatusText) remoteStatusText.textContent = 'Server stopped.';
+      if (remoteQrContainer) remoteQrContainer.style.display = 'none';
+      if (remoteQrPlaceholder) remoteQrPlaceholder.style.display = 'flex';
+      return;
+    }
+
+    try {
+      startRemoteBtn.setAttribute('disabled', 'true');
+      if (remoteStatusText) remoteStatusText.textContent = 'Starting server...';
+      if (remoteConsole) remoteConsole.value = ''; // clear console
+      
+      const port = parseInt(remotePort?.value || '8090');
+      const tunnel = remoteTunnel?.value || 'cloudflare';
+      let token = remoteAuthToken?.value?.trim() || localStorage.getItem('ag_remote_auth_token') || '11';
+      if (remoteAuthToken && (!remoteAuthToken.value || remoteAuthToken.value.trim().length === 0)) {
+        remoteAuthToken.value = token;
+      }
+
+      // Sauvegarde persistante des choix
+      try {
+        localStorage.setItem('ag_remote_auth_token', token);
+        localStorage.setItem('ag_remote_port', port.toString());
+        localStorage.setItem('ag_remote_tunnel', tunnel);
+      } catch { /* ignore */ }
+
+      const res = await window.ag.startDaemon({ port, tunnel, token });
+
+      if (res && res.alreadyRunning) {
+        await syncDaemonUiStatus(port);
+      } else if (tunnel === 'none') {
+        const ip = await window.ag.getLocalIp();
+        const wsUrl = `ws://${ip}:${port}/ws?token=${token}`;
+        const dataUrl = await window.ag.generateQr(wsUrl);
+        if (remoteQrImage) remoteQrImage.src = dataUrl;
+        if (remoteQrPlaceholder) remoteQrPlaceholder.style.display = 'none';
+        if (remoteQrContainer) remoteQrContainer.style.display = 'block';
+        if (remoteStatusText) {
+          remoteStatusText.innerHTML = `Server listening on <b>${ip}:${port}</b> (Local Network)<br/><button class="btn btn-ghost" id="copyRemoteWsBtn" type="button" style="margin-top: 8px; padding: 2px 10px; font-size: 11px;">📋 Copier l'URL</button>`;
+          attachCopyButton(wsUrl);
+        }
+      }
+
+      isDaemonRunning = true;
+      startRemoteBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg> Stop Remote Server';
+      startRemoteBtn.classList.add('btn-danger');
+    } catch (e: any) {
+      if (remoteStatusText) remoteStatusText.textContent = `Error: ${e.message}`;
+    } finally {
+      startRemoteBtn.removeAttribute('disabled');
+    }
+  });
+}
+
+// Auto-détection de l'état du daemon au chargement
+void syncDaemonUiStatus();

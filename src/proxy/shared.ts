@@ -53,6 +53,17 @@ export function touchStateTimestamp(map: Map<string, number>, key: string): void
   map.set(key, Date.now());
 }
 
+/**
+ * Helper to build composite key for per-session model state isolation.
+ * When sessionId is absent, falls back to modelName for backward compatibility.
+ */
+export function getSessionModelKey(modelName: string, sessionId?: string): string {
+  if (sessionId && typeof sessionId === 'string' && sessionId.trim()) {
+    return `${sessionId.trim()}:${modelName}`;
+  }
+  return modelName;
+}
+
 // ─── Periodic Cleanup (managed lifecycle) ─────────────────────────────────
 
 let cleanupInterval: ReturnType<typeof setInterval> | null = null;

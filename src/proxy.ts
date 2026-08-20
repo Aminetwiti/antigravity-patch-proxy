@@ -5,9 +5,19 @@ import * as https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { app } from 'electron';
+
 import log from 'electron-log';
 import { createLogger } from './logger';
+
+function traceLog(...args: unknown[]): void {
+  // ponytail: keeps the 'app' import (and thus the electron require) out of
+  // proxy.ts's module graph when tracing is disabled; upgrade path: replace
+  // with a real log-level switch if verbose tracing is ever needed.
+  if (process.env.AG_PROXY_TRACE === '1') {
+    // eslint-disable-next-line no-console
+    console.log('[proxy-trace]', ...args);
+  }
+}
 import { startTimer as metricTimer, inc as metricInc, observe as metricObserve } from './metrics';
 import { randomBytes } from 'crypto';
 
@@ -44,12 +54,11 @@ import {
   translatedToolCalls,
   stateTimestamps,
   touchStateTimestamp,
+  getSessionModelKey,
   startCleanupInterval,
   stopCleanupInterval,
 } from './proxy/shared';
 
-// Model configuration & capability detection
-import { detectModelCapabilities } from './proxy/modelUtils';
 
 // Provider translator registry (auto-discovers translators from proxy/translators/)
 import * as registry from './proxy/registry';
@@ -63,7 +72,7 @@ import { invalidateModelStoreCache } from './services/modelStore';
 import { invalidateHealthCache } from './proxy/modelHealthChecker';
 import { recordProviderUsage } from './customModelStore';
 import { classifyError, ErrorDiagnostic, type ErrorType } from './proxy/errorClassifier';
-import { shouldRetryStatus } from './proxy/retryStrategy';
+import { shouldRetryStatus, computeRetryDelay, type RetryStrategy } from './proxy/retryStrategy';
 import { getOpenBreaker, recordFailure, recordSuccess } from './proxy/circuitBreaker';
 import { IdleTimeoutGuard } from './proxy/idleTimeout';
 import { resolveClientForUrl, disposeAll as disposeAgentPool } from './proxy/agentPool';
@@ -106,19 +115,22 @@ import {
 } from './proxy/urlBuilder';
 
 
-// ID generation (extracted from proxy.ts)
+// ID generation is now strictly in idGenerator.ts
 import { generateModelPlaceholderId, toSlug } from './proxy/idGenerator';
-export { generateModelPlaceholderId, toSlug };
 import { expandModelsWithEffort } from './proxy/effortExpander';
 
 // DNS resolution bypasses the poisoned hosts file (extracted from proxy.ts)
 import { resolveGoogleIp } from './proxy/dnsResolver';
 
 // Smart model routing and rate-limit tracking
-import { markProviderRateLimited, isProviderRateLimited, selectBestModel } from './proxy/modelRouter';
+import { markProviderRateLimited } from './proxy/modelRouter';
 import { trimContextPayload } from './proxy/contextTrimmer';
 import { checkAllModelsHealth } from './proxy/modelHealthChecker';
 import { recordRecentModel, restoreRecentModels } from './proxy/recentModelsStore';
+
+// MCP relay bridge (mobile companion): lists MCP servers configured on the
+// desktop session and forwards tool calls to the local MCP runtime.
+import { mcpListServers, mcpCallTool } from './proxy/mcpRelay';
 
 // ─── Proxy Error Emitter ──────────────────────────────────────────────────
 // Lets the main process fan-out notable diagnostics to the renderer without
@@ -357,7 +369,7 @@ async function resolveFileData(body: GeminiRequestBody, reqHeaders: Record<strin
         if (fileContent) {
           (item.parts[i] as Record<string, unknown>) = { text: '[File content]:\n\n' + fileContent };
         }
-      } catch (e) { log.warn('[Proxy] File resolve failed:', (e as Error).message); }
+      } catch (e) { throw new Error(`[Proxy] File resolve failed: ${(e as Error).message}`); }
     }
   }
 }
@@ -370,9 +382,552 @@ function downloadFileContent(url: string, authHeader: string): Promise<string> {
       method: 'GET', headers: { 'Authorization': authHeader }, timeout: FILE_DOWNLOAD_TIMEOUT_MS,
     }, (res) => {
       if (res.statusCode !== 200) { reject(new Error('HTTP ' + res.statusCode)); return; }
-      let d = ''; res.on('data', (c: Buffer) => d += c.toString()); res.on('end', () => resolve(d));
+      let d = ''; let bytes = 0;
+      res.on('data', (c: Buffer) => {
+        bytes += c.length;
+        if (bytes > 10 * 1024 * 1024) { reject(new Error('File too large')); res.destroy(); return; }
+        d += c.toString();
+      });
+      res.on('end', () => resolve(d));
     }).on('error', reject).end();
   });
+}
+
+// Fix 6 helper extraction — spliced into src/proxy.ts at module level
+// (inserted between `downloadFileContent` and the `handleCustomModelRequest` banner).
+// Envelope: Cloud Code `{"response":{...},"traceId":"","metadata":{}}` preserved verbatim.
+
+type RetryDispatch = (
+  retryCount: number,
+  delayMs: number,
+  logReason: string,
+) => void;
+
+interface StreamRequestCtx {
+  res: http.ServerResponse;
+  model: CustomModel;
+  geminiBody: GeminiRequestBody;
+  isStream: boolean;
+  retryCount: number;
+  maxRetries: number;
+  provider: string;
+  traceId: string;
+  attemptFallback: (d: ErrorDiagnostic) => boolean;
+  retry: RetryDispatch;
+}
+
+/** Shared helper to record failure to both breaker and budget */
+function recordModelFailure(model: CustomModel, errorType: ErrorType): void {
+  recordFailure(model, errorType);
+  getRetryBudget().recordFailure(model);
+}
+
+/** Shared retry dispatcher — schedules a re-dispatch with a jittered delay. */
+function scheduleRetry(
+  ctx: StreamRequestCtx,
+  retryCount: number,
+  delayMs: number,
+  logReason: string,
+): void {
+  log.warn(`[Proxy] ${logReason} for ${ctx.model.name}, retrying (${retryCount + 1}/${ctx.maxRetries})...`);
+  setTimeout(
+    () => handleCustomModelRequest(ctx.res, ctx.model, ctx.geminiBody, ctx.isStream, ctx.retryCount + 1),
+    delayMs,
+  );
+}
+
+/** Helper to log detailed diagnostics for 401 Unauthorized errors */
+function log401Diagnostic(model: CustomModel, finalUrlStr: string, apiRes: http.IncomingMessage): void {
+  const apiKeyInfo = model.apiKey && model.apiKey !== 'none'
+    ? `<set, len=${model.apiKey.length > 50 ? '>50' : model.apiKey.length <= 20 ? '≤20' : '21-50'}>`
+    : '<empty or none>';
+  log.error(`[Proxy] 401 Unauthorized from ${model.name} (${model.provider})`);
+  log.error(`[Proxy]   URL: ${finalUrlStr}`);
+  log.error(`[Proxy]   API key: ${apiKeyInfo}`);
+  log.error(`[Proxy]   Headers sent: ${Object.keys(registry.getProviderHeaders(model.provider, model.apiKey, model.extraHeaders)).join(', ')}`);
+  log.error(`[Proxy]   Possible causes:`);
+  log.error(`[Proxy]     - Missing or invalid API key (check custom_models.json)`);
+  log.error(`[Proxy]     - Wrong header name for this provider (e.g. 'Authorization' vs 'x-api-key')`);
+  log.error(`[Proxy]     - Expired or revoked token`);
+  log.error(`[Proxy]     - Account suspended or rate-limited`);
+  log.error(`[Proxy]     - Wrong endpoint URL (${finalUrlStr})`);
+  log.error(`[Proxy]   Upstream response: ${JSON.stringify(apiRes.headers).slice(0, 200)}`);
+}
+
+/** Upstream response error (mid-stream connection drop) — emits, ends, logs 401 context. */
+function handleApiResError(err: Error, apiRes: http.IncomingMessage, ctx: StreamRequestCtx, finalUrlStr: string): void {
+  const { model, res } = ctx;
+  log.error(`[Proxy] Upstream stream error for ${model.name}:`, err.message);
+  const diagnostic = classifyError(500, err, undefined, model.provider);
+  emitProxyError(buildProxyErrorPayload(ctx.traceId, 500, err, model.provider));
+  if (safeWriteHead(res, 500, {
+    'Content-Type': 'application/json',
+    'X-AG-Error-Type': diagnostic.errorType,
+  })) {
+    safeEnd(res, JSON.stringify({
+      error: { message: 'Upstream connection error: ' + err.message },
+      _agDiagnostic: diagnostic,
+    }));
+  } else if (!res.writableEnded) {
+    safeEnd(res);
+  }
+
+  // P3: Log 401 errors with detailed diagnostic context to help users
+  // understand why their custom endpoint rejected the request.
+  // Common causes: missing API key, wrong header name, expired token,
+  // wrong endpoint URL, account suspended.
+  const status = apiRes.statusCode || 0;
+  if (status === 401) {
+    log401Diagnostic(model, finalUrlStr, apiRes);
+  }
+}
+
+/** Stream response branch — SSE translation, idle/empty guards, error envelope. */
+function handleStreamResponse(apiRes: http.IncomingMessage, request: http.ClientRequest, ctx: StreamRequestCtx): void {
+  const { model, res, provider, traceId } = ctx;
+
+  // Check for API errors BEFORE writing streaming headers
+  if (apiRes.statusCode! >= 400) {
+    let errorBody = '';
+    apiRes.on('data', (chunk: Buffer) => errorBody += chunk.toString());
+    apiRes.on('end', () => {
+      log.error(`[Proxy] Stream API error (${apiRes.statusCode}) for ${model.name}: ${errorBody.substring(0, 300)}`);
+      const streamDiagnostic = classifyError(apiRes.statusCode!, null, errorBody, model.provider);
+      emitProxyError(buildProxyErrorPayload(traceId, apiRes.statusCode!, errorBody, model.provider));
+
+      // Trip the breaker on the first hard failure so subsequent
+      // requests short-circuit instead of piling up against a stuck upstream.
+      if (
+        streamDiagnostic.errorType === 'server' ||
+        streamDiagnostic.errorType === 'rate_limit' ||
+        streamDiagnostic.errorType === 'timeout' ||
+        streamDiagnostic.errorType === 'network'
+      ) {
+        recordModelFailure(model, streamDiagnostic.errorType);
+        if (streamDiagnostic.errorType === 'rate_limit') {
+          markProviderRateLimited(model.apiUrl);
+        }
+      }
+
+      if (shouldRetryStatus(apiRes.statusCode!, ctx.retryCount, ctx.maxRetries)) {
+        const retryAfterMs = parseRetryAfter(apiRes.headers);
+        const delay = computeRetryDelay('rate-limit', ctx.retryCount, retryAfterMs);
+        ctx.retry(ctx.retryCount, delay, `Stream error ${apiRes.statusCode} (rate-limit)`);
+        return;
+      }
+      const diagnostic = streamDiagnostic;
+
+      if (ctx.attemptFallback(diagnostic)) return;
+
+      if (diagnostic.errorType === 'billing' || diagnostic.errorType === 'auth' || diagnostic.errorType === 'forbidden') {
+        const errResponse = {
+          response: {
+            candidates: [
+              {
+                content: { parts: [{ text: generateGracefulMarkdown(diagnostic) }], role: 'model' },
+                finishReason: 'STOP',
+                index: 0,
+              },
+            ],
+          },
+          traceId: '',
+          metadata: {},
+          _agDiagnostic: diagnostic,
+        };
+        if (safeWriteHead(res, 200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+          'X-AG-Error-Type': diagnostic.errorType,
+        })) {
+          res.write('data: ' + JSON.stringify(errResponse) + '\n\n');
+          safeEnd(res);
+        }
+        return;
+      }
+
+      let responseJson = { error: { message: `Upstream error: ${errorBody}` } };
+      try {
+        responseJson = JSON.parse(errorBody);
+      } catch {
+        // not JSON
+      }
+      if (typeof responseJson === 'object' && responseJson !== null) {
+        (responseJson as any)._agDiagnostic = diagnostic;
+      }
+      if (safeWriteHead(res, apiRes.statusCode!, {
+        'Content-Type': 'application/json',
+        'X-AG-Error-Type': diagnostic.errorType,
+      })) {
+        safeEnd(res, JSON.stringify(responseJson));
+      }
+    });
+    return;
+  }
+
+  if (apiRes.statusCode === 200) {
+    // Any successful response proves the upstream is healthy again;
+    // clear the breaker so subsequent requests don't short-circuit.
+    recordSuccess(model);
+  }
+
+  if (!safeWriteHead(res, 200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  })) {
+    return;
+  }
+
+  // Phase 2: Per-chunk idle timeout guard. Vendor pattern from
+  // `withIdleTimeout`'s stream wrapper. If no SSE chunk arrives for
+  // STREAM_IDLE_TIMEOUT_MS, treat the upstream as stuck and abort.
+  const idleGuard = new IdleTimeoutGuard(apiRes, {
+    idleTimeoutMs: STREAM_IDLE_TIMEOUT_MS,
+    label: model.name,
+    onTimeout: (err) => {
+      log.warn(`[Proxy] ${err.message} — aborting request for ${model.name}`);
+      recordModelFailure(model, 'timeout');
+      try {
+        request.destroy(err);
+      } catch { /* already destroyed */ }
+    },
+  });
+
+  // Phase 4: Empty-stream guard. Track raw chunks + SSE frames so we can
+  // detect a 200 OK stream that contains no usable content (e.g. upstream
+  // returns `[DONE]` immediately, or only keep-alive comments, or zero
+  // non-empty chunks). Vendor pattern: "did we get something useful?" AND
+  // gate from `vscode-unify-chat-provider`.
+  const emptyGuard = new EmptyStreamGuard();
+
+  let buffer = '';
+  apiRes.on('data', (chunk: Buffer) => {
+    // Observe first, then forward. The guard splits SSE frames on
+    // newlines so a frame that spans two chunks is still counted.
+    emptyGuard.observe(chunk);
+    buffer += chunk.toString('utf-8');
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (trimmed.startsWith('data: ')) {
+        const dataStr = trimmed.substring(6).trim();
+        if (dataStr === '[DONE]') continue;
+        try {
+          const parsed = JSON.parse(dataStr);
+          const mapped = registry.translateStreamChunk(provider, parsed, model.name);
+
+          if (mapped) {
+            const cloudCodeResponse = {
+              response: { candidates: [mapped] },
+              traceId: '',
+              metadata: {},
+            };
+            res.write(`data: ${JSON.stringify(cloudCodeResponse)}\n\n`);
+          }
+        } catch (err) {
+          // Partial/invalid JSON chunks are normal during streaming; debug-level only
+          log.debug(`[Proxy] Stream chunk parse warning for ${model.name}:`, (err as Error).message);
+        }
+      }
+    }
+  });
+
+  apiRes.on('end', () => {
+    idleGuard.dispose();
+    emptyGuard.observe(Buffer.from('')); // no-op, but tightens API
+
+    // Phase 4: Detect empty streams BEFORE finalizing the response.
+    // An empty stream is a 200 OK response with no SSE data frames.
+    // We retry once (unless MAX_RETRIES is already exhausted) to give
+    // flaky upstreams a second chance before surfacing an error.
+    const verdict = emptyGuard.finalize({ statusCode: apiRes.statusCode ?? 0 });
+    if (verdict.isEmpty && ctx.retryCount < ctx.maxRetries) {
+      log.warn(
+        `[Proxy] Empty stream from ${model.name}: ${verdict.reason} ` +
+        `(0 frames, ${verdict.bytesReceived}B) — retrying (${ctx.retryCount + 1}/${ctx.maxRetries}).`,
+      );
+      recordModelFailure(model, 'empty_stream');
+      ctx.retry(ctx.retryCount, computeRetryDelay('stream-error', ctx.retryCount, 0), `Empty stream: ${verdict.reason}`);
+      return;
+    }
+    if (verdict.isEmpty) {
+      log.warn(
+        `[Proxy] Empty stream from ${model.name}: ${verdict.reason} ` +
+        `(0 frames, ${verdict.bytesReceived}B) — max retries exhausted.`,
+      );
+      // Final attempt exhausted: count it as a failure so the budget
+      // can downgrade the model's trust on the next request.
+      recordModelFailure(model, 'empty_stream');
+    }
+    if (buffer.trim().startsWith('data: ')) {
+      const dataStr = buffer.trim().substring(6).trim();
+      if (dataStr !== '[DONE]') {
+        try {
+          const parsed = JSON.parse(dataStr);
+          const mapped = registry.translateStreamChunk(provider, parsed, model.name);
+          if (mapped) {
+            const cloudCodeResponse = {
+              response: { candidates: [mapped] },
+              traceId: '',
+              metadata: {},
+            };
+            res.write(`data: ${JSON.stringify(cloudCodeResponse)}\n\n`);
+          }
+        } catch (e) {
+          log.debug(`[Proxy] Stream buffer drain parse warning for ${model.name}:`, (e as Error).message);
+        }
+      }
+    }
+
+    const finalChunk = {
+      response: {
+        candidates: [
+          {
+            content: { parts: [], role: 'model' },
+            finishReason: 'STOP',
+            index: 0,
+          },
+        ],
+      },
+      traceId: '',
+      metadata: {},
+    };
+    res.write(`data: ${JSON.stringify(finalChunk)}\n\n`);
+    res.end();
+    const pId = model.name.includes('-') ? model.name.split('-')[0] : model.provider;
+    void recordProviderUsage(pId, 100, 150);
+  });
+}
+
+/** Non-stream response branch — JSON translate, retry on error status, graceful envelope. */
+function handleNonStreamResponse(apiRes: http.IncomingMessage, ctx: StreamRequestCtx): void {
+  const { model, res, provider, traceId } = ctx;
+  let body = '';
+  apiRes.on('data', (chunk: Buffer) => (body += chunk));
+  apiRes.on('end', () => {
+    // Retry if eligible based on status code
+    if (shouldRetryStatus(apiRes.statusCode!, ctx.retryCount, ctx.maxRetries)) {
+      const retryAfterMs = parseRetryAfter(apiRes.headers);
+      const delay = computeRetryDelay('rate-limit', ctx.retryCount, retryAfterMs);
+      ctx.retry(ctx.retryCount, delay, `Upstream error status ${apiRes.statusCode}`);
+      return;
+    }
+
+    if (apiRes.statusCode! >= 400) {
+      // P0-3: Only log status code and model name, NOT response body content
+      log.error(`[Proxy] API error (${apiRes.statusCode}) for ${model.name}`);
+
+      const diagnostic = classifyError(apiRes.statusCode!, null, body, model.provider);
+      emitProxyError(buildProxyErrorPayload(traceId, apiRes.statusCode!, body, model.provider));
+
+      // Trip the breaker on hard failures so subsequent requests
+      // short-circuit instead of piling up against a stuck upstream.
+      if (
+        diagnostic.errorType === 'server' ||
+        diagnostic.errorType === 'rate_limit' ||
+        diagnostic.errorType === 'timeout' ||
+        diagnostic.errorType === 'network'
+      ) {
+        recordModelFailure(model, diagnostic.errorType);
+      }
+
+      if (ctx.attemptFallback(diagnostic)) return;
+
+      if (diagnostic.errorType === 'billing' || diagnostic.errorType === 'auth' || diagnostic.errorType === 'forbidden') {
+        const errResponse = {
+          response: {
+            candidates: [
+              {
+                content: { parts: [{ text: generateGracefulMarkdown(diagnostic) }], role: 'model' },
+                finishReason: 'STOP',
+                index: 0,
+              },
+            ],
+          },
+          traceId: '',
+          metadata: {},
+          _agDiagnostic: diagnostic,
+        };
+        if (safeWriteHead(res, 200, {
+          'Content-Type': 'application/json',
+          'X-AG-Error-Type': diagnostic.errorType,
+        })) {
+          safeEnd(res, JSON.stringify(errResponse));
+        }
+        return;
+      }
+
+      let responseJson = { error: { message: `Upstream error: ${body}` } };
+      try {
+        responseJson = JSON.parse(body);
+      } catch {
+        // not JSON
+      }
+      if (typeof responseJson === 'object' && responseJson !== null) {
+        (responseJson as any)._agDiagnostic = diagnostic;
+      }
+
+      if (safeWriteHead(res, apiRes.statusCode!, {
+        'Content-Type': 'application/json',
+        'X-AG-Error-Type': diagnostic.errorType,
+      })) {
+        safeEnd(res, JSON.stringify(responseJson));
+      }
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(body) as Record<string, unknown>;
+
+      const reasoning =
+        (parsed as { choices?: { message?: { reasoning_content?: string; reasoning?: string } }[] }).choices?.[0]
+          ?.message?.reasoning_content ||
+        (parsed as { choices?: { message?: { reasoning_content?: string; reasoning?: string } }[] }).choices?.[0]
+          ?.message?.reasoning;
+      if (reasoning) {
+        const modelKey = getSessionModelKey(model.name, (ctx.geminiBody as any)?.sessionId || (ctx.geminiBody as any)?.conversationId);
+        modelReasoningContent.set(modelKey, reasoning);
+        if (modelKey !== model.name) {
+          modelReasoningContent.set(model.name, reasoning);
+        }
+        touchStateTimestamp(stateTimestamps.reasoning, modelKey);
+      }
+
+      const providerForResponse =
+        model.provider === 'custom' || model.provider === 'openrouter' ? 'openai' : model.provider;
+      const mapped = registry.translateResponse(providerForResponse, parsed, model.name);
+
+      const cloudCodeResponse = {
+        response: mapped,
+        traceId: '',
+        metadata: {},
+      };
+
+      // Successful 2xx response — clear breaker for this model.
+      recordSuccess(model);
+      // P5-2: feed the per-model retry budget a success sample so the
+      // model's trust score recovers after a hard stretch of failures.
+      getRetryBudget().recordSuccess(model);
+
+      if (safeWriteHead(res, 200, { 'Content-Type': 'application/json' })) {
+        safeEnd(res, JSON.stringify(cloudCodeResponse));
+      }
+    } catch (e) {
+      log.error('[Proxy] Failed to map response:', e);
+
+      if (ctx.retryCount < ctx.maxRetries) {
+        ctx.retry(ctx.retryCount, computeRetryDelay('server-error', ctx.retryCount, 0), 'Parse error');
+        return;
+      }
+
+      const diagnostic = classifyError(500, e, body, model.provider);
+
+      if (ctx.attemptFallback(diagnostic)) return;
+
+      if (safeWriteHead(res, 500, {
+        'Content-Type': 'application/json',
+        'X-AG-Error-Type': diagnostic.errorType,
+      })) {
+        safeEnd(res, JSON.stringify({
+          error: { message: 'Failed to translate model response' },
+          _agDiagnostic: diagnostic,
+        }));
+      }
+    }
+  });
+}
+
+/** Request-level timeout — breaker + budget + retry or 504. */
+function handleRequestTimeout(request: http.ClientRequest, ctx: StreamRequestCtx): void {
+  const { model, res } = ctx;
+  log.error(`[Proxy] Request timeout (${resolveRequestTimeout(model)}ms) for ${model.name}`);
+  request.destroy();
+  // Trip the breaker immediately on timeout — these are the worst offender
+  // in retry storms (the request holds the proxy open for the full timeout).
+  recordModelFailure(model, 'timeout');
+
+  if (ctx.retryCount < ctx.maxRetries) {
+    ctx.retry(ctx.retryCount, computeRetryDelay('server-error', ctx.retryCount, 0), 'Timeout');
+    return;
+  }
+
+  const diagnostic = classifyError(504, 'ETIMEDOUT', undefined, model.provider);
+
+  if (ctx.attemptFallback(diagnostic)) return;
+
+  if (safeWriteHead(res, 504, {
+    'Content-Type': 'application/json',
+    'X-AG-Error-Type': diagnostic.errorType,
+  })) {
+    safeEnd(res, JSON.stringify({
+      error: { message: `Request timeout after ${resolveRequestTimeout(model) / 1000}s` },
+      _agDiagnostic: diagnostic,
+    }));
+  }
+}
+
+/** Request-level network error — breaker + budget + retry or 502 envelope. */
+function handleRequestError(err: Error, ctx: StreamRequestCtx): void {
+  const { model, res } = ctx;
+  log.error('[Proxy] Custom Model Request Error:', err);
+  // Trip the breaker on network errors so the proxy stops hammering the
+  // dead upstream. Use the error's code when present, default to 'network'.
+  const code = (err as NodeJS.ErrnoException).code?.toUpperCase();
+  const breakerType: ErrorType =
+    code === 'ETIMEDOUT' || code === 'ESOCKETTIMEDOUT' ? 'timeout' :
+    code === 'ENOTFOUND' || code === 'EAI_AGAIN' ? 'dns' :
+    'network';
+  recordModelFailure(model, breakerType);
+
+  if (ctx.retryCount < ctx.maxRetries) {
+    ctx.retry(ctx.retryCount, computeRetryDelay('network' as RetryStrategy, ctx.retryCount, 0), 'Network error');
+    return;
+  }
+
+  const diagnostic = classifyError(undefined, err, undefined, model.provider);
+  emitProxyError(buildProxyErrorPayload(ctx.traceId, undefined, err, model.provider));
+
+  if (ctx.attemptFallback(diagnostic)) return;
+
+  if (ctx.isStream) {
+    if (!res.headersSent && !res.writableEnded) {
+      const errResponse = {
+        response: {
+          candidates: [
+            {
+              content: { parts: [{ text: 'Network error: ' + err.message }], role: 'model' },
+              finishReason: 'STOP',
+              index: 0,
+            },
+          ],
+        },
+        traceId: '',
+        metadata: {},
+        _agDiagnostic: diagnostic,
+      };
+      safeWriteHead(res, 502, {
+        'Content-Type': 'text/event-stream',
+        'X-AG-Error-Type': diagnostic.errorType,
+      });
+      res.write('data: ' + JSON.stringify(errResponse) + '\n\n');
+    }
+    safeEnd(res);
+  } else {
+    if (safeWriteHead(res, 502, {
+      'Content-Type': 'application/json',
+      'X-AG-Error-Type': diagnostic.errorType,
+    })) {
+      safeEnd(res, JSON.stringify({
+        error: { message: 'Custom model request failed: ' + err.message },
+        _agDiagnostic: diagnostic,
+      }));
+    }
+  }
 }
 
 // ─── Custom Model Request Handler ─────────────────────────────────────────
@@ -442,44 +997,7 @@ function handleCustomModelRequest(
       `[Proxy] Circuit OPEN for ${model.name} (${openBreaker.errorType}, tripped ${Math.round((Date.now() - openBreaker.trippedAt) / 1000)}s ago). Short-circuiting request.`,
     );
 
-    // attemptFallback is defined as a nested closure below; it shares
-    // res/model/geminiBody/isStream/fallbackDepth via lexical scope.
-    const breakerAttemptFallback = (
-      res: http.ServerResponse,
-      _model: CustomModel,
-      _body: GeminiRequestBody,
-      _isStream: boolean,
-      diagnostic: ErrorDiagnostic,
-      _depth: number,
-    ): boolean => {
-      if (fallbackDepth >= 2) return false;
-      try {
-        const allModels = loadCustomModels();
-        // ponytail: skip same-provider on rate_limit — shared quota, fallback is a no-op
-        const sameProviderRateLimit = diagnostic.errorType === 'rate_limit'
-          ? new URL(model.apiUrl).hostname
-          : null;
-        for (const m of allModels) {
-          if (m.name !== model.name && m.apiKey && !m.apiKey.startsWith('fallback:')) {
-            if (sameProviderRateLimit && new URL(m.apiUrl).hostname === sameProviderRateLimit) {
-              log.warn(`[Proxy] Circuit-OPEN: skipping same-provider fallback ${m.displayName || m.name} (shared quota, rate_limit)`);
-              continue;
-            }
-            const toName = m.displayName || m.name;
-            log.warn(
-              `[Proxy] Circuit-OPEN fallback: ${model.name} -> ${toName} (reason: ${diagnostic.errorType})`,
-            );
-            handleCustomModelRequest(res, m, _body, _isStream, 0, fallbackDepth + 1);
-            return true;
-          }
-        }
-      } catch (e) {
-        log.error('[Proxy] Circuit-OPEN fallback exception:', e);
-      }
-      return false;
-    };
-
-    if (breakerAttemptFallback(res, model, geminiBody, isStream, cached, fallbackDepth)) {
+    if (attemptFallback(cached)) {
       return;
     }
 
@@ -499,6 +1017,8 @@ function handleCustomModelRequest(
     return;
   }
 
+  // Shared by both the open-breaker short-circuit path and the regular
+  // upstream-error paths. It only picks a different model and re-dispatches.
   function attemptFallback(diagnostic: ErrorDiagnostic): boolean {
     if (fallbackDepth >= 2) return false;
     const isEligibleForFallback =
@@ -511,11 +1031,24 @@ function handleCustomModelRequest(
 
     try {
       const allModels = loadCustomModels();
+      // If a specific fallback model is configured on the model, prioritize it!
+      let orderedModels = allModels;
+      if (model.fallbackModel) {
+        const preferred = allModels.filter(m =>
+          m.name === model.fallbackModel ||
+          m.displayName === model.fallbackModel ||
+          m.externalModelName === model.fallbackModel ||
+          m.name.endsWith(`/${model.fallbackModel}`)
+        );
+        const rest = allModels.filter(m => !preferred.includes(m));
+        orderedModels = [...preferred, ...rest];
+      }
+
       // ponytail: skip same-provider on rate_limit — shared quota, fallback is a no-op
       const sameProviderRateLimit = diagnostic.errorType === 'rate_limit'
         ? new URL(model.apiUrl).hostname
         : null;
-      for (const m of allModels) {
+      for (const m of orderedModels) {
         if (m.name !== model.name && m.apiKey && !m.apiKey.startsWith('fallback:')) {
           if (sameProviderRateLimit && new URL(m.apiUrl).hostname === sameProviderRateLimit) {
             log.warn(`[Proxy] Auto-fallback: skipping ${m.displayName || m.name} (same provider ${sameProviderRateLimit}, shared quota)`);
@@ -613,20 +1146,23 @@ function handleCustomModelRequest(
   );
   recordRecentModel(model.name);
 
+  // Fix 6: dispatch through the extracted SRP helpers. The request-level
+  // timeout/error handlers and the pooled request dispatch stay here.
+  const ctx: StreamRequestCtx = {
+    res,
+    model,
+    geminiBody,
+    isStream,
+    retryCount,
+    maxRetries: MAX_RETRIES,
+    provider,
+    traceId,
+    attemptFallback,
+    retry: (rc, delayMs, logReason) => scheduleRetry(ctx, rc, delayMs, logReason),
+  };
+
   const request = pooledClient.request(finalUrlStr, options, (apiRes) => {
-    apiRes.on('error', (err) => {
-      log.error(`[Proxy] Upstream stream error for ${model.name}:`, err.message);
-      const diagnostic = classifyError(500, err, undefined, model.provider);
-      emitProxyError(buildProxyErrorPayload(traceId, 500, err, model.provider));
-      if (safeWriteHead(res, 500, {
-        'Content-Type': 'application/json',
-        'X-AG-Error-Type': diagnostic.errorType
-      })) {
-        safeEnd(res, JSON.stringify({ error: { message: 'Upstream connection error: ' + err.message }, _agDiagnostic: diagnostic }));
-      } else if (!res.writableEnded) {
-        safeEnd(res);
-      }
-    });
+    apiRes.on('error', (err) => handleApiResError(err, apiRes, ctx, finalUrlStr));
     const status = apiRes.statusCode || 0;
 
     // P3: Log 401 errors with detailed diagnostic context to help users
@@ -634,9 +1170,9 @@ function handleCustomModelRequest(
     // Common causes: missing API key, wrong header name, expired token,
     // wrong endpoint URL, account suspended.
     if (status === 401) {
-      // S-2: Never log actual key material — only presence and length bucket.
+      // S-2: Never log actual key material â€” only presence and length bucket.
       const apiKeyInfo = model.apiKey && model.apiKey !== 'none'
-        ? `<set, len=${model.apiKey.length > 50 ? '>50' : model.apiKey.length <= 20 ? '≤20' : '21-50'}>`
+        ? `<set, len=${model.apiKey.length > 50 ? '>50' : model.apiKey.length <= 20 ? 'â‰¤20' : '21-50'}>`
         : '<empty or none>';
       log.error(`[Proxy] 401 Unauthorized from ${model.name} (${model.provider})`);
       log.error(`[Proxy]   URL: ${finalUrlStr}`);
@@ -652,459 +1188,15 @@ function handleCustomModelRequest(
     }
 
     if (isStream) {
-      // Check for API errors BEFORE writing streaming headers
-      if (apiRes.statusCode! >= 400) {
-        let errorBody = '';
-        apiRes.on('data', (chunk: Buffer) => errorBody += chunk.toString());
-        apiRes.on('end', () => {
-          log.error(`[Proxy] Stream API error (${apiRes.statusCode}) for ${model.name}: ${errorBody.substring(0, 300)}`);
-          const streamDiagnostic = classifyError(apiRes.statusCode!, null, errorBody, model.provider);
-          emitProxyError(buildProxyErrorPayload(traceId, apiRes.statusCode!, errorBody, model.provider));
-
-          // Trip the breaker on the first hard failure so subsequent
-          // requests short-circuit instead of piling up against a stuck upstream.
-          if (
-            streamDiagnostic.errorType === 'server' ||
-            streamDiagnostic.errorType === 'rate_limit' ||
-            streamDiagnostic.errorType === 'timeout' ||
-            streamDiagnostic.errorType === 'network'
-          ) {
-            recordFailure(model, streamDiagnostic.errorType);
-            // P5-2: feed the per-model retry budget so future requests can adapt
-            getRetryBudget().recordFailure(model);
-            if (streamDiagnostic.errorType === 'rate_limit') {
-              markProviderRateLimited(model.apiUrl);
-            }
-          }
-
-          if (shouldRetryStatus(apiRes.statusCode!, retryCount, MAX_RETRIES)) {
-            log.warn(`[Proxy] Stream error, retrying (${retryCount + 1}/${MAX_RETRIES})...`);
-            setTimeout(() => handleCustomModelRequest(res, model, geminiBody, isStream, retryCount + 1), 1000 * (retryCount + 1));
-            return;
-          }
-          const diagnostic = streamDiagnostic;
-
-          if (attemptFallback(diagnostic)) return;
-
-          if (diagnostic.errorType === 'billing' || diagnostic.errorType === 'auth' || diagnostic.errorType === 'forbidden') {
-            const errResponse = {
-              response: {
-                candidates: [
-                  {
-                    content: { parts: [{ text: generateGracefulMarkdown(diagnostic) }], role: 'model' },
-                    finishReason: 'STOP',
-                    index: 0,
-                  },
-                ],
-              },
-              traceId: '',
-              metadata: {},
-              _agDiagnostic: diagnostic
-            };
-            if (safeWriteHead(res, 200, {
-              'Content-Type': 'text/event-stream',
-              'Cache-Control': 'no-cache',
-              Connection: 'keep-alive',
-              'X-AG-Error-Type': diagnostic.errorType
-            })) {
-              res.write('data: ' + JSON.stringify(errResponse) + '\n\n');
-              safeEnd(res);
-            }
-            return;
-          }
-
-          let responseJson = { error: { message: `Upstream error: ${errorBody}` } };
-          try {
-            responseJson = JSON.parse(errorBody);
-          } catch {
-            // not JSON
-          }
-          if (typeof responseJson === 'object' && responseJson !== null) {
-            (responseJson as any)._agDiagnostic = diagnostic;
-          }
-          if (safeWriteHead(res, apiRes.statusCode!, {
-            'Content-Type': 'application/json',
-            'X-AG-Error-Type': diagnostic.errorType
-          })) {
-            safeEnd(res, JSON.stringify(responseJson));
-          }
-        });
-        return;
-      }
-
-      if (apiRes.statusCode === 200) {
-        // Any successful response proves the upstream is healthy again;
-        // clear the breaker so subsequent requests don't short-circuit.
-        recordSuccess(model);
-      }
-
-      if (!safeWriteHead(res, 200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-        'X-Accel-Buffering': 'no',
-      })) {
-        return;
-      }
-
-      // Phase 2: Per-chunk idle timeout guard. Vendor pattern from
-      // `withIdleTimeout`'s stream wrapper. If no SSE chunk arrives for
-      // STREAM_IDLE_TIMEOUT_MS, treat the upstream as stuck and abort.
-      const idleGuard = new IdleTimeoutGuard(apiRes, {
-        idleTimeoutMs: STREAM_IDLE_TIMEOUT_MS,
-        label: model.name,
-        onTimeout: (err) => {
-          log.warn(`[Proxy] ${err.message} — aborting request for ${model.name}`);
-          recordFailure(model, 'timeout');
-          // P5-2: feed the retry budget so future requests see this stall.
-          getRetryBudget().recordFailure(model);
-          try {
-            request.destroy(err);
-          } catch { /* already destroyed */ }
-        },
-      });
-
-      // Phase 4: Empty-stream guard. Track raw chunks + SSE frames so we can
-      // detect a 200 OK stream that contains no usable content (e.g. upstream
-      // returns `[DONE]` immediately, or only keep-alive comments, or zero
-      // non-empty chunks). Vendor pattern: "did we get something useful?" AND
-      // gate from `vscode-unify-chat-provider`.
-      const emptyGuard = new EmptyStreamGuard();
-
-      let buffer = '';
-      apiRes.on('data', (chunk: Buffer) => {
-        // Observe first, then forward. The guard splits SSE frames on
-        // newlines so a frame that spans two chunks is still counted.
-        emptyGuard.observe(chunk);
-        buffer += chunk.toString('utf-8');
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-          if (trimmed.startsWith('data: ')) {
-            const dataStr = trimmed.substring(6).trim();
-            if (dataStr === '[DONE]') continue;
-            try {
-              const parsed = JSON.parse(dataStr);
-              const mapped = registry.translateStreamChunk(provider, parsed, model.name);
-
-              if (mapped) {
-                const cloudCodeResponse = {
-                  response: { candidates: [mapped] },
-                  traceId: '',
-                  metadata: {},
-                };
-                res.write(`data: ${JSON.stringify(cloudCodeResponse)}\n\n`);
-              }
-            } catch (err) {
-              // Partial/invalid JSON chunks are normal during streaming; debug-level only
-              log.debug(`[Proxy] Stream chunk parse warning for ${model.name}:`, (err as Error).message);
-            }
-          }
-        }
-      });
-
-      apiRes.on('end', () => {
-        idleGuard.dispose();
-        emptyGuard.observe(Buffer.from('')); // no-op, but tightens API
-
-        // Phase 4: Detect empty streams BEFORE finalizing the response.
-        // An empty stream is a 200 OK response with no SSE data frames.
-        // We retry once (unless MAX_RETRIES is already exhausted) to give
-        // flaky upstreams a second chance before surfacing an error.
-        const verdict = emptyGuard.finalize({ statusCode: apiRes.statusCode ?? 0 });
-        if (verdict.isEmpty && retryCount < MAX_RETRIES) {
-          log.warn(
-            `[Proxy] Empty stream from ${model.name}: ${verdict.reason} ` +
-            `(0 frames, ${verdict.bytesReceived}B) — retrying (${retryCount + 1}/${MAX_RETRIES}).`,
-          );
-          recordFailure(model, 'empty_stream');
-          // P5-2: feed the per-model retry budget so future requests adapt.
-          getRetryBudget().recordFailure(model);
-          setTimeout(
-            () => handleCustomModelRequest(res, model, geminiBody, isStream, retryCount + 1),
-            500 * (retryCount + 1),
-          );
-          return;
-        }
-        if (verdict.isEmpty) {
-          log.warn(
-            `[Proxy] Empty stream from ${model.name}: ${verdict.reason} ` +
-            `(0 frames, ${verdict.bytesReceived}B) — max retries exhausted.`,
-          );
-          // Final attempt exhausted: count it as a failure so the budget
-          // can downgrade the model's trust on the next request.
-          getRetryBudget().recordFailure(model);
-        }
-        if (buffer.trim().startsWith('data: ')) {
-          const dataStr = buffer.trim().substring(6).trim();
-          if (dataStr !== '[DONE]') {
-            try {
-              const parsed = JSON.parse(dataStr);
-              const mapped = registry.translateStreamChunk(provider, parsed, model.name);
-              if (mapped) {
-                const cloudCodeResponse = {
-                  response: { candidates: [mapped] },
-                  traceId: '',
-                  metadata: {},
-                };
-                res.write(`data: ${JSON.stringify(cloudCodeResponse)}\n\n`);
-              }
-            } catch (e) {
-              log.debug(`[Proxy] Stream buffer drain parse warning for ${model.name}:`, (e as Error).message);
-            }
-          }
-        }
-
-        const finalChunk = {
-          response: {
-            candidates: [
-              {
-                content: { parts: [], role: 'model' },
-                finishReason: 'STOP',
-                index: 0,
-              },
-            ],
-          },
-          traceId: '',
-          metadata: {},
-        };
-        res.write(`data: ${JSON.stringify(finalChunk)}\n\n`);
-        res.end();
-        const pId = model.name.includes('-') ? model.name.split('-')[0] : model.provider;
-        void recordProviderUsage(pId, 100, 150);
-      });
+      handleStreamResponse(apiRes, request, ctx);
     } else {
-      let body = '';
-      apiRes.on('data', (chunk: Buffer) => (body += chunk));
-      apiRes.on('end', () => {
-        // Retry if eligible based on status code
-        if (shouldRetryStatus(apiRes.statusCode!, retryCount, MAX_RETRIES)) {
-          const retryAfter = parseRetryAfter(apiRes.headers);
-          const delay = retryAfter > 0 ? retryAfter : (apiRes.statusCode === 429 ? 2000 : 1000) * Math.pow(2, retryCount);
-          log.warn(
-            `[Proxy] Upstream error status ${apiRes.statusCode} for ${model.name}, retrying in ${delay}ms (${retryCount + 1}/${MAX_RETRIES})...`,
-          );
-          setTimeout(() => handleCustomModelRequest(res, model, geminiBody, isStream, retryCount + 1), delay);
-          return;
-        }
-
-        if (apiRes.statusCode! >= 400) {
-          // P0-3: Only log status code and model name, NOT response body content
-          log.error(`[Proxy] API error (${apiRes.statusCode}) for ${model.name}`);
-
-          const diagnostic = classifyError(apiRes.statusCode!, null, body, model.provider);
-          emitProxyError(buildProxyErrorPayload(traceId, apiRes.statusCode!, body, model.provider));
-
-          // Trip the breaker on hard failures so subsequent requests
-          // short-circuit instead of piling up against a stuck upstream.
-          if (
-            diagnostic.errorType === 'server' ||
-            diagnostic.errorType === 'rate_limit' ||
-            diagnostic.errorType === 'timeout' ||
-            diagnostic.errorType === 'network'
-          ) {
-            recordFailure(model, diagnostic.errorType);
-            // P5-2: feed the per-model retry budget.
-            getRetryBudget().recordFailure(model);
-          }
-
-          if (attemptFallback(diagnostic)) return;
-
-          if (diagnostic.errorType === 'billing' || diagnostic.errorType === 'auth' || diagnostic.errorType === 'forbidden') {
-            const errResponse = {
-              response: {
-                candidates: [
-                  {
-                    content: { parts: [{ text: generateGracefulMarkdown(diagnostic) }], role: 'model' },
-                    finishReason: 'STOP',
-                    index: 0,
-                  },
-                ],
-              },
-              traceId: '',
-              metadata: {},
-              _agDiagnostic: diagnostic
-            };
-            if (safeWriteHead(res, 200, {
-              'Content-Type': 'application/json',
-              'X-AG-Error-Type': diagnostic.errorType
-            })) {
-              safeEnd(res, JSON.stringify(errResponse));
-            }
-            return;
-          }
-
-          let responseJson = { error: { message: `Upstream error: ${body}` } };
-          try {
-            responseJson = JSON.parse(body);
-          } catch {
-            // not JSON
-          }
-          if (typeof responseJson === 'object' && responseJson !== null) {
-            (responseJson as any)._agDiagnostic = diagnostic;
-          }
-
-          if (safeWriteHead(res, apiRes.statusCode!, {
-            'Content-Type': 'application/json',
-            'X-AG-Error-Type': diagnostic.errorType
-          })) {
-            safeEnd(res, JSON.stringify(responseJson));
-          }
-          return;
-        }
-
-        try {
-          const parsed = JSON.parse(body) as Record<string, unknown>;
-
-          const reasoning =
-            (parsed as { choices?: { message?: { reasoning_content?: string; reasoning?: string } }[] }).choices?.[0]
-              ?.message?.reasoning_content ||
-            (parsed as { choices?: { message?: { reasoning_content?: string; reasoning?: string } }[] }).choices?.[0]
-              ?.message?.reasoning;
-          if (reasoning) {
-            modelReasoningContent.set(model.name, reasoning);
-            touchStateTimestamp(stateTimestamps.reasoning, model.name);
-          }
-
-          const providerForResponse =
-            model.provider === 'custom' || model.provider === 'openrouter' ? 'openai' : model.provider;
-          const mapped = registry.translateResponse(providerForResponse, parsed, model.name);
-
-          const cloudCodeResponse = {
-            response: mapped,
-            traceId: '',
-            metadata: {},
-          };
-
-          // Successful 2xx response — clear breaker for this model.
-          recordSuccess(model);
-          // P5-2: feed the per-model retry budget a success sample so the
-          // model's trust score recovers after a hard stretch of failures.
-          getRetryBudget().recordSuccess(model);
-
-          if (safeWriteHead(res, 200, { 'Content-Type': 'application/json' })) {
-            safeEnd(res, JSON.stringify(cloudCodeResponse));
-          }
-        } catch (e) {
-          log.error('[Proxy] Failed to map response:', e);
-
-          if (retryCount < MAX_RETRIES) {
-            log.warn(`[Proxy] Parse error for ${model.name}, retrying (${retryCount + 1}/${MAX_RETRIES})...`);
-            setTimeout(
-              () => handleCustomModelRequest(res, model, geminiBody, isStream, retryCount + 1),
-              1000 * (retryCount + 1),
-            );
-            return;
-          }
-
-          const diagnostic = classifyError(500, e, body, model.provider);
-          
-          if (attemptFallback(diagnostic)) return;
-          
-          if (safeWriteHead(res, 500, {
-            'Content-Type': 'application/json',
-            'X-AG-Error-Type': diagnostic.errorType
-          })) {
-            safeEnd(res, JSON.stringify({ error: { message: 'Failed to translate model response' }, _agDiagnostic: diagnostic }));
-          }
-        }
-      });
+      handleNonStreamResponse(apiRes, ctx);
     }
   });
 
-  request.setTimeout(REQUEST_TIMEOUT_MS, () => {
-    log.error(`[Proxy] Request timeout (${REQUEST_TIMEOUT_MS}ms) for ${model.name}`);
-    request.destroy();
-    // Trip the breaker immediately on timeout — these are the worst offender
-    // in retry storms (the request holds the proxy open for the full timeout).
-    recordFailure(model, 'timeout');
-    // P5-2: feed the retry budget.
-    getRetryBudget().recordFailure(model);
+  request.setTimeout(REQUEST_TIMEOUT_MS, () => handleRequestTimeout(request, ctx));
 
-    if (retryCount < MAX_RETRIES) {
-      log.warn(`[Proxy] Timeout for ${model.name}, retrying (${retryCount + 1}/${MAX_RETRIES})...`);
-      setTimeout(
-        () => handleCustomModelRequest(res, model, geminiBody, isStream, retryCount + 1),
-        1000 * (retryCount + 1),
-      );
-      return;
-    }
-
-    const diagnostic = classifyError(504, 'ETIMEDOUT', undefined, model.provider);
-
-    if (attemptFallback(diagnostic)) return;
-
-    if (safeWriteHead(res, 504, {
-      'Content-Type': 'application/json',
-      'X-AG-Error-Type': diagnostic.errorType
-    })) {
-      safeEnd(res, JSON.stringify({ error: { message: `Request timeout after ${REQUEST_TIMEOUT_MS / 1000}s` }, _agDiagnostic: diagnostic }));
-    }
-  });
-
-  request.on('error', (err) => {
-    log.error('[Proxy] Custom Model Request Error:', err);
-    // Trip the breaker on network errors so the proxy stops hammering the
-    // dead upstream. Use the error's code when present, default to 'network'.
-    const code = (err as NodeJS.ErrnoException).code?.toUpperCase();
-    const breakerType: ErrorType =
-      code === 'ETIMEDOUT' || code === 'ESOCKETTIMEDOUT' ? 'timeout' :
-      code === 'ENOTFOUND' || code === 'EAI_AGAIN' ? 'dns' :
-      'network';
-    recordFailure(model, breakerType);
-    // P5-2: feed the retry budget so future requests can adapt.
-    getRetryBudget().recordFailure(model);
-
-    if (retryCount < MAX_RETRIES) {
-      log.warn(`[Proxy] Network error for ${model.name}, retrying (${retryCount + 1}/${MAX_RETRIES})...`);
-      setTimeout(
-        () => handleCustomModelRequest(res, model, geminiBody, isStream, retryCount + 1),
-        1000 * (retryCount + 1),
-      );
-      return;
-    }
-
-    const diagnostic = classifyError(undefined, err, undefined, model.provider);
-    emitProxyError(buildProxyErrorPayload(traceId, undefined, err, model.provider));
-
-    if (attemptFallback(diagnostic)) return;
-
-    if (isStream) {
-      if (!res.headersSent && !res.writableEnded) {
-        const errResponse = {
-          response: {
-            candidates: [
-              {
-                content: { parts: [{ text: 'Network error: ' + err.message }], role: 'model' },
-                finishReason: 'STOP',
-                index: 0,
-              },
-            ],
-          },
-          traceId: '',
-          metadata: {},
-          _agDiagnostic: diagnostic
-        };
-        safeWriteHead(res, 502, {
-          'Content-Type': 'text/event-stream',
-          'X-AG-Error-Type': diagnostic.errorType
-        });
-        res.write('data: ' + JSON.stringify(errResponse) + '\n\n');
-      }
-      safeEnd(res);
-    } else {
-      if (safeWriteHead(res, 502, {
-        'Content-Type': 'application/json',
-        'X-AG-Error-Type': diagnostic.errorType
-      })) {
-        safeEnd(res, JSON.stringify({ error: { message: 'Custom model request failed: ' + err.message }, _agDiagnostic: diagnostic }));
-      }
-    }
-  });
-
+  request.on('error', (err) => handleRequestError(err, ctx));
   request.write(JSON.stringify(payload));
   request.end();
 }
@@ -1351,7 +1443,7 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
   req.url = req.url!.replace(/\/v1internal\/x{7}/, '');
 
   // P0-4: Enforce maximum request body size to prevent memory exhaustion DoS
-  const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10 MB
+  const MAX_BODY_SIZE = 10 * 1024 * 1024;
   let bodyLength = 0;
   let bodyRejected = false;
 
@@ -1381,6 +1473,37 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
     const bodyStr = fullBody.toString('utf-8');
 
     log.info(`[Proxy] Request: ${req.method} ${req.url}`);
+
+    // MCP relay: the mobile companion asks the desktop session for the list
+    // of configured MCP servers (name + tools + status) because the phone
+    // holds no credentials or allowlist. The actual MCP runtime is the
+    // Antigravity IDE sidecar; we simply delegate and relay its JSON.
+    if (req.method === 'GET' && (req.url === '/list_mcp_servers' || req.url === '/mcp_servers')) {
+      const listRes = await mcpListServers();
+      if (safeWriteHead(res, 200, { 'Content-Type': 'application/json' })) {
+        safeEnd(res, JSON.stringify(listRes));
+      }
+      return;
+    }
+
+    // MCP tool relay (same shape the daemon sends): serverName, toolName,
+    // arguments. The proxy forwards to the MCP runtime and relays the JSON.
+    if (req.method === 'POST' && req.url === '/call_mcp_tool') {
+      let payload: Record<string, unknown> = {};
+      try {
+        payload = JSON.parse(bodyStr || '{}');
+      } catch (e) {
+        if (safeWriteHead(res, 400, { 'Content-Type': 'application/json' })) {
+          safeEnd(res, JSON.stringify({ error: { message: 'Invalid JSON body' } }));
+        }
+        return;
+      }
+      const callRes = await mcpCallTool(payload);
+      if (safeWriteHead(res, 200, { 'Content-Type': 'application/json' })) {
+        safeEnd(res, JSON.stringify(callRes));
+      }
+      return;
+    }
 
     // 0. Intercept GetAvailableModels (redirected from Electron webRequest)
     if (req.url!.startsWith('/GetAvailableModels')) {
@@ -1884,6 +2007,21 @@ export function startProxy(): Promise<number> {
   return new Promise((resolve, reject) => {
     try {
       server = http.createServer(handleRequest);
+
+      // The Antigravity language server multiplexes many requests over a few
+      // keep-alive sockets and pipelines them aggressively (state page updates
+      // every ~200ms, back-to-back streamGenerateContent). Node's default
+      // keepAliveTimeout (5s) destroys idle sockets under the LS's next write;
+      // Windows then aborts that write with WSAECONNABORTED, the Go client
+      // retries, and we get a retry flood + CPU burn. Disable all three
+      // reaping timeouts: the proxy binds 127.0.0.1 only, and the idle guard
+      // on upstream streams handles stuck providers.
+      // ponytail: 0 disables reaping → a broken local client could hold
+      // sockets open forever. Acceptable on loopback; re-enable with
+      // keepAliveTimeout=60_000 if the proxy is ever exposed beyond localhost.
+      server.keepAliveTimeout = 0;
+      server.headersTimeout = 0;
+      server.requestTimeout = 0;
 
       // P2: Make port/host configurable via env vars so the proxy can be
       // tuned per-machine without recompiling. Defaults preserve legacy behavior.

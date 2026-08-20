@@ -12,7 +12,7 @@ REM
 REM    B) Classic Antigravity (2.x shell)
 REM         - version-aware asar surgery (2.2.x / 2.3.x / ...)
 REM         - binary patch: language_server URL -> localhost:%AG_PROXY_PORT%
-REM         - optional MITM 443 (admin)
+REM         - asar cache + auto-heal registration (survives official updates)
 REM
 REM  Pipeline:
 REM    1. Stop Antigravity processes
@@ -29,8 +29,12 @@ set "AG_IDE=%LOCALAPPDATA%\Programs\Antigravity IDE"
 set "AG_CLASSIC=%LOCALAPPDATA%\Programs\Antigravity"
 set "AG_IDE_EXE=%AG_IDE%\Antigravity IDE.exe"
 set "AG_CLASSIC_EXE=%AG_CLASSIC%\Antigravity.exe"
+set "AG_ASAR=%AG_CLASSIC%\resources\app.asar"
+set "AG_BIN_LS=%AG_CLASSIC%\resources\bin\language_server.exe"
 set "PROXY_PORT=%AG_PROXY_PORT%"
 if "!PROXY_PORT!"=="" set "PROXY_PORT=51074"
+set "STAGING_DIR=%TEMP%\antigravity-asar-staging-%RANDOM%"
+set "AG_SCRATCH=%USERPROFILE%\.gemini\antigravity\scratch"
 
 cd /d "%SCRIPT_DIR%"
 
@@ -134,9 +138,32 @@ if "%TARGET%"=="IDE" (
   echo  Launching Antigravity (classic)...
   start "" "%AG_CLASSIC_EXE%"
 )
+
+REM -- 6. Cache the patched asar for the auto-healer (survives official updates)
+if "%TARGET%"=="CLASSIC" (
+  if not exist "%AG_SCRATCH%" mkdir "%AG_SCRATCH%"
+  copy /Y "%AG_ASAR%" "%AG_SCRATCH%\app.asar.patched" >nul
+  echo [6/6] Patched asar cached: %AG_SCRATCH%\app.asar.patched
+  if exist "%AG_CLASSIC%\resources\app.asar.unpacked" (
+    if exist "%AG_SCRATCH%\app.asar.unpacked" rmdir /S /Q "%AG_SCRATCH%\app.asar.unpacked"
+    xcopy /E /I /H /Y "%AG_CLASSIC%\resources\app.asar.unpacked" "%AG_SCRATCH%\app.asar.unpacked" >nul
+    echo [6/6] app.asar.unpacked cached as well
+  )
+
+  REM -- 7. Register the startup VBS auto-healer
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%scripts\register-auto-heal.ps1"
+  if errorlevel 1 (
+    echo   [WARN] Auto-heal registration failed -- re-run scripts\register-auto-heal.ps1 manually
+  ) else (
+    echo [7/7] Auto-heal registered in Windows Startup
+  )
+)
+
 echo.
+echo ============================================================
 echo  Patch complete!
 echo  - Custom models now route through the local proxy (port %PROXY_PORT%)
+echo  - Cache + auto-heal configured for classic installs
 echo  - Verify with:  ag-doctor doctor
 echo ============================================================
 echo.

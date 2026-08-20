@@ -1,0 +1,471 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:mobile/core/notifications/approval_notifier.dart';
+import 'package:mobile/core/protocol/daemon_api.dart';
+import 'package:mobile/services/settings_store.dart';
+import 'package:mobile/theme/app_colors.dart';
+import 'package:mobile/widgets/app_toast.dart';
+
+/// Section General (Antigravity IDE 1:1 Exact)
+/// Configure agent execution, queued message delivery, and permissions.
+class GeneralSettingsSection extends StatefulWidget {
+  final DaemonApi? api;
+  final ApprovalNotifier? notifier;
+
+  const GeneralSettingsSection({
+    super.key,
+    this.api,
+    this.notifier,
+  });
+
+  @override
+  State<GeneralSettingsSection> createState() => _GeneralSettingsSectionState();
+}
+
+class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
+  // Execution
+  String _queuedMessagesMode = 'queue'; // 'queue' | 'immediate'
+
+  // Agent Settings
+  String _securityPreset = 'Default'; // 'Default' | 'Strict' | 'Permissive'
+
+  // Agent Behavior
+  String _artifactReviewPolicy = 'Always Ask'; // 'Always Ask' | 'Auto Approve' | 'Never'
+
+  // Tool Approvals & Notifications
+  bool _toolNotifications = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final s = await SettingsStore.load();
+    if (mounted) {
+      setState(() {
+        _queuedMessagesMode = (s['queuedMessagesMode'] as String?) ?? 'queue';
+        _securityPreset = (s['securityPreset'] as String?) ?? 'Default';
+        _artifactReviewPolicy = (s['artifactReviewPolicy'] as String?) ?? 'Always Ask';
+        _toolNotifications = (s['toolNotifications'] as bool?) ?? true;
+      });
+      widget.notifier?.setEnabled(_toolNotifications);
+    }
+  }
+
+  Future<void> _setQueuedMessagesMode(String mode) async {
+    setState(() => _queuedMessagesMode = mode);
+    HapticFeedback.selectionClick();
+    await SettingsStore.save({'queuedMessagesMode': mode});
+    if (!mounted) return;
+    AppToast.show(
+      context,
+      message: mode == 'queue' ? 'Queued Messages activé.' : 'Envoi immédiat activé.',
+      icon: Icons.schedule_send_outlined,
+    );
+  }
+
+  Future<void> _setSecurityPreset(String preset) async {
+    setState(() => _securityPreset = preset);
+    HapticFeedback.selectionClick();
+    await SettingsStore.save({'securityPreset': preset});
+    if (!mounted) return;
+    AppToast.show(
+      context,
+      message: 'Security Preset : $preset',
+      icon: Icons.shield_outlined,
+    );
+  }
+
+  Future<void> _setArtifactReviewPolicy(String policy) async {
+    setState(() => _artifactReviewPolicy = policy);
+    HapticFeedback.selectionClick();
+    await SettingsStore.save({'artifactReviewPolicy': policy});
+    if (!mounted) return;
+    AppToast.show(
+      context,
+      message: 'Artifact Review Policy : $policy',
+      icon: Icons.rate_review_outlined,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Text(
+            'General',
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+              color: scheme.onSurface,
+              letterSpacing: -0.5,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Configure agent execution, queued message delivery, and permissions.',
+            style: TextStyle(
+              fontSize: 13,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // ── 1. Execution
+          _buildSectionHeader('Execution', scheme),
+          const SizedBox(height: 8),
+          _buildCard(
+            isDark: isDark,
+            scheme: scheme,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Queued Messages',
+                        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: scheme.onSurface),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'Configure when follow-up messages are sent.',
+                        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Text(
+                            'Keyboard shortcuts',
+                            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant.withValues(alpha: 0.8)),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(Icons.info_outline, size: 12, color: scheme.onSurfaceVariant),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                _buildSegmentedToggle(
+                  isDark: isDark,
+                  scheme: scheme,
+                  options: const [
+                    {'id': 'queue', 'label': 'Queue'},
+                    {'id': 'immediate', 'label': 'Send Immediately'},
+                  ],
+                  selectedId: _queuedMessagesMode,
+                  onChanged: _setQueuedMessagesMode,
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          // ── 2. Agent Settings
+          _buildSectionHeader('Agent Settings', scheme),
+          const SizedBox(height: 8),
+          _buildCard(
+            isDark: isDark,
+            scheme: scheme,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Security Preset',
+                        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: scheme.onSurface),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'Choose a predefined security preset for the agent. This controls terminal auto-execution policy, and file access policy.',
+                        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Text(
+                            'Learn more about $_securityPreset',
+                            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant.withValues(alpha: 0.8)),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(Icons.info_outline, size: 12, color: scheme.onSurfaceVariant),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                _buildDropdown(
+                  isDark: isDark,
+                  scheme: scheme,
+                  value: _securityPreset,
+                  items: const ['Default', 'Strict', 'Permissive'],
+                  onChanged: (val) {
+                    if (val != null) _setSecurityPreset(val);
+                  },
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          // ── 3. Agent Behavior
+          _buildSectionHeader('Agent Behavior', scheme),
+          const SizedBox(height: 8),
+          _buildCard(
+            isDark: isDark,
+            scheme: scheme,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Artifact Review Policy',
+                        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: scheme.onSurface),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'Specifies Agent\'s behavior when asking for review on artifacts, which are documents it creates to enable a richer conversation experience.',
+                        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                _buildDropdown(
+                  isDark: isDark,
+                  scheme: scheme,
+                  value: _artifactReviewPolicy,
+                  items: const ['Always Ask', 'Auto Approve', 'Never'],
+                  onChanged: (val) {
+                    if (val != null) _setArtifactReviewPolicy(val);
+                  },
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          // ── 4. File Permissions
+          _buildSectionHeader('File Permissions', scheme),
+          const SizedBox(height: 8),
+          _buildCard(
+            isDark: isDark,
+            scheme: scheme,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'File Access Rules',
+                        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: scheme.onSurface),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'Configure allowed and denied paths for file reads and writes.',
+                        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                OutlinedButton(
+                  onPressed: () {
+                    AppToast.show(context, message: 'Règles de fichiers configurées via le workspace.', icon: Icons.folder_open_outlined);
+                  },
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    side: BorderSide(color: isDark ? const Color(0xFF33363F) : scheme.outlineVariant),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                  ),
+                  child: Text(
+                    'Open',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: scheme.onSurface),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          // ── 5. Network Permissions
+          _buildSectionHeader('Network Permissions', scheme),
+          const SizedBox(height: 8),
+          _buildCard(
+            isDark: isDark,
+            scheme: scheme,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Network Access Policy',
+                        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: scheme.onSurface),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'Allow outbound network connections to approved hosts and MCP servers.',
+                        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                OutlinedButton(
+                  onPressed: () {
+                    AppToast.show(context, message: 'Trafic réseau géré par le proxy local.', icon: Icons.lan_outlined);
+                  },
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    side: BorderSide(color: isDark ? const Color(0xFF33363F) : scheme.outlineVariant),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                  ),
+                  child: Text(
+                    'Open',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: scheme.onSurface),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 20),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title, ColorScheme scheme) {
+    return Text(
+      title,
+      style: TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        color: scheme.onSurface,
+      ),
+    );
+  }
+
+  Widget _buildCard({
+    required bool isDark,
+    required ColorScheme scheme,
+    required Widget child,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF141619) : scheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(
+          color: isDark ? const Color(0xFF26282E) : scheme.outlineVariant,
+          width: 1,
+        ),
+      ),
+      child: child,
+    );
+  }
+
+  Widget _buildSegmentedToggle({
+    required bool isDark,
+    required ColorScheme scheme,
+    required List<Map<String, String>> options,
+    required String selectedId,
+    required ValueChanged<String> onChanged,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1F2228) : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: isDark ? const Color(0xFF33363F) : scheme.outlineVariant),
+      ),
+      padding: const EdgeInsets.all(2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: options.map((opt) {
+          final isSelected = opt['id'] == selectedId;
+          return GestureDetector(
+            onTap: () => onChanged(opt['id']!),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? (isDark ? const Color(0xFF33363F) : scheme.surface)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                opt['label']!,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                  color: isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildDropdown({
+    required bool isDark,
+    required ColorScheme scheme,
+    required String value,
+    required List<String> items,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1F2228) : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: isDark ? const Color(0xFF33363F) : scheme.outlineVariant),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: items.contains(value) ? value : items.first,
+          dropdownColor: isDark ? const Color(0xFF1F2228) : scheme.surfaceContainerHigh,
+          icon: Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: scheme.onSurfaceVariant),
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: scheme.onSurface),
+          isDense: true,
+          items: items.map((item) {
+            return DropdownMenuItem<String>(
+              value: item,
+              child: Text(item),
+            );
+          }).toList(),
+          onChanged: onChanged,
+        ),
+      ),
+    );
+  }
+}

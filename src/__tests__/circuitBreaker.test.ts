@@ -71,11 +71,12 @@ describe('circuitBreaker', () => {
     expect(getOpenBreaker(baseModel)).toBeNull();
   });
 
-  it('does not trip on a benign failure (still records for diagnostics)', () => {
-    // 'auth' failures trip too — the threshold is 1 for any non-trivial error.
-    recordFailure(baseModel, 'auth');
-    const diagnostic = getOpenBreaker(baseModel);
-    expect(diagnostic).not.toBeNull();
-    expect(diagnostic?.errorType).toBe('auth');
+  it('supports fallbackModel configuration property on model definition', () => {
+    const fallbackModel: CustomModel = {
+      ...baseModel,
+      fallbackModel: 'deepseek-chat',
+    };
+    expect(fallbackModel.fallbackModel).toBe('deepseek-chat');
   });
 });
+

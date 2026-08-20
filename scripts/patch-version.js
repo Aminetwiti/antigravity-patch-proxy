@@ -92,10 +92,10 @@ console.log(`[patch-version] detected Antigravity version: ${version}`);
 const scriptsDir = __dirname;
 let targetScript;
 let exitCode = 0;
-// 2.5.x/2.6.x use the full overlay patcher; /^2\.[7-9]\./ routes future
-// 2.7-2.9 builds to the same overlay as a best-effort (the layout may change
-// in newer majors — verify after applying).
-if (version.startsWith('2.5.') || version.startsWith('2.6.') || /^2\.[7-9]\./.test(version)) {
+// 2.5.x/2.6.x/2.7.x+ use the full overlay patcher; the explicit startsWith checks
+// cover 2.5-2.9, while /^2\.[1-9]\d+\./ is a best-effort catch-all for future
+// 2.10+ builds (the layout may change in newer majors — verify after applying).
+if (version.startsWith('2.5.') || version.startsWith('2.6.') || version.startsWith('2.7.') || version.startsWith('2.8.') || version.startsWith('2.9.') || /^2\.[5-9]\./.test(version) || /^2\.[1-9]\d+\./.test(version)) {
   targetScript = path.join(scriptsDir, 'patch_2_5.js');
   console.log(`[patch-version] dispatching to patch_2_5.js (full overlay + modular JS modules) for Antigravity ${version}`);
 } else if (version.startsWith('2.3.') || version.startsWith('2.4.')) {
@@ -110,7 +110,7 @@ if (version.startsWith('2.5.') || version.startsWith('2.6.') || /^2\.[7-9]\./.te
   process.exit(1);
 } else {
   console.error(`[patch-version] Unsupported Antigravity version: ${version}`);
-  console.error('  Known versions: 2.0.x, 2.1.x, 2.2.x, 2.3.x, 2.4.x, 2.5.x, 2.6.x');
+  console.error('  Known versions: 2.0.x, 2.1.x, 2.2.x, 2.3.x, 2.4.x, 2.5.x, 2.6.x, 2.7.x, 2.8.x+');
   console.error('  Update scripts/patch-version.js + create a new patch_<version>.js if needed.');
   process.exit(1);
 }

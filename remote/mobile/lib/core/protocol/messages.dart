@@ -1,0 +1,448 @@
+/// Protocol Data Models for Antigravity Remote Protocol
+class CascadeSession {
+  final String id;
+  final String workspacePath;
+  final String title;
+  final String status;
+  final String time;
+  final String? lastPrompt;
+  final String? worktree;
+  final String? projectId;
+  /// Nombre d'étapes enregistrées — sert à détecter l'activité récente (point bleu)
+  final int stepCount;
+  /// Indicateur d'activité non-consultée — identique au point bleu de l'IDE
+  final bool hasUnread;
+  /// Session épinglée
+  final bool isPinned;
+
+  const CascadeSession({
+    required this.id,
+    required this.workspacePath,
+    required this.title,
+    required this.status,
+    required this.time,
+    this.lastPrompt,
+    this.worktree,
+    this.projectId,
+    this.stepCount = 0,
+    this.hasUnread = false,
+    this.isPinned = false,
+  });
+
+  factory CascadeSession.fromJson(Map<String, dynamic> json) {
+    return CascadeSession(
+      id: json['cascadeId'] ?? json['id'] ?? '',
+      workspacePath: json['workspacePath'] ?? json['workspace'] ?? '',
+      title: json['title'] ?? 'Cascade Session',
+      status: json['status'] ?? 'CASCADE_STATUS_READY',
+      time: json['time'] ?? _relativeTime(json['updatedAt']),
+      lastPrompt: json['lastPrompt']?.toString(),
+      worktree: json['worktree']?.toString(),
+      projectId: json['projectId']?.toString(),
+      stepCount: (json['stepCount'] as num?)?.toInt() ?? 0,
+      hasUnread: json['hasUnread'] == true,
+      isPinned: json['isPinned'] == true || json['pinned'] == true,
+    );
+  }
+
+  static String _relativeTime(Object? iso) {
+    if (iso is! String) return 'Just now';
+    final parsed = DateTime.tryParse(iso);
+    if (parsed == null || parsed.year < 2000) return 'Just now';
+    final diff = DateTime.now().difference(parsed.toLocal());
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m';
+    if (diff.inHours < 24) return '${diff.inHours}h';
+    return '${diff.inDays}d';
+  }
+
+  bool get isAvailable {
+    if (id.isEmpty) return false;
+    final st = status.toUpperCase();
+    if (st.contains('ARCHIV') ||
+        st.contains('DELET') ||
+        st.contains('TRASH') ||
+        st.contains('KILLED') ||
+        st.contains('SUBAGENT') ||
+        st == 'CASCADE_STATUS_ARCHIVED' ||
+        st == 'CASCADE_STATUS_DELETED' ||
+        st == 'CASCADE_STATUS_KILLED' ||
+        st == 'CASCADE_STATUS_SUBAGENT') {
+      return false;
+    }
+    final lowerTitle = title.toLowerCase();
+    final lowerWs = workspacePath.toLowerCase();
+    if (lowerTitle.startsWith('subagent') ||
+        lowerTitle.contains('subagent-') ||
+        lowerTitle.contains('subagent_') ||
+        lowerWs.startsWith('subagent') ||
+        lowerWs.contains('subagent-') ||
+        lowerWs.contains('subagent_')) {
+      return false;
+    }
+    return true;
+  }
+
+  bool get isRunning {
+    final st = status.toUpperCase();
+    return st.contains('RUNNING');
+  }
+
+  bool get isWaitingAction {
+    final st = status.toUpperCase();
+    return st.contains('WAIT') || st.contains('APPROVAL') || st.contains('QUESTION');
+  }
+
+  bool get isError {
+    final st = status.toUpperCase();
+    return st.contains('ERROR') || st.contains('FAIL');
+  }
+
+  CascadeSession copyWith({
+    String? id,
+    String? workspacePath,
+    String? title,
+    String? status,
+    String? time,
+    String? lastPrompt,
+    String? worktree,
+    String? projectId,
+    int? stepCount,
+    bool? hasUnread,
+    bool? isPinned,
+  }) {
+    return CascadeSession(
+      id: id ?? this.id,
+      workspacePath: workspacePath ?? this.workspacePath,
+      title: title ?? this.title,
+      status: status ?? this.status,
+      time: time ?? this.time,
+      lastPrompt: lastPrompt ?? this.lastPrompt,
+      worktree: worktree ?? this.worktree,
+      projectId: projectId ?? this.projectId,
+      stepCount: stepCount ?? this.stepCount,
+      hasUnread: hasUnread ?? this.hasUnread,
+      isPinned: isPinned ?? this.isPinned,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'cascadeId': id,
+        'workspacePath': workspacePath,
+        'title': title,
+        'status': status,
+        'time': time,
+        if (lastPrompt != null) 'lastPrompt': lastPrompt,
+        if (worktree != null) 'worktree': worktree,
+        if (projectId != null) 'projectId': projectId,
+        'stepCount': stepCount,
+        'hasUnread': hasUnread,
+        'isPinned': isPinned,
+      };
+}
+
+/// Official Antigravity 2.0 Project model (from ~/.gemini/config/projects/)
+class ProjectItem {
+  final String id;
+  final String name;
+  final String folderUri;
+  final String path;
+  final DateTime? updatedAt;
+
+  const ProjectItem({
+    required this.id,
+    required this.name,
+    required this.folderUri,
+    required this.path,
+    this.updatedAt,
+  });
+
+  factory ProjectItem.fromJson(Map<String, dynamic> json) {
+    return ProjectItem(
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? 'Unnamed Project',
+      folderUri: json['folderUri']?.toString() ?? '',
+      path: json['path']?.toString() ?? '',
+      updatedAt: json['updatedAt'] != null
+          ? DateTime.tryParse(json['updatedAt'].toString())
+          : null,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'folderUri': folderUri,
+        'path': path,
+        'updatedAt': updatedAt?.toIso8601String(),
+      };
+}
+
+class ChatMessage {
+  final String id;
+  final String sender; // 'user' or 'assistant'
+  final String text;
+  final String? thought;
+  final String timestamp;
+  final bool isStreaming;
+  final bool isError;
+  // true quand le message est en attente d'envoi dans l'outbox hors-ligne.
+  final bool isQueued;
+  final String? modelLabel;
+
+  /// Session result: list of modified file paths, populated at stream_end.
+  final List<String> filesChanged;
+  final int additions;
+  final int deletions;
+
+  const ChatMessage({
+    required this.id,
+    required this.sender,
+    required this.text,
+    this.thought,
+    required this.timestamp,
+    this.isStreaming = false,
+    this.isError = false,
+    this.isQueued = false,
+    this.modelLabel,
+    this.filesChanged = const [],
+    this.additions = 0,
+    this.deletions = 0,
+  });
+
+  ChatMessage copyWith({
+    String? text,
+    String? thought,
+    bool? isStreaming,
+    bool? isError,
+    bool? isQueued,
+    String? modelLabel,
+    List<String>? filesChanged,
+    int? additions,
+    int? deletions,
+  }) {
+    return ChatMessage(
+      id: id,
+      sender: sender,
+      text: text ?? this.text,
+      thought: thought ?? this.thought,
+      timestamp: timestamp,
+      isStreaming: isStreaming ?? this.isStreaming,
+      isError: isError ?? this.isError,
+      isQueued: isQueued ?? this.isQueued,
+      modelLabel: modelLabel ?? this.modelLabel,
+      filesChanged: filesChanged ?? this.filesChanged,
+      additions: additions ?? this.additions,
+      deletions: deletions ?? this.deletions,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'sender': sender,
+        'text': text,
+        if (thought != null) 'thought': thought,
+        'timestamp': timestamp,
+        'isStreaming': isStreaming,
+        'isError': isError,
+        'isQueued': isQueued,
+        if (modelLabel != null) 'modelLabel': modelLabel,
+        'filesChanged': filesChanged,
+        'additions': additions,
+        'deletions': deletions,
+      };
+
+  factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
+        id: json['id']?.toString() ?? '',
+        sender: json['sender']?.toString() ?? 'assistant',
+        text: json['text']?.toString() ?? '',
+        thought: json['thought']?.toString(),
+        timestamp: json['timestamp']?.toString() ?? '',
+        isStreaming: json['isStreaming'] == true,
+        isError: json['isError'] == true,
+        isQueued: json['isQueued'] == true,
+        modelLabel: json['modelLabel']?.toString(),
+        filesChanged: (json['filesChanged'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+        additions: json['additions'] is int ? json['additions'] as int : int.tryParse(json['additions']?.toString() ?? '0') ?? 0,
+        deletions: json['deletions'] is int ? json['deletions'] as int : int.tryParse(json['deletions']?.toString() ?? '0') ?? 0,
+      );
+}
+
+enum ToolDecision { allow, deny }
+
+/// Portée d'une décision d'approbation : ponctuelle, conversation/session, projet, ou globale (toujours).
+enum ApprovalScope {
+  once,
+  session,
+  project,
+  global;
+
+  String toWireString() {
+    switch (this) {
+      case ApprovalScope.session:
+        return 'session';
+      case ApprovalScope.project:
+        return 'project';
+      case ApprovalScope.global:
+        return 'global';
+      case ApprovalScope.once:
+        return 'once';
+    }
+  }
+
+  static ApprovalScope fromWire(String? val) {
+    if (val == null) return ApprovalScope.once;
+    switch (val.toLowerCase()) {
+      case 'session':
+      case 'conversation':
+        return ApprovalScope.session;
+      case 'project':
+      case 'workspace':
+        return ApprovalScope.project;
+      case 'global':
+      case 'always':
+        return ApprovalScope.global;
+      case 'once':
+      default:
+        return ApprovalScope.once;
+    }
+  }
+}
+
+class ToolApprovalRequest {
+  final String callId;
+  final String toolName;
+  final String command;
+  final String description;
+  final String cascadeId;
+  final String trajectoryId;
+  final int stepIndex;
+  final String approvalType;
+  final String? filePath;
+  final String? url;
+
+  /// Portée sélectionnée pour l'approbation.
+  final ApprovalScope scope;
+
+  const ToolApprovalRequest({
+    required this.callId,
+    required this.toolName,
+    required this.command,
+    required this.description,
+    this.cascadeId = '',
+    this.trajectoryId = '',
+    this.stepIndex = -1,
+    this.approvalType = 'approval',
+    this.filePath,
+    this.url,
+    this.scope = ApprovalScope.once,
+  });
+
+  factory ToolApprovalRequest.fromJson(Map<String, dynamic> json) {
+    return ToolApprovalRequest(
+      callId: json['callId'] ?? '',
+      toolName: json['toolName'] ?? 'run_command',
+      command: json['command'] ?? '',
+      description: json['description'] ??
+          'An agent tool requires user confirmation',
+      cascadeId: json['cascadeId'] ?? '',
+      trajectoryId: json['trajectoryId'] ?? '',
+      stepIndex: (json['stepIndex'] as num?)?.toInt() ?? -1,
+      approvalType: json['approvalType'] ?? 'approval',
+      filePath: json['filePath'],
+      url: json['url'] ?? json['targetUrl'],
+      scope: ApprovalScope.fromWire(json['scope']?.toString()),
+    );
+  }
+}
+
+class AskQuestionChoiceRequest {
+  final String requestId;
+  final String cascadeId;
+  final String trajectoryId;
+  final int stepIndex;
+  final String question;
+  final List<String> options;
+  final bool isMultiSelect;
+  final bool allowCustom;
+
+  const AskQuestionChoiceRequest({
+    required this.requestId,
+    this.cascadeId = '',
+    this.trajectoryId = '',
+    this.stepIndex = -1,
+    required this.question,
+    required this.options,
+    this.isMultiSelect = false,
+    this.allowCustom = true,
+  });
+
+  factory AskQuestionChoiceRequest.fromJson(Map<String, dynamic> json) {
+    List<String> parsedOptions = [];
+    String parsedQuestion = json['question'] ?? '';
+    bool isMulti = json['isMultiSelect'] == true || json['is_multi_select'] == true;
+
+    if (json['options'] is List) {
+      parsedOptions = (json['options'] as List).map((e) => e.toString()).toList();
+    } else if (json['questions'] is List && (json['questions'] as List).isNotEmpty) {
+      final firstQ = (json['questions'] as List).first;
+      if (firstQ is Map) {
+        if (firstQ['options'] is List) {
+          parsedOptions = (firstQ['options'] as List).map((e) => e.toString()).toList();
+        }
+        if (parsedQuestion.isEmpty && firstQ['question'] != null) {
+          parsedQuestion = firstQ['question'].toString();
+        }
+        if (firstQ['is_multi_select'] == true || firstQ['isMultiSelect'] == true) {
+          isMulti = true;
+        }
+      }
+    }
+
+    if (parsedQuestion.isEmpty) {
+      parsedQuestion = 'The agent needs your feedback:';
+    }
+
+    return AskQuestionChoiceRequest(
+      requestId: json['requestId'] ?? json['callId'] ?? '',
+      cascadeId: json['cascadeId'] ?? '',
+      trajectoryId: json['trajectoryId'] ?? '',
+      stepIndex: (json['stepIndex'] as num?)?.toInt() ?? -1,
+      question: parsedQuestion,
+      options: parsedOptions,
+      isMultiSelect: isMulti,
+      allowCustom: json['allowCustom'] ?? true,
+    );
+  }
+}
+
+class ClientMessage {
+  final String type;
+  final String? requestId;
+  final String? cascadeId;
+  final Map<String, dynamic>? data;
+
+  const ClientMessage({
+    required this.type,
+    this.requestId,
+    this.cascadeId,
+    this.data,
+  });
+
+  factory ClientMessage.fromJson(Map<String, dynamic> json) {
+    return ClientMessage(
+      type: json['type'] as String? ?? '',
+      requestId: json['requestId'] as String?,
+      cascadeId: json['cascadeId'] as String?,
+      data: json['data'] is Map ? Map<String, dynamic>.from(json['data'] as Map) : null,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'type': type,
+    if (requestId != null) 'requestId': requestId,
+    if (cascadeId != null) 'cascadeId': cascadeId,
+    if (data != null) ...data!,
+  };
+}
+

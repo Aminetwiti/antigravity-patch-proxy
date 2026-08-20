@@ -164,7 +164,11 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
       const incoming = configExchange.parseProvidersFromBase64(base64Str);
       const existing = await customModelStore.loadProviders();
       const res = configExchange.mergeProviderConfigs(existing, incoming, strategy);
-      await customModelStore.saveProviders(res.providers);
+      const providers = res.providers.map((p) => {
+        const enc = customModelStore.encryptApiKeyIfNeeded(p.apiKey);
+        return { ...p, apiKey: enc.apiKey, encrypted: enc.encrypted };
+      });
+      await customModelStore.saveProviders(providers);
       return res;
     } catch (err) {
       return { success: false, error: (err as Error).message };
@@ -276,12 +280,21 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
       const incoming = parsed.providers ?? [];
       const existing = await customModelStore.loadProviders();
       const res = configExchange.mergeProviderConfigs(existing, incoming, 'merge');
-      await customModelStore.saveProviders(res.providers);
+      const providers = res.providers.map((p) => {
+        const enc = customModelStore.encryptApiKeyIfNeeded(p.apiKey);
+        return { ...p, apiKey: enc.apiKey, encrypted: enc.encrypted };
+      });
+      await customModelStore.saveProviders(providers);
       return { success: true, count: incoming.length };
     } catch (err) {
       return { success: false, error: (err as Error).message };
     }
   });
+
+  // Imported configs (JSON file or base64) may carry plaintext keys. Reuse the
+  // canonical encryptApiKeyIfNeeded path: encrypt any non-masked plaintext key,
+  // keep 'none' as-is, and pass through keys already encrypted in the store.
+
 
 
   ipcMain.handle('storage:get-doctor-diagnostics', async () => {
@@ -332,9 +345,7 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
       const models = await customModelStore.loadCustomModels();
       const existingIdx = models.findIndex((m) => m.name === newModel.name);
 
-      const isMasked =
-        newModel.apiKey &&
-        (newModel.apiKey.includes('...') || newModel.apiKey.startsWith('***') || newModel.apiKey === '********');
+      const isMasked = !!newModel.apiKey && customModelStore.isMaskedApiKey(newModel.apiKey);
       if (isMasked && existingIdx !== -1) {
         newModel.apiKey = models[existingIdx].apiKey;
         newModel.encrypted = models[existingIdx].encrypted;
@@ -447,65 +458,73 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
         const startTime = Date.now();
         const getLatency = () => Math.round(Date.now() - startTime);
 
-        const req = client.request(options);
+        function doRequest(method: string) {
+          options.method = method;
+          const req = client.request(options);
 
-        req.on('response', (res: http.IncomingMessage) => {
-          // Distinguish auth failures (401/403) from network reachable.
-          if (res.statusCode === 401 || res.statusCode === 403) {
-            res.resume();
-            resolve({ success: false, status: res.statusCode, error: `Authentication failed (HTTP ${res.statusCode})`, latencyMs: getLatency() });
-            return;
-          }
-          if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 500) {
-            res.resume();
-            resolve({ success: false, status: res.statusCode, error: `HTTP ${res.statusCode}`, latencyMs: getLatency() });
-            return;
-          }
-          let body = '';
-          let bytes = 0;
-          const MAX_BODY = 256 * 1024;
-          res.on('data', (chunk: Buffer | string) => {
-            bytes += chunk.length;
-            if (bytes > MAX_BODY) {
-              req.destroy();
-              resolve({ success: false, error: 'Response too large', latencyMs: getLatency() });
+          req.on('response', (res: http.IncomingMessage) => {
+            // Some APIs reject HEAD requests entirely. If we tried HEAD and got a method error, fallback to GET.
+            if (method === 'HEAD' && (res.statusCode === 405 || res.statusCode === 404 || res.statusCode === 403)) {
+              res.resume();
+              doRequest('GET');
               return;
             }
-            body += chunk.toString();
+            
+            // Distinguish auth failures (401/403) from network reachable.
+            if (res.statusCode === 401 || res.statusCode === 403) {
+              res.resume();
+              resolve({ success: false, status: res.statusCode, error: `Authentication failed (HTTP ${res.statusCode})`, latencyMs: getLatency() });
+              return;
+            }
+            if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 500) {
+              res.resume();
+              resolve({ success: false, status: res.statusCode, error: `HTTP ${res.statusCode}`, latencyMs: getLatency() });
+              return;
+            }
+            let body = '';
+            let bytes = 0;
+            const MAX_BODY = 256 * 1024;
+            res.on('data', (chunk: Buffer | string) => {
+              bytes += chunk.length;
+              if (bytes > MAX_BODY) {
+                req.destroy();
+                resolve({ success: false, error: 'Response too large', latencyMs: getLatency() });
+                return;
+              }
+              body += chunk.toString();
+            });
+            res.on('end', () => {
+              const ok = res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 400;
+              resolve({ success: ok, status: res.statusCode, message: `HTTP ${res.statusCode}`, latencyMs: getLatency() });
+            });
           });
-          res.on('end', () => {
-            const ok = res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 400;
-            resolve({ success: ok, status: res.statusCode, message: `HTTP ${res.statusCode}`, latencyMs: getLatency() });
+
+          req.setTimeout(10000, () => {
+            req.destroy();
+            resolve({ success: false, error: 'Request timed out', latencyMs: getLatency() });
           });
-        });
 
-        req.setTimeout(10000, () => {
-          req.destroy();
-          resolve({ success: false, error: 'Request timed out', latencyMs: getLatency() });
-        });
+          req.on('error', (err: NodeJS.ErrnoException) => {
+            let message = err.message;
+            if (message.includes('ECONNREFUSED')) {
+              message = 'Connection refused — server may not be running';
+            } else if (message.includes('ENOTFOUND') || message.includes('getaddrinfo')) {
+              message = 'Host not found — check the API URL';
+            } else if (message.includes('CERT') || message.includes('certificate') || message.includes('SSL')) {
+              message = 'SSL/TLS error — try enabling "allowUnauthorized" for self-signed certs';
+            }
+            resolve({ success: false, error: message, latencyMs: getLatency() });
+          });
 
-        req.on('error', (err: NodeJS.ErrnoException) => {
-          let message = err.message;
-          if (message.includes('ECONNREFUSED')) {
-            message = 'Connection refused — server may not be running';
-          } else if (message.includes('ENOTFOUND') || message.includes('getaddrinfo')) {
-            message = 'Host not found — check the API URL';
-          } else if (message.includes('CERT') || message.includes('certificate') || message.includes('SSL')) {
-            message = 'SSL/TLS error — try enabling "allowUnauthorized" for self-signed certs';
-          }
-          resolve({ success: false, error: message, latencyMs: getLatency() });
-        });
+          req.end();
+        }
 
-        req.end();
+        doRequest('HEAD');
       } catch (err) {
         resolve({ success: false, error: `Invalid URL: ${(err as Error).message}` });
       }
     });
   });
-
-  function isMaskedKey(key: string): boolean {
-    return key.includes('...') || key.startsWith('***') || key === '********';
-  };
 
   // ─── Fetch Models from /v1/models endpoint ──────────────────────────────────────
   // P3-18: Query a provider's /v1/models endpoint to discover available models
@@ -573,7 +592,7 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
 
         // Add auth header
         const apiKey = (params as { apiKey?: string }).apiKey;
-        if (apiKey && apiKey !== 'none' && !isMaskedKey(apiKey)) {
+        if (apiKey && apiKey !== 'none' && !customModelStore.isMaskedApiKey(apiKey)) {
           let key = apiKey;
           try {
             key = cryptoStore.decryptString(apiKey);
@@ -694,6 +713,9 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
     try {
       const logPath = log.transports.file.getFile().path;
       const contents = await fs.readFile(logPath, 'utf-8');
+      if (contents.length > 100_000) {
+        return '... [Truncated for IPC limits] ...\n' + contents.slice(-100_000);
+      }
       return contents;
     } catch (err) {
       return `Failed to read logs: ${String(err)}`;
@@ -821,14 +843,14 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
           res.on('end', () => {
             if (res.statusCode === 200) {
               try {
-                const parsed = JSON.parse(body) as { data?: Array<{ id: string; object?: string; input_modalities?: string[] }> };
+                const parsed = JSON.parse(body) as { data?: Array<{ id: string; name?: string; object?: string; input_modalities?: string[] }> };
                 
                 if (parsed.data && Array.isArray(parsed.data)) {
                   const models = parsed.data
                     .filter((m) => m.id && m.object === 'model')
                     .map((m) => ({
                       id: m.id,
-                      name: m.id,
+                      name: (m.name as string) || m.id,
                       inputModalities: m.input_modalities || ['text'], // Default to text-only if not specified
                     }));
                   

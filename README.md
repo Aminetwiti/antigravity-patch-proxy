@@ -4,7 +4,7 @@
   <img src="assets/antigravity_patch_proxy_logo.png" width="180" alt="Google Antigravity Custom Model Proxy Logo" />
 </p>
 
-[![Version](https://img.shields.io/badge/version-3.0.2-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-3.2.0-blue.svg)](package.json)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue?logo=typescript)](tsconfig.json)
 [![Tests](https://img.shields.io/badge/tests-2565%20passed-brightgreen.svg)](src/__tests__)
@@ -35,6 +35,10 @@
   - [macOS & Linux Setup](#macos--linux-setup)
   - [Enterprise MITM HTTPS Mode](#enterprise-mitm-https-mode)
 - [`ag-doctor` Diagnostic CLI](#ag-doctor-diagnostic-cli)
+- [Antigravity Remote 2.0 (Mobile & Daemon Bridge)](#antigravity-remote-20-mobile--daemon-bridge)
+  - [Architecture & Protocol](#remote-architecture--protocol)
+  - [Mobile Companion Features](#mobile-companion-features)
+  - [Running the Remote Daemon](#running-the-remote-daemon)
 - [Supported LLM Providers & Matrix](#supported-llm-providers--matrix)
 - [`custom_models.json` Schema Reference](#custom_modelsjson-schema-reference)
 - [Developer Guide](#developer-guide)
@@ -335,6 +339,46 @@ In addition to the terminal CLI, this repository includes **`ag-doctor-ui`**, a 
 - **Auto-Healing Diagnostics**: the doctor check starts the emergency proxy stub when port ${AG_PROXY_PORT:-51074} is closed (so the patched language server can initialise), and `proxy start` replaces a stub with the real proxy. Provider probes use a 15s timeout with a retry on timeouts to avoid false "down" alarms.
 
 
+
+---
+
+## Antigravity Remote 2.0 (Mobile & Daemon Bridge)
+
+**Antigravity Remote 2.0** brings Google Antigravity IDE and your custom models directly to your smartphone (Android / iOS). Control background tasks, monitor streaming reasoning models, review unified diffs, and approve CLI tool actions from anywhere via local Wi-Fi or automated Cloudflare Quick Tunnels.
+
+```
+IDE Chat UI ↔ Language Server (Hub :55256) ◄── gRPC-Web ── Daemon Go (:8090 / Cloudflare Tunnel)
+                                                                 ▲
+                                                                 │ WebSocket (JSON RPC)
+                                                                 ▼
+                                                    Mobile Client (Flutter App)
+```
+
+### Remote Architecture & Protocol
+- **Go Daemon Bridge (`remote/daemon`)**: Scans running Antigravity `language_server` processes, extracts session CSRF tokens with a background watchdog, frames binary gRPC-Web Protobuf & Jetbox Connect JSON streams, and serves a hardened WebSocket server (`/ws?token=...`).
+- **Zero-Config Discovery & Pairing**: UDP LAN Beacon on port `41234` for automatic discovery, 60s rotating 6-digit PIN pairing (`POST /pair`), and live **Cloudflare Quick Tunnels** with terminal QR code pairing.
+- **Interactive PTY Terminal & ADB Bridge**: Interactive shell terminal emulator and Android Debug Bridge (`adb.*`) for remote device and file management.
+- **StepRecovery Buffer**: Retains the last 100 trajectory frames in memory to re-synchronize sessions immediately after transient network drops without losing chat state.
+
+### Mobile Companion Features (`remote/mobile`)
+- **Exact Antigravity 2.0 Design Tokens**: Built to match real computed IDE stylesheet tokens (`htmlcss.log`) — featuring Quiet Console welcome cards, `#101010` canvas, `#21252B` sidebars, `#528BFF` focus accents, `#D7BA7D` syntax highlights, and native diff insertion/deletion tints.
+- **Interactive Tool Approvals (`submit_approval`)**: Push alerts and cards to authorize shell commands and file writes with single-use (`once`) or full-session (`session`) approval scopes and auto-rejection timeouts.
+- **Interactive Choice Prompts (`AskQuestion`)**: Single and multi-select cards for responding directly to agent decision forks.
+- **Colosseum Battle Arena**: Multi-model duel supervision (e.g. Claude vs Gemini) with live branch diffing and arbitration voting.
+- **MCP Server & Tool Explorer**: Inspect active Model Context Protocol (MCP) servers, trigger tools, and complete OAuth flows.
+- **Workspace File Explorer & Code Viewer**: Interactive tree navigation, search, find-in-page, syntax icons, and code inspection.
+- **Scheduled Tasks Monitor & Code Review Comments**: View cron jobs, trigger tasks on-demand, and attach comments to code diffs on the fly.
+
+### Running the Remote Daemon
+```bash
+# Start Daemon with Cloudflare Tunnel & Auth Token
+cd remote/daemon
+go run main.go --port 8090 --tunnel cloudflare --auth-token mysecret
+
+# Run Flutter Mobile Companion
+cd remote/mobile
+flutter run -d <device-id>
+```
 
 ---
 

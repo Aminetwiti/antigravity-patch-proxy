@@ -1,6 +1,6 @@
 # AGENTS.md — Antigravity Patch Proxy
 
-> `antigravity-patch-proxy` v3.0.2 — Desktop Electron proxy that injects custom LLM models (Claude, GPT, DeepSeek, Ollama, etc.) into Google Antigravity IDE.
+> `antigravity-patch-proxy` v3.2.0 — Desktop Electron proxy that injects custom LLM models (Claude, GPT, DeepSeek, Ollama, etc.) into Google Antigravity IDE.
 
 ---
 
@@ -8,78 +8,59 @@
 
 ```
 antigravity-add-model-main/
-├── AGENTS.md                        # This file
+├── AGENTS.md                        # This file — master system map & developer guide
 ├── package.json                     # Entry: dist/main.js | Scripts: build/test/lint/doctor/repack/patch
 ├── tsconfig.json                    # ES2020, commonjs, strict: partial
 ├── vitest.config.ts                 # Vitest, node env, electron stubbed
 │
-├── src/
-│   # ── Core
+├── src/                             # Desktop Electron Patch Proxy
 │   ├── main.ts                      # Electron lifecycle, LS startup, proxy boot
-│   ���── proxy.ts                     # [1999 lines] HTTP proxy server orchestration
+│   ├── proxy.ts                     # HTTP proxy server orchestration
 │   ├── preload.ts                   # contextBridge → window.* APIs (10 domains)
-│   ├── ipcHandlers.ts               # [919 lines] Legacy IPC — migrating to src/ipc/
-│   ├── constants.ts                 # PROVIDERS, ports, timeouts ��� source of truth
+│   ├── ipcHandlers.ts               # Legacy IPC — migrating to src/ipc/
+│   ├── constants.ts                 # PROVIDERS, ports, timeouts — source of truth
 │   ├── configExchange.ts            # Provider config import/export + AES-256-GCM
-│   └── schemaValidator.ts           # Runtime response validation
+│   ├── schemaValidator.ts           # Runtime response validation
+│   ├── proxy/                       # Translators & proxy resilience (circuit breaker, retry budget, etc.)
+│   ├── services/                    # CryptoStore (safeStorage), ModelStore, SettingsService
+│   ├── ipc/                         # Modular IPC handlers
+│   └── __tests__/                   # 55 test files, 1469 tests (Vitest)
 │
-│   # ── Proxy (translators + resilience)
-│   ├── proxy/
-│   │   ├── registry.ts              # Auto-discovers translators/ modules
-│   │   ├── translators/             # openai.ts, anthropic.ts, google.ts, ollama.ts, utils.ts
-│   │   ├── modelInjector.ts         # Merge custom models into model lists
-│   │   ├── protoInjector.ts         # Inject models into protobuf GetAvailableModels
-│   │   ├── protobuf.ts              # Manual protobuf parse/encode (no library)
-│   │   ├── idGenerator.ts           # DJB2 hash → MODEL_PLACEHOLDER_<hash>
-│   │   ├── urlBuilder.ts            # Provider URL construction
-│   │   ├── modelLoader.ts           # Load custom models from disk
-│   │   ├── modelRouter.ts           # Route requests by model
-│   │   ├── modelUtils.ts            # Capability detection (thinking, images)
-│   │   ├── modelHealthChecker.ts    # Health check caching
-│   │   ├── shared.ts                # Cross-turn state (tool calls, streams)
-│   │   ├���─ circuitBreaker.ts        # Per-provider circuit breaker
-│   │   ├── retryStrategy.ts         # Exponential backoff + jitter
-│   │   ├── retryBudget.ts           # Adaptive per-provider budget
-│   │   ├── idleTimeout.ts           # Stream idle guard
-│   │   ├── emptyStream.ts           # Aborted stream detection
-│   │   ├── persistedState.ts        # Disk-persisted breaker + budget state
-│   │   ├── agentPool.ts             # HTTP connection pooling
-│   │   ├── dnsResolver.ts           # DNS caching
-│   │   ├── errorClassifier.ts       # HTTP error → category
-│   │   ├── jsonRepair.ts            # SSE JSON repair (no eval)
-│   │   ├── diagnostics.ts           # Debug snapshots
-│   │   ├── metricsRoute.ts          # /metrics endpoint
-│   │   ├── providerGate.ts          # Provider enable/disable
-│   │   ├��─ recentModelsStore.ts     # Recent model tracking
-│   │   ├── contextTrimmer.ts        # Context window management
-���   │   ├── logThrottle.ts           # Log rate limiting
-│   │   ├── httpUtils.ts             # HTTP helpers
-│   │   ├── types.ts                 # Proxy type definitions
-│   │   └── backoff.ts               # Backoff utilities
+├── remote/                          # Antigravity Remote 2.0 Ecosystem
+│   ├── PROTOCOL.md                  # ConnectRPC & WebSocket wire protocol specification
+│   ├── daemon/                      # Go Daemon Bridge (gRPC-Web ↔ WebSocket + Cloudflare/Pinggy Tunnels)
+│   │   ├── main.go                  # Daemon CLI entrypoint (flags: --port, --host, --tunnel, --auth-token, --approval-timeout)
+│   │   ├── pkg/adb/                 # Android Debug Bridge remote file & device operations
+│   │   ├── pkg/discovery/           # Process scanner, CSRF watchdog, PIN pairing & UDP LAN Beacon
+│   │   ├── pkg/connectrpc/          # ConnectRPC / gRPC-Web client, Jetbox Connect JSON & protobuf framing
+│   │   ├── pkg/gateway/             # WebSocket hub, StepRecovery, PTY terminal, Scheduler, history & RPC dispatchers
+│   │   └── pkg/tunnel/              # Automated Cloudflare Quick Tunnel & Pinggy bridge, terminal QR generator
 │   │
-│   │── services/
-│   │   ├── cryptoStore.ts           # safeStorage encryption (DPAPI/Keychain/SecretService)
-│   │   ├── modelStore.ts            # Atomic JSON persistence (withWriteLock mutex)
-│   │   └── settingsService.ts       # Window/preferences persistence
-│   │
-│   │── ipc/                         # Modular IPC (migrating from ipcHandlers.ts)
-│   │��─ presets/                     # Well-known provider presets
-│   │── preload/                     # Preload module types & API
-│   │── shared/                      # Logger
-│   │── wellKnown/                   # Model ID normalization
-│   │── gateway/                     # Server bootstrap
-│   │
-│   ���── __tests__/                   # 47 test files, 2565+ tests (Vitest)
+│   └── mobile/                      # Flutter Companion App (Android / iOS)
+│       ├── lib/
+│       │   ├── core/protocol/       # DaemonApi typed WebSocket client & Markdown renderer
+│       │   ├── theme/app_colors.dart# Exact Antigravity 2.0 IDE design tokens (htmlcss.log)
+│       │   ├── features/
+│       │   │   ├── chat_stream/     # Streaming chat with Quiet Console welcome & action pills
+│       │   │   ├── sessions/        # Session drawer & trajectory management
+│       │   │   ├── workspace/       # File tree viewer, search & Git worktree switcher
+│       │   │   ├── mcp/             # MCP server & tools explorer
+│       │   │   ├── scheduled_tasks/ # Scheduled cron & background tasks dashboard
+│       │   │   ├── code_review/     # In-line code commenting modal
+│       │   │   ├── discovery/       # QR scanner & daemon pairing
+│       │   │   └── settings/        # Profile, appearances, timeouts & diagnostics export
+│       │   └── widgets/             # Tool approval cards, AskQuestion modal, diff viewers
+│       └── test/                    # 215 unit and widget tests
 │
 ├── ag-doctor/                       # Diagnostic CLI (bin/ag-doctor.js)
 ├── ag-doctor-ui/                    # Electron diagnostic UI
-├── scripts/                         # repack/, deploy/, mitm/, patch_*.js
-���── assets/                          # Screenshots & logos
+├── scripts/                         # repack/, deploy/, mitm/, patch_*.js, auto-heal.ps1, supervise-daemon.ps1
+├── assets/                          # Screenshots & logos
 ├── ARCHITECTURE.md                  # Deep architecture documentation
 ├── DESIGN.md                        # UI design system specification
 ├── TROUBLESHOOTING.md               # Common issues & fixes
 ├── repatch.bat                      # Windows one-click repatch
-��── "Start Antigravity MITM.bat"     # MITM mode launcher
+└── "Start Antigravity MITM.bat"     # MITM mode launcher
 ```
 
 ---
@@ -94,17 +75,28 @@ IDE Chat UI ↔ Language Server (Go Binary, patched) ↔ Local Proxy :${AG_PROXY
                                               │                        │
                                    OpenAI API / Anthropic API    Model list modified
                                    / Google AI Studio           in GetAvailableModels
+                                              ▲
+                                              │
+Language Server (Hub :55256) ◄── gRPC-Web ── Daemon Go (:8090 / Cloudflare Tunnel)
+                                                     ▲
+                                                     │ WebSocket (JSON RPC)
+                                                     ▼
+                                        Mobile Client (Flutter App)
 ```
 
 **Three core mechanisms:**
 1. **Binary Patching** — Go binary string tables: `daily-cloudcode-pa.googleapis.com` → `127.0.0.1:${AG_PROXY_PORT:-51074}`
 2. **HTTP Interception** — `session.defaultSession.webRequest.onBeforeRequest` + proxy server
 3. **Protobuf Injection** — Parse gRPC-Web `GetAvailableModels` response → append custom models → re-encode
+4. **Remote Daemon Bridge** — Automatic PID discovery, CSRF watchdog, gRPC-Web framing, and WebSocket multiplexing with StepRecovery buffer
+5. **Quota Push** — Daemon scheduler polls the LS `RetrieveUserQuotaSummary` every 60 s (only when clients are connected) and broadcasts `quota_update` over WebSocket; the mobile consumes it instead of polling
+6. **Auto-heal** — `scripts/auto-heal.ps1` + `register-auto-heal.ps1` (Startup VBS) + `supervise-daemon.ps1` restore the binary patch after an official update overwrites `app.asar`
 
 ---
 
 ## 3. Exact Commands
 
+### Proxy & Desktop
 ```bash
 npm run build                   # tsc (compile src/ → dist/)
 npm run lint                    # tsc --noEmit (type-check only)
@@ -125,7 +117,33 @@ npm run repatch                 # Windows one-click repatch
 npm run mitm:start              # Start MITM HTTPS proxy
 ```
 
-**Verification order:** `npm run lint && npm run build && npm test`
+### Remote Daemon (Go Bridge)
+```bash
+cd remote/daemon
+go test ./...                   # Run all 243 Go unit & property tests
+go run main.go --port 8090 --tunnel cloudflare --auth-token mysecret
+```
+
+### Remote Resilience (Windows)
+```powershell
+powershell -NoProfile -File scripts\register-auto-heal.ps1   # one-time: Startup VBS → auto-heal at boot
+powershell -NoProfile -File scripts\supervise-daemon.ps1 -Once  # one-shot daemon watchdog
+powershell -NoProfile -File scripts\supervise-daemon.ps1 -Loop  # loop mode (scheduled task)
+```
+`repatch.bat` caches the patched `app.asar` (+ `.unpacked`) to `~/.gemini\antigravity\scratch\` and registers the auto-heal VBS. On an official update, `auto-heal.ps1` detects the lost `MODEL_PLACEHOLDER_` signature, kills Antigravity + language_server, restores the cache, and relaunches.
+
+### Remote Mobile (Flutter App)
+```bash
+cd remote/mobile
+flutter analyze                 # Dart static analysis (0 issues)
+flutter test --exclude-tags=live # Run all 215 Flutter unit & widget tests (excludes @Tags(['live']))
+flutter run -d <device-id>      # Run on connected phone (e.g. Galaxy S21 FE)
+```
+
+**Verification order:**
+- **Proxy**: `npm run lint && npm run build && npm test` (1469 tests)
+- **Daemon**: `go test ./...` in `remote/daemon` (243 tests)
+- **Mobile**: `flutter analyze && flutter test --exclude-tags=live` in `remote/mobile` (215 tests)
 
 ---
 

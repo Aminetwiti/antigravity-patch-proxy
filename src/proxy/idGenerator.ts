@@ -4,9 +4,9 @@
  */
 
 import type { CustomModel } from './types';
-import { PLACEHOLDER_ID_BASE, PLACEHOLDER_ID_RANGE } from '../constants';
+import { DJB2_SEED, PLACEHOLDER_ID_BASE, PLACEHOLDER_ID_RANGE } from '../constants';
 
-export { PLACEHOLDER_ID_BASE, PLACEHOLDER_ID_RANGE };
+export { DJB2_SEED, PLACEHOLDER_ID_BASE, PLACEHOLDER_ID_RANGE };
 
 
 /**
@@ -24,7 +24,7 @@ export function generateModelPlaceholderId(model: CustomModel): string {
   // Include provider, apiUrl, and externalModelName to ensure uniqueness
   const effortTag = model._effortSuffix || '';
   const input = `${model.provider}-${model.apiUrl}-${model.externalModelName}-${model.displayName || model.name || 'custom-model'}${effortTag}`.toLowerCase();
-  let hash = 5381;
+  let hash = DJB2_SEED;
   for (let i = 0; i < input.length; i++) {
     hash = (hash << 5) + hash + input.charCodeAt(i);
     hash = hash & hash; // Force 32-bit integer

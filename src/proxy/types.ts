@@ -21,11 +21,13 @@ export interface CustomModelFileEntry {
   useRawBaseUrl?: boolean;
   extraHeaders?: Record<string, string>;
   extraBody?: Record<string, unknown>;
+  fallbackModel?: string;
   models?: Array<{
     id: string;
     displayName?: string;
     description?: string;
     enabled?: boolean;
+    fallbackModel?: string;
   }>;
 }
 
@@ -45,6 +47,7 @@ export interface CustomModel {
   useRawBaseUrl?: boolean;
   extraHeaders?: Record<string, string>;
   extraBody?: Record<string, unknown>;
+  fallbackModel?: string;
   _slug?: string;
   /** Internal: effort suffix appended by effortExpander for unique placeholder IDs. */
   _effortSuffix?: string;

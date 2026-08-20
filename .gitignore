@@ -46,3 +46,21 @@ tool/
 # Temporary text outputs from scripts
 scripts/freebuff/extraction-output.txt
 scripts/freebuff/pkce-output.txt
+remote/tools/*
+remote/mobile/.gradle/*
+remote/daemon/*.exe
+remote/daemon/*.exe~
+remote/daemon/*.log
+remote/daemon/*.dll
+remote/daemon/*.txt
+remote/daemon/*.cmd
+remote/daemon/*.vbs
+remote/daemon/*.ps1
+remote/daemon/*.js
+remote/daemon/%TEMP%/
+remote/daemon/bin/
+remote/daemon/scratch/*
+remote/daemon/!scratch/README.md
+remote/daemon/*.crt
+remote/daemon/*.key
+remote/insperer/*

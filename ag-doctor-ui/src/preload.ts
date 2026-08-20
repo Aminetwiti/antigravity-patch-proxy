@@ -2,6 +2,7 @@
  * Preload script — exposes a strictly whitelisted IPC bridge to the renderer.
  */
 import { contextBridge, ipcRenderer } from 'electron';
+import { DOCTOR_IPC_CHANNELS } from './ipc/channels';
 
 export interface RunResult {
   code: number;
@@ -10,20 +11,20 @@ export interface RunResult {
 }
 
 const api = {
-  run: (args: string[]): Promise<RunResult> => ipcRenderer.invoke('ag:run', args),
+  run: (args: string[]): Promise<RunResult> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.RUN, args),
 
   // Provider Management APIs
   providers: {
-    get: (): Promise<unknown[]> => ipcRenderer.invoke('ag:providers:get'),
-    save: (p: unknown): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('ag:providers:save', p),
-    delete: (id: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('ag:providers:delete', id),
-    fetchModels: (params: { apiUrl: string; apiKey: string }): Promise<{ success: boolean; models?: Array<{ id: string; displayName?: string; enabled?: boolean }>; error?: string }> => ipcRenderer.invoke('ag:providers:fetch-models', params),
+    get: (): Promise<unknown[]> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.PROVIDERS_GET),
+    save: (p: unknown): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.PROVIDERS_SAVE, p),
+    delete: (id: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.PROVIDERS_DELETE, id),
+    fetchModels: (params: { apiUrl: string; apiKey: string }): Promise<{ success: boolean; models?: Array<{ id: string; displayName?: string; enabled?: boolean }>; error?: string }> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.PROVIDERS_FETCH_MODELS, params),
     test: (params: { apiUrl: string; apiKey: string; id?: string; modelId?: string }): Promise<{ success: boolean; status?: number; latencyMs?: number; healthStatus?: 'healthy' | 'degraded' | 'offline'; error?: string }> =>
-      ipcRenderer.invoke('ag:providers:test', params),
+      ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.PROVIDERS_TEST, params),
     onChanged: (handler: () => void): (() => void) => {
       const listener = () => handler();
-      ipcRenderer.on('ag:providers:changed', listener);
-      return () => ipcRenderer.removeListener('ag:providers:changed', listener);
+      ipcRenderer.on(DOCTOR_IPC_CHANNELS.PROVIDERS_CHANGED, listener);
+      return () => ipcRenderer.removeListener(DOCTOR_IPC_CHANNELS.PROVIDERS_CHANGED, listener);
     },
   },
   info: (): Promise<{
@@ -34,11 +35,11 @@ const api = {
     node: string;
     chrome: string;
     cliPath: string;
-  }> => ipcRenderer.invoke('ag:info'),
-  config: (): Promise<Record<string, unknown>> => ipcRenderer.invoke('ag:config'),
-  setTheme: (theme: 'dark' | 'light'): Promise<boolean> => ipcRenderer.invoke('ag:config:set-theme', theme),
-  setNotifyEnabled: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('ag:config:set-notify', enabled),
-  restoreBackup: (): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('ag:config:restore-backup'),
+  }> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.INFO),
+  config: (): Promise<Record<string, unknown>> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.CONFIG),
+  setTheme: (theme: 'dark' | 'light'): Promise<boolean> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.CONFIG_SET_THEME, theme),
+  setNotifyEnabled: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.CONFIG_SET_NOTIFY, enabled),
+  restoreBackup: (): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.CONFIG_RESTORE_BACKUP),
   getProxyErrorHistory: (): Promise<Array<{
     traceId: string;
     provider: string;
@@ -50,42 +51,55 @@ const api = {
     suggestions: string[];
     actionUrl?: string;
     at: number;
-  }>> => ipcRenderer.invoke('ag:proxy-error-history'),
-  notify: (title: string, body: string): Promise<void> => ipcRenderer.invoke('ag:notify', title, body),
-  trayStatus: (status: 'ok' | 'warn' | 'err'): Promise<void> => ipcRenderer.invoke('ag:tray-status', status),
-  openExternal: (url: string): Promise<void> => ipcRenderer.invoke('ag:open-external', url),
-  reveal: (p: string): Promise<void> => ipcRenderer.invoke('ag:reveal', p),
+  }>> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.PROXY_ERROR_HISTORY),
+  notify: (title: string, body: string): Promise<void> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.NOTIFY, title, body),
+  trayStatus: (status: 'ok' | 'warn' | 'err'): Promise<void> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.TRAY_STATUS, status),
+  openExternal: (url: string): Promise<void> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.OPEN_EXTERNAL, url),
+  reveal: (p: string): Promise<void> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.REVEAL, p),
 
   // MITM Proxy Server Management
   proxyStart: (): Promise<{ ok: boolean; message: string; pid?: number }> =>
-    ipcRenderer.invoke('ag:proxy:start'),
+    ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.PROXY_START),
   proxyStop: (): Promise<{ ok: boolean; message: string }> =>
-    ipcRenderer.invoke('ag:proxy:stop'),
+    ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.PROXY_STOP),
   proxyStatus: (): Promise<{ ok: boolean; data?: { running: boolean; port: number; pid?: number; error?: string }; error?: string }> =>
-    ipcRenderer.invoke('ag:proxy:status'),
+    ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.PROXY_STATUS),
   proxyRestart: (): Promise<{ ok: boolean; message: string }> =>
-    ipcRenderer.invoke('ag:proxy:restart'),
+    ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.PROXY_RESTART),
 
+  // Network Utils
+  getLocalIp: (): Promise<string> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.NETWORK_GET_LOCAL_IP),
+  generateQr: (text: string): Promise<string> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.NETWORK_GENERATE_QR, text),
+  startDaemon: (options: { port: number; tunnel: string; token: string }): Promise<any> => 
+    ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.NETWORK_START_DAEMON, options),
+  stopDaemon: (): Promise<any> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.NETWORK_STOP_DAEMON),
+  getDaemonStatus: (port?: number): Promise<any> =>
+    ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.NETWORK_GET_DAEMON_STATUS, port),
+  onDaemonLog: (callback: (data: string) => void) => {
+    const handler = (_event: any, data: string) => callback(data);
+    ipcRenderer.on(DOCTOR_IPC_CHANNELS.NETWORK_DAEMON_LOG, handler);
+    return () => ipcRenderer.removeListener(DOCTOR_IPC_CHANNELS.NETWORK_DAEMON_LOG, handler);
+  },
 
   // Antigravity lifecycle (version, status, launch, kill, restart)
   antigravityStatus: (): Promise<{ ok: boolean; data?: unknown; error?: string }> =>
-    ipcRenderer.invoke('ag:antigravity:status'),
+    ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.ANTIGRAVITY_STATUS),
   antigravityVersion: (): Promise<{ ok: boolean; data?: { version: string }; error?: string }> =>
-    ipcRenderer.invoke('ag:antigravity:version'),
+    ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.ANTIGRAVITY_VERSION),
   antigravityLaunch: (): Promise<{ ok: boolean; data?: { ok: boolean; pid?: number; message: string }; error?: string }> =>
-    ipcRenderer.invoke('ag:antigravity:launch'),
+    ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.ANTIGRAVITY_LAUNCH),
   antigravityKill: (): Promise<{ ok: boolean; data?: { killed: number; message: string }; error?: string }> =>
-    ipcRenderer.invoke('ag:antigravity:kill'),
+    ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.ANTIGRAVITY_KILL),
   antigravityRestart: (): Promise<{ ok: boolean; data?: { ok: boolean; message: string; pid?: number }; error?: string }> =>
-    ipcRenderer.invoke('ag:antigravity:restart'),
+    ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.ANTIGRAVITY_RESTART),
   antigravityLaunchLogs: (): Promise<string> =>
-    ipcRenderer.invoke('ag:antigravity:launch-logs'),
+    ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.ANTIGRAVITY_LAUNCH_LOGS),
 
   // Proxy stub lifecycle — emergency fallback when Antigravity's bundled proxy fails
   proxyStartStub: (): Promise<{ ok: boolean; pid?: number; port?: number; note?: string; error?: string }> =>
-    ipcRenderer.invoke('ag:proxy:start-stub'),
+    ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.PROXY_START_STUB),
   proxyStubStatus: (): Promise<{ ok: boolean; data?: { ok: boolean; stub: boolean; latencyMs: number; error?: string }; error?: string }> =>
-    ipcRenderer.invoke('ag:proxy:stub-status'),
+    ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.PROXY_STUB_STATUS),
   proxyStats: (): Promise<{
     ok: boolean;
     data?: {
@@ -94,7 +108,7 @@ const api = {
       uptime: number;
     };
     error?: string;
-  }> => ipcRenderer.invoke('ag:proxy-stats'),
+  }> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.PROXY_STATS),
 
   // Installation Detector — scans for Antigravity binaries (v1.x vs v2.0+)
   detectInstallation: (): Promise<{
@@ -115,40 +129,40 @@ const api = {
       summary: string;
     };
     error?: string;
-  }> => ipcRenderer.invoke('ag:detect-installation'),
+  }> => ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.DETECT_INSTALLATION),
 
   // Model testing — tests a single model's connection
   testModel: (name: string): Promise<{ ok: boolean; data?: unknown; error?: string }> =>
-    ipcRenderer.invoke('ag:test-model', name),
+    ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.TEST_MODEL, name),
 
   repairRun: (): Promise<{ ok: boolean; proxy?: boolean; ca?: boolean; error?: string }> =>
-    ipcRenderer.invoke('ag:repair:run'),
+    ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.REPAIR_RUN),
 
   onRunDoctor: (handler: () => void): (() => void) => {
     const listener = () => handler();
-    ipcRenderer.on('ag:run-doctor', listener);
-    return () => ipcRenderer.removeListener('ag:run-doctor', listener);
+    ipcRenderer.on(DOCTOR_IPC_CHANNELS.RUN_DOCTOR, listener);
+    return () => ipcRenderer.removeListener(DOCTOR_IPC_CHANNELS.RUN_DOCTOR, listener);
   },
   onNavigate: (handler: (view: string) => void): (() => void) => {
     const listener = (_: unknown, view: string) => handler(view);
-    ipcRenderer.on('ag:navigate', listener);
-    return () => ipcRenderer.removeListener('ag:navigate', listener);
+    ipcRenderer.on(DOCTOR_IPC_CHANNELS.NAVIGATE, listener);
+    return () => ipcRenderer.removeListener(DOCTOR_IPC_CHANNELS.NAVIGATE, listener);
   },
   onCommandPalette: (handler: () => void): (() => void) => {
     const listener = () => handler();
-    ipcRenderer.on('ag:command-palette', listener);
-    return () => ipcRenderer.removeListener('ag:command-palette', listener);
+    ipcRenderer.on(DOCTOR_IPC_CHANNELS.COMMAND_PALETTE, listener);
+    return () => ipcRenderer.removeListener(DOCTOR_IPC_CHANNELS.COMMAND_PALETTE, listener);
   },
   onThemeChanged: (handler: (theme: 'dark' | 'light') => void): (() => void) => {
     const listener = (_: unknown, theme: 'dark' | 'light') => handler(theme);
-    ipcRenderer.on('ag:theme-changed', listener);
-    return () => ipcRenderer.removeListener('ag:theme-changed', listener);
+    ipcRenderer.on(DOCTOR_IPC_CHANNELS.THEME_CHANGED, listener);
+    return () => ipcRenderer.removeListener(DOCTOR_IPC_CHANNELS.THEME_CHANGED, listener);
   },
 
   startStream: (args: string[], streamId: string): Promise<boolean> =>
-    ipcRenderer.invoke('ag:stream:start', args, streamId),
+    ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.STREAM_START, args, streamId),
   cancelStream: (streamId: string): Promise<boolean> =>
-    ipcRenderer.invoke('ag:stream:cancel', streamId),
+    ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.STREAM_CANCEL, streamId),
   onStreamData: (streamId: string, handler: (chunk: string) => void): (() => void) => {
     const channel = `ag:stream:${streamId}:data`;
     const listener = (_: unknown, chunk: string) => handler(chunk);
@@ -168,9 +182,7 @@ const api = {
     return () => ipcRenderer.removeListener(channel, listener);
   },
 
-  // MITM traffic fan-out — emitted once per intercepted request when the
-  // proxy (mitm_443.js) writes a `mitm:traffic` JSON line on stdout.
-  // payload.id is unique per call; payload.ts is Date.now() at the proxy.
+  // MITM traffic fan-out
   onMitmTraffic: (handler: (payload: {
     id: string;
     ts: number;
@@ -181,23 +193,12 @@ const api = {
     statusCode: number;
     latencyMs: number;
   }) => void): (() => void) => {
-    const listener = (_: unknown, payload: {
-      id: string;
-      ts: number;
-      method: string;
-      path: string;
-      targetModel: string;
-      translatedProvider: string;
-      statusCode: number;
-      latencyMs: number;
-    }) => handler(payload);
-    ipcRenderer.on('mitm:traffic', listener);
-    return () => ipcRenderer.removeListener('mitm:traffic', listener);
+    const listener = (_: unknown, payload: any) => handler(payload);
+    ipcRenderer.on(DOCTOR_IPC_CHANNELS.MITM_TRAFFIC, listener);
+    return () => ipcRenderer.removeListener(DOCTOR_IPC_CHANNELS.MITM_TRAFFIC, listener);
   },
 
-  // Real-time proxy error fan-out from the main process. The renderer
-  // receives a ProxyErrorPayload (see src/proxy.ts) and renders the matching
-  // native quota/error card via NativeQuotaCardRenderer.
+  // Real-time proxy error fan-out
   onProxyError: (handler: (payload: {
     traceId: string;
     provider: string;
@@ -209,19 +210,9 @@ const api = {
     suggestions: string[];
     actionUrl?: string;
   }) => void): (() => void) => {
-    const listener = (_: unknown, payload: {
-      traceId: string;
-      provider: string;
-      status?: number;
-      errorType: string;
-      rawError: string;
-      title: string;
-      message: string;
-      suggestions: string[];
-      actionUrl?: string;
-    }) => handler(payload);
-    ipcRenderer.on('proxy:error', listener);
-    return () => ipcRenderer.removeListener('proxy:error', listener);
+    const listener = (_: unknown, payload: any) => handler(payload);
+    ipcRenderer.on(DOCTOR_IPC_CHANNELS.PROXY_ERROR, listener);
+    return () => ipcRenderer.removeListener(DOCTOR_IPC_CHANNELS.PROXY_ERROR, listener);
   },
 };
 
