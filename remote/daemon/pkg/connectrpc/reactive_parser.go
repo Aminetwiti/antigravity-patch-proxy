@@ -169,6 +169,8 @@ func reactiveInteractionValue(v any) int {
 			return InteractionPermission
 		case "OPEN_BROWSER_URL", "INTERACTION_TYPE_OPEN_BROWSER_URL":
 			return InteractionOpenBrowserURL
+		case "READ_URL_CONTENT", "INTERACTION_TYPE_READ_URL_CONTENT", "READ_URL", "BROWSE":
+			return InteractionReadUrlContent
 		case "PLAN_APPROVAL", "INTERACTION_TYPE_PLAN_APPROVAL":
 			return InteractionPlanApproval
 		case "MULTI_SELECT", "INTERACTION_TYPE_MULTI_SELECT":

@@ -60,6 +60,7 @@ class ActionPillsBar extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
+                      gradient: AppGradients.cardCool(isDark: isDark),
                       color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(AppRadius.pill),
                       border: Border.all(

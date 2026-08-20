@@ -61,13 +61,20 @@ func ParseFrameEvents(raw []byte, cascadeID string) []StreamEvent {
 					trajectoryID = string(sub.Bytes)
 				}
 				if sub.Num == InteractionRunCommand || sub.Num == InteractionOpenBrowserURL ||
-					sub.Num == InteractionFilePermission || sub.Num == InteractionPermission ||
+					sub.Num == InteractionReadUrlContent || sub.Num == InteractionFilePermission ||
+					sub.Num == InteractionPermission || sub.Num == InteractionAskQuestion ||
 					sub.Num == InteractionApproval {
 					isInteraction = true
 					if sub.Num == InteractionRunCommand {
 						detectedTool = "run_command"
 					} else if sub.Num == InteractionFilePermission {
 						detectedTool = "write_to_file"
+					} else if sub.Num == InteractionReadUrlContent || sub.Num == InteractionOpenBrowserURL {
+						detectedTool = "read_url_content"
+					} else if sub.Num == InteractionPermission {
+						detectedTool = "permission"
+					} else if sub.Num == InteractionAskQuestion {
+						detectedTool = "ask_question"
 					}
 					if len(sub.Bytes) > 0 {
 						detail = string(sub.Bytes)
@@ -106,6 +113,13 @@ func ParseFrameEvents(raw []byte, cascadeID string) []StreamEvent {
 			strings.Contains(trimmed, `"edit_file"`) ||
 			strings.Contains(trimmed, `"list_files"`) ||
 			strings.Contains(trimmed, `"search_files"`) ||
+			strings.Contains(trimmed, `"read_url"`) ||
+			strings.Contains(trimmed, `"read_url_content"`) ||
+			strings.Contains(trimmed, `"open_browser_url"`) ||
+			strings.Contains(trimmed, `"browse"`) ||
+			strings.Contains(trimmed, `"search_web"`) ||
+			strings.Contains(trimmed, `"fetch"`) ||
+			strings.Contains(trimmed, `"permission"`) ||
 			strings.Contains(trimmed, `"ask_question"`) ||
 			strings.Contains(trimmed, `"ask_user"`) ||
 			strings.Contains(trimmed, `"tool"`) ||
@@ -143,6 +157,10 @@ func ParseFrameEvents(raw []byte, cascadeID string) []StreamEvent {
 					(strings.Contains(st, `"run_command"`) || strings.Contains(st, `"write_to_file"`) ||
 						strings.Contains(st, `"read_file"`) || strings.Contains(st, `"edit_file"`) ||
 						strings.Contains(st, `"list_files"`) || strings.Contains(st, `"search_files"`) ||
+						strings.Contains(st, `"read_url"`) || strings.Contains(st, `"read_url_content"`) ||
+						strings.Contains(st, `"open_browser_url"`) || strings.Contains(st, `"browse"`) ||
+						strings.Contains(st, `"search_web"`) || strings.Contains(st, `"fetch"`) ||
+						strings.Contains(st, `"permission"`) ||
 						strings.Contains(st, `"ask_question"`) || strings.Contains(st, `"ask_user"`) ||
 						strings.Contains(st, `"tool"`)) {
 					isNestedApproval = true
@@ -195,9 +213,15 @@ func extractToolName(s string) string {
 	if strings.Contains(s, "write_to_file") {
 		return "write_to_file"
 	}
+	if strings.Contains(s, "read_url_content") || strings.Contains(s, "read_url") || strings.Contains(s, "open_browser_url") || strings.Contains(s, "browse") {
+		return "read_url_content"
+	}
+	if strings.Contains(s, "permission") {
+		return "permission"
+	}
 	// Outils de lecture/recherche : le blob JSON contient la clé de l'outil
 	// ("read_file": "path"). Sans clé connue → generic_tool (non auto-accepté).
-	for _, k := range []string{"read_file", "edit_file", "list_files", "search_files", "grep", "glob", "fetch"} {
+	for _, k := range []string{"read_file", "edit_file", "list_files", "search_files", "grep", "glob", "fetch", "search_web"} {
 		if strings.Contains(s, k) {
 			return k
 		}

@@ -74,10 +74,15 @@ class _SkeletonLoaderState extends State<SkeletonLoader> with SingleTickerProvid
     }
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final scheme = Theme.of(context).colorScheme;
-
-    final base = widget.baseColor ?? (isDark ? const Color(0xFF1B1F27) : scheme.surfaceContainerHighest.withValues(alpha: 0.5));
-    final highlight = widget.highlightColor ?? (isDark ? const Color(0xFF2E3440) : scheme.surfaceContainerHighest);
+    final List<Color> shimmer;
+    if (widget.baseColor != null || widget.highlightColor != null) {
+      // Respect caller overrides (backward compat)
+      final base = widget.baseColor ?? (isDark ? const Color(0xFF1B1F27) : const Color(0xFFEAEEF2));
+      final hl = widget.highlightColor ?? (isDark ? const Color(0xFF2E3440) : const Color(0xFFF6F8FA));
+      shimmer = [base, hl, base];
+    } else {
+      shimmer = AppGradients.shimmerColors(isDark: isDark);
+    }
 
     return AnimatedBuilder(
       animation: _controller,
@@ -88,7 +93,7 @@ class _SkeletonLoaderState extends State<SkeletonLoader> with SingleTickerProvid
             return LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [base, highlight, base],
+              colors: shimmer,
               stops: const [0.0, 0.5, 1.0],
               transform: _SlidingGradientTransform(slidePercent: _controller.value),
             ).createShader(bounds);

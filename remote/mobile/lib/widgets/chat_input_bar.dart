@@ -130,10 +130,9 @@ class ChatInputBarState extends State<ChatInputBar> {
   SendMode _sendMode = SendMode.immediate;
   // Feature Niveaux d'effort de raisonnement (Faible, Moyen, Élevé)
   String _reasoningEffort = 'Moyen'; // Options: 'Faible', 'Moyen', 'Élevé'
-  // Feature attachement fichiers et images (Quiet Console)
-  _AttachedItem? _attachment;
-  String? _attachedFileName;
-  String? _attachedFileContent;
+  // Feature multi-attachements fichiers et images (Quiet Console)
+  final List<_AttachedItem> _attachments = [];
+  double? _uploadProgress;
 
   final GlobalKey _modelButtonKey = GlobalKey();
   final GlobalKey _textFieldKey = GlobalKey();
@@ -258,11 +257,11 @@ class ChatInputBarState extends State<ChatInputBar> {
     return raw.replaceAll(RegExp(r'(\r?\n){3,}'), '\n\n').trim();
   }
 
-  void _handleSend() {
+  Future<void> _handleSend() async {
     if (_isSending) return;
     final rawText = _controller.text;
     final text = _sanitizeInput(rawText);
-    final hasContent = text.isNotEmpty || _attachment != null || _attachedFileContent != null;
+    final hasContent = text.isNotEmpty || _attachments.isNotEmpty;
     if (!hasContent) return;
 
     _isSending = true;
@@ -277,45 +276,66 @@ class ChatInputBarState extends State<ChatInputBar> {
       finalPayload = '$cmd $args'.trim();
     }
 
-    // Traitement de l'attachement (upload vers daemon si connecté)
-    String fullMessage = finalPayload;
-    final att = _attachment;
-    if (att != null) {
-      if (widget.api != null && widget.cascadeId != null && att.base64Data != null) {
-        if (att.isImage) {
-          widget.api!.uploadMedia(
-            cascadeId: widget.cascadeId!,
-            fileName: att.name,
-            mimeType: att.mimeType ?? 'image/jpeg',
-            base64Data: att.base64Data!,
-          );
-        } else {
-          widget.api!.uploadChunk(
-            uploadId: 'up_${DateTime.now().millisecondsSinceEpoch}',
-            cascadeId: widget.cascadeId!,
-            fileName: att.name,
-            chunkIndex: 0,
-            totalChunks: 1,
-            totalBytes: att.size,
-            base64Data: att.base64Data!,
-          );
+    // Traitement et upload des attachements vers le daemon si connecté
+    if (widget.api != null && widget.cascadeId != null && _attachments.isNotEmpty) {
+      setState(() => _uploadProgress = 0.05);
+      for (int i = 0; i < _attachments.length; i++) {
+        final att = _attachments[i];
+        if (att.base64Data != null) {
+          try {
+            if (att.isImage) {
+              await widget.api!.uploadMedia(
+                cascadeId: widget.cascadeId!,
+                fileName: att.name,
+                mimeType: att.mimeType ?? 'image/jpeg',
+                base64Data: att.base64Data!,
+              );
+            } else {
+              await widget.api!.uploadChunk(
+                uploadId: 'up_${DateTime.now().millisecondsSinceEpoch}_$i',
+                cascadeId: widget.cascadeId!,
+                fileName: att.name,
+                chunkIndex: 0,
+                totalChunks: 1,
+                totalBytes: att.size,
+                base64Data: att.base64Data!,
+              );
+            }
+          } catch (_) {}
+        }
+        if (mounted) {
+          setState(() => _uploadProgress = (i + 1) / _attachments.length);
         }
       }
-
-      if (att.isImage) {
-        fullMessage = finalPayload.isEmpty
-            ? '[Image jointe: ${att.name}]'
-            : '[Image: ${att.name}]\n$finalPayload';
-      } else if (att.textContent != null) {
-        fullMessage = '[Fichier: ${att.name}]\n${att.textContent}\n\n$finalPayload'.trim();
-      } else {
-        fullMessage = '[Fichier joint: ${att.name} (${_formatBytes(att.size)})]\n$finalPayload'.trim();
-      }
-    } else if (_attachedFileContent != null) {
-      fullMessage = '${_attachedFileName != null ? "[Fichier: $_attachedFileName]\n" : ""}'
-              '$_attachedFileContent\n\n$finalPayload'
-          .trim();
     }
+
+    // Construction du payload textuel combiné
+    final buffer = StringBuffer();
+    final images = _attachments.where((a) => a.isImage).toList();
+    final files = _attachments.where((a) => !a.isImage).toList();
+
+    if (images.isNotEmpty) {
+      if (images.length == 1) {
+        buffer.writeln('[Image jointe: ${images.first.name}]');
+      } else {
+        buffer.writeln('[Images jointes: ${images.map((img) => img.name).join(', ')}]');
+      }
+    }
+
+    for (final f in files) {
+      if (f.textContent != null) {
+        buffer.writeln('[Fichier: ${f.name}]\n${f.textContent}\n');
+      } else {
+        buffer.writeln('[Fichier joint: ${f.name} (${_formatBytes(f.size)})]');
+      }
+    }
+
+    if (finalPayload.isNotEmpty) {
+      if (buffer.isNotEmpty) buffer.writeln();
+      buffer.write(finalPayload);
+    }
+
+    final fullMessage = buffer.toString().trim();
 
     widget.onSend(
       fullMessage,
@@ -327,13 +347,14 @@ class ChatInputBarState extends State<ChatInputBar> {
     _lastDraftText = '';
     // P6 : le message a été envoyé → purge le brouillon persisté.
     widget.onDraftChanged?.call('');
-    FocusScope.of(context).unfocus(); // Ferme le clavier sur mobile après l'envoi
-    setState(() {
-      _attachment = null;
-      _attachedFileName = null;
-      _attachedFileContent = null;
-      _isSending = false;
-    });
+    if (mounted) {
+      FocusScope.of(context).unfocus(); // Ferme le clavier sur mobile après l'envoi
+      setState(() {
+        _attachments.clear();
+        _uploadProgress = null;
+        _isSending = false;
+      });
+    }
   }
 
   /// Shortcut Cmd+L / Ctrl+L : citer le texte sélectionné
@@ -411,42 +432,44 @@ class ChatInputBarState extends State<ChatInputBar> {
     }
   }
 
-  void _clearAttachment() {
-    setState(() {
-      _attachment = null;
-      _attachedFileName = null;
-      _attachedFileContent = null;
-    });
+  void _removeAttachment(int index) {
+    if (index >= 0 && index < _attachments.length) {
+      setState(() => _attachments.removeAt(index));
+    }
   }
 
-  /// Sélection d'image native depuis la galerie
+  void _clearAttachments() {
+    setState(() => _attachments.clear());
+  }
+
+  /// Sélection d'images natives depuis la galerie (support multi-sélection)
   Future<void> _pickImageFromGallery() async {
     try {
       final picker = ImagePicker();
-      final picked = await picker.pickImage(
-        source: ImageSource.gallery,
+      final pickedList = await picker.pickMultiImage(
         maxWidth: 2048,
         maxHeight: 2048,
         imageQuality: 85,
       );
-      if (picked == null) return;
-      final bytes = await picked.readAsBytes();
-      final name = picked.name.isNotEmpty ? picked.name : 'image_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      final mime = picked.mimeType ?? (name.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg');
-      final b64 = base64Encode(bytes);
+      if (pickedList.isEmpty) return;
 
-      setState(() {
-        _attachment = _AttachedItem(
+      final newItems = <_AttachedItem>[];
+      for (final picked in pickedList) {
+        final bytes = await picked.readAsBytes();
+        final name = picked.name.isNotEmpty ? picked.name : 'image_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        final mime = picked.mimeType ?? (name.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg');
+        final b64 = base64Encode(bytes);
+        newItems.add(_AttachedItem(
           name: name,
           size: bytes.length,
           mimeType: mime,
           bytes: bytes,
           base64Data: b64,
           isImage: true,
-        );
-        _attachedFileName = name;
-        _attachedFileContent = '[Image: $name ($mime)]';
-      });
+        ));
+      }
+
+      setState(() => _attachments.addAll(newItems));
     } catch (_) {
       _pickImage();
     }
@@ -469,52 +492,50 @@ class ChatInputBarState extends State<ChatInputBar> {
       final b64 = base64Encode(bytes);
 
       setState(() {
-        _attachment = _AttachedItem(
+        _attachments.add(_AttachedItem(
           name: name,
           size: bytes.length,
           mimeType: mime,
           bytes: bytes,
           base64Data: b64,
           isImage: true,
-        );
-        _attachedFileName = name;
-        _attachedFileContent = '[Image: $name ($mime)]';
+        ));
       });
     } catch (_) {
       _pickImage();
     }
   }
 
-  /// Sélection de fichier natif du smartphone (code, documents, json...)
+  /// Sélection de fichiers natifs du smartphone (support multi-fichiers)
   Future<void> _pickFileNative() async {
     try {
       final res = await FilePicker.pickFiles(
         withData: true,
-        allowMultiple: false,
+        allowMultiple: true,
       );
       if (res == null || res.files.isEmpty) return;
-      final f = res.files.first;
-      Uint8List? bytes = f.bytes;
-      if (bytes == null && f.path != null) {
-        try {
-          bytes = await File(f.path!).readAsBytes();
-        } catch (_) {}
-      }
-      if (bytes == null || bytes.isEmpty) return;
-      final name = f.name;
-      final size = f.size > 0 ? f.size : bytes.length;
-      final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
-      final isImg = ['png', 'jpg', 'jpeg', 'webp', 'gif'].contains(ext);
-      final b64 = base64Encode(bytes);
-      String? textContent;
-      if (['txt', 'json', 'md', 'csv', 'dart', 'ts', 'js', 'py', 'go', 'yaml', 'yml', 'html', 'css', 'xml', 'sh'].contains(ext) && bytes.length < 500000) {
-        try {
-          textContent = utf8.decode(bytes, allowMalformed: true);
-        } catch (_) {}
-      }
 
-      setState(() {
-        _attachment = _AttachedItem(
+      final newItems = <_AttachedItem>[];
+      for (final f in res.files) {
+        Uint8List? bytes = f.bytes;
+        if (bytes == null && f.path != null) {
+          try {
+            bytes = await File(f.path!).readAsBytes();
+          } catch (_) {}
+        }
+        if (bytes == null || bytes.isEmpty) continue;
+        final name = f.name;
+        final size = f.size > 0 ? f.size : bytes.length;
+        final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+        final isImg = ['png', 'jpg', 'jpeg', 'webp', 'gif'].contains(ext);
+        final b64 = base64Encode(bytes);
+        String? textContent;
+        if (['txt', 'json', 'md', 'csv', 'dart', 'ts', 'js', 'py', 'go', 'yaml', 'yml', 'html', 'css', 'xml', 'sh'].contains(ext) && bytes.length < 500000) {
+          try {
+            textContent = utf8.decode(bytes, allowMalformed: true);
+          } catch (_) {}
+        }
+        newItems.add(_AttachedItem(
           name: name,
           size: size,
           mimeType: isImg ? (ext == 'png' ? 'image/png' : 'image/jpeg') : 'application/octet-stream',
@@ -522,13 +543,61 @@ class ChatInputBarState extends State<ChatInputBar> {
           base64Data: b64,
           isImage: isImg,
           textContent: textContent,
-        );
-        _attachedFileName = name;
-        _attachedFileContent = textContent ?? '[Fichier: $name (${_formatBytes(size)})]';
-      });
+        ));
+      }
+
+      setState(() => _attachments.addAll(newItems));
     } catch (_) {
       _pickTextFile();
     }
+  }
+
+  /// Collage automatique et intelligent depuis le presse-papier
+  Future<void> _pasteFromClipboard() async {
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      final text = data?.text?.trim();
+      if (text == null || text.isEmpty) return;
+
+      if (text.startsWith('data:image/') && text.contains('base64,')) {
+        final parts = text.split('base64,');
+        final mime = parts.first.replaceAll('data:', '').replaceAll(';', '').trim();
+        final b64 = parts.last.trim();
+        Uint8List? bytes;
+        try {
+          bytes = base64Decode(b64);
+        } catch (_) {}
+        final ext = mime.contains('png') ? 'png' : 'jpg';
+        final name = 'clipboard_${DateTime.now().millisecondsSinceEpoch}.$ext';
+        setState(() {
+          _attachments.add(_AttachedItem(
+            name: name,
+            size: bytes?.length ?? 0,
+            mimeType: mime,
+            bytes: bytes,
+            base64Data: b64,
+            isImage: true,
+          ));
+        });
+      } else if (text.length > 100 || text.startsWith('{') || text.startsWith('[') || text.startsWith('<?') || text.contains('\n')) {
+        final isJson = (text.startsWith('{') && text.endsWith('}')) || (text.startsWith('[') && text.endsWith(']'));
+        final name = isJson ? 'clipboard_data.json' : 'clipboard_snippet.txt';
+        final bytes = Uint8List.fromList(utf8.encode(text));
+        setState(() {
+          _attachments.add(_AttachedItem(
+            name: name,
+            size: bytes.length,
+            mimeType: isJson ? 'application/json' : 'text/plain',
+            bytes: bytes,
+            base64Data: base64Encode(bytes),
+            isImage: false,
+            textContent: text,
+          ));
+        });
+      } else {
+        _insertTextAtCursor(text);
+      }
+    } catch (_) {}
   }
 
   /// Feature attachement .txt, .json, .md, .csv (Fallback manuel)
@@ -600,7 +669,7 @@ class ChatInputBarState extends State<ChatInputBar> {
       final content = result['content']!;
       final bytes = Uint8List.fromList(utf8.encode(content));
       setState(() {
-        _attachment = _AttachedItem(
+        _attachments.add(_AttachedItem(
           name: name,
           size: bytes.length,
           mimeType: 'text/plain',
@@ -608,9 +677,7 @@ class ChatInputBarState extends State<ChatInputBar> {
           base64Data: base64Encode(bytes),
           isImage: false,
           textContent: content,
-        );
-        _attachedFileName = name;
-        _attachedFileContent = content;
+        ));
       });
     }
   }
@@ -701,32 +768,123 @@ class ChatInputBarState extends State<ChatInputBar> {
       } catch (_) {}
 
       setState(() {
-        _attachment = _AttachedItem(
+        _attachments.add(_AttachedItem(
           name: fileName,
           size: rawBytes?.length ?? 0,
           mimeType: mimeType,
           bytes: rawBytes,
           base64Data: base64Data,
           isImage: true,
-        );
-        _attachedFileName = fileName;
-        _attachedFileContent = '[Image: $fileName ($mimeType)]';
+        ));
       });
     }
   }
 
-  /// Aperçu visuel Quiet Console de l'attachement sélectionné
+  /// Aperçu visuel Quiet Console des attachements sélectionnés (carte unique ou carousel scrollable)
   Widget _buildAttachmentPreview(ColorScheme scheme, bool isDark) {
-    final att = _attachment;
-    final fallbackName = _attachedFileName;
-    if (att == null && fallbackName == null) return const SizedBox.shrink();
+    if (_attachments.isEmpty) return const SizedBox.shrink();
 
-    final name = att?.name ?? fallbackName ?? 'fichier';
-    final sizeStr = att != null ? _formatBytes(att.size) : '';
-    final isImg = att?.isImage ?? (name.toLowerCase().endsWith('.png') || name.toLowerCase().endsWith('.jpg') || name.toLowerCase().endsWith('.jpeg'));
+    final totalBytes = _attachments.fold<int>(0, (sum, item) => sum + item.size);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Barre de progression d'upload si en cours
+          if (_uploadProgress != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: _uploadProgress,
+                        minHeight: 3,
+                        backgroundColor: isDark ? const Color(0xFF26282E) : scheme.surfaceContainerHighest,
+                        valueColor: AlwaysStoppedAnimation<Color>(scheme.primary),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${((_uploadProgress ?? 0) * 100).toInt()}%',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.primary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+          if (_attachments.length == 1)
+            // Carte unique détaillée
+            _buildSingleAttachmentCard(_attachments.first, 0, scheme, isDark)
+          else
+            // Multi-attachements : Header récapitulatif + Carousel horizontal
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6, left: 2, right: 2),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.attach_file_rounded, size: 13, color: scheme.primary),
+                          const SizedBox(width: 4),
+                          Text(
+                            '${_attachments.length} pièces jointes (${_formatBytes(totalBytes)})',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                            ),
+                          ),
+                        ],
+                      ),
+                      BouncingTap(
+                        onTap: _clearAttachments,
+                        child: Text(
+                          'Tout effacer',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(
+                  height: 48,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _attachments.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    itemBuilder: (ctx, idx) => _buildCompactAttachmentCard(_attachments[idx], idx, scheme, isDark),
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSingleAttachmentCard(_AttachedItem att, int index, ColorScheme scheme, bool isDark) {
+    final sizeStr = _formatBytes(att.size);
+    final isImg = att.isImage;
+
+    return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
         color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerHighest,
@@ -738,11 +896,11 @@ class ChatInputBarState extends State<ChatInputBar> {
       ),
       child: Row(
         children: [
-          if (isImg && att?.bytes != null)
+          if (isImg && att.bytes != null)
             ClipRRect(
               borderRadius: BorderRadius.circular(6),
               child: Image.memory(
-                att!.bytes!,
+                att.bytes!,
                 width: 36,
                 height: 36,
                 fit: BoxFit.cover,
@@ -753,13 +911,13 @@ class ChatInputBarState extends State<ChatInputBar> {
               width: 36,
               height: 36,
               decoration: BoxDecoration(
-                color: _badgeColorForExtension(name, scheme).withValues(alpha: 0.15),
+                color: _badgeColorForExtension(att.name, scheme).withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Icon(
-                _iconForExtension(name),
+                _iconForExtension(att.name),
                 size: 20,
-                color: _badgeColorForExtension(name, scheme),
+                color: _badgeColorForExtension(att.name, scheme),
               ),
             ),
           const SizedBox(width: 10),
@@ -769,7 +927,7 @@ class ChatInputBarState extends State<ChatInputBar> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  name,
+                  att.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -791,7 +949,7 @@ class ChatInputBarState extends State<ChatInputBar> {
           ),
           const SizedBox(width: 8),
           BouncingTap(
-            onTap: _clearAttachment,
+            onTap: () => _removeAttachment(index),
             child: Container(
               padding: const EdgeInsets.all(5),
               decoration: BoxDecoration(
@@ -810,18 +968,99 @@ class ChatInputBarState extends State<ChatInputBar> {
     );
   }
 
+  Widget _buildCompactAttachmentCard(_AttachedItem att, int index, ColorScheme scheme, bool isDark) {
+    final isImg = att.isImage;
+
+    return Container(
+      width: 140,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(
+          color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.6),
+          width: 0.8,
+        ),
+      ),
+      child: Row(
+        children: [
+          if (isImg && att.bytes != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: Image.memory(
+                att.bytes!,
+                width: 28,
+                height: 28,
+                fit: BoxFit.cover,
+              ),
+            )
+          else
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: _badgeColorForExtension(att.name, scheme).withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Icon(
+                _iconForExtension(att.name),
+                size: 16,
+                color: _badgeColorForExtension(att.name, scheme),
+              ),
+            ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  att.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                  ),
+                ),
+                Text(
+                  _formatBytes(att.size),
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 4),
+          BouncingTap(
+            onTap: () => _removeAttachment(index),
+            child: Icon(
+              Icons.close_rounded,
+              size: 14,
+              color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showAttachmentMenu() {
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (ctx) => SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -852,10 +1091,10 @@ class ChatInputBarState extends State<ChatInputBar> {
               ListTile(
                 leading: Icon(Icons.photo_library_outlined, color: scheme.primary),
                 title: Text(
-                  'Choisir une image',
+                  'Choisir des images',
                   style: TextStyle(color: isDark ? AppColors.inkPrimary : scheme.onSurface, fontWeight: FontWeight.w500),
                 ),
-                subtitle: Text('Galerie photos (PNG, JPEG, WebP, GIF)', style: TextStyle(color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant, fontSize: 12)),
+                subtitle: Text('Galerie photos multi-sélection (PNG, JPEG, WebP, GIF)', style: TextStyle(color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant, fontSize: 12)),
                 onTap: () {
                   Navigator.of(ctx).pop();
                   _pickImageFromGallery();
@@ -864,13 +1103,25 @@ class ChatInputBarState extends State<ChatInputBar> {
               ListTile(
                 leading: Icon(Icons.file_present_outlined, color: scheme.primary),
                 title: Text(
-                  'Sélectionner un fichier',
+                  'Sélectionner des fichiers',
                   style: TextStyle(color: isDark ? AppColors.inkPrimary : scheme.onSurface, fontWeight: FontWeight.w500),
                 ),
                 subtitle: Text('Code, JSON, Markdown, texte, PDF...', style: TextStyle(color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant, fontSize: 12)),
                 onTap: () {
                   Navigator.of(ctx).pop();
                   _pickFileNative();
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.content_paste_rounded, color: scheme.primary),
+                title: Text(
+                  'Coller depuis le presse-papier',
+                  style: TextStyle(color: isDark ? AppColors.inkPrimary : scheme.onSurface, fontWeight: FontWeight.w500),
+                ),
+                subtitle: Text('Image Base64, JSON, texte ou extrait de code', style: TextStyle(color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant, fontSize: 12)),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _pasteFromClipboard();
                 },
               ),
               ListTile(
@@ -1246,14 +1497,18 @@ class ChatInputBarState extends State<ChatInputBar> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isQueued = _sendMode == SendMode.queued;
     final viewInsets = MediaQuery.of(context).viewInsets;
+    final viewPadding = MediaQuery.of(context).viewPadding;
     final rawInsetsBottom = View.of(context).viewInsets.bottom / MediaQuery.of(context).devicePixelRatio;
     final hasKeyboard = viewInsets.bottom > 50 || rawInsetsBottom > 50;
+    final bottomMargin = hasKeyboard
+        ? 2.0
+        : (viewPadding.bottom > 0 ? 4.0 : 8.0);
 
     return SafeArea(
       top: false,
       bottom: !hasKeyboard,
       child: Container(
-        margin: EdgeInsets.fromLTRB(12, 2, 12, hasKeyboard ? 2 : 8),
+        margin: EdgeInsets.fromLTRB(12, 2, 12, bottomMargin),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1267,14 +1522,14 @@ class ChatInputBarState extends State<ChatInputBar> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
                     decoration: BoxDecoration(
-                      color: Theme.of(context).brightness == Brightness.dark
+                      color: isDark
                           ? AppColors.surfaceRaised
-                          : scheme.surfaceContainerHighest,
+                          : AppColors.panel(context),
                       borderRadius: BorderRadius.circular(AppRadius.md),
                       border: Border.all(
-                        color: Theme.of(context).brightness == Brightness.dark
+                        color: isDark
                             ? AppColors.borderSubtle
-                            : scheme.outlineVariant.withValues(alpha: 0.5),
+                            : AppColors.border(context),
                         width: 1,
                       ),
                     ),
@@ -1288,11 +1543,11 @@ class ChatInputBarState extends State<ChatInputBar> {
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w500,
-                            color: scheme.onSurface,
+                            color: isDark ? AppColors.inkPrimary : AppColors.text(context),
                           ),
                         ),
                         const SizedBox(width: 4),
-                        Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: scheme.onSurfaceVariant),
+                        Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: isDark ? AppColors.inkMuted : AppColors.textMuted(context)),
                       ],
                     ),
                   ),
@@ -1313,16 +1568,16 @@ class ChatInputBarState extends State<ChatInputBar> {
                 vertical: hasKeyboard ? 6 : 12,
               ),
               decoration: BoxDecoration(
-                color: Theme.of(context).brightness == Brightness.dark
+                color: isDark
                     ? AppColors.surfaceRaised
-                    : scheme.surfaceContainerHighest,
+                    : AppColors.panel(context),
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
                   color: isQueued
                       ? scheme.primary.withValues(alpha: 0.6)
-                      : (Theme.of(context).brightness == Brightness.dark
+                      : (isDark
                           ? AppColors.borderSubtle
-                          : scheme.outlineVariant.withValues(alpha: 0.4)),
+                          : AppColors.border(context)),
                   width: 1,
                 ),
               ),
@@ -1596,7 +1851,7 @@ class ChatInputBarState extends State<ChatInputBar> {
                                       decoration: BoxDecoration(
                                         color: widget.hasActiveStream && _controller.text.trim().isEmpty
                                             ? scheme.error
-                                            : ((_controller.text.trim().isNotEmpty || _attachment != null || _attachedFileContent != null) &&
+                                            : ((_controller.text.trim().isNotEmpty || _attachments.isNotEmpty) &&
                                                     widget.isConnected
                                                 ? scheme.primary
                                                 : scheme.surfaceContainerHighest),
@@ -1609,7 +1864,7 @@ class ChatInputBarState extends State<ChatInputBar> {
                                                 ? Icons.stop_rounded
                                                 : Icons.arrow_forward),
                                         size: 15,
-                                        color: ((_controller.text.trim().isNotEmpty || _attachment != null || _attachedFileContent != null) &&
+                                        color: ((_controller.text.trim().isNotEmpty || _attachments.isNotEmpty) &&
                                                     widget.isConnected) ||
                                                 (widget.hasActiveStream && _controller.text.trim().isEmpty)
                                             ? AppColors.onAccent

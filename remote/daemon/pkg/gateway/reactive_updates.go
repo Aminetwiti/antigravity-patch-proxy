@@ -65,7 +65,8 @@ func (s *Server) reactiveSyncUpdates(updates map[string]connectrpc.ReactiveUpdat
 				connectrpc.InteractionRunCommand,
 				connectrpc.InteractionFilePermission,
 				connectrpc.InteractionPermission,
-				connectrpc.InteractionOpenBrowserURL:
+				connectrpc.InteractionOpenBrowserURL,
+				connectrpc.InteractionReadUrlContent:
 				tool := interactionToolName(u.RequestedInteraction)
 				// Même garde que le chemin binaire (websocket.go) : une
 				// auto-approbation de session déjà traitée ne doit ni poser
@@ -132,6 +133,8 @@ func interactionToolName(t int) string {
 		return "permission"
 	case connectrpc.InteractionOpenBrowserURL:
 		return "open_browser_url"
+	case connectrpc.InteractionReadUrlContent:
+		return "read_url_content"
 	default:
 		return "approval"
 	}

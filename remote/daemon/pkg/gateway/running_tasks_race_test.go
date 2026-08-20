@@ -155,3 +155,37 @@ func TestRunningTasksFifoEviction(t *testing.T) {
 		t.Errorf("Rétention dépassée : %d tâches présentes (max 5)", len(all))
 	}
 }
+
+// TestRunningTasksCascadeIsolation vérifie que listTasksForCascade isole strictement
+// les tâches actives par session (cascadeId).
+func TestRunningTasksCascadeIsolation(t *testing.T) {
+	mgr := newRunningTaskManager()
+
+	mgr.startTask("task-1", "npm test", "session-A", nil)
+	mgr.startTask("task-2", "go build", "session-A", nil)
+	mgr.startTask("task-3", "python script.py", "session-B", nil)
+
+	tasksA := mgr.listTasksForCascade("session-A", true)
+	if len(tasksA) != 2 {
+		t.Fatalf("Attendu 2 tâches pour session-A, obtenu %d", len(tasksA))
+	}
+	for _, task := range tasksA {
+		if task.CascadeID != "session-A" {
+			t.Errorf("Tâche de cascade incorrecte dans session-A: %s", task.CascadeID)
+		}
+	}
+
+	tasksB := mgr.listTasksForCascade("session-B", true)
+	if len(tasksB) != 1 {
+		t.Fatalf("Attendu 1 tâche pour session-B, obtenu %d", len(tasksB))
+	}
+	if tasksB[0].ID != "task-3" {
+		t.Errorf("Tâche inattendue pour session-B: %s", tasksB[0].ID)
+	}
+
+	tasksC := mgr.listTasksForCascade("session-C", true)
+	if len(tasksC) != 0 {
+		t.Fatalf("Attendu 0 tâche pour session-C, obtenu %d", len(tasksC))
+	}
+}
+

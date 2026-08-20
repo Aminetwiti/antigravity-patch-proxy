@@ -296,7 +296,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   Future<void> _refreshRunningTasks() async {
     if (widget.api == null) return;
     try {
-      final tasks = await widget.api!.listRunningTasks();
+      final tasks = await widget.api!.listRunningTasks(
+        cascadeId: widget.activeSessionId,
+      );
       if (mounted) {
         final active = <String>[];
         for (final t in tasks) {
@@ -1278,6 +1280,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
       if (type == 'task_started') {
         final data = msg['data'] as Map<String, dynamic>? ?? {};
+        final eventCascadeId = data['cascadeId'] as String? ?? msg['cascadeId'] as String? ?? '';
+        if (eventCascadeId.isNotEmpty && eventCascadeId != widget.activeSessionId) {
+          return;
+        }
         final cmd = data['command'] as String? ?? data['id'] as String? ?? 'Task';
         final taskId = data['id'] as String? ?? cmd;
         if (!_runningBackgroundTasks.contains(cmd)) {
@@ -1292,6 +1298,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         return;
       } else if (type == 'task_output') {
         final data = msg['data'] as Map<String, dynamic>? ?? {};
+        final eventCascadeId = data['cascadeId'] as String? ?? msg['cascadeId'] as String? ?? '';
+        if (eventCascadeId.isNotEmpty && eventCascadeId != widget.activeSessionId) {
+          return;
+        }
         final cmd = data['command'] as String? ?? data['id'] as String? ?? '';
         final taskId = data['id'] as String? ?? cmd;
         final delta = data['delta'] as String? ?? '';
@@ -1304,6 +1314,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         return;
       } else if (type == 'task_ended') {
         final data = msg['data'] as Map<String, dynamic>? ?? {};
+        final eventCascadeId = data['cascadeId'] as String? ?? msg['cascadeId'] as String? ?? '';
+        if (eventCascadeId.isNotEmpty && eventCascadeId != widget.activeSessionId) {
+          return;
+        }
         final cmd = data['command'] as String? ?? data['id'] as String? ?? '';
         final taskId = data['id'] as String? ?? cmd;
         final status = data['status'] as String? ?? 'completed';

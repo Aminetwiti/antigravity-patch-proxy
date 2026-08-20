@@ -162,6 +162,15 @@ func TestWebSocketRPCsCoverage(t *testing.T) {
 	}
 
 	// 9. Session: get_active_session
+	gw.mu.Lock()
+	gw.focusedCascadeID = "casc-cov-1"
+	gw.jetboxSummaries["casc-cov-1"] = &connectrpc.JetboxSummary{
+		CascadeID: "casc-cov-1",
+		Title:     "Test Session",
+		Workspace: "C:/repo",
+		Status:    "active",
+	}
+	gw.mu.Unlock()
 	client.sendJSON(t, map[string]interface{}{
 		"type":      "get_active_session",
 		"requestId": "req-sess-1",

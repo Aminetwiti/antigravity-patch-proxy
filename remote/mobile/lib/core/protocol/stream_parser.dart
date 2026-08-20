@@ -279,6 +279,17 @@ class StreamDeltaParser {
         final tool = e['tool'] as String? ?? 'generic_tool';
         // Si c'est ask_question, ce n'est pas un tool standard d'approbation binaire
         if (tool == 'ask_question' || tool == 'ask_user') continue;
+        final cleanTool = tool.toLowerCase();
+        String appType = 'approval';
+        if (cleanTool == 'run_command') {
+          appType = 'run_command';
+        } else if (cleanTool.contains('url') || cleanTool == 'browse' || cleanTool == 'open_browser_url' || cleanTool == 'read_url_content') {
+          appType = 'read_url_content';
+        } else if (cleanTool == 'file_permission' || cleanTool == 'write_to_file') {
+          appType = 'file_permission';
+        } else if (cleanTool == 'permission') {
+          appType = 'permission';
+        }
         return ToolApproval(
           callId: e['callId'] as String? ?? '',
           tool: tool,
@@ -286,7 +297,7 @@ class StreamDeltaParser {
           cascadeId: e['cascadeId'] as String? ?? '',
           trajectoryId: e['trajectoryId'] as String? ?? '',
           stepIndex: e['stepIndex'] is num ? (e['stepIndex'] as num).toInt() : -1,
-          approvalType: tool == 'run_command' ? 'run_command' : 'approval',
+          approvalType: appType,
         );
       }
     }
@@ -378,7 +389,19 @@ class StreamDeltaParser {
         : cascadeId;
     final trajectoryId = map['trajectoryId'] as String? ?? '';
     final stepIndex = map['stepIndex'] is num ? (map['stepIndex'] as num).toInt() : -1;
-    final approvalType = map['approvalType'] as String? ?? (tool == 'run_command' ? 'run_command' : 'approval');
+
+    final cleanTool = tool.toLowerCase();
+    String defaultAppType = 'approval';
+    if (cleanTool == 'run_command') {
+      defaultAppType = 'run_command';
+    } else if (cleanTool.contains('url') || cleanTool == 'browse' || cleanTool == 'open_browser_url' || cleanTool == 'read_url_content') {
+      defaultAppType = 'read_url_content';
+    } else if (cleanTool == 'file_permission' || cleanTool == 'write_to_file') {
+      defaultAppType = 'file_permission';
+    } else if (cleanTool == 'permission') {
+      defaultAppType = 'permission';
+    }
+    final approvalType = map['approvalType'] as String? ?? defaultAppType;
 
     return ToolApproval(
       callId: callId,
@@ -434,17 +457,29 @@ class ToolApproval {
     this.approvalType = 'approval',
   });
 
-  /// The command line to echo back on approval (run_command oneof field 2).
-  String get command => _extractCommand(detail);
+  /// The command line or URL to echo back on approval (run_command / read_url_content).
+  String get command => _extractTarget(detail);
 
-  static String _extractCommand(String detail) {
-    final m = RegExp(
-          r'"(command_line|commandline)"\s*:\s*"((?:[^"\\]|\\.)*)"',
+  static String _extractTarget(String detail) {
+    // Check for command
+    final cmdMatch = RegExp(
+          r'"(command_line|commandline|command)"\s*:\s*"((?:[^"\\]|\\.)*)"',
           caseSensitive: false,
-        )
-        .firstMatch(detail);
-    if (m != null) return m.group(2)!.replaceAll(r'\n', '\n');
-    // Fallback: first quoted line that looks like a shell command.
+        ).firstMatch(detail);
+    if (cmdMatch != null) return cmdMatch.group(2)!.replaceAll(r'\n', '\n');
+
+    // Check for URL / domain
+    final urlMatch = RegExp(
+          r'"(url|Url|targetUrl|target_url|absolute_path_uri|uri)"\s*:\s*"((?:[^"\\]|\\.)*)"',
+          caseSensitive: false,
+        ).firstMatch(detail);
+    if (urlMatch != null) return urlMatch.group(2)!;
+
+    // Direct URL in string
+    final rawUrlMatch = RegExp(r'https?://[^\s"<>]+').firstMatch(detail);
+    if (rawUrlMatch != null) return rawUrlMatch.group(0)!;
+
+    // Fallback: first quoted line that looks like a shell command or URL.
     for (final line in detail.split('\n')) {
       final t = line.trim();
       if (t.isNotEmpty && !t.startsWith('{') && !t.startsWith('}')) {

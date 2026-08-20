@@ -270,9 +270,44 @@ class ChatMessage {
 
 enum ToolDecision { allow, deny }
 
-/// Portée d'une décision d'approbation : ponctuelle (par défaut) ou
-/// « pour toute la session » (auto-approuvé côté daemon ensuite).
-enum ApprovalScope { once, session }
+/// Portée d'une décision d'approbation : ponctuelle, conversation/session, projet, ou globale (toujours).
+enum ApprovalScope {
+  once,
+  session,
+  project,
+  global;
+
+  String toWireString() {
+    switch (this) {
+      case ApprovalScope.session:
+        return 'session';
+      case ApprovalScope.project:
+        return 'project';
+      case ApprovalScope.global:
+        return 'global';
+      case ApprovalScope.once:
+        return 'once';
+    }
+  }
+
+  static ApprovalScope fromWire(String? val) {
+    if (val == null) return ApprovalScope.once;
+    switch (val.toLowerCase()) {
+      case 'session':
+      case 'conversation':
+        return ApprovalScope.session;
+      case 'project':
+      case 'workspace':
+        return ApprovalScope.project;
+      case 'global':
+      case 'always':
+        return ApprovalScope.global;
+      case 'once':
+      default:
+        return ApprovalScope.once;
+    }
+  }
+}
 
 class ToolApprovalRequest {
   final String callId;
@@ -284,9 +319,9 @@ class ToolApprovalRequest {
   final int stepIndex;
   final String approvalType;
   final String? filePath;
+  final String? url;
 
-  /// "Ne plus redemander pour cette session" — le daemon auto-approuve les
-  /// approbations du même type pour cette cascade.
+  /// Portée sélectionnée pour l'approbation.
   final ApprovalScope scope;
 
   const ToolApprovalRequest({
@@ -299,6 +334,7 @@ class ToolApprovalRequest {
     this.stepIndex = -1,
     this.approvalType = 'approval',
     this.filePath,
+    this.url,
     this.scope = ApprovalScope.once,
   });
 
@@ -314,9 +350,8 @@ class ToolApprovalRequest {
       stepIndex: (json['stepIndex'] as num?)?.toInt() ?? -1,
       approvalType: json['approvalType'] ?? 'approval',
       filePath: json['filePath'],
-      scope: json['scope'] == 'session'
-          ? ApprovalScope.session
-          : ApprovalScope.once,
+      url: json['url'] ?? json['targetUrl'],
+      scope: ApprovalScope.fromWire(json['scope']?.toString()),
     );
   }
 }

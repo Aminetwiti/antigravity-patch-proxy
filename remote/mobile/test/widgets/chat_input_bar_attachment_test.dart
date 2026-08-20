@@ -30,8 +30,9 @@ void main() {
 
     // Verify menu items
     expect(find.text('Prendre une photo'), findsOneWidget);
-    expect(find.text('Choisir une image'), findsOneWidget);
-    expect(find.text('Sélectionner un fichier'), findsOneWidget);
+    expect(find.text('Choisir des images'), findsOneWidget);
+    expect(find.text('Sélectionner des fichiers'), findsOneWidget);
+    expect(find.text('Coller depuis le presse-papier'), findsOneWidget);
     expect(find.text('Saisie manuelle (Base64 / Texte)'), findsOneWidget);
 
     // Tap manual entry
@@ -65,5 +66,60 @@ void main() {
 
     // Verify attachment preview is cleared after send
     expect(find.byIcon(Icons.close_rounded), findsNothing);
+  });
+
+  testWidgets('ChatInputBar supports multi-attachments and deletion', (tester) async {
+    String? sentMessage;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ChatInputBar(
+            onSend: (msg, {modelEnum, modelUID, queued = false}) {
+              sentMessage = msg;
+            },
+          ),
+        ),
+      ),
+    );
+
+    // Add first attachment
+    await tester.tap(find.byIcon(Icons.add));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Saisie manuelle (Base64 / Texte)'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Nom du fichier (ex: data.json, doc.md)'), 'file1.txt');
+    await tester.enterText(find.widgetWithText(TextField, 'Contenu'), 'Content 1');
+    await tester.tap(find.text('Joindre'));
+    await tester.pumpAndSettle();
+
+    // Add second attachment
+    await tester.tap(find.byIcon(Icons.add));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Saisie manuelle (Base64 / Texte)'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Nom du fichier (ex: data.json, doc.md)'), 'file2.txt');
+    await tester.enterText(find.widgetWithText(TextField, 'Contenu'), 'Content 2');
+    await tester.tap(find.text('Joindre'));
+    await tester.pumpAndSettle();
+
+    // Multi-attachment header should be visible
+    expect(find.textContaining('2 pièces jointes'), findsOneWidget);
+    expect(find.text('Tout effacer'), findsOneWidget);
+    expect(find.text('file1.txt'), findsOneWidget);
+    expect(find.text('file2.txt'), findsOneWidget);
+
+    // Send combined message
+    await tester.tap(find.byIcon(Icons.arrow_forward));
+    await tester.pumpAndSettle();
+
+    expect(sentMessage, isNotNull);
+    expect(sentMessage, contains('[Fichier: file1.txt]'));
+    expect(sentMessage, contains('Content 1'));
+    expect(sentMessage, contains('[Fichier: file2.txt]'));
+    expect(sentMessage, contains('Content 2'));
+
+    // Cleared after send
+    expect(find.textContaining('pièces jointes'), findsNothing);
   });
 }

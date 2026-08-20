@@ -1165,9 +1165,11 @@ class DaemonApi {
   }
 
   /// Récupère la liste des tâches actives en arrière-plan (list_running_tasks).
-  Future<List<Map<String, dynamic>>> listRunningTasks() async {
+  Future<List<Map<String, dynamic>>> listRunningTasks({String? cascadeId}) async {
     try {
-      final res = await rpc('list_running_tasks', {});
+      final res = await rpc('list_running_tasks', {
+        if (cascadeId != null && cascadeId.isNotEmpty) 'cascadeId': cascadeId,
+      });
       final tasks = res['tasks'] ?? (res['data'] is Map ? res['data']['tasks'] : null);
       if (tasks is List) {
         return tasks.map((e) => Map<String, dynamic>.from(e is Map ? e : {})).toList();

@@ -122,8 +122,19 @@ abstract class AppMotion {
   }
 }
 
-/// Atmospheric background gradients
+/// Atmospheric background gradients — Antigravity 2.0 logo palette
+///
+/// Official AGY logo colors (extracted from blog SVG):
+///   Blue  #3186FF   Green #00B95C   Yellow #FBBC04 / #FFE432   Red #FC413D
+///   Accent #749BFF
 abstract class AppGradients {
+  // ── AGY Logo Palette (source of truth for all gradient tints) ──
+  static const Color _agyBlue   = Color(0xFF3186FF);
+  static const Color _agyGreen  = Color(0xFF00B95C);
+  static const Color _agyYellow = Color(0xFFFBBC04);
+  static const Color _agyRed    = Color(0xFFFC413D);
+  static const Color _agyAccent = Color(0xFF749BFF);
+
   /// Subtle studio-lit radial glow from top center into deep dark canvas
   static const RadialGradient zenithal = RadialGradient(
     center: Alignment(0.0, -1.25),
@@ -134,6 +145,84 @@ abstract class AppGradients {
     ],
     stops: [0.0, 0.65],
   );
+
+  // ── Decorative atmospheric orbs (blurred circles behind content) ──
+
+  /// Blue orb — top-right placement, 5% opacity dark / 3% light
+  static RadialGradient orbBlue({bool isDark = true}) => RadialGradient(
+    center: Alignment.center,
+    radius: 0.8,
+    colors: [
+      _agyBlue.withValues(alpha: isDark ? 0.06 : 0.035),
+      _agyBlue.withValues(alpha: 0.0),
+    ],
+  );
+
+  /// Green orb — bottom-left placement
+  static RadialGradient orbGreen({bool isDark = true}) => RadialGradient(
+    center: Alignment.center,
+    radius: 0.8,
+    colors: [
+      _agyGreen.withValues(alpha: isDark ? 0.05 : 0.03),
+      _agyGreen.withValues(alpha: 0.0),
+    ],
+  );
+
+  /// Yellow orb — top-left placement (optional warmth)
+  static RadialGradient orbYellow({bool isDark = true}) => RadialGradient(
+    center: Alignment.center,
+    radius: 0.7,
+    colors: [
+      _agyYellow.withValues(alpha: isDark ? 0.04 : 0.025),
+      _agyYellow.withValues(alpha: 0.0),
+    ],
+  );
+
+  // ── Card surface washes (barely-visible tint on card backgrounds) ──
+
+  /// Cool card wash: blue→green at 5% opacity (info / neutral cards)
+  static LinearGradient cardCool({bool isDark = true}) => LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [
+      _agyBlue.withValues(alpha: isDark ? 0.05 : 0.04),
+      _agyGreen.withValues(alpha: isDark ? 0.04 : 0.03),
+    ],
+  );
+
+  /// Warm card wash: yellow→red at 5% opacity (attention / action cards)
+  static LinearGradient cardWarm({bool isDark = true}) => LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [
+      _agyYellow.withValues(alpha: isDark ? 0.06 : 0.04),
+      _agyRed.withValues(alpha: isDark ? 0.05 : 0.03),
+    ],
+  );
+
+  // ── Full-color CTA gradient (the only surface with visible gradient) ──
+
+  /// Primary action button gradient: AGY blue → lighter accent
+  static const LinearGradient accentCta = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [_agyBlue, _agyAccent],
+  );
+
+  // ── Branded shimmer sweep for skeleton loaders ──
+
+  /// Shimmer with subtle AGY blue tint instead of neutral grey
+  static List<Color> shimmerColors({bool isDark = true}) => isDark
+      ? [
+          const Color(0xFF1B1F27),
+          _agyBlue.withValues(alpha: 0.08),
+          const Color(0xFF1B1F27),
+        ]
+      : [
+          const Color(0xFFEAEEF2),
+          _agyBlue.withValues(alpha: 0.06),
+          const Color(0xFFEAEEF2),
+        ];
 }
 
 /// Typography scale matching Antigravity 2.0 & DESIGN.md

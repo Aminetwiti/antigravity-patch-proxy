@@ -2143,26 +2143,53 @@ func (s *Server) handleADB(conn *websocket.Conn, msg IncomingMessage) bool {
 	return false
 }
 
+// parsePermissionScope convertit la chaîne de portée reçue du mobile
+// ("once", "conversation", "session", "workspace", "project", "global")
+// en valeur enum PermissionScope numérique de cortex_pb.
+func parsePermissionScope(scopeStr string) uint64 {
+	switch strings.ToLower(scopeStr) {
+	case "conversation", "session":
+		return connectrpc.PermissionScopeConversation
+	case "workspace":
+		return connectrpc.PermissionScopeWorkspace
+	case "project":
+		return connectrpc.PermissionScopeProject
+	case "global", "always":
+		return connectrpc.PermissionScopeGlobal
+	default:
+		return connectrpc.PermissionScopeOnce
+	}
+}
+
 // buildApprovalPayload construit le oneof + payload HandleCascadeUserInteraction
-// pour une d├®cision. run_command = 5, file_permission = 19, permission = 21,
-// approval = 23 (fallback g├®n├®rique). Partag├® entre submit_approval et
-// l'auto-refus d'expiration. denyReason (texte libre, ex. instruction apr├¿s un
-// refus) n'est transmis que pour run_command ÔÇö champ 3 (submitted) du
-// CascadeRunCommandInteraction ; le protocole n'expose pas de texte libre pour
-// les autres types, il est ignor├® sans erreur.
-func buildApprovalPayload(approvalType string, confirm bool, command, filePath, denyReason string) (int, []byte) {
-	oneofField := connectrpc.InteractionApproval // fallback g├®n├®rique
+// pour une décision. run_command = 5, open_browser_url = 6, read_url_content = 17,
+// file_permission = 19, permission = 21, ask_question = 22, approval = 23 (fallback).
+// Partagé entre submit_approval et l'auto-refus d'expiration.
+func buildApprovalPayload(approvalType string, confirm bool, command, filePath, denyReason string, scopeArgs ...string) (int, []byte) {
+	oneofField := connectrpc.InteractionApproval // fallback générique
 	var oneofPayload []byte
+	scopeStr := "once"
+	if len(scopeArgs) > 0 && scopeArgs[0] != "" {
+		scopeStr = scopeArgs[0]
+	}
+	scope := parsePermissionScope(scopeStr)
+
 	switch strings.ToLower(approvalType) {
 	case "run_command":
 		oneofField = connectrpc.InteractionRunCommand
 		oneofPayload = connectrpc.BuildRunCommandInteraction(confirm, command, denyReason)
 	case "file_permission":
 		oneofField = connectrpc.InteractionFilePermission
-		oneofPayload = connectrpc.BuildFilePermissionInteraction(confirm, 2, filePath)
+		oneofPayload = connectrpc.BuildFilePermissionInteraction(confirm, scope, filePath)
 	case "permission":
 		oneofField = connectrpc.InteractionPermission
-		oneofPayload = connectrpc.BuildPermissionInteraction(confirm, 2)
+		oneofPayload = connectrpc.BuildPermissionInteraction(confirm, scope, filePath)
+	case "read_url_content", "read_url", "browse":
+		oneofField = connectrpc.InteractionReadUrlContent
+		oneofPayload = connectrpc.BuildReadUrlContentInteraction(confirm)
+	case "open_browser_url":
+		oneofField = connectrpc.InteractionOpenBrowserURL
+		oneofPayload = connectrpc.BuildOpenBrowserUrlInteraction(confirm)
 	case "ask_question":
 		oneofField = connectrpc.InteractionAskQuestion
 		oneofPayload = connectrpc.BuildAskQuestionInteraction(nil, denyReason, !confirm)
@@ -2172,24 +2199,32 @@ func buildApprovalPayload(approvalType string, confirm bool, command, filePath, 
 	return oneofField, oneofPayload
 }
 
-// sessionApprovalKey : cl├® de cache ┬½ toujours autoriser pour cette session ┬╗.
+// sessionApprovalKey : clé de cache « toujours autoriser ».
 func sessionApprovalKey(cascadeID, approvalType string) string {
 	return cascadeID + "|" + strings.ToLower(approvalType)
 }
 
-// hasSessionApproval rapporte si l'utilisateur a d├®j├á auto-approuv├® ce type
-// d'approbation pour cette cascade (B3).
+// hasSessionApproval rapporte si l'utilisateur a déjà auto-approuvé ce type
+// d'approbation pour cette cascade ou globalement.
 func (s *Server) hasSessionApproval(cascadeID, approvalType string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.sessionApprovals[sessionApprovalKey(cascadeID, approvalType)]
+	return s.sessionApprovals[sessionApprovalKey(cascadeID, approvalType)] || s.sessionApprovals[sessionApprovalKey("*", approvalType)]
 }
 
-// markSessionApproval enregistre l'auto-approbation pour le reste de la session.
-func (s *Server) markSessionApproval(cascadeID, approvalType string) {
+// markSessionApproval enregistre l'auto-approbation pour le reste de la session ou globalement.
+func (s *Server) markSessionApproval(cascadeID, approvalType string, scopeArgs ...string) {
 	s.mu.Lock()
-	s.sessionApprovals[sessionApprovalKey(cascadeID, approvalType)] = true
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	scope := "session"
+	if len(scopeArgs) > 0 && scopeArgs[0] != "" {
+		scope = scopeArgs[0]
+	}
+	if strings.ToLower(scope) == "global" || strings.ToLower(scope) == "always" {
+		s.sessionApprovals[sessionApprovalKey("*", approvalType)] = true
+	} else {
+		s.sessionApprovals[sessionApprovalKey(cascadeID, approvalType)] = true
+	}
 }
 
 type OutgoingMessage struct {
@@ -3221,11 +3256,17 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		if cascadeID != "" {
 			s.scanRunningTasksFromTranscript(cascadeID)
 		}
+		var taskList []RunningTaskInfo
+		if cascadeID != "" {
+			taskList = s.runningTasks.listTasksForCascade(cascadeID, true)
+		} else {
+			taskList = s.runningTasks.listTasks(true)
+		}
 		s.writeJSON(conn, OutgoingMessage{
 			Type:      "response",
 			RequestID: msg.RequestID,
 			Data: map[string]interface{}{
-				"tasks": s.runningTasks.listTasks(true),
+				"tasks": taskList,
 			},
 		})
 		return
@@ -3811,13 +3852,12 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 
-		// B3 : ┬½ pour toute la session ┬╗ ÔåÆ le daemon ne redemandera plus pour
-		// ce type d'approbation sur cette cascade.
-		if msg.Scope == "session" && confirm {
-			s.markSessionApproval(msg.CascadeID, msg.ApprovalType)
+		// Persistance de l'auto-approbation selon la portée choisie.
+		if confirm && (msg.Scope == "session" || msg.Scope == "conversation" || msg.Scope == "project" || msg.Scope == "workspace" || msg.Scope == "global" || msg.Scope == "always") {
+			s.markSessionApproval(msg.CascadeID, msg.ApprovalType, msg.Scope)
 		}
 
-		oneofField, oneofPayload := buildApprovalPayload(msg.ApprovalType, confirm, msg.Command, msg.FilePath, msg.DenyReason)
+		oneofField, oneofPayload := buildApprovalPayload(msg.ApprovalType, confirm, msg.Command, msg.FilePath, msg.DenyReason, msg.Scope)
 		raw, err = s.RPCClient.SubmitToolApproval(msg.CascadeID, msg.TrajectoryID, uint32(msg.StepIndex), oneofField, oneofPayload)
 		if err == nil {
 			s.writeJSON(conn, OutgoingMessage{
@@ -5890,6 +5930,22 @@ func (m *runningTaskManager) listTasks(onlyRunning bool) []RunningTaskInfo {
 	defer m.mu.RUnlock()
 	res := make([]RunningTaskInfo, 0, len(m.tasks))
 	for _, t := range m.tasks {
+		if !onlyRunning || t.Status == "running" {
+			res = append(res, *t)
+		}
+	}
+	return res
+}
+
+// listTasksForCascade returns only tasks belonging to the given cascade/session.
+func (m *runningTaskManager) listTasksForCascade(cascadeID string, onlyRunning bool) []RunningTaskInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	res := make([]RunningTaskInfo, 0)
+	for _, t := range m.tasks {
+		if t.CascadeID != cascadeID {
+			continue
+		}
 		if !onlyRunning || t.Status == "running" {
 			res = append(res, *t)
 		}

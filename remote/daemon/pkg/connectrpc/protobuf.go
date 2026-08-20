@@ -242,10 +242,21 @@ func BuildHandleStreamingCommand(commandText string, source uint64) []byte {
 const (
 	InteractionRunCommand     = 5  // CascadeRunCommandInteraction
 	InteractionOpenBrowserURL = 6  // CascadeOpenBrowserUrlInteraction
+	InteractionReadUrlContent = 17 // CascadeReadUrlContentInteraction
 	InteractionFilePermission = 19 // FilePermissionInteraction
 	InteractionPermission     = 21 // PermissionInteraction
 	InteractionAskQuestion    = 22 // AskQuestionInteraction
 	InteractionApproval       = 23 // ApprovalInteraction
+)
+
+// Valeurs enum PermissionScope (cortex_pb)
+const (
+	PermissionScopeUnspecified  uint64 = 0
+	PermissionScopeOnce         uint64 = 1
+	PermissionScopeConversation uint64 = 2
+	PermissionScopeWorkspace    uint64 = 3
+	PermissionScopeGlobal       uint64 = 4
+	PermissionScopeProject      uint64 = 5
 )
 
 // BuildRunCommandInteraction : {1: confirm, 2: proposed, 3: submitted}.
@@ -259,11 +270,28 @@ func BuildRunCommandInteraction(confirm bool, proposed, submitted string) []byte
 	return w.b
 }
 
-// BuildPermissionInteraction : {1: allow, 2: scope} (le scope 2 = CONVERSATION).
-func BuildPermissionInteraction(allow bool, scope uint64) []byte {
+// BuildReadUrlContentInteraction : {1: confirm}.
+func BuildReadUrlContentInteraction(confirm bool) []byte {
+	w := &writer{}
+	w.varintField(1, boolToUint64(confirm))
+	return w.b
+}
+
+// BuildOpenBrowserUrlInteraction : {1: confirm}.
+func BuildOpenBrowserUrlInteraction(confirm bool) []byte {
+	w := &writer{}
+	w.varintField(1, boolToUint64(confirm))
+	return w.b
+}
+
+// BuildPermissionInteraction : {1: allow, 2: scope, 3: path_or_url}.
+func BuildPermissionInteraction(allow bool, scope uint64, pathOrURL ...string) []byte {
 	w := &writer{}
 	w.varintField(1, boolToUint64(allow))
 	w.varintField(2, scope)
+	if len(pathOrURL) > 0 && pathOrURL[0] != "" {
+		w.stringField(3, pathOrURL[0])
+	}
 	return w.b
 }
 
