@@ -17,6 +17,7 @@ import * as customModelStore from './customModelStore';
 import type { CustomModelFileEntry as CustomModelFileEntryFromTypes } from './proxy/types';
 import { WELL_KNOWN_PRESETS } from './presets';
 import * as configExchange from './configExchange';
+import { DEFAULT_PROXY_PORT } from './constants';
 
 
 
@@ -300,12 +301,12 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
     try {
       const providers = await customModelStore.loadProviders();
       const customModels = await customModelStore.loadCustomModels();
-      let activePort = 50999;
+      let activePort = DEFAULT_PROXY_PORT;
       try {
         const home = process.env.HOME || process.env.USERPROFILE || require('os').homedir();
         const portFile = path.join(home, '.gemini', 'antigravity', '.proxy_port');
         const content = await fs.readFile(portFile, 'utf-8');
-        activePort = parseInt(content.trim(), 10) || 50999;
+        activePort = parseInt(content.trim(), 10) || DEFAULT_PROXY_PORT;
       } catch {
         /* default port */
       }

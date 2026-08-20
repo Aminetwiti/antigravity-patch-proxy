@@ -3,6 +3,8 @@
  */
 import type { CheckResult } from '../types';
 import { getAntigravityStatus } from '../core/antigravity';
+import { findAntigravityIdeInstallDir, getIdeExecutable } from '../core/paths';
+import { getIdeVersion } from '../core/ide-patch';
 
 export async function checkAntigravity(): Promise<CheckResult> {
   const status = await getAntigravityStatus();
@@ -20,6 +22,15 @@ export async function checkAntigravity(): Promise<CheckResult> {
   const running = status.running ? 'running' : 'not running';
   const proxy = status.proxyReachable ? 'reachable' : 'unreachable';
   const parts = [`v${v}`, running, `proxy ${proxy}`];
+
+  // The VS Code-based Antigravity IDE is the product the user actually runs;
+  // surface it alongside the classic install state.
+  const ideDir = findAntigravityIdeInstallDir();
+  const ideExe = ideDir ? getIdeExecutable(ideDir) : null;
+  if (ideExe) {
+    const ideVersion = getIdeVersion(ideDir ?? undefined);
+    parts.push(`IDE ${ideVersion ? `v${ideVersion}` : 'installed'}`);
+  }
 
   // The system is operational when either the app is running OR the local
   // proxy answers (the proxy is what actually serves the custom models, and

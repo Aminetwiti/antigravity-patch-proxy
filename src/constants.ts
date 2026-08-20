@@ -22,18 +22,10 @@ export const LS_CERT_FINGERPRINT = 'sha256/sTZpQemOWEytaZqa7P/y/dNXbHMdOAzMvzHEh
 /**
  * Default port for the local proxy server.
  *
- * IMPORTANT: This port is reserved for the MAIN Antigravity proxy.
- * The ag-doctor-ui emergency stub uses port 51999 (see STUB_PORT_DEFAULT)
- * to avoid conflicts when both run simultaneously.
- *
  * Override via the AG_PROXY_PORT environment variable. If the default is in
- * use, the proxy will try the FALLBACK_PROXY_PORTS in order, then bind to a
- * random dynamic port as a last resort.
+ * use, the proxy will bind to a random dynamic port as a last resort.
  */
-export const DEFAULT_PROXY_PORT = 50999;
-
-/** Fallback ports tried in order when DEFAULT_PROXY_PORT is in use. */
-export const FALLBACK_PROXY_PORTS: readonly number[] = [51000, 51001, 51002, 51003, 51004, 51005, 51006, 51007, 51008, 51009, 51010];
+export const DEFAULT_PROXY_PORT = 51074;
 
 /**
  * Default port for the ag-doctor-ui emergency proxy stub.

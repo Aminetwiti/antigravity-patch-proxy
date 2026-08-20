@@ -8,7 +8,7 @@
       - Which versions are installed
       - Which binary is currently active
       - Whether the running process is v1.x or v2.0+
-      - Port 50999 ownership (which PID is bound to it)
+      - Port ${AG_PROXY_PORT:-51074} ownership (which PID is bound to it)
 
     Use this script FIRST whenever you have problems. It avoids the most common
     mistake of patching the wrong installation.
@@ -21,6 +21,7 @@
 #>
 
 $ErrorActionPreference = 'Continue'
+$PROXY_PORT = if ($env:AG_PROXY_PORT) { $env:AG_PROXY_PORT } else { '51074' }
 
 # ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -140,13 +141,13 @@ if (-not $running) {
 }
 Write-Host ''
 
-# ─── 3. Port 50999 Ownership ──────────────────────────────────────────────
+# ─── 3. Port $PROXY_PORT Ownership ──────────────────────────────────────────────
 
-Write-Section '3. Port 50999 Ownership'
+Write-Section "3. Port $PROXY_PORT Ownership"
 
-$owner = Get-PortOwner 50999
+$owner = Get-PortOwner $PROXY_PORT
 if ($owner) {
-    Write-Host "  ⚠️  Port 50999 is bound by:" -ForegroundColor Yellow
+    Write-Host "  ⚠️  Port $PROXY_PORT is bound by:" -ForegroundColor Yellow
     Write-Host "     PID:     $($owner.PID)" -ForegroundColor White
     Write-Host "     Process: $($owner.Process)" -ForegroundColor White
     Write-Host "     Path:    $($owner.Path)" -ForegroundColor Gray
@@ -160,12 +161,12 @@ if ($owner) {
         Write-Host ''
         Write-Host '  ⚠️  This is NOT our patched build.' -ForegroundColor Yellow
         Write-Host '     If you started Antigravity 2.0 (uppercase), its proxy cannot start' -ForegroundColor Yellow
-        Write-Host '     because port 50999 is taken. Either:' -ForegroundColor Yellow
+        Write-Host '     because port $PROXY_PORT is taken. Either:' -ForegroundColor Yellow
         Write-Host '       (a) Kill PID $($owner.PID): Stop-Process -Id $($owner.PID) -Force' -ForegroundColor Yellow
         Write-Host '       (b) Run Antigravity 2.0 with AG_PROXY_PORT=51999' -ForegroundColor Yellow
     }
 } else {
-    Write-Host '  ✅ Port 50999 is FREE.' -ForegroundColor Green
+    Write-Host "  ✅ Port $PROXY_PORT is FREE." -ForegroundColor Green
 }
 Write-Host ''
 

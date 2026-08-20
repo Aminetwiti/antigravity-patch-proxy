@@ -1,12 +1,12 @@
 const path = require('path');
 const fs = require('fs');
 
-// Attempt to find the built proxy.js in app.asar or locally in the root dist/
-let proxyPath = process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'antigravity', 'resources', 'app.asar', 'dist', 'proxy.js') : '';
+// Prefer the freshly built proxy in this repo's dist/ — the copy bundled
+// inside a (possibly stale/legacy) app.asar is only a fallback.
+let proxyPath = path.resolve(__dirname, '..', '..', '..', 'dist', 'proxy.js');
 
-if (!fs.existsSync(proxyPath)) {
-  // Fallback to local root dist
-  proxyPath = path.resolve(__dirname, '..', '..', '..', 'dist', 'proxy.js');
+if (!fs.existsSync(proxyPath) && process.env.LOCALAPPDATA) {
+  proxyPath = path.join(process.env.LOCALAPPDATA, 'Programs', 'antigravity', 'resources', 'app.asar', 'dist', 'proxy.js');
 }
 
 if (!fs.existsSync(proxyPath)) {
@@ -49,11 +49,35 @@ if (!process.versions.electron) {
   };
 }
 
-const proxy = require(proxyPath);
+function run() {
+  const proxy = require(proxyPath);
+  proxy.startProxy().then((port) => {
+    console.log(`[StandaloneProxy] Proxy started successfully on port ${port}`);
+  }).catch(err => {
+    console.error('[StandaloneProxy] Failed to start proxy:', err);
+    process.exit(1);
+  });
+}
 
-proxy.startProxy().then((port) => {
-  console.log(`[StandaloneProxy] Proxy started successfully on port ${port}`);
-}).catch(err => {
-  console.error('[StandaloneProxy] Failed to start proxy:', err);
-  process.exit(1);
-});
+// Under a real Electron binary (recommended: ag-doctor-ui/node_modules/electron)
+// safeStorage is available, so DPAPI-encrypted API keys (`enc:`) can be
+// decrypted. safeStorage requires the app to be ready first.
+if (process.versions.electron) {
+  try {
+    const electron = require('electron');
+    if (electron.app && typeof electron.app.whenReady === 'function') {
+      electron.app.whenReady().then(run).catch((err) => {
+        console.error('[StandaloneProxy] app.whenReady failed:', err);
+        process.exit(1);
+      });
+      return;
+    }
+  } catch (e) {
+    console.error('[StandaloneProxy] electron bootstrap failed:', e.message);
+    if (process.env.ELECTRON_RUN_AS_NODE) {
+      console.error('[StandaloneProxy] ELECTRON_RUN_AS_NODE is set — unset it and relaunch, or spawn via `ag-doctor proxy start` which clears it automatically.');
+    }
+    process.exit(1);
+  }
+}
+run();

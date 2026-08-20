@@ -3,10 +3,11 @@ $ErrorActionPreference = 'Continue'
 # Portable paths — derived from $PSScriptRoot, never hardcoded.
 $ScriptDir = $PSScriptRoot
 $AgDoctor = Join-Path $ScriptDir 'ag-doctor\bin\ag-doctor.js'
+$PROXY_PORT = if ($env:AG_PROXY_PORT) { $env:AG_PROXY_PORT } else { '51074' }
 
-Write-Host '== Setting system proxy to 127.0.0.1:50999 ==' -ForegroundColor Cyan
+Write-Host "== Setting system proxy to 127.0.0.1:${PROXY_PORT} ==" -ForegroundColor Cyan
 try {
-  netsh winhttp set proxy proxy-server="127.0.0.1:50999" | Out-String | Write-Host
+  netsh winhttp set proxy proxy-server="127.0.0.1:${PROXY_PORT}" | Out-String | Write-Host
   Write-Host 'OK: netsh winhttp set proxy succeeded' -ForegroundColor Green
 } catch {
   Write-Host ("FAIL: " + $_.Exception.Message) -ForegroundColor Red

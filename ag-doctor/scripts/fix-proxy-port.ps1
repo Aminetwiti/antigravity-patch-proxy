@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Self-elevating helper that fixes the WinHTTP proxy to 127.0.0.1:50999.
+    Self-elevating helper that fixes the WinHTTP proxy to 127.0.0.1:<AG_PROXY_PORT>.
 
 .DESCRIPTION
     When run from a non-elevated PowerShell, `netsh winhttp set proxy` triggers
@@ -20,7 +20,7 @@
 #>
 
 $ErrorActionPreference = 'Stop'
-$ExpectedPort = 50999
+$ExpectedPort = if ($env:AG_PROXY_PORT) { [int]$env:AG_PROXY_PORT } else { 51074 }
 $ProxyValue  = "127.0.0.1:$ExpectedPort"
 
 function Is-Elevated {

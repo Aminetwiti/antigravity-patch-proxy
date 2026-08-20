@@ -200,24 +200,45 @@ export function addCustomModel(model: CustomModel, filePath?: string): CustomMod
 
 export function removeCustomModel(name: string, filePath?: string): CustomModelsFile {
   const file = loadCustomModels(filePath);
+  const cleanName = name.replace(/^models\//, '');
   // Match by name only when no provider is encoded, otherwise by full key.
   // Accept either the legacy plain name or the "provider::name" form.
   file.models = file.models.filter((m) => {
     if (name.includes('::')) return modelKey(m) !== name;
     return m.name !== name;
   });
-  saveCustomModels(file, filePath);
+
+  // Dual-format sync: loadCustomModels merges providers[] back into the model
+  // list, so a model removed from models[] but still referenced by a provider
+  // entry would resurrect in every consumer (CLI list, doctor UI, proxy).
+  // loadCustomModels only returns { models }, so prune the raw file directly.
+  const fp = filePath ?? getCustomModelsPath();
+  let raw: any = { models: file.models };
+  try {
+    if (fs.existsSync(fp)) {
+      raw = JSON.parse(fs.readFileSync(fp, 'utf-8').replace(/^\uFEFF/, ''));
+    }
+  } catch {
+    raw = { models: file.models };
+  }
+  raw.models = file.models;
+  if (Array.isArray(raw.providers)) {
+    for (const p of raw.providers) {
+      if (!Array.isArray(p.models)) continue;
+      p.models = p.models.filter((pm: any) => {
+        if (!pm) return false;
+        const pmId = String(pm.id ?? pm.displayName ?? '').replace(/^models\//, '');
+        const pmName = String(pm.name ?? '').replace(/^models\//, '');
+        return pmId !== cleanName && pmName !== cleanName && pmId !== name && pmName !== name;
+      });
+    }
+  }
+  const dir = path.dirname(fp);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(fp, JSON.stringify(raw, null, 2), 'utf-8');
   return file;
 }
 
-/**
- * Heuristic: detect if the file contains encrypted API keys (opaque strings).
- *
- * A key is considered "encrypted" if it's non-empty AND doesn't match any
- * known plaintext prefix. This catches safeStorage-encrypted blobs (which are
- * base64 with no recognizable prefix) without false-positives on legitimate
- * keys from any supported provider.
- */
 export function looksEncrypted(filePath?: string): boolean {
   const fp = filePath ?? getCustomModelsPath();
   if (!fs.existsSync(fp)) return false;
@@ -226,6 +247,50 @@ export function looksEncrypted(filePath?: string): boolean {
     if (typeof m.apiKey !== 'string' || m.apiKey.length === 0) return false;
     return !KNOWN_KEY_PREFIXES.some((p) => m.apiKey!.startsWith(p));
   });
+}
+
+/**
+ * True when the key was encrypted by the language server's own scheme:
+ * "enc:" + base64 of a blob starting with the 3-byte ASCII marker "v10"
+ * (0x76 0x31 0x30). The local proxy's cryptoStore cannot decrypt this format
+ * (it is not Chromium OSCrypt v10 and not raw DPAPI) — only the Go language
+ * server can. Such keys must be re-entered via `ag-doctor models rekey`.
+ */
+export function isLsEncryptedKey(apiKey: string | undefined): boolean {
+  if (typeof apiKey !== 'string' || !apiKey.startsWith('enc:')) return false;
+  try {
+    const buf = Buffer.from(apiKey.slice(4), 'base64');
+    return buf.length >= 3 && buf[0] === 0x76 && buf[1] === 0x31 && buf[2] === 0x30;
+  } catch {
+    return false;
+  }
+}
+
+/** Number of models whose key is in the language server's own format. */
+export function countLsEncryptedKeys(filePath?: string): number {
+  const fp = filePath ?? getCustomModelsPath();
+  if (!fs.existsSync(fp)) return 0;
+  try {
+    const file = loadCustomModels(fp);
+    return file.models.filter((m) => isLsEncryptedKey(m.apiKey)).length;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Encode a plaintext API key in the proxy-compatible fallback format
+ * ("fallback:" + base64). The local proxy's cryptoStore decrypts this format
+ * without requiring Electron safeStorage, so keys re-entered through the CLI
+ * keep working when the proxy runs standalone.
+ *
+ * SECURITY NOTE: this is base64 obfuscation, not encryption — anyone with
+ * read access to custom_models.json can recover the plaintext key. It exists
+ * because the CLI cannot use Electron's safeStorage; it matches the existing
+ * `fallback:` convention the proxy already understands.
+ */
+export function toFallbackKey(plaintext: string): string {
+  return 'fallback:' + Buffer.from(plaintext, 'utf-8').toString('base64');
 }
 
 export interface ValidationIssue {

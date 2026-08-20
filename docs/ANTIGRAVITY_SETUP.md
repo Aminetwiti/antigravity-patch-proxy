@@ -30,7 +30,7 @@
 │  ┌──────────────┐   HTTPS    cloudcode-pa.googleapis.com:443                 │
 │  │ UI renderer  │──────────▶  (hosts Windows → 127.0.0.1:443)               │
 │  └──────────────┘                                                           │
-│  ┌──────────────┐   HTTPS    127.0.0.1:50999                                │
+│  ┌──────────────┐   HTTPS    127.0.0.1:${AG_PROXY_PORT:-51074}                                │
 │  │ Language S.  │──────────▶  (binary patch redirige vers le proxy local)   │
 │  └──────────────┘                                                           │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -39,7 +39,7 @@
                      │                                     │
                      ▼                                     ▼
           ┌─────────────────────┐              ┌─────────────────────┐
-          │ MITM HTTPS :443     │              │ Proxy local :50999  │
+          │ MITM HTTPS :443     │              │  Proxy local :${AG_PROXY_PORT:-51074}  │
           │ cert *.googleapis   │──────────────│ dist/proxy.js patché│
           └─────────────────────┘   HTTP       └─────────────────────┘
                                                             │
@@ -171,7 +171,7 @@ powershell -Command "Start-Process PowerShell -Verb RunAs -ArgumentList '-Execut
 4. Vérifier dans `C:\Users\amine\AppData\Roaming\Antigravity\logs\main.log` :
 
 ```
-[Proxy] Server listening on http://127.0.0.1:50999
+[Proxy] Server listening on http://127.0.0.1:${AG_PROXY_PORT:-51074}
 [Proxy] Loaded custom models count: <N>
 [Proxy] Custom model "<votre-model>" => ...
 ```
@@ -333,7 +333,7 @@ text = text.replace(/https:(\/\/)cloudcode-pa\.googleapis\.com/g, `${proxyProto}
 | `src/customModelStore.ts` | Module ajouté par le patch — charge/valide `custom_models.json`. |
 | `src/schemaValidator.ts` | Module ajouté par le patch — valide la structure des modèles. |
 | `scripts/patch_2_2_1.js` | **Patcheur chirurgical** — injecte les 3 modules ci-dessus dans `app.asar`. |
-| `scripts/mitm/mitm_443.js` | Forwarder HTTPS 443 → HTTP 50999. |
+| `scripts/mitm/mitm_443.js` | Forwarder HTTPS 443 → HTTP ${AG_PROXY_PORT:-51074}. |
 | `scripts/mitm/start_mitm_443.ps1` | Script PowerShell admin : importe la CA et lance `mitm_443.js`. |
 | `scripts/deploy/deploy.ps1` | Déploiement complet (Windows). |
 | `scripts/repack/repack.ps1` | Recompile + repack complet (utilisé en secours). |
@@ -417,7 +417,7 @@ copy "C:\Users\amine\AppData\Local\Programs\antigravity\resources\app.asar.bak" 
 | `Loaded custom models count: 0` | `custom_models.json` invalide / BOM | Strip BOM, vérifier JSON |
 | Modèles custom absents après mise à jour Antigravity | Patch pas réappliqué | Lancer `repatch.bat` |
 | MITM ne démarre pas sur 443 | Pas admin / port déjà utilisé | Vérifier UAC / tuer l'ancien MITM |
-| `connectex: No connection could be made` sur 50999 | Proxy local n'a pas démarré | Inspecter `main.log` (chercher `[Proxy]` lines); redémarrer Antigravity |
+| `connectex: No connection could be made` sur ${AG_PROXY_PORT:-51074} | Proxy local n'a pas démarré | Inspecter `main.log` (chercher `[Proxy]` lines); redémarrer Antigravity |
 
 ---
 

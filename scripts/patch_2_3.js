@@ -348,11 +348,22 @@ async function main() {
   let totalBytes = 0;
   let filesAdded = 0;
   for (const mod of MISSING_JS_MODULES) {
-    const srcJs = path.join(repoDist, `${mod}.js`);
-    const dstJs = path.join(buildDist, `${mod}.js`);
+    let srcJs = path.join(repoDist, `${mod}.js`);
     if (!fs.existsSync(srcJs)) {
-      die(`required source missing: ${srcJs}\n` +
-          `  (you may need to run \`npm run build\` in the repo first)`);
+      // The repo moved service modules into src/services/ (compiled to
+      // dist/services/). The fallbacks below assume the module shape matches
+      // what the asar's require sites expect (named/default exports). After a
+      // real classic repack, smoke-test the merged asar before shipping.
+      if (mod === 'cryptoStore' && fs.existsSync(path.join(repoDist, 'services', 'cryptoStore.js'))) {
+        srcJs = path.join(repoDist, 'services', 'cryptoStore.js');
+      } else if (mod === 'customModelStore' && fs.existsSync(path.join(repoDist, 'services', 'modelStore.js'))) {
+        srcJs = path.join(repoDist, 'services', 'modelStore.js');
+      } else if (fs.existsSync(path.join(repoDist, 'services', `${mod}.js`))) {
+        srcJs = path.join(repoDist, 'services', `${mod}.js`);
+      } else {
+        die(`required source missing: ${srcJs}\n` +
+            `  (you may need to run \`npm run build\` in the repo first)`);
+      }
     }
     // Ensure the destination subdirectory exists (e.g. dist/proxy/)
     ensureDir(path.dirname(dstJs));

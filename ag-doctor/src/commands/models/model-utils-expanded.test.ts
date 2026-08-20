@@ -153,7 +153,7 @@ describe('Model Utils & Capability Inference (25 tests)', () => {
   });
 
   it('validates valid http localhost base URL', () => {
-    const res = validateBaseUrl('http://localhost:50999/v1');
+    const res = validateBaseUrl('http://localhost:9999/v1');
     expect(res.valid).toBe(true);
   });
 

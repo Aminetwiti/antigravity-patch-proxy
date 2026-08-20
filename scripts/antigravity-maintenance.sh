@@ -36,11 +36,11 @@ health_check() {
     done
     
     # 2. Vérification Proxy Local
-    echo -e "\n${YELLOW}[2/3] Vérification du Proxy Local (Port 50999)...${NC}"
-    if nc -z -w 2 localhost 50999 2>/dev/null; then
-        echo -e "  ${GREEN}✅ Proxy local (Port 50999) actif et à l'écoute.${NC}"
+    echo -e "\n${YELLOW}[2/3] Vérification du Proxy Local (Port ${AG_PROXY_PORT:-51074})...${NC}"
+    if nc -z -w 2 localhost ${AG_PROXY_PORT:-51074} 2>/dev/null; then
+        echo -e "  ${GREEN}✅ Proxy local (Port ${AG_PROXY_PORT:-51074}) actif et à l'écoute.${NC}"
     else
-        echo -e "  ${RED}❌ Proxy local (Port 50999) inactif ou inaccessible.${NC}"
+        echo -e "  ${RED}❌ Proxy local (Port ${AG_PROXY_PORT:-51074}) inactif ou inaccessible.${NC}"
     fi
     
     # 3. Espace Disque

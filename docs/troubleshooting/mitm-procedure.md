@@ -59,7 +59,7 @@ Double-clic sur le VBS → UAC prompt → MITM démarre.
 | `EACCES` au lancement | Pas en admin | Relancer en admin |
 | `EADDRINUSE` port 443 | Un autre process bind déjà 443 | `netstat -ano \| findstr :443` → tuer le process |
 | MITM démarre mais LS continue d'échouer | CA non trusté | Réimporter [mitm-procedure.md#121-préparation-unique-une-seule fois](mitm-procedure.md) |
-| MITM forward error vers 50999 | Proxy off | Démarrer Antigravity (qui lance le proxy) |
+| MITM forward error vers ${AG_PROXY_PORT:-51074} | Proxy off | Démarrer Antigravity (qui lance le proxy) |
 | Erreur TLS côté LS | CA fingerprint mismatch | Vérifier que `certs/ca-cert.pem` n'a pas été régénéré sans réimport |
 
 ### 12.4 Logs du MITM
@@ -80,7 +80,7 @@ fichier :
 **Erreur d'analyse initiale** : lors du diagnostic du 2026-07-11 14:00, j'ai
 affirmé à tort que le MITM n'était pas requis. La vérité :
 
-- ✅ Le proxy sur 50999 est démarré automatiquement par `proxy-runner.js`.
+- ✅ Le proxy sur ${AG_PROXY_PORT:-51074} est démarré automatiquement par `proxy-runner.js`.
 - ❌ Le MITM sur 443 doit être démarré **manuellement** par l'utilisateur.
 - Sans MITM : `ECONNREFUSED 127.0.0.1:443` récurrent même si le proxy tourne.
 

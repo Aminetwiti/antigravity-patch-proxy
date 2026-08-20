@@ -71,9 +71,13 @@ class ModalManager {
    */
   open<T>(setup: (handle: ConfirmModalHandle) => T | Promise<T>): Promise<T> {
     if (this.active) {
-      return Promise.reject(
-        new Error('ModalManager: a modal is already open — close it before opening another.'),
-      );
+      // A second open() while one modal is up would otherwise surface as an
+      // uncaught rejection in every caller. Close the current modal first
+      // (resolving it as cancelled), then open the new one — this keeps rapid
+      // double-clicks (e.g. "Apply patch" while the preflight modal is open)
+      // from breaking the UI.
+      console.warn('[ModalManager] open() called while a modal is open — closing it first');
+      this.closeActive();
     }
 
     const handle: ConfirmModalHandle = {
@@ -292,5 +296,17 @@ class ModalManager {
       }
     }
   };
+
+  /** Force-close the active modal (if any), resolving it as cancelled. */
+  private closeActive(): void {
+    if (!this.active) return;
+    try {
+      this.active.cleanup();
+      this.active.resolve(null);
+    } catch {
+      // ignore
+    }
+    this.active = null;
+  }
 }
 

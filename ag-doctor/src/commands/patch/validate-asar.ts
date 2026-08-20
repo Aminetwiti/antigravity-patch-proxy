@@ -22,6 +22,9 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
+// Static import: loads asar-reader (and its process.noAsar side effect) so even
+// the early fs.existsSync/statSync calls work under Electron-as-node.
+import { listAsarPaths, readAsarFile as nativeReadAsarFile } from '../../core/asar-reader';
 
 export type AsarVerdict = 'ok' | 'warn' | 'block';
 
@@ -56,8 +59,10 @@ export interface AsarValidationReport {
   asarSizeBytes: number;
 }
 
-const MAIN_JS_EXPECTED_BYTES = 14_554;
+const MAIN_JS_EXPECTED_BYTES = 14_554; // kept for reference / docs
 const MAIN_JS_TOLERANCE = 0.10; // ±10 %
+/** Upper bound for a surgical main.js — the 21 MB overlay disaster case. */
+const MAX_MAIN_JS_BYTES = 1_000_000; // 1 MB
 const MAX_DELTA_BYTES = 100 * 1024; // 100 KB warning threshold
 
 interface AsarListEntry {
@@ -66,14 +71,19 @@ interface AsarListEntry {
 }
 
 function listAsarEntries(asarPath: string): string[] {
+  // Dependency-free reader first: @electron/asar requires Node >= 22 and fails
+  // under the doctor UI's workers (Electron's Node 18). Fall back to the
+  // library when available (plain Node >= 22).
   try {
-    // Lazy require: same pattern as asar-integrity.ts
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const paths = listAsarPaths(asarPath);
+    if (paths.length > 0) return paths;
+  } catch {
+    // fall through to @electron/asar
+  }
+  try {
     const asar = require('@electron/asar') as {
       listPackage?: (p: string) => unknown;
     };
-    // Support both default-export style and named-export style — same as the
-    // way `asar-integrity.ts` calls into the library.
     const fn = asar.listPackage ?? (asar as unknown as { default?: { listPackage?: (p: string) => unknown } }).default?.listPackage;
     if (typeof fn !== 'function') return [];
     const listed: unknown = (fn as (p: string) => unknown)(asarPath);
@@ -94,7 +104,12 @@ function listAsarEntries(asarPath: string): string[] {
 
 function readAsarFile(asarPath: string, filePath: string): Buffer | null {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const buf = nativeReadAsarFile(asarPath, filePath.replace(/^\//, ''));
+    if (buf) return buf;
+  } catch {
+    // fall through to @electron/asar
+  }
+  try {
     const asar = require('@electron/asar') as {
       extractFile?: (p: string, f: string) => unknown;
     };
@@ -198,8 +213,6 @@ export function validateAsar(asarPath: string, liveAsarPath?: string | null): As
   } else {
     const buf = readAsarFile(asarPath, mainJsEntry.replace(/^\//, ''));
     const size = buf?.length ?? 0;
-    const minOk = Math.floor(MAIN_JS_EXPECTED_BYTES * (1 - MAIN_JS_TOLERANCE));
-    const maxOk = Math.ceil(MAIN_JS_EXPECTED_BYTES * (1 + MAIN_JS_TOLERANCE));
     if (size === 0) {
       checks.push({
         id: 'main-js-present',
@@ -208,17 +221,18 @@ export function validateAsar(asarPath: string, liveAsarPath?: string | null): As
         status: 'fail',
         detail: 'dist/main.js exists but is empty.',
       });
-    } else if (size < minOk || size > maxOk) {
-      // A wildly oversized or shrunken main.js is the exact failure mode that
-      // bricked the live app on 2026-07-11 (a 21 MB overlay replaced the real
-      // 14.5 KB file). Treat it as required so the verdict escalates to 'block'.
+    } else if (size > MAX_MAIN_JS_BYTES) {
+      // A wildly oversized main.js is the exact failure mode that bricked the
+      // live app on 2026-07-11 (a 21 MB overlay replaced the real ~14 KB
+      // file). Surgical builds (original ~14.5 KB, repo build ~18 KB) are far
+      // below this bound, so only the disaster case blocks.
       checks.push({
         id: 'main-js-present',
         label: 'dist/main.js size',
         required: true,
         status: 'fail',
         value: size,
-        detail: `Expected ≈ ${MAIN_JS_EXPECTED_BYTES} B (±10 %), got ${size} B. A surgical patch should keep this file small.`,
+        detail: `main.js is ${size} B — a multi-MB overlay that would brick the app. A surgical patch keeps this file small (< 1 MB).`,
       });
     } else {
       checks.push({

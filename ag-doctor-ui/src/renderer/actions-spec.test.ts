@@ -64,9 +64,9 @@ describe('Proxy ON Action Workflow & Rollback', () => {
   });
 
   it('fails cleanly at step 1 if proxy server fails to start', () => {
-    const res = executeProxyOnFlow({ ok: false, message: 'Port 50999 in use' });
+    const res = executeProxyOnFlow({ ok: false, message: 'Proxy port in use' });
     expect(res.status).toBe('start_error');
-    expect(res.error).toContain('Port 50999 in use');
+    expect(res.error).toContain('Proxy port in use');
   });
 
   it('triggers rollback (proxyStop) if system proxy configuration fails at step 2', () => {

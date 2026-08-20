@@ -6,16 +6,10 @@
  *
  * Schema (all fields optional — defaults are applied at read time):
  * {
- *   "mitmPort": 50999,
+ *   "mitmPort": <DEFAULT_MITM_PORT>,
  *   "logLines": 100,
  *   "doctorInterval": 5000,
- *   "ui": { "theme": "dark", "accent": "#22d3ee" },
- *   "history": { "maxRuns": 50 },
- *   "snapshot": { "enabled": true, "maxSnapshots": 10 },
- *   "patch": {
- *     "versionOverride": "2.3.0+",        // force a specific version range
- *     "overrideReason": "auto-detect failed"  // optional, audit trail
- *   }
+ *   ...
  * }
  */
 import fs from 'fs';
@@ -62,7 +56,7 @@ export interface AgDoctorConfig {
 }
 
 export const DEFAULT_CONFIG: AgDoctorConfig = {
-  mitmPort: 50999,
+  mitmPort: 51074,
   logLines: 100,
   doctorInterval: 5000,
   ui: {
@@ -82,6 +76,8 @@ export const DEFAULT_CONFIG: AgDoctorConfig = {
     overrideSetAt: null,
   },
 };
+
+export const DEFAULT_MITM_PORT = DEFAULT_CONFIG.mitmPort;
 
 /** Type guard for a string that is one of the known patch ranges. */
 export function isKnownPatchRange(s: unknown): s is KnownPatchRange {

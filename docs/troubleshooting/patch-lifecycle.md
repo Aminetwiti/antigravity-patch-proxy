@@ -74,7 +74,7 @@ app.asar.pre-surgical-20260711T135228.bak    ← snapshot après restauration
 - **Caller** : `src/proxy/modelLoader.ts` (ligne 10 : `import * as cryptoStore from '../cryptoStore';`)
 - **Fallback dans le LS** : `src/languageServer.ts` (ligne 168-169)
 - **Autre doc liée** :
-  - `TROUBLESHOOTING.md` (flowchart port 50999)
+  - `TROUBLESHOOTING.md` (flowchart port ${AG_PROXY_PORT:-51074})
   - `SOLUTION_LAUNCH_FIX.md` (problème de lancement après update)
   - `docs/MITM-Notes.md` (notes sur le MITM 443)
 

@@ -1,6 +1,7 @@
 @echo off
-REM Kill any process holding port 50999 then start a new MITM forwarder.
-set PORT=50999
+REM Kill any process holding the configured proxy port then start a new MITM forwarder.
+set PORT=%AG_PROXY_PORT%
+if "%PORT%"=="" set PORT=51074
 for /f "tokens=5" %%P in ('netstat -ano ^| findstr /R "[: ]%PORT% .*LISTENING"') do (
   echo Killing PID %%P on %PORT%...
   taskkill /F /T /PID %%P 2>&1

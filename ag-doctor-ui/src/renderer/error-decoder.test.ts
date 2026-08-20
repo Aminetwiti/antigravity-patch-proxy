@@ -121,7 +121,7 @@ describe('decodeError', () => {
   });
 
   it('matches EADDRINUSE with run-doctor', () => {
-    const r = decodeError('Error: listen EADDRINUSE: address already in use :::50999');
+    const r = decodeError('Error: listen EADDRINUSE: address already in use :::9999');
     expect(r.matched).toBe(true);
     expect(r.action).toBe('run-doctor');
     expect(r.pattern).toContain('EADDRINUSE');
