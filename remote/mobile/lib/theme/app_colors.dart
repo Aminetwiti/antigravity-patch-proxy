@@ -3,55 +3,77 @@ import 'package:flutter/material.dart';
 /// Antigravity 2.0 Color Palette ("The Quiet Console")
 /// Extracted from Antigravity IDE computed tokens (htmlcss.log) + DESIGN.md
 abstract class AppColors {
-  // ── Surfaces (Dark Zinc Console & VSCode Bridge)
-  static const Color surfaceBase = Color(0xFF09090B);   // #09090b (Zinc-950, deepest canvas — --background #101010)
-  static const Color surfaceRaised = Color(0xFF18181B); // #18181b (Zinc-900, app surface: sidebar, AppBar — #21252b)
-  static const Color surfaceInput = Color(0xFF27272A);  // #27272a (Zinc-800, inputs, code blocks, panels — #1b1d23)
-  static const Color surfaceHover = Color(0xFF3F3F46);  // #3f3f46 (Zinc-700, raised hover — #2c313a)
-  static const Color sidebarBackground = Color(0xFF21252B); // #21252b (--vscode-sideBar-background)
-  static const Color editorBackground = Color(0xFF282C34);  // #282c34 (--vscode-editor-background)
-  static const Color listSelectionBg = Color(0xFF2C313A);   // #2c313a (--vscode-list-activeSelectionBackground)
+  // ── Backgrounds & Surfaces (Antigravity 2.0 Quiet Console)
+  static const Color surfaceBase = Color(0xFF202020);   // #202020 (background.default)
+  static const Color surfaceRaised = Color(0xFF242424); // #242424 (surface.default / background.elevated)
+  static const Color surfaceInput = Color(0xFF282828);  // #282828 (surface.raised / background.subtle)
+  static const Color surfaceOverlay = Color(0xFF2B2B2B);// #2b2b2b (surface.overlay)
+  static const Color surfaceHover = Color(0xFF2F2F2F);  // #2f2f2f (surface.hover)
+  static const Color surfacePressed = Color(0xFF353535);// #353535 (surface.pressed)
+  static const Color surfaceDisabled = Color(0xFF222222);// #222222 (surface.disabled)
+  static const Color sidebarBackground = Color(0xFF202020); // #202020
+  static const Color editorBackground = Color(0xFF1A1A1A);  // #1a1a1a
+  static const Color listSelectionBg = Color(0xFF3C4043);   // #3c4043 (interactive.selection)
 
-  // ── Borders (PC --border / --border-strong / --vscode-editorWidget-border)
-  static const Color borderSubtle = Color(0xFF27272A);  // #27272a (rgba(255,255,255,0.05))
-  static const Color borderStrong = Color(0xFF3F3F46);  // #3f3f46 (#3a3f4b)
+  // ── Borders (Antigravity 2.0 Border Scale)
+  static const Color borderSubtle = Color(0xFF303030);  // #303030 (border.subtle)
+  static const Color borderDefault = Color(0xFF3A3A3A); // #3a3a3a (border.default)
+  static const Color borderStrong = Color(0xFF4A4A4A);  // #4a4a4a (border.strong)
+  static const Color borderFocus = Color(0xFF8AB4F8);   // #8ab4f8 (border.focus)
 
-  // ── Ink / Text (PC --text-0 … --text-3 & VSCode Foregrounds)
-  static const Color inkPrimary = Color(0xFFF4F4F5);   // #f4f4f5 (high contrast text — #ffffff / #cccccc)
-  static const Color inkSecondary = Color(0xFFD4D4D8); // #d4d4d8 (Zinc 300 / #9da5b4 subtitles)
-  static const Color inkMuted = Color(0xFFA1A1AA);     // #a1a1aa (Zinc 400 / #636d83 line numbers)
-  static const Color inkFaint = Color(0xFF919BAF);     // #919baf (10px uppercase tracking labels)
-  static const Color codeGold = Color(0xFFD7BA7D);     // #d7ba7d (--code-foreground / syntax strings)
+  // ── Ink / Text (Antigravity 2.0 Typography Foregrounds)
+  static const Color inkPrimary = Color(0xFFF1F1F1);   // #f1f1f1 (text.primary)
+  static const Color inkSecondary = Color(0xFFB8B8B8); // #b8b8b8 (text.secondary)
+  static const Color inkTertiary = Color(0xFF969696);  // #969696 (text.tertiary)
+  static const Color inkMuted = Color(0xFF858585);     // #858585 (text.muted)
+  static const Color inkDisabled = Color(0xFF606060);  // #606060 (text.disabled)
+  static const Color inkFaint = Color(0xFF969696);     // #969696 (labels)
+  static const Color codeGold = Color(0xFFC7E1A3);     // #c7e1a3 (code.string)
 
-  // ── Accents & Actions (PC --accent-blue / --vscode-button-background / #528bff)
-  static const Color accentBlue = Color(0xFF3B82F6);     // #3b82f6 (primary action)
-  static const Color accentBlueBright = Color(0xFF528BFF); // #528bff (--vscode-focusBorder / badge)
-  static const Color buttonBackground = Color(0xFF4D78CC); // #4d78cc (--vscode-button-background)
-  static const Color accentBlueDeep = Color(0xFF2563EB); // #2563eb (pressed state)
+  // ── Accents & Actions (Antigravity 2.0 Google Blue Accent)
+  static const Color accentBlue = Color(0xFF8AB4F8);     // #8ab4f8 (accent.primary)
+  static const Color accentBlueHover = Color(0xFFAECBFA);// #aecbfa (accent.primaryHover)
+  static const Color accentBlueBright = Color(0xFFAECBFA);// #aecbfa
+  static const Color accentBluePressed = Color(0xFF669DF6);// #669df6 (accent.primaryPressed)
+  static const Color accentBlueDeep = Color(0xFF669DF6); // #669df6
+  static const Color accentSubtle = Color(0xFF263447);   // #263447 (accent.subtle)
+  static const Color buttonBackground = Color(0xFF8AB4F8); // #8ab4f8
 
-  // ── Status (PC --ok / --warn / --err / --info)
-  static const Color positive = Color(0xFF22C55E);       // #22c55e (approve / connected — #7aae66)
+  // ── Status (Antigravity 2.0 States: Success / Warning / Error / Info)
+  static const Color positive = Color(0xFF81C995);       // #81c995 (status.success)
   static const Color success = positive;
-  static const Color warning = Color(0xFFEAB308);        // #eab308 (tool approval pending — #f3c949)
-  static const Color danger = Color(0xFFEF4444);         // #ef4444 (refuse / error — #de5555)
+  static const Color successSubtle = Color(0xFF20352A);  // #20352a (status.successSubtle)
+  static const Color warning = Color(0xFFFDD663);        // #fdd663 (status.warning)
+  static const Color warningSubtle = Color(0xFF3A321A);  // #3a321a (status.warningSubtle)
+  static const Color danger = Color(0xFFF28B82);         // #f28b82 (status.error)
   static const Color error = danger;
-  static const Color dangerDeep = Color(0xFFDC2626);     // #dc2626
-  static const Color info = Color(0xFF3B82F6);           // #3b82f6 (informational — #59a4f9)
+  static const Color dangerSubtle = Color(0xFF3A2423);   // #3a2423 (status.errorSubtle)
+  static const Color dangerDeep = Color(0xFFD93025);     // #d93025
+  static const Color info = Color(0xFF8AB4F8);           // #8ab4f8 (status.info)
+  static const Color infoSubtle = Color(0xFF263447);     // #263447 (status.infoSubtle)
   static const Color accent = accentBlue;
 
-  // ── Diff Editor Tokens (--vscode-diffEditor-*)
-  static const Color diffInsertedLine = Color(0x339BB955); // rgba(155, 185, 85, 0.2)
-  static const Color diffRemovedLine = Color(0x33FF0000);  // rgba(255, 0, 0, 0.2)
-  static const Color diffInsertedText = Color(0x3300809B); // rgba(0, 128, 155, 0.2)
-  static const Color diffRemovedText = Color(0x66FF0000);  // rgba(255, 0, 0, 0.4)
+  // ── Code Syntax Colors
+  static const Color codeBackground = Color(0xFF1A1A1A); // #1a1a1a
+  static const Color codeForeground = Color(0xFFE8EAED); // #e8eaed
+  static const Color codeComment = Color(0xFF80868B);    // #80868b
+  static const Color codeKeyword = Color(0xFFA8C7FA);    // #a8c7fa
+  static const Color codeString = Color(0xFFC7E1A3);     // #c7e1a3
+  static const Color codeNumber = Color(0xFFF8C8DC);     // #f8c8dc
+
+  // ── Diff Editor Tokens
+  static const Color diffInsertedLine = Color(0x3381C995); // rgba(129, 201, 149, 0.2)
+  static const Color diffRemovedLine = Color(0x33F28B82);  // rgba(242, 139, 130, 0.2)
+  static const Color diffInsertedText = Color(0x4D81C995); // rgba(129, 201, 149, 0.3)
+  static const Color diffRemovedText = Color(0x66F28B82);  // rgba(242, 139, 130, 0.4)
 
   // ── Neutrals (scrims, shadows, camera overlay)
   static const Color overlayScrim = Color(0xFF000000);   // full-black scrim (camera, modal backdrop)
   static const Color shadowNeutral = Color(0xFF000000);  // drop shadows, elevation
 
   // ── On-fill ink (text/icons over accent & danger fills)
-  static const Color onAccent = Color(0xFFFAFAFA);       // #fafafa (Zinc-50 — labels on primary)
-  static const Color onDanger = Color(0xFFFAFAFA);       // #fafafa (Zinc-50 — labels on error)
+  static const Color onAccent = Color(0xFF202020);       // #202020 (dark text over light blue accent)
+  static const Color onDanger = Color(0xFF202020);       // #202020
 
   // ── Provider Accent Badges
   static const Color providerOpenAI = Color(0xFF10A37F);
@@ -97,14 +119,16 @@ extension ThemeContextExtension on BuildContext {
   bool get shouldAnimate => AppMotion.shouldAnimate(this);
 }
 
-/// Radius scale (PC ag-doctor-ui --r-sm/md/lg/xl/pill)
+/// Radius scale (Antigravity 2.0 radius.json)
 abstract class AppRadius {
-  static const double xs = 2;    // micro tags, lines
-  static const double sm = 4;    // inputs, chips
-  static const double md = 6;    // buttons, nav items
-  static const double lg = 10;   // cards, modals
-  static const double xl = 14;   // hero panels
-  static const double pill = 999;
+  static const double none = 0;   // rect
+  static const double xs = 4;     // tags, small chips
+  static const double sm = 6;     // buttons sm, micro cards
+  static const double md = 8;     // buttons, inputs, dropdowns
+  static const double lg = 12;    // cards, panels, bottom sheets
+  static const double xl = 16;    // modals, composers
+  static const double xxl = 20;   // hero containers
+  static const double pill = 999; // status pills, badges
 }
 
 /// Motion tokens (PC --t-fast/base/slow + --ease-out)

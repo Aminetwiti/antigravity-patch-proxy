@@ -3,6 +3,8 @@ package gateway
 import (
 	"strings"
 	"testing"
+
+	"github.com/antigravity/remote-daemon/pkg/connectrpc"
 )
 
 // TestWebSocketRPCsCoverage teste l'ensemble des handlers RPC WebSocket auparavant
@@ -163,8 +165,11 @@ func TestWebSocketRPCsCoverage(t *testing.T) {
 
 	// 9. Session: get_active_session
 	gw.mu.Lock()
+	if gw.jetboxSummaries == nil {
+		gw.jetboxSummaries = make(map[string]connectrpc.JetboxSummary)
+	}
 	gw.focusedCascadeID = "casc-cov-1"
-	gw.jetboxSummaries["casc-cov-1"] = &connectrpc.JetboxSummary{
+	gw.jetboxSummaries["casc-cov-1"] = connectrpc.JetboxSummary{
 		CascadeID: "casc-cov-1",
 		Title:     "Test Session",
 		Workspace: "C:/repo",

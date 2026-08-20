@@ -880,6 +880,133 @@ class ChatInputBarState extends State<ChatInputBar> {
     );
   }
 
+  void _showAttachmentInspectDialog(_AttachedItem att, int index) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+          side: BorderSide(
+            color: isDark ? AppColors.borderSubtle : scheme.outlineVariant,
+          ),
+        ),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 8, 10),
+              child: Row(
+                children: [
+                  Icon(
+                    att.isImage ? Icons.image_outlined : _iconForExtension(att.name),
+                    size: 18,
+                    color: _badgeColorForExtension(att.name, scheme),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      att.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    _formatBytes(att.size),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                    onPressed: () => Navigator.of(ctx).pop(),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+
+            // Content preview
+            Flexible(
+              child: att.isImage && att.bytes != null
+                  ? Container(
+                      constraints: const BoxConstraints(maxHeight: 380),
+                      color: isDark ? const Color(0xFF101216) : scheme.surfaceContainerLow,
+                      child: InteractiveViewer(
+                        minScale: 0.5,
+                        maxScale: 4.0,
+                        child: Center(
+                          child: Image.memory(
+                            att.bytes!,
+                            fit: BoxFit.contain,
+                          ),
+                        ),
+                      ),
+                    )
+                  : Container(
+                      constraints: const BoxConstraints(maxHeight: 300),
+                      padding: const EdgeInsets.all(12),
+                      color: isDark ? const Color(0xFF101216) : scheme.surfaceContainerLow,
+                      child: SingleChildScrollView(
+                        child: SelectableText(
+                          att.textContent ?? '[Fichier binaire (${_formatBytes(att.size)})]',
+                          style: TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 11.5,
+                            color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                          ),
+                        ),
+                      ),
+                    ),
+            ),
+            const Divider(height: 1),
+
+            // Actions
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  TextButton.icon(
+                    icon: Icon(Icons.delete_outline_rounded, size: 16, color: scheme.error),
+                    label: Text(
+                      'Supprimer',
+                      style: TextStyle(color: scheme.error, fontSize: 12.5),
+                    ),
+                    onPressed: () {
+                      Navigator.of(ctx).pop();
+                      _removeAttachment(index);
+                    },
+                  ),
+                  ElevatedButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    ),
+                    child: const Text('Fermer'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildSingleAttachmentCard(_AttachedItem att, int index, ColorScheme scheme, bool isDark) {
     final sizeStr = _formatBytes(att.size);
     final isImg = att.isImage;
@@ -896,55 +1023,60 @@ class ChatInputBarState extends State<ChatInputBar> {
       ),
       child: Row(
         children: [
-          if (isImg && att.bytes != null)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: Image.memory(
-                att.bytes!,
-                width: 36,
-                height: 36,
-                fit: BoxFit.cover,
-              ),
-            )
-          else
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: _badgeColorForExtension(att.name, scheme).withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Icon(
-                _iconForExtension(att.name),
-                size: 20,
-                color: _badgeColorForExtension(att.name, scheme),
-              ),
-            ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  att.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? AppColors.inkPrimary : scheme.onSurface,
-                  ),
-                ),
-                if (sizeStr.isNotEmpty)
-                  Text(
-                    sizeStr,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+          GestureDetector(
+            onTap: () => _showAttachmentInspectDialog(att, index),
+            child: isImg && att.bytes != null
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: Image.memory(
+                      att.bytes!,
+                      width: 36,
+                      height: 36,
+                      fit: BoxFit.cover,
+                    ),
+                  )
+                : Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: _badgeColorForExtension(att.name, scheme).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Icon(
+                      _iconForExtension(att.name),
+                      size: 20,
+                      color: _badgeColorForExtension(att.name, scheme),
                     ),
                   ),
-              ],
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: GestureDetector(
+              onTap: () => _showAttachmentInspectDialog(att, index),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    att.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                    ),
+                  ),
+                  if (sizeStr.isNotEmpty)
+                    Text(
+                      sizeStr,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
           const SizedBox(width: 8),
@@ -984,54 +1116,59 @@ class ChatInputBarState extends State<ChatInputBar> {
       ),
       child: Row(
         children: [
-          if (isImg && att.bytes != null)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: Image.memory(
-                att.bytes!,
-                width: 28,
-                height: 28,
-                fit: BoxFit.cover,
-              ),
-            )
-          else
-            Container(
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                color: _badgeColorForExtension(att.name, scheme).withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Icon(
-                _iconForExtension(att.name),
-                size: 16,
-                color: _badgeColorForExtension(att.name, scheme),
-              ),
-            ),
+          GestureDetector(
+            onTap: () => _showAttachmentInspectDialog(att, index),
+            child: isImg && att.bytes != null
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: Image.memory(
+                      att.bytes!,
+                      width: 28,
+                      height: 28,
+                      fit: BoxFit.cover,
+                    ),
+                  )
+                : Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: _badgeColorForExtension(att.name, scheme).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Icon(
+                      _iconForExtension(att.name),
+                      size: 16,
+                      color: _badgeColorForExtension(att.name, scheme),
+                    ),
+                  ),
+          ),
           const SizedBox(width: 6),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  att.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+            child: GestureDetector(
+              onTap: () => _showAttachmentInspectDialog(att, index),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    att.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                    ),
                   ),
-                ),
-                Text(
-                  _formatBytes(att.size),
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                  Text(
+                    _formatBytes(att.size),
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           const SizedBox(width: 4),
