@@ -10,6 +10,9 @@
 /// supported; upgrade path is `flutter_markdown` if a real need appears.
 library;
 
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 class CodeBlock {
@@ -223,11 +226,12 @@ class MarkdownRenderer {
   }) {
     final spans = <InlineSpan>[];
     final codeRe = RegExp(r'`([^`]+)`');
+    final imageRe = RegExp(r'!\[([^\]]*)\]\(([^)\s]+)\)');
+    final linkRe = RegExp(r'\[([^\]]+)\]\(([^)\s]+)\)');
     final boldRe = RegExp(r'\*\*([^*]+)\*\*');
     // CommonMark flanking: opening * must be followed by non-space, closing *
     // must be preceded by non-space (so `a * b * c` stays literal).
     final italicRe = RegExp(r'\*(?=\S)([^*\n]+?)(?<=\S)\*(?!\*)');
-    final linkRe = RegExp(r'\[([^\]]+)\]\(([^)\s]+)\)');
 
     var remaining = text;
     while (remaining.isNotEmpty) {
@@ -247,7 +251,35 @@ class MarkdownRenderer {
         continue;
       }
 
-      // 2. Link with tooltip showing full target path/URL on hover.
+      // 2. Markdown Image ![alt](url)
+      final imageMatch = imageRe.firstMatch(remaining);
+      if (imageMatch != null && imageMatch.start == 0) {
+        final alt = imageMatch.group(1) ?? '';
+        final url = imageMatch.group(2) ?? '';
+        final isLocalFile = url.startsWith('file://');
+        final isDataUri = url.startsWith('data:image/');
+        final filePath = isLocalFile ? _filePathOf(url) : '';
+
+        spans.add(WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: _buildImageWidget(
+              url: url,
+              alt: alt,
+              filePath: filePath,
+              isLocalFile: isLocalFile,
+              isDataUri: isDataUri,
+              scheme: scheme,
+              onLocalFile: onLocalFile,
+            ),
+          ),
+        ));
+        remaining = remaining.substring(imageMatch.end);
+        continue;
+      }
+
+      // 3. Link with tooltip showing full target path/URL on hover.
       // P5 : un lien file:/// devient tappable (ouvre le fichier côté hôte)
       // quand onLocalFile est fourni ; sinon comportement historique.
       final linkMatch = linkRe.firstMatch(remaining);
@@ -297,7 +329,7 @@ class MarkdownRenderer {
         continue;
       }
 
-      // 3. Bold.
+      // 4. Bold.
       final boldMatch = boldRe.firstMatch(remaining);
       if (boldMatch != null && boldMatch.start == 0) {
         spans.add(TextSpan(
@@ -308,7 +340,7 @@ class MarkdownRenderer {
         continue;
       }
 
-      // 4. Italic.
+      // 5. Italic.
       final italicMatch = italicRe.firstMatch(remaining);
       if (italicMatch != null && italicMatch.start == 0) {
         spans.add(TextSpan(
@@ -319,9 +351,9 @@ class MarkdownRenderer {
         continue;
       }
 
-      // 5. Plain text up to the next markdown token.
+      // 6. Plain text up to the next markdown token.
       final nextIndex = <int>[
-        for (final r in [codeRe, linkRe, boldRe, italicRe])
+        for (final r in [codeRe, imageRe, linkRe, boldRe, italicRe])
           r.firstMatch(remaining)?.start ?? remaining.length,
       ].reduce((a, b) => a < b ? a : b);
       if (nextIndex == 0) {
@@ -334,6 +366,135 @@ class MarkdownRenderer {
       remaining = remaining.substring(nextIndex);
     }
     return spans;
+  }
+
+  /// Construit un aperçu soigné pour une image markdown (locale, data URI ou distante).
+  static Widget _buildImageWidget({
+    required String url,
+    required String alt,
+    required String filePath,
+    required bool isLocalFile,
+    required bool isDataUri,
+    required ColorScheme scheme,
+    LocalFileTap? onLocalFile,
+  }) {
+    if (isDataUri) {
+      try {
+        final commaIdx = url.indexOf(',');
+        if (commaIdx != -1) {
+          final b64 = url.substring(commaIdx + 1);
+          final bytes = base64Decode(b64);
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.memory(
+              bytes,
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => _imageErrorTile(alt.isNotEmpty ? alt : 'Image', scheme),
+            ),
+          );
+        }
+      } catch (_) {}
+    }
+
+    if (isLocalFile && filePath.isNotEmpty) {
+      try {
+        final file = File(filePath);
+        if (file.existsSync()) {
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.file(
+              file,
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => _imageErrorTile(alt.isNotEmpty ? alt : filePath, scheme),
+            ),
+          );
+        }
+      } catch (_) {}
+
+      // Image sur l'hôte distant (PC)
+      return InkWell(
+        onTap: onLocalFile == null ? null : () => onLocalFile(filePath),
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.6)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.image_outlined, size: 18, color: scheme.primary),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      alt.isNotEmpty ? alt : filePath.split(RegExp(r'[\\/]')).last,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: scheme.onSurface,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      'Image enregistrée sur l\'hôte',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 6),
+              Icon(Icons.open_in_new, size: 14, color: scheme.onSurfaceVariant),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.network(
+          url,
+          fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => _imageErrorTile(alt.isNotEmpty ? alt : url, scheme),
+        ),
+      );
+    }
+
+    return _imageErrorTile(alt.isNotEmpty ? alt : url, scheme);
+  }
+
+  static Widget _imageErrorTile(String label, ColorScheme scheme) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.broken_image_outlined, size: 14, color: scheme.error),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Normalise une URI file:/// en chemin hôte (décode %XX, gère les

@@ -1,7 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
 
 import '../core/protocol/daemon_api.dart';
 import '../core/protocol/model_catalog.dart';
@@ -9,12 +13,34 @@ import '../services/settings_store.dart';
 import '../features/chat_stream/models/mention_item.dart';
 import '../features/chat_stream/widgets/action_pills_bar.dart';
 import '../features/chat_stream/widgets/mention_autocomplete_overlay.dart';
+import 'bouncing_tap.dart';
 import 'custom_dropdown_overlay.dart';
 import 'voice_prompt_dialog.dart';
 import '../theme/app_colors.dart';
 
 /// Modes d'envoi : immédiat ou mis en file pour exécution séquentielle.
 enum SendMode { immediate, queued }
+
+/// Données d'un fichier ou d'une image attachée avant l'envoi.
+class _AttachedItem {
+  final String name;
+  final int size;
+  final String? mimeType;
+  final Uint8List? bytes;
+  final String? base64Data;
+  final bool isImage;
+  final String? textContent;
+
+  const _AttachedItem({
+    required this.name,
+    required this.size,
+    this.mimeType,
+    this.bytes,
+    this.base64Data,
+    required this.isImage,
+    this.textContent,
+  });
+}
 
 /// Entrée de la palette de commandes slash (/btw, /plan, ...).
 class _SlashCommand {
@@ -84,10 +110,16 @@ class ChatInputBar extends StatefulWidget {
   });
 
   @override
-  State<ChatInputBar> createState() => _ChatInputBarState();
+  State<ChatInputBar> createState() => ChatInputBarState();
 }
 
-class _ChatInputBarState extends State<ChatInputBar> {
+class ChatInputBarState extends State<ChatInputBar> {
+  void openModelSelector() {
+    if (mounted) {
+      _showModelDropdown(context);
+    }
+  }
+
   final TextEditingController _controller = TextEditingController();
   String _selectedModel = 'Gemini 3.7 Flash';
   String? _selectedModelId = 'gemini-3.7-flash';
@@ -98,7 +130,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
   SendMode _sendMode = SendMode.immediate;
   // Feature Niveaux d'effort de raisonnement (Faible, Moyen, Élevé)
   String _reasoningEffort = 'Moyen'; // Options: 'Faible', 'Moyen', 'Élevé'
-  // Feature attachement .txt
+  // Feature attachement fichiers et images (Quiet Console)
+  _AttachedItem? _attachment;
   String? _attachedFileName;
   String? _attachedFileContent;
 
@@ -229,13 +262,13 @@ class _ChatInputBarState extends State<ChatInputBar> {
     if (_isSending) return;
     final rawText = _controller.text;
     final text = _sanitizeInput(rawText);
-    final hasContent = text.isNotEmpty || _attachedFileContent != null;
+    final hasContent = text.isNotEmpty || _attachment != null || _attachedFileContent != null;
     if (!hasContent) return;
 
     _isSending = true;
     HapticFeedback.lightImpact();
 
-    // Normaliser les commandes barriques avec saut de ligne \n ou tabulation \t
+    // Normaliser les commandes slash avec saut de ligne \n ou tabulation \t
     String finalPayload = text;
     if (text.startsWith('/') && (text.contains('\n') || text.contains('\t'))) {
       final parts = text.split(RegExp(r'[\n\t]'));
@@ -244,16 +277,46 @@ class _ChatInputBarState extends State<ChatInputBar> {
       finalPayload = '$cmd $args'.trim();
     }
 
-    // Préfixe le contenu du fichier attaché avant le texte utilisateur.
-    final fullMessage =
-        _attachedFileContent != null
-            ? '${_attachedFileName != null ? "[Fichier: $_attachedFileName]\n" : ""}'
-                    '$_attachedFileContent\n\n$finalPayload'
-                .trim()
-            : finalPayload;
+    // Traitement de l'attachement (upload vers daemon si connecté)
+    String fullMessage = finalPayload;
+    final att = _attachment;
+    if (att != null) {
+      if (widget.api != null && widget.cascadeId != null && att.base64Data != null) {
+        if (att.isImage) {
+          widget.api!.uploadMedia(
+            cascadeId: widget.cascadeId!,
+            fileName: att.name,
+            mimeType: att.mimeType ?? 'image/jpeg',
+            base64Data: att.base64Data!,
+          );
+        } else {
+          widget.api!.uploadChunk(
+            uploadId: 'up_${DateTime.now().millisecondsSinceEpoch}',
+            cascadeId: widget.cascadeId!,
+            fileName: att.name,
+            chunkIndex: 0,
+            totalChunks: 1,
+            totalBytes: att.size,
+            base64Data: att.base64Data!,
+          );
+        }
+      }
 
-    // C2 : signature désormais unique et typée — l'ancien try/catch en cascade
-    // (compat rétro) n'a plus de raison d'être.
+      if (att.isImage) {
+        fullMessage = finalPayload.isEmpty
+            ? '[Image jointe: ${att.name}]'
+            : '[Image: ${att.name}]\n$finalPayload';
+      } else if (att.textContent != null) {
+        fullMessage = '[Fichier: ${att.name}]\n${att.textContent}\n\n$finalPayload'.trim();
+      } else {
+        fullMessage = '[Fichier joint: ${att.name} (${_formatBytes(att.size)})]\n$finalPayload'.trim();
+      }
+    } else if (_attachedFileContent != null) {
+      fullMessage = '${_attachedFileName != null ? "[Fichier: $_attachedFileName]\n" : ""}'
+              '$_attachedFileContent\n\n$finalPayload'
+          .trim();
+    }
+
     widget.onSend(
       fullMessage,
       queued: _sendMode == SendMode.queued || widget.hasActiveStream,
@@ -264,10 +327,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
     _lastDraftText = '';
     // P6 : le message a été envoyé → purge le brouillon persisté.
     widget.onDraftChanged?.call('');
-    FocusScope.of(
-      context,
-    ).unfocus(); // Ferme le clavier sur mobile après l'envoi
+    FocusScope.of(context).unfocus(); // Ferme le clavier sur mobile après l'envoi
     setState(() {
+      _attachment = null;
       _attachedFileName = null;
       _attachedFileContent = null;
       _isSending = false;
@@ -297,6 +359,12 @@ class _ChatInputBarState extends State<ChatInputBar> {
     _controller.text = newText;
   }
 
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
   Color _badgeColorForExtension(String name, ColorScheme scheme) {
     if (name.endsWith('/') || !name.contains('.')) {
       return scheme.tertiary;
@@ -309,6 +377,12 @@ class _ChatInputBarState extends State<ChatInputBar> {
         return scheme.primary;
       case 'csv':
         return scheme.secondary;
+      case 'dart':
+      case 'ts':
+      case 'js':
+      case 'py':
+      case 'go':
+        return scheme.primary;
       default:
         return scheme.tertiary;
     }
@@ -324,12 +398,140 @@ class _ChatInputBarState extends State<ChatInputBar> {
         return Icons.article_outlined;
       case 'csv':
         return Icons.table_chart_outlined;
+      case 'dart':
+      case 'ts':
+      case 'js':
+      case 'py':
+      case 'go':
+        return Icons.code_rounded;
+      case 'pdf':
+        return Icons.picture_as_pdf_outlined;
       default:
         return Icons.description_outlined;
     }
   }
 
-  /// Feature attachement .txt, .json, .md, .csv
+  void _clearAttachment() {
+    setState(() {
+      _attachment = null;
+      _attachedFileName = null;
+      _attachedFileContent = null;
+    });
+  }
+
+  /// Sélection d'image native depuis la galerie
+  Future<void> _pickImageFromGallery() async {
+    try {
+      final picker = ImagePicker();
+      final picked = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 2048,
+        maxHeight: 2048,
+        imageQuality: 85,
+      );
+      if (picked == null) return;
+      final bytes = await picked.readAsBytes();
+      final name = picked.name.isNotEmpty ? picked.name : 'image_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final mime = picked.mimeType ?? (name.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg');
+      final b64 = base64Encode(bytes);
+
+      setState(() {
+        _attachment = _AttachedItem(
+          name: name,
+          size: bytes.length,
+          mimeType: mime,
+          bytes: bytes,
+          base64Data: b64,
+          isImage: true,
+        );
+        _attachedFileName = name;
+        _attachedFileContent = '[Image: $name ($mime)]';
+      });
+    } catch (_) {
+      _pickImage();
+    }
+  }
+
+  /// Prise de photo directe avec l'appareil photo
+  Future<void> _pickImageFromCamera() async {
+    try {
+      final picker = ImagePicker();
+      final picked = await picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 2048,
+        maxHeight: 2048,
+        imageQuality: 85,
+      );
+      if (picked == null) return;
+      final bytes = await picked.readAsBytes();
+      final name = 'photo_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final mime = 'image/jpeg';
+      final b64 = base64Encode(bytes);
+
+      setState(() {
+        _attachment = _AttachedItem(
+          name: name,
+          size: bytes.length,
+          mimeType: mime,
+          bytes: bytes,
+          base64Data: b64,
+          isImage: true,
+        );
+        _attachedFileName = name;
+        _attachedFileContent = '[Image: $name ($mime)]';
+      });
+    } catch (_) {
+      _pickImage();
+    }
+  }
+
+  /// Sélection de fichier natif du smartphone (code, documents, json...)
+  Future<void> _pickFileNative() async {
+    try {
+      final res = await FilePicker.pickFiles(
+        withData: true,
+        allowMultiple: false,
+      );
+      if (res == null || res.files.isEmpty) return;
+      final f = res.files.first;
+      Uint8List? bytes = f.bytes;
+      if (bytes == null && f.path != null) {
+        try {
+          bytes = await File(f.path!).readAsBytes();
+        } catch (_) {}
+      }
+      if (bytes == null || bytes.isEmpty) return;
+      final name = f.name;
+      final size = f.size > 0 ? f.size : bytes.length;
+      final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+      final isImg = ['png', 'jpg', 'jpeg', 'webp', 'gif'].contains(ext);
+      final b64 = base64Encode(bytes);
+      String? textContent;
+      if (['txt', 'json', 'md', 'csv', 'dart', 'ts', 'js', 'py', 'go', 'yaml', 'yml', 'html', 'css', 'xml', 'sh'].contains(ext) && bytes.length < 500000) {
+        try {
+          textContent = utf8.decode(bytes, allowMalformed: true);
+        } catch (_) {}
+      }
+
+      setState(() {
+        _attachment = _AttachedItem(
+          name: name,
+          size: size,
+          mimeType: isImg ? (ext == 'png' ? 'image/png' : 'image/jpeg') : 'application/octet-stream',
+          bytes: bytes,
+          base64Data: b64,
+          isImage: isImg,
+          textContent: textContent,
+        );
+        _attachedFileName = name;
+        _attachedFileContent = textContent ?? '[Fichier: $name (${_formatBytes(size)})]';
+      });
+    } catch (_) {
+      _pickTextFile();
+    }
+  }
+
+  /// Feature attachement .txt, .json, .md, .csv (Fallback manuel)
   Future<void> _pickTextFile() async {
     final result = await showDialog<Map<String, String>?>(
       context: context,
@@ -394,15 +596,26 @@ class _ChatInputBarState extends State<ChatInputBar> {
       },
     );
     if (result != null && result['content']!.isNotEmpty) {
+      final name = result['name']!.isEmpty ? 'fichier.txt' : result['name']!;
+      final content = result['content']!;
+      final bytes = Uint8List.fromList(utf8.encode(content));
       setState(() {
-        _attachedFileName =
-            result['name']!.isEmpty ? 'fichier.txt' : result['name']!;
-        _attachedFileContent = result['content'];
+        _attachment = _AttachedItem(
+          name: name,
+          size: bytes.length,
+          mimeType: 'text/plain',
+          bytes: bytes,
+          base64Data: base64Encode(bytes),
+          isImage: false,
+          textContent: content,
+        );
+        _attachedFileName = name;
+        _attachedFileContent = content;
       });
     }
   }
 
-  /// Feature attachement image/photo (Multimodal)
+  /// Feature attachement image/photo (Fallback Base64)
   Future<void> _pickImage() async {
     final result = await showDialog<Map<String, String>?>(
       context: context,
@@ -482,49 +695,190 @@ class _ChatInputBarState extends State<ChatInputBar> {
       final mimeType = result['mimeType']!;
       final base64Data = result['base64Data']!;
 
-      if (widget.api != null && widget.cascadeId != null) {
-        widget.api!.uploadMedia(
-          cascadeId: widget.cascadeId!,
-          fileName: fileName,
-          mimeType: mimeType,
-          base64Data: base64Data,
-        );
-      }
+      Uint8List? rawBytes;
+      try {
+        rawBytes = base64Decode(base64Data);
+      } catch (_) {}
 
       setState(() {
+        _attachment = _AttachedItem(
+          name: fileName,
+          size: rawBytes?.length ?? 0,
+          mimeType: mimeType,
+          bytes: rawBytes,
+          base64Data: base64Data,
+          isImage: true,
+        );
         _attachedFileName = fileName;
         _attachedFileContent = '[Image: $fileName ($mimeType)]';
       });
     }
   }
 
+  /// Aperçu visuel Quiet Console de l'attachement sélectionné
+  Widget _buildAttachmentPreview(ColorScheme scheme, bool isDark) {
+    final att = _attachment;
+    final fallbackName = _attachedFileName;
+    if (att == null && fallbackName == null) return const SizedBox.shrink();
+
+    final name = att?.name ?? fallbackName ?? 'fichier';
+    final sizeStr = att != null ? _formatBytes(att.size) : '';
+    final isImg = att?.isImage ?? (name.toLowerCase().endsWith('.png') || name.toLowerCase().endsWith('.jpg') || name.toLowerCase().endsWith('.jpeg'));
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(
+          color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.6),
+          width: 0.8,
+        ),
+      ),
+      child: Row(
+        children: [
+          if (isImg && att?.bytes != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: Image.memory(
+                att!.bytes!,
+                width: 36,
+                height: 36,
+                fit: BoxFit.cover,
+              ),
+            )
+          else
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: _badgeColorForExtension(name, scheme).withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Icon(
+                _iconForExtension(name),
+                size: 20,
+                color: _badgeColorForExtension(name, scheme),
+              ),
+            ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                  ),
+                ),
+                if (sizeStr.isNotEmpty)
+                  Text(
+                    sizeStr,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          BouncingTap(
+            onTap: _clearAttachment,
+            child: Container(
+              padding: const EdgeInsets.all(5),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF26282E) : scheme.surfaceContainer,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.close_rounded,
+                size: 14,
+                color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showAttachmentMenu() {
     final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     showModalBottomSheet(
       context: context,
-      backgroundColor: scheme.surfaceContainer,
+      backgroundColor: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (ctx) => SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: isDark ? AppColors.borderSubtle : scheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(AppRadius.pill),
+                  ),
+                ),
+              ),
               ListTile(
-                leading: Icon(Icons.image_outlined, color: scheme.primary),
-                title: Text('Joindre une image / photo', style: TextStyle(color: scheme.onSurface)),
-                subtitle: Text('PNG, JPEG, WebP, GIF', style: TextStyle(color: scheme.onSurfaceVariant)),
+                leading: Icon(Icons.camera_alt_outlined, color: scheme.primary),
+                title: Text(
+                  'Prendre une photo',
+                  style: TextStyle(color: isDark ? AppColors.inkPrimary : scheme.onSurface, fontWeight: FontWeight.w500),
+                ),
+                subtitle: Text('Appareil photo en direct', style: TextStyle(color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant, fontSize: 12)),
                 onTap: () {
                   Navigator.of(ctx).pop();
-                  _pickImage();
+                  _pickImageFromCamera();
                 },
               ),
               ListTile(
-                leading: Icon(Icons.description_outlined, color: scheme.onSurface),
-                title: Text('Joindre un fichier', style: TextStyle(color: scheme.onSurface)),
-                subtitle: Text('.txt, .json, .md, .csv', style: TextStyle(color: scheme.onSurfaceVariant)),
+                leading: Icon(Icons.photo_library_outlined, color: scheme.primary),
+                title: Text(
+                  'Choisir une image',
+                  style: TextStyle(color: isDark ? AppColors.inkPrimary : scheme.onSurface, fontWeight: FontWeight.w500),
+                ),
+                subtitle: Text('Galerie photos (PNG, JPEG, WebP, GIF)', style: TextStyle(color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant, fontSize: 12)),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _pickImageFromGallery();
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.file_present_outlined, color: scheme.primary),
+                title: Text(
+                  'Sélectionner un fichier',
+                  style: TextStyle(color: isDark ? AppColors.inkPrimary : scheme.onSurface, fontWeight: FontWeight.w500),
+                ),
+                subtitle: Text('Code, JSON, Markdown, texte, PDF...', style: TextStyle(color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant, fontSize: 12)),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _pickFileNative();
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.edit_note_outlined, color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant),
+                title: Text(
+                  'Saisie manuelle (Base64 / Texte)',
+                  style: TextStyle(color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant, fontSize: 13),
+                ),
                 onTap: () {
                   Navigator.of(ctx).pop();
                   _pickTextFile();
@@ -889,6 +1243,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final isQueued = _sendMode == SendMode.queued;
     final viewInsets = MediaQuery.of(context).viewInsets;
     final rawInsetsBottom = View.of(context).viewInsets.bottom / MediaQuery.of(context).devicePixelRatio;
@@ -974,72 +1329,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Badge fichier attaché avec icône & couleur spécifiques à l'extension
-                  if (_attachedFileName != null)
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: _badgeColorForExtension(
-                          _attachedFileName!,
-                          scheme,
-                        ).withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: _badgeColorForExtension(
-                            _attachedFileName!,
-                            scheme,
-                          ).withValues(alpha: 0.5),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            _iconForExtension(_attachedFileName!),
-                            size: 14,
-                            color: _badgeColorForExtension(
-                              _attachedFileName!,
-                              scheme,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              _attachedFileName!,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: scheme.onSurface,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          Semantics(
-                            label: 'Supprimer le fichier attaché',
-                            button: true,
-                            child: InkWell(
-                              onTap:
-                                  () => setState(() {
-                                    _attachedFileName = null;
-                                    _attachedFileContent = null;
-                                  }),
-                              borderRadius: BorderRadius.circular(12),
-                              child: Padding(
-                                padding: const EdgeInsets.all(6),
-                                child: Icon(
-                                  Icons.close,
-                                  size: 16,
-                                  color: scheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                  // Aperçu attachement Quiet Console (Image ou Fichier)
+                  _buildAttachmentPreview(scheme, isDark),
 
                   // Badge mode queue + "Envoyer maintenant"
                   if (isQueued)
@@ -1305,7 +1596,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                                       decoration: BoxDecoration(
                                         color: widget.hasActiveStream && _controller.text.trim().isEmpty
                                             ? scheme.error
-                                            : (_controller.text.trim().isNotEmpty &&
+                                            : ((_controller.text.trim().isNotEmpty || _attachment != null || _attachedFileContent != null) &&
                                                     widget.isConnected
                                                 ? scheme.primary
                                                 : scheme.surfaceContainerHighest),
@@ -1318,7 +1609,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                                                 ? Icons.stop_rounded
                                                 : Icons.arrow_forward),
                                         size: 15,
-                                        color: (_controller.text.trim().isNotEmpty &&
+                                        color: ((_controller.text.trim().isNotEmpty || _attachment != null || _attachedFileContent != null) &&
                                                     widget.isConnected) ||
                                                 (widget.hasActiveStream && _controller.text.trim().isEmpty)
                                             ? AppColors.onAccent

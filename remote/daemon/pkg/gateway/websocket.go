@@ -393,6 +393,7 @@ func NewServer(client RPCClient, authToken string) *Server {
 		logJSON.Warn("scheduled_tasks_load_failed", "error", err.Error())
 	}
 	s.startTranscriptWatchdog()
+	StartScratchCleanupRoutine(context.Background(), 24*time.Hour, DefaultScratchMaxAge)
 	return s
 }
 

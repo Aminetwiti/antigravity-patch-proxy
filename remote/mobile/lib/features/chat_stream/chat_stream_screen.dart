@@ -36,6 +36,12 @@ import '../../widgets/skeleton_loader.dart';
 import '../subagents/subagents_tree_sheet.dart';
 import '../subagents/models/subagent_item.dart';
 import '../subagents/widgets/subagent_tree_card.dart';
+import '../../widgets/zenithal_canvas.dart';
+import '../../widgets/status_dot_badge.dart';
+import '../../widgets/bouncing_tap.dart';
+import '../../widgets/app_notification_banner.dart';
+import 'models/banner_notification.dart';
+import '../settings/models_settings_section.dart';
 import 'package:mobile/theme/app_colors.dart';
 
 class ChatStreamScreen extends StatefulWidget {
@@ -321,6 +327,56 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   Map<String, dynamic>? _quotaSummary;
   Timer? _quotaTimer;
 
+  // ── Unified Notification Banners ──────────────────────────────────────────
+  final GlobalKey<ChatInputBarState> _chatInputKey = GlobalKey<ChatInputBarState>();
+  final Map<String, BannerNotificationData> _activeBanners = {};
+  final Set<String> _dismissedBannerIds = {};
+
+  BannerNotificationData? get _topActiveBanner {
+    final available = _activeBanners.values
+        .where((b) => !_dismissedBannerIds.contains(b.id))
+        .toList();
+    if (available.isEmpty) return null;
+    available.sort((a, b) => a.priority.compareTo(b.priority));
+    return available.first;
+  }
+
+  void _dismissBanner(String bannerId) {
+    if (mounted) {
+      setState(() {
+        _dismissedBannerIds.add(bannerId);
+      });
+    }
+  }
+
+  void _showModelSelector() {
+    _chatInputKey.currentState?.openModelSelector();
+  }
+
+  void _showPlansOrLimitsSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.85,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        builder: (_, scrollController) => Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).brightness == Brightness.dark
+                ? AppColors.surfaceRaised
+                : Theme.of(context).colorScheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+          ),
+          child: ModelsSettingsSection(
+            api: widget.api,
+          ),
+        ),
+      ),
+    );
+  }
+
   // ── État de connexion live (alimenté par wsClient) ─────────────────────
   ConnectionStatus _status = ConnectionStatus.disconnected;
   int _attempt = 0;
@@ -503,7 +559,20 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     try {
       final q = await api.getUserQuotaSummary();
       if (mounted) {
-        setState(() => _quotaSummary = q);
+        setState(() {
+          _quotaSummary = q;
+          final banner = BannerClassifier.classifyQuota(
+            q,
+            onDismiss: () => _dismissBanner('quota-exceeded-metric'),
+            onSwitchModel: _showModelSelector,
+            onSeePlans: _showPlansOrLimitsSheet,
+          );
+          if (banner != null) {
+            _activeBanners[banner.id] = banner;
+          } else {
+            _activeBanners.remove('quota-exceeded-metric');
+          }
+        });
       }
     } catch (_) {}
   }
@@ -1182,7 +1251,20 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       if (type == 'quota_update') {
         final data = msg['data'] as Map<String, dynamic>?;
         if (data != null && data.isNotEmpty && mounted) {
-          setState(() => _quotaSummary = data);
+          setState(() {
+            _quotaSummary = data;
+            final banner = BannerClassifier.classifyQuota(
+              data,
+              onDismiss: () => _dismissBanner('quota-exceeded-metric'),
+              onSwitchModel: _showModelSelector,
+              onSeePlans: _showPlansOrLimitsSheet,
+            );
+            if (banner != null) {
+              _activeBanners[banner.id] = banner;
+            } else {
+              _activeBanners.remove('quota-exceeded-metric');
+            }
+          });
         }
         return;
       }
@@ -1779,6 +1861,19 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                         ? localData['message'] as String? ?? 'Erreur'
                         : null)
                     : null);
+            if (error != null) {
+              final banner = BannerClassifier.classifyError(
+                error,
+                onDismiss: () => _dismissBanner('quota-exceeded'),
+                onSwitchModel: _showModelSelector,
+                onSeePlans: _showPlansOrLimitsSheet,
+              );
+              if (banner != null) {
+                _activeBanners[banner.id] = banner;
+                _dismissedBannerIds.remove(banner.id);
+              }
+              _refreshQuotaSummary();
+            }
             if (error != null && (error.contains('MODEL_CAPACITY_EXHAUSTED') || error.contains('No capacity available') || error.contains('503'))) {
               error = '⚠️ Capacité du modèle saturée sur les serveurs (HTTP 503 / MODEL_CAPACITY_EXHAUSTED).\nVeuillez basculer vers Gemini 3.7 Flash, Claude ou un modèle custom via le sélecteur ci-dessous.';
             }
@@ -1797,11 +1892,22 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         _onStreamEnded(targetSession);
         setState(() {
           final idx = buf.indexWhere((m) => m.id == assistantId);
+          final errorText = 'Erreur: $err';
+          final banner = BannerClassifier.classifyError(
+            errorText,
+            onDismiss: () => _dismissBanner('quota-exceeded'),
+            onSwitchModel: _showModelSelector,
+            onSeePlans: _showPlansOrLimitsSheet,
+          );
+          if (banner != null) {
+            _activeBanners[banner.id] = banner;
+            _dismissedBannerIds.remove(banner.id);
+          }
           if (idx >= 0) {
             buf[idx] = buf[idx].copyWith(
               isStreaming: false,
               isError: true,
-              text: 'Erreur: $err',
+              text: errorText,
             );
           }
         });
@@ -2010,54 +2116,22 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     } catch (_) {}
     if (!_isSyncing && pendingCount == 0) return const SizedBox.shrink();
 
+    if (_isSyncing) {
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        child: StatusDotBadge(
+          label: 'Rattrapage des messages…',
+          color: scheme.primary,
+          isPulsing: true,
+        ),
+      );
+    }
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: _isSyncing
-            ? scheme.primary.withValues(alpha: 0.12)
-            : const Color(0xFFD29922).withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(AppRadius.pill),
-        border: Border.all(
-          color: _isSyncing
-              ? scheme.primary.withValues(alpha: 0.3)
-              : const Color(0xFFD29922).withValues(alpha: 0.3),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (_isSyncing) ...[
-            SizedBox(
-              width: 10,
-              height: 10,
-              child: CircularProgressIndicator(
-                strokeWidth: 1.5,
-                valueColor: AlwaysStoppedAnimation<Color>(scheme.primary),
-              ),
-            ),
-            const SizedBox(width: 6),
-            Text(
-              'Rattrapage des messages en cours…',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-                color: scheme.primary,
-              ),
-            ),
-          ] else ...[
-            const Icon(Icons.cloud_upload_outlined, size: 12, color: Color(0xFFD29922)),
-            const SizedBox(width: 6),
-            Text(
-              '$pendingCount message${pendingCount > 1 ? 's' : ''} en attente de connexion',
-              style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-                color: Color(0xFFD29922),
-              ),
-            ),
-          ],
-        ],
+      child: StatusDotBadge(
+        label: '$pendingCount message${pendingCount > 1 ? 's' : ''} en attente',
+        color: const Color(0xFFD29922),
       ),
     );
   }
@@ -2159,134 +2233,142 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       },
     );
 
-    return Column(
-      children: [
-        connectivityBanner,
-        if (!hasKeyboard) breadcrumb,
-        SessionTopTabs(
-          activeTab: _currentTab,
-          onTabChanged: (tab) {
-            setState(() {
-              _activeArtifact = null;
-              _currentTab = tab;
-            });
-            if (tab == SessionTabType.review) {
-              _fetchVcsChanges();
-            }
-          },
-          filesChangedCount: _modifiedFiles.length,
-          hasPlan: _latestPlanText != null,
-          hasTasks: false,
-          runningTasksCount: _activeStreamCount,
-          artifactTabs: _artifacts,
-          activeArtifact: _activeArtifact,
-          onOpenArtifact: (art) => setState(() {
-            _activeArtifact = art;
-          }),
-          onNewTab: () {
-            final projs = widget.projects ?? [];
-            if (projs.length > 1) {
-              _showProjectSelector(context);
-            } else {
-              widget.onNewConversation?.call();
-            }
-          },
-        ),
-        if (!hasKeyboard) ...[
-          _buildSyncStatusBadge(scheme),
-          _buildQuotaBadge(scheme),
-        ],
-        Expanded(
-          child: Stack(
-            children: [
-              Positioned.fill(
-                // P6 : swipe horizontal gauche/droite pour changer d'onglet.
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onHorizontalDragEnd: (details) {
-                    if (_activeArtifact != null) return; // onglet artefact : pas de swipe
-                    final tabs = _swipeableTabs;
-                    if (tabs.length < 2) return;
-                    final idx = tabs.indexOf(_currentTab);
-                    if (idx < 0) return;
-                    final velocity = details.primaryVelocity ?? 0;
-                    final next = velocity < -200
-                        ? idx + 1
-                        : velocity > 200
-                            ? idx - 1
-                            : -1;
-                    if (next < 0 || next >= tabs.length) return;
-                    final nextTab = tabs[next];
-                    setState(() {
-                      _activeArtifact = null;
-                      _currentTab = nextTab;
-                    });
-                    if (nextTab == SessionTabType.review) {
-                      _fetchVcsChanges();
-                    }
-                  },
-                  child: _buildActiveTabContent(scheme, isConnected),
-                ),
-              ),
-              // P1 : bouton flottant « retour en bas » — uniquement sur
-              // l'onglet chat, quand l'utilisateur s'est éloigné du bas.
-              if (_showJumpToBottom &&
-                  _activeArtifact == null &&
-                  _currentTab == SessionTabType.chat)
-                Positioned(
-                  right: 16,
-                  bottom: 12,
-                  child: _JumpToBottomButton(
-                    count: _hiddenNewCount,
-                    onTap: _jumpToBottom,
-                  ),
-                ),
-            ],
-          ),
-        ),
-        _buildApprovalArea(),
-        if (_sideQuestion != null)
-          SideQuestionCard(
-            question: _sideQuestion!,
-            answer: _sideQuestionAnswer,
-            isLoading: _isSideQuestionLoading,
-            onClose: () => setState(() {
-              _sideQuestion = null;
-              _sideQuestionAnswer = null;
+    return ZenithalCanvas(
+      child: Column(
+        children: [
+          connectivityBanner,
+          if (!hasKeyboard) breadcrumb,
+          SessionTopTabs(
+            activeTab: _currentTab,
+            onTabChanged: (tab) {
+              setState(() {
+                _activeArtifact = null;
+                _currentTab = tab;
+              });
+              if (tab == SessionTabType.review) {
+                _fetchVcsChanges();
+              }
+            },
+            filesChangedCount: _modifiedFiles.length,
+            hasPlan: _latestPlanText != null,
+            hasTasks: false,
+            runningTasksCount: _activeStreamCount,
+            artifactTabs: _artifacts,
+            activeArtifact: _activeArtifact,
+            onOpenArtifact: (art) => setState(() {
+              _activeArtifact = art;
             }),
-          ),
-        if (_runningBackgroundTasks.isNotEmpty)
-          BackgroundTasksBar(
-            runningTasks: _runningBackgroundTasks,
-            onTapTask: _openTaskOutputSheet,
-            onStopTask: _handleStopBackgroundTask,
-            onViewTasks: () {
-              if (_runningBackgroundTasks.isNotEmpty) {
-                _openTaskOutputSheet(_runningBackgroundTasks.first);
+            onNewTab: () {
+              final projs = widget.projects ?? [];
+              if (projs.length > 1) {
+                _showProjectSelector(context);
+              } else {
+                widget.onNewConversation?.call();
               }
             },
           ),
-        if ((_sessionMessageQueues[widget.activeSessionId]?.isNotEmpty ?? false))
-          ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: hasKeyboard ? 80 : 160),
-            child: QueuedMessagesCard(
-              queuedMessages: _sessionMessageQueues[widget.activeSessionId]!,
-              onSendNow: _handleQueueSendNow,
-              onEdit: _handleQueueEdit,
-              onDelete: _handleQueueDelete,
+          if (!hasKeyboard) ...[
+            _buildSyncStatusBadge(scheme),
+            _buildQuotaBadge(scheme),
+          ],
+          Expanded(
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  // P6 : swipe horizontal gauche/droite pour changer d'onglet.
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onHorizontalDragEnd: (details) {
+                      if (_activeArtifact != null) return; // onglet artefact : pas de swipe
+                      final tabs = _swipeableTabs;
+                      if (tabs.length < 2) return;
+                      final idx = tabs.indexOf(_currentTab);
+                      if (idx < 0) return;
+                      final velocity = details.primaryVelocity ?? 0;
+                      final next = velocity < -200
+                          ? idx + 1
+                          : velocity > 200
+                              ? idx - 1
+                              : -1;
+                      if (next < 0 || next >= tabs.length) return;
+                      final nextTab = tabs[next];
+                      setState(() {
+                        _activeArtifact = null;
+                        _currentTab = nextTab;
+                      });
+                      if (nextTab == SessionTabType.review) {
+                        _fetchVcsChanges();
+                      }
+                    },
+                    child: _buildActiveTabContent(scheme, isConnected),
+                  ),
+                ),
+                // P1 : bouton flottant « retour en bas » — uniquement sur
+                // l'onglet chat, quand l'utilisateur s'est éloigné du bas.
+                if (_showJumpToBottom &&
+                    _activeArtifact == null &&
+                    _currentTab == SessionTabType.chat)
+                  Positioned(
+                    right: 16,
+                    bottom: 12,
+                    child: _JumpToBottomButton(
+                      count: _hiddenNewCount,
+                      onTap: _jumpToBottom,
+                    ),
+                  ),
+              ],
             ),
           ),
-        ChatInputBar(
-          onSend: _handleSendMessage,
-          isConnected: isConnected,
-          hasActiveStream: _hasCurrentActiveStream,
-          onStop: _handleStopGeneration,
-          api: widget.api,
-          cascadeId: widget.activeSessionId,
-          initialText: currentDraft,
-          onDraftChanged: setDraft,
-        ),
-      ],
+          _buildApprovalArea(),
+          if (_sideQuestion != null)
+            SideQuestionCard(
+              question: _sideQuestion!,
+              answer: _sideQuestionAnswer,
+              isLoading: _isSideQuestionLoading,
+              onClose: () => setState(() {
+                _sideQuestion = null;
+                _sideQuestionAnswer = null;
+              }),
+            ),
+          if (_runningBackgroundTasks.isNotEmpty)
+            BackgroundTasksBar(
+              runningTasks: _runningBackgroundTasks,
+              onTapTask: _openTaskOutputSheet,
+              onStopTask: _handleStopBackgroundTask,
+              onViewTasks: () {
+                if (_runningBackgroundTasks.isNotEmpty) {
+                  _openTaskOutputSheet(_runningBackgroundTasks.first);
+                }
+              },
+            ),
+          if ((_sessionMessageQueues[widget.activeSessionId]?.isNotEmpty ?? false))
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: hasKeyboard ? 80 : 160),
+              child: QueuedMessagesCard(
+                queuedMessages: _sessionMessageQueues[widget.activeSessionId]!,
+                onSendNow: _handleQueueSendNow,
+                onEdit: _handleQueueEdit,
+                onDelete: _handleQueueDelete,
+              ),
+            ),
+          if (_topActiveBanner != null)
+            AppNotificationBanner(
+              data: _topActiveBanner!,
+              isCompact: hasKeyboard,
+            ),
+          ChatInputBar(
+            key: _chatInputKey,
+            onSend: _handleSendMessage,
+            isConnected: isConnected,
+            hasActiveStream: _hasCurrentActiveStream,
+            onStop: _handleStopGeneration,
+            api: widget.api,
+            cascadeId: widget.activeSessionId,
+            initialText: currentDraft,
+            onDraftChanged: setDraft,
+          ),
+        ],
+      ),
     );
   }
 
@@ -2503,6 +2585,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                 onViewPlan: () => setState(() => _currentTab = SessionTabType.plan),
                 onViewReview: () => setState(() => _currentTab = SessionTabType.review),
                 onStop: _handleStopGeneration,
+                onSwitchModel: _showModelSelector,
                 onResend: (m) {
                   final reqId = m.id.startsWith('pending-')
                       ? m.id.substring('pending-'.length)
@@ -2880,6 +2963,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   /// Ponytail : pas de workspacePath — les liens IDE sont des chemins
   /// absolus hôte, la voie RPC les accepte directement.
   void _openLocalFile(String filePath) {
+    debugPrint("Tentative d'ouverture de fichier: $filePath");
     final api = widget.api;
     if (api == null) return;
     final name = filePath.split('/').last.split('\\').last;
@@ -3062,6 +3146,7 @@ class _MessageBubble extends StatelessWidget {
   final VoidCallback? onViewReview;
   final VoidCallback? onStop;
   final ValueChanged<ChatMessage>? onResend;
+  final VoidCallback? onSwitchModel;
 
   /// P5 : tap sur un lien markdown file:/// → ouvre le fichier distant.
   final LocalFileTap? onLocalFile;
@@ -3080,6 +3165,7 @@ class _MessageBubble extends StatelessWidget {
     this.onViewReview,
     this.onStop,
     this.onResend,
+    this.onSwitchModel,
   });
 
   @override
@@ -3175,10 +3261,10 @@ class _MessageBubble extends StatelessWidget {
                 onOpenArtifact: onOpenArtifact,
               ),
             ],
-            if (isError && (message.text.length < 120 && !message.text.contains('\n') && !message.text.startsWith('#')))
+            if (isError)
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 decoration: BoxDecoration(
                   color: isDark ? const Color(0xFF1E1214) : scheme.errorContainer.withValues(alpha: 0.25),
                   borderRadius: BorderRadius.circular(8),
@@ -3187,26 +3273,72 @@ class _MessageBubble extends StatelessWidget {
                     width: 0.8,
                   ),
                 ),
-                child: Row(
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(
-                      Icons.error_outline,
-                      size: 16,
-                      color: isDark ? AppColors.danger : scheme.error,
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.error_outline,
+                          size: 16,
+                          color: isDark ? AppColors.danger : scheme.error,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: SelectableText(
+                            message.text,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              height: 1.4,
+                              color: isDark ? const Color(0xFFFCA5A5) : scheme.onErrorContainer,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        message.text,
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          height: 1.4,
-                          color: isDark ? const Color(0xFFFCA5A5) : scheme.onErrorContainer,
-                          fontWeight: FontWeight.w500,
+                    if (onSwitchModel != null &&
+                        (message.text.toLowerCase().contains('quota') ||
+                            message.text.toLowerCase().contains('capacity') ||
+                            message.text.toLowerCase().contains('503') ||
+                            message.text.toLowerCase().contains('401') ||
+                            message.text.toLowerCase().contains('invalid_api_key'))) ...[
+                      const SizedBox(height: 10),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: InkWell(
+                          onTap: () {
+                            HapticFeedback.lightImpact();
+                            onSwitchModel?.call();
+                          },
+                          borderRadius: BorderRadius.circular(6),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: AppColors.accentBlue,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.swap_horiz_rounded, size: 13, color: Colors.white),
+                                SizedBox(width: 4),
+                                Text(
+                                  'Changer de modèle',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
               )
@@ -3386,29 +3518,26 @@ class _JumpToBottomButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        key: const Key('jump-to-bottom'),
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadius.pill),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHigh,
-            borderRadius: BorderRadius.circular(AppRadius.pill),
-            border: Border.all(
-              color: isDark ? AppColors.borderSubtle : scheme.outlineVariant,
-              width: 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.35),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
+    return BouncingTap(
+      key: const Key('jump-to-bottom'),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+          border: Border.all(
+            color: isDark ? AppColors.borderSubtle : scheme.outlineVariant,
+            width: 1,
           ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.35),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -3436,8 +3565,7 @@ class _JumpToBottomButton extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
+      );
   }
 }
 

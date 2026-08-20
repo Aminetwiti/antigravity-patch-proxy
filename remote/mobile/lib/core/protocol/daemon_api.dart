@@ -638,15 +638,16 @@ class DaemonApi {
   });
 
   /// Upload de média multimodal (images/photos) vers le daemon.
-  void uploadMedia({
+  Future<Map<String, dynamic>> uploadMedia({
     required String cascadeId,
     required String fileName,
     required String mimeType,
     required String base64Data,
   }) {
+    final id = _newRequestId();
     final clientMsg = ClientMessage(
       type: 'upload_media',
-      requestId: _newRequestId(),
+      requestId: id,
       cascadeId: cascadeId,
       data: {
         'fileName': fileName,
@@ -655,7 +656,51 @@ class DaemonApi {
       },
     );
     _sendRaw?.call(clientMsg);
-    _send(clientMsg.toJson());
+    final completer = Completer<Map<String, dynamic>>();
+    _pending[id] = completer;
+    final message = {
+      'type': 'upload_media',
+      'requestId': id,
+      'cascadeId': cascadeId,
+      'fileName': fileName,
+      'mimeType': mimeType,
+      'base64Data': base64Data,
+    };
+    final outbox = _outbox;
+    if (outbox != null) {
+      outbox.enqueue(message);
+    }
+    _send(message);
+    return completer.future.timeout(
+      _timeout,
+      onTimeout: () {
+        _pending.remove(id);
+        throw TimeoutException('Daemon did not respond to upload_media ($id)');
+      },
+    );
+  }
+
+  /// Upload de fichier par morceaux (chunks) avec progression vers le daemon.
+  Future<Map<String, dynamic>> uploadChunk({
+    required String uploadId,
+    required String cascadeId,
+    required String fileName,
+    required int chunkIndex,
+    required int totalChunks,
+    required int totalBytes,
+    required String base64Data,
+    String? targetPath,
+  }) {
+    return rpc('upload_chunk', {
+      'uploadId': uploadId,
+      'cascadeId': cascadeId,
+      'fileName': fileName,
+      'chunkIndex': chunkIndex,
+      'totalChunks': totalChunks,
+      'totalBytes': totalBytes,
+      'base64Data': base64Data,
+      if (targetPath != null) 'targetPath': targetPath,
+    });
   }
 
   /// Liste les branches Git du workspace.
