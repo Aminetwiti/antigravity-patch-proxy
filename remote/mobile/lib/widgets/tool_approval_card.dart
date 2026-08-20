@@ -37,6 +37,9 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
   Timer? _submitTimeout;
   final TextEditingController _denyReasonController = TextEditingController();
 
+  bool _showMcpArgs = false;
+  bool _destructiveConfirmed = false;
+
   bool get _isUrlApproval => widget.request.isUrlApproval;
   bool get _isFileApproval => widget.request.isFileApproval;
   bool get _isScopedApproval =>
@@ -121,6 +124,8 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
       _selectedOption = 1;
       _alwaysAllow = false;
       _showDenyReason = false;
+      _showMcpArgs = false;
+      _destructiveConfirmed = false;
       _denyReasonController.clear();
       _submitTimeout?.cancel();
     }
@@ -379,6 +384,119 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
             ),
             const SizedBox(height: 8),
 
+            // ── Inspecteur de Paramètres MCP
+            if (widget.request.isMcpApproval &&
+                widget.request.mcpArgs != null &&
+                widget.request.mcpArgs!.isNotEmpty) ...[
+              InkWell(
+                key: const Key('toggle-mcp-args-btn'),
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  setState(() => _showMcpArgs = !_showMcpArgs);
+                },
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  margin: const EdgeInsets.only(bottom: 8),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? AppColors.surfaceHover
+                        : scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: isDark ? AppColors.borderSubtle : scheme.outlineVariant,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.data_object,
+                        size: 14,
+                        color: isDark ? AppColors.accentBlueBright : scheme.primary,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          _showMcpArgs ? 'Masquer les paramètres' : 'Inspecter les paramètres JSON',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                          ),
+                        ),
+                      ),
+                      Icon(
+                        _showMcpArgs ? Icons.expand_less : Icons.expand_more,
+                        size: 16,
+                        color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (_showMcpArgs) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  margin: const EdgeInsets.only(bottom: 8),
+                  decoration: BoxDecoration(
+                    color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: isDark ? AppColors.borderSubtle : scheme.outlineVariant,
+                    ),
+                  ),
+                  child: SelectableText(
+                    widget.request.mcpArgs!,
+                    style: TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 11,
+                      height: 1.3,
+                      color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+
+            // ── Quick chips Stdin
+            if (widget.request.isStdinApproval) ...[
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    ActionChip(
+                      label: const Text('y (Yes)', style: TextStyle(fontSize: 11)),
+                      onPressed: _isSubmitting || widget.isExpired
+                          ? null
+                          : () {
+                              _handleDecision(ToolDecision.allow, scope: ApprovalScope.once, denyReason: 'y');
+                            },
+                    ),
+                    ActionChip(
+                      label: const Text('n (No)', style: TextStyle(fontSize: 11)),
+                      onPressed: _isSubmitting || widget.isExpired
+                          ? null
+                          : () {
+                              _handleDecision(ToolDecision.allow, scope: ApprovalScope.once, denyReason: 'n');
+                            },
+                    ),
+                    ActionChip(
+                      label: const Text('↵ Enter', style: TextStyle(fontSize: 11)),
+                      onPressed: _isSubmitting || widget.isExpired
+                          ? null
+                          : () {
+                              _handleDecision(ToolDecision.allow, scope: ApprovalScope.once, denyReason: '\n');
+                            },
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
             // ── Avertissement Action Destructive si détectée
             if (_isDestructive) ...[
               Container(
@@ -392,22 +510,59 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
                     color: (isDark ? AppColors.danger : scheme.error).withValues(alpha: 0.5),
                   ),
                 ),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(
-                      Icons.warning_amber_rounded,
-                      size: 16,
-                      color: isDark ? AppColors.danger : scheme.error,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Attention : Cette opération risque de supprimer ou modifier irrémédiablement des données.',
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w600,
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.warning_amber_rounded,
+                          size: 16,
                           color: isDark ? AppColors.danger : scheme.error,
                         ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Attention : Cette opération risque de supprimer ou modifier irrémédiablement des données.',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? AppColors.danger : scheme.error,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    InkWell(
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        setState(() => _destructiveConfirmed = !_destructiveConfirmed);
+                      },
+                      child: Row(
+                        children: [
+                          Checkbox(
+                            key: const Key('destructive-confirm-checkbox'),
+                            value: _destructiveConfirmed,
+                            onChanged: (v) {
+                              HapticFeedback.lightImpact();
+                              setState(() => _destructiveConfirmed = v ?? false);
+                            },
+                            activeColor: isDark ? AppColors.danger : scheme.error,
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              'Je confirme le risque irréversible',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: isDark ? AppColors.danger : scheme.error,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -639,7 +794,9 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
                 Expanded(
                   child: ElevatedButton.icon(
                     key: const Key('allow-btn'),
-                    onPressed: _isSubmitting || widget.isExpired
+                    onPressed: _isSubmitting ||
+                            widget.isExpired ||
+                            (_isDestructive && !_destructiveConfirmed && !(_isUrlApproval && _selectedOption == 5))
                         ? null
                         : _handleSubmitSelected,
                     icon: _isSubmitting

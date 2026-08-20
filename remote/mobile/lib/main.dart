@@ -1247,13 +1247,21 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                       ),
                     ),
                     const SizedBox(width: 6),
-                    Text(
-                      isConnected ? 'Connecté' : 'Hors ligne',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        color: isConnected ? AppColors.positive : AppColors.danger,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    ValueListenableBuilder<int?>(
+                      valueListenable: _wsClient.latencyMsNotifier,
+                      builder: (context, latency, _) {
+                        final label = isConnected
+                            ? (latency != null ? 'Connecté • ${latency}ms' : 'Connecté')
+                            : 'Hors ligne';
+                        return Text(
+                          label,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: isConnected ? AppColors.positive : AppColors.danger,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        );
+                      },
                     ),
                   ],
                 ),

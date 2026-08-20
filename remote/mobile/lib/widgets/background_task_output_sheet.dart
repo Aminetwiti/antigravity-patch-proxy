@@ -62,11 +62,14 @@ class BackgroundTaskOutputSheet extends StatefulWidget {
 
 class _BackgroundTaskOutputSheetState extends State<BackgroundTaskOutputSheet> {
   final ScrollController _scrollController = ScrollController();
+  final TextEditingController _searchController = TextEditingController();
   late StringBuffer _outputBuffer;
   late String _currentStatus;
   Timer? _pollTimer;
   bool _autoScroll = true;
   bool _userScrolledUp = false;
+  bool _isSearching = false;
+  String _searchQuery = '';
 
   @override
   void initState() {
@@ -174,6 +177,7 @@ class _BackgroundTaskOutputSheetState extends State<BackgroundTaskOutputSheet> {
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _searchController.dispose();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
@@ -184,7 +188,19 @@ class _BackgroundTaskOutputSheetState extends State<BackgroundTaskOutputSheet> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isRunning = _currentStatus == 'running';
     final outputText = _outputBuffer.toString();
-    final lines = outputText.isEmpty ? <String>['(En attente de la sortie de la commande...)'] : outputText.split('\n');
+    final allLines = outputText.isEmpty ? <String>['(En attente de la sortie de la commande...)'] : outputText.split('\n');
+    final lines = _searchQuery.isEmpty
+        ? allLines
+        : allLines.where((l) => l.toLowerCase().contains(_searchQuery.toLowerCase())).toList();
+
+    final hasError = outputText.contains('exited with code 1') ||
+        outputText.contains('Error:') ||
+        outputText.contains('FAILED') ||
+        outputText.contains('FAIL');
+    final statusLabel = isRunning ? 'EN COURS' : (hasError ? 'ÉCHEC' : 'SUCCÈS');
+    final statusColor = isRunning
+        ? AppColors.accentBlue
+        : (hasError ? AppColors.danger : AppColors.positive);
 
     return Container(
       height: MediaQuery.of(context).size.height * 0.75,
@@ -259,6 +275,26 @@ class _BackgroundTaskOutputSheetState extends State<BackgroundTaskOutputSheet> {
                 ),
                 const SizedBox(width: 6),
 
+                // Recherche / Filtre
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  padding: const EdgeInsets.all(6),
+                  icon: Icon(_isSearching ? Icons.search_off_rounded : Icons.search_rounded, size: 16),
+                  tooltip: _isSearching ? 'Fermer la recherche' : 'Rechercher dans les logs',
+                  color: _isSearching ? AppColors.accentBlue : (isDark ? AppColors.inkMuted : const Color(0xFF8B949E)),
+                  onPressed: () {
+                    HapticFeedback.selectionClick();
+                    setState(() {
+                      _isSearching = !_isSearching;
+                      if (!_isSearching) {
+                        _searchQuery = '';
+                        _searchController.clear();
+                      }
+                    });
+                  },
+                ),
+
                 // Rafraîchir
                 IconButton(
                   visualDensity: VisualDensity.compact,
@@ -322,7 +358,54 @@ class _BackgroundTaskOutputSheetState extends State<BackgroundTaskOutputSheet> {
             ),
           ),
 
-          // Titre secondaire
+          // Barre de recherche si active
+          if (_isSearching)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: BoxDecoration(
+                  color: isDark ? AppColors.surfaceRaised : Colors.white,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: AppColors.accentBlue.withValues(alpha: 0.5)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.search_rounded, size: 14, color: AppColors.accentBlue),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: TextField(
+                        controller: _searchController,
+                        autofocus: true,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark ? AppColors.inkPrimary : Colors.black87,
+                        ),
+                        decoration: const InputDecoration(
+                          hintText: 'Filtrer (error, FAIL, warning...)',
+                          hintStyle: TextStyle(fontSize: 12, color: AppColors.inkMuted),
+                          border: InputBorder.none,
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(vertical: 6),
+                        ),
+                        onChanged: (val) {
+                          setState(() {
+                            _searchQuery = val.trim();
+                          });
+                        },
+                      ),
+                    ),
+                    if (_searchQuery.isNotEmpty)
+                      Text(
+                        '${lines.length} résultat${lines.length > 1 ? 's' : ''}',
+                        style: const TextStyle(fontSize: 11, color: AppColors.inkMuted),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+
+          // Titre secondaire avec badge de statut
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             child: Row(
@@ -343,17 +426,15 @@ class _BackgroundTaskOutputSheetState extends State<BackgroundTaskOutputSheet> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: isRunning
-                        ? AppColors.accentBlue.withValues(alpha: 0.15)
-                        : AppColors.positive.withValues(alpha: 0.15),
+                    color: statusColor.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
-                    isRunning ? 'EN COURS' : 'TERMINÉ',
+                    statusLabel,
                     style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
-                      color: isRunning ? AppColors.accentBlue : AppColors.positive,
+                      color: statusColor,
                     ),
                   ),
                 ),

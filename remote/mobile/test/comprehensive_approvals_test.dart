@@ -40,7 +40,8 @@ void main() {
       expect(find.byKey(const Key('approval-option-5')), findsOneWidget);
     });
 
-    testWidgets('Destructive Action displays high risk warning banner', (tester) async {
+    testWidgets('Destructive Action requires confirmation checkbox before allowing', (tester) async {
+      ToolDecision? decision;
       final req = ToolApprovalRequest.fromJson({
         'callId': 'call-rm-123',
         'toolName': 'run_command',
@@ -55,7 +56,9 @@ void main() {
             body: SingleChildScrollView(
               child: ToolApprovalCard(
                 request: req,
-                onDecision: (d, {scope = ApprovalScope.once, denyReason = ''}) {},
+                onDecision: (d, {scope = ApprovalScope.once, denyReason = ''}) {
+                  decision = d;
+                },
               ),
             ),
           ),
@@ -65,13 +68,30 @@ void main() {
 
       expect(find.text('Action Destructive / Risque Élevé'), findsOneWidget);
       expect(find.textContaining('Attention : Cette opération risque de supprimer'), findsOneWidget);
+      expect(find.byKey(const Key('destructive-confirm-checkbox')), findsOneWidget);
+
+      // Verify allow button is disabled until checkbox checked
+      final allowBtnFinder = find.byKey(const Key('allow-btn'));
+      expect(tester.widget<ElevatedButton>(allowBtnFinder).onPressed, isNull);
+
+      // Check checkbox
+      await tester.tap(find.byKey(const Key('destructive-confirm-checkbox')));
+      await tester.pumpAndSettle();
+
+      // Allow button should now be enabled
+      expect(tester.widget<ElevatedButton>(allowBtnFinder).onPressed, isNotNull);
+      await tester.tap(allowBtnFinder);
+      await tester.pumpAndSettle();
+
+      expect(decision, ToolDecision.allow);
     });
 
-    testWidgets('MCP tool displays server badge and tool name', (tester) async {
+    testWidgets('MCP tool displays inspector and toggles arguments', (tester) async {
       final req = ToolApprovalRequest.fromJson({
         'callId': 'call-mcp-999',
         'toolName': 'create_server',
         'mcpServer': 'coolify',
+        'mcpArgs': '{"name": "production-node", "ip": "1.2.3.4"}',
         'approvalType': 'mcp_tool',
         'description': 'Create new server in Coolify',
       });
@@ -92,6 +112,50 @@ void main() {
 
       expect(find.text('Allow MCP tool execution (coolify)?'), findsOneWidget);
       expect(find.text('coolify -> create_server'), findsOneWidget);
+      expect(find.byKey(const Key('toggle-mcp-args-btn')), findsOneWidget);
+
+      // Toggle arguments
+      await tester.tap(find.byKey(const Key('toggle-mcp-args-btn')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('{"name": "production-node", "ip": "1.2.3.4"}'), findsOneWidget);
+    });
+
+    testWidgets('Stdin tool displays quick action chips', (tester) async {
+      String? submittedReason;
+      final req = ToolApprovalRequest.fromJson({
+        'callId': 'call-stdin-1',
+        'toolName': 'send_command_input',
+        'command': 'Do you want to continue? [y/N]',
+        'approvalType': 'send_command_input',
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: ToolApprovalCard(
+                request: req,
+                onDecision: (d, {scope = ApprovalScope.once, denyReason = ''}) {
+                  submittedReason = denyReason;
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Send terminal input (stdin)'), findsOneWidget);
+      expect(find.text('y (Yes)'), findsOneWidget);
+      expect(find.text('n (No)'), findsOneWidget);
+      expect(find.text('↵ Enter'), findsOneWidget);
+
+      // Tap 'y (Yes)' chip
+      await tester.tap(find.text('y (Yes)'));
+      await tester.pumpAndSettle();
+
+      expect(submittedReason, 'y');
     });
   });
 }

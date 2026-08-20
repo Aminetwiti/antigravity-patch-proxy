@@ -179,7 +179,7 @@ class ImplementationPlanCard extends StatelessWidget {
   }
 }
 
-/// Carte interactive de Walkthrough dans le chat
+/// Carte interactive de Walkthrough dans le chat (Antigravity 2.0 Desktop Style)
 class WalkthroughCard extends StatelessWidget {
   final String title;
   final String summary;
@@ -198,14 +198,21 @@ class WalkthroughCard extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 6),
+      margin: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
         color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
+        gradient: AppGradients.cardCool(isDark: isDark),
         borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: isDark ? AppColors.borderStrong : scheme.outlineVariant, width: 1),
+        border: Border.all(
+          color: isDark ? const Color(0xFF00B95C).withValues(alpha: 0.3) : const Color(0xFF00B95C).withValues(alpha: 0.25),
+          width: 1,
+        ),
       ),
       child: InkWell(
-        onTap: onViewWalkthrough,
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onViewWalkthrough();
+        },
         borderRadius: BorderRadius.circular(AppRadius.lg),
         child: Padding(
           padding: const EdgeInsets.all(14),
@@ -214,31 +221,84 @@ class WalkthroughCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  const Icon(Icons.menu_book_outlined, size: 16, color: AppColors.positive),
-                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.all(5),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF00B95C).withValues(alpha: isDark ? 0.18 : 0.12),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Icon(Icons.verified_outlined, size: 16, color: Color(0xFF00B95C)),
+                  ),
+                  const SizedBox(width: 10),
                   Expanded(
-                    child: Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: scheme.onSurface,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                            color: scheme.onSurface,
+                            letterSpacing: -0.1,
+                          ),
+                        ),
+                        const Text(
+                          'RÉSUMÉ DES CHANGEMENTS & VALIDATION',
+                          style: TextStyle(
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.6,
+                            color: Color(0xFF00B95C),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   Icon(Icons.chevron_right, size: 16, color: scheme.onSurfaceVariant),
                 ],
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 8),
               Text(
                 summary,
                 style: TextStyle(
-                  fontSize: 12,
-                  color: scheme.onSurfaceVariant,
-                  height: 1.4,
+                  fontSize: 12.5,
+                  color: isDark ? const Color(0xFFD4D4D8) : scheme.onSurfaceVariant,
+                  height: 1.45,
                 ),
-                maxLines: 3,
+                maxLines: 4,
                 overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF14241B) : const Color(0xFFE6F7EC),
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
+                      border: Border.all(
+                        color: const Color(0xFF00B95C).withValues(alpha: isDark ? 0.4 : 0.3),
+                        width: 0.8,
+                      ),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.menu_book_outlined, size: 13, color: Color(0xFF00B95C)),
+                        SizedBox(width: 5),
+                        Text(
+                          'Consulter le Walkthrough',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF00B95C),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ],
           ),

@@ -275,6 +275,11 @@ class ChatInputBarState extends State<ChatInputBar> {
       finalPayload = '$cmd $args'.trim();
     }
 
+    if (finalPayload.isNotEmpty && (_promptHistory.isEmpty || _promptHistory.last != finalPayload)) {
+      _promptHistory.add(finalPayload);
+      if (_promptHistory.length > 50) _promptHistory.removeAt(0);
+    }
+
     // Traitement et upload des attachements vers le daemon si connecté
     if (widget.api != null && widget.cascadeId != null && _attachments.isNotEmpty) {
       setState(() => _uploadProgress = 0.05);
@@ -1624,6 +1629,106 @@ class ChatInputBarState extends State<ChatInputBar> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
       ),
       builder: (ctx) => _UsageLimitsModal(api: widget.api),
+    );
+  }
+
+  static final List<String> _promptHistory = [];
+
+  void _showPromptHistoryMenu(BuildContext context) {
+    if (_promptHistory.isEmpty) return;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final scheme = Theme.of(context).colorScheme;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.5,
+        ),
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.surfaceBase : AppColors.surfaceInput,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+          border: Border(
+            top: BorderSide(
+              color: isDark ? AppColors.borderStrong : AppColors.borderSubtle,
+            ),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 8, bottom: 6),
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: isDark ? AppColors.borderStrong : AppColors.borderSubtle,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.history_rounded, size: 16, color: AppColors.accentBlue),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Historique des messages envoyés',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? AppColors.inkPrimary : Colors.black87,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.close_rounded, size: 16),
+                    onPressed: () => Navigator.of(ctx).pop(),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                itemCount: _promptHistory.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (context, idx) {
+                  final item = _promptHistory[_promptHistory.length - 1 - idx];
+                  return ListTile(
+                    dense: true,
+                    title: Text(
+                      item,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: const Icon(Icons.north_west_rounded, size: 14, color: AppColors.inkMuted),
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      _controller.text = item;
+                      _controller.selection = TextSelection.collapsed(offset: item.length);
+                      widget.onDraftChanged?.call(item);
+                      Navigator.of(ctx).pop();
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

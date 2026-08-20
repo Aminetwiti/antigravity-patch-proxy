@@ -26,7 +26,7 @@ import (
 const reactiveBackoff = 30 * time.Second
 
 // reactiveNotFoundBackoff temporise 5 minutes si le LS répond 404 (endpoint non implémenté).
-const reactiveNotFoundBackoff = 5 * time.Minute
+var reactiveNotFoundBackoff = 5 * time.Minute
 
 // ReactiveStreamer est la portion minimale du client LS nécessaire au flux
 // réactif. Interface étroite : les tests injectent un faux sans réimplémenter

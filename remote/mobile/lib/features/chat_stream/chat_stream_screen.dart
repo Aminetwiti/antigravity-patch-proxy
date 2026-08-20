@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -3230,6 +3232,9 @@ class _MessageBubble extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     if (isUser) {
+      final parsed = _extractMediaAndCleanText(message.text);
+      final hasMedia = parsed.media.isNotEmpty;
+
       return RepaintBoundary(
         child: Container(
           margin: const EdgeInsets.only(bottom: 16),
@@ -3243,12 +3248,28 @@ class _MessageBubble extends StatelessWidget {
             ),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: MarkdownBubble(
-            text: message.text,
-            isStreaming: false,
-            api: api,
-            workspacePath: workspacePath,
-            onLocalFile: onLocalFile,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (hasMedia) ...[
+                _MediaGalleryRow(
+                  media: parsed.media,
+                  api: api,
+                  workspacePath: workspacePath,
+                  onLocalFile: onLocalFile,
+                ),
+                if (parsed.cleanText.isNotEmpty) const SizedBox(height: 10),
+              ],
+              if (parsed.cleanText.isNotEmpty)
+                MarkdownBubble(
+                  text: parsed.cleanText,
+                  isStreaming: false,
+                  api: api,
+                  workspacePath: workspacePath,
+                  onLocalFile: onLocalFile,
+                ),
+            ],
           ),
         ),
       );

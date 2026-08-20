@@ -348,25 +348,20 @@ class ToolApprovalRequest {
 
   bool get isFileApproval =>
       approvalType == 'file_permission' ||
-      toolName.toLowerCase().contains('file') ||
-      toolName.toLowerCase() == 'write_to_file' ||
+      approvalType == 'permission' ||
       filePath != null;
 
   bool get isUrlApproval =>
       approvalType == 'read_url_content' ||
-      toolName.toLowerCase().contains('url') ||
-      toolName.toLowerCase() == 'browse' ||
-      toolName.toLowerCase() == 'open_browser_url' ||
+      approvalType == 'open_browser_url' ||
       url != null;
 
   bool get isMcpApproval =>
       approvalType == 'mcp_tool' ||
-      toolName.toLowerCase().contains('mcp') ||
       mcpServer != null;
 
   bool get isStdinApproval =>
       approvalType == 'send_command_input' ||
-      toolName.toLowerCase().contains('input') ||
       toolName.toLowerCase().contains('stdin');
 
   bool get isDeployApproval =>
