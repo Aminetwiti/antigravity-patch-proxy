@@ -799,6 +799,8 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
                   ),
                   child: Text(
                     'Refuser',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
                       fontSize: 12.5,
@@ -834,6 +836,8 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
                       _isSubmitting
                           ? 'En cours...'
                           : ((_isUrlApproval && _selectedOption == 5) ? 'Refuser' : 'Approuver'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,

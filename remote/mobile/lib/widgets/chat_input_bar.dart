@@ -153,10 +153,39 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
   }
 
   final TextEditingController _controller = TextEditingController();
+  final FocusNode _focusNode = FocusNode();
   String _selectedModel = 'Gemini 3.7 Flash';
   String? _selectedModelId = 'gemini-3.7-flash';
   int? _selectedModelEnum = 312;
   List<AntigravityModel> _availableModels = ModelCatalog.standardModels;
+
+  String get _displayModelName {
+    var name = _selectedModel.trim();
+    if (name.contains('/')) {
+      name = name.split('/').last.trim();
+    }
+    return name;
+  }
+
+  Color _getModelProviderColor(String modelName, ColorScheme scheme) {
+    final lower = modelName.toLowerCase();
+    if (lower.contains('claude') || lower.contains('anthropic')) {
+      return AppColors.providerAnthropic;
+    }
+    if (lower.contains('gpt') || lower.contains('openai') || lower.contains('codex')) {
+      return AppColors.providerOpenAI;
+    }
+    if (lower.contains('deepseek')) {
+      return AppColors.providerCustom;
+    }
+    if (lower.contains('ollama')) {
+      return AppColors.providerOllama;
+    }
+    if (lower.contains('gemini') || lower.contains('google')) {
+      return AppColors.accentBlue;
+    }
+    return scheme.primary;
+  }
 
   bool _isSendPressed = false;
   SendMode _sendMode = SendMode.immediate;
@@ -182,6 +211,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _focusNode.addListener(_onFocusChanged);
     if (widget.initialText.isNotEmpty) {
       // P6 : restaure le brouillon persisté avant d'écouter les frappes.
       _controller.text = widget.initialText;
@@ -194,6 +224,10 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
     widget.onDraftChanged?.call(_controller.text);
     _loadModelsAndPreferences();
     _checkClipboard();
+  }
+
+  void _onFocusChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -322,6 +356,8 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _sendDebounceTimer?.cancel();
+    _focusNode.removeListener(_onFocusChanged);
+    _focusNode.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -961,7 +997,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
                       child: LinearProgressIndicator(
                         value: _uploadProgress,
                         minHeight: 3,
-                        backgroundColor: isDark ? const Color(0xFF26282E) : scheme.surfaceContainerHighest,
+                        backgroundColor: isDark ? AppColors.surfaceHover : scheme.surfaceContainerHighest,
                         valueColor: AlwaysStoppedAnimation<Color>(scheme.primary),
                       ),
                     ),
@@ -1101,7 +1137,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
               child: att.isImage && att.bytes != null
                   ? Container(
                       constraints: const BoxConstraints(maxHeight: 380),
-                      color: isDark ? const Color(0xFF101216) : scheme.surfaceContainerLow,
+                      color: isDark ? AppColors.editorBackground : scheme.surfaceContainerLow,
                       child: InteractiveViewer(
                         minScale: 0.5,
                         maxScale: 4.0,
@@ -1116,7 +1152,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
                   : Container(
                       constraints: const BoxConstraints(maxHeight: 300),
                       padding: const EdgeInsets.all(12),
-                      color: isDark ? const Color(0xFF101216) : scheme.surfaceContainerLow,
+                      color: isDark ? AppColors.editorBackground : scheme.surfaceContainerLow,
                       child: SingleChildScrollView(
                         child: SelectableText(
                           att.textContent ?? '[Fichier binaire (${_formatBytes(att.size)})]',
@@ -1242,7 +1278,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
             child: Container(
               padding: const EdgeInsets.all(5),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF26282E) : scheme.surfaceContainer,
+                color: isDark ? AppColors.surfaceHover : scheme.surfaceContainer,
                 shape: BoxShape.circle,
               ),
               child: Icon(
@@ -1923,15 +1959,21 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
     final viewPadding = MediaQuery.of(context).viewPadding;
     final rawInsetsBottom = View.of(context).viewInsets.bottom / MediaQuery.of(context).devicePixelRatio;
     final hasKeyboard = viewInsets.bottom > 50 || rawInsetsBottom > 50;
+    final isIdle = !_focusNode.hasFocus && _controller.text.isEmpty && _attachments.isEmpty && !hasKeyboard;
     final bottomMargin = hasKeyboard
         ? 2.0
         : (viewPadding.bottom > 0 ? 4.0 : 8.0);
+
+    final providerColor = _getModelProviderColor(_selectedModel, scheme);
+    final isThinking = _selectedModel.toLowerCase().contains('thinking') ||
+        _selectedModel.toLowerCase().contains('high') ||
+        _reasoningEffort == 'Élevé';
 
     return SafeArea(
       top: false,
       bottom: !hasKeyboard,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
+        duration: const Duration(milliseconds: 180),
         curve: Curves.easeOutCubic,
         margin: EdgeInsets.fromLTRB(12, 2, 12, bottomMargin),
         child: Column(
@@ -1988,19 +2030,19 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
                       hapticType: BouncingHapticType.selection,
                       onTap: _pasteClipboard,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                         decoration: BoxDecoration(
-                          color: isDark ? const Color(0xFF1F2430) : scheme.surfaceContainerHighest,
+                          color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
                           borderRadius: BorderRadius.circular(AppRadius.pill),
                           border: Border.all(
-                            color: const Color(0xFF3186FF).withValues(alpha: isDark ? 0.4 : 0.3),
+                            color: AppColors.accentBlue.withValues(alpha: isDark ? 0.4 : 0.3),
                             width: 0.8,
                           ),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.content_paste_rounded, size: 12, color: Color(0xFF3186FF)),
+                            const Icon(Icons.content_paste_rounded, size: 12, color: AppColors.accentBlue),
                             const SizedBox(width: 5),
                             Text(
                               'Coller : ${_clipboardPreviewText!.replaceAll('\n', ' ').length > 24 ? '${_clipboardPreviewText!.replaceAll('\n', ' ').substring(0, 24)}…' : _clipboardPreviewText!.replaceAll('\n', ' ')}',
@@ -2014,24 +2056,25 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
                         ),
                       ),
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: 2),
                     InkWell(
                       onTap: () => setState(() => _clipboardPreviewText = null),
-                      borderRadius: BorderRadius.circular(12),
-                      child: Padding(
-                        padding: const EdgeInsets.all(4),
-                        child: Icon(Icons.close_rounded, size: 13, color: isDark ? AppColors.inkMuted : scheme.outline),
+                      borderRadius: BorderRadius.circular(16),
+                      child: Container(
+                        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                        alignment: Alignment.center,
+                        child: Icon(Icons.close_rounded, size: 14, color: isDark ? AppColors.inkMuted : scheme.outline),
                       ),
                     ),
                   ],
                 ),
               ),
-            if (!hasKeyboard)
+            if (!hasKeyboard && !isIdle)
               _buildQuickActionPills(scheme, isDark),
             Container(
               padding: EdgeInsets.symmetric(
                 horizontal: 12,
-                vertical: hasKeyboard ? 6 : 12,
+                vertical: hasKeyboard ? 6 : (isIdle ? 7 : 10),
               ),
               decoration: BoxDecoration(
                 color: isDark
@@ -2040,11 +2083,13 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
                   color: isQueued
-                      ? scheme.primary.withValues(alpha: 0.6)
-                      : (isDark
-                          ? AppColors.borderSubtle
-                          : AppColors.border(context)),
-                  width: 1,
+                      ? scheme.primary.withValues(alpha: 0.8)
+                      : (_focusNode.hasFocus
+                          ? (isDark ? AppColors.accentBlue : scheme.primary)
+                          : (isDark
+                              ? AppColors.borderSubtle
+                              : AppColors.border(context))),
+                  width: _focusNode.hasFocus ? 1.2 : 1.0,
                 ),
               ),
               child: Column(
@@ -2131,18 +2176,19 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
                       child: Container(
                         key: _textFieldKey,
                         child: TextField(
+                          focusNode: _focusNode,
                           controller: _controller,
                           autofocus: false,
-                          maxLines: 6,
+                          maxLines: isIdle ? 1 : 6,
                           minLines: 1,
                           style: TextStyle(fontSize: 14, color: scheme.onSurface),
                           decoration: InputDecoration(
                             hintText:
                                 widget.isConnected
                                     ? (isQueued
-                                        ? "Message queued — sends after agent finishes working"
-                                        : 'Ask anything, @ to mention, / for actions')
-                                    : 'Offline — message will be sent when reconnected',
+                                        ? "Message en file d'attente (envoi automatique)..."
+                                        : 'Poser une question, @ pour mentionner...')
+                                    : 'Hors ligne — message mis en attente locale',
                             hintStyle: TextStyle(
                               color:
                                   widget.isConnected ? scheme.onSurfaceVariant.withValues(alpha: 0.8) : scheme.error,
@@ -2160,69 +2206,92 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
                       ),
                     ),
                   ),
-                  SizedBox(height: hasKeyboard ? 4 : 10),
+                  SizedBox(height: isIdle ? 4 : (hasKeyboard ? 4 : 8)),
 
                   // Bottom Action Bar
                   Row(
                     children: [
                       // Attach media/file
-                      InkWell(
+                      BouncingTap(
+                        hapticType: BouncingHapticType.selection,
                         onTap: _showAttachmentMenu,
-                        borderRadius: BorderRadius.circular(8),
-                        child: Padding(
-                          padding: const EdgeInsets.all(8),
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHigh,
+                            shape: BoxShape.circle,
+                          ),
+                          alignment: Alignment.center,
                           child: Icon(
                             Icons.add,
                             size: 20,
-                            color: scheme.onSurfaceVariant,
+                            color: isDark ? AppColors.inkPrimary : scheme.onSurface,
                           ),
                         ),
                       ),
-                      const SizedBox(width: 2),
+                      const SizedBox(width: 8),
 
-                      // Model & Reasoning Effort Pill
+                      // Model & Reasoning Effort Pill with Brand Dot & Thinking Badge
                       Flexible(
                         fit: FlexFit.loose,
-                        child: InkWell(
+                        child: BouncingTap(
                           key: _modelButtonKey,
+                          hapticType: BouncingHapticType.selection,
                           onTap: () => _showModelDropdown(context),
-                          borderRadius: BorderRadius.circular(6),
-                          child: Padding(
+                          child: Container(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 6,
+                              horizontal: 8,
+                              vertical: 4.5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHigh,
+                              borderRadius: BorderRadius.circular(AppRadius.pill),
+                              border: Border.all(
+                                color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.5),
+                                width: 0.8,
+                              ),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(
-                                  isQueued
-                                      ? Icons.playlist_add_check_outlined
-                                      : Icons.psychology_outlined,
-                                  size: 15,
-                                  color:
-                                      isQueued
-                                          ? scheme.primary
-                                          : scheme.onSurfaceVariant,
+                                Container(
+                                  width: 7,
+                                  height: 7,
+                                  decoration: BoxDecoration(
+                                    color: isQueued ? scheme.primary : providerColor,
+                                    shape: BoxShape.circle,
+                                  ),
                                 ),
-                                const SizedBox(width: 4),
+                                const SizedBox(width: 5),
                                 Flexible(
-                                  child: Text(
-                                    _selectedModel,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: scheme.onSurface,
-                                      fontWeight: FontWeight.w500,
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(maxWidth: 130),
+                                    child: Text(
+                                      _displayModelName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                                        fontWeight: FontWeight.w600,
+                                      ),
                                     ),
                                   ),
                                 ),
+                                if (isThinking) ...[
+                                  const SizedBox(width: 4),
+                                  Icon(
+                                    Icons.psychology_outlined,
+                                    size: 13,
+                                    color: isDark ? AppColors.accentBlue : scheme.primary,
+                                  ),
+                                ],
                                 const SizedBox(width: 2),
                                 Icon(
-                                  Icons.keyboard_arrow_up,
-                                  size: 15,
-                                  color: scheme.onSurfaceVariant,
+                                  Icons.keyboard_arrow_up_rounded,
+                                  size: 14,
+                                  color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
                                 ),
                               ],
                             ),
@@ -2232,15 +2301,33 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
 
                       const Spacer(),
 
-                      // Voice / Dictée vocale avec formatage intelligent de code
-                      IconButton(
-                        icon: Icon(
-                          Icons.mic_rounded,
-                          size: 20,
-                          color: scheme.onSurfaceVariant.withValues(alpha: 0.9),
+                      // Clear text button (when text is typed)
+                      if (_controller.text.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 2),
+                          child: BouncingTap(
+                            hapticType: BouncingHapticType.selection,
+                            onTap: () {
+                              _controller.clear();
+                              widget.onDraftChanged?.call('');
+                            },
+                            child: Container(
+                              width: 30,
+                              height: 30,
+                              alignment: Alignment.center,
+                              child: Icon(
+                                Icons.close_rounded,
+                                size: 16,
+                                color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
                         ),
-                        onPressed: () {
-                          HapticFeedback.lightImpact();
+
+                      // Voice / Dictée vocale avec formatage intelligent de code
+                      BouncingTap(
+                        hapticType: BouncingHapticType.selection,
+                        onTap: () {
                           VoicePromptDialog.show(
                             context,
                             onInsert: (formattedText) {
@@ -2254,30 +2341,48 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
                             },
                           );
                         },
-                        tooltip: 'Dictée vocale & formatage code',
-                      ),
-                      // Historique des messages envoyés
-                      if (_promptHistory.isNotEmpty)
-                        IconButton(
-                          icon: Icon(
-                            Icons.history_rounded,
-                            size: 20,
-                            color: scheme.onSurfaceVariant.withValues(alpha: 0.9),
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          alignment: Alignment.center,
+                          child: Icon(
+                            Icons.mic_rounded,
+                            size: 19,
+                            color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
                           ),
-                          onPressed: () {
-                            HapticFeedback.selectionClick();
-                            _showPromptHistoryMenu(context);
-                          },
-                          tooltip: 'Rappeler un message précédent',
                         ),
+                      ),
+                      const SizedBox(width: 2),
+
+                      // Historique des messages envoyés
+                      if (_promptHistory.isNotEmpty) ...[
+                        BouncingTap(
+                          hapticType: BouncingHapticType.selection,
+                          onTap: () => _showPromptHistoryMenu(context),
+                          child: Container(
+                            width: 32,
+                            height: 32,
+                            alignment: Alignment.center,
+                            child: Icon(
+                              Icons.history_rounded,
+                              size: 19,
+                              color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 2),
+                      ],
+
                       // If streaming and user has typed text, show both Stop and Queue/Send buttons
                       if (widget.hasActiveStream && _controller.text.trim().isNotEmpty) ...[
-                        // Dedicated Stop button
-                        IconButton(
+                        BouncingTap(
                           key: const Key('stop-generation-button'),
-                          icon: Container(
-                            width: 26,
-                            height: 26,
+                          hapticType: BouncingHapticType.heavy,
+                          onTap: () => widget.onStop?.call(),
+                          child: Container(
+                            width: 30,
+                            height: 30,
+                            margin: const EdgeInsets.only(right: 6),
                             decoration: BoxDecoration(
                               color: scheme.error,
                               shape: BoxShape.circle,
@@ -2288,13 +2393,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
                               color: AppColors.onDanger,
                             ),
                           ),
-                          tooltip: 'Arrêter la génération (Emergency Stop)',
-                          onPressed: () {
-                            HapticFeedback.heavyImpact();
-                            widget.onStop?.call();
-                          },
                         ),
-                        const SizedBox(width: 4),
                       ],
 
                       // Primary action button (Send / Queue / Stop)
@@ -2330,7 +2429,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
                             onTapCancel:
                                 () => setState(() => _isSendPressed = false),
                             child: ConstrainedBox(
-                              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
                               child: Center(
                                 child: AnimatedScale(
                                   scale: _isSendPressed ? 0.85 : 1.0,
@@ -2339,16 +2438,23 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
                                   child: GestureDetector(
                                     onLongPress: () => _showQueueSettings(context),
                                     child: Container(
-                                      width: 28,
-                                      height: 28,
+                                      width: 30,
+                                      height: 30,
                                       decoration: BoxDecoration(
                                         color: widget.hasActiveStream && _controller.text.trim().isEmpty
                                             ? scheme.error
                                             : ((_controller.text.trim().isNotEmpty || _attachments.isNotEmpty) &&
                                                     widget.isConnected
-                                                ? scheme.primary
-                                                : scheme.surfaceContainerHighest),
+                                                ? (isDark ? AppColors.accentBlue : scheme.primary)
+                                                : (isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest)),
                                         shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: ((_controller.text.trim().isNotEmpty || _attachments.isNotEmpty) &&
+                                                  widget.isConnected)
+                                              ? Colors.transparent
+                                              : (isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.5)),
+                                          width: 0.8,
+                                        ),
                                       ),
                                       child: Icon(
                                         (isQueued || (widget.hasActiveStream && _controller.text.trim().isNotEmpty))
@@ -2356,12 +2462,12 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
                                             : (widget.hasActiveStream && _controller.text.trim().isEmpty
                                                 ? Icons.stop_rounded
                                                 : Icons.arrow_forward),
-                                        size: 15,
+                                        size: 16,
                                         color: ((_controller.text.trim().isNotEmpty || _attachments.isNotEmpty) &&
                                                     widget.isConnected) ||
                                                 (widget.hasActiveStream && _controller.text.trim().isEmpty)
                                             ? AppColors.onAccent
-                                            : scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                                            : (isDark ? AppColors.inkMuted : scheme.onSurfaceVariant),
                                       ),
                                     ),
                                   ),
@@ -2849,10 +2955,10 @@ class _ModelDropdownMenuContentState extends State<_ModelDropdownMenuContent> {
           ),
           ...widget.standardModels.map((m) => _buildStandardModelRow(m, isDark, scheme, textTheme)),
           if (widget.customModels.isNotEmpty) ...[
-            Divider(color: isDark ? const Color(0xFF2B2D31) : scheme.outlineVariant, height: 1),
+            Divider(color: isDark ? AppColors.borderSubtle : scheme.outlineVariant, height: 1),
             ...widget.customModels.map((m) => _buildCustomModelRow(m, isDark, scheme, textTheme)),
           ],
-          Divider(color: isDark ? const Color(0xFF2B2D31) : scheme.outlineVariant, height: 1),
+          Divider(color: isDark ? AppColors.borderSubtle : scheme.outlineVariant, height: 1),
           _buildViewUsageRow(isDark, scheme, textTheme),
         ],
       ),
@@ -2898,7 +3004,7 @@ class _ModelDropdownMenuContentState extends State<_ModelDropdownMenuContent> {
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
                   color: isSelected && !isExpanded
-                      ? (isDark ? const Color(0xFF26282E) : scheme.surfaceContainerHighest)
+                      ? (isDark ? AppColors.surfaceHover : scheme.surfaceContainerHighest)
                       : Colors.transparent,
                   borderRadius: BorderRadius.circular(AppRadius.md),
                 ),
@@ -2935,7 +3041,7 @@ class _ModelDropdownMenuContentState extends State<_ModelDropdownMenuContent> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: isDark ? const Color(0xFF26282E) : scheme.surfaceContainerHighest,
+                          color: isDark ? AppColors.surfaceHover : scheme.surfaceContainerHighest,
                           borderRadius: BorderRadius.circular(AppRadius.sm),
                         ),
                         child: Row(
@@ -2983,10 +3089,10 @@ class _ModelDropdownMenuContentState extends State<_ModelDropdownMenuContent> {
             margin: const EdgeInsets.only(left: 20, right: 10, top: 2, bottom: 4),
             padding: const EdgeInsets.symmetric(vertical: 4),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF181A1D) : scheme.surfaceContainer,
+              color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
               borderRadius: BorderRadius.circular(AppRadius.md),
               border: Border.all(
-                color: isDark ? const Color(0xFF2B2D31) : scheme.outlineVariant,
+                color: isDark ? AppColors.borderSubtle : scheme.outlineVariant,
                 width: 0.8,
               ),
             ),
@@ -3019,7 +3125,7 @@ class _ModelDropdownMenuContentState extends State<_ModelDropdownMenuContent> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
         decoration: BoxDecoration(
-          color: isTierActive ? (isDark ? const Color(0xFF26282E) : scheme.surfaceContainerHighest) : Colors.transparent,
+          color: isTierActive ? (isDark ? AppColors.surfaceHover : scheme.surfaceContainerHighest) : Colors.transparent,
           borderRadius: BorderRadius.circular(4),
         ),
         child: Row(
@@ -3053,11 +3159,11 @@ class _ModelDropdownMenuContentState extends State<_ModelDropdownMenuContent> {
 
     Color statusColor = scheme.primary;
     if (model.status == 'degraded') {
-      statusColor = const Color(0xFFFFCC00);
+      statusColor = AppColors.warning;
     } else if (model.status == 'offline') {
       statusColor = scheme.error;
     } else {
-      statusColor = const Color(0xFFFFCC00);
+      statusColor = AppColors.positive;
     }
 
     return Semantics(
@@ -3072,7 +3178,7 @@ class _ModelDropdownMenuContentState extends State<_ModelDropdownMenuContent> {
             margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: isSelected ? (isDark ? const Color(0xFF26282E) : scheme.surfaceContainerHighest) : Colors.transparent,
+              color: isSelected ? (isDark ? AppColors.surfaceHover : scheme.surfaceContainerHighest) : Colors.transparent,
               borderRadius: BorderRadius.circular(AppRadius.md),
             ),
             child: Row(

@@ -1224,6 +1224,19 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final cascadeId = targetSessionId ?? data['cascadeId'] as String? ?? widget.activeSessionId;
     final message = data['message'] as String? ?? '';
 
+    // Ne pas notifier "Tâche terminée" si des tâches en arrière-plan, sous-agents
+    // ou approbations/questions sont encore en cours ou en attente pour cette session.
+    final hasActiveBackgroundTasks = _runningBackgroundTasks.isNotEmpty ||
+        _taskStatuses.values.any((st) => st == 'running');
+    final hasSubagentsRunning = (_sessionSubagents[cascadeId] ?? []).any((sa) => sa.status.toLowerCase() == 'running');
+    final isAwaitingUserAction = (_sessionApprovals[cascadeId]?.isNotEmpty ?? false) ||
+        _sessionQuestions.containsKey(cascadeId);
+
+    if (hasActiveBackgroundTasks || hasSubagentsRunning || isAwaitingUserAction) {
+      // L'agent n'a pas fini son travail : on évite la fausse notification de fin
+      return;
+    }
+
     ApprovalNotifier.instance.notifyTaskEnded(
       cascadeId: cascadeId,
       outcome: outcome,
@@ -1463,6 +1476,19 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           _taskStatuses[taskId] = status;
         });
         _refreshRunningTasks();
+
+        // Si toutes les tâches d'arrière-plan sont terminées et que le stream est inactif,
+        // notifier la véritable fin d'exécution.
+        if (_runningBackgroundTasks.isEmpty &&
+            !_hasCurrentActiveStream &&
+            !(_sessionApprovals[widget.activeSessionId]?.isNotEmpty ?? false) &&
+            !_sessionQuestions.containsKey(widget.activeSessionId)) {
+          ApprovalNotifier.instance.notifyTaskEnded(
+            cascadeId: widget.activeSessionId,
+            outcome: status == 'error' ? 'error' : 'done',
+            message: cmd.isNotEmpty ? 'Tâche terminée : $cmd' : 'Travail terminé',
+          );
+        }
         return;
       }
 
@@ -2426,23 +2452,35 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       },
       onToggleSearch: _toggleSearch,
       isSearching: _isSearching,
+      isStreaming: _hasCurrentActiveStream,
+      hasRunningTasks: _runningBackgroundTasks.isNotEmpty,
+      hasWaitingApproval: _currentSessionApprovals.isNotEmpty,
+      isError: false,
     );
 
     return ZenithalCanvas(
-      child: Column(
-        children: [
-          connectivityBanner,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 920),
+          child: Column(
+            children: [
+              connectivityBanner,
           if (!hasKeyboard && (_isHeaderVisible || _isFullscreen)) breadcrumb,
-          if (_isSearching)
-            _ChatSearchBar(
-              controller: _searchController,
-              matchCount: _searchMatches.length,
-              currentIndex: _currentSearchMatchIndex,
-              onQueryChanged: _onSearchQueryChanged,
-              onNext: _nextSearchMatch,
-              onPrev: _prevSearchMatch,
-              onClose: _closeSearch,
-            ),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            child: _isSearching
+                ? _ChatSearchBar(
+                    controller: _searchController,
+                    matchCount: _searchMatches.length,
+                    currentIndex: _currentSearchMatchIndex,
+                    onQueryChanged: _onSearchQueryChanged,
+                    onNext: _nextSearchMatch,
+                    onPrev: _prevSearchMatch,
+                    onClose: _closeSearch,
+                  )
+                : const SizedBox.shrink(),
+          ),
           if (!_isFullscreen && _isHeaderVisible) ...[
             SessionTopTabs(
               activeTab: _currentTab,
@@ -2580,7 +2618,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           ),
         ],
       ),
-    );
+    ),
+  ),
+);
   }
 
   void _handleStopGeneration() {
@@ -2894,8 +2934,34 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                 child: bubbleWidget,
               );
 
+              final semanticBubble = Semantics(
+                customSemanticsActions: {
+                  const CustomSemanticsAction(label: 'Citer ce message'): () {
+                    HapticFeedback.mediumImpact();
+                    _chatInputKey.currentState?.insertQuote(msg.text);
+                    AppToast.show(
+                      context,
+                      message: 'Message cité dans la barre de saisie',
+                      icon: Icons.format_quote_rounded,
+                      type: ToastType.info,
+                    );
+                  },
+                  const CustomSemanticsAction(label: 'Copier le texte'): () {
+                    HapticFeedback.lightImpact();
+                    Clipboard.setData(ClipboardData(text: msg.text));
+                    AppToast.show(
+                      context,
+                      message: 'Message copié dans le presse-papiers',
+                      icon: Icons.copy_outlined,
+                      type: ToastType.success,
+                    );
+                  },
+                },
+                child: swipeableBubble,
+              );
+
               // Wrap individual bubbles in RepaintBoundary for 60/120fps streaming isolation
-              final isolatedBubble = RepaintBoundary(child: swipeableBubble);
+              final isolatedBubble = RepaintBoundary(child: semanticBubble);
 
               // N'anime l'entrée que pour le dernier message en cours et uniquement si Reduce Motion est inactif
               if (isLatest && ctx.shouldAnimate) {
@@ -2980,19 +3046,27 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     );
     if (ok == true) {
       await _runWorkspaceCommand(command);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              confirmLabel == 'Tout rejeter'
-                  ? 'Modifications rejetées — commande envoyée au workspace.'
-                  : 'Modifications acceptées — commande envoyée au workspace.',
-            ),
-            duration: const Duration(seconds: 2),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+      if (confirmLabel == 'Tout rejeter') {
+        setState(() {
+          _modifiedFileList.clear();
+          _sessionModifiedFiles[widget.activeSessionId]?.clear();
+        });
       }
+      await Future.delayed(const Duration(milliseconds: 600));
+      if (!mounted) return;
+      await _fetchVcsChanges();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            confirmLabel == 'Tout rejeter'
+                ? 'Modifications rejetées — workspace restauré.'
+                : 'Modifications acceptées — modifications appliquées.',
+          ),
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
   }
 
@@ -3053,6 +3127,45 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             }
           }
         }
+      }
+
+      // Enrichir avec les diffs réels et comptes d'additions / suppressions (getTurnDiff)
+      if (widget.activeSessionId.isNotEmpty) {
+        try {
+          final diffRes = await api.getTurnDiff(cascadeId: widget.activeSessionId);
+          final fileDiffs = diffRes['fileDiffs'];
+          if (fileDiffs is List) {
+            for (final fd in fileDiffs) {
+              if (fd is Map) {
+                final p = (fd['path'] as String? ?? '').replaceAll('\\', '/');
+                final d = fd['diff'];
+                if (d is Map) {
+                  final orig = d['originalContents'] as String? ?? '';
+                  final mod = d['modifiedContents'] as String? ?? '';
+                  final adds = d['additions'] as int? ?? (d['totalAdditions'] as int? ?? 0);
+                  final dels = d['deletions'] as int? ?? (d['totalDeletions'] as int? ?? 0);
+                  final fileDiff = _buildUnifiedDiffFromStrings(p.split('/').last, orig, mod);
+                  final idx = list.indexWhere((f) => _pathsMatch(f.path, p));
+                  if (idx >= 0) {
+                    list[idx] = SessionModifiedFile(
+                      path: list[idx].path,
+                      additions: adds > 0 ? adds : list[idx].additions,
+                      deletions: dels > 0 ? dels : list[idx].deletions,
+                      diffContent: fileDiff.isNotEmpty ? fileDiff : list[idx].diffContent,
+                    );
+                  } else if (p.isNotEmpty) {
+                    list.add(SessionModifiedFile(
+                      path: p,
+                      additions: adds > 0 ? adds : 1,
+                      deletions: dels,
+                      diffContent: fileDiff.isNotEmpty ? fileDiff : null,
+                    ));
+                  }
+                }
+              }
+            }
+          }
+        } catch (_) {}
       }
 
       if (mounted) {
@@ -3133,36 +3246,188 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     );
   }
 
-  String _buildUnifiedDiffFromStrings(String path, String orig, String mod) {
-    if (orig == mod) {
-      final lines = mod.split('\n');
+  bool _pathsMatch(String a, String b) {
+    if (a.isEmpty || b.isEmpty) return false;
+    final cleanA = a.replaceAll('\\', '/').toLowerCase();
+    final cleanB = b.replaceAll('\\', '/').toLowerCase();
+    if (cleanA == cleanB) return true;
+    if (cleanA.endsWith('/$cleanB') || cleanB.endsWith('/$cleanA')) return true;
+    final nameA = cleanA.split('/').last;
+    final nameB = cleanB.split('/').last;
+    return nameA.isNotEmpty && nameA == nameB;
+  }
+
+  String _buildUnifiedDiffFromStrings(String path, String orig, String mod, {int contextLines = 3}) {
+    final cleanOrig = orig.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    final cleanMod = mod.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    if (cleanOrig == cleanMod) {
+      return '';
+    }
+
+    final a = cleanOrig.isEmpty ? <String>[] : cleanOrig.split('\n');
+    final b = cleanMod.isEmpty ? <String>[] : cleanMod.split('\n');
+
+    if (a.isEmpty) {
       final buf = StringBuffer();
-      buf.writeln('--- a/$path');
+      buf.writeln('--- /dev/null');
       buf.writeln('+++ b/$path');
-      buf.writeln('@@ -1,${lines.length} +1,${lines.length} @@');
-      for (final l in lines) {
-        buf.writeln(' $l');
+      buf.writeln('@@ -0,0 +1,${b.length} @@');
+      for (final l in b) {
+        buf.writeln('+$l');
       }
       return buf.toString();
     }
-    final origLines = orig.isEmpty ? <String>[] : orig.split('\n');
-    final modLines = mod.isEmpty ? <String>[] : mod.split('\n');
+
+    if (b.isEmpty) {
+      final buf = StringBuffer();
+      buf.writeln('--- a/$path');
+      buf.writeln('+++ /dev/null');
+      buf.writeln('@@ -1,${a.length} +0,0 @@');
+      for (final l in a) {
+        buf.writeln('-$l');
+      }
+      return buf.toString();
+    }
+
+    // Dynamic programming LCS sur la section modifiée (après élimination des préfixes/suffixes communs)
+    int start = 0;
+    while (start < a.length && start < b.length && a[start] == b[start]) {
+      start++;
+    }
+
+    int endA = a.length - 1;
+    int endB = b.length - 1;
+    while (endA >= start && endB >= start && a[endA] == b[endB]) {
+      endA--;
+      endB--;
+    }
+
+    final subA = a.sublist(start, endA + 1);
+    final subB = b.sublist(start, endB + 1);
+    final n = subA.length;
+    final m = subB.length;
+
+    final dp = List.generate(n + 1, (_) => List.filled(m + 1, 0));
+    for (int i = 0; i < n; i++) {
+      for (int j = 0; j < m; j++) {
+        if (subA[i] == subB[j]) {
+          dp[i + 1][j + 1] = dp[i][j] + 1;
+        } else {
+          dp[i + 1][j + 1] = dp[i + 1][j] > dp[i][j + 1] ? dp[i + 1][j] : dp[i][j + 1];
+        }
+      }
+    }
+
+    int i = n;
+    int j = m;
+    final middleOps = <_UnifiedDiffOp>[];
+    while (i > 0 || j > 0) {
+      if (i > 0 && j > 0 && subA[i - 1] == subB[j - 1]) {
+        middleOps.add(_UnifiedDiffOp(_UnifiedDiffOpType.equal, subA[i - 1]));
+        i--;
+        j--;
+      } else if (j > 0 && (i == 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+        middleOps.add(_UnifiedDiffOp(_UnifiedDiffOpType.insert, subB[j - 1]));
+        j--;
+      } else {
+        middleOps.add(_UnifiedDiffOp(_UnifiedDiffOpType.delete, subA[i - 1]));
+        i--;
+      }
+    }
+
+    final allOps = <_UnifiedDiffOp>[];
+    for (int k = 0; k < start; k++) {
+      allOps.add(_UnifiedDiffOp(_UnifiedDiffOpType.equal, a[k]));
+    }
+    allOps.addAll(middleOps.reversed);
+    for (int k = endA + 1; k < a.length; k++) {
+      allOps.add(_UnifiedDiffOp(_UnifiedDiffOpType.equal, a[k]));
+    }
+
+    final changeIndices = <int>[];
+    for (int idx = 0; idx < allOps.length; idx++) {
+      if (allOps[idx].type != _UnifiedDiffOpType.equal) {
+        changeIndices.add(idx);
+      }
+    }
+
+    if (changeIndices.isEmpty) {
+      return '';
+    }
+
+    final hunkRanges = <List<int>>[];
+    int rangeStart = changeIndices.first;
+    int rangeEnd = changeIndices.first;
+
+    for (int c = 1; c < changeIndices.length; c++) {
+      final idx = changeIndices[c];
+      if (idx - rangeEnd <= 2 * contextLines) {
+        rangeEnd = idx;
+      } else {
+        hunkRanges.add([rangeStart, rangeEnd]);
+        rangeStart = idx;
+        rangeEnd = idx;
+      }
+    }
+    hunkRanges.add([rangeStart, rangeEnd]);
+
+    final oldLineNums = List<int>.filled(allOps.length + 1, 1);
+    final newLineNums = List<int>.filled(allOps.length + 1, 1);
+    int curOld = 1;
+    int curNew = 1;
+    for (int idx = 0; idx < allOps.length; idx++) {
+      oldLineNums[idx] = curOld;
+      newLineNums[idx] = curNew;
+      final op = allOps[idx];
+      if (op.type == _UnifiedDiffOpType.equal) {
+        curOld++;
+        curNew++;
+      } else if (op.type == _UnifiedDiffOpType.delete) {
+        curOld++;
+      } else if (op.type == _UnifiedDiffOpType.insert) {
+        curNew++;
+      }
+    }
+    oldLineNums[allOps.length] = curOld;
+    newLineNums[allOps.length] = curNew;
+
     final buf = StringBuffer();
     buf.writeln('--- a/$path');
     buf.writeln('+++ b/$path');
-    buf.writeln('@@ -1,${origLines.length} +1,${modLines.length} @@');
-    for (final l in origLines) {
-      if (!modLines.contains(l)) {
-        buf.writeln('-$l');
+
+    for (final hr in hunkRanges) {
+      final hStart = (hr[0] - contextLines).clamp(0, allOps.length);
+      final hEnd = (hr[1] + contextLines + 1).clamp(0, allOps.length);
+
+      final hunkOps = allOps.sublist(hStart, hEnd);
+      int oldLinesCount = 0;
+      int newLinesCount = 0;
+      for (final op in hunkOps) {
+        if (op.type == _UnifiedDiffOpType.equal) {
+          oldLinesCount++;
+          newLinesCount++;
+        } else if (op.type == _UnifiedDiffOpType.delete) {
+          oldLinesCount++;
+        } else if (op.type == _UnifiedDiffOpType.insert) {
+          newLinesCount++;
+        }
+      }
+
+      final oldStartLine = oldLineNums[hStart];
+      final newStartLine = newLineNums[hStart];
+
+      buf.writeln('@@ -$oldStartLine,$oldLinesCount +$newStartLine,$newLinesCount @@');
+      for (final op in hunkOps) {
+        if (op.type == _UnifiedDiffOpType.equal) {
+          buf.writeln(' ${op.line}');
+        } else if (op.type == _UnifiedDiffOpType.delete) {
+          buf.writeln('-${op.line}');
+        } else if (op.type == _UnifiedDiffOpType.insert) {
+          buf.writeln('+${op.line}');
+        }
       }
     }
-    for (final l in modLines) {
-      if (!origLines.contains(l)) {
-        buf.writeln('+$l');
-      } else {
-        buf.writeln(' $l');
-      }
-    }
+
     return buf.toString();
   }
 
@@ -3185,7 +3450,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             if (fd is Map) {
               final p = (fd['path'] as String? ?? '').replaceAll('\\', '/');
               final target = (effectivePath ?? '').replaceAll('\\', '/');
-              if (target.isNotEmpty && (p == target || p.endsWith(target) || target.endsWith(p))) {
+              if (_pathsMatch(p, target)) {
                 final d = fd['diff'];
                 if (d is Map) {
                   final orig = d['originalContents'] as String? ?? '';
@@ -3198,32 +3463,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               }
             }
           }
-        }
-      } catch (_) {}
-    }
-
-    // 2. Tenter la lecture directe du fichier avec le workspacePath
-    if (diff.isEmpty && effectivePath != null && widget.api != null) {
-      try {
-        final ws = widget.workspacePath?.isNotEmpty == true
-            ? widget.workspacePath
-            : (widget.activeProjectName.isNotEmpty ? widget.activeProjectName : null);
-        final res = await widget.api!.readFile(
-          effectivePath,
-          workspacePath: ws,
-          cascadeId: widget.activeSessionId.isNotEmpty ? widget.activeSessionId : null,
-        );
-        final fileContent = res['content'] as String? ?? '';
-        if (fileContent.isNotEmpty) {
-          final lines = fileContent.split('\n');
-          final buf = StringBuffer();
-          buf.writeln('--- a/$effectiveName');
-          buf.writeln('+++ b/$effectiveName');
-          buf.writeln('@@ -1,${lines.length} +1,${lines.length} @@');
-          for (final l in lines) {
-            buf.writeln(' $l');
-          }
-          diff = buf.toString();
         }
       } catch (_) {}
     }
@@ -4594,5 +4833,13 @@ class _MediaThumbnailItemState extends State<_MediaThumbnailItem> {
       color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
     );
   }
+}
+
+enum _UnifiedDiffOpType { equal, insert, delete }
+
+class _UnifiedDiffOp {
+  final _UnifiedDiffOpType type;
+  final String line;
+  const _UnifiedDiffOp(this.type, this.line);
 }
 

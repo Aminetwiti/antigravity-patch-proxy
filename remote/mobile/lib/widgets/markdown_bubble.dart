@@ -460,21 +460,25 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
               ),
             )
           else
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.all(12),
-              child: RichText(
-                text: TextSpan(
-                  style: TextStyle(
-                    fontFamily: 'monospace',
-                    fontSize: 12,
-                    height: 1.5,
-                    color: scheme.onSurface,
-                  ),
-                  children: SyntaxHighlighter.highlight(
-                    (isLong && !_expanded) ? displayLines.join('\n') : widget.code.code,
-                    widget.code.language,
-                    defaultTextColor: scheme.onSurface,
+            Scrollbar(
+              thumbVisibility: false,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                padding: const EdgeInsets.all(12),
+                child: RichText(
+                  text: TextSpan(
+                    style: TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                      height: 1.5,
+                      color: scheme.onSurface,
+                    ),
+                    children: SyntaxHighlighter.highlight(
+                      (isLong && !_expanded) ? displayLines.join('\n') : widget.code.code,
+                      widget.code.language,
+                      defaultTextColor: scheme.onSurface,
+                    ),
                   ),
                 ),
               ),

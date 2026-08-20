@@ -460,43 +460,50 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
     required VoidCallback onTap,
     required ColorScheme scheme,
   }) {
+    final semanticLabel = label ?? (icon == Icons.arrow_upward ? 'Haut' : icon == Icons.arrow_downward ? 'Bas' : icon == Icons.arrow_back ? 'Gauche' : icon == Icons.arrow_forward ? 'Droite' : 'Touche');
+
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2.5, vertical: 3),
-      child: Material(
-        color: isAccent
-            ? AppColors.danger.withValues(alpha: 0.15)
-            : scheme.surfaceContainer,
-        borderRadius: BorderRadius.circular(4),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(4),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(
-                color: isAccent
-                    ? AppColors.danger.withValues(alpha: 0.4)
-                    : scheme.outlineVariant.withValues(alpha: 0.6),
-                width: 0.8,
+      padding: const EdgeInsets.symmetric(horizontal: 2.5, vertical: 2),
+      child: Semantics(
+        button: true,
+        label: semanticLabel,
+        child: Material(
+          color: isAccent
+              ? AppColors.danger.withValues(alpha: 0.15)
+              : scheme.surfaceContainer,
+          borderRadius: BorderRadius.circular(5),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(5),
+            child: Container(
+              constraints: const BoxConstraints(minWidth: 38, minHeight: 32),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(5),
+                border: Border.all(
+                  color: isAccent
+                      ? AppColors.danger.withValues(alpha: 0.4)
+                      : scheme.outlineVariant.withValues(alpha: 0.6),
+                  width: 0.8,
+                ),
               ),
-            ),
-            child: icon != null
-                ? Icon(
-                    icon,
-                    size: 13,
-                    color: scheme.onSurfaceVariant,
-                  )
-                : Text(
-                    label ?? '',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      fontFamily: 'monospace',
-                      color: isAccent ? AppColors.danger : scheme.onSurface,
+              child: icon != null
+                  ? Icon(
+                      icon,
+                      size: 14,
+                      color: scheme.onSurfaceVariant,
+                    )
+                  : Text(
+                      label ?? '',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        fontFamily: 'monospace',
+                        color: isAccent ? AppColors.danger : scheme.onSurface,
+                      ),
                     ),
-                  ),
+            ),
           ),
         ),
       ),

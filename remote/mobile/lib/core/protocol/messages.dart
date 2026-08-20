@@ -85,17 +85,27 @@ class CascadeSession {
 
   bool get isRunning {
     final st = status.toUpperCase();
-    return st.contains('RUNNING');
+    return st.contains('RUNNING') || st.contains('BUSY') || st.contains('STREAMING');
+  }
+
+  bool get isBackgroundTask {
+    final st = status.toUpperCase();
+    return st.contains('BACKGROUND') || st.contains('TASK') || st.contains('EXECUTING');
   }
 
   bool get isWaitingAction {
     final st = status.toUpperCase();
-    return st.contains('WAIT') || st.contains('APPROVAL') || st.contains('QUESTION');
+    return st.contains('WAIT') || st.contains('APPROVAL') || st.contains('QUESTION') || st.contains('USER_ACTION');
   }
 
   bool get isError {
     final st = status.toUpperCase();
     return st.contains('ERROR') || st.contains('FAIL');
+  }
+
+  bool get isReady {
+    final st = status.toUpperCase();
+    return st.contains('READY') || st.contains('IDLE') || st.contains('PAUSE');
   }
 
   CascadeSession copyWith({

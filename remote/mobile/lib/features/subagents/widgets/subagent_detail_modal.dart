@@ -1,11 +1,11 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/protocol/daemon_api.dart';
 import '../../../theme/app_colors.dart';
 import '../models/subagent_item.dart';
 
 /// Modal affichant les détails complets d'un sous-agent (mission, prompt, statut, durée, logs).
-class SubagentDetailModal extends StatelessWidget {
+class SubagentDetailModal extends StatefulWidget {
   final SubagentItem agent;
   final DaemonApi? api;
   final String? cascadeId;
@@ -38,6 +38,36 @@ class SubagentDetailModal extends StatelessWidget {
         onKill: onKill,
       ),
     );
+  }
+
+  @override
+  State<SubagentDetailModal> createState() => _SubagentDetailModalState();
+}
+
+class _SubagentDetailModalState extends State<SubagentDetailModal>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseController;
+  late final Animation<double> _pulseAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    );
+    _pulseAnimation = Tween<double>(begin: 0.4, end: 1.0).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+    if (widget.agent.status.toLowerCase() == 'running') {
+      _pulseController.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
   }
 
   Color _getStatusColor(String status, ColorScheme scheme) {
@@ -90,8 +120,8 @@ class SubagentDetailModal extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final statusColor = _getStatusColor(agent.status, scheme);
-    final isRunning = agent.status.toLowerCase() == 'running';
+    final statusColor = _getStatusColor(widget.agent.status, scheme);
+    final isRunning = widget.agent.status.toLowerCase() == 'running';
 
     return Container(
       constraints: BoxConstraints(
@@ -150,7 +180,7 @@ class SubagentDetailModal extends StatelessWidget {
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(
-                                agent.typeName ?? 'agent',
+                                widget.agent.typeName ?? 'agent',
                                 style: TextStyle(
                                   fontSize: 10.5,
                                   fontWeight: FontWeight.w700,
@@ -162,7 +192,7 @@ class SubagentDetailModal extends StatelessWidget {
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                agent.role,
+                                widget.agent.role,
                                 style: TextStyle(
                                   fontSize: 15,
                                   fontWeight: FontWeight.w700,
@@ -177,17 +207,30 @@ class SubagentDetailModal extends StatelessWidget {
                         const SizedBox(height: 4),
                         Row(
                           children: [
-                            Container(
-                              width: 7,
-                              height: 7,
-                              decoration: BoxDecoration(
-                                color: statusColor,
-                                shape: BoxShape.circle,
+                            if (isRunning)
+                              AnimatedBuilder(
+                                animation: _pulseAnimation,
+                                builder: (context, _) => Container(
+                                  width: 7,
+                                  height: 7,
+                                  decoration: BoxDecoration(
+                                    color: statusColor.withValues(alpha: _pulseAnimation.value),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              )
+                            else
+                              Container(
+                                width: 7,
+                                height: 7,
+                                decoration: BoxDecoration(
+                                  color: statusColor,
+                                  shape: BoxShape.circle,
+                                ),
                               ),
-                            ),
                             const SizedBox(width: 5),
                             Text(
-                              _formatStatusLabel(agent.status),
+                              _formatStatusLabel(widget.agent.status),
                               style: TextStyle(
                                 fontSize: 11.5,
                                 fontWeight: FontWeight.w600,
@@ -196,7 +239,7 @@ class SubagentDetailModal extends StatelessWidget {
                             ),
                             const SizedBox(width: 10),
                             Text(
-                              '•  ${agent.displayWorkedFor}',
+                              '•  ${widget.agent.displayWorkedFor}',
                               style: TextStyle(
                                 fontSize: 11,
                                 fontFamily: 'monospace',
@@ -210,6 +253,7 @@ class SubagentDetailModal extends StatelessWidget {
                   ),
                   IconButton(
                     icon: const Icon(Icons.close, size: 20),
+                    constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
                     onPressed: () => Navigator.of(context).pop(),
                   ),
                 ],
@@ -253,7 +297,7 @@ class SubagentDetailModal extends StatelessWidget {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  agent.id.isNotEmpty ? agent.id : '(Généré à l\'exécution)',
+                                  widget.agent.id.isNotEmpty ? widget.agent.id : '(Généré à l\'exécution)',
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontFamily: 'monospace',
@@ -266,12 +310,13 @@ class SubagentDetailModal extends StatelessWidget {
                               ],
                             ),
                           ),
-                          if (agent.id.isNotEmpty)
+                          if (widget.agent.id.isNotEmpty)
                             IconButton(
                               icon: const Icon(Icons.copy_rounded, size: 16),
                               tooltip: 'Copier l\'ID',
+                              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
                               onPressed: () {
-                                Clipboard.setData(ClipboardData(text: agent.id));
+                                Clipboard.setData(ClipboardData(text: widget.agent.id));
                                 HapticFeedback.selectionClick();
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
@@ -285,7 +330,7 @@ class SubagentDetailModal extends StatelessWidget {
                       ),
                     ),
 
-                    if (agent.stateDetail != null && agent.stateDetail!.isNotEmpty) ...[
+                    if (widget.agent.stateDetail != null && widget.agent.stateDetail!.isNotEmpty) ...[
                       const SizedBox(height: 12),
                       Container(
                         padding: const EdgeInsets.all(12),
@@ -302,7 +347,7 @@ class SubagentDetailModal extends StatelessWidget {
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                agent.stateDetail!,
+                                widget.agent.stateDetail!,
                                 style: const TextStyle(
                                   fontSize: 12,
                                   fontFamily: 'monospace',
@@ -336,8 +381,8 @@ class SubagentDetailModal extends StatelessWidget {
                         ),
                       ),
                       child: SelectableText(
-                        agent.prompt != null && agent.prompt!.isNotEmpty
-                            ? agent.prompt!
+                        widget.agent.prompt != null && widget.agent.prompt!.isNotEmpty
+                            ? widget.agent.prompt!
                             : 'Aucun prompt explicite spécifié pour ce sous-agent.',
                         style: TextStyle(
                           fontSize: 13,
@@ -351,11 +396,11 @@ class SubagentDetailModal extends StatelessWidget {
                     // Action row
                     Row(
                       children: [
-                        if (agent.prompt != null && agent.prompt!.isNotEmpty)
+                        if (widget.agent.prompt != null && widget.agent.prompt!.isNotEmpty)
                           Expanded(
                             child: OutlinedButton.icon(
                               onPressed: () {
-                                Clipboard.setData(ClipboardData(text: agent.prompt!));
+                                Clipboard.setData(ClipboardData(text: widget.agent.prompt!));
                                 HapticFeedback.selectionClick();
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
@@ -367,23 +412,23 @@ class SubagentDetailModal extends StatelessWidget {
                               icon: const Icon(Icons.copy_rounded, size: 15),
                               label: const Text('Copier Mission'),
                               style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                padding: const EdgeInsets.symmetric(vertical: 12),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(AppRadius.md),
                                 ),
                               ),
                             ),
                           ),
-                        if (isRunning && (onKill != null || api != null)) ...[
+                        if (isRunning && (widget.onKill != null || widget.api != null)) ...[
                           const SizedBox(width: 10),
                           Expanded(
                             child: ElevatedButton.icon(
                               onPressed: () {
                                 Navigator.of(context).pop();
-                                if (onKill != null) {
-                                  onKill!();
-                                } else if (api != null && agent.id.isNotEmpty) {
-                                  api!.sendCommand('/stop');
+                                if (widget.onKill != null) {
+                                  widget.onKill!();
+                                } else if (widget.api != null && widget.agent.id.isNotEmpty) {
+                                  widget.api!.sendCommand('/stop');
                                 }
                               },
                               icon: const Icon(Icons.stop_circle_outlined, size: 16),
@@ -391,7 +436,7 @@ class SubagentDetailModal extends StatelessWidget {
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: scheme.error,
                                 foregroundColor: scheme.onError,
-                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                padding: const EdgeInsets.symmetric(vertical: 12),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(AppRadius.md),
                                 ),

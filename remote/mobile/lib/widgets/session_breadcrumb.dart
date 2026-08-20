@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../core/protocol/messages.dart';
 import '../theme/app_colors.dart';
+import 'antigravity_spinning_arc.dart';
 
 /// Barre de fil d'Ariane (Breadcrumb) élégante et compacte affichée entre
 /// le Header (AppBar) et la barre d'onglets (Nav : Chat, Review, Overview...).
@@ -16,6 +17,10 @@ class SessionBreadcrumb extends StatelessWidget {
   final VoidCallback? onToggleSearch;
   final bool isSearching;
   final List<ProjectItem>? projects;
+  final bool isStreaming;
+  final bool hasRunningTasks;
+  final bool hasWaitingApproval;
+  final bool isError;
 
   const SessionBreadcrumb({
     super.key,
@@ -29,6 +34,10 @@ class SessionBreadcrumb extends StatelessWidget {
     this.onToggleSearch,
     this.isSearching = false,
     this.projects,
+    this.isStreaming = false,
+    this.hasRunningTasks = false,
+    this.hasWaitingApproval = false,
+    this.isError = false,
   });
 
   @override
@@ -58,7 +67,7 @@ class SessionBreadcrumb extends StatelessWidget {
           ),
         ),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
       alignment: Alignment.centerLeft,
       child: Row(
         mainAxisSize: MainAxisSize.max,
@@ -128,16 +137,59 @@ class SessionBreadcrumb extends StatelessWidget {
                       borderRadius: BorderRadius.circular(4),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
-                        child: Text(
-                          displayTitle,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w400,
-                            color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
-                            letterSpacing: -0.1,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (isStreaming) ...[
+                              AntigravitySpinningArc(
+                                size: 10.5,
+                                color: isDark ? AppColors.accentBlueBright : scheme.primary,
+                              ),
+                              const SizedBox(width: 4),
+                            ] else if (hasRunningTasks) ...[
+                              Tooltip(
+                                message: 'Tâche en cours d\'exécution...',
+                                child: AntigravitySpinningArc(
+                                  size: 10.5,
+                                  color: isDark ? const Color(0xFF8AB4F8) : scheme.primary,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                            ] else if (hasWaitingApproval) ...[
+                              Tooltip(
+                                message: 'Action ou approbation requise',
+                                child: const Icon(
+                                  Icons.shield_outlined,
+                                  size: 11.5,
+                                  color: Color(0xFFE5A93C),
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                            ] else if (isError) ...[
+                              Tooltip(
+                                message: 'Erreur',
+                                child: const Icon(
+                                  Icons.error_outline,
+                                  size: 11.5,
+                                  color: Color(0xFFE5534B),
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                            ],
+                            Flexible(
+                              child: Text(
+                                displayTitle,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w400,
+                                  color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
+                                  letterSpacing: -0.1,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),

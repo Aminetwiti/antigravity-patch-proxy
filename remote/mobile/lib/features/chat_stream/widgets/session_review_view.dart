@@ -38,12 +38,6 @@ class SessionReviewView extends StatefulWidget {
   final VoidCallback? onSplitDiffView;
   final bool isLoading;
 
-  /// P5 : actions groupées — accepter / rejeter l'ensemble des modifications.
-  /// Les callbacks restent optionnels : si absents, la barre d'actions est
-  /// masquée (l'écran parent décide si le daemon peut les appliquer).
-  final VoidCallback? onAcceptAll;
-  final VoidCallback? onDiscardAll;
-
   const SessionReviewView({
     super.key,
     required this.files,
@@ -51,8 +45,6 @@ class SessionReviewView extends StatefulWidget {
     this.onExpandAll,
     this.onSplitDiffView,
     this.isLoading = false,
-    this.onAcceptAll,
-    this.onDiscardAll,
   });
 
   @override
@@ -306,45 +298,6 @@ class _SessionReviewViewState extends State<SessionReviewView> {
               ),
             ),
           ),
-        // P5 : actions groupées (Accepter tout / Tout rejeter) — uniquement
-        // quand des fichiers sont listés et que l'écran parent fournit les
-        // callbacks d'application.
-        if (widget.files.isNotEmpty &&
-            (widget.onAcceptAll != null || widget.onDiscardAll != null)) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
-            child: Row(
-              children: [
-                if (widget.onAcceptAll != null)
-                  Expanded(
-                    child: _BulkActionChip(
-                      icon: Icons.check_circle_outline_rounded,
-                      label: 'Tout accepter',
-                      color: const Color(0xFF22C55E),
-                      onTap: () {
-                        HapticFeedback.lightImpact();
-                        widget.onAcceptAll?.call();
-                      },
-                    ),
-                  ),
-                if (widget.onAcceptAll != null && widget.onDiscardAll != null)
-                  const SizedBox(width: 8),
-                if (widget.onDiscardAll != null)
-                  Expanded(
-                    child: _BulkActionChip(
-                      icon: Icons.undo_rounded,
-                      label: 'Tout rejeter',
-                      color: const Color(0xFFEF4444),
-                      onTap: () {
-                        HapticFeedback.lightImpact();
-                        widget.onDiscardAll?.call();
-                      },
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
 
         const Divider(color: Color(0xFF212328), height: 1),
 

@@ -14,7 +14,7 @@ class SkeletonLoader extends StatefulWidget {
     super.key,
     required this.child,
     this.enabled = true,
-    this.duration = const Duration(milliseconds: 1400),
+    this.duration = const Duration(milliseconds: 950),
     this.baseColor,
     this.highlightColor,
   });
