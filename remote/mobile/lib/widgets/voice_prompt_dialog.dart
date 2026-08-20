@@ -219,6 +219,82 @@ class _VoicePromptDialogState extends State<VoicePromptDialog> with SingleTicker
           ),
           const SizedBox(height: 16),
 
+          // Audio Waveform Visualizer (Active during listening)
+          if (_isListening)
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF14171F) : scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                gradient: AppGradients.cardCool(isDark: isDark),
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+                border: Border.all(
+                  color: const Color(0xFF3186FF).withValues(alpha: isDark ? 0.35 : 0.25),
+                  width: 0.8,
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text(
+                    'ÉCOUTE EN COURS',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.8,
+                      color: Color(0xFF3186FF),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  AnimatedBuilder(
+                    animation: _pulseController,
+                    builder: (context, _) {
+                      final val = _pulseController.value;
+                      final heights = [
+                        8.0 + 12.0 * val,
+                        14.0 + 18.0 * (1 - val),
+                        10.0 + 22.0 * val,
+                        18.0 + 10.0 * (1 - val),
+                        12.0 + 16.0 * val,
+                        16.0 + 14.0 * (1 - val),
+                        8.0 + 10.0 * val,
+                      ];
+                      final colors = [
+                        const Color(0xFF3186FF),
+                        const Color(0xFF749BFF),
+                        const Color(0xFF00B95C),
+                        const Color(0xFFFBBC04),
+                        const Color(0xFFFC413D),
+                        const Color(0xFF00B95C),
+                        const Color(0xFF3186FF),
+                      ];
+
+                      return Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: List.generate(heights.length, (i) {
+                          return Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 2),
+                            width: 3.5,
+                            height: heights[i],
+                            decoration: BoxDecoration(
+                              color: colors[i],
+                              borderRadius: BorderRadius.circular(2),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: colors[i].withValues(alpha: 0.4),
+                                  blurRadius: 3,
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+
           // Bottom Action Buttons
           Row(
             children: [
@@ -227,7 +303,11 @@ class _VoicePromptDialogState extends State<VoicePromptDialog> with SingleTicker
                   setState(() {
                     _isListening = !_isListening;
                   });
-                  HapticFeedback.lightImpact();
+                  if (_isListening) {
+                    HapticFeedback.heavyImpact();
+                  } else {
+                    HapticFeedback.lightImpact();
+                  }
                 },
                 icon: AnimatedBuilder(
                   animation: _pulseController,
@@ -241,7 +321,7 @@ class _VoicePromptDialogState extends State<VoicePromptDialog> with SingleTicker
                     );
                   },
                 ),
-                label: Text(_isListening ? 'Écoute active…' : 'Dictée'),
+                label: Text(_isListening ? 'Arrêter' : 'Dictée'),
               ),
               const Spacer(),
               ElevatedButton.icon(

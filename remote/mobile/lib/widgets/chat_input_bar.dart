@@ -96,6 +96,12 @@ class ChatInputBar extends StatefulWidget {
   final String? projectName;
   final VoidCallback? onSelectProject;
 
+  /// Actions rapides & plan actif
+  final bool hasPlan;
+  final VoidCallback? onProceedPlan;
+  final VoidCallback? onRunTests;
+  final VoidCallback? onViewDiff;
+
   const ChatInputBar({
     super.key,
     required this.onSend,
@@ -109,17 +115,41 @@ class ChatInputBar extends StatefulWidget {
     this.onDraftChanged,
     this.projectName,
     this.onSelectProject,
+    this.hasPlan = false,
+    this.onProceedPlan,
+    this.onRunTests,
+    this.onViewDiff,
   });
 
   @override
   State<ChatInputBar> createState() => ChatInputBarState();
 }
 
-class ChatInputBarState extends State<ChatInputBar> {
+class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver {
   void openModelSelector() {
     if (mounted) {
       _showModelDropdown(context);
     }
+  }
+
+  /// Insère une citation markdown formatée (> texte) dans le champ de saisie
+  void insertQuote(String quoteText) {
+    if (!mounted) return;
+    final lines = quoteText.trim().split('\n');
+    final formattedQuote = lines.take(6).map((l) => '> $l').join('\n');
+    final current = _controller.text;
+    final newContent = current.isEmpty
+        ? '$formattedQuote\n\n'
+        : '$current\n\n$formattedQuote\n\n';
+    _controller.text = newContent;
+    _controller.selection = TextSelection.collapsed(offset: newContent.length);
+  }
+
+  /// Remplace le texte de la barre de saisie
+  void setText(String text) {
+    if (!mounted) return;
+    _controller.text = text;
+    _controller.selection = TextSelection.collapsed(offset: text.length);
   }
 
   final TextEditingController _controller = TextEditingController();
@@ -135,6 +165,7 @@ class ChatInputBarState extends State<ChatInputBar> {
   // Feature multi-attachements fichiers et images (Quiet Console)
   final List<_AttachedItem> _attachments = [];
   double? _uploadProgress;
+  String? _clipboardPreviewText;
 
   final GlobalKey _modelButtonKey = GlobalKey();
   final GlobalKey _textFieldKey = GlobalKey();
@@ -150,6 +181,7 @@ class ChatInputBarState extends State<ChatInputBar> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     if (widget.initialText.isNotEmpty) {
       // P6 : restaure le brouillon persisté avant d'écouter les frappes.
       _controller.text = widget.initialText;
@@ -161,6 +193,45 @@ class ChatInputBarState extends State<ChatInputBar> {
     _controller.addListener(_onTextChanged);
     widget.onDraftChanged?.call(_controller.text);
     _loadModelsAndPreferences();
+    _checkClipboard();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkClipboard();
+    }
+  }
+
+  Future<void> _checkClipboard() async {
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      final text = data?.text?.trim();
+      if (text != null &&
+          text.isNotEmpty &&
+          text.length > 2 &&
+          text.length < 3000 &&
+          text != _controller.text.trim()) {
+        if (mounted) {
+          setState(() => _clipboardPreviewText = text);
+        }
+      } else {
+        if (mounted && _clipboardPreviewText != null) {
+          setState(() => _clipboardPreviewText = null);
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _pasteClipboard() {
+    if (_clipboardPreviewText == null) return;
+    HapticFeedback.selectionClick();
+    final current = _controller.text;
+    final newText = current.isEmpty ? _clipboardPreviewText! : '$current\n${_clipboardPreviewText!}';
+    _controller.text = newText;
+    _controller.selection = TextSelection.collapsed(offset: newText.length);
+    widget.onDraftChanged?.call(newText);
+    setState(() => _clipboardPreviewText = null);
   }
 
   @override
@@ -249,6 +320,7 @@ class ChatInputBarState extends State<ChatInputBar> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _sendDebounceTimer?.cancel();
     _controller.dispose();
     super.dispose();
@@ -1858,7 +1930,9 @@ class ChatInputBarState extends State<ChatInputBar> {
     return SafeArea(
       top: false,
       bottom: !hasKeyboard,
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOutCubic,
         margin: EdgeInsets.fromLTRB(12, 2, 12, bottomMargin),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1904,6 +1978,56 @@ class ChatInputBarState extends State<ChatInputBar> {
                   ),
                 ),
               ),
+            if (_clipboardPreviewText != null && _clipboardPreviewText!.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6, left: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    BouncingTap(
+                      hapticType: BouncingHapticType.selection,
+                      onTap: _pasteClipboard,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF1F2430) : scheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(AppRadius.pill),
+                          border: Border.all(
+                            color: const Color(0xFF3186FF).withValues(alpha: isDark ? 0.4 : 0.3),
+                            width: 0.8,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.content_paste_rounded, size: 12, color: Color(0xFF3186FF)),
+                            const SizedBox(width: 5),
+                            Text(
+                              'Coller : ${_clipboardPreviewText!.replaceAll('\n', ' ').length > 24 ? '${_clipboardPreviewText!.replaceAll('\n', ' ').substring(0, 24)}…' : _clipboardPreviewText!.replaceAll('\n', ' ')}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: scheme.onSurface,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    InkWell(
+                      onTap: () => setState(() => _clipboardPreviewText = null),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Icon(Icons.close_rounded, size: 13, color: isDark ? AppColors.inkMuted : scheme.outline),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (!hasKeyboard)
+              _buildQuickActionPills(scheme, isDark),
             Container(
               padding: EdgeInsets.symmetric(
                 horizontal: 12,
@@ -2252,15 +2376,139 @@ class ChatInputBarState extends State<ChatInputBar> {
                 ],
               ),
             ),
-
-
           ],
         ),
       ),
     );
   }
 
+  Widget _buildQuickActionPills(ColorScheme scheme, bool isDark) {
+    return Container(
+      height: 30,
+      margin: const EdgeInsets.only(bottom: 6),
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        children: [
+          if (widget.hasPlan)
+            _buildActionPill(
+              icon: Icons.play_arrow_rounded,
+              label: 'Proceed ⌘↵',
+              color: AppColors.positive,
+              isDark: isDark,
+              scheme: scheme,
+              onTap: () {
+                HapticFeedback.selectionClick();
+                if (widget.onProceedPlan != null) {
+                  widget.onProceedPlan!();
+                } else {
+                  widget.onSend('proceed');
+                }
+              },
+            ),
+          _buildActionPill(
+            icon: Icons.play_circle_outline,
+            label: 'Tests',
+            color: scheme.primary,
+            isDark: isDark,
+            scheme: scheme,
+            onTap: () {
+              HapticFeedback.selectionClick();
+              if (widget.onRunTests != null) {
+                widget.onRunTests!();
+              } else {
+                widget.onSend('Exécute les tests unitaires du projet');
+              }
+            },
+          ),
+          _buildActionPill(
+            icon: Icons.difference_outlined,
+            label: 'Diff Git',
+            color: scheme.secondary,
+            isDark: isDark,
+            scheme: scheme,
+            onTap: () {
+              HapticFeedback.selectionClick();
+              if (widget.onViewDiff != null) {
+                widget.onViewDiff!();
+              } else {
+                widget.onSend('Affiche le diff git des changements récents');
+              }
+            },
+          ),
+          _buildActionPill(
+            icon: Icons.help_outline,
+            label: 'Expliquer',
+            color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
+            isDark: isDark,
+            scheme: scheme,
+            onTap: () {
+              HapticFeedback.selectionClick();
+              _controller.text = 'Explique le code récent et ce qui a changé';
+              _controller.selection = TextSelection.collapsed(offset: _controller.text.length);
+              widget.onDraftChanged?.call(_controller.text);
+            },
+          ),
+          _buildActionPill(
+            icon: Icons.build_outlined,
+            label: 'Corriger',
+            color: scheme.error,
+            isDark: isDark,
+            scheme: scheme,
+            onTap: () {
+              HapticFeedback.selectionClick();
+              _controller.text = 'Analyse l\'erreur et applique le correctif';
+              _controller.selection = TextSelection.collapsed(offset: _controller.text.length);
+              widget.onDraftChanged?.call(_controller.text);
+            },
+          ),
+        ],
+      ),
+    );
+  }
 
+  Widget _buildActionPill({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required bool isDark,
+    required ColorScheme scheme,
+    required VoidCallback onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+          decoration: BoxDecoration(
+            color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.6),
+              width: 0.8,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 13, color: color),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// Tile de sélection du mode d'envoi dans le bottom sheet.

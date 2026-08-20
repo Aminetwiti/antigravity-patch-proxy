@@ -13,6 +13,8 @@ class SessionBreadcrumb extends StatelessWidget {
   final VoidCallback? onOpenIde;
   final VoidCallback? onToggleFullscreen;
   final bool isFullscreen;
+  final VoidCallback? onToggleSearch;
+  final bool isSearching;
   final List<ProjectItem>? projects;
 
   const SessionBreadcrumb({
@@ -24,6 +26,8 @@ class SessionBreadcrumb extends StatelessWidget {
     this.onOpenIde,
     this.onToggleFullscreen,
     this.isFullscreen = false,
+    this.onToggleSearch,
+    this.isSearching = false,
     this.projects,
   });
 
@@ -142,6 +146,36 @@ class SessionBreadcrumb extends StatelessWidget {
               ],
             ),
           ),
+          if (onToggleSearch != null) ...[
+            const SizedBox(width: 4),
+            InkWell(
+              key: const Key('toggle-search-btn'),
+              onTap: onToggleSearch,
+              borderRadius: BorderRadius.circular(4),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: isSearching
+                      ? (isDark ? AppColors.accentBlue.withValues(alpha: 0.2) : scheme.primaryContainer)
+                      : (isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                    color: isSearching
+                        ? (isDark ? AppColors.accentBlue : scheme.primary)
+                        : (isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.4)),
+                    width: 0.6,
+                  ),
+                ),
+                child: Icon(
+                  Icons.search_rounded,
+                  size: 13,
+                  color: isSearching
+                      ? (isDark ? AppColors.accentBlue : scheme.primary)
+                      : (isDark ? AppColors.inkMuted : scheme.onSurfaceVariant),
+                ),
+              ),
+            ),
+          ],
           if (onToggleFullscreen != null) ...[
             const SizedBox(width: 6),
             InkWell(

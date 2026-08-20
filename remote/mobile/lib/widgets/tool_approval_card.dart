@@ -117,6 +117,22 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    _triggerArrivalHaptic();
+  }
+
+  void _triggerArrivalHaptic() {
+    if (!widget.isExpired) {
+      if (_isDestructive) {
+        HapticFeedback.heavyImpact();
+      } else {
+        HapticFeedback.mediumImpact();
+      }
+    }
+  }
+
+  @override
   void didUpdateWidget(ToolApprovalCard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.request.callId != widget.request.callId) {
@@ -128,6 +144,7 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
       _destructiveConfirmed = false;
       _denyReasonController.clear();
       _submitTimeout?.cancel();
+      _triggerArrivalHaptic();
     }
   }
 

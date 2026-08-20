@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/base64"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -70,4 +71,48 @@ func TestSaveUploadedImage_Validation(t *testing.T) {
 	}
 	defer os.Remove(filePath)
 }
+
+func TestReadFile_UploadedImageLeadingSlash(t *testing.T) {
+	dummyContent := "image binary payload"
+	b64 := base64.StdEncoding.EncodeToString([]byte(dummyContent))
+	cascadeID := "cascade-img-test"
+
+	filePath, _, err := saveUploadedImage(cascadeID, "photo_1787194458484.jpg", b64)
+	if err != nil {
+		t.Fatalf("failed to save test image: %v", err)
+	}
+	defer os.Remove(filePath)
+
+	bDir := findBrainDir(cascadeID)
+	if bDir == "" {
+		t.Skip("brain directory not available in test environment")
+	}
+
+	cleanPath := "/photo_1787194458484.jpg"
+	relCleanPath := strings.TrimLeft(cleanPath, "/\\")
+	baseFileName := "photo_1787194458484.jpg"
+
+	candidates := []string{
+		filePath,
+		filepath.Join(bDir, relCleanPath),
+		filepath.Join(bDir, ".user_uploaded", relCleanPath),
+		filepath.Join(bDir, "scratch", relCleanPath),
+		filepath.Join(bDir, ".user_uploaded", baseFileName),
+		filepath.Join(bDir, "scratch", baseFileName),
+	}
+
+	found := false
+	for _, cand := range candidates {
+		if content, errRead := os.ReadFile(cand); errRead == nil {
+			if string(content) == dummyContent {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Fatal("failed to find uploaded image using candidates with leading slash")
+	}
+}
+
 

@@ -4019,10 +4019,19 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		// 1. Direct local file check (e.g. brain artifacts, absolute file paths, file:// URIs)
 		cleanPath := strings.TrimPrefix(msg.FilePath, "file:///")
 		cleanPath = strings.TrimPrefix(cleanPath, "file://")
-		if len(cleanPath) >= 3 && cleanPath[0] == '/' && cleanPath[2] == ':' {
+		if len(cleanPath) >= 3 && (cleanPath[0] == '/' || cleanPath[0] == '\\') && cleanPath[2] == ':' {
 			cleanPath = cleanPath[1:]
 		}
-		cleanPath = filepath.Clean(cleanPath)
+
+		isDriveLetterAbs := len(cleanPath) >= 2 && ((cleanPath[0] >= 'a' && cleanPath[0] <= 'z') || (cleanPath[0] >= 'A' && cleanPath[0] <= 'Z')) && cleanPath[1] == ':'
+		isUNCAbs := strings.HasPrefix(cleanPath, `\\`) || strings.HasPrefix(cleanPath, `//`)
+		isUnixAbs := runtime.GOOS != "windows" && strings.HasPrefix(cleanPath, "/")
+
+		relCleanPath := cleanPath
+		if !isDriveLetterAbs && !isUNCAbs && !isUnixAbs {
+			relCleanPath = strings.TrimLeft(cleanPath, "/\\")
+		}
+		baseFileName := filepath.Base(cleanPath)
 
 		respondWithFileContent := func(content []byte) {
 			lower := strings.ToLower(cleanPath)
@@ -4049,14 +4058,14 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: data})
 		}
 
-		if filepath.IsAbs(cleanPath) {
-			if content, errRead := os.ReadFile(cleanPath); errRead == nil {
+		if isDriveLetterAbs || isUNCAbs || isUnixAbs {
+			if content, errRead := os.ReadFile(filepath.Clean(cleanPath)); errRead == nil {
 				respondWithFileContent(content)
 				return
 			}
 		}
-		if strings.HasPrefix(msg.FilePath, ".gemini") || strings.HasPrefix(cleanPath, ".gemini") {
-			abs := homeRoot(cleanPath)
+		if strings.HasPrefix(msg.FilePath, ".gemini") || strings.HasPrefix(relCleanPath, ".gemini") {
+			abs := homeRoot(relCleanPath)
 			if content, errRead := os.ReadFile(abs); errRead == nil {
 				respondWithFileContent(content)
 				return
@@ -4071,9 +4080,12 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		if cascadeID != "" {
 			if bDir := findBrainDir(cascadeID); bDir != "" {
 				candidates := []string{
-					filepath.Join(bDir, cleanPath),
-					filepath.Join(bDir, ".user_uploaded", cleanPath),
-					filepath.Join(bDir, "scratch", cleanPath),
+					filepath.Join(bDir, relCleanPath),
+					filepath.Join(bDir, ".user_uploaded", relCleanPath),
+					filepath.Join(bDir, "scratch", relCleanPath),
+					filepath.Join(bDir, ".user_uploaded", baseFileName),
+					filepath.Join(bDir, "scratch", baseFileName),
+					filepath.Join(bDir, baseFileName),
 				}
 				for _, cand := range candidates {
 					if content, errRead := os.ReadFile(cand); errRead == nil {
@@ -4082,33 +4094,36 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 					}
 				}
 			}
-		} else {
-			// Scan active sessions or brain directories if cascadeID was not specified
-			if home, errHome := os.UserHomeDir(); errHome == nil {
-				brainRoots := []string{
-					filepath.Join(home, ".gemini", "antigravity", "brain"),
-					filepath.Join(home, ".gemini", "antigravity-ide", "brain"),
+		}
+
+		// Scan active sessions or brain directories if not found in specific cascade
+		if home, errHome := os.UserHomeDir(); errHome == nil {
+			brainRoots := []string{
+				filepath.Join(home, ".gemini", "antigravity", "brain"),
+				filepath.Join(home, ".gemini", "antigravity-ide", "brain"),
+			}
+			for _, bRoot := range brainRoots {
+				entries, errEntries := os.ReadDir(bRoot)
+				if errEntries != nil {
+					continue
 				}
-				for _, bRoot := range brainRoots {
-					entries, errEntries := os.ReadDir(bRoot)
-					if errEntries != nil {
+				for _, e := range entries {
+					if !e.IsDir() {
 						continue
 					}
-					for _, e := range entries {
-						if !e.IsDir() {
-							continue
-						}
-						bDir := filepath.Join(bRoot, e.Name())
-						cands := []string{
-							filepath.Join(bDir, cleanPath),
-							filepath.Join(bDir, ".user_uploaded", cleanPath),
-							filepath.Join(bDir, "scratch", cleanPath),
-						}
-						for _, cand := range cands {
-							if content, errRead := os.ReadFile(cand); errRead == nil {
-								respondWithFileContent(content)
-								return
-							}
+					bDir := filepath.Join(bRoot, e.Name())
+					cands := []string{
+						filepath.Join(bDir, relCleanPath),
+						filepath.Join(bDir, ".user_uploaded", relCleanPath),
+						filepath.Join(bDir, "scratch", relCleanPath),
+						filepath.Join(bDir, ".user_uploaded", baseFileName),
+						filepath.Join(bDir, "scratch", baseFileName),
+						filepath.Join(bDir, baseFileName),
+					}
+					for _, cand := range cands {
+						if content, errRead := os.ReadFile(cand); errRead == nil {
+							respondWithFileContent(content)
+							return
 						}
 					}
 				}

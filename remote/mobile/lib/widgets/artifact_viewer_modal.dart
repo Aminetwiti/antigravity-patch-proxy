@@ -91,6 +91,7 @@ class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
   Future<void> _fetchArtifactContent() async {
     try {
       Map<String, dynamic> res;
+      final cleanP = widget.artifactPath.replaceFirst(RegExp(r'^/+'), '');
       try {
         res = await widget.api.readFile(
           widget.artifactPath,
@@ -98,10 +99,25 @@ class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
           cascadeId: widget.cascadeId,
         );
       } catch (_) {
-        res = await widget.api.readFile(
-          widget.artifactPath,
-          cascadeId: widget.cascadeId,
-        );
+        try {
+          res = await widget.api.readFile(
+            cleanP.isNotEmpty ? cleanP : widget.artifactName,
+            workspacePath: widget.workspacePath,
+            cascadeId: widget.cascadeId,
+          );
+        } catch (_) {
+          try {
+            res = await widget.api.readFile(
+              widget.artifactName,
+              cascadeId: widget.cascadeId,
+            );
+          } catch (_) {
+            res = await widget.api.readFile(
+              widget.artifactPath,
+              cascadeId: widget.cascadeId,
+            );
+          }
+        }
       }
       if (mounted) {
         Uint8List? imgBytes;

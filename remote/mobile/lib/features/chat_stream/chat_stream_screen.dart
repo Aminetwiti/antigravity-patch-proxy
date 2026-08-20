@@ -39,6 +39,7 @@ import '../../widgets/skeleton_loader.dart';
 import '../subagents/subagents_tree_sheet.dart';
 import '../subagents/models/subagent_item.dart';
 import '../subagents/widgets/subagent_tree_card.dart';
+import '../subagents/widgets/subagent_detail_modal.dart';
 import '../../widgets/zenithal_canvas.dart';
 import '../../widgets/status_dot_badge.dart';
 import '../../widgets/bouncing_tap.dart';
@@ -249,10 +250,94 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
   bool get _isSideQuestionLoading => _sessionSideQuestionLoadings[widget.activeSessionId] ?? false;
   set _isSideQuestionLoading(bool l) => _sessionSideQuestionLoadings[widget.activeSessionId] = l;
+  Timer? _sideQuestionTimer;
+  Timer? _loadOlderTimer;
 
   final List<String> _runningBackgroundTasks = [];
   bool _isFullscreen = false;
   bool _isHeaderVisible = true;
+  bool _isSearching = false;
+  final TextEditingController _searchController = TextEditingController();
+  List<int> _searchMatches = [];
+  int _currentSearchMatchIndex = 0;
+
+  void _toggleSearch() {
+    HapticFeedback.selectionClick();
+    setState(() {
+      _isSearching = !_isSearching;
+      if (!_isSearching) {
+        _searchController.clear();
+        _searchMatches.clear();
+        _currentSearchMatchIndex = 0;
+      }
+    });
+  }
+
+  void _onSearchQueryChanged(String query) {
+    final q = query.trim().toLowerCase();
+    final msgs = _sessionMessages[widget.activeSessionId] ?? [];
+    if (q.isEmpty) {
+      setState(() {
+        _searchMatches = [];
+        _currentSearchMatchIndex = 0;
+      });
+      return;
+    }
+    final matches = <int>[];
+    for (var i = 0; i < msgs.length; i++) {
+      final m = msgs[i];
+      if (m.text.toLowerCase().contains(q) || m.sender.toLowerCase().contains(q)) {
+        matches.add(i);
+      }
+    }
+    setState(() {
+      _searchMatches = matches;
+      _currentSearchMatchIndex = matches.isNotEmpty ? matches.length - 1 : 0;
+    });
+    _jumpToSearchMatch();
+  }
+
+  void _jumpToSearchMatch() {
+    if (_searchMatches.isEmpty || !_scrollController.hasClients) return;
+    final msgs = _sessionMessages[widget.activeSessionId] ?? [];
+    if (msgs.isEmpty) return;
+    final targetIndex = _searchMatches[_currentSearchMatchIndex];
+    final fraction = (targetIndex / (msgs.isNotEmpty ? msgs.length : 1)).clamp(0.0, 1.0);
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    _scrollController.animateTo(
+      fraction * maxScroll,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+    );
+    HapticFeedback.selectionClick();
+  }
+
+  void _nextSearchMatch() {
+    if (_searchMatches.isEmpty) return;
+    setState(() {
+      _currentSearchMatchIndex = (_currentSearchMatchIndex + 1) % _searchMatches.length;
+    });
+    _jumpToSearchMatch();
+  }
+
+  void _prevSearchMatch() {
+    if (_searchMatches.isEmpty) return;
+    setState(() {
+      _currentSearchMatchIndex = (_currentSearchMatchIndex - 1 + _searchMatches.length) % _searchMatches.length;
+    });
+    _jumpToSearchMatch();
+  }
+
+  void _closeSearch() {
+    HapticFeedback.selectionClick();
+    setState(() {
+      _isSearching = false;
+      _searchController.clear();
+      _searchMatches.clear();
+      _currentSearchMatchIndex = 0;
+    });
+  }
+
   final Map<String, StringBuffer> _taskOutputs = {};
   final Map<String, String> _taskStatuses = {};
   final Map<String, StreamController<String>> _taskOutputControllers = {};
@@ -495,7 +580,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       final current = _visibleCounts[widget.activeSessionId] ?? _pageSize;
       _visibleCounts[widget.activeSessionId] = current + _pageSize;
     });
-    Future.delayed(const Duration(milliseconds: 250), () {
+    _loadOlderTimer?.cancel();
+    _loadOlderTimer = Timer(const Duration(milliseconds: 250), () {
       if (mounted) {
         setState(() {
           _isLoadingMoreOlder = false;
@@ -1052,11 +1138,14 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     _stillWorkingTimer?.cancel();
     _syncTimer?.cancel();
     _quotaTimer?.cancel();
+    _sideQuestionTimer?.cancel();
+    _loadOlderTimer?.cancel();
     for (final t in _settleTimers) {
       t.cancel();
     }
     _settleTimers.clear();
     _scrollController.dispose();
+    _searchController.dispose();
     final client = widget.wsClient;
     client?.statusNotifier.removeListener(_onConnectionStatusChanged);
     client?.retryInfo.removeListener(_onRetryInfoChanged);
@@ -1098,6 +1187,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       if (_showStillWorking && mounted) {
         setState(() => _showStillWorking = false);
       }
+    }
+    if (sessionId == widget.activeSessionId) {
+      HapticFeedback.lightImpact();
     }
     final queue = _sessionMessageQueues[sessionId] ?? [];
     final lastEnd = _sessionLastStreamEnds[sessionId];
@@ -1727,7 +1819,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         _isSideQuestionLoading = true;
         _sideQuestionAnswer = null;
       });
-      Future.delayed(const Duration(milliseconds: 1200), () {
+      _sideQuestionTimer?.cancel();
+      _sideQuestionTimer = Timer(const Duration(milliseconds: 1200), () {
         if (mounted) {
           setState(() {
             _isSideQuestionLoading = false;
@@ -2331,6 +2424,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           _isFullscreen = !_isFullscreen;
         });
       },
+      onToggleSearch: _toggleSearch,
+      isSearching: _isSearching,
     );
 
     return ZenithalCanvas(
@@ -2338,6 +2433,16 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         children: [
           connectivityBanner,
           if (!hasKeyboard && (_isHeaderVisible || _isFullscreen)) breadcrumb,
+          if (_isSearching)
+            _ChatSearchBar(
+              controller: _searchController,
+              matchCount: _searchMatches.length,
+              currentIndex: _currentSearchMatchIndex,
+              onQueryChanged: _onSearchQueryChanged,
+              onNext: _nextSearchMatch,
+              onPrev: _prevSearchMatch,
+              onClose: _closeSearch,
+            ),
           if (!_isFullscreen && _isHeaderVisible) ...[
             SessionTopTabs(
               activeTab: _currentTab,
@@ -2468,6 +2573,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             cascadeId: widget.activeSessionId,
             initialText: currentDraft,
             onDraftChanged: setDraft,
+            hasPlan: _latestPlanText != null,
+            onProceedPlan: () => _handleSendMessage('proceed'),
+            onRunTests: () => _handleSendMessage('Exécute les tests unitaires du projet'),
+            onViewDiff: () => setState(() => _currentTab = SessionTabType.review),
           ),
         ],
       ),
@@ -2633,10 +2742,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                   );
                 },
                 onSelectSubagent: (sub) {
-                  SubagentsTreeSheet.show(
+                  SubagentDetailModal.show(
                     context,
+                    agent: sub,
                     api: widget.api,
                     cascadeId: widget.activeSessionId,
+                    onKill: () => _fetchSubagentsForSession(widget.activeSessionId),
                   );
                 },
               ),
@@ -2688,6 +2799,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                 onViewReview: () => setState(() => _currentTab = SessionTabType.review),
                 onStop: _handleStopGeneration,
                 onSwitchModel: _showModelSelector,
+                onEditPrompt: (text) => _chatInputKey.currentState?.setText(text),
                 onResend: (m) {
                   final reqId = m.id.startsWith('pending-')
                       ? m.id.substring('pending-'.length)
@@ -2706,8 +2818,84 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                 },
               );
 
+              // Swipe-to-Action : Glisser à droite pour citer, à gauche pour copier
+              final swipeableBubble = Dismissible(
+                key: Key('swipe-msg-${msg.id}'),
+                direction: msg.isStreaming ? DismissDirection.none : DismissDirection.horizontal,
+                confirmDismiss: (direction) async {
+                  if (direction == DismissDirection.startToEnd) {
+                    // Swipe Right -> Citer / Répondre
+                    HapticFeedback.mediumImpact();
+                    _chatInputKey.currentState?.insertQuote(msg.text);
+                    AppToast.show(
+                      context,
+                      message: 'Message cité dans la barre de saisie',
+                      icon: Icons.format_quote_rounded,
+                      type: ToastType.info,
+                    );
+                  } else if (direction == DismissDirection.endToStart) {
+                    // Swipe Left -> Copier dans le presse-papiers
+                    HapticFeedback.lightImpact();
+                    Clipboard.setData(ClipboardData(text: msg.text));
+                    AppToast.show(
+                      context,
+                      message: 'Message copié dans le presse-papiers',
+                      icon: Icons.copy_outlined,
+                      type: ToastType.success,
+                    );
+                  }
+                  return false; // Ne supprime pas le message
+                },
+                background: Container(
+                  alignment: Alignment.centerLeft,
+                  padding: const EdgeInsets.only(left: 16),
+                  decoration: BoxDecoration(
+                    color: scheme.primary.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(AppRadius.lg),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.reply_rounded, size: 18, color: scheme.primary),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Citer',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: scheme.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                secondaryBackground: Container(
+                  alignment: Alignment.centerRight,
+                  padding: const EdgeInsets.only(right: 16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF00B95C).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(AppRadius.lg),
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      Text(
+                        'Copier',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF00B95C),
+                        ),
+                      ),
+                      SizedBox(width: 6),
+                      Icon(Icons.copy_rounded, size: 18, color: Color(0xFF00B95C)),
+                    ],
+                  ),
+                ),
+                child: bubbleWidget,
+              );
+
               // Wrap individual bubbles in RepaintBoundary for 60/120fps streaming isolation
-              final isolatedBubble = RepaintBoundary(child: bubbleWidget);
+              final isolatedBubble = RepaintBoundary(child: swipeableBubble);
 
               // N'anime l'entrée que pour le dernier message en cours et uniquement si Reduce Motion est inactif
               if (isLatest && ctx.shouldAnimate) {
@@ -3252,6 +3440,7 @@ class _MessageBubble extends StatelessWidget {
   final VoidCallback? onStop;
   final ValueChanged<ChatMessage>? onResend;
   final VoidCallback? onSwitchModel;
+  final ValueChanged<String>? onEditPrompt;
 
   /// P5 : tap sur un lien markdown file:/// → ouvre le fichier distant.
   final LocalFileTap? onLocalFile;
@@ -3271,6 +3460,7 @@ class _MessageBubble extends StatelessWidget {
     this.onStop,
     this.onResend,
     this.onSwitchModel,
+    this.onEditPrompt,
   });
 
   @override
@@ -3284,40 +3474,53 @@ class _MessageBubble extends StatelessWidget {
       final hasMedia = parsed.media.isNotEmpty;
 
       return RepaintBoundary(
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 16),
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerLow,
-            borderRadius: BorderRadius.circular(AppRadius.lg),
-            border: Border.all(
-              color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.5),
-              width: 1,
+        child: GestureDetector(
+          onDoubleTap: onEditPrompt != null ? () => onEditPrompt!(message.text) : null,
+          onLongPress: () {
+            HapticFeedback.lightImpact();
+            Clipboard.setData(ClipboardData(text: message.text));
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Prompt copié dans le presse-papiers'),
+                duration: Duration(seconds: 1),
+              ),
+            );
+          },
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              border: Border.all(
+                color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.5),
+                width: 1,
+              ),
             ),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (hasMedia) ...[
-                _MediaGalleryRow(
-                  media: parsed.media,
-                  api: api,
-                  workspacePath: workspacePath,
-                  onLocalFile: onLocalFile,
-                ),
-                if (parsed.cleanText.isNotEmpty) const SizedBox(height: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (hasMedia) ...[
+                  _MediaGalleryRow(
+                    media: parsed.media,
+                    api: api,
+                    workspacePath: workspacePath,
+                    onLocalFile: onLocalFile,
+                  ),
+                  if (parsed.cleanText.isNotEmpty) const SizedBox(height: 10),
+                ],
+                if (parsed.cleanText.isNotEmpty)
+                  MarkdownBubble(
+                    text: parsed.cleanText,
+                    isStreaming: false,
+                    api: api,
+                    workspacePath: workspacePath,
+                    onLocalFile: onLocalFile,
+                  ),
               ],
-              if (parsed.cleanText.isNotEmpty)
-                MarkdownBubble(
-                  text: parsed.cleanText,
-                  isStreaming: false,
-                  api: api,
-                  workspacePath: workspacePath,
-                  onLocalFile: onLocalFile,
-                ),
-            ],
+            ),
           ),
         ),
       );
@@ -3638,6 +3841,108 @@ class _MessageBubble extends StatelessWidget {
       ),
     ),
   );
+  }
+}
+
+class _ChatSearchBar extends StatelessWidget {
+  final TextEditingController controller;
+  final int matchCount;
+  final int currentIndex;
+  final ValueChanged<String> onQueryChanged;
+  final VoidCallback onNext;
+  final VoidCallback onPrev;
+  final VoidCallback onClose;
+
+  const _ChatSearchBar({
+    required this.controller,
+    required this.matchCount,
+    required this.currentIndex,
+    required this.onQueryChanged,
+    required this.onNext,
+    required this.onPrev,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
+        border: Border(
+          bottom: BorderSide(
+            color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.5),
+            width: 1,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.search_rounded,
+            size: 16,
+            color: isDark ? AppColors.accentBlue : scheme.primary,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              key: const Key('chat-search-input'),
+              controller: controller,
+              autofocus: true,
+              style: TextStyle(fontSize: 13, color: scheme.onSurface),
+              decoration: InputDecoration(
+                hintText: 'Rechercher dans cette session...',
+                hintStyle: TextStyle(
+                  fontSize: 12.5,
+                  color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                ),
+                isDense: true,
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(vertical: 6),
+              ),
+              onChanged: onQueryChanged,
+            ),
+          ),
+          if (controller.text.isNotEmpty) ...[
+            Text(
+              matchCount > 0 ? '${currentIndex + 1} / $matchCount' : '0 résultat',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: matchCount > 0
+                    ? (isDark ? AppColors.accentBlue : scheme.primary)
+                    : scheme.error,
+              ),
+            ),
+            const SizedBox(width: 4),
+            IconButton(
+              key: const Key('search-prev-btn'),
+              icon: const Icon(Icons.keyboard_arrow_up_rounded, size: 18),
+              onPressed: matchCount > 1 ? onPrev : null,
+              visualDensity: VisualDensity.compact,
+              tooltip: 'Résultat précédent',
+            ),
+            IconButton(
+              key: const Key('search-next-btn'),
+              icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 18),
+              onPressed: matchCount > 1 ? onNext : null,
+              visualDensity: VisualDensity.compact,
+              tooltip: 'Résultat suivant',
+            ),
+          ],
+          IconButton(
+            key: const Key('close-search-btn'),
+            icon: const Icon(Icons.close_rounded, size: 16),
+            onPressed: onClose,
+            visualDensity: VisualDensity.compact,
+            tooltip: 'Fermer la recherche',
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -4144,6 +4449,7 @@ class _MediaThumbnailItem extends StatefulWidget {
 }
 
 class _MediaThumbnailItemState extends State<_MediaThumbnailItem> {
+  static final Map<String, Uint8List> _thumbnailMemoryCache = {};
   Uint8List? _bytes;
   bool _isLoading = false;
 
@@ -4154,12 +4460,20 @@ class _MediaThumbnailItemState extends State<_MediaThumbnailItem> {
   }
 
   void _loadThumbnail() async {
+    final cacheKey = widget.item.dataUri ?? widget.item.path;
+    if (_thumbnailMemoryCache.containsKey(cacheKey)) {
+      setState(() => _bytes = _thumbnailMemoryCache[cacheKey]);
+      return;
+    }
+
     if (widget.item.dataUri != null) {
       try {
         final comma = widget.item.dataUri!.indexOf(',');
         if (comma != -1) {
+          final b = base64Decode(widget.item.dataUri!.substring(comma + 1));
+          _thumbnailMemoryCache[cacheKey] = b;
           setState(() {
-            _bytes = base64Decode(widget.item.dataUri!.substring(comma + 1));
+            _bytes = b;
           });
         }
       } catch (_) {}
@@ -4178,6 +4492,7 @@ class _MediaThumbnailItemState extends State<_MediaThumbnailItem> {
       final f = File(p);
       if (f.existsSync()) {
         final b = await f.readAsBytes();
+        _thumbnailMemoryCache[cacheKey] = b;
         if (mounted) setState(() => _bytes = b);
         return;
       }
@@ -4190,8 +4505,10 @@ class _MediaThumbnailItemState extends State<_MediaThumbnailItem> {
         final res = await widget.api!.readFile(p, workspacePath: widget.workspacePath);
         final b64 = res['base64Data'] as String?;
         if (b64 != null && b64.isNotEmpty && mounted) {
+          final b = base64Decode(b64);
+          _thumbnailMemoryCache[cacheKey] = b;
           setState(() {
-            _bytes = base64Decode(b64);
+            _bytes = b;
             _isLoading = false;
           });
         }

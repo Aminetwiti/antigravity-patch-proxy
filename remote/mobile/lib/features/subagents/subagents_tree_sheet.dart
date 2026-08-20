@@ -4,6 +4,7 @@ import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/skeleton_loader.dart';
 import 'models/subagent_item.dart';
+import 'widgets/subagent_detail_modal.dart';
 
 /// Modal bottom sheet presenting the active subagent DAG / tree for a session.
 class SubagentsTreeSheet extends StatefulWidget {
@@ -344,9 +345,19 @@ class _SubagentsTreeSheetState extends State<SubagentsTreeSheet> {
                                             ),
                                             child: InkWell(
                                               borderRadius: BorderRadius.circular(AppRadius.md),
-                                              onTap: widget.onSelectSubagent != null
-                                                  ? () => widget.onSelectSubagent!(agent)
-                                                  : null,
+                                              onTap: () {
+                                                if (widget.onSelectSubagent != null) {
+                                                  widget.onSelectSubagent!(agent);
+                                                } else {
+                                                  SubagentDetailModal.show(
+                                                    context,
+                                                    agent: agent,
+                                                    api: widget.api,
+                                                    cascadeId: widget.cascadeId,
+                                                    onKill: () => _loadSubagents(),
+                                                  );
+                                                }
+                                              },
                                               child: Padding(
                                                 padding: const EdgeInsets.all(12),
                                                 child: Column(
@@ -421,6 +432,12 @@ class _SubagentsTreeSheetState extends State<SubagentsTreeSheet> {
                                                               ),
                                                             ],
                                                           ),
+                                                        ),
+                                                        const SizedBox(width: 4),
+                                                        Icon(
+                                                          Icons.chevron_right_rounded,
+                                                          size: 16,
+                                                          color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
                                                         ),
                                                       ],
                                                     ),

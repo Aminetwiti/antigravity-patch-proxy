@@ -508,36 +508,44 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
     final mq = MediaQuery.of(context);
     final bottomInset = mq.viewInsets.bottom;
     final bottomPadding = mq.padding.bottom;
-    final height = (mq.size.height * 0.85).clamp(380.0, 750.0);
     final scheme = Theme.of(context).colorScheme;
 
     // Détermination de l'état de connexion du terminal
     final bool isOffline = widget.api == null;
     final bool isPtyActive = _ptyId != null && !_ptyClosed;
 
-    return Container(
-      height: height + bottomInset,
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-        border: Border(
-          top: BorderSide(color: scheme.outlineVariant, width: 1),
-          left: BorderSide(color: scheme.outlineVariant, width: 1),
-          right: BorderSide(color: scheme.outlineVariant, width: 1),
-        ),
-      ),
-      child: Column(
-        children: [
-          // Drag handle
-          Container(
-            margin: const EdgeInsets.only(top: 8, bottom: 4),
-            width: 36,
-            height: 4,
-            decoration: BoxDecoration(
-              color: scheme.outline.withValues(alpha: 0.5),
-              borderRadius: BorderRadius.circular(2),
+    return DraggableScrollableSheet(
+      initialChildSize: 0.75,
+      minChildSize: 0.35,
+      maxChildSize: 0.95,
+      snap: true,
+      snapSizes: const [0.35, 0.70, 0.95],
+      builder: (context, scrollSheetController) {
+        return Container(
+          decoration: BoxDecoration(
+            color: scheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+            border: Border(
+              top: BorderSide(color: scheme.outlineVariant, width: 1),
+              left: BorderSide(color: scheme.outlineVariant, width: 1),
+              right: BorderSide(color: scheme.outlineVariant, width: 1),
             ),
           ),
+          child: Column(
+            children: [
+              // Drag handle tactile
+              GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                child: Container(
+                  margin: const EdgeInsets.only(top: 8, bottom: 4),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: scheme.outline.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
 
           // Header
           Padding(
@@ -877,6 +885,8 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
           ),
         ],
       ),
+    );
+      },
     );
   }
 }

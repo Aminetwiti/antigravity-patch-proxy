@@ -1210,60 +1210,71 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                 tooltip: 'Ouvrir le menu gauche',
               ),
         title: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              'Antigravity',
-              style: TextStyle(
-                fontSize: 14.5,
-                fontWeight: FontWeight.w600,
-                color: Theme.of(context).colorScheme.onSurface,
-                letterSpacing: -0.2,
+            Flexible(
+              child: Text(
+                'Antigravity',
+                style: TextStyle(
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).colorScheme.onSurface,
+                  letterSpacing: -0.2,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-            const Spacer(),
-            InkWell(
-              onTap: () {
-                if (isConnected) {
-                  _wsClient.disconnect();
-                  // Déconnexion manuelle explicite : la session persistée est
-                  // oubliée pour ne pas se reconnecter toute seule au tunnel.
-                  SettingsStore.clearSession();
-                } else {
-                  _wsClient.connect();
-                }
-              },
-              borderRadius: BorderRadius.circular(4),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: isConnected ? AppColors.positive : AppColors.danger,
-                        shape: BoxShape.circle,
+            const SizedBox(width: 8),
+            Flexible(
+              child: InkWell(
+                onTap: () {
+                  if (isConnected) {
+                    _wsClient.disconnect();
+                    // Déconnexion manuelle explicite : la session persistée est
+                    // oubliée pour ne pas se reconnecter toute seule au tunnel.
+                    SettingsStore.clearSession();
+                  } else {
+                    _wsClient.connect();
+                  }
+                },
+                borderRadius: BorderRadius.circular(4),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: isConnected ? AppColors.positive : AppColors.danger,
+                          shape: BoxShape.circle,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 6),
-                    ValueListenableBuilder<int?>(
-                      valueListenable: _wsClient.latencyMsNotifier,
-                      builder: (context, latency, _) {
-                        final label = isConnected
-                            ? (latency != null ? 'Connecté • ${latency}ms' : 'Connecté')
-                            : 'Hors ligne';
-                        return Text(
-                          label,
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            color: isConnected ? AppColors.positive : AppColors.danger,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        );
-                      },
-                    ),
-                  ],
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: ValueListenableBuilder<int?>(
+                          valueListenable: _wsClient.latencyMsNotifier,
+                          builder: (context, latency, _) {
+                            final label = isConnected
+                                ? (latency != null ? 'Connecté • ${latency}ms' : 'Connecté')
+                                : 'Hors ligne';
+                            return Text(
+                              label,
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                color: isConnected ? AppColors.positive : AppColors.danger,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),

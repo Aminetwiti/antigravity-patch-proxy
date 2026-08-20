@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../theme/app_colors.dart';
 import '../../../theme/app_theme.dart';
 import '../models/subagent_item.dart';
+import 'subagent_detail_modal.dart';
 
 /// Carte visuelle affichant l'arborescence des sous-agents en temps réel
 /// directement dans l'interface de discussion (inspiré de Claude Code / Codex).
@@ -118,7 +119,13 @@ class _SubagentTreeCardState extends State<SubagentTreeCard> {
                 final currentTool = subagent.stateDetail;
 
                 return InkWell(
-                  onTap: () => widget.onSelectSubagent?.call(subagent),
+                  onTap: () {
+                    if (widget.onSelectSubagent != null) {
+                      widget.onSelectSubagent!(subagent);
+                    } else {
+                      SubagentDetailModal.show(context, agent: subagent);
+                    }
+                  },
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                     child: Row(

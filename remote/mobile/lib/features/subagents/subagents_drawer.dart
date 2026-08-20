@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'models/subagent_item.dart';
 import 'package:mobile/theme/app_colors.dart';
+import 'widgets/subagent_detail_modal.dart';
 
 class SubagentsDrawer extends StatelessWidget {
   final List<SubagentItem> subagents;
@@ -167,7 +168,13 @@ class SubagentsDrawer extends StatelessWidget {
                             side: BorderSide(color: borderCol, width: 1),
                           ),
                           child: InkWell(
-                            onTap: onSelectAgent != null ? () => onSelectAgent!(agent.id) : null,
+                            onTap: () {
+                              if (onSelectAgent != null) {
+                                onSelectAgent!(agent.id);
+                              } else {
+                                SubagentDetailModal.show(context, agent: agent);
+                              }
+                            },
                             borderRadius: BorderRadius.circular(AppRadius.md),
                             child: Padding(
                               padding: const EdgeInsets.all(12),

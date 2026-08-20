@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile/theme/app_colors.dart';
+import 'bouncing_tap.dart';
 
 /// Carte interactive d'Implementation Plan dans le chat avec bouton d'action Proceed
 class ImplementationPlanCard extends StatelessWidget {
@@ -104,11 +105,9 @@ class ImplementationPlanCard extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
             child: Row(
               children: [
-                GestureDetector(
-                  onTap: () {
-                    HapticFeedback.mediumImpact();
-                    onProceed();
-                  },
+                BouncingTap(
+                  hapticType: BouncingHapticType.heavy,
+                  onTap: onProceed,
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
                     decoration: BoxDecoration(
@@ -141,7 +140,8 @@ class ImplementationPlanCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                GestureDetector(
+                BouncingTap(
+                  hapticType: BouncingHapticType.selection,
                   onTap: onViewPlan,
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
@@ -468,11 +468,9 @@ class _FilesChangedCardState extends State<FilesChangedCard>
                   ),
                   const SizedBox(width: 8),
                   // Review button
-                  GestureDetector(
-                    onTap: () {
-                      HapticFeedback.lightImpact();
-                      widget.onReview();
-                    },
+                  BouncingTap(
+                    hapticType: BouncingHapticType.light,
+                    onTap: widget.onReview,
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                       decoration: BoxDecoration(
