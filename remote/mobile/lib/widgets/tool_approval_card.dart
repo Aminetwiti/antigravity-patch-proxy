@@ -37,21 +37,20 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
   Timer? _submitTimeout;
   final TextEditingController _denyReasonController = TextEditingController();
 
-  bool get _isUrlApproval {
-    final lowerTool = widget.request.toolName.toLowerCase();
-    final lowerType = widget.request.approvalType.toLowerCase();
-    return lowerTool.contains('url') ||
-        lowerTool == 'browse' ||
-        lowerTool == 'open_browser_url' ||
-        lowerTool == 'read_url_content' ||
-        lowerType.contains('url') ||
-        lowerType == 'browse' ||
-        lowerType == 'open_browser_url' ||
-        widget.request.url != null;
-  }
+  bool get _isUrlApproval => widget.request.isUrlApproval;
+  bool get _isFileApproval => widget.request.isFileApproval;
+  bool get _isScopedApproval =>
+      _isUrlApproval || _isFileApproval || widget.request.approvalType == 'permission';
+  bool get _isDestructive => widget.request.checkDestructive;
 
   String _extractTargetDisplay(String raw) {
-    if (raw.isEmpty) return widget.request.description;
+    if (raw.isEmpty) {
+      if (widget.request.filePath != null) return widget.request.filePath!;
+      if (widget.request.mcpServer != null) {
+        return '${widget.request.mcpServer} -> ${widget.request.mcpTool ?? widget.request.toolName}';
+      }
+      return widget.request.description;
+    }
     final trimmed = raw.trim();
     if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
       final uri = Uri.tryParse(trimmed);
@@ -63,7 +62,13 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
   }
 
   IconData _iconForTool(String toolName) {
+    if (_isDestructive) return Icons.warning_amber_rounded;
     if (_isUrlApproval) return Icons.lock_outline;
+    if (_isFileApproval) return Icons.folder_open_outlined;
+    if (widget.request.isMcpApproval) return Icons.extension_outlined;
+    if (widget.request.isStdinApproval) return Icons.keyboard_outlined;
+    if (widget.request.isSubagentApproval) return Icons.smart_toy_outlined;
+    if (widget.request.isDeployApproval) return Icons.cloud_upload_outlined;
     final lower = toolName.toLowerCase();
     if (lower.contains('bash') || lower.contains('command') || lower.contains('run')) {
       return Icons.terminal;
@@ -76,8 +81,27 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
   }
 
   String _titleForTool() {
+    if (_isDestructive) {
+      return 'Action Destructive / Risque Élevé';
+    }
     if (_isUrlApproval) {
       return 'Allow reading this URL?';
+    }
+    if (_isFileApproval) {
+      return 'Allow file access outside workspace?';
+    }
+    if (widget.request.isMcpApproval) {
+      final srv = widget.request.mcpServer != null ? ' (${widget.request.mcpServer})' : '';
+      return 'Allow MCP tool execution$srv?';
+    }
+    if (widget.request.isStdinApproval) {
+      return 'Send terminal input (stdin)';
+    }
+    if (widget.request.isSubagentApproval) {
+      return 'Allow subagent delegation?';
+    }
+    if (widget.request.isDeployApproval) {
+      return 'Allow cloud deployment?';
     }
     final lower = widget.request.toolName.toLowerCase();
     if (lower.contains('run') || lower.contains('command')) {
@@ -131,7 +155,7 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
 
   void _handleSubmitSelected() {
     if (_isSubmitting || widget.isExpired) return;
-    if (_isUrlApproval) {
+    if (_isScopedApproval) {
       switch (_selectedOption) {
         case 1:
           _handleDecision(ToolDecision.allow, scope: ApprovalScope.once);
@@ -355,8 +379,44 @@ class _ToolApprovalCardState extends State<ToolApprovalCard> {
             ),
             const SizedBox(height: 8),
 
-            // ── Choix d'approbation (5 options si URL, switch si Commande standard)
-            if (_isUrlApproval) ...[
+            // ── Avertissement Action Destructive si détectée
+            if (_isDestructive) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                margin: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(
+                  color: (isDark ? AppColors.danger : scheme.error).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: (isDark ? AppColors.danger : scheme.error).withValues(alpha: 0.5),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.warning_amber_rounded,
+                      size: 16,
+                      color: isDark ? AppColors.danger : scheme.error,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Attention : Cette opération risque de supprimer ou modifier irrémédiablement des données.',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? AppColors.danger : scheme.error,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            // ── Choix d'approbation (5 options si Scoped/URL/File, switch si Commande standard)
+            if (_isScopedApproval) ...[
               _buildOptionRow(
                 index: 1,
                 label: 'Yes, allow this time',

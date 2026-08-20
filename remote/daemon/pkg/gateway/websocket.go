@@ -2193,6 +2193,21 @@ func buildApprovalPayload(approvalType string, confirm bool, command, filePath, 
 	case "ask_question":
 		oneofField = connectrpc.InteractionAskQuestion
 		oneofPayload = connectrpc.BuildAskQuestionInteraction(nil, denyReason, !confirm)
+	case "send_command_input", "send_input":
+		oneofField = connectrpc.InteractionSendCommandInput
+		oneofPayload = connectrpc.BuildSendCommandInputInteraction(command, !confirm)
+	case "mcp_tool", "call_mcp_tool", "mcp":
+		oneofField = connectrpc.InteractionMcp
+		oneofPayload = connectrpc.BuildMcpInteraction(confirm, filePath, command, denyReason)
+	case "deploy", "deploy_firebase":
+		oneofField = connectrpc.InteractionDeploy
+		oneofPayload = connectrpc.BuildDeployInteraction(confirm, command)
+	case "invoke_subagent", "subagent":
+		oneofField = connectrpc.InteractionInvokeSubagent
+		oneofPayload = connectrpc.BuildSubagentSpawnInteraction(confirm, command)
+	case "run_extension_code":
+		oneofField = connectrpc.InteractionRunExtensionCode
+		oneofPayload = connectrpc.BuildApprovalInteraction(confirm)
 	default:
 		oneofPayload = connectrpc.BuildApprovalInteraction(confirm)
 	}
@@ -6080,19 +6095,67 @@ func findTaskLogPath(cascadeID, taskID string) string {
 }
 
 func (s *Server) getTaskLog(cascadeID, taskID string) (string, string, string) {
-	taskID = normalizeTaskID(taskID)
+	cleanTaskID := normalizeTaskID(taskID)
 	s.runningTasks.mu.RLock()
-	t, ok := s.runningTasks.tasks[taskID]
+	t, ok := s.runningTasks.tasks[cleanTaskID]
+	if !ok {
+		// Recherche par commande exacte ou préfixe dans la cascade
+		for _, candidate := range s.runningTasks.tasks {
+			if candidate.CascadeID == cascadeID || cascadeID == "" {
+				if candidate.ID == cleanTaskID ||
+					strings.EqualFold(candidate.Command, taskID) ||
+					strings.HasPrefix(candidate.Command, taskID) ||
+					strings.HasPrefix(taskID, candidate.Command) {
+					t = candidate
+					ok = true
+					break
+				}
+			}
+		}
+	}
 	s.runningTasks.mu.RUnlock()
 
 	cmd := ""
 	status := "done"
+	actualTaskID := cleanTaskID
 	if ok {
 		cmd = t.Command
 		status = t.Status
+		actualTaskID = t.ID
 	}
 
-	logPath := findTaskLogPath(cascadeID, taskID)
+	// 1. Recherche via le chemin de log standard avec actualTaskID et cleanTaskID
+	logPath := findTaskLogPath(cascadeID, actualTaskID)
+	if logPath == "" && actualTaskID != cleanTaskID {
+		logPath = findTaskLogPath(cascadeID, cleanTaskID)
+	}
+
+	// 2. Si non trouvé et cascadeId présent, scanner le dossier .system_generated/tasks
+	if logPath == "" && cascadeID != "" {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			tasksDirs := []string{
+				filepath.Join(home, ".gemini", "antigravity", "brain", cascadeID, ".system_generated", "tasks"),
+				filepath.Join(home, ".gemini", "antigravity-ide", "brain", cascadeID, ".system_generated", "tasks"),
+			}
+			for _, dir := range tasksDirs {
+				if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
+					for _, entry := range entries {
+						name := entry.Name()
+						base := strings.TrimSuffix(name, ".log")
+						if base == actualTaskID || base == cleanTaskID || strings.Contains(taskID, base) || (ok && base == t.ID) {
+							logPath = filepath.Join(dir, name)
+							break
+						}
+					}
+					if logPath != "" {
+						break
+					}
+				}
+			}
+		}
+	}
+
 	if logPath != "" {
 		data, err := os.ReadFile(logPath)
 		if err == nil && len(data) > 0 {

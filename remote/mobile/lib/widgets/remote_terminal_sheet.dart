@@ -738,67 +738,67 @@ class _RemoteTerminalSheetState extends State<RemoteTerminalSheet> {
                       }
 
                       final entry = _entries[index];
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (entry.command != 'init')
-                              Row(
-                                children: [
-                                  const Text(
-                                    r'$ ',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
-                                      color: AppColors.positive,
-                                      fontFamily: 'monospace',
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: SelectableText(
-                                      entry.command,
+                      return RepaintBoundary(
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (entry.command != 'init')
+                                Row(
+                                  children: [
+                                    const Text(
+                                      r'$ ',
                                       style: TextStyle(
                                         fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                        color: scheme.onSurface,
+                                        fontWeight: FontWeight.bold,
+                                        color: AppColors.positive,
                                         fontFamily: 'monospace',
                                       ),
                                     ),
+                                    Expanded(
+                                      child: SelectableText(
+                                        entry.command,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: scheme.onSurface,
+                                          fontFamily: 'monospace',
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              if (entry.output.isNotEmpty) ...[
+                                const SizedBox(height: 3),
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: scheme.surfaceContainerHighest,
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: entry.isError
+                                          ? AppColors.danger.withValues(alpha: 0.3)
+                                          : scheme.outlineVariant,
+                                      width: 0.8,
+                                    ),
                                   ),
-                                ],
-                              ),
-                            if (entry.output.isNotEmpty) ...[
-                              const SizedBox(height: 3),
-                              Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.all(9),
-                                decoration: BoxDecoration(
-                                  color: scheme.surfaceContainerHighest,
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(
-                                    color: entry.isError
-                                        ? scheme.error.withValues(
-                                            alpha: 0.4,
-                                          )
-                                        : scheme.outlineVariant,
-                                    width: 1,
+                                  child: SelectableText(
+                                    entry.output,
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontFamily: 'monospace',
+                                      color: entry.isError
+                                          ? AppColors.danger
+                                          : scheme.onSurfaceVariant,
+                                      height: 1.35,
+                                    ),
                                   ),
                                 ),
-                                child: SelectableText(
-                                  entry.output,
-                                  style: TextStyle(
-                                    fontSize: 11.5,
-                                    fontFamily: 'monospace',
-                                    color: entry.isError
-                                        ? scheme.error
-                                        : const Color(0xFFE4E4E7),
-                                    height: 1.35,
-                                  ),
-                                ),
-                              ),
+                              ],
                             ],
-                          ],
+                          ),
                         ),
                       );
                     },

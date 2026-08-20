@@ -6,6 +6,7 @@ import '../../core/protocol/messages.dart';
 import '../../core/protocol/workspace_path.dart';
 import '../../core/protocol/daemon_api.dart';
 import '../../widgets/project_selector_bottom_sheet.dart';
+import '../../widgets/antigravity_logo.dart';
 import 'package:mobile/theme/app_colors.dart';
 import 'display_options.dart';
 
@@ -217,31 +218,18 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
           children: [
             const SizedBox(height: 6),
 
-            // ── Top Navigation Bar: Icons [◫ Sidebar toggle] [← Back] [→ Forward]
+            // ── Top Navigation Bar: Antigravity Brand Lockup + Action Buttons
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
               child: Row(
                 children: [
-                  _HeaderIconBtn(
-                    icon: Icons.dock_outlined,
-                    tooltip: 'Masquer la barre',
-                    onTap: () {
-                      if (Navigator.of(context).canPop()) {
-                        Navigator.of(context).pop();
-                      }
-                    },
+                  AntigravityLogo.wordmark(
+                    iconSize: 24,
+                    title: 'Antigravity',
+                    subtitle: 'REMOTE',
+                    showGlow: true,
                   ),
-                  const SizedBox(width: 8),
-                  _HeaderIconBtn(
-                    icon: Icons.arrow_back,
-                    tooltip: 'Retour',
-                    onTap: () {
-                      if (Navigator.of(context).canPop()) {
-                        Navigator.of(context).pop();
-                      }
-                    },
-                  ),
-                  const SizedBox(width: 8),
+                  const Spacer(),
                   _HeaderIconBtn(
                     icon: Icons.history,
                     tooltip: 'Historique des conversations',
@@ -251,6 +239,16 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                           Navigator.of(context).pop();
                         }
                         widget.onConversationHistory!();
+                      }
+                    },
+                  ),
+                  const SizedBox(width: 6),
+                  _HeaderIconBtn(
+                    icon: Icons.dock_outlined,
+                    tooltip: 'Masquer la barre',
+                    onTap: () {
+                      if (Navigator.of(context).canPop()) {
+                        Navigator.of(context).pop();
                       }
                     },
                   ),

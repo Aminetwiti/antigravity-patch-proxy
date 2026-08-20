@@ -238,15 +238,22 @@ func BuildHandleStreamingCommand(commandText string, source uint64) []byte {
 	return w.b
 }
 
-// Champs oneof de CascadeUserInteraction (vérifiés dans cortex_pb.ts).
+// Champs oneof de CascadeUserInteraction (vérifiés dans cortex_pb.ts et language_server binary).
 const (
-	InteractionRunCommand     = 5  // CascadeRunCommandInteraction
-	InteractionOpenBrowserURL = 6  // CascadeOpenBrowserUrlInteraction
-	InteractionReadUrlContent = 17 // CascadeReadUrlContentInteraction
-	InteractionFilePermission = 19 // FilePermissionInteraction
-	InteractionPermission     = 21 // PermissionInteraction
-	InteractionAskQuestion    = 22 // AskQuestionInteraction
-	InteractionApproval       = 23 // ApprovalInteraction
+	InteractionRunCommand        = 5   // CascadeRunCommandInteraction
+	InteractionOpenBrowserURL    = 6   // CascadeOpenBrowserUrlInteraction
+	InteractionReadUrlContent    = 17  // CascadeReadUrlContentInteraction
+	InteractionFilePermission    = 19  // FilePermissionInteraction
+	InteractionPermission        = 21  // PermissionInteraction
+	InteractionAskQuestion       = 22  // AskQuestionInteraction
+	InteractionApproval          = 23  // ApprovalInteraction
+	InteractionMcp               = 47  // CascadeMcpInteraction
+	InteractionDeploy            = 59  // CascadeDeployInteraction
+	InteractionRunExtensionCode  = 68  // CascadeRunExtensionCodeInteraction
+	InteractionDeleteDirectory   = 105 // CascadeDeleteDirectoryInteraction
+	InteractionSendCommandInput  = 113 // CascadeSendCommandInputInteraction
+	InteractionInvokeSubagent    = 143 // CascadeInvokeSubagentInteraction
+	InteractionCloudSQL          = 153 // CascadeCloudSqlInteraction
 )
 
 // Valeurs enum PermissionScope (cortex_pb)
@@ -301,6 +308,54 @@ func BuildFilePermissionInteraction(allow bool, scope uint64, pathURI string) []
 	w.varintField(1, boolToUint64(allow))
 	w.varintField(2, scope)
 	w.stringField(3, pathURI)
+	return w.b
+}
+
+// BuildSendCommandInputInteraction : {1: input, 2: end_of_input}.
+func BuildSendCommandInputInteraction(input string, endOfInput bool) []byte {
+	w := &writer{}
+	w.stringField(1, input)
+	if endOfInput {
+		w.varintField(2, 1)
+	}
+	return w.b
+}
+
+// BuildMcpInteraction : {1: confirm, 2: server_name, 3: tool_name, 4: arguments_json}.
+func BuildMcpInteraction(confirm bool, serverName, toolName, argumentsJson string) []byte {
+	w := &writer{}
+	w.varintField(1, boolToUint64(confirm))
+	if serverName != "" {
+		w.stringField(2, serverName)
+	}
+	if toolName != "" {
+		w.stringField(3, toolName)
+	}
+	if argumentsJson != "" {
+		w.stringField(4, argumentsJson)
+	}
+	return w.b
+}
+
+// BuildDeployInteraction : {1: confirm, 2: target_env}.
+func BuildDeployInteraction(confirm bool, targetEnv string) []byte {
+	w := &writer{}
+	w.varintField(1, boolToUint64(confirm))
+	if targetEnv != "" {
+		w.stringField(2, targetEnv)
+	}
+	return w.b
+}
+
+// BuildSubagentSpawnInteraction : {1: confirm, 2: subagent_types}.
+func BuildSubagentSpawnInteraction(confirm bool, subagentTypes ...string) []byte {
+	w := &writer{}
+	w.varintField(1, boolToUint64(confirm))
+	for _, st := range subagentTypes {
+		if st != "" {
+			w.stringField(2, st)
+		}
+	}
 	return w.b
 }
 

@@ -40,6 +40,7 @@ import '../../widgets/zenithal_canvas.dart';
 import '../../widgets/status_dot_badge.dart';
 import '../../widgets/bouncing_tap.dart';
 import '../../widgets/app_notification_banner.dart';
+import '../../widgets/antigravity_logo.dart';
 import 'models/banner_notification.dart';
 import '../settings/models_settings_section.dart';
 import 'package:mobile/theme/app_colors.dart';
@@ -250,6 +251,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   final Map<String, StringBuffer> _taskOutputs = {};
   final Map<String, String> _taskStatuses = {};
   final Map<String, StreamController<String>> _taskOutputControllers = {};
+  final Map<String, String> _taskCommandToId = {};
+  final Map<String, String> _taskIdToCommand = {};
   final Map<String, DateTime> _streamStartTimes = {};
 
   String _computeWorkedDuration(DateTime? startTime) {
@@ -265,17 +268,28 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   void _openTaskOutputSheet(String taskNameOrId) {
-    final initialOut = _taskOutputs[taskNameOrId]?.toString() ?? '';
-    final status = _taskStatuses[taskNameOrId] ?? 'running';
+    final realTaskId = _taskCommandToId[taskNameOrId] ?? taskNameOrId;
+    final realCommand = _taskIdToCommand[taskNameOrId] ??
+        (_taskIdToCommand[realTaskId] ?? taskNameOrId);
+
+    final initialOut = (_taskOutputs[taskNameOrId]?.isNotEmpty == true)
+        ? _taskOutputs[taskNameOrId]!.toString()
+        : ((_taskOutputs[realTaskId]?.isNotEmpty == true)
+            ? _taskOutputs[realTaskId]!.toString()
+            : (_taskOutputs[realCommand]?.toString() ?? ''));
+    final status = _taskStatuses[taskNameOrId] ??
+        _taskStatuses[realTaskId] ??
+        _taskStatuses[realCommand] ??
+        'running';
     final ctrl = _taskOutputControllers.putIfAbsent(
-      taskNameOrId,
+      realTaskId,
       () => StreamController<String>.broadcast(),
     );
 
     BackgroundTaskOutputSheet.show(
       context,
-      taskId: taskNameOrId,
-      command: taskNameOrId,
+      taskId: realTaskId,
+      command: realCommand,
       initialOutput: initialOut,
       status: status,
       outputStream: ctrl.stream,
@@ -286,10 +300,13 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   void _handleStopBackgroundTask(String taskNameOrId) {
-    widget.api?.killRunningTask(taskNameOrId);
+    final realTaskId = _taskCommandToId[taskNameOrId] ?? taskNameOrId;
+    widget.api?.killRunningTask(realTaskId);
     setState(() {
       _runningBackgroundTasks.remove(taskNameOrId);
+      _runningBackgroundTasks.remove(realTaskId);
       _taskStatuses[taskNameOrId] = 'killed';
+      _taskStatuses[realTaskId] = 'killed';
     });
   }
 
@@ -305,6 +322,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           final id = t['id']?.toString() ?? '';
           final cmd = t['command']?.toString() ?? id;
           final status = t['status']?.toString() ?? 'running';
+          if (id.isNotEmpty) {
+            _taskCommandToId[cmd] = id;
+            _taskIdToCommand[id] = cmd;
+          }
           if (status == 'running' && cmd.isNotEmpty) {
             active.add(cmd);
             _taskStatuses[cmd] = 'running';
@@ -1286,6 +1307,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         }
         final cmd = data['command'] as String? ?? data['id'] as String? ?? 'Task';
         final taskId = data['id'] as String? ?? cmd;
+        if (taskId.isNotEmpty && cmd.isNotEmpty) {
+          _taskCommandToId[cmd] = taskId;
+          _taskIdToCommand[taskId] = cmd;
+        }
         if (!_runningBackgroundTasks.contains(cmd)) {
           setState(() {
             _runningBackgroundTasks.add(cmd);
@@ -2618,6 +2643,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                 },
               );
 
+              // Wrap individual bubbles in RepaintBoundary for 60/120fps streaming isolation
+              final isolatedBubble = RepaintBoundary(child: bubbleWidget);
+
               // N'anime l'entrée que pour le dernier message en cours et uniquement si Reduce Motion est inactif
               if (isLatest && ctx.shouldAnimate) {
                 return Padding(
@@ -2636,14 +2664,14 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                         ),
                       );
                     },
-                    child: bubbleWidget,
+                    child: isolatedBubble,
                   ),
                 );
               }
 
               return Padding(
                 padding: const EdgeInsets.only(bottom: 16),
-                child: bubbleWidget,
+                child: isolatedBubble,
               );
             },
           ),
@@ -3601,24 +3629,9 @@ class _WelcomeEmptyState extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(AppRadius.lg),
-            border: Border.all(
-              color: isDark ? AppColors.borderSubtle : scheme.outlineVariant,
-              width: 1,
-            ),
-          ),
-          child: Center(
-            child: Icon(
-              Icons.terminal_rounded,
-              size: 26,
-              color: scheme.primary,
-            ),
-          ),
+        const AntigravityLogo(
+          size: 64,
+          showGlow: true,
         ),
         const SizedBox(height: 18),
         Text(

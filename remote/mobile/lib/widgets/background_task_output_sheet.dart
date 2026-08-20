@@ -138,7 +138,15 @@ class _BackgroundTaskOutputSheetState extends State<BackgroundTaskOutputSheet> {
 
   Future<void> _fetchLog() async {
     if (widget.api != null && widget.cascadeId != null && widget.cascadeId!.isNotEmpty) {
-      final res = await widget.api!.getTaskLog(widget.cascadeId!, widget.taskId);
+      Map<String, dynamic> res = await widget.api!.getTaskLog(widget.cascadeId!, widget.taskId);
+      if (res.isEmpty || res['log']?.toString().isEmpty == true) {
+        if (widget.command.isNotEmpty && widget.command != widget.taskId) {
+          final resAlt = await widget.api!.getTaskLog(widget.cascadeId!, widget.command);
+          if (resAlt.isNotEmpty && resAlt['log']?.toString().isNotEmpty == true) {
+            res = resAlt;
+          }
+        }
+      }
       if (mounted && res.isNotEmpty) {
         final log = res['log']?.toString() ?? '';
         final st = res['status']?.toString() ?? _currentStatus;
@@ -250,6 +258,20 @@ class _BackgroundTaskOutputSheetState extends State<BackgroundTaskOutputSheet> {
                   ),
                 ),
                 const SizedBox(width: 6),
+
+                // Rafraîchir
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  padding: const EdgeInsets.all(6),
+                  icon: const Icon(Icons.refresh_rounded, size: 16),
+                  tooltip: 'Rafraîchir les logs',
+                  color: isDark ? AppColors.inkMuted : const Color(0xFF8B949E),
+                  onPressed: () {
+                    HapticFeedback.selectionClick();
+                    _fetchLog();
+                  },
+                ),
 
                 // Copier
                 IconButton(

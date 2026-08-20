@@ -320,6 +320,10 @@ class ToolApprovalRequest {
   final String approvalType;
   final String? filePath;
   final String? url;
+  final String? mcpServer;
+  final String? mcpTool;
+  final String? mcpArgs;
+  final bool isDestructive;
 
   /// Portée sélectionnée pour l'approbation.
   final ApprovalScope scope;
@@ -335,22 +339,81 @@ class ToolApprovalRequest {
     this.approvalType = 'approval',
     this.filePath,
     this.url,
+    this.mcpServer,
+    this.mcpTool,
+    this.mcpArgs,
+    this.isDestructive = false,
     this.scope = ApprovalScope.once,
   });
 
+  bool get isFileApproval =>
+      approvalType == 'file_permission' ||
+      toolName.toLowerCase().contains('file') ||
+      toolName.toLowerCase() == 'write_to_file' ||
+      filePath != null;
+
+  bool get isUrlApproval =>
+      approvalType == 'read_url_content' ||
+      toolName.toLowerCase().contains('url') ||
+      toolName.toLowerCase() == 'browse' ||
+      toolName.toLowerCase() == 'open_browser_url' ||
+      url != null;
+
+  bool get isMcpApproval =>
+      approvalType == 'mcp_tool' ||
+      toolName.toLowerCase().contains('mcp') ||
+      mcpServer != null;
+
+  bool get isStdinApproval =>
+      approvalType == 'send_command_input' ||
+      toolName.toLowerCase().contains('input') ||
+      toolName.toLowerCase().contains('stdin');
+
+  bool get isDeployApproval =>
+      approvalType == 'deploy' ||
+      toolName.toLowerCase().contains('deploy');
+
+  bool get isSubagentApproval =>
+      approvalType == 'invoke_subagent' ||
+      toolName.toLowerCase().contains('subagent');
+
+  bool get checkDestructive {
+    if (isDestructive) return true;
+    final cmd = command.toLowerCase();
+    final tool = toolName.toLowerCase();
+    return tool.contains('delete') ||
+        cmd.contains('rm -rf') ||
+        cmd.contains('rmdir') ||
+        cmd.contains('drop database') ||
+        cmd.contains('git reset --hard') ||
+        cmd.contains('git push --force') ||
+        cmd.contains('git push -f');
+  }
+
   factory ToolApprovalRequest.fromJson(Map<String, dynamic> json) {
+    final cmd = json['command'] ?? '';
+    final tool = json['toolName'] ?? json['tool'] ?? 'run_command';
+    final appType = json['approvalType'] ?? 'approval';
+    final isDestruct = json['isDestructive'] == true ||
+        tool.toString().toLowerCase().contains('delete') ||
+        cmd.toString().toLowerCase().contains('rm -rf');
+
     return ToolApprovalRequest(
-      callId: json['callId'] ?? '',
-      toolName: json['toolName'] ?? 'run_command',
-      command: json['command'] ?? '',
+      callId: json['callId'] ?? json['approvalId'] ?? '',
+      toolName: tool,
+      command: cmd,
       description: json['description'] ??
           'An agent tool requires user confirmation',
       cascadeId: json['cascadeId'] ?? '',
       trajectoryId: json['trajectoryId'] ?? '',
       stepIndex: (json['stepIndex'] as num?)?.toInt() ?? -1,
-      approvalType: json['approvalType'] ?? 'approval',
-      filePath: json['filePath'],
-      url: json['url'] ?? json['targetUrl'],
+      approvalType: appType,
+      filePath: json['filePath'] ?? json['path'] ?? json['file_path'],
+      url: json['url'] ?? json['targetUrl'] ?? json['target_url'],
+      mcpServer: json['mcpServer'] ?? json['serverName'] ?? json['server_name'],
+      mcpTool: json['mcpTool'] ?? json['tool_name'],
+      mcpArgs: json['mcpArgs'] ?? json['argumentsJson'] ?? json['arguments_json'],
+      isDestructive: isDestruct,
       scope: ApprovalScope.fromWire(json['scope']?.toString()),
     );
   }

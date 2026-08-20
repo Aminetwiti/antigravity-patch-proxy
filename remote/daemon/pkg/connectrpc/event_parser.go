@@ -63,18 +63,35 @@ func ParseFrameEvents(raw []byte, cascadeID string) []StreamEvent {
 				if sub.Num == InteractionRunCommand || sub.Num == InteractionOpenBrowserURL ||
 					sub.Num == InteractionReadUrlContent || sub.Num == InteractionFilePermission ||
 					sub.Num == InteractionPermission || sub.Num == InteractionAskQuestion ||
-					sub.Num == InteractionApproval {
+					sub.Num == InteractionApproval || sub.Num == InteractionMcp ||
+					sub.Num == InteractionDeploy || sub.Num == InteractionRunExtensionCode ||
+					sub.Num == InteractionDeleteDirectory || sub.Num == InteractionSendCommandInput ||
+					sub.Num == InteractionInvokeSubagent || sub.Num == InteractionCloudSQL {
 					isInteraction = true
 					if sub.Num == InteractionRunCommand {
 						detectedTool = "run_command"
 					} else if sub.Num == InteractionFilePermission {
-						detectedTool = "write_to_file"
+						detectedTool = "file_permission"
 					} else if sub.Num == InteractionReadUrlContent || sub.Num == InteractionOpenBrowserURL {
 						detectedTool = "read_url_content"
 					} else if sub.Num == InteractionPermission {
 						detectedTool = "permission"
 					} else if sub.Num == InteractionAskQuestion {
 						detectedTool = "ask_question"
+					} else if sub.Num == InteractionMcp {
+						detectedTool = "mcp_tool"
+					} else if sub.Num == InteractionDeploy {
+						detectedTool = "deploy"
+					} else if sub.Num == InteractionRunExtensionCode {
+						detectedTool = "run_extension_code"
+					} else if sub.Num == InteractionDeleteDirectory {
+						detectedTool = "delete_directory"
+					} else if sub.Num == InteractionSendCommandInput {
+						detectedTool = "send_command_input"
+					} else if sub.Num == InteractionInvokeSubagent {
+						detectedTool = "invoke_subagent"
+					} else if sub.Num == InteractionCloudSQL {
+						detectedTool = "cloudsql"
 					}
 					if len(sub.Bytes) > 0 {
 						detail = string(sub.Bytes)
@@ -207,14 +224,35 @@ func extractToolName(s string) string {
 	if strings.Contains(s, "ask_question") || strings.Contains(s, "ask_user") {
 		return "ask_question"
 	}
+	if strings.Contains(s, "mcp_tool") || strings.Contains(s, "call_mcp_tool") || strings.Contains(s, "mcp") {
+		return "mcp_tool"
+	}
+	if strings.Contains(s, "delete_directory") {
+		return "delete_directory"
+	}
+	if strings.Contains(s, "send_command_input") || strings.Contains(s, "send_input") {
+		return "send_command_input"
+	}
+	if strings.Contains(s, "invoke_subagent") || strings.Contains(s, "subagent") {
+		return "invoke_subagent"
+	}
+	if strings.Contains(s, "deploy_firebase") || strings.Contains(s, "check_deploy_status") || strings.Contains(s, "deploy") {
+		return "deploy"
+	}
+	if strings.Contains(s, "cloudsql") || strings.Contains(s, "execute_sql") || strings.Contains(s, "update_schema") {
+		return "cloudsql"
+	}
 	if strings.Contains(s, "run_command") {
 		return "run_command"
 	}
-	if strings.Contains(s, "write_to_file") {
+	if strings.Contains(s, "write_to_file") || strings.Contains(s, "replace_file_content") {
 		return "write_to_file"
 	}
 	if strings.Contains(s, "read_url_content") || strings.Contains(s, "read_url") || strings.Contains(s, "open_browser_url") || strings.Contains(s, "browse") {
 		return "read_url_content"
+	}
+	if strings.Contains(s, "file_permission") {
+		return "file_permission"
 	}
 	if strings.Contains(s, "permission") {
 		return "permission"

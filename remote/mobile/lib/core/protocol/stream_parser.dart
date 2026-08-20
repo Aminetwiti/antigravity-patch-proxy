@@ -285,10 +285,22 @@ class StreamDeltaParser {
           appType = 'run_command';
         } else if (cleanTool.contains('url') || cleanTool == 'browse' || cleanTool == 'open_browser_url' || cleanTool == 'read_url_content') {
           appType = 'read_url_content';
-        } else if (cleanTool == 'file_permission' || cleanTool == 'write_to_file') {
+        } else if (cleanTool == 'file_permission' || cleanTool == 'write_to_file' || cleanTool == 'replace_file_content') {
           appType = 'file_permission';
         } else if (cleanTool == 'permission') {
           appType = 'permission';
+        } else if (cleanTool.contains('mcp') || cleanTool == 'mcp_tool' || cleanTool == 'call_mcp_tool') {
+          appType = 'mcp_tool';
+        } else if (cleanTool == 'delete_directory') {
+          appType = 'delete_directory';
+        } else if (cleanTool.contains('send_command_input') || cleanTool.contains('stdin') || cleanTool == 'send_input') {
+          appType = 'send_command_input';
+        } else if (cleanTool.contains('invoke_subagent') || cleanTool.contains('subagent')) {
+          appType = 'invoke_subagent';
+        } else if (cleanTool.contains('deploy') || cleanTool == 'deploy_firebase') {
+          appType = 'deploy';
+        } else if (cleanTool.contains('cloudsql') || cleanTool.contains('execute_sql')) {
+          appType = 'cloudsql';
         }
         return ToolApproval(
           callId: e['callId'] as String? ?? '',
@@ -396,10 +408,22 @@ class StreamDeltaParser {
       defaultAppType = 'run_command';
     } else if (cleanTool.contains('url') || cleanTool == 'browse' || cleanTool == 'open_browser_url' || cleanTool == 'read_url_content') {
       defaultAppType = 'read_url_content';
-    } else if (cleanTool == 'file_permission' || cleanTool == 'write_to_file') {
+    } else if (cleanTool == 'file_permission' || cleanTool == 'write_to_file' || cleanTool == 'replace_file_content') {
       defaultAppType = 'file_permission';
     } else if (cleanTool == 'permission') {
       defaultAppType = 'permission';
+    } else if (cleanTool.contains('mcp') || cleanTool == 'mcp_tool' || cleanTool == 'call_mcp_tool') {
+      defaultAppType = 'mcp_tool';
+    } else if (cleanTool == 'delete_directory') {
+      defaultAppType = 'delete_directory';
+    } else if (cleanTool.contains('send_command_input') || cleanTool.contains('stdin') || cleanTool == 'send_input') {
+      defaultAppType = 'send_command_input';
+    } else if (cleanTool.contains('invoke_subagent') || cleanTool.contains('subagent')) {
+      defaultAppType = 'invoke_subagent';
+    } else if (cleanTool.contains('deploy') || cleanTool == 'deploy_firebase') {
+      defaultAppType = 'deploy';
+    } else if (cleanTool.contains('cloudsql') || cleanTool.contains('execute_sql')) {
+      defaultAppType = 'cloudsql';
     }
     final approvalType = map['approvalType'] as String? ?? defaultAppType;
 
