@@ -502,6 +502,21 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
           buffer.writeln('[Fichier joint: ${f.name} (${_formatBytes(f.size)})]');
         }
       }
+      final fp = uploadedPaths[f.name];
+      var clean = '';
+      if (fp != null && fp.isNotEmpty) {
+        clean = fp.replaceAll(r'\', '/');
+        if (!clean.startsWith('file:///')) {
+          clean = clean.startsWith('/') ? 'file://$clean' : 'file:///$clean';
+        }
+      }
+      mediaList.add({
+        'uri': clean,
+        'mimeType': f.mimeType ?? _detectMime(f.name),
+        'description': f.name,
+        'name': f.name,
+        if (f.base64Data != null) 'base64Data': f.base64Data,
+      });
     }
 
     if (finalPayload.isNotEmpty) {
@@ -576,6 +591,26 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  static String _detectMime(String name) {
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    if (lower.endsWith('.gif')) return 'image/gif';
+    if (lower.endsWith('.svg')) return 'image/svg+xml';
+    if (lower.endsWith('.pdf')) return 'application/pdf';
+    if (lower.endsWith('.csv')) return 'text/csv';
+    if (lower.endsWith('.json')) return 'application/json';
+    if (lower.endsWith('.md')) return 'text/markdown';
+    if (lower.endsWith('.txt')) return 'text/plain';
+    if (lower.endsWith('.mp3')) return 'audio/mpeg';
+    if (lower.endsWith('.wav')) return 'audio/wav';
+    if (lower.endsWith('.ogg')) return 'audio/ogg';
+    if (lower.endsWith('.webm')) return 'audio/webm';
+    if (lower.endsWith('.mp4')) return 'video/mp4';
+    return 'application/octet-stream';
   }
 
   Color _badgeColorForExtension(String name, ColorScheme scheme) {

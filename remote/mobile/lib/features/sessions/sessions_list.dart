@@ -80,6 +80,21 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
     super.initState();
     _loadPins();
     _loadReadSessions();
+    _loadCollapsedFolders();
+  }
+
+  Future<void> _loadCollapsedFolders() async {
+    final prefs = await SharedPreferences.getInstance();
+    final collapsed = prefs.getStringList('collapsed_folder_names') ?? const [];
+    if (!mounted) return;
+    setState(() {
+      _collapsedFolders.addAll(collapsed);
+    });
+  }
+
+  void _saveCollapsedFolders() {
+    SharedPreferences.getInstance().then((prefs) =>
+        prefs.setStringList('collapsed_folder_names', _collapsedFolders.toList()));
   }
 
   Future<void> _loadPins() async {
@@ -506,6 +521,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                                 _collapsedFolders.add(proj);
                               }
                             });
+                            _saveCollapsedFolders();
                           },
                           onSessionTap: (id) {
                             _markSessionAsRead(id);
@@ -997,23 +1013,23 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                 ),
               ListTile(
                 leading: Icon(Icons.copy_rounded, size: 18, color: scheme.onSurface),
-                title: Text('Copy Title', style: TextStyle(fontSize: 13, color: scheme.onSurface)),
+                title: Text('Copier le titre', style: TextStyle(fontSize: 13, color: scheme.onSurface)),
                 onTap: () {
                   Navigator.of(ctx).pop();
                   Clipboard.setData(ClipboardData(text: widget.session.title));
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Titre copié'), duration: Duration(seconds: 2)),
+                    const SnackBar(content: Text('Titre copié dans le presse-papiers'), duration: Duration(seconds: 2)),
                   );
                 },
               ),
               ListTile(
                 leading: Icon(Icons.tag_rounded, size: 18, color: scheme.onSurface),
-                title: Text('Copy Session ID', style: TextStyle(fontSize: 13, color: scheme.onSurface)),
+                title: Text('Copier l\'identifiant de session', style: TextStyle(fontSize: 13, color: scheme.onSurface)),
                 onTap: () {
                   Navigator.of(ctx).pop();
                   Clipboard.setData(ClipboardData(text: widget.session.id));
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('ID de session copié'), duration: Duration(seconds: 2)),
+                    const SnackBar(content: Text('Identifiant de session copié dans le presse-papiers'), duration: Duration(seconds: 2)),
                   );
                 },
               ),
@@ -1116,15 +1132,23 @@ class _SessionRowItemState extends State<_SessionRowItem> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final isSelected = widget.isSelected;
     final isRunning = widget.session.isRunning;
     final isUnread = (widget.isUnread || widget.session.hasUnread) && !isSelected && !isRunning;
+    final displayTitle = widget.session.title.trim().isNotEmpty
+        ? widget.session.title.trim()
+        : 'Nouvelle conversation';
     final subtitleText = widget.session.worktree ?? WorkspacePath.displayName(widget.session.workspacePath);
+    final pinText = widget.isPinned ? "Épinglée, " : "";
+    final runningText = isRunning ? "En cours d'exécution, " : "";
+    final timeText = widget.session.time.isNotEmpty ? widget.session.time : "récent";
 
     Widget item = Semantics(
       button: true,
       selected: isSelected,
-      label: '${widget.session.title}, ${widget.session.time.isNotEmpty ? widget.session.time : "récent"}',
+      label: '$displayTitle, $pinText$runningText$timeText',
       child: MouseRegion(
         onEnter: (_) => setState(() => _hovered = true),
         onExit: (_) => setState(() => _hovered = false),
@@ -1139,13 +1163,13 @@ class _SessionRowItemState extends State<_SessionRowItem> {
             duration: AppMotion.fast,
             curve: AppMotion.easeOut,
             margin: const EdgeInsets.only(left: 14, right: 6, top: 1, bottom: 1),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6.5),
             decoration: BoxDecoration(
               color: isSelected
-                  ? const Color(0xFF26282E)
-                  : _hovered
-                      ? const Color(0xFF1E2025)
-                      : Colors.transparent,
+                  ? (isDark ? const Color(0xFF26282E) : scheme.surfaceContainerHighest)
+                  : (_hovered
+                      ? (isDark ? const Color(0xFF1E2025) : scheme.surfaceContainerHigh.withValues(alpha: 0.5))
+                      : Colors.transparent),
               borderRadius: BorderRadius.circular(AppRadius.md),
             ),
             child: Row(
@@ -1156,12 +1180,12 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      widget.session.title,
+                      displayTitle,
                       style: TextStyle(
                         fontSize: 12.5,
                         color: isSelected
-                            ? const Color(0xFFFFFFFF)
-                            : const Color(0xFFB0B0BA),
+                            ? (isDark ? const Color(0xFFFFFFFF) : scheme.onSurface)
+                            : (isDark ? const Color(0xFFB0B0BA) : scheme.onSurfaceVariant),
                         fontWeight: isSelected ? FontWeight.w500 : FontWeight.w400,
                       ),
                       overflow: TextOverflow.ellipsis,
@@ -1175,8 +1199,8 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                           style: TextStyle(
                             fontSize: 10.5,
                             color: isSelected
-                                ? const Color(0xFF8F909A)
-                                : const Color(0xFF8E909D),
+                                ? (isDark ? const Color(0xFF8F909A) : scheme.primary)
+                                : (isDark ? const Color(0xFF8E909D) : scheme.outline),
                             fontWeight: FontWeight.w400,
                           ),
                           overflow: TextOverflow.ellipsis,
@@ -1198,8 +1222,8 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                         child: AntigravitySpinningArc(
                           size: 13.5,
                           color: isSelected
-                              ? const Color(0xFFB4B8C5)
-                              : const Color(0xFF8E929E),
+                              ? (isDark ? const Color(0xFFB4B8C5) : scheme.primary)
+                              : (isDark ? const Color(0xFF8E929E) : scheme.outline),
                         ),
                       )
                     : widget.session.isBackgroundTask
@@ -1256,13 +1280,13 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                                                 _showSessionContextMenu(context);
                                               },
                                               child: Padding(
-                                                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                                                padding: const EdgeInsets.all(4),
                                                 child: Icon(
                                                   Icons.more_horiz_rounded,
                                                   size: 15,
                                                   color: isSelected
-                                                      ? const Color(0xFFB0B0BA)
-                                                      : const Color(0xFF8F909A),
+                                                      ? (isDark ? const Color(0xFFB0B0BA) : scheme.onSurface)
+                                                      : (isDark ? const Color(0xFF8F909A) : scheme.onSurfaceVariant),
                                                 ),
                                               ),
                                             ),
@@ -1274,8 +1298,8 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                                                 style: TextStyle(
                                                   fontSize: 11.5,
                                                   color: isSelected
-                                                      ? const Color(0xFF9E9FA9)
-                                                      : const Color(0xFF7E818D),
+                                                      ? (isDark ? const Color(0xFF9E9FA9) : scheme.onSurfaceVariant)
+                                                      : (isDark ? const Color(0xFF7E818D) : scheme.outline),
                                                   fontWeight: FontWeight.w400,
                                                 ),
                                               )
@@ -1287,7 +1311,9 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                   child: Icon(
                     Icons.push_pin_rounded,
                     size: 11,
-                    color: isSelected ? const Color(0xFF9E9FA9) : const Color(0xFF6E707A),
+                    color: isSelected
+                        ? (isDark ? const Color(0xFF9E9FA9) : scheme.primary)
+                        : (isDark ? const Color(0xFF6E707A) : scheme.outlineVariant),
                   ),
                 ),
             ],

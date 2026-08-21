@@ -99,4 +99,67 @@ func TestWebSocket_AccountSkillsRulesRPC(t *testing.T) {
 	if respBrowser.Data["mode"] == nil {
 		t.Fatalf("expected browser status data")
 	}
+
+	// 4. get_project_settings
+	reqProj := map[string]string{
+		"type":      "get_project_settings",
+		"requestId": "req-proj-1",
+	}
+	if err := conn.WriteJSON(reqProj); err != nil {
+		t.Fatalf("write proj: %v", err)
+	}
+	var respProj struct {
+		Type      string          `json:"type"`
+		RequestID string          `json:"requestId"`
+		Data      ProjectSettings `json:"data"`
+	}
+	if err := conn.ReadJSON(&respProj); err != nil {
+		t.Fatalf("read proj: %v", err)
+	}
+	if respProj.Data.SecurityPreset == "" {
+		t.Fatalf("expected non-empty security preset")
+	}
+
+	// 5. update_project_settings
+	reqUpdateProj := map[string]interface{}{
+		"type":      "update_project_settings",
+		"requestId": "req-proj-2",
+		"data": map[string]interface{}{
+			"securityPreset":       "Turbo mode",
+			"artifactReviewPolicy": "Auto Approve",
+		},
+	}
+	if err := conn.WriteJSON(reqUpdateProj); err != nil {
+		t.Fatalf("write update proj: %v", err)
+	}
+	var respUpdateProj struct {
+		Type      string          `json:"type"`
+		RequestID string          `json:"requestId"`
+		Data      ProjectSettings `json:"data"`
+	}
+	if err := conn.ReadJSON(&respUpdateProj); err != nil {
+		t.Fatalf("read update proj: %v", err)
+	}
+	if respUpdateProj.Data.SecurityPreset != "Turbo mode" {
+		t.Fatalf("expected Turbo mode, got: %s", respUpdateProj.Data.SecurityPreset)
+	}
 }
+
+func TestProjectSettings_GetAndUpdate(t *testing.T) {
+	s := GetProjectSettings("outside-of-project")
+	if s.ProjectID == "" {
+		t.Fatalf("expected project id")
+	}
+
+	updated, err := UpdateProjectSettings("outside-of-project", ProjectSettings{
+		SecurityPreset:       "Full machine",
+		ArtifactReviewPolicy: "Always Ask",
+	})
+	if err != nil {
+		t.Fatalf("update error: %v", err)
+	}
+	if updated.SecurityPreset != "Full machine" {
+		t.Fatalf("expected Full machine, got: %s", updated.SecurityPreset)
+	}
+}
+

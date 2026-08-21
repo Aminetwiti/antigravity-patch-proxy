@@ -72,6 +72,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return GeneralSettingsSection(
           api: widget.api,
           notifier: widget.notifier,
+          workspacePath: widget.workspacePath,
         );
       case SettingsCategory.appearance:
         return AppearanceSettingsSection(

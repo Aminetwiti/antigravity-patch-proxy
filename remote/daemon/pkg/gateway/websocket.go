@@ -5459,6 +5459,56 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: status})
 		return
 
+	case "get_project_settings", "project.get_settings", "get_agent_settings":
+		target := msg.WorkspacePath
+		if target == "" {
+			target = msg.WorkspaceURI
+		}
+		if target == "" {
+			target = msg.ProjectID
+		}
+		if target == "" && msg.Data != nil {
+			if ws, ok := msg.Data["workspacePath"].(string); ok && ws != "" {
+				target = ws
+			} else if pid, ok := msg.Data["projectId"].(string); ok && pid != "" {
+				target = pid
+			}
+		}
+		settings := GetProjectSettings(target)
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: settings})
+		return
+
+	case "update_project_settings", "project.update_settings", "set_agent_settings":
+		target := msg.WorkspacePath
+		if target == "" {
+			target = msg.WorkspaceURI
+		}
+		if target == "" {
+			target = msg.ProjectID
+		}
+		var pSettings ProjectSettings
+		if msg.Data != nil {
+			if ws, ok := msg.Data["workspacePath"].(string); ok && ws != "" && target == "" {
+				target = ws
+			} else if pid, ok := msg.Data["projectId"].(string); ok && pid != "" && target == "" {
+				target = pid
+			}
+			if b, errMarshal := json.Marshal(msg.Data); errMarshal == nil {
+				_ = json.Unmarshal(b, &pSettings)
+			}
+		}
+		updated, errUp := UpdateProjectSettings(target, pSettings)
+		if errUp != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errUp.Error()})
+			return
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: updated})
+		s.broadcast(OutgoingMessage{
+			Type: "project_settings_updated",
+			Data: updated,
+		})
+		return
+
 	case "get_available_models", "models.get_available_models", "list_models":
 		models, errModels := s.cachedModels()
 		if errModels == nil && len(models) > 0 {
