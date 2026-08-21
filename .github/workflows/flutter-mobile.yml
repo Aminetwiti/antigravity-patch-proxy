@@ -136,16 +136,16 @@ jobs:
 
       - name: Package iOS IPA & Payload
         run: |
-          mkdir -p release-artifacts/ios
+          mkdir -p "$GITHUB_WORKSPACE/release-artifacts/ios"
           mkdir -p build_ipa/Payload
           cp -r remote/mobile/build/ios/iphoneos/Runner.app build_ipa/Payload/
           cd build_ipa
-          zip -r ../release-artifacts/ios/antigravity-remote-ios-unsigned.ipa Payload/
-          cd ..
+          zip -r "$GITHUB_WORKSPACE/release-artifacts/ios/antigravity-remote-ios-unsigned.ipa" Payload/
+          cd "$GITHUB_WORKSPACE"
           # Also archive runner.app
           cd remote/mobile/build/ios/iphoneos
-          zip -r ../../../../release-artifacts/ios/antigravity-remote-ios-Runner.app.zip Runner.app
-          cd ../../../..
+          zip -r "$GITHUB_WORKSPACE/release-artifacts/ios/antigravity-remote-ios-Runner.app.zip" Runner.app
+          cd "$GITHUB_WORKSPACE"
 
       - name: Upload iOS Artifacts
         uses: actions/upload-artifact@v4
