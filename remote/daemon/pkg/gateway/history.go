@@ -113,7 +113,7 @@ func isSessionArchived(home, cascadeID string) bool {
 		if strings.Contains(s, "archived: false") || strings.Contains(s, "archived:false") {
 			continue
 		}
-		if strings.Contains(s, "archived: true") || strings.Contains(s, "archived:true") {
+		if strings.Contains(s, "archived: true") || strings.Contains(s, "archived:true") || strings.Contains(s, "archival_status_timestamp") {
 			return true
 		}
 	}

@@ -107,7 +107,7 @@ func trajectoryFromBlob(blob []byte) TrajectorySummary {
 			case 15: // annotations submessage
 				if f.WireType == 2 {
 					for _, af := range DecodeFields(f.Bytes) {
-						if af.Num == 4 && af.WireType == 0 && af.Varint != 0 {
+						if (af.Num == 4 && af.WireType == 0 && af.Varint != 0) || af.Num == 5 {
 							t.Archived = true
 						}
 					}
