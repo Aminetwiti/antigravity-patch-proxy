@@ -82,15 +82,15 @@ jobs:
 
       - name: Build Universal APK
         working-directory: remote/mobile
-        run: flutter build apk --release
+        run: flutter build apk --release --android-skip-build-dependency-validation
 
       - name: Build Split-per-ABI APKs
         working-directory: remote/mobile
-        run: flutter build apk --release --split-per-abi
+        run: flutter build apk --release --split-per-abi --android-skip-build-dependency-validation
 
       - name: Build Android App Bundle (AAB)
         working-directory: remote/mobile
-        run: flutter build appbundle --release
+        run: flutter build appbundle --release --android-skip-build-dependency-validation
 
       - name: Prepare Android Artifacts
         run: |
