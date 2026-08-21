@@ -1,8 +1,8 @@
 name: mobile
-description: "A new Flutter project."
+description: "Antigravity Remote 2.0 Mobile Companion App"
 publish_to: 'none'
 
-version: 3.3.1+4
+version: 3.3.2+5
 
 environment:
   sdk: ^3.7.2

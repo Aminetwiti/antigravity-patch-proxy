@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -230,46 +231,54 @@ class _ToastStackOverlayState extends State<_ToastStackOverlay> {
     int extraCount = 0,
     VoidCallback? onClose,
   }) {
-    final (defaultIcon, iconColor, bg) = switch (toast.type) {
+    final (defaultIcon, iconColor, bg, borderColor) = switch (toast.type) {
       ToastType.info => (
           Icons.info_outline,
           isDark ? AppColors.accentBlueBright : scheme.primary,
-          isDark ? const Color(0xFF1B202B) : scheme.surfaceContainerHighest,
+          (isDark ? const Color(0xFF1B202B) : scheme.surfaceContainerHighest).withValues(alpha: isDark ? 0.88 : 0.94),
+          (isDark ? AppColors.accentBlue : scheme.primary).withValues(alpha: 0.35),
         ),
       ToastType.success => (
           Icons.check_circle_outline,
           AppColors.positive,
-          isDark ? const Color(0xFF14241B) : scheme.surfaceContainerHighest,
+          (isDark ? const Color(0xFF14241B) : scheme.surfaceContainerHighest).withValues(alpha: isDark ? 0.88 : 0.94),
+          AppColors.positive.withValues(alpha: 0.35),
         ),
       ToastType.warning => (
           Icons.warning_amber_rounded,
           AppColors.warning,
-          isDark ? const Color(0xFF2B2114) : scheme.surfaceContainerHighest,
+          (isDark ? const Color(0xFF2B2114) : scheme.surfaceContainerHighest).withValues(alpha: isDark ? 0.88 : 0.94),
+          AppColors.warning.withValues(alpha: 0.35),
         ),
       ToastType.error => (
           Icons.error_outline,
           isDark ? const Color(0xFFFCA5A5) : scheme.error,
-          isDark ? const Color(0xFF2C1417) : scheme.surfaceContainerHighest,
+          (isDark ? const Color(0xFF2C1417) : scheme.surfaceContainerHighest).withValues(alpha: isDark ? 0.88 : 0.94),
+          (isDark ? AppColors.danger : scheme.error).withValues(alpha: 0.35),
         ),
     };
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(AppRadius.pill),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.25),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadius.pill),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(AppRadius.pill),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.15),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+            border: Border.all(
+              color: borderColor,
+              width: 1,
+            ),
           ),
-        ],
-        border: Border.all(
-          color: isDark ? const Color(0xFF323B4E) : scheme.outlineVariant,
-          width: 1,
-        ),
-      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [

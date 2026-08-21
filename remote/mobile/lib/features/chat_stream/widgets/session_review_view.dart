@@ -576,8 +576,10 @@ class FileCommentPill extends StatelessWidget {
       child: InkWell(
         onTap: () {
           HapticFeedback.selectionClick();
-          if (comments.isNotEmpty) {
+          if (comments.length == 1) {
             onSelectComment?.call(comments.first);
+          } else if (comments.length > 1) {
+            _showCommentSelectorSheet(context, scheme);
           }
         },
         borderRadius: BorderRadius.circular(AppRadius.pill),
@@ -606,6 +608,133 @@ class FileCommentPill extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  void _showCommentSelectorSheet(BuildContext context, ColorScheme scheme) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerHigh,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+          border: Border.all(
+            color: isDark ? AppColors.borderSubtle : scheme.outlineVariant,
+            width: 1,
+          ),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: isDark ? AppColors.borderStrong : scheme.outlineVariant,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Row(
+              children: [
+                Icon(Icons.chat_bubble_outline_rounded, size: 15, color: scheme.primary),
+                const SizedBox(width: 8),
+                Text(
+                  'Commentaires (${comments.length})',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 280),
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: comments.length,
+                separatorBuilder: (_, __) => Divider(
+                  height: 1,
+                  color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.5),
+                ),
+                itemBuilder: (context, index) {
+                  final c = comments[index];
+                  final linePrefix = c.lineNumber != null && c.lineNumber! > 0 ? 'Ligne ${c.lineNumber}' : 'Fichier';
+                  return InkWell(
+                    onTap: () {
+                      Navigator.of(ctx).pop();
+                      onSelectComment?.call(c);
+                    },
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: scheme.primary.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              linePrefix,
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontFamily: 'monospace',
+                                fontWeight: FontWeight.w600,
+                                color: scheme.primary,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  c.commentText,
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                                  ),
+                                ),
+                                if (c.snippet.isNotEmpty) ...[
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    c.snippet,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontFamily: 'monospace',
+                                      color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          Icon(Icons.chevron_right_rounded, size: 16, color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 6),
+          ],
         ),
       ),
     );

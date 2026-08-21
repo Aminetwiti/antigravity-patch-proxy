@@ -315,7 +315,7 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
       return Icons.settings_suggest_outlined;
     }
     if (lower.endsWith('.md') || lower.endsWith('.txt')) return Icons.article_outlined;
-    if (lower.endsWith('.sh') || lower.endsWith('.bat') || lower.endsWith('.ps1')) return Icons.terminal_rounded;
+    if (lower.endsWith('.sh') || lower.endsWith('.bat') || lower.endsWith('.ps1') || lower.endsWith('.psm1') || lower.endsWith('.psd1') || lower.endsWith('.zsh')) return Icons.terminal_rounded;
     if (lower.endsWith('.gitignore') || lower.startsWith('.git')) return Icons.alt_route_rounded;
     if (lower.endsWith('.js') || lower.endsWith('.ts') || lower.endsWith('.tsx') || lower.endsWith('.jsx')) {
       return Icons.javascript_rounded;
@@ -331,7 +331,9 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
       return const Color(0xFFEAB308);
     }
     if (lower.endsWith('.md')) return const Color(0xFFA855F7);
-    if (lower.endsWith('.sh') || lower.endsWith('.bat')) return const Color(0xFF22C55E);
+    if (lower.endsWith('.sh') || lower.endsWith('.bat') || lower.endsWith('.ps1') || lower.endsWith('.psm1') || lower.endsWith('.psd1') || lower.endsWith('.zsh')) {
+      return const Color(0xFF22C55E);
+    }
     if (lower.endsWith('.gitignore')) return const Color(0xFFF43F5E);
     if (lower.endsWith('.ts') || lower.endsWith('.tsx')) return const Color(0xFF3178C6);
     if (lower.endsWith('.js') || lower.endsWith('.jsx')) return const Color(0xFFF7DF1E);

@@ -804,12 +804,16 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
         s.type == ExecutionStepType.workedDuration);
 
     return RepaintBoundary(
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
+      child: AnimatedSize(
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.fastOutSlowIn,
+        alignment: Alignment.topLeft,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
             if (widget.isStreaming)
               _buildLiveAgentHeader(scheme, isDark)
             else
@@ -911,8 +915,9 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   String _getMasterTitle(List<ExecutionStepItem> steps) {
     for (final s in steps) {
@@ -1316,123 +1321,129 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
           ),
 
           // Sub-items for Explored Group (Indented Children)
-          if (isExpanded && item.subItems != null && item.subItems!.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(left: 14, top: 2, bottom: 2),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (final sub in item.subItems!)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            sub.action,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Color(0xFF9E9FA8),
-                              fontWeight: FontWeight.w400,
+          AnimatedSize(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.fastOutSlowIn,
+            alignment: Alignment.topLeft,
+            child: (isExpanded && item.subItems != null && item.subItems!.isNotEmpty)
+                ? Padding(
+                    padding: const EdgeInsets.only(left: 14, top: 2, bottom: 2),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final sub in item.subItems!)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  sub.action,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Color(0xFF9E9FA8),
+                                    fontWeight: FontWeight.w400,
+                                  ),
+                                ),
+                                const SizedBox(width: 5),
+                                if (sub.type == ExecutionStepType.search) ...[
+                                  Container(
+                                    margin: const EdgeInsets.only(right: 5),
+                                    width: 13,
+                                    height: 13,
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFF0D9488),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Center(
+                                      child: Icon(
+                                        Icons.search_rounded,
+                                        size: 8.5,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ] else if (sub.type == ExecutionStepType.fileAnalysis || sub.type == ExecutionStepType.fileEdit) ...[
+                                  Container(
+                                    margin: const EdgeInsets.only(right: 5),
+                                    width: 13,
+                                    height: 13,
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFF0284C7),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Center(
+                                      child: Icon(
+                                        Icons.description_rounded,
+                                        size: 8.5,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                                Flexible(
+                                  child: Text(
+                                    sub.title,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontFamily: (sub.type == ExecutionStepType.fileAnalysis || sub.type == ExecutionStepType.fileEdit)
+                                          ? 'monospace'
+                                          : null,
+                                      fontWeight: FontWeight.w500,
+                                      color: const Color(0xFFF4F4F5),
+                                    ),
+                                  ),
+                                ),
+                                if (sub.lineRange != null) ...[
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    sub.lineRange!,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontFamily: 'monospace',
+                                      color: Color(0xFF71717A),
+                                    ),
+                                  ),
+                                ],
+                                if (sub.diffAdded != null && sub.type == ExecutionStepType.search) ...[
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    sub.diffAdded!,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Color(0xFF71717A),
+                                    ),
+                                  ),
+                                ] else if (sub.diffAdded != null) ...[
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    sub.diffAdded!,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontFamily: 'monospace',
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF4ADE80),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    sub.diffRemoved ?? '-0',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontFamily: 'monospace',
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFFF87171),
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
-                          const SizedBox(width: 5),
-                          if (sub.type == ExecutionStepType.search) ...[
-                            Container(
-                              margin: const EdgeInsets.only(right: 5),
-                              width: 13,
-                              height: 13,
-                              decoration: const BoxDecoration(
-                                color: Color(0xFF0D9488),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Center(
-                                child: Icon(
-                                  Icons.search_rounded,
-                                  size: 8.5,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                          ] else if (sub.type == ExecutionStepType.fileAnalysis || sub.type == ExecutionStepType.fileEdit) ...[
-                            Container(
-                              margin: const EdgeInsets.only(right: 5),
-                              width: 13,
-                              height: 13,
-                              decoration: const BoxDecoration(
-                                color: Color(0xFF0284C7),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Center(
-                                child: Icon(
-                                  Icons.description_rounded,
-                                  size: 8.5,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                          ],
-                          Flexible(
-                            child: Text(
-                              sub.title,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontFamily: (sub.type == ExecutionStepType.fileAnalysis || sub.type == ExecutionStepType.fileEdit)
-                                    ? 'monospace'
-                                    : null,
-                                fontWeight: FontWeight.w500,
-                                color: const Color(0xFFF4F4F5),
-                              ),
-                            ),
-                          ),
-                          if (sub.lineRange != null) ...[
-                            const SizedBox(width: 5),
-                            Text(
-                              sub.lineRange!,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontFamily: 'monospace',
-                                color: Color(0xFF71717A),
-                              ),
-                            ),
-                          ],
-                          if (sub.diffAdded != null && sub.type == ExecutionStepType.search) ...[
-                            const SizedBox(width: 6),
-                            Text(
-                              sub.diffAdded!,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                color: Color(0xFF71717A),
-                              ),
-                            ),
-                          ] else if (sub.diffAdded != null) ...[
-                            const SizedBox(width: 6),
-                            Text(
-                              sub.diffAdded!,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontFamily: 'monospace',
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF4ADE80),
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              sub.diffRemoved ?? '-0',
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontFamily: 'monospace',
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFFF87171),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
+                      ],
                     ),
-                ],
-              ),
-            ),
+                  )
+                : const SizedBox.shrink(),
+          ),
 
           // Inset Box for Timers & Wait Events (e.g. "Check flutter test results" + "Status: Fired")
           if (isExpanded && item.type == ExecutionStepType.timer)

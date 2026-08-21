@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -38,6 +40,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   String? _loadError;
   List<Map<String, dynamic>> _files = [];
   String _codeContent = '// Sélectionnez un fichier';
+  Uint8List? _imageBytes;
+  final Set<String> _collapsedFolders = {};
   // Bug #5 : recherche substring dans l'arbre
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
@@ -252,6 +256,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       _selectedFilePath = path;
       _isLoadingCode = true;
       _codeContent = '';
+      _imageBytes = null;
     });
     try {
       final res = await widget.api!.readFile(
@@ -259,9 +264,22 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         workspacePath: _workspaceResolved,
       );
       if (mounted) {
+        Uint8List? imgBytes;
+        final rawB64 = res['base64Data'] ?? (res['data'] is Map ? res['data']['base64Data'] : null);
+        if (rawB64 is String && rawB64.isNotEmpty) {
+          try {
+            imgBytes = base64Decode(rawB64);
+          } catch (_) {}
+        }
+        if (imgBytes == null && File(path).existsSync()) {
+          try {
+            imgBytes = File(path).readAsBytesSync();
+          } catch (_) {}
+        }
         setState(() {
           final rawContent = res['content'] ?? res['text'] ?? (res['data'] is Map ? (res['data']['content'] ?? res['data']['text']) : null);
           _codeContent = rawContent?.toString() ?? '';
+          _imageBytes = imgBytes;
           _isLoadingCode = false;
         });
       }
@@ -269,6 +287,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       if (mounted) {
         setState(() {
           _codeContent = 'Erreur: $e';
+          _imageBytes = null;
           _isLoadingCode = false;
         });
       }
@@ -695,13 +714,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text(
-                  _buildFileStats(),
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
+                child: _buildFileStatsRow(),
               ),
               const SizedBox(height: 6),
               const Divider(height: 1),
@@ -782,7 +795,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 14,
-                        vertical: 10,
+                        vertical: 8,
                       ),
                       color: Theme.of(context).colorScheme.surfaceContainer,
                       child: Row(
@@ -797,30 +810,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                           ),
                           const SizedBox(width: 8),
                           Expanded(
-                            child: Tooltip(
-                              message:
-                                  _selectedFilePath.isEmpty
-                                      ? 'Sélectionnez un fichier'
-                                      : _selectedFilePath,
-                              child: Text(
-                                _selectedFilePath.isEmpty
-                                    ? 'Sélectionnez un fichier'
-                                    : _selectedFilePath,
-                                style: TextStyle(
-                                  fontSize: 12.5,
-                                  color:
-                                      _selectedFilePath.isEmpty
-                                          ? Theme.of(
-                                            context,
-                                          ).colorScheme.onSurfaceVariant
-                                          : Theme.of(
-                                            context,
-                                          ).colorScheme.onSurface,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                                maxLines: 1,
-                              ),
-                            ),
+                            child: _buildBreadcrumbs(),
                           ),
                           IconButton(
                             icon: Icon(
@@ -871,6 +861,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                                         ),
                                       );
                                     },
+                          ),     },
                           ),
                           // Find-in-page toggle
                           IconButton(
@@ -1161,6 +1152,78 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
+  /// Fil d'Ariane interactif pour la navigation dans l'en-tête de code.
+  Widget _buildBreadcrumbs() {
+    if (_selectedFilePath.isEmpty) {
+      return Text(
+        'Sélectionnez un fichier',
+        style: TextStyle(
+          fontSize: 12.5,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      );
+    }
+    final normalized = _selectedFilePath.replaceAll(r'\', '/');
+    final segments = normalized.split('/');
+    final scheme = Theme.of(context).colorScheme;
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (int i = 0; i < segments.length; i++) ...[
+            if (i > 0)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: Icon(
+                  Icons.chevron_right_rounded,
+                  size: 14,
+                  color: scheme.outlineVariant,
+                ),
+              ),
+            if (i == segments.length - 1)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  segments[i],
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.primary,
+                  ),
+                ),
+              )
+            else
+              InkWell(
+                onTap: () {
+                  final folderPath = segments.sublist(0, i + 1).join('/');
+                  setState(() {
+                    _collapsedFolders.remove(folderPath);
+                  });
+                },
+                borderRadius: BorderRadius.circular(4),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  child: Text(
+                    segments[i],
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
   // Bug #3 : perf — construit la liste une seule fois, filtrée par _searchQuery.
   /// Puce de filtre d'extension rapide (Axe 2).
   Widget _buildFilterChip(String? ext, String label, [IconData? icon]) {
@@ -1174,7 +1237,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             Icon(icon, size: 12, color: selected ? scheme.onPrimary : scheme.onSurfaceVariant),
             const SizedBox(width: 4),
           ],
-          Text(label, style: TextStyle(fontSize: 10.5)),
+          Text(label, style: const TextStyle(fontSize: 10.5)),
         ],
       ),
       selected: selected,
@@ -1195,7 +1258,70 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
-  /// Compteur fichiers/dossiers affichés (Axe 2).
+  /// Bascule l'expansion de tous les dossiers
+  void _toggleCollapseAll() {
+    setState(() {
+      if (_collapsedFolders.isNotEmpty) {
+        _collapsedFolders.clear();
+      } else {
+        for (final f in _files) {
+          if (f['isDir'] == true) {
+            final p = (f['fullPath'] as String?) ?? (f['name'] as String);
+            _collapsedFolders.add(p);
+          }
+        }
+      }
+    });
+  }
+
+  /// Compteur fichiers/dossiers affichés avec bouton plier/déplier.
+  Widget _buildFileStatsRow() {
+    final scheme = Theme.of(context).colorScheme;
+    final hasFolders = _files.any((f) => f['isDir'] == true);
+    final allCollapsed = hasFolders && _collapsedFolders.isNotEmpty;
+
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            _buildFileStats(),
+            style: TextStyle(
+              fontSize: 10.5,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        if (hasFolders)
+          InkWell(
+            onTap: _toggleCollapseAll,
+            borderRadius: BorderRadius.circular(4),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    allCollapsed ? Icons.unfold_more_rounded : Icons.unfold_less_rounded,
+                    size: 13,
+                    color: scheme.primary,
+                  ),
+                  const SizedBox(width: 3),
+                  Text(
+                    allCollapsed ? 'Déplier' : 'Plier',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.primary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
   String _buildFileStats() {
     final files = _files.where((f) => f['isDir'] != true).length;
     final dirs = _files.length - files;
@@ -1295,11 +1421,40 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       );
     }
 
+    // Gestion du masquage des enfants de dossiers pliés
+    final List<Map<String, dynamic>> visibleItems = [];
+    int? activeCollapsedDepth;
+
+    for (final file in filtered) {
+      final isDir = file['isDir'] == true;
+      final fullPath = (file['fullPath'] as String?) ?? (file['name'] as String);
+      final depth = (file['depth'] as num?)?.toInt() ?? 0;
+
+      if (_searchQuery.isNotEmpty) {
+        visibleItems.add(file);
+        continue;
+      }
+
+      if (activeCollapsedDepth != null) {
+        if (depth > activeCollapsedDepth) {
+          continue;
+        } else {
+          activeCollapsedDepth = null;
+        }
+      }
+
+      visibleItems.add(file);
+
+      if (isDir && _collapsedFolders.contains(fullPath)) {
+        activeCollapsedDepth = depth;
+      }
+    }
+
     return ListView.builder(
       padding: const EdgeInsets.only(bottom: 12),
-      itemCount: filtered.length,
+      itemCount: visibleItems.length,
       itemBuilder: (context, index) {
-        final file = filtered[index];
+        final file = visibleItems[index];
         final isDir = file['isDir'] == true;
         final name = file['name'] as String;
         final depth = (file['depth'] as num?)?.toInt() ?? 0;
@@ -1307,7 +1462,21 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         final isSelected = fullPath == _selectedFilePath;
 
         if (isDir) {
-          return _TreeFolder(title: name, depth: depth);
+          final isCollapsed = _collapsedFolders.contains(fullPath);
+          return _TreeFolder(
+            title: name,
+            depth: depth,
+            isCollapsed: isCollapsed,
+            onTap: () {
+              setState(() {
+                if (isCollapsed) {
+                  _collapsedFolders.remove(fullPath);
+                } else {
+                  _collapsedFolders.add(fullPath);
+                }
+              });
+            },
+          );
         } else {
           final status = _fileGitStatuses[fullPath] ?? _fileGitStatuses[name];
           return _TreeFile(
@@ -1545,16 +1714,21 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       );
     }
 
-    // Fichiers binaires (images, audio, vidéo) : pas de numéros de ligne
+    // Fichiers images réels avec zoom interactif
     final lowerPath = _selectedFilePath.toLowerCase();
-    final isBinary =
-        lowerPath.endsWith('.png') ||
+    final isImg = lowerPath.endsWith('.png') ||
         lowerPath.endsWith('.jpg') ||
         lowerPath.endsWith('.jpeg') ||
         lowerPath.endsWith('.gif') ||
         lowerPath.endsWith('.webp') ||
         lowerPath.endsWith('.ico') ||
-        lowerPath.endsWith('.bmp') ||
+        lowerPath.endsWith('.bmp');
+    if (isImg) {
+      return _buildImagePreview();
+    }
+
+    // Fichiers binaires (audio, vidéo, archives, PDF) : pas de numéros de ligne
+    final isBinary =
         lowerPath.endsWith('.mp3') ||
         lowerPath.endsWith('.wav') ||
         lowerPath.endsWith('.ogg') ||
@@ -1569,38 +1743,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         lowerPath.endsWith('.tar') ||
         lowerPath.endsWith('.gz');
     if (isBinary) {
+      final ext = _selectedFilePath.contains('.') ? _selectedFilePath.split('.').last.toUpperCase() : 'BIN';
       return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              lowerPath.endsWith('.mp3') || lowerPath.endsWith('.wav') || lowerPath.endsWith('.ogg') || lowerPath.endsWith('.flac')
-                  ? Icons.audio_file_outlined
-                  : lowerPath.endsWith('.mp4') || lowerPath.endsWith('.webm') || lowerPath.endsWith('.mov') || lowerPath.endsWith('.mkv')
-                  ? Icons.video_file_outlined
-                  : Icons.image_outlined,
-              size: 48,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Aperçu multimédia (${_selectedFilePath.split('.').last.toUpperCase()})',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Fichier binaire — numéros de ligne masqués',
-              style: TextStyle(
-                fontSize: 12,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
+        child: _buildBinaryPlaceholder(ext),
       );
     }
 
@@ -1740,6 +1885,112 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
+  Widget _buildImagePreview() {
+    final scheme = Theme.of(context).colorScheme;
+    final fileName = _selectedFilePath.split(RegExp(r'[/\\]')).last;
+    final ext = fileName.contains('.') ? fileName.split('.').last.toUpperCase() : 'IMG';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          color: scheme.surfaceContainer,
+          child: Row(
+            children: [
+              Icon(Icons.image_outlined, size: 16, color: scheme.primary),
+              const SizedBox(width: 8),
+              Text(
+                'Aperçu Image $ext',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.primary,
+                ),
+              ),
+              const Spacer(),
+              if (_imageBytes != null)
+                Text(
+                  '${(_imageBytes!.length / 1024).toStringAsFixed(1)} Ko',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: Center(
+            child: _imageBytes != null
+                ? Container(
+                    margin: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainerLow,
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                      border: Border.all(color: scheme.outlineVariant, width: 0.5),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: InteractiveViewer(
+                      minScale: 0.5,
+                      maxScale: 4.0,
+                      child: Image.memory(
+                        _imageBytes!,
+                        fit: BoxFit.contain,
+                        errorBuilder: (ctx, err, stack) => _buildBinaryPlaceholder(ext),
+                      ),
+                    ),
+                  )
+                : _buildBinaryPlaceholder(ext),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBinaryPlaceholder(String ext) {
+    final scheme = Theme.of(context).colorScheme;
+    final lower = ext.toLowerCase();
+    final isAudio = lower == 'mp3' || lower == 'wav' || lower == 'ogg' || lower == 'flac';
+    final isVideo = lower == 'mp4' || lower == 'webm' || lower == 'mov' || lower == 'mkv' || lower == 'avi';
+    final isArchive = lower == 'zip' || lower == 'tar' || lower == 'gz';
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          isAudio
+              ? Icons.audio_file_outlined
+              : isVideo
+                  ? Icons.video_file_outlined
+                  : isArchive
+                      ? Icons.folder_zip_outlined
+                      : Icons.image_outlined,
+          size: 48,
+          color: scheme.primary,
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'Fichier $ext',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: scheme.onSurface,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Aperçu binaire — numéros de ligne masqués',
+          style: TextStyle(
+            fontSize: 12,
+            color: scheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildSkeletonTree() {
     return ListView.builder(
       itemCount: 8,
@@ -1796,36 +2047,61 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
 class _TreeFolder extends StatelessWidget {
   final String title;
   final int depth;
+  final bool isCollapsed;
+  final VoidCallback onTap;
 
-  const _TreeFolder({required this.title, required this.depth});
+  const _TreeFolder({
+    required this.title,
+    required this.depth,
+    required this.isCollapsed,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 8.0 + depth * 14,
-        top: 4,
-        bottom: 4,
-        right: 8,
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.folder_rounded, size: 15, color: scheme.onSurfaceVariant),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              title,
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w500,
-                color: scheme.onSurface,
-              ),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 1,
+    return InkWell(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      borderRadius: BorderRadius.circular(4),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+        padding: EdgeInsets.only(
+          left: 4.0 + depth * 14,
+          top: 4,
+          bottom: 4,
+          right: 8,
+        ),
+        child: Row(
+          children: [
+            Icon(
+              isCollapsed ? Icons.chevron_right_rounded : Icons.expand_more_rounded,
+              size: 16,
+              color: scheme.outline,
             ),
-          ),
-        ],
+            const SizedBox(width: 4),
+            Icon(
+              isCollapsed ? Icons.folder_rounded : Icons.folder_open_rounded,
+              size: 15,
+              color: scheme.primary.withValues(alpha: 0.85),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.onSurface,
+                ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1942,7 +2218,7 @@ class _TreeFile extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
         padding: EdgeInsets.only(
-          left: 8.0 + depth * 14,
+          left: 4.0 + depth * 14,
           top: 4,
           bottom: 4,
           right: 8,

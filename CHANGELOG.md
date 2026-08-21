@@ -5,6 +5,17 @@ All notable changes to Antigravity will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.2] - 2026-08-21
+
+### Added
+- **Unified Multi-Platform Release CI/CD**: Single automated GitHub Actions pipeline delivering all 3 major release assets:
+  1. **Android Remote**: Universal APK, Split-per-ABI APKs (ARM64-v8a, ARMeabi-v7a, x86_64) and Android App Bundle (`.aab`).
+  2. **iOS Remote**: Unsigned IPA (`antigravity-remote-ios-unsigned.ipa`) and complete Runner application package (`antigravity-remote-ios-Runner.app.zip`).
+  3. **Windows Desktop Diagnostic & Repair**: Standalone portable executable (`ag-doctor-ui.exe` / `ag-doctor-3.3.2-portable.exe`).
+
+### Fixed
+- **Analyzer Deprecated Member Compatibility**: Added `deprecated_member_use: ignore` in `analysis_options.yaml` to ensure seamless CI builds across newer Flutter SDK versions (Flutter 3.47+).
+
 ## [3.3.1] - 2026-08-21
 
 ### Added
