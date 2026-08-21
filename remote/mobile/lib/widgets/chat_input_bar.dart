@@ -425,7 +425,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
               final res = await widget.api!.uploadMedia(
                 cascadeId: effectiveCascadeId,
                 fileName: att.name,
-                mimeType: att.mimeType ?? 'image/jpeg',
+                mimeType: att.mimeType ?? 'image/png',
                 base64Data: att.base64Data!,
               );
               final fp = res['filePath'] as String? ?? res['path'] as String?;
@@ -492,7 +492,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
         }
         mediaList.add({
           'uri': clean,
-          'mimeType': img.mimeType ?? 'image/jpeg',
+          'mimeType': img.mimeType ?? 'image/png',
           'description': img.name,
           'name': img.name,
           if (img.base64Data != null) 'base64Data': img.base64Data,
@@ -779,7 +779,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
         }
         return;
       }
-      final mime = 'image/jpeg';
+      final mime = 'image/png';
       final b64 = base64Encode(bytes);
 
       setState(() {
@@ -847,7 +847,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
         newItems.add(_AttachedItem(
           name: name,
           size: size,
-          mimeType: isImg ? _detectMime(name) : 'application/octet-stream',
+          mimeType: isImg ? 'image/png' : 'application/octet-stream',
           bytes: bytes,
           base64Data: b64,
           isImage: isImg,
@@ -872,19 +872,17 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
 
       if (text.startsWith('data:image/') && text.contains('base64,')) {
         final parts = text.split('base64,');
-        final mime = parts.first.replaceAll('data:', '').replaceAll(';', '').trim();
         final b64 = parts.last.trim();
         Uint8List? bytes;
         try {
           bytes = base64Decode(b64);
         } catch (_) {}
-        final ext = mime.contains('png') ? 'png' : 'jpg';
-        final name = 'clipboard_${DateTime.now().millisecondsSinceEpoch}.$ext';
+        final name = 'clipboard_${DateTime.now().millisecondsSinceEpoch}.png';
         setState(() {
           _attachments.add(_AttachedItem(
             name: name,
             size: bytes?.length ?? 0,
-            mimeType: mime,
+            mimeType: 'image/png',
             bytes: bytes,
             base64Data: b64,
             isImage: true,
@@ -995,7 +993,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
         _attachments.add(_AttachedItem(
           name: name,
           size: bytes!.length,
-          mimeType: isImg ? (ext == 'png' ? 'image/png' : 'image/jpeg') : 'text/plain',
+          mimeType: isImg ? 'image/png' : 'text/plain',
           bytes: bytes,
           base64Data: b64,
           isImage: isImg,

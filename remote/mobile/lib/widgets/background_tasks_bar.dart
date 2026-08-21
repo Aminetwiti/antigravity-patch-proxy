@@ -10,6 +10,7 @@ class BackgroundTasksBar extends StatefulWidget {
   final ValueChanged<String>? onTapTask;
   final ValueChanged<String>? onStopTask;
   final VoidCallback? onViewTasks;
+  final bool initiallyExpanded;
 
   const BackgroundTasksBar({
     super.key,
@@ -17,6 +18,7 @@ class BackgroundTasksBar extends StatefulWidget {
     this.onTapTask,
     this.onStopTask,
     this.onViewTasks,
+    this.initiallyExpanded = false,
   });
 
   @override
@@ -36,17 +38,12 @@ class _BackgroundTasksBarState extends State<BackgroundTasksBar>
       vsync: this,
       duration: const Duration(seconds: 2),
     )..repeat();
-    _expanded = widget.runningTasks.length == 1;
+    _expanded = widget.initiallyExpanded;
   }
 
   @override
   void didUpdateWidget(covariant BackgroundTasksBar oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.runningTasks.length != oldWidget.runningTasks.length) {
-      if (widget.runningTasks.length == 1 && oldWidget.runningTasks.isEmpty) {
-        _expanded = true;
-      }
-    }
   }
 
   @override
@@ -181,11 +178,6 @@ class _BackgroundTasksBarState extends State<BackgroundTasksBar>
             onTap: () {
               HapticFeedback.selectionClick();
               setState(() => _expanded = !_expanded);
-              if (count == 1 && widget.onTapTask != null) {
-                widget.onTapTask!(widget.runningTasks.first);
-              } else if (widget.onViewTasks != null) {
-                widget.onViewTasks!();
-              }
             },
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 2),
@@ -210,6 +202,20 @@ class _BackgroundTasksBarState extends State<BackgroundTasksBar>
                     ),
                   ),
                   const Spacer(),
+                  if (widget.onViewTasks != null) ...[
+                    IconButton(
+                      icon: const Icon(Icons.open_in_new, size: 14),
+                      onPressed: () {
+                        HapticFeedback.selectionClick();
+                        widget.onViewTasks!();
+                      },
+                      tooltip: 'Afficher les détails',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                      color: isDark ? const Color(0xFF9E9E9E) : scheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 4),
+                  ],
                   Tooltip(
                     message: isActuallyExpanded ? 'Réduire les tâches' : 'Afficher les tâches',
                     child: Container(

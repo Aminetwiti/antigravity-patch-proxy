@@ -14,6 +14,7 @@ class SubagentTreeCard extends StatefulWidget {
   final String? sessionTitle;
   final VoidCallback? onOpenFullTree;
   final ValueChanged<SubagentItem>? onSelectSubagent;
+  final bool initiallyExpanded;
 
   const SubagentTreeCard({
     super.key,
@@ -23,6 +24,7 @@ class SubagentTreeCard extends StatefulWidget {
     this.sessionTitle,
     this.onOpenFullTree,
     this.onSelectSubagent,
+    this.initiallyExpanded = false,
   });
 
   @override
@@ -30,8 +32,14 @@ class SubagentTreeCard extends StatefulWidget {
 }
 
 class _SubagentTreeCardState extends State<SubagentTreeCard> {
-  bool _isExpanded = true;
+  late bool _isExpanded;
   final ScrollController _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _isExpanded = widget.initiallyExpanded;
+  }
 
   @override
   void dispose() {

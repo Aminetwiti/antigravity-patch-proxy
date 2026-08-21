@@ -388,6 +388,7 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
                   _ContextItemRow(
                     title: 'Subagents',
                     badgeCount: widget.subagentsCount,
+                    isExpandable: false,
                     onTap: () {
                       SubagentsTreeSheet.show(
                         context,
@@ -723,6 +724,7 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
                   _ContextItemRow(
                     title: 'MCP Servers',
                     badgeCount: widget.mcpServersCount > 0 ? widget.mcpServersCount : _mcpCount,
+                    isExpandable: false,
                     onTap: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(
@@ -734,6 +736,7 @@ class _RightSidebarDrawerState extends State<RightSidebarDrawer> {
                   _ContextItemRow(
                     title: 'Background Tasks',
                     badgeCount: widget.backgroundTasksCount,
+                    isExpandable: false,
                     onTap: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(
@@ -764,12 +767,14 @@ class _ContextItemRow extends StatelessWidget {
   final int badgeCount;
   final VoidCallback onTap;
   final bool isExpanded;
+  final bool isExpandable;
 
   const _ContextItemRow({
     required this.title,
     required this.badgeCount,
     required this.onTap,
     this.isExpanded = false,
+    this.isExpandable = true,
   });
 
   @override
@@ -785,7 +790,7 @@ class _ContextItemRow extends StatelessWidget {
           curve: AppMotion.easeOut,
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            color: isExpanded ? scheme.surfaceContainerHighest : Colors.transparent,
+            color: (isExpandable && isExpanded) ? scheme.surfaceContainerHighest : Colors.transparent,
             borderRadius: BorderRadius.circular(AppRadius.md),
           ),
           child: Row(
@@ -818,15 +823,22 @@ class _ContextItemRow extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 6),
-              AnimatedRotation(
-                turns: isExpanded ? 0.25 : 0,
-                duration: AppMotion.fast,
-                child: Icon(
+              if (isExpandable)
+                AnimatedRotation(
+                  turns: isExpanded ? 0.25 : 0,
+                  duration: AppMotion.fast,
+                  child: Icon(
+                    Icons.chevron_right,
+                    size: 16,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                )
+              else
+                Icon(
                   Icons.chevron_right,
                   size: 16,
                   color: scheme.onSurfaceVariant,
                 ),
-              ),
             ],
           ),
         ),

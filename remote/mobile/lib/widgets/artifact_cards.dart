@@ -177,6 +177,7 @@ class FilesChangedCard extends StatefulWidget {
   final int deletions;
   final VoidCallback onReview;
   final ValueChanged<String>? onOpenFile;
+  final bool initiallyExpanded;
 
   const FilesChangedCard({
     super.key,
@@ -185,6 +186,7 @@ class FilesChangedCard extends StatefulWidget {
     this.deletions = 0,
     required this.onReview,
     this.onOpenFile,
+    this.initiallyExpanded = false,
   });
 
   @override
@@ -193,17 +195,18 @@ class FilesChangedCard extends StatefulWidget {
 
 class _FilesChangedCardState extends State<FilesChangedCard>
     with SingleTickerProviderStateMixin {
-  bool _expanded = true;
+  late bool _expanded;
   late final AnimationController _anim;
   late final Animation<double> _sizeFactor;
 
   @override
   void initState() {
     super.initState();
+    _expanded = widget.initiallyExpanded;
     _anim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 200),
-      value: 1.0,
+      value: _expanded ? 1.0 : 0.0,
     );
     _sizeFactor = CurvedAnimation(parent: _anim, curve: Curves.easeOut);
   }

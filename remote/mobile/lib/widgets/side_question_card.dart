@@ -85,7 +85,7 @@ class _SideQuestionCardState extends State<SideQuestionCard> {
                     const SizedBox(width: 8),
                   ],
                   Icon(
-                    _isExpanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up,
+                    _isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
                     size: 16,
                     color: scheme.onSurfaceVariant,
                   ),

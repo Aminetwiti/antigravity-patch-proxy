@@ -116,8 +116,8 @@ type MediaAttachment struct {
 func buildMediaItem(m MediaAttachment) []byte {
 	mw := &writer{}
 	mime := m.MimeType
-	if mime == "" {
-		mime = "image/jpeg"
+	if mime == "" || mime == "image/jpeg" || mime == "image/jpg" {
+		mime = "image/png"
 	}
 	mw.stringField(1, mime)
 	if len(m.Data) > 0 {
@@ -153,8 +153,8 @@ func buildImageData(m MediaAttachment) []byte {
 		iw.stringField(1, b64)
 	}
 	mime := m.MimeType
-	if mime == "" {
-		mime = "image/jpeg"
+	if mime == "" || mime == "image/jpeg" || mime == "image/jpg" {
+		mime = "image/png"
 	}
 	iw.stringField(2, mime)
 	if m.Description != "" {
@@ -710,15 +710,15 @@ func BuildGetRevertPreview(cascadeID string, stepIndex int64, apiKey, sessionID 
 }
 
 // BuildRevertToCascadeStep construit un RevertToCascadeStepRequest :
-// {1: metadata, 2: cascade_id, 3: step_index, 5: override_config}
+// {1: cascade_id, 2: step_index, 3: metadata, 5: override_config}
 func BuildRevertToCascadeStep(cascadeID string, stepIndex int64, apiKey, sessionID string, modelUID string, modelEnum uint64) []byte {
 	w := &writer{}
-	if apiKey != "" {
-		w.bytesField(1, buildMetadata(apiKey, sessionID))
-	}
-	w.stringField(2, cascadeID)
+	w.stringField(1, cascadeID)
 	if stepIndex >= 0 {
-		w.varintField(3, uint64(stepIndex))
+		w.varintField(2, uint64(stepIndex))
+	}
+	if apiKey != "" {
+		w.bytesField(3, buildMetadata(apiKey, sessionID))
 	}
 	if modelUID != "" || modelEnum != 0 {
 		w.bytesField(5, BuildCascadeConfig(modelUID, modelEnum))

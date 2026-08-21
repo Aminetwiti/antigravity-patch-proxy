@@ -429,4 +429,84 @@ func TestBuildSendMessageWithMedia(t *testing.T) {
 	}
 }
 
+func TestBuildRevertToCascadeStep(t *testing.T) {
+	cascadeID := "casc-undo-test"
+	stepIndex := int64(11)
+	apiKey := "test-key"
+	sessionID := "sess-1"
 
+	buf := BuildRevertToCascadeStep(cascadeID, stepIndex, apiKey, sessionID, "gemini-flash", 0)
+	fields := DecodeFields(buf)
+
+	var foundCascadeID string
+	var foundStepIndex int64 = -1
+	var foundMetadata bool
+	var foundOverrideConfig bool
+
+	for _, f := range fields {
+		switch f.Num {
+		case 1:
+			foundCascadeID = string(f.Bytes)
+		case 2:
+			foundStepIndex = int64(f.Varint)
+		case 3:
+			foundMetadata = true
+		case 5:
+			foundOverrideConfig = true
+		}
+	}
+
+	if foundCascadeID != cascadeID {
+		t.Errorf("field 1 (cascade_id) expected %q, got %q", cascadeID, foundCascadeID)
+	}
+	if foundStepIndex != stepIndex {
+		t.Errorf("field 2 (step_index) expected %d, got %d", stepIndex, foundStepIndex)
+	}
+	if !foundMetadata {
+		t.Errorf("field 3 (metadata) expected to be present")
+	}
+	if !foundOverrideConfig {
+		t.Errorf("field 5 (override_config) expected to be present")
+	}
+}
+
+func TestBuildGetRevertPreview(t *testing.T) {
+	cascadeID := "casc-prev-test"
+	stepIndex := int64(5)
+	apiKey := "test-key"
+	sessionID := "sess-1"
+
+	buf := BuildGetRevertPreview(cascadeID, stepIndex, apiKey, sessionID, "gemini-flash", 0)
+	fields := DecodeFields(buf)
+
+	var foundCascadeID string
+	var foundStepIndex int64 = -1
+	var foundMetadata bool
+	var foundOverrideConfig bool
+
+	for _, f := range fields {
+		switch f.Num {
+		case 1:
+			foundCascadeID = string(f.Bytes)
+		case 2:
+			foundStepIndex = int64(f.Varint)
+		case 3:
+			foundMetadata = true
+		case 4:
+			foundOverrideConfig = true
+		}
+	}
+
+	if foundCascadeID != cascadeID {
+		t.Errorf("field 1 (cascade_id) expected %q, got %q", cascadeID, foundCascadeID)
+	}
+	if foundStepIndex != stepIndex {
+		t.Errorf("field 2 (step_index) expected %d, got %d", stepIndex, foundStepIndex)
+	}
+	if !foundMetadata {
+		t.Errorf("field 3 (metadata) expected to be present")
+	}
+	if !foundOverrideConfig {
+		t.Errorf("field 4 (override_config) expected to be present")
+	}
+}

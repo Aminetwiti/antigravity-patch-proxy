@@ -10,6 +10,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	"image/png"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -2722,6 +2726,27 @@ var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[
 // (lettres, chiffres, tirets, underscores). Validation stricte = pas de traversal via "../", "/" ou "\".
 var safeCascadeIDRe = regexp.MustCompile(`^[a-zA-Z0-9_\-\.]{1,64}$`)
 
+// ensurePngData transcode les images (JPEG, GIF, etc.) en PNG pour garantir la compatibilité
+// avec le Language Server qui exige le type MIME image/png.
+func ensurePngData(rawBytes []byte) ([]byte, string) {
+	if len(rawBytes) == 0 {
+		return rawBytes, "image/png"
+	}
+	// Vérifier si c'est déjà un PNG (magic number 89 50 4E 47 0D 0A 1A 0A)
+	if len(rawBytes) >= 8 && rawBytes[0] == 0x89 && rawBytes[1] == 0x50 && rawBytes[2] == 0x4E && rawBytes[3] == 0x47 {
+		return rawBytes, "image/png"
+	}
+	// Tenter de décoder l'image (JPEG, GIF, etc.)
+	img, _, err := image.Decode(bytes.NewReader(rawBytes))
+	if err == nil && img != nil {
+		var buf bytes.Buffer
+		if errEnc := png.Encode(&buf, img); errEnc == nil && buf.Len() > 0 {
+			return buf.Bytes(), "image/png"
+		}
+	}
+	return rawBytes, "image/png"
+}
+
 // saveUploadedImage décode une image base64 et la sauvegarde dans le dossier scratch de la cascade.
 func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, error) {
 	if cascadeID == "" {
@@ -2742,12 +2767,15 @@ func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, 
 
 	rawBytes, err := base64.StdEncoding.DecodeString(base64Data)
 	if err != nil {
-		return "", "", fmt.Errorf("erreur de d├®codage base64: %w", err)
+		return "", "", fmt.Errorf("erreur de décodage base64: %w", err)
 	}
 
 	if len(rawBytes) > 15<<20 {
 		return "", "", fmt.Errorf("image trop volumineuse (max 15 Mo)")
 	}
+
+	// Normaliser impérativement vers PNG pour conformité avec le Language Server
+	rawBytes, _ = ensurePngData(rawBytes)
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -2763,21 +2791,17 @@ func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, 
 	_ = os.MkdirAll(userUploadDir, 0755)
 
 	ext := ".png"
-	lower := strings.ToLower(fileName)
-	if strings.HasSuffix(lower, ".jpg") || strings.HasSuffix(lower, ".jpeg") {
-		ext = ".jpg"
-	} else if strings.HasSuffix(lower, ".webp") {
-		ext = ".webp"
-	} else if strings.HasSuffix(lower, ".gif") {
-		ext = ".gif"
-	}
-
 	base := filepath.Base(fileName)
 	if base == "." || base == "/" || base == "\\" || base == "" {
 		timestamp := time.Now().UnixMilli()
 		base = fmt.Sprintf("upload_%d%s", timestamp, ext)
-	} else if !strings.HasSuffix(strings.ToLower(base), ext) {
-		base += ext
+	} else {
+		extLower := strings.ToLower(filepath.Ext(base))
+		if extLower == ".jpg" || extLower == ".jpeg" || extLower == ".webp" || extLower == ".gif" || extLower == ".png" {
+			// Garder l'extension d'origine valide
+		} else {
+			base += ext
+		}
 	}
 
 	targetPath := filepath.Join(userUploadDir, base)
@@ -2795,6 +2819,93 @@ func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, 
 	absPath := filepath.ToSlash(targetPath)
 	markdownRef := fmt.Sprintf("![Uploaded Image](file:///%s)", absPath)
 	return targetPath, markdownRef, nil
+}
+
+// revertPreviewOut convertit une réponse GetRevertPreviewResponse brute en JSON
+// avec listes des fichiers modifiés et diffs unifiés.
+func revertPreviewOut(raw []byte) interface{} {
+	if len(raw) == 0 {
+		return map[string]interface{}{
+			"affectedFiles": []string{},
+			"diff":          "",
+			"files":         []string{},
+			"preview":       "",
+		}
+	}
+	payload := raw
+	for len(payload) >= 5 {
+		length := int(binary.BigEndian.Uint32(payload[1:5]))
+		if length <= 0 || 5+length > len(payload) {
+			break
+		}
+		if payload[0]&0x80 == 0 {
+			payload = payload[5 : 5+length]
+			break
+		}
+		payload = payload[5+length:]
+	}
+
+	fields := connectrpc.DecodeFields(payload)
+	var affectedFiles []string
+	var diffBuilder strings.Builder
+
+	for _, f := range fields {
+		if f.Num == 1 && f.WireType == 2 { // CodeEditRevertPreview
+			var fileURI string
+			var changesText strings.Builder
+			for _, ef := range connectrpc.DecodeFields(f.Bytes) {
+				switch ef.Num {
+				case 1: // file_uri
+					if ef.WireType == 2 {
+						fileURI = string(ef.Bytes)
+					}
+				case 2: // diff (UnifiedDiff)
+					if ef.WireType == 2 {
+						for _, uf := range connectrpc.DecodeFields(ef.Bytes) {
+							if uf.Num == 1 && uf.WireType == 2 { // UnifiedDiffChange
+								var text string
+								var changeType uint64
+								for _, cf := range connectrpc.DecodeFields(uf.Bytes) {
+									if cf.Num == 1 && cf.WireType == 2 {
+										text = string(cf.Bytes)
+									} else if cf.Num == 2 && cf.WireType == 0 {
+										changeType = cf.Varint
+									}
+								}
+								switch changeType {
+								case 2:
+									changesText.WriteString("+" + text + "\n")
+								case 3:
+									changesText.WriteString("-" + text + "\n")
+								default:
+									changesText.WriteString(" " + text + "\n")
+								}
+							}
+						}
+					}
+				}
+			}
+			if fileURI != "" {
+				affectedFiles = append(affectedFiles, fileURI)
+				if diffBuilder.Len() > 0 {
+					diffBuilder.WriteString("\n")
+				}
+				diffBuilder.WriteString("--- a/" + fileURI + "\n+++ b/" + fileURI + "\n")
+				diffBuilder.WriteString(changesText.String())
+			}
+		}
+	}
+
+	if len(affectedFiles) == 0 {
+		return toOutgoing(raw)
+	}
+
+	return map[string]interface{}{
+		"affectedFiles": affectedFiles,
+		"diff":          diffBuilder.String(),
+		"files":         affectedFiles,
+		"preview":       diffBuilder.String(),
+	}
 }
 
 // toOutgoing convertit une r├®ponse protobuf brute en JSON lisible (hex + champs).
@@ -3889,13 +4000,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		if base64Data != "" {
 			if targetPath, _, errImg := saveUploadedImage(msg.CascadeID, fileName, base64Data); errImg == nil {
 				uri := "file:///" + filepath.ToSlash(targetPath)
-				mime := "image/jpeg"
-				if strings.HasSuffix(strings.ToLower(targetPath), ".png") {
-					mime = "image/png"
-				}
 				mediaAttachments = append(mediaAttachments, connectrpc.MediaAttachment{
 					URI:         uri,
-					MimeType:    mime,
+					MimeType:    "image/png",
 					Description: filepath.Base(targetPath),
 					Base64Data:  base64Data,
 				})
@@ -3925,10 +4032,6 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 					if !strings.HasPrefix(cleanURI, "file:///") {
 						cleanURI = "file:///" + filepath.ToSlash(cleanURI)
 					}
-					mime := "image/jpeg"
-					if strings.HasSuffix(strings.ToLower(rawPath), ".png") {
-						mime = "image/png"
-					}
 					if desc == "" {
 						desc = filepath.Base(rawPath)
 					}
@@ -3942,7 +4045,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 					if !alreadyAdded {
 						mediaAttachments = append(mediaAttachments, connectrpc.MediaAttachment{
 							URI:         cleanURI,
-							MimeType:    mime,
+							MimeType:    "image/png",
 							Description: desc,
 						})
 					}
@@ -3952,7 +4055,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			promptText = strings.TrimSpace(imgTagRe.ReplaceAllString(promptText, ""))
 		}
 
-		// Populer Data et Base64Data pour chaque mediaAttachment en lisant le fichier sur disque
+		// Populer Data et Base64Data pour chaque mediaAttachment en lisant le fichier sur disque et en normalisant vers PNG
 		for i := range mediaAttachments {
 			m := &mediaAttachments[i]
 			if len(m.Data) == 0 && m.Base64Data != "" {
@@ -3969,27 +4072,26 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				localPath = filepath.FromSlash(localPath)
 				if data, err := os.ReadFile(localPath); err == nil && len(data) > 0 {
 					m.Data = data
-					if m.Base64Data == "" {
-						m.Base64Data = base64.StdEncoding.EncodeToString(data)
-					}
 				}
 			}
-			if m.MimeType == "" || m.MimeType == "application/octet-stream" {
+			// Transcoder toute image en PNG pour satisfaire le Language Server (unsupported mime type image/jpeg)
+			isImg := strings.HasPrefix(m.MimeType, "image/") || m.MimeType == "" || m.MimeType == "application/octet-stream" ||
+				strings.HasSuffix(strings.ToLower(m.URI), ".jpg") || strings.HasSuffix(strings.ToLower(m.URI), ".jpeg") ||
+				strings.HasSuffix(strings.ToLower(m.URI), ".png") || strings.HasSuffix(strings.ToLower(m.URI), ".webp") ||
+				strings.HasSuffix(strings.ToLower(m.URI), ".gif")
+
+			if isImg {
+				if len(m.Data) > 0 {
+					pngBytes, _ := ensurePngData(m.Data)
+					m.Data = pngBytes
+					m.Base64Data = base64.StdEncoding.EncodeToString(pngBytes)
+				}
+				m.MimeType = "image/png"
+			} else if m.MimeType == "" || m.MimeType == "application/octet-stream" {
 				if len(m.Data) > 0 {
 					m.MimeType = http.DetectContentType(m.Data)
 				} else if m.URI != "" {
-					lower := strings.ToLower(m.URI)
-					if strings.HasSuffix(lower, ".png") {
-						m.MimeType = "image/png"
-					} else if strings.HasSuffix(lower, ".jpg") || strings.HasSuffix(lower, ".jpeg") {
-						m.MimeType = "image/jpeg"
-					} else if strings.HasSuffix(lower, ".webp") {
-						m.MimeType = "image/webp"
-					} else if strings.HasSuffix(lower, ".gif") {
-						m.MimeType = "image/gif"
-					} else if strings.HasSuffix(lower, ".svg") {
-						m.MimeType = "image/svg+xml"
-					} else if strings.HasSuffix(lower, ".pdf") {
+					if strings.HasSuffix(strings.ToLower(m.URI), ".pdf") {
 						m.MimeType = "application/pdf"
 					}
 				}
@@ -5575,13 +5677,28 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 
 	case "get_revert_preview", "cascade.get_revert_preview":
-		if msg.CascadeID == "" {
+		cid := msg.CascadeID
+		if cid == "" {
+			cid = msg.ConversationID
+		}
+		if cid == "" && msg.Data != nil {
+			if id, ok := msg.Data["cascadeId"].(string); ok {
+				cid = id
+			}
+		}
+		stepIdx := msg.StepIndex
+		if stepIdx <= 0 && msg.Data != nil {
+			if si, ok := msg.Data["stepIndex"].(float64); ok {
+				stepIdx = int64(si)
+			}
+		}
+		if cid == "" {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
 			return
 		}
-		raw, err = s.RPCClient.GetRevertPreview(msg.CascadeID, msg.StepIndex)
+		raw, err = s.RPCClient.GetRevertPreview(cid, stepIdx)
 		if err == nil {
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: revertPreviewOut(raw)})
 			return
 		}
 
