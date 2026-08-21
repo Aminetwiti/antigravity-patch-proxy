@@ -5,6 +5,24 @@ All notable changes to Antigravity will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.0] - 2026-08-21
+
+### Added
+- **Modular Settings & User Account Architecture**: Added dedicated account profile configuration, custom preset policy derivation, and quota visualization suite.
+- **Master Design System Parity in Mobile**: Strict alignment of mobile UI theme tokens with Antigravity 2.0 visual specification across dark and light modes.
+- **Enhanced Safe Area Support**: Added responsive `SafeArea` handling across all modal sheets and bottom sheets (`ScheduledTasks`, `McpExplorer`, `VoicePromptDialog`, `ChatInputBar`, `BackgroundTaskOutputSheet`).
+
+### Changed
+- **Daemon Log & WebSocket Resilience**:
+  - Automated 404 detection and exponential backoff (5 min) on unsupported `/StreamReactiveUpdates` endpoints, eliminating repetitive spam logs.
+  - Silenced unformatted standard error noise from Gorilla WebSocket pipe closures via `log.SetOutput(io.Discard)`.
+  - Filtered benign TCP socket disconnects in `writeJSON` down to `DEBUG` level.
+- **Breadcrumb Responsive Adaptation**: Streamlined horizontal padding on `SessionBreadcrumb` preventing overflow on split-screen or narrow mobile layouts.
+
+### Fixed
+- **Unicode & Path Resolution**: Fixed UTF-16 code units decoding issues in `resolveWorkspacePath` and binary image decoding fallbacks in `artifact_viewer_modal`.
+- **Syntax & Modal Closing Delimiters**: Fixed nested widget closure delimiters across mobile modal dialogs.
+
 ## [3.2.0] - 2026-08-19
 
 ### Added
