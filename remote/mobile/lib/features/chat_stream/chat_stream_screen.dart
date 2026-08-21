@@ -1417,12 +1417,14 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     List<String> selectedAnswers,
     String? customAnswer,
   ) async {
-    // H3 (audit clean-code-guard) : on ne retire la carte qu'après
-    // confirmation du daemon — un échec réseau la laisse visible pour un
-    // nouvel essai au lieu de faire disparaître silencieusement la question.
     try {
+      final targetCascadeId = q.cascadeId.isNotEmpty
+          ? q.cascadeId
+          : (widget.activeSessionId.isNotEmpty
+              ? widget.activeSessionId
+              : 'cascade-${DateTime.now().millisecondsSinceEpoch}');
       await widget.api?.submitQuestionResponse(
-        cascadeId: q.cascadeId.isNotEmpty ? q.cascadeId : widget.activeSessionId,
+        cascadeId: targetCascadeId,
         trajectoryId: q.trajectoryId.isNotEmpty ? q.trajectoryId : null,
         stepIndex: q.stepIndex >= 0 ? q.stepIndex : null,
         selectedAnswers: selectedAnswers,
@@ -1430,9 +1432,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       );
       _removeQuestion(q.requestId);
     } catch (_) {
-      // Réseau indisponible ou daemon injoignable : on garde la question
-      // (l'utilisateur pourra re-soumettre) — l'outbox ne prend pas en charge
-      // les réponses à question.
     }
   }
 
@@ -2327,6 +2326,38 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     );
   }
 
+  void _handleRetryTaskDirectly(ChatMessage errorMsg) {
+    final targetSession = widget.activeSessionId;
+    final buf = _sessionMessages[targetSession] ?? _messages;
+    String lastUserPrompt = '';
+    for (int i = buf.length - 1; i >= 0; i--) {
+      if (buf[i].sender == 'user' && buf[i].text.trim().isNotEmpty) {
+        lastUserPrompt = buf[i].text.trim();
+        break;
+      }
+    }
+    if (lastUserPrompt.isEmpty) {
+      lastUserPrompt = 'Reprendre la tâche';
+    }
+
+    setState(() {
+      buf.removeWhere((m) => m.id == errorMsg.id);
+    });
+
+    AppToast.show(
+      context,
+      message: 'Reprise directe de la tâche...',
+      icon: Icons.refresh_rounded,
+      type: ToastType.info,
+    );
+
+    _sendPrompt(
+      lastUserPrompt,
+      modelUID: _selectedModelUID,
+      modelEnum: _selectedModelEnum,
+    );
+  }
+
   void _handleToolDecision(ToolDecision decision,
       {ApprovalScope scope = ApprovalScope.once, String denyReason = ''}) {
     final approval = _currentApproval;
@@ -2597,7 +2628,22 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   void _showProjectSelector(BuildContext context) {
-    final projs = widget.projects ?? [];
+    final projs = List<ProjectItem>.from(widget.projects ?? []);
+    final knownPaths = projs.map((p) => p.path).toSet();
+
+    // Compléter avec les projets/workspaces découverts dans les sessions
+    for (final s in widget.sessions ?? []) {
+      if (s.workspacePath.isNotEmpty && knownPaths.add(s.workspacePath)) {
+        final name = WorkspacePath.displayName(s.workspacePath);
+        projs.add(ProjectItem(
+          id: s.workspacePath,
+          name: name,
+          path: s.workspacePath,
+          folderUri: s.workspacePath,
+        ));
+      }
+    }
+
     if (projs.isEmpty) return;
     ProjectSelectorBottomSheet.show(
       context,
@@ -3115,6 +3161,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                 onSwitchModel: _showModelSelector,
                 onEditPrompt: (text) => _chatInputKey.currentState?.setText(text),
                 onRevertStep: _handleRevertStep,
+                onRetryTask: () => _handleRetryTaskDirectly(msg),
                 onResend: (m) {
                   final reqId = m.id.startsWith('pending-')
                       ? m.id.substring('pending-'.length)
@@ -3615,6 +3662,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final api = widget.api;
     if (api == null) return;
     final name = filePath.split('/').last.split('\\').last;
+    final norm = filePath.replaceAll(r'\', '/').toLowerCase();
+    final isPlan = norm.contains('implementation_plan') || norm.endsWith('plan.md');
     ArtifactViewerModal.show(
       context,
       api: api,
@@ -3622,6 +3671,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       artifactName: name.isEmpty ? 'fichier' : name,
       cascadeId: widget.activeSessionId,
       workspacePath: widget.workspacePath,
+      requestFeedback: isPlan,
+      onProceed: () => _handleSendMessage('proceed', queued: false),
+      onRequestFeedback: () => _handleSendMessage('Je valide le plan d\'implémentation, continue.', queued: false),
     );
   }
 
@@ -3629,7 +3681,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final api = widget.api;
     if (api == null) return;
     final cleanName = artifactName.trim();
-    final fileName = cleanName.toLowerCase().contains('plan') && !cleanName.endsWith('.md')
+    final isPlan = cleanName.toLowerCase().contains('plan');
+    final fileName = isPlan && !cleanName.toLowerCase().endsWith('.md')
         ? 'implementation_plan.md'
         : cleanName;
     ArtifactViewerModal.show(
@@ -3639,6 +3692,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       artifactName: cleanName.isNotEmpty ? cleanName : 'Implementation Plan',
       cascadeId: widget.activeSessionId,
       workspacePath: widget.workspacePath,
+      requestFeedback: isPlan,
+      onProceed: () => _handleSendMessage('proceed', queued: false),
+      onRequestFeedback: () => _handleSendMessage('Je valide le plan d\'implémentation, continue.', queued: false),
     );
   }
 
@@ -3802,6 +3858,7 @@ class _MessageBubble extends StatelessWidget {
   final LocalFileTap? onLocalFile;
   final ValueChanged<String>? onOpenArtifact;
   final ValueChanged<ChatMessage>? onRevertStep;
+  final VoidCallback? onRetryTask;
 
   const _MessageBubble({
     required this.message,
@@ -3820,6 +3877,7 @@ class _MessageBubble extends StatelessWidget {
     this.onEditPrompt,
     this.onOpenFile,
     this.onRevertStep,
+    this.onRetryTask,
   });
 
   @override
@@ -4061,46 +4119,88 @@ class _MessageBubble extends StatelessWidget {
                         ),
                       ],
                     ),
-                    if (onSwitchModel != null &&
-                        (message.text.toLowerCase().contains('quota') ||
-                            message.text.toLowerCase().contains('capacity') ||
-                            message.text.toLowerCase().contains('503') ||
-                            message.text.toLowerCase().contains('401') ||
-                            message.text.toLowerCase().contains('invalid_api_key'))) ...[
-                      const SizedBox(height: 10),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: InkWell(
-                          onTap: () {
-                            HapticFeedback.lightImpact();
-                            onSwitchModel?.call();
-                          },
-                          borderRadius: BorderRadius.circular(6),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                            decoration: BoxDecoration(
-                              color: AppColors.accentBlue,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.swap_horiz_rounded, size: 13, color: Colors.white),
-                                SizedBox(width: 4),
-                                Text(
-                                  'Changer de modèle',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.white,
-                                  ),
+                    const SizedBox(height: 10),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        if (onRetryTask != null) ...[
+                          InkWell(
+                            onTap: () {
+                              HapticFeedback.lightImpact();
+                              onRetryTask?.call();
+                            },
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: isDark ? const Color(0xFF2B3340) : scheme.surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: isDark ? const Color(0xFF404B5E) : scheme.outlineVariant,
+                                  width: 1,
                                 ),
-                              ],
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.refresh_rounded,
+                                    size: 13,
+                                    color: isDark ? const Color(0xFFE2E8F0) : scheme.onSurface,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Réessayer',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: isDark ? const Color(0xFFE2E8F0) : scheme.onSurface,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                    ],
+                          const SizedBox(width: 8),
+                        ],
+                        if (onSwitchModel != null &&
+                            (message.text.toLowerCase().contains('quota') ||
+                                message.text.toLowerCase().contains('capacity') ||
+                                message.text.toLowerCase().contains('503') ||
+                                message.text.toLowerCase().contains('401') ||
+                                message.text.toLowerCase().contains('invalid_api_key'))) ...[
+                          InkWell(
+                            onTap: () {
+                              HapticFeedback.lightImpact();
+                              onSwitchModel?.call();
+                            },
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: AppColors.accentBlue,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.swap_horiz_rounded, size: 13, color: Colors.white),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'Changer de modèle',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ],
                 ),
               )
@@ -4293,23 +4393,34 @@ class _MessageBubble extends StatelessWidget {
                         AppToast.show(
                           context,
                           message: 'Merci pour votre retour !',
-                          icon: Icons.thumb_up_outlined,
-                          type: ToastType.info,
+                          icon: Icons.thumb_up_rounded,
+                          type: ToastType.success,
                         );
                       },
                       borderRadius: BorderRadius.circular(6),
-                      child: Padding(
-                        padding: const EdgeInsets.all(8),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF22242A) : scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: isDark ? const Color(0xFF32353E) : scheme.outlineVariant.withValues(alpha: 0.6),
+                            width: 0.8,
+                          ),
+                        ),
                         child: Semantics(
                           label: 'Marquer comme utile',
                           button: true,
-                          child: Icon(Icons.thumb_up_outlined,
-                              size: 15, color: scheme.onSurfaceVariant),
+                          child: Icon(
+                            Icons.thumb_up_outlined,
+                            size: 13.5,
+                            color: isDark ? const Color(0xFFD4D7E2) : scheme.onSurface,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 6),
                   Tooltip(
                     message: 'Pas utile',
                     child: InkWell(
@@ -4318,18 +4429,29 @@ class _MessageBubble extends StatelessWidget {
                         AppToast.show(
                           context,
                           message: 'Retour enregistré',
-                          icon: Icons.thumb_down_outlined,
+                          icon: Icons.thumb_down_rounded,
                           type: ToastType.info,
                         );
                       },
                       borderRadius: BorderRadius.circular(6),
-                      child: Padding(
-                        padding: const EdgeInsets.all(8),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF22242A) : scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: isDark ? const Color(0xFF32353E) : scheme.outlineVariant.withValues(alpha: 0.6),
+                            width: 0.8,
+                          ),
+                        ),
                         child: Semantics(
                           label: 'Marquer comme pas utile',
                           button: true,
-                          child: Icon(Icons.thumb_down_outlined,
-                              size: 15, color: scheme.onSurfaceVariant),
+                          child: Icon(
+                            Icons.thumb_down_outlined,
+                            size: 13.5,
+                            color: isDark ? const Color(0xFFD4D7E2) : scheme.onSurface,
+                          ),
                         ),
                       ),
                     ),

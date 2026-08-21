@@ -30,7 +30,7 @@ type DaemonConfig struct {
 // 3. Variables d'environnement (AG_*)
 func LoadConfig() *DaemonConfig {
 	cfg := &DaemonConfig{
-		Host:                 getEnvString("AG_DAEMON_HOST", "127.0.0.1"),
+		Host:                 getEnvString("AG_DAEMON_HOST", "0.0.0.0"),
 		Port:                 getEnvInt("AG_DAEMON_PORT", 8090),
 		LanguageServerPort:   getEnvInt("AG_LS_PORT", 55256),
 		TunnelProvider:       getEnvString("AG_TUNNEL_PROVIDER", ""),

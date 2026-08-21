@@ -62,12 +62,28 @@ class SyntaxHighlighter {
       'self', 'Self', 'static', 'struct', 'super', 'trait', 'true', 'type',
       'unsafe', 'use', 'where', 'while',
     },
-    'sql': {
-      'select', 'from', 'where', 'insert', 'into', 'values', 'update', 'set',
-      'delete', 'create', 'table', 'drop', 'alter', 'join', 'inner', 'left',
-      'right', 'outer', 'on', 'group', 'by', 'order', 'having', 'limit',
-      'offset', 'as', 'and', 'or', 'not', 'null', 'is', 'in', 'distinct',
-      'union', 'all', 'case', 'when', 'then', 'else', 'end',
+    'powershell': {
+      'param', 'function', 'filter', 'workflow', 'configuration', 'if', 'else',
+      'elseif', 'switch', 'while', 'do', 'until', 'for', 'foreach', 'in', 'break',
+      'continue', 'return', 'try', 'catch', 'finally', 'throw', 'trap', 'data',
+      'dynamicparam', 'begin', 'process', 'end', 'exit', 'using', 'module', 'class',
+      'enum', 'hidden', 'static', 'cmdletbinding', 'true', 'false', 'null',
+      'write-host', 'write-output', 'write-error', 'write-warning', 'invoke-command',
+      'where-object', 'select-object', 'new-object', 'get-command', 'get-process',
+      'get-content', 'set-content', 'test-path', 'start-process', 'stop-process',
+    },
+    'zsh': {
+      'if', 'then', 'else', 'elif', 'fi', 'case', 'esac', 'for', 'select', 'while',
+      'until', 'do', 'done', 'in', 'function', 'time', 'repeat', 'nocorrect',
+      'foreach', 'end', 'autoload', 'typeset', 'local', 'export', 'return', 'exit',
+      'set', 'unset', 'source', 'eval', 'alias', 'unalias', 'echo', 'printf',
+      'read', 'cd', 'pwd', 'test', 'true', 'false', 'bindkey', 'zstyle', 'setopt',
+      'unsetopt', 'whence', 'where', 'which',
+    },
+    'shell': {
+      'if', 'then', 'else', 'elif', 'fi', 'case', 'esac', 'for', 'while', 'until',
+      'do', 'done', 'in', 'function', 'export', 'return', 'exit', 'set', 'unset',
+      'source', 'eval', 'alias', 'echo', 'printf', 'read', 'cd', 'pwd', 'test',
     },
   };
 
@@ -77,7 +93,9 @@ class SyntaxHighlighter {
     if (l == 'golang') return 'go';
     if (l == 'py') return 'python';
     if (l == 'rs') return 'rust';
-    if (l == 'sh' || l == 'bash' || l == 'zsh' || l == 'shell' || l == 'powershell' || l == 'pwsh' || l == 'cmd') return 'shell';
+    if (l == 'powershell' || l == 'pwsh' || l == 'ps1' || l == 'psm1' || l == 'psd1') return 'powershell';
+    if (l == 'zsh') return 'zsh';
+    if (l == 'sh' || l == 'bash' || l == 'shell' || l == 'cmd') return 'shell';
     return l;
   }
 
@@ -118,7 +136,7 @@ class SyntaxHighlighter {
       spans.add(TextSpan(text: line.substring(0, leadingSpaces)));
     }
 
-    if (trimmed.startsWith('//') || (lang == 'python' && trimmed.startsWith('#')) || (lang == 'shell' && trimmed.startsWith('#')) || (lang == 'sql' && trimmed.startsWith('--'))) {
+    if (trimmed.startsWith('//') || ((lang == 'python' || lang == 'shell' || lang == 'zsh' || lang == 'powershell') && trimmed.startsWith('#')) || (lang == 'sql' && trimmed.startsWith('--'))) {
       spans.add(TextSpan(
         text: trimmed,
         style: const TextStyle(
@@ -158,12 +176,27 @@ class SyntaxHighlighter {
       }
 
       // Inline comment in remainder of line
-      if (cursor < line.length - 1 && line[cursor] == '/' && line[cursor + 1] == '/') {
+      if ((cursor < line.length - 1 && line[cursor] == '/' && line[cursor + 1] == '/') ||
+          ((lang == 'python' || lang == 'shell' || lang == 'zsh' || lang == 'powershell') && char == '#' && (cursor == 0 || line[cursor - 1] == ' '))) {
         spans.add(TextSpan(
           text: line.substring(cursor),
           style: const TextStyle(color: colorComment, fontStyle: FontStyle.italic),
         ));
         break;
+      }
+
+      // Variable starting with $ ($var, $1, $?)
+      if (char == '$' && (lang == 'shell' || lang == 'zsh' || lang == 'powershell' || lang == 'typescript' || lang == 'dart')) {
+        int end = cursor + 1;
+        while (end < line.length && (_isWordChar(line[end]) || line[end] == '?' || line[end] == '!')) {
+          end++;
+        }
+        spans.add(TextSpan(
+          text: line.substring(cursor, end),
+          style: const TextStyle(color: colorVariable, fontWeight: FontWeight.w500),
+        ));
+        cursor = end;
+        continue;
       }
 
       // Number literal

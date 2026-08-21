@@ -547,3 +547,304 @@ class TaskTrackerCard extends StatelessWidget {
     );
   }
 }
+
+/// Google Workspace 2026 Product types
+enum WorkspaceProductType { docs, sheets, slides, drive, generic }
+
+class WorkspaceProductHelper {
+  static WorkspaceProductType detect(String url) {
+    final lower = url.toLowerCase();
+    if (lower.contains('docs.google.com/document') || lower.contains('docs.google.com/doc')) {
+      return WorkspaceProductType.docs;
+    }
+    if (lower.contains('docs.google.com/spreadsheets') || lower.contains('sheets.google.com')) {
+      return WorkspaceProductType.sheets;
+    }
+    if (lower.contains('docs.google.com/presentation') || lower.contains('slides.google.com')) {
+      return WorkspaceProductType.slides;
+    }
+    if (lower.contains('drive.google.com')) {
+      return WorkspaceProductType.drive;
+    }
+    return WorkspaceProductType.generic;
+  }
+
+  static String getLabel(WorkspaceProductType type) {
+    switch (type) {
+      case WorkspaceProductType.docs:
+        return 'Google Docs';
+      case WorkspaceProductType.sheets:
+        return 'Google Sheets';
+      case WorkspaceProductType.slides:
+        return 'Google Slides';
+      case WorkspaceProductType.drive:
+        return 'Google Drive';
+      case WorkspaceProductType.generic:
+        return 'Web Link';
+    }
+  }
+}
+
+/// Official Google Workspace 2026 vector icon
+class GoogleWorkspaceLogo extends StatelessWidget {
+  final WorkspaceProductType type;
+  final double size;
+
+  const GoogleWorkspaceLogo({
+    super.key,
+    required this.type,
+    this.size = 20,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: CustomPaint(
+        painter: _WorkspaceIconPainter(type),
+      ),
+    );
+  }
+}
+
+class _WorkspaceIconPainter extends CustomPainter {
+  final WorkspaceProductType type;
+
+  _WorkspaceIconPainter(this.type);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+
+    switch (type) {
+      case WorkspaceProductType.docs:
+        // Google Docs 2026: Rounded Blue Document with folded corner and white horizontal lines
+        final rrect = RRect.fromRectAndRadius(
+          Rect.fromLTWH(w * 0.1, h * 0.05, w * 0.8, h * 0.9),
+          Radius.circular(w * 0.14),
+        );
+        final bgPaint = Paint()..color = const Color(0xFF2684FC); // Docs Royal Blue
+        canvas.drawRRect(rrect, bgPaint);
+
+        // Folded top-right corner effect
+        final cornerPath = Path()
+          ..moveTo(w * 0.62, h * 0.05)
+          ..lineTo(w * 0.9, h * 0.33)
+          ..lineTo(w * 0.62, h * 0.33)
+          ..close();
+        final foldPaint = Paint()..color = const Color(0xFFAECBFA);
+        canvas.drawPath(cornerPath, foldPaint);
+
+        // White document lines
+        final linePaint = Paint()
+          ..color = Colors.white
+          ..strokeCap = StrokeCap.round
+          ..strokeWidth = w * 0.08;
+        canvas.drawLine(Offset(w * 0.26, h * 0.46), Offset(w * 0.74, h * 0.46), linePaint);
+        canvas.drawLine(Offset(w * 0.26, h * 0.60), Offset(w * 0.74, h * 0.60), linePaint);
+        canvas.drawLine(Offset(w * 0.26, h * 0.74), Offset(w * 0.56, h * 0.74), linePaint);
+        break;
+
+      case WorkspaceProductType.sheets:
+        // Google Sheets 2026: Emerald Green Sheet with spreadsheet grid
+        final rrect = RRect.fromRectAndRadius(
+          Rect.fromLTWH(w * 0.1, h * 0.05, w * 0.8, h * 0.9),
+          Radius.circular(w * 0.14),
+        );
+        final bgPaint = Paint()..color = const Color(0xFF0F9D58); // Sheets Emerald Green
+        canvas.drawRRect(rrect, bgPaint);
+
+        // Folded top-right corner
+        final cornerPath = Path()
+          ..moveTo(w * 0.62, h * 0.05)
+          ..lineTo(w * 0.9, h * 0.33)
+          ..lineTo(w * 0.62, h * 0.33)
+          ..close();
+        final foldPaint = Paint()..color = const Color(0xFF81C995);
+        canvas.drawPath(cornerPath, foldPaint);
+
+        // White spreadsheet grid cross
+        final gridPaint = Paint()
+          ..color = Colors.white
+          ..strokeCap = StrokeCap.round
+          ..strokeWidth = w * 0.07;
+        canvas.drawLine(Offset(w * 0.26, h * 0.58), Offset(w * 0.74, h * 0.58), gridPaint);
+        canvas.drawLine(Offset(w * 0.50, h * 0.42), Offset(w * 0.50, h * 0.78), gridPaint);
+        break;
+
+      case WorkspaceProductType.slides:
+        // Google Slides 2026: Amber/Gold Presentation Slide
+        final rrect = RRect.fromRectAndRadius(
+          Rect.fromLTWH(w * 0.1, h * 0.05, w * 0.8, h * 0.9),
+          Radius.circular(w * 0.14),
+        );
+        final bgPaint = Paint()..color = const Color(0xFFF4B400); // Slides Gold
+        canvas.drawRRect(rrect, bgPaint);
+
+        // Folded corner
+        final cornerPath = Path()
+          ..moveTo(w * 0.62, h * 0.05)
+          ..lineTo(w * 0.9, h * 0.33)
+          ..lineTo(w * 0.62, h * 0.33)
+          ..close();
+        final foldPaint = Paint()..color = const Color(0xFFFDE293);
+        canvas.drawPath(cornerPath, foldPaint);
+
+        // Center projector/presentation rectangle
+        final slideInner = RRect.fromRectAndRadius(
+          Rect.fromLTWH(w * 0.26, h * 0.44, w * 0.48, h * 0.32),
+          Radius.circular(w * 0.04),
+        );
+        final innerPaint = Paint()..color = Colors.white;
+        canvas.drawRRect(slideInner, innerPaint);
+        break;
+
+      case WorkspaceProductType.drive:
+        // Google Drive 2026: 3-colored geometric triangle
+        final yellowPath = Path()
+          ..moveTo(w * 0.32, h * 0.15)
+          ..lineTo(w * 0.68, h * 0.15)
+          ..lineTo(w * 0.45, h * 0.55)
+          ..lineTo(w * 0.15, h * 0.55)
+          ..close();
+        canvas.drawPath(yellowPath, Paint()..color = const Color(0xFFFFBA00));
+
+        final greenPath = Path()
+          ..moveTo(w * 0.68, h * 0.15)
+          ..lineTo(w * 0.88, h * 0.52)
+          ..lineTo(w * 0.58, h * 0.90)
+          ..lineTo(w * 0.38, h * 0.55)
+          ..close();
+        canvas.drawPath(greenPath, Paint()..color = const Color(0xFF00AC47));
+
+        final bluePath = Path()
+          ..moveTo(w * 0.15, h * 0.55)
+          ..lineTo(w * 0.45, h * 0.55)
+          ..lineTo(w * 0.58, h * 0.90)
+          ..lineTo(w * 0.12, h * 0.90)
+          ..close();
+        canvas.drawPath(bluePath, Paint()..color = const Color(0xFF2684FC));
+        break;
+
+      case WorkspaceProductType.generic:
+        final circlePaint = Paint()..color = const Color(0xFF5F6368);
+        canvas.drawCircle(Offset(w * 0.5, h * 0.5), w * 0.4, circlePaint);
+        break;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _WorkspaceIconPainter oldDelegate) => oldDelegate.type != type;
+}
+
+/// Carte d'artefact enrichie pour les liens Google Workspace 2026 (Docs, Sheets, Slides, Drive)
+class WorkspaceUrlArtifactCard extends StatelessWidget {
+  final String url;
+  final String title;
+  final VoidCallback? onTap;
+
+  const WorkspaceUrlArtifactCard({
+    super.key,
+    required this.url,
+    this.title = '',
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final type = WorkspaceProductHelper.detect(url);
+    final productLabel = WorkspaceProductHelper.getLabel(type);
+    final displayTitle = title.trim().isNotEmpty ? title.trim() : productLabel;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF16191E) : scheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(
+          color: isDark ? const Color(0xFF282C36) : scheme.outlineVariant,
+          width: 1,
+        ),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () {
+            HapticFeedback.selectionClick();
+            onTap?.call();
+          },
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+            child: Row(
+              children: [
+                GoogleWorkspaceLogo(type: type, size: 22),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        displayTitle,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: scheme.onSurface,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                            decoration: BoxDecoration(
+                              color: isDark ? const Color(0xFF222630) : scheme.surfaceContainerHighest,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              productLabel,
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w500,
+                                color: scheme.primary,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              url,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  Icons.open_in_new_rounded,
+                  size: 15,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

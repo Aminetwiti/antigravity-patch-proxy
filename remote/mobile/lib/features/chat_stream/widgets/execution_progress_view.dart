@@ -1378,13 +1378,14 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
                 children: [
                   if (item.consolePrompt != null && item.consolePrompt!.isNotEmpty)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Text(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: SelectableText(
                         item.consolePrompt!,
                         style: const TextStyle(
                           fontSize: 11,
                           fontFamily: 'monospace',
                           color: Color(0xFF71717A),
+                          height: 1.35,
                         ),
                       ),
                     ),

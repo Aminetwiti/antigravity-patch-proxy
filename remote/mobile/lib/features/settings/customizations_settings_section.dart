@@ -24,6 +24,9 @@ class _CustomizationsSettingsSectionState extends State<CustomizationsSettingsSe
   List<Map<String, dynamic>> _skills = [];
   bool _isLoading = false;
   bool _skillsExpanded = true;
+  bool _rulesExpanded = false;
+  bool _pluginsExpanded = false;
+  bool _customAgentsExpanded = false;
   final String _searchQuery = '';
 
   // Token Usage breakdown metrics (1:1 with Antigravity IDE)
@@ -212,7 +215,7 @@ class _CustomizationsSettingsSectionState extends State<CustomizationsSettingsSe
             onTap: () => setState(() => _skillsExpanded = !_skillsExpanded),
             borderRadius: BorderRadius.circular(6),
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
+              padding: const EdgeInsets.symmetric(vertical: 6),
               child: Row(
                 children: [
                   Icon(
@@ -233,9 +236,9 @@ class _CustomizationsSettingsSectionState extends State<CustomizationsSettingsSe
               ),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
 
-          // ── 3. Skills List
+          // ── Skills List
           if (_skillsExpanded) ...[
             if (_isLoading)
               const Center(
@@ -261,7 +264,131 @@ class _CustomizationsSettingsSectionState extends State<CustomizationsSettingsSe
               }),
           ],
 
-          const SizedBox(height: 20),
+          const SizedBox(height: 14),
+
+          // ── 3. Rules Accordion Header
+          InkWell(
+            onTap: () => setState(() => _rulesExpanded = !_rulesExpanded),
+            borderRadius: BorderRadius.circular(6),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  Icon(
+                    _rulesExpanded ? Icons.keyboard_arrow_down_rounded : Icons.keyboard_arrow_right_rounded,
+                    size: 20,
+                    color: scheme.onSurface,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Rules (1)',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.onSurface,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_rulesExpanded) ...[
+            const SizedBox(height: 6),
+            _buildSkillItem(
+              name: 'user_global',
+              description: 'Ponytail senior developer rules — root cause fixing, zero boilerplate, stdlib first.',
+              badge: 'Global Rule',
+              isDark: isDark,
+              scheme: scheme,
+            ),
+          ],
+
+          const SizedBox(height: 14),
+
+          // ── 4. Plugins Accordion Header
+          InkWell(
+            onTap: () => setState(() => _pluginsExpanded = !_pluginsExpanded),
+            borderRadius: BorderRadius.circular(6),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  Icon(
+                    _pluginsExpanded ? Icons.keyboard_arrow_down_rounded : Icons.keyboard_arrow_right_rounded,
+                    size: 20,
+                    color: scheme.onSurface,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Plugins (2)',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.onSurface,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_pluginsExpanded) ...[
+            const SizedBox(height: 6),
+            _buildSkillItem(
+              name: 'gstack-router',
+              description: 'Intelligent skill orchestrator and autonomous decision routing pipeline.',
+              badge: 'Plugin',
+              isDark: isDark,
+              scheme: scheme,
+            ),
+            _buildSkillItem(
+              name: 'adb-bridge',
+              description: 'Android Debug Bridge host interface for mobile emulation & filesystem inspection.',
+              badge: 'Plugin',
+              isDark: isDark,
+              scheme: scheme,
+            ),
+          ],
+
+          const SizedBox(height: 14),
+
+          // ── 5. Custom Agents Accordion Header
+          InkWell(
+            onTap: () => setState(() => _customAgentsExpanded = !_customAgentsExpanded),
+            borderRadius: BorderRadius.circular(6),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  Icon(
+                    _customAgentsExpanded ? Icons.keyboard_arrow_down_rounded : Icons.keyboard_arrow_right_rounded,
+                    size: 20,
+                    color: scheme.onSurface,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Custom Agents (1)',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.onSurface,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_customAgentsExpanded) ...[
+            const SizedBox(height: 6),
+            _buildCustomAgentCard(
+              name: 'research',
+              description: 'Research subagent with read-only tools for exploring the codebase and searching the web.',
+              inheritCustomizations: true,
+              isDark: isDark,
+              scheme: scheme,
+            ),
+          ],
+
+          const SizedBox(height: 24),
         ],
       ),
     );
@@ -453,6 +580,86 @@ class _CustomizationsSettingsSectionState extends State<CustomizationsSettingsSe
         ),
       ),
       child: child,
+    );
+  }
+
+  Widget _buildCustomAgentCard({
+    required String name,
+    required String description,
+    required bool inheritCustomizations,
+    required bool isDark,
+    required ColorScheme scheme,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF16181D) : scheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(
+          color: isDark ? const Color(0xFF262A35) : scheme.outlineVariant,
+          width: 0.8,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.smart_toy_outlined, size: 18, color: scheme.primary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      name,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: inheritCustomizations
+                            ? (isDark ? const Color(0xFF16251E) : scheme.surfaceContainerHighest)
+                            : (isDark ? const Color(0xFF222630) : scheme.surfaceContainer),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                          color: inheritCustomizations
+                              ? AppColors.positive.withValues(alpha: 0.4)
+                              : scheme.outlineVariant,
+                          width: 0.8,
+                        ),
+                      ),
+                      child: Text(
+                        inheritCustomizations ? 'inheritCustomizations: true' : 'inheritCustomizations: false',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w500,
+                          color: inheritCustomizations ? AppColors.positive : scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  description,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: scheme.onSurfaceVariant,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

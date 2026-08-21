@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -5,14 +6,37 @@ import '../theme/app_colors.dart';
 
 enum ToastType { info, success, warning, error }
 
-/// Floating pill-shaped Toast component matching Material 3 and Antigravity 2.0 aesthetics.
+class _ToastItem {
+  final String id;
+  final String message;
+  final IconData? icon;
+  final ToastType type;
+  final DateTime createdAt;
+  final Duration duration;
+
+  _ToastItem({
+    required this.id,
+    required this.message,
+    this.icon,
+    required this.type,
+    required this.duration,
+  }) : createdAt = DateTime.now();
+}
+
+/// Floating Toast component in the bottom-right corner.
+/// Collapses into a compact stack when multiple toasts arrive, and expands on hover.
 class AppToast {
+  static final List<_ToastItem> _activeToasts = [];
+  static OverlayEntry? _overlayEntry;
+  static final ValueNotifier<bool> _isHovered = ValueNotifier(false);
+  static int _idCounter = 0;
+
   static void show(
     BuildContext context, {
     required String message,
     IconData? icon,
     ToastType type = ToastType.info,
-    Duration duration = const Duration(seconds: 2),
+    Duration duration = const Duration(seconds: 3),
   }) {
     switch (type) {
       case ToastType.info:
@@ -29,11 +53,168 @@ class AppToast {
         break;
     }
 
+    final item = _ToastItem(
+      id: 'toast_${++_idCounter}_${DateTime.now().millisecondsSinceEpoch}',
+      message: message,
+      icon: icon,
+      type: type,
+      duration: duration,
+    );
+
+    _activeToasts.add(item);
+    _ensureOverlay(context);
+
+    Timer(duration, () {
+      _removeToast(item.id);
+    });
+  }
+
+  static void _removeToast(String id) {
+    _activeToasts.removeWhere((t) => t.id == id);
+    if (_activeToasts.isEmpty) {
+      _overlayEntry?.remove();
+      _overlayEntry = null;
+    } else {
+      _overlayEntry?.markNeedsBuild();
+    }
+  }
+
+  static void _ensureOverlay(BuildContext context) {
+    if (_overlayEntry != null) {
+      _overlayEntry!.markNeedsBuild();
+      return;
+    }
+
+    final overlayState = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlayState == null) return;
+
+    _overlayEntry = OverlayEntry(
+      builder: (ctx) => _ToastStackOverlay(
+        toasts: _activeToasts,
+        isHovered: _isHovered,
+        onDismiss: _removeToast,
+      ),
+    );
+
+    overlayState.insert(_overlayEntry!);
+  }
+}
+
+class _ToastStackOverlay extends StatefulWidget {
+  final List<_ToastItem> toasts;
+  final ValueNotifier<bool> isHovered;
+  final ValueChanged<String> onDismiss;
+
+  const _ToastStackOverlay({
+    required this.toasts,
+    required this.isHovered,
+    required this.onDismiss,
+  });
+
+  @override
+  State<_ToastStackOverlay> createState() => _ToastStackOverlayState();
+}
+
+class _ToastStackOverlayState extends State<_ToastStackOverlay> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.toasts.isEmpty) return const SizedBox.shrink();
+
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final scheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
+    final displayToasts = widget.toasts.reversed.toList();
+    final topToast = displayToasts.first;
+    final extraCount = displayToasts.length - 1;
 
-    final (defaultIcon, iconColor, bg) = switch (type) {
+    return Positioned(
+      right: 16,
+      bottom: 24,
+      child: Material(
+        color: Colors.transparent,
+        child: MouseRegion(
+          onEnter: (_) => setState(() => _expanded = true),
+          onExit: (_) => setState(() => _expanded = false),
+          child: GestureDetector(
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOutCubic,
+              constraints: const BoxConstraints(maxWidth: 360),
+              child: _expanded && displayToasts.length > 1
+                  ? Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        for (int i = 0; i < displayToasts.length; i++) ...[
+                          _buildSingleToast(
+                            toast: displayToasts[i],
+                            isDark: isDark,
+                            scheme: scheme,
+                            showBadge: false,
+                            onClose: () => widget.onDismiss(displayToasts[i].id),
+                          ),
+                          if (i < displayToasts.length - 1) const SizedBox(height: 6),
+                        ],
+                      ],
+                    )
+                  : Stack(
+                      clipBehavior: Clip.none,
+                      alignment: Alignment.bottomRight,
+                      children: [
+                        if (extraCount > 1)
+                          Positioned(
+                            bottom: 8,
+                            right: 8,
+                            left: 8,
+                            child: Container(
+                              height: 38,
+                              decoration: BoxDecoration(
+                                color: (isDark ? const Color(0xFF1E222B) : scheme.surfaceContainerHighest).withValues(alpha: 0.6),
+                                borderRadius: BorderRadius.circular(AppRadius.pill),
+                              ),
+                            ),
+                          ),
+                        if (extraCount > 0)
+                          Positioned(
+                            bottom: 4,
+                            right: 4,
+                            left: 4,
+                            child: Container(
+                              height: 38,
+                              decoration: BoxDecoration(
+                                color: (isDark ? const Color(0xFF1E222B) : scheme.surfaceContainerHighest).withValues(alpha: 0.8),
+                                borderRadius: BorderRadius.circular(AppRadius.pill),
+                              ),
+                            ),
+                          ),
+                        _buildSingleToast(
+                          toast: topToast,
+                          isDark: isDark,
+                          scheme: scheme,
+                          showBadge: extraCount > 0,
+                          extraCount: extraCount,
+                          onClose: () => widget.onDismiss(topToast.id),
+                        ),
+                      ],
+                    ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSingleToast({
+    required _ToastItem toast,
+    required bool isDark,
+    required ColorScheme scheme,
+    bool showBadge = false,
+    int extraCount = 0,
+    VoidCallback? onClose,
+  }) {
+    final (defaultIcon, iconColor, bg) = switch (toast.type) {
       ToastType.info => (
           Icons.info_outline,
           isDark ? AppColors.accentBlueBright : scheme.primary,
@@ -56,42 +237,74 @@ class AppToast {
         ),
     };
 
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.only(bottom: 24, left: 20, right: 20),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        elevation: 8,
-        backgroundColor: bg,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadius.pill),
-          side: BorderSide(
-            color: isDark ? const Color(0xFF323B4E) : scheme.outlineVariant,
-            width: 1,
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.25),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
+        ],
+        border: Border.all(
+          color: isDark ? const Color(0xFF323B4E) : scheme.outlineVariant,
+          width: 1,
         ),
-        duration: duration,
-        content: Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon ?? defaultIcon, size: 16, color: iconColor),
-            const SizedBox(width: 9),
-            Flexible(
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(toast.icon ?? defaultIcon, size: 16, color: iconColor),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              toast.message,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w500,
+                color: isDark ? const Color(0xFFF0F4F8) : scheme.onSurface,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (showBadge && extraCount > 0) ...[
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: scheme.primary.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(10),
+              ),
               child: Text(
-                message,
-                style: (textTheme.bodyMedium ?? const TextStyle(fontSize: 12.5)).copyWith(
-                  color: isDark ? const Color(0xFFF0F4F8) : scheme.onSurface,
-                  fontWeight: FontWeight.w500,
+                '+$extraCount',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                  color: scheme.primary,
                 ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],
-        ),
+          if (onClose != null) ...[
+            const SizedBox(width: 6),
+            InkWell(
+              onTap: onClose,
+              borderRadius: BorderRadius.circular(10),
+              child: Padding(
+                padding: const EdgeInsets.all(2),
+                child: Icon(
+                  Icons.close_rounded,
+                  size: 13,
+                  color: isDark ? const Color(0xFF8E929E) : scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

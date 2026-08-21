@@ -9,6 +9,7 @@ import '../../core/protocol/daemon_api.dart';
 import '../../core/protocol/messages.dart';
 import '../../core/protocol/workspace_path.dart';
 import '../../widgets/custom_dropdown_overlay.dart';
+import '../../widgets/syntax_highlighter.dart';
 import 'git_commit_dialog.dart';
 import 'package:mobile/theme/app_colors.dart';
 
@@ -1545,20 +1546,37 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     }
 
     // Fichiers binaires (images, audio, vidéo) : pas de numéros de ligne
+    final lowerPath = _selectedFilePath.toLowerCase();
     final isBinary =
-        _selectedFilePath.endsWith('.png') ||
-        _selectedFilePath.endsWith('.jpg') ||
-        _selectedFilePath.endsWith('.mp3') ||
-        _selectedFilePath.endsWith('.mp4');
+        lowerPath.endsWith('.png') ||
+        lowerPath.endsWith('.jpg') ||
+        lowerPath.endsWith('.jpeg') ||
+        lowerPath.endsWith('.gif') ||
+        lowerPath.endsWith('.webp') ||
+        lowerPath.endsWith('.ico') ||
+        lowerPath.endsWith('.bmp') ||
+        lowerPath.endsWith('.mp3') ||
+        lowerPath.endsWith('.wav') ||
+        lowerPath.endsWith('.ogg') ||
+        lowerPath.endsWith('.flac') ||
+        lowerPath.endsWith('.mp4') ||
+        lowerPath.endsWith('.webm') ||
+        lowerPath.endsWith('.mov') ||
+        lowerPath.endsWith('.mkv') ||
+        lowerPath.endsWith('.avi') ||
+        lowerPath.endsWith('.pdf') ||
+        lowerPath.endsWith('.zip') ||
+        lowerPath.endsWith('.tar') ||
+        lowerPath.endsWith('.gz');
     if (isBinary) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              _selectedFilePath.endsWith('.mp3')
+              lowerPath.endsWith('.mp3') || lowerPath.endsWith('.wav') || lowerPath.endsWith('.ogg') || lowerPath.endsWith('.flac')
                   ? Icons.audio_file_outlined
-                  : _selectedFilePath.endsWith('.mp4')
+                  : lowerPath.endsWith('.mp4') || lowerPath.endsWith('.webm') || lowerPath.endsWith('.mov') || lowerPath.endsWith('.mkv')
                   ? Icons.video_file_outlined
                   : Icons.image_outlined,
               size: 48,
@@ -1608,6 +1626,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       ).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
     );
 
+    final ext = _selectedFilePath.contains('.') ? _selectedFilePath.split('.').last.toLowerCase() : '';
     // Lignes du viewer : numéros + contenu (softWrap:false pour permettre le
     // scroll horizontal du conteneur parent au lieu du wrap silencieux).
     final codeList = ListView.builder(
@@ -1617,15 +1636,21 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         final lineNum = '${index + 1}'.padLeft(4, ' ');
         final line = lines[index];
         if (_findQuery.isEmpty) {
+          final highlightedSpans = SyntaxHighlighter.highlight(
+            line,
+            ext,
+            defaultTextColor: Theme.of(context).colorScheme.onSurface,
+          );
           return Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('$lineNum │ ', style: lineNumberStyle),
               Expanded(
-                child: SelectableText(
-                  line,
-                  style: textStyle,
-                  // Longues lignes → scroll horizontal, pas de wrap.
+                child: SelectableText.rich(
+                  TextSpan(
+                    style: textStyle,
+                    children: highlightedSpans,
+                  ),
                   maxLines: null,
                 ),
               ),
@@ -1657,7 +1682,18 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         if (cursor < line.length) {
           spans.add(TextSpan(text: line.substring(cursor)));
         }
-        return RichText(text: TextSpan(style: textStyle, children: spans));
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('$lineNum │ ', style: lineNumberStyle),
+            Expanded(
+              child: SelectableText.rich(
+                TextSpan(style: textStyle, children: spans),
+                maxLines: null,
+              ),
+            ),
+          ],
+        );
       },
     );
 

@@ -272,8 +272,21 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
   @override
   void didUpdateWidget(covariant ChatInputBar oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if ((oldWidget.cascadeId != widget.cascadeId || oldWidget.initialText != widget.initialText) &&
-        widget.initialText != _controller.text) {
+    if (oldWidget.cascadeId != widget.cascadeId) {
+      if (widget.initialText != _controller.text) {
+        _controller.text = widget.initialText;
+        _lastDraftText = widget.initialText;
+        _controller.selection = TextSelection.collapsed(
+          offset: _controller.text.length,
+        );
+      }
+      // Re-focus the text input when switching conversations via keyboard shortcuts
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _focusNode.canRequestFocus) {
+          _focusNode.requestFocus();
+        }
+      });
+    } else if (oldWidget.initialText != widget.initialText && widget.initialText != _controller.text) {
       _controller.text = widget.initialText;
       _lastDraftText = widget.initialText;
       _controller.selection = TextSelection.collapsed(
@@ -637,8 +650,11 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
   }
 
   IconData _iconForExtension(String name) {
-    if (name.endsWith('/') || !name.contains('.')) return Icons.folder_outlined;
-    final ext = name.split('.').last.toLowerCase();
+    final clean = name.trim();
+    if (clean.endsWith('/') || clean.endsWith('\\') || clean.startsWith('folder:') || clean.startsWith('dir:') || (!clean.contains('.') && !clean.startsWith('.'))) {
+      return Icons.folder_outlined;
+    }
+    final ext = clean.split('.').last.toLowerCase();
     switch (ext) {
       case 'json':
         return Icons.data_object;
@@ -680,11 +696,38 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
       );
       if (pickedList.isEmpty) return;
 
+      const maxFileSize = 20 * 1024 * 1024; // 20 MB
+      const maxAttachments = 10;
       final newItems = <_AttachedItem>[];
+
       for (final picked in pickedList) {
+        if (_attachments.length + newItems.length >= maxAttachments) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Limite atteinte : 10 pièces jointes au maximum'),
+                duration: Duration(seconds: 3),
+              ),
+            );
+          }
+          break;
+        }
+
         final bytes = await picked.readAsBytes();
         final name = picked.name.isNotEmpty ? picked.name : 'image_${DateTime.now().millisecondsSinceEpoch}.jpg';
-        final mime = picked.mimeType ?? (name.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg');
+        if (bytes.length > maxFileSize) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Image trop volumineuse : "$name" dépasse 20 Mo'),
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          }
+          continue;
+        }
+
+        final mime = picked.mimeType ?? _detectMime(name);
         final b64 = base64Encode(bytes);
         newItems.add(_AttachedItem(
           name: name,
@@ -696,7 +739,9 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
         ));
       }
 
-      setState(() => _attachments.addAll(newItems));
+      if (newItems.isNotEmpty) {
+        setState(() => _attachments.addAll(newItems));
+      }
     } catch (_) {
       _pickImage();
     }
@@ -705,6 +750,17 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
   /// Prise de photo directe avec l'appareil photo
   Future<void> _pickImageFromCamera() async {
     try {
+      if (_attachments.length >= 10) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Limite atteinte : 10 pièces jointes au maximum'),
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+        return;
+      }
       final picker = ImagePicker();
       final picked = await picker.pickImage(
         source: ImageSource.camera,
@@ -715,6 +771,14 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
       if (picked == null) return;
       final bytes = await picked.readAsBytes();
       final name = 'photo_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      if (bytes.length > 20 * 1024 * 1024) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Photo trop volumineuse (> 20 Mo)'), duration: Duration(seconds: 3)),
+          );
+        }
+        return;
+      }
       final mime = 'image/jpeg';
       final b64 = base64Encode(bytes);
 
@@ -742,8 +806,18 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
       );
       if (res == null || res.files.isEmpty) return;
 
+      const maxFileSize = 20 * 1024 * 1024;
+      const maxAttachments = 10;
       final newItems = <_AttachedItem>[];
       for (final f in res.files) {
+        if (_attachments.length + newItems.length >= maxAttachments) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Limite atteinte : 10 pièces jointes au maximum'), duration: Duration(seconds: 3)),
+            );
+          }
+          break;
+        }
         Uint8List? bytes = f.bytes;
         if (bytes == null && f.path != null) {
           try {
@@ -753,6 +827,14 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
         if (bytes == null || bytes.isEmpty) continue;
         final name = f.name;
         final size = f.size > 0 ? f.size : bytes.length;
+        if (size > maxFileSize) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Fichier "$name" trop volumineux (> 20 Mo)'), duration: const Duration(seconds: 3)),
+            );
+          }
+          continue;
+        }
         final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
         final isImg = ['png', 'jpg', 'jpeg', 'webp', 'gif'].contains(ext);
         final b64 = base64Encode(bytes);
@@ -765,7 +847,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
         newItems.add(_AttachedItem(
           name: name,
           size: size,
-          mimeType: isImg ? (ext == 'png' ? 'image/png' : 'image/jpeg') : 'application/octet-stream',
+          mimeType: isImg ? _detectMime(name) : 'application/octet-stream',
           bytes: bytes,
           base64Data: b64,
           isImage: isImg,
@@ -773,7 +855,9 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
         ));
       }
 
-      setState(() => _attachments.addAll(newItems));
+      if (newItems.isNotEmpty) {
+        setState(() => _attachments.addAll(newItems));
+      }
     } catch (_) {
       _pickTextFile();
     }
@@ -1685,17 +1769,33 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
 
   void _showActionDropdown([String query = '']) {
     _mentionOrActionOpen = true;
-    final q = query.toLowerCase();
-    // P2 : filtre au fur et à mesure — '/pl' ne montre que /plan.
-    final filtered = _slashCommands
-        .where((c) => q.isEmpty || c.title.toLowerCase().contains(q))
-        .toList();
+    final q = query.toLowerCase().replaceAll('/', '').trim();
+
+    // Classement et filtrage intelligent :
+    // 1. Débute par la requête (priorité max)
+    // 2. Titre contient la requête
+    // 3. Description contient la requête
+    final filtered = List<_SlashCommand>.from(_slashCommands.where((c) {
+      if (q.isEmpty) return true;
+      final t = c.title.toLowerCase().replaceAll('/', '');
+      final sub = c.subtitle.toLowerCase();
+      return t.contains(q) || sub.contains(q);
+    }))
+      ..sort((a, b) {
+        if (q.isEmpty) return 0;
+        final aT = a.title.toLowerCase().replaceAll('/', '');
+        final bT = b.title.toLowerCase().replaceAll('/', '');
+        final aStarts = aT.startsWith(q) ? 1 : 0;
+        final bStarts = bT.startsWith(q) ? 1 : 0;
+        if (aStarts != bStarts) return bStarts.compareTo(aStarts);
+        return aT.compareTo(bT);
+      });
 
     CustomDropdownOverlay.show(
       context: context,
       targetKey: _textFieldKey,
-      width: 250,
-      maxHeight: 200,
+      width: 280,
+      maxHeight: 240,
       child: Material(
         color: Colors.transparent,
         child: filtered.isEmpty
@@ -1707,7 +1807,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     child: Text(
-                      'Slash Commands & Actions',
+                      'Commandes & Actions rapides',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -1720,6 +1820,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
                       c.icon,
                       c.title,
                       c.subtitle,
+                      q,
                       () {
                         _insertTextAtCursor('${c.title} ');
                         CustomDropdownOverlay.hide();
@@ -1755,6 +1856,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
     IconData icon,
     String title,
     String subtitle,
+    String searchQuery,
     VoidCallback onTap,
   ) {
     final scheme = Theme.of(context).colorScheme;
@@ -1770,25 +1872,29 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(
               children: [
-                Icon(icon, size: 16, color: scheme.onSurfaceVariant),
+                Icon(icon, size: 16, color: scheme.primary),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text(
+                      _buildHighlightedText(
                         title,
-                        style: (textTheme.bodyMedium ?? const TextStyle(fontSize: 13)).copyWith(
+                        searchQuery,
+                        (textTheme.bodyMedium ?? const TextStyle(fontSize: 13)).copyWith(
                           color: scheme.onSurface,
-                          fontWeight: FontWeight.w500,
+                          fontWeight: FontWeight.w600,
                         ),
+                        scheme.primary,
                       ),
-                      Text(
+                      _buildHighlightedText(
                         subtitle,
-                        style: (textTheme.bodySmall ?? const TextStyle(fontSize: 11)).copyWith(
+                        searchQuery,
+                        (textTheme.bodySmall ?? const TextStyle(fontSize: 11)).copyWith(
                           color: scheme.onSurfaceVariant,
                         ),
+                        scheme.primary,
                       ),
                     ],
                   ),
@@ -1797,6 +1903,45 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildHighlightedText(
+    String text,
+    String query,
+    TextStyle baseStyle,
+    Color highlightColor,
+  ) {
+    if (query.isEmpty) {
+      return Text(text, style: baseStyle, overflow: TextOverflow.ellipsis, maxLines: 1);
+    }
+    final lowerText = text.toLowerCase();
+    final lowerQuery = query.toLowerCase();
+    final index = lowerText.indexOf(lowerQuery);
+    if (index < 0) {
+      return Text(text, style: baseStyle, overflow: TextOverflow.ellipsis, maxLines: 1);
+    }
+    final before = text.substring(0, index);
+    final match = text.substring(index, index + query.length);
+    final after = text.substring(index + query.length);
+
+    return RichText(
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      text: TextSpan(
+        style: baseStyle,
+        children: [
+          if (before.isNotEmpty) TextSpan(text: before),
+          TextSpan(
+            text: match,
+            style: baseStyle.copyWith(
+              color: highlightColor,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          if (after.isNotEmpty) TextSpan(text: after),
+        ],
       ),
     );
   }
@@ -2185,25 +2330,39 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
               ),
             if (!hasKeyboard && !isIdle)
               _buildQuickActionPills(scheme, isDark),
-            Container(
+            DragTarget<String>(
+              onWillAcceptWithDetails: (details) => true,
+              onAcceptWithDetails: (details) {
+                final dropped = details.data;
+                if (dropped.isNotEmpty) {
+                  final cur = _controller.text;
+                  final prefix = cur.isEmpty || cur.endsWith(' ') ? '' : ' ';
+                  _controller.text = '$cur$prefix$dropped ';
+                  _controller.selection = TextSelection.fromPosition(TextPosition(offset: _controller.text.length));
+                  setState(() {});
+                }
+              },
+              builder: (ctx, candidateData, rejectedData) => Container(
               padding: EdgeInsets.symmetric(
                 horizontal: 12,
                 vertical: hasKeyboard ? 6 : (isIdle ? 7 : 10),
               ),
               decoration: BoxDecoration(
-                color: isDark
-                    ? AppColors.surfaceRaised
-                    : AppColors.panel(context),
+                color: candidateData.isNotEmpty
+                    ? scheme.primary.withValues(alpha: 0.15)
+                    : (isDark ? AppColors.surfaceRaised : AppColors.panel(context)),
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                  color: isQueued
-                      ? scheme.primary.withValues(alpha: 0.8)
-                      : (_focusNode.hasFocus
-                          ? (isDark ? AppColors.accentBlue : scheme.primary)
-                          : (isDark
-                              ? AppColors.borderSubtle
-                              : AppColors.border(context))),
-                  width: _focusNode.hasFocus ? 1.2 : 1.0,
+                  color: candidateData.isNotEmpty
+                      ? scheme.primary
+                      : (isQueued
+                          ? scheme.primary.withValues(alpha: 0.8)
+                          : (_focusNode.hasFocus
+                              ? (isDark ? AppColors.accentBlue : scheme.primary)
+                              : (isDark
+                                  ? AppColors.borderSubtle
+                                  : AppColors.border(context)))),
+                  width: (candidateData.isNotEmpty || _focusNode.hasFocus) ? 1.2 : 1.0,
                 ),
               ),
               child: Column(
@@ -2595,6 +2754,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
                   ),
                 ],
               ),
+            ),
             ),
           ],
         ),

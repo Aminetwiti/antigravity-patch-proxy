@@ -177,9 +177,33 @@ func renameSessionOnDisk(home, cascadeID, title string) error {
 }
 
 // pinSessionOnDisk persiste le statut épinglé dans annotations/<cascadeID>.pbtxt
+// cascadeExistsOnDisk vérifie si une session/cascade existe physiquement sur le disque.
+func cascadeExistsOnDisk(home, cascadeID string) bool {
+	if cascadeID == "" {
+		return false
+	}
+	subDir := resolveGeminiSubDir(home, cascadeID)
+	brainDir := filepath.Join(home, ".gemini", subDir, "brain", cascadeID)
+	if fi, err := os.Stat(brainDir); err == nil && fi.IsDir() {
+		return true
+	}
+	convDir := filepath.Join(home, ".gemini", subDir, "conversations", cascadeID)
+	if fi, err := os.Stat(convDir); err == nil && fi.IsDir() {
+		return true
+	}
+	annoPath := filepath.Join(home, ".gemini", subDir, "annotations", cascadeID+".pbtxt")
+	if _, err := os.Stat(annoPath); err == nil {
+		return true
+	}
+	return false
+}
+
 func pinSessionOnDisk(home, cascadeID string, pinned bool) error {
 	if cascadeID == "" {
 		return fmt.Errorf("cascadeId requis")
+	}
+	if !cascadeExistsOnDisk(home, cascadeID) {
+		return fmt.Errorf("conversation introuvable sur le disque (impossible d'épingler)")
 	}
 	annoDir := filepath.Join(home, ".gemini", resolveGeminiSubDir(home, cascadeID), "annotations")
 	_ = os.MkdirAll(annoDir, 0o755)
@@ -216,6 +240,9 @@ func pinSessionOnDisk(home, cascadeID string, pinned bool) error {
 func archiveSessionOnDisk(home, cascadeID string, archived bool) error {
 	if cascadeID == "" {
 		return fmt.Errorf("cascadeId requis")
+	}
+	if !cascadeExistsOnDisk(home, cascadeID) {
+		return fmt.Errorf("conversation introuvable sur le disque (impossible d'archiver)")
 	}
 	annoDir := filepath.Join(home, ".gemini", resolveGeminiSubDir(home, cascadeID), "annotations")
 	_ = os.MkdirAll(annoDir, 0o755)
@@ -712,11 +739,14 @@ func extractSessionMetadata(transcriptPath, cascadeID string) (title string, wor
 				}
 			}
 
-			// 3. Titre depuis USER_INPUT
-			if title == "" && entry.Type == "USER_INPUT" && entry.Content != "" {
+			// 3. Titre depuis USER_INPUT (uniquement si aucun titre officiel ou valide n'a encore été assigné)
+			if !hasOfficialTitle && title == "" && entry.Type == "USER_INPUT" && entry.Content != "" {
 				clean := extractUserRequest(entry.Content)
 				if !strings.HasPrefix(clean, "<identity>") && !strings.HasPrefix(clean, "<user_information>") && clean != "" {
-					title = cleanPromptTitle(clean)
+					cand := cleanPromptTitle(clean)
+					if cand != "" && !isSubagentTitle(cand) {
+						title = cand
+					}
 				}
 			}
 		}

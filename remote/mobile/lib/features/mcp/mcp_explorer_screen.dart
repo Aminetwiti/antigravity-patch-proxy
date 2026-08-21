@@ -321,6 +321,7 @@ class _McpExplorerScreenState extends State<McpExplorerScreen> {
                               return Card(
                                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                                 shape: RoundedRectangleBorder(
+),
                                   borderRadius: BorderRadius.circular(AppRadius.md),
                                   side: BorderSide(color: scheme.outlineVariant),
                                 ),
@@ -333,7 +334,11 @@ class _McpExplorerScreenState extends State<McpExplorerScreen> {
                                             width: 8,
                                             height: 8,
                                             decoration: BoxDecoration(
-                                              color: server.status == 'ready' ? AppColors.positive : scheme.tertiary,
+                                              color: server.status == 'ready' || server.status == 'connected'
+                                                  ? AppColors.positive
+                                                  : server.status == 'connecting' || server.status == 'pending'
+                                                      ? AppColors.warning
+                                                      : AppColors.danger,
                                               shape: BoxShape.circle,
                                             ),
                                           ),
@@ -341,6 +346,31 @@ class _McpExplorerScreenState extends State<McpExplorerScreen> {
                                           Text(
                                             server.name,
                                             style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                                            decoration: BoxDecoration(
+                                              color: (server.status == 'ready' || server.status == 'connected'
+                                                      ? AppColors.positive
+                                                      : server.status == 'connecting' || server.status == 'pending'
+                                                          ? AppColors.warning
+                                                          : AppColors.danger)
+                                                  .withValues(alpha: 0.15),
+                                              borderRadius: BorderRadius.circular(AppRadius.xs),
+                                            ),
+                                            child: Text(
+                                              server.status.toUpperCase(),
+                                              style: TextStyle(
+                                                fontSize: 9.5,
+                                                fontWeight: FontWeight.w700,
+                                                color: server.status == 'ready' || server.status == 'connected'
+                                                    ? AppColors.positive
+                                                    : server.status == 'connecting' || server.status == 'pending'
+                                                        ? AppColors.warning
+                                                        : AppColors.danger,
+                                              ),
+                                            ),
                                           ),
                                           const Spacer(),
                                           Container(
@@ -351,13 +381,13 @@ class _McpExplorerScreenState extends State<McpExplorerScreen> {
                                             ),
                                             child: Text(
                                               '${server.toolCount} tools',
-                                              style: const TextStyle(fontSize: 11),
+                                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
                                             ),
                                           ),
                                         ],
                                       ),
                                       subtitle: server.description != null
-                                          ? Text(server.description!, style: const TextStyle(fontSize: 11))
+                                          ? Text(server.description!, style: const TextStyle(fontSize: 11.5))
                                           : null,
                                       onTap: () => setState(() => _expandedIndex = isExpanded ? null : index),
                                     ),

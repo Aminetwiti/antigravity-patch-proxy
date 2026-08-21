@@ -72,6 +72,10 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
   // P4 : sessions épinglées — synchronisées localement et avec le daemon.
   final Set<String> _pinnedIds = {};
 
+  // Top-level sections collapsible states
+  bool _quickNavExpanded = true;
+  bool _projectsTreeExpanded = true;
+
   // Suivi des sessions consultées pour afficher le point bleu (activité terminée non lue)
   final Set<String> _readSessionIds = {};
 
@@ -355,27 +359,55 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
 
             const SizedBox(height: 12),
 
-            // ── Quick-nav actions (History, Scheduled Tasks)
-            _SidebarActionItem(
-              icon: Icons.history_rounded,
-              label: 'Conversation History',
-              isSelected: false,
-              onTap: () {
-                Navigator.of(context).pop();
-                widget.onConversationHistory?.call();
-              },
+            // ── Quick Navigation Section (Collapsible)
+            InkWell(
+              onTap: () => setState(() => _quickNavExpanded = !_quickNavExpanded),
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
+                child: Row(
+                  children: [
+                    Text(
+                      'Navigation',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.3,
+                        color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                      ),
+                    ),
+                    const Spacer(),
+                    Icon(
+                      _quickNavExpanded ? Icons.keyboard_arrow_down_rounded : Icons.keyboard_arrow_right_rounded,
+                      size: 16,
+                      color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                    ),
+                  ],
+                ),
+              ),
             ),
-            _SidebarActionItem(
-              icon: Icons.schedule_outlined,
-              label: 'Scheduled Tasks',
-              isSelected: false,
-              onTap: () {
-                Navigator.of(context).pop();
-                widget.onScheduledTasks?.call();
-              },
-            ),
+            if (_quickNavExpanded) ...[
+              _SidebarActionItem(
+                icon: Icons.history_rounded,
+                label: 'Conversation History',
+                isSelected: false,
+                onTap: () {
+                  Navigator.of(context).pop();
+                  widget.onConversationHistory?.call();
+                },
+              ),
+              _SidebarActionItem(
+                icon: Icons.schedule_outlined,
+                label: 'Scheduled Tasks',
+                isSelected: false,
+                onTap: () {
+                  Navigator.of(context).pop();
+                  widget.onScheduledTasks?.call();
+                },
+              ),
+            ],
 
-            const SizedBox(height: 14),
+            const SizedBox(height: 8),
 
             // ── Section Header: Projects [display options] [new folder]
             Padding(
@@ -415,6 +447,26 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                         }
                       });
                     },
+                  ),
+                  _HeaderIconBtn(
+                    icon: _collapsedFolders.length >= projectNames.length && projectNames.isNotEmpty
+                        ? Icons.unfold_more_rounded
+                        : Icons.unfold_less_rounded,
+                    tooltip: _collapsedFolders.length >= projectNames.length && projectNames.isNotEmpty
+                        ? 'Développer tout'
+                        : 'Réduire tout',
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      setState(() {
+                        if (_collapsedFolders.length >= projectNames.length && projectNames.isNotEmpty) {
+                          _collapsedFolders.clear();
+                        } else {
+                          _collapsedFolders.addAll(projectNames);
+                        }
+                      });
+                      _saveCollapsedFolders();
+                    },
+                    size: 15,
                   ),
                   const SizedBox(width: 6),
                   _HeaderIconBtn(
@@ -749,8 +801,8 @@ class _WorkspaceFolderSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    // Antigravity 2.0 IDE sidebar: max 6 sessions récentes par projet
-    final visibleSessions = sessions.take(6).toList();
+    // Antigravity 2.0 IDE sidebar: jusqu'à 30 sessions en vue non groupée, 6 en vue groupée par projet
+    final visibleSessions = hideHeader ? sessions.take(30).toList() : sessions.take(6).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -818,6 +870,7 @@ class _WorkspaceFolderSection extends StatelessWidget {
                           value: 'copy_name',
                           height: 32,
                           child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
                               Icon(Icons.copy_rounded, size: 14, color: itemScheme.onSurface),
                               const SizedBox(width: 8),
@@ -829,6 +882,7 @@ class _WorkspaceFolderSection extends StatelessWidget {
                           value: 'settings',
                           height: 32,
                           child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
                               Icon(Icons.settings_outlined, size: 14, color: itemScheme.onSurface),
                               const SizedBox(width: 8),
@@ -1085,6 +1139,14 @@ class _SessionRowItemState extends State<_SessionRowItem> {
         content: TextField(
           controller: controller,
           autofocus: true,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (val) {
+            final newTitle = val.trim();
+            Navigator.of(ctx).pop();
+            if (newTitle.isNotEmpty && newTitle != widget.session.title) {
+              widget.onRename?.call(newTitle);
+            }
+          },
           style: TextStyle(fontSize: 13, color: scheme.onSurface),
           decoration: InputDecoration(
             hintText: 'Nouveau titre...',
@@ -1101,6 +1163,7 @@ class _SessionRowItemState extends State<_SessionRowItem> {
             child: Text('Annuler', style: TextStyle(color: scheme.onSurfaceVariant)),
           ),
           FilledButton(
+            autofocus: true,
             onPressed: () {
               final newTitle = controller.text.trim();
               Navigator.of(ctx).pop();
@@ -1133,6 +1196,7 @@ class _SessionRowItemState extends State<_SessionRowItem> {
             child: Text('Annuler', style: TextStyle(color: scheme.onSurfaceVariant)),
           ),
           FilledButton(
+            autofocus: true,
             style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
             onPressed: () {
               Navigator.of(ctx).pop();
@@ -1152,160 +1216,210 @@ class _SessionRowItemState extends State<_SessionRowItem> {
     final isSelected = widget.isSelected;
     final isRunning = widget.session.isRunning;
     final isUnread = (widget.isUnread || widget.session.hasUnread) && !isSelected && !isRunning;
-    final displayTitle = widget.session.title.trim().isNotEmpty
+    final rawTitle = widget.session.title.trim().isNotEmpty
         ? widget.session.title.trim()
         : 'Nouvelle conversation';
+    // Point 9 : remplacer [nom](url) par @nom propre
+    final displayTitle = rawTitle.replaceAllMapped(
+      RegExp(r'\[([^\]]+)\]\([^\)]+\)'),
+      (m) => '@${m.group(1)}',
+    );
     final subtitleText = widget.session.worktree ?? WorkspacePath.displayName(widget.session.workspacePath);
     final pinText = widget.isPinned ? "Épinglée, " : "";
     final runningText = isRunning ? "En cours d'exécution, " : "";
     final timeText = widget.session.time.isNotEmpty ? widget.session.time : "récent";
 
-    Widget item = Semantics(
-      button: true,
-      selected: isSelected,
-      label: '$displayTitle, $pinText$runningText$timeText',
-      child: MouseRegion(
-        onEnter: (_) => setState(() => _hovered = true),
-        onExit: (_) => setState(() => _hovered = false),
-        child: GestureDetector(
-          onTap: () {
-            HapticFeedback.selectionClick();
-            widget.onTap();
-          },
-          onLongPress: () => _showSessionContextMenu(context),
-          onSecondaryTap: () => _showSessionContextMenu(context),
-          child: AnimatedContainer(
-            duration: AppMotion.fast,
-            curve: AppMotion.easeOut,
-            margin: const EdgeInsets.only(left: 14, right: 6, top: 1, bottom: 1),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6.5),
-            decoration: BoxDecoration(
-              color: isSelected
-                  ? (isDark ? const Color(0xFF26282E) : scheme.surfaceContainerHighest)
-                  : (_hovered
-                      ? (isDark ? const Color(0xFF1E2025) : scheme.surfaceContainerHigh.withValues(alpha: 0.5))
-                      : Colors.transparent),
-              borderRadius: BorderRadius.circular(AppRadius.md),
-            ),
-            child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      displayTitle,
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        color: isSelected
-                            ? (isDark ? const Color(0xFFFFFFFF) : scheme.onSurface)
-                            : (isDark ? const Color(0xFFB0B0BA) : scheme.onSurfaceVariant),
-                        fontWeight: isSelected ? FontWeight.w500 : FontWeight.w400,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 1,
-                    ),
-                    if (widget.showSubtitle && subtitleText.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 1.5),
-                        child: Text(
-                          subtitleText,
-                          style: TextStyle(
-                            fontSize: 10.5,
-                            color: isSelected
-                                ? (isDark ? const Color(0xFF8F909A) : scheme.primary)
-                                : (isDark ? const Color(0xFF8E909D) : scheme.outline),
-                            fontWeight: FontWeight.w400,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 1,
-                        ),
-                      ),
-                  ],
-                ),
+    Widget item = Tooltip(
+      message: '$displayTitle\n📁 $subtitleText',
+      waitDuration: const Duration(milliseconds: 600),
+      child: Semantics(
+        button: true,
+        selected: isSelected,
+        label: '$displayTitle, $pinText$runningText$timeText, projet $subtitleText',
+        child: MouseRegion(
+          onEnter: (_) => setState(() => _hovered = true),
+          onExit: (_) => setState(() => _hovered = false),
+          child: GestureDetector(
+            onTap: () {
+              HapticFeedback.selectionClick();
+              widget.onTap();
+            },
+            onLongPress: () => _showSessionContextMenu(context),
+            onSecondaryTap: () => _showSessionContextMenu(context),
+            child: AnimatedContainer(
+              duration: AppMotion.fast,
+              curve: AppMotion.easeOut,
+              margin: const EdgeInsets.only(left: 14, right: 6, top: 1, bottom: 1),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6.5),
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? (isDark ? const Color(0xFF26282E) : scheme.surfaceContainerHighest)
+                    : (_hovered
+                        ? (isDark ? const Color(0xFF1E2025) : scheme.surfaceContainerHigh.withValues(alpha: 0.5))
+                        : Colors.transparent),
+                borderRadius: BorderRadius.circular(AppRadius.md),
               ),
-              const SizedBox(width: 8),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 180),
-                switchInCurve: Curves.easeOutCubic,
-                switchOutCurve: Curves.easeOutCubic,
-                child: isRunning
-                    ? Tooltip(
-                        key: const ValueKey('running'),
-                        message: 'En cours d\'exécution',
-                        child: AntigravitySpinningArc(
-                          size: 13.5,
+              child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        displayTitle,
+                        style: TextStyle(
+                          fontSize: 12.5,
                           color: isSelected
-                              ? (isDark ? const Color(0xFFB4B8C5) : scheme.primary)
-                              : (isDark ? const Color(0xFF8E929E) : scheme.outline),
+                              ? (isDark ? const Color(0xFFFFFFFF) : scheme.onSurface)
+                              : (isDark ? const Color(0xFFB0B0BA) : scheme.onSurfaceVariant),
+                          fontWeight: isSelected ? FontWeight.w500 : FontWeight.w400,
                         ),
-                      )
-                    : widget.session.isBackgroundTask
-                        ? Tooltip(
-                            key: const ValueKey('background_task'),
-                            message: 'Tâche d\'arrière-plan en cours',
-                            child: AntigravitySpinningArc(
-                              size: 13.5,
-                              color: isSelected
-                                  ? const Color(0xFF8AB4F8)
-                                  : const Color(0xFF669DF6),
-                            ),
-                          )
-                        : widget.session.isWaitingAction
-                            ? Tooltip(
-                                key: const ValueKey('waiting'),
-                                message: 'Action ou approbation requise',
-                                child: Container(
-                                  width: 6,
-                                  height: 6,
-                                  decoration: const BoxDecoration(
-                                    color: Color(0xFFE5A93C),
-                                    shape: BoxShape.circle,
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                      if (widget.showSubtitle && subtitleText.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 1.5),
+                          child: Row(
+                            children: [
+                              Icon(
+                                (widget.session.worktree != null && widget.session.worktree!.isNotEmpty)
+                                    ? Icons.account_tree_outlined
+                                    : Icons.folder_outlined,
+                                size: 10.5,
+                                color: isSelected
+                                    ? (isDark ? const Color(0xFF8F909A) : scheme.primary)
+                                    : (isDark ? const Color(0xFF8E909D) : scheme.outline),
+                              ),
+                              const SizedBox(width: 3.5),
+                              Expanded(
+                                child: Text(
+                                  subtitleText,
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    color: isSelected
+                                        ? (isDark ? const Color(0xFF8F909A) : scheme.primary)
+                                        : (isDark ? const Color(0xFF8E909D) : scheme.outline),
+                                    fontWeight: FontWeight.w400,
                                   ),
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
                                 ),
-                              )
-                            : widget.session.isError
-                                ? Tooltip(
-                                    key: const ValueKey('error'),
-                                    message: 'Erreur',
-                                    child: Container(
-                                      width: 6,
-                                      height: 6,
-                                      decoration: const BoxDecoration(
-                                        color: Color(0xFFE5534B),
-                                        shape: BoxShape.circle,
-                                      ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  switchInCurve: Curves.easeOutCubic,
+                  switchOutCurve: Curves.easeOutCubic,
+                  child: isRunning
+                      ? Tooltip(
+                          key: const ValueKey('running'),
+                          message: 'En cours d\'exécution',
+                          child: AntigravitySpinningArc(
+                            size: 13.5,
+                            color: isSelected
+                                ? (isDark ? const Color(0xFFB4B8C5) : scheme.primary)
+                                : (isDark ? const Color(0xFF8E929E) : scheme.outline),
+                          ),
+                        )
+                      : widget.session.isBackgroundTask
+                          ? Tooltip(
+                              key: const ValueKey('background_task'),
+                              message: 'Tâche d\'arrière-plan en cours',
+                              child: AntigravitySpinningArc(
+                                size: 13.5,
+                                color: isSelected
+                                    ? const Color(0xFF8AB4F8)
+                                    : const Color(0xFF669DF6),
+                              ),
+                            )
+                          : widget.session.isWaitingAction
+                              ? Tooltip(
+                                  key: const ValueKey('waiting'),
+                                  message: 'Action ou approbation requise',
+                                  child: Container(
+                                    width: 6,
+                                    height: 6,
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFFE5A93C),
+                                      shape: BoxShape.circle,
                                     ),
-                                  )
-                                : isUnread
-                                    ? const Tooltip(
-                                        key: ValueKey('unread_blue_dot'),
-                                        message: 'Session terminée — non lue',
-                                        child: _PulsingBlueDot(),
-                                      )
-                                    : (isSelected || _hovered)
-                                        ? Tooltip(
-                                            key: const ValueKey('session_menu_btn'),
-                                            message: 'Options de la conversation',
-                                            child: InkWell(
-                                              borderRadius: BorderRadius.circular(4),
-                                              onTap: () {
-                                                HapticFeedback.selectionClick();
-                                                _showSessionContextMenu(context);
-                                              },
-                                              child: Padding(
-                                                padding: const EdgeInsets.all(4),
-                                                child: Icon(
-                                                  Icons.more_horiz_rounded,
-                                                  size: 15,
-                                                  color: isSelected
-                                                      ? (isDark ? const Color(0xFFB0B0BA) : scheme.onSurface)
-                                                      : (isDark ? const Color(0xFF8F909A) : scheme.onSurfaceVariant),
+                                  ),
+                                )
+                              : widget.session.isError
+                                  ? Tooltip(
+                                      key: const ValueKey('error'),
+                                      message: 'Erreur',
+                                      child: Container(
+                                        width: 6,
+                                        height: 6,
+                                        decoration: const BoxDecoration(
+                                          color: Color(0xFFE5534B),
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                    )
+                                  : isUnread
+                                      ? const Tooltip(
+                                          key: ValueKey('unread_blue_dot'),
+                                          message: 'Session terminée — non lue',
+                                          child: _PulsingBlueDot(),
+                                        )
+                                      : (isSelected || _hovered)
+                                          ? Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                if (widget.onTogglePin != null)
+                                                  Tooltip(
+                                                    message: widget.isPinned ? 'Désépingler' : 'Épingler',
+                                                    child: InkWell(
+                                                      borderRadius: BorderRadius.circular(4),
+                                                      onTap: () {
+                                                        HapticFeedback.selectionClick();
+                                                        widget.onTogglePin?.call();
+                                                      },
+                                                      child: Padding(
+                                                        padding: const EdgeInsets.all(3),
+                                                        child: Icon(
+                                                          widget.isPinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
+                                                          size: 14,
+                                                          color: isDark ? const Color(0xFF8F909A) : scheme.onSurfaceVariant,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                Focus(
+                                                  child: Tooltip(
+                                                    key: const ValueKey('session_menu_btn'),
+                                                    message: 'Options de la conversation (Clavier: Entrée)',
+                                                    child: InkWell(
+                                                      borderRadius: BorderRadius.circular(4),
+                                                      onTap: () {
+                                                        HapticFeedback.selectionClick();
+                                                        _showSessionContextMenu(context);
+                                                      },
+                                                      child: Padding(
+                                                        padding: const EdgeInsets.all(3),
+                                                        child: Icon(
+                                                          Icons.more_horiz_rounded,
+                                                          size: 15,
+                                                          color: isSelected
+                                                              ? (isDark ? const Color(0xFFB0B0BA) : scheme.onSurface)
+                                                              : (isDark ? const Color(0xFF8F909A) : scheme.onSurfaceVariant),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
                                                 ),
-                                              ),
-                                            ),
-                                          )
+                                              ],
+                                            )
                                         : widget.session.time.isNotEmpty
                                             ? Text(
                                                 widget.session.time,

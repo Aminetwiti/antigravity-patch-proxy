@@ -1409,8 +1409,7 @@ func (s *Server) handleMcpAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"raw": string(respBody)}})
 		return
 	}
-	// list_mcp_servers : nettoyage léger du payload relayé — un serveur MCP
-	// configuré sans champ "name" n'a pas à exposer serverName:"" au mobile.
+	// list_mcp_servers : nettoyage et isolation des configurations invalides/non supportées (Point 5)
 	if msg.Type == "list_mcp_servers" {
 		if servers, ok := proxyResp["servers"].([]interface{}); ok {
 			cleaned := make([]interface{}, 0, len(servers))
@@ -1430,8 +1429,64 @@ func (s *Server) handleMcpAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 			proxyResp["servers"] = cleaned
 		}
+	} else if msg.Type == "call_mcp_tool" || msg.Type == "mcp_tool" {
+		// Point 4 : déplacement des gros attachements binaires (images, PDF, audio) dans scratch/mcp_media/
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			sanitizeMcpResponse(home, proxyResp)
+		}
 	}
 	s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: proxyResp})
+}
+
+// sanitizeMcpResponse inspecte les retours MCP et sauvegarde les gros attachements binaires
+// (> 32 Ko, images, PDF, audio) sur disque dans scratch/mcp_media/ pour ne pas faire déborder le contexte du tour.
+func sanitizeMcpResponse(home string, resp map[string]interface{}) {
+	if resp == nil {
+		return
+	}
+	content, ok := resp["content"].([]interface{})
+	if !ok {
+		return
+	}
+	mediaDir := filepath.Join(home, ".gemini", "antigravity", "scratch", "mcp_media")
+	_ = os.MkdirAll(mediaDir, 0755)
+
+	for _, item := range content {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		itemType, _ := m["type"].(string)
+		dataStr, _ := m["data"].(string)
+		mimeType, _ := m["mimeType"].(string)
+
+		if (itemType == "image" || itemType == "resource" || strings.HasPrefix(mimeType, "image/") || strings.HasPrefix(mimeType, "audio/") || mimeType == "application/pdf") && len(dataStr) > 32*1024 {
+			rawBytes, err := base64.StdEncoding.DecodeString(dataStr)
+			if err == nil && len(rawBytes) > 0 {
+				ext := ".bin"
+				if strings.Contains(mimeType, "png") {
+					ext = ".png"
+				} else if strings.Contains(mimeType, "jpeg") || strings.Contains(mimeType, "jpg") {
+					ext = ".jpg"
+				} else if strings.Contains(mimeType, "pdf") {
+					ext = ".pdf"
+				} else if strings.Contains(mimeType, "audio") || strings.Contains(mimeType, "wav") {
+					ext = ".wav"
+				} else if strings.Contains(mimeType, "mp3") {
+					ext = ".mp3"
+				}
+				fileName := fmt.Sprintf("mcp_%d%s", time.Now().UnixNano(), ext)
+				targetPath := filepath.Join(mediaDir, fileName)
+				if err := os.WriteFile(targetPath, rawBytes, 0644); err == nil {
+					m["data"] = ""
+					m["savedPath"] = targetPath
+					m["fileUri"] = "file:///" + filepath.ToSlash(targetPath)
+					m["text"] = fmt.Sprintf("[MCP Media Saved: %s](%s)", fileName, m["fileUri"])
+				}
+			}
+		}
+	}
 }
 
 // broadcast envoie le même message à TOUS les clients connectés : c'est ce qui
@@ -3651,6 +3706,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			// avec le stream_end diffusé en parallèle.
 			if err == nil {
 				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "submitted"}})
+			} else {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
 			}
 			return
 		} else if ok {
@@ -3660,9 +3717,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "approval expired (auto-denied)"})
 			return
 		}
-		// R├®ponse libre : fire-and-forget vers le LS (le flux arrive par
-		// SendMessageStream) ÔÇö le mobile n'attend pas de r├®ponse unary ici,
-		// c'est le prochain stream_delta qui fait foi.
+		// Réponse libre : accuse réception au client et envoie au LS
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "submitted"}})
 		go func() {
 			_ = s.RPCClient.SendMessageStream(msg.CascadeID, responseText, func([]byte) error { return nil })
 		}()
@@ -5530,20 +5586,44 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 
 	case "revert_to_step", "cascade.revert_to_step":
-		if msg.CascadeID == "" || msg.StepIndex < 0 {
+		cid := msg.CascadeID
+		if cid == "" {
+			cid = msg.ConversationID
+		}
+		stepIdx := msg.StepIndex
+		if stepIdx <= 0 && msg.Data != nil {
+			if si, ok := msg.Data["stepIndex"].(float64); ok {
+				stepIdx = int64(si)
+			}
+		}
+		if cid == "" || stepIdx < 0 {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId + stepIndex requis"})
 			return
 		}
-		err = s.RPCClient.RevertToCascadeStep(msg.CascadeID, msg.StepIndex)
+		err = s.RPCClient.RevertToCascadeStep(cid, stepIdx)
 		if err == nil {
+			// Invalider le buffer de récupération pour les étapes postérieures au rollback
+			s.recoveryMu.Lock()
+			if buf, ok := s.stepRecovery[cid]; ok && len(buf) > 0 {
+				newBuf := make([]OutgoingMessage, 0, len(buf))
+				for _, m := range buf {
+					if m.StepIndex <= stepIdx {
+						newBuf = append(newBuf, m)
+					}
+				}
+				s.stepRecovery[cid] = newBuf
+			}
+			s.recoveryMu.Unlock()
+			s.clearApproval(cid)
+
 			s.broadcast(OutgoingMessage{
 				Type: "cascade_reverted",
 				Data: map[string]interface{}{
-					"cascadeId": msg.CascadeID,
-					"stepIndex": msg.StepIndex,
+					"cascadeId": cid,
+					"stepIndex": stepIdx,
 				},
 			})
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "reverted", "cascadeId": msg.CascadeID, "stepIndex": msg.StepIndex}})
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "reverted", "cascadeId": cid, "stepIndex": stepIdx}})
 			return
 		}
 

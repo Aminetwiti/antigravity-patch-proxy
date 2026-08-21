@@ -162,6 +162,49 @@ const TOOL_PARAM_NORMALIZATION: Record<string, { primaryKey: string; aliases: st
       'destination',
     ],
   },
+  write_to_file: {
+    primaryKey: 'TargetFile',
+    aliases: [
+      'target_file',
+      'targetFile',
+      'TargetFile',
+      'file',
+      'filePath',
+      'file_path',
+      'path',
+      'AbsolutePath',
+      'absolute_path',
+      'filename',
+      'FileName',
+      'target',
+      'dest',
+      'destination',
+    ],
+  },
+  'write_to_file.CodeContent': {
+    primaryKey: 'CodeContent',
+    aliases: ['code_content', 'codeContent', 'content', 'Code', 'code', 'text', 'body', 'data', 'contents'],
+  },
+  'write_to_file.Overwrite': {
+    primaryKey: 'Overwrite',
+    aliases: ['overwrite', 'force', 'replace'],
+  },
+  'write_to_file.Description': {
+    primaryKey: 'Description',
+    aliases: ['description', 'desc', 'summary', 'comment'],
+  },
+  'replace_file_content.TargetContent': {
+    primaryKey: 'TargetContent',
+    aliases: ['target_content', 'targetContent', 'oldContent', 'old_content', 'search', 'target'],
+  },
+  'replace_file_content.ReplacementContent': {
+    primaryKey: 'ReplacementContent',
+    aliases: ['replacement_content', 'replacementContent', 'newContent', 'new_content', 'replace', 'replacement'],
+  },
+  'replace_file_content.Instruction': {
+    primaryKey: 'Instruction',
+    aliases: ['instruction', 'description', 'desc', 'comment'],
+  },
   run_command: {
     primaryKey: 'CommandLine',
     aliases: [

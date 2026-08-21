@@ -38,6 +38,17 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
   final Map<int, String> _annotations = {}; // lineIndex -> comment
   bool _wrapLines = true;
   bool _hasRealDiff = true;
+  bool _showSideBySideImage = true;
+
+  bool get _isImageOrSvg {
+    final name = (widget.fileName ?? widget.filePath ?? '').toLowerCase();
+    return name.endsWith('.png') ||
+        name.endsWith('.jpg') ||
+        name.endsWith('.jpeg') ||
+        name.endsWith('.gif') ||
+        name.endsWith('.webp') ||
+        name.endsWith('.svg');
+  }
 
   @override
   void initState() {
@@ -263,6 +274,7 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
                   filePath: widget.filePath ?? widget.fileName ?? 'code',
                   snippet: line.content.trim(),
                   commentText: text,
+                  lineNumber: line.newLine ?? line.oldLine ?? (lineIndex + 1),
                 ));
               } else {
                 setState(() => _annotations.remove(lineIndex));
@@ -473,6 +485,22 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
                     constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                   ),
 
+                  // Toggle image side-by-side mode
+                  if (_isImageOrSvg)
+                    IconButton(
+                      icon: Icon(
+                        _showSideBySideImage ? Icons.splitscreen_rounded : Icons.code_rounded,
+                        size: 16,
+                        color: _showSideBySideImage ? scheme.primary : scheme.onSurfaceVariant,
+                      ),
+                      onPressed: () {
+                        setState(() => _showSideBySideImage = !_showSideBySideImage);
+                      },
+                      tooltip: _showSideBySideImage ? 'Afficher le diff textuel' : 'Afficher côte à côte',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    ),
+
                   // Copy diff
                   IconButton(
                     icon: Icon(Icons.copy_rounded, size: 16, color: scheme.onSurfaceVariant),
@@ -497,30 +525,32 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
 
             // Diff content or Empty State
             Expanded(
-              child: !_hasRealDiff || _lines.isEmpty
-                  ? _buildEmptyState(context, isDark, scheme)
-                  : _wrapLines
-                      ? ListView.builder(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          itemCount: _lines.length,
-                          itemBuilder: (context, index) => _buildDiffItem(index, scheme),
-                        )
-                      : LayoutBuilder(
-                          builder: (context, constraints) {
-                            return SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: SizedBox(
-                                width: 800,
-                                height: constraints.maxHeight,
-                                child: ListView.builder(
-                                  padding: const EdgeInsets.symmetric(vertical: 4),
-                                  itemCount: _lines.length,
-                                  itemBuilder: (context, index) => _buildDiffItem(index, scheme),
-                                ),
-                              ),
-                            );
-                          },
-                        ),
+              child: _isImageOrSvg && _showSideBySideImage
+                  ? _buildImageSideBySideView(context, isDark, scheme)
+                  : (!_hasRealDiff || _lines.isEmpty)
+                      ? _buildEmptyState(context, isDark, scheme)
+                      : _wrapLines
+                          ? ListView.builder(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              itemCount: _lines.length,
+                              itemBuilder: (context, index) => _buildDiffItem(index, scheme),
+                            )
+                          : LayoutBuilder(
+                              builder: (context, constraints) {
+                                return SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  child: SizedBox(
+                                    width: 800,
+                                    height: constraints.maxHeight,
+                                    child: ListView.builder(
+                                      padding: const EdgeInsets.symmetric(vertical: 4),
+                                      itemCount: _lines.length,
+                                      itemBuilder: (context, index) => _buildDiffItem(index, scheme),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
             ),
 
             // Bottom Hunks selection bar
@@ -910,6 +940,192 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
               padding: const EdgeInsets.only(left: 6, right: 4),
               child: Icon(Icons.comment, size: 14, color: scheme.primary),
             ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImageSideBySideView(BuildContext context, bool isDark, ColorScheme scheme) {
+    final fileName = widget.fileName ?? widget.filePath ?? 'image';
+    final isSvg = fileName.toLowerCase().endsWith('.svg');
+
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF1E2128) : scheme.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: isDark ? const Color(0xFF2C2F38) : scheme.outlineVariant.withValues(alpha: 0.6),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  isSvg ? Icons.polyline_rounded : Icons.image_rounded,
+                  size: 15,
+                  color: scheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  isSvg ? 'Prévisualisation SVG côte à côte' : 'Comparaison d\'image côte à côte',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onSurface,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: scheme.primary.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    isSvg ? 'VECTOR SVG' : fileName.split('.').last.toUpperCase(),
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: scheme.primary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Panneau gauche : Avant / Original
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF16181D) : scheme.surface,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: const Color(0xFFEF4444).withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFEF4444).withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text(
+                                'ORIGINAL (AVANT)',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFFEF4444),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const Spacer(),
+                        Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                isSvg ? Icons.polyline_outlined : Icons.image_not_supported_outlined,
+                                size: 36,
+                                color: isDark ? const Color(0xFF5A5D6A) : scheme.outline,
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                'Version précédente',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: isDark ? const Color(0xFF8E909D) : scheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Spacer(),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // Panneau droit : Après / Modifié
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF16181D) : scheme.surface,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: const Color(0xFF22C55E).withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF22C55E).withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text(
+                                'MODIFIÉ (APRÈS)',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF22C55E),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const Spacer(),
+                        Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                isSvg ? Icons.polyline_rounded : Icons.image_rounded,
+                                size: 36,
+                                color: scheme.primary,
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                'Nouvelle version',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: scheme.onSurface,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Spacer(),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );

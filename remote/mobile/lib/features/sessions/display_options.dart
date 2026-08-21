@@ -49,6 +49,7 @@ extension SessionSortByX on SessionSortBy {
 
 enum SessionSubtitle {
   worktree,
+  project,
   none,
 }
 
@@ -56,7 +57,9 @@ extension SessionSubtitleX on SessionSubtitle {
   String get label {
     switch (this) {
       case SessionSubtitle.worktree:
-        return 'Worktree';
+        return 'Worktree / Branch';
+      case SessionSubtitle.project:
+        return 'Project';
       case SessionSubtitle.none:
         return 'No Subtitle';
     }
@@ -391,25 +394,42 @@ class DisplayOptionsMenuButton extends StatelessWidget {
     return PopupMenuItem<String>(
       value: value,
       height: 32,
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 13,
-                color: isSelected ? (isDark ? Colors.white : scheme.primary) : scheme.onSurface,
-                fontWeight: isSelected ? FontWeight.w500 : FontWeight.w400,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? (isDark ? const Color(0xFF26282E) : scheme.primary.withValues(alpha: 0.08))
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: scheme.onSurface,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                ),
               ),
             ),
-          ),
-          if (isSelected)
-            Icon(
-              Icons.check_rounded,
-              size: 15,
-              color: isDark ? Colors.white : scheme.primary,
-            ),
-        ],
+            if (isSelected)
+              Container(
+                padding: const EdgeInsets.all(2),
+                decoration: BoxDecoration(
+                  color: scheme.primary,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.check_rounded,
+                  size: 11,
+                  color: isDark ? Colors.black : Colors.white,
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

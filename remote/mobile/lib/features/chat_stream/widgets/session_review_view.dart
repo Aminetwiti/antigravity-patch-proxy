@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile/theme/app_colors.dart';
+import '../../code_review/models/code_comment.dart';
 import '../../../widgets/skeleton_loader.dart';
 
 /// Modèle représentant un fichier modifié dans la session (avec additions/deletions)
@@ -9,12 +10,14 @@ class SessionModifiedFile {
   final int additions;
   final int deletions;
   final String? diffContent;
+  final List<CodeComment> comments;
 
   const SessionModifiedFile({
     required this.path,
     this.additions = 0,
     this.deletions = 0,
     this.diffContent,
+    this.comments = const [],
   });
 
   String get fileName {
@@ -115,14 +118,28 @@ class _SessionReviewViewState extends State<SessionReviewView> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final q = _searchQuery.toLowerCase();
     final filtered = widget.files.where((f) {
-      if (_searchQuery.isEmpty) return true;
-      return f.path.toLowerCase().contains(_searchQuery);
+      if (q.isEmpty) return true;
+      return f.path.toLowerCase().contains(q) ||
+          f.fileName.toLowerCase().contains(q) ||
+          (f.diffContent != null && f.diffContent!.toLowerCase().contains(q));
     }).toList();
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.keyF, control: true): () {
+          setState(() => _isSearchOpen = true);
+        },
+        const SingleActivator(LogicalKeyboardKey.keyF, meta: true): () {
+          setState(() => _isSearchOpen = true);
+        },
+      },
+      child: Focus(
+        autofocus: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
         // ── En-tête : Titre "Review (N)" + Actions
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 12, 8),
@@ -192,6 +209,7 @@ class _SessionReviewViewState extends State<SessionReviewView> {
                     value: 'split',
                     height: 34,
                     child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         Icon(Icons.splitscreen_rounded, size: 15, color: scheme.onSurface),
                         const SizedBox(width: 8),
@@ -203,6 +221,7 @@ class _SessionReviewViewState extends State<SessionReviewView> {
                     value: 'expand',
                     height: 34,
                     child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         Icon(Icons.unfold_more_rounded, size: 15, color: scheme.onSurface),
                         const SizedBox(width: 8),
@@ -214,6 +233,7 @@ class _SessionReviewViewState extends State<SessionReviewView> {
                     value: 'copy_paths',
                     height: 34,
                     child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         Icon(Icons.copy_rounded, size: 15, color: scheme.onSurface),
                         const SizedBox(width: 8),
@@ -371,6 +391,8 @@ class _SessionReviewViewState extends State<SessionReviewView> {
                 ),
         ),
       ],
+        ),
+      ),
     );
   }
 }
@@ -393,7 +415,7 @@ class _ChangedFileRow extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return InkWell(
+    final rowContent = InkWell(
       onTap: () {
         HapticFeedback.selectionClick();
         onTap();
@@ -404,86 +426,188 @@ class _ChangedFileRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         child: Row(
           children: [
-              // Icône du langage / fichier
-              Icon(
-                icon,
-                size: 16,
-                color: iconColor,
-              ),
-              const SizedBox(width: 9),
+            // Icône du langage / fichier
+            Icon(
+              icon,
+              size: 16,
+              color: iconColor,
+            ),
+            const SizedBox(width: 9),
 
-              // Nom du fichier + chemin relatif
-              Expanded(
-                child: Row(
-                  children: [
+            // Nom du fichier + chemin relatif
+            Expanded(
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      file.fileName,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? const Color(0xFFE4E4E7) : scheme.onSurface,
+                        letterSpacing: -0.1,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (file.directoryPath.isNotEmpty) ...[
+                    const SizedBox(width: 6),
                     Flexible(
                       child: Text(
-                        file.fileName,
+                        file.directoryPath,
                         style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: isDark ? const Color(0xFFE4E4E7) : scheme.onSurface,
-                          letterSpacing: -0.1,
+                          fontSize: 11.5,
+                          color: isDark ? const Color(0xFF8F909A) : scheme.onSurfaceVariant,
                         ),
                         overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    if (file.directoryPath.isNotEmpty) ...[
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          file.directoryPath,
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            color: isDark ? const Color(0xFF8F909A) : scheme.onSurfaceVariant,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-
-              const SizedBox(width: 10),
-
-              // Badges Additions / Deletions: +X -Y
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (file.additions > 0 || file.deletions == 0)
-                    Text(
-                      '+${file.additions}',
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF22C55E),
-                      ),
-                    ),
-                  if (file.deletions > 0) ...[
-                    const SizedBox(width: 5),
-                    Text(
-                      '-${file.deletions}',
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFFEF4444),
                       ),
                     ),
                   ],
                 ],
               ),
+            ),
 
+            const SizedBox(width: 10),
+
+            // Badges Additions / Deletions: +X -Y
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (file.comments.isNotEmpty) ...[
+                  FileCommentPill(
+                    comments: file.comments,
+                    onSelectComment: (c) {
+                      onTap?.call();
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                if (file.additions > 0 || file.deletions == 0)
+                  Text(
+                    '+${file.additions}',
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF22C55E),
+                    ),
+                  ),
+                if (file.deletions > 0) ...[
+                  const SizedBox(width: 5),
+                  Text(
+                    '-${file.deletions}',
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFFEF4444),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+
+            const SizedBox(width: 6),
+            const Icon(
+              Icons.chevron_right_rounded,
+              size: 15,
+              color: Color(0xFF5E606A),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    return Draggable<String>(
+      data: '@${file.path.isNotEmpty ? file.path : file.fileName}',
+      feedback: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            border: Border.all(color: scheme.primary),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 8),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: iconColor),
               const SizedBox(width: 6),
-              const Icon(
-                Icons.chevron_right_rounded,
-                size: 15,
-                color: Color(0xFF5E606A),
+              Text(
+                '@${file.fileName}',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: scheme.onSurface),
               ),
             ],
           ),
         ),
-      );
+      ),
+      child: rowContent,
+    );
   }
 }
 
+/// Pilule de comptage de commentaires avec prévisualisation au survol et navigation ciblée
+class FileCommentPill extends StatelessWidget {
+  final List<CodeComment> comments;
+  final ValueChanged<CodeComment>? onSelectComment;
+
+  const FileCommentPill({
+    super.key,
+    required this.comments,
+    this.onSelectComment,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (comments.isEmpty) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+
+    final previewLines = comments.map((c) {
+      final lineStr = c.lineNumber != null && c.lineNumber! > 0 ? 'L.${c.lineNumber}: ' : '';
+      final snippet = c.commentText.length > 50 ? '${c.commentText.substring(0, 47)}...' : c.commentText;
+      return '$lineStr"$snippet"';
+    }).join('\n');
+
+    return Tooltip(
+      message: 'Commentaires sur ce fichier :\n$previewLines\n(Cliquer pour concentrer)',
+      waitDuration: const Duration(milliseconds: 100),
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          if (comments.isNotEmpty) {
+            onSelectComment?.call(comments.first);
+          }
+        },
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: scheme.primary.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(AppRadius.pill),
+            border: Border.all(
+              color: scheme.primary.withValues(alpha: 0.4),
+              width: 0.8,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.chat_bubble_outline_rounded, size: 11, color: scheme.primary),
+              const SizedBox(width: 4),
+              Text(
+                '${comments.length}',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                  color: scheme.primary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

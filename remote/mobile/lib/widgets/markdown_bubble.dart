@@ -28,6 +28,7 @@ class MarkdownBubble extends StatefulWidget {
   /// P5 : callback quand l'utilisateur tape un lien markdown file:/// —
   /// le parent ouvre le fichier (ArtifactViewerModal). Null → tooltip seul.
   final LocalFileTap? onLocalFile;
+  final String? searchQuery;
 
   const MarkdownBubble({
     super.key,
@@ -36,6 +37,7 @@ class MarkdownBubble extends StatefulWidget {
     this.api,
     this.workspacePath = '',
     this.onLocalFile,
+    this.searchQuery,
   });
 
   @override
@@ -100,7 +102,7 @@ class _MarkdownBubbleState extends State<MarkdownBubble> {
             else if (block.table != null)
               _MarkdownTableView(table: block.table!, onLocalFile: widget.onLocalFile)
             else
-              _ParagraphView(block: block, onLocalFile: widget.onLocalFile),
+              _ParagraphView(block: block, onLocalFile: widget.onLocalFile, searchQuery: widget.searchQuery),
             const SizedBox(height: 10),
           ],
           if (widget.isStreaming) const _StreamingCursor(),
@@ -232,8 +234,9 @@ class _MarkdownTableView extends StatelessWidget {
 class _ParagraphView extends StatelessWidget {
   final MarkdownBlock block;
   final LocalFileTap? onLocalFile;
+  final String? searchQuery;
 
-  const _ParagraphView({required this.block, this.onLocalFile});
+  const _ParagraphView({required this.block, this.onLocalFile, this.searchQuery});
 
   @override
   Widget build(BuildContext context) {
@@ -296,6 +299,7 @@ class _ParagraphView extends StatelessWidget {
         headerBase,
         scheme: scheme,
         onLocalFile: onLocalFile,
+        searchQuery: searchQuery,
       );
 
       return Padding(
@@ -315,6 +319,7 @@ class _ParagraphView extends StatelessWidget {
       base,
       scheme: scheme,
       onLocalFile: onLocalFile,
+      searchQuery: searchQuery,
     );
 
     Widget childWidget;
