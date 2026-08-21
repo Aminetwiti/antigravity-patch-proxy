@@ -37,6 +37,8 @@ func TestFakeBinariesHelper(t *testing.T) {
 		os.Stderr.WriteString("INF Your quick Tunnel has been created! https://fake-123.trycloudflare.com\n")
 	case "ssh":
 		os.Stdout.WriteString("https://abc-123.a.pinggy.link ready\n")
+	case "newt", "pangolin":
+		os.Stdout.WriteString("Tunnel ready: https://remote.custom-pangolin.net forwarded to 127.0.0.1:8090\n")
 	case "taskkill":
 		os.Exit(0)
 	}
@@ -74,6 +76,20 @@ func TestStartPinggyFakeBinary(t *testing.T) {
 	m.Stop()
 }
 
+// TestStartPangolinFakeBinary — le Manager démarre un faux newt/pangolin et extrait l'URL.
+func TestStartPangolinFakeBinary(t *testing.T) {
+	FakeBinaries(t)
+	m := NewManager("")
+	url, err := m.startPangolin("newt", 8090)
+	if err != nil {
+		t.Fatalf("startPangolin: %v", err)
+	}
+	if !strings.HasPrefix(url, "https://") || !strings.Contains(url, "custom-pangolin.net") {
+		t.Fatalf("URL inattendue: %q", url)
+	}
+	m.Stop()
+}
+
 // TestStartAutoTunnelForcedProvider — dispatch par provider forcé, sans
 // dépendre de la présence de binaires sur $PATH.
 func TestStartAutoTunnelForcedProvider(t *testing.T) {
@@ -102,7 +118,20 @@ func TestStartAutoTunnelForcedProvider(t *testing.T) {
 		t.Fatalf("PublicURL inattendue: %q", m2.PublicURL)
 	}
 	m2.Stop()
+
+	m3 := NewManager("pangolin")
+	if _, err := m3.StartAutoTunnel(8090); err != nil {
+		t.Fatalf("StartAutoTunnel(pangolin): %v", err)
+	}
+	if m3.Provider != "pangolin" {
+		t.Fatalf("Provider attendu pangolin, reçu %q", m3.Provider)
+	}
+	if !strings.Contains(m3.PublicURL, "custom-pangolin.net") {
+		t.Fatalf("PublicURL inattendue: %q", m3.PublicURL)
+	}
+	m3.Stop()
 }
+
 
 // TestStopWindowsKillsProcess — Stop() passe par taskkill sur Windows (faux
 // binaire) et ne panique pas.

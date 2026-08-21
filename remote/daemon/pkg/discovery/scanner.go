@@ -19,14 +19,15 @@ import (
 )
 
 type LocalHarnessInfo struct {
-	PID            int
-	ProcessName    string
-	CSRFToken      string
-	ExtensionCSRF  string
-	ExtensionPort  int
-	WorkspaceID    string
-	SubclientType  string
-	ConnectRPCPort int
+	PID             int
+	ProcessName     string
+	CSRFToken       string
+	ExtensionCSRF   string
+	ExtensionPort   int
+	HTTPSServerPort int
+	WorkspaceID     string
+	SubclientType   string
+	ConnectRPCPort  int
 }
 
 type procEntry struct {
@@ -78,14 +79,16 @@ func Discover() (*LocalHarnessInfo, error) {
 
 	for _, pick := range sortedProcs {
 		info := &LocalHarnessInfo{
-			PID:           pick.pid,
-			ProcessName:   pick.name,
-			CSRFToken:     extractArg(pick.commandLine, "csrf_token"),
-			ExtensionCSRF: extractArg(pick.commandLine, "extension_server_csrf_token"),
-			ExtensionPort: atoi(extractArg(pick.commandLine, "extension_server_port")),
-			WorkspaceID:   extractArg(pick.commandLine, "workspace_id"),
-			SubclientType: extractArg(pick.commandLine, "subclient_type"),
+			PID:             pick.pid,
+			ProcessName:     pick.name,
+			CSRFToken:       extractArg(pick.commandLine, "csrf_token"),
+			ExtensionCSRF:   extractArg(pick.commandLine, "extension_server_csrf_token"),
+			ExtensionPort:   atoi(extractArg(pick.commandLine, "extension_server_port")),
+			HTTPSServerPort: atoi(extractArg(pick.commandLine, "https_server_port")),
+			WorkspaceID:     extractArg(pick.commandLine, "workspace_id"),
+			SubclientType:   extractArg(pick.commandLine, "subclient_type"),
 		}
+
 		if info.ExtensionCSRF == "" {
 			info.ExtensionCSRF = info.CSRFToken
 		}
@@ -145,23 +148,44 @@ func probePorts(ports []int, csrfToken string) int {
 	return 0
 }
 
-// candidatePorts : active_port file, extension_server_port+1..+20 si présent, sinon netstat PID.
+// candidatePorts : https_server_port, active_port file, netstat PID ports, extension_server_port+1..+20.
 func candidatePorts(info *LocalHarnessInfo, p *procEntry) []int {
 	var ports []int
 
-	// 0. Vérifier d'abord le fichier active_port standard ~/.gemini/antigravity/active_port
+	// 0. Si --https_server_port est explicitement dans la ligne de commande, le prioriser !
+	if info.HTTPSServerPort > 0 {
+		ports = append(ports, info.HTTPSServerPort)
+	}
+
+	// 1. Vérifier le fichier active_port standard ~/.gemini/antigravity/active_port
 	if activePort := readActivePortFile(); activePort > 0 {
 		ports = append(ports, activePort)
 	}
 
+	// 2. Ports réels en écoute pour ce PID (netstat)
+	if p != nil && p.pid > 0 {
+		ports = append(ports, listeningPortsForPID(p.pid)...)
+	}
+
+	// 3. Plage extension_server_port si présent
 	if info.ExtensionPort > 0 {
 		for offset := 1; offset <= 20; offset++ {
 			ports = append(ports, info.ExtensionPort+offset)
 		}
-	} else {
-		ports = append(ports, listeningPortsForPID(p.pid)...)
 	}
-	return ports
+	return dedupeInts(ports)
+}
+
+func dedupeInts(in []int) []int {
+	seen := make(map[int]bool)
+	var out []int
+	for _, v := range in {
+		if v > 0 && v <= 65535 && !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func readActivePortFile() int {
@@ -216,11 +240,13 @@ func listeningPortsForPID(pid int) []int {
 
 // probeService vérifie que le port expose bien le LanguageServerService.
 // 1. Sonde HTTP : frame gRPC-Web Heartbeat (chemin principal).
-// 2. Sonde HTTPS : GetUserStatus en JSON — le LS expose parfois des ports
-// TLS (certificat auto-signé) que la sonde HTTP rate ; technique reprise de
-// Deck/IDE-mobile (quota-service.ts, rejectUnauthorized: false).
+// 2. Sonde HTTPS : frame gRPC-Web Heartbeat (sur port TLS auto-signé).
+// 3. Sonde HTTPS : GetUserStatus en JSON.
 func probeService(port int, csrfToken string) bool {
 	if probeHTTPHeartbeat(port, csrfToken) {
+		return true
+	}
+	if probeHTTPSHeartbeat(port, csrfToken) {
 		return true
 	}
 	return probeHTTPSGetUserStatus(port, csrfToken)
@@ -240,6 +266,34 @@ func probeHTTPHeartbeat(port int, csrfToken string) bool {
 	req.Header.Set("X-Grpc-Web", "1")
 
 	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode == http.StatusOK
+}
+
+func probeHTTPSHeartbeat(port int, csrfToken string) bool {
+	url := fmt.Sprintf("https://127.0.0.1:%d/exa.language_server_pb.LanguageServerService/Heartbeat", port)
+	body := make([]byte, 5) // frame gRPC-Web vide
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Content-Type", "application/grpc-web+proto")
+	req.Header.Set("Accept", "application/grpc-web+proto,application/grpc-web-text")
+	req.Header.Set("x-codeium-csrf-token", csrfToken)
+	req.Header.Set("Connect-Protocol-Version", "1")
+	req.Header.Set("X-Grpc-Web", "1")
+
+	client := &http.Client{
+		Timeout: 3 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // #nosec G402 — certificat auto-signé LS
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return false
@@ -274,6 +328,7 @@ func probeHTTPSGetUserStatus(port int, csrfToken string) bool {
 	raw, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode == http.StatusOK && bytes.Contains(raw, []byte("user_status"))
 }
+
 
 func getProcesses() ([]procEntry, error) {
 	if runtime.GOOS == "windows" {
