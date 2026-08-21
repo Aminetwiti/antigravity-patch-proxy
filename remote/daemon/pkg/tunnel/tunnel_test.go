@@ -73,3 +73,37 @@ func TestTunnelDisabledPreference(t *testing.T) {
 	}
 }
 
+func TestPangolinURLRegex(t *testing.T) {
+	lines := []string{
+		"[newt] connecting to server...",
+		"Assigned URL: https://antigravity.my-homelab.net",
+		"Forwarding http://127.0.0.1:8090 to https://antigravity.my-homelab.net",
+	}
+	var got string
+	for _, line := range lines {
+		if m := pangolinURLRe.FindString(line); m != "" {
+			got = m
+			break
+		}
+	}
+	if got != "https://antigravity.my-homelab.net" {
+		t.Fatalf("Attendu https://antigravity.my-homelab.net, reçu %q", got)
+	}
+}
+
+func TestPangolinStaticURL(t *testing.T) {
+	t.Setenv("PANGOLIN_URL", "https://custom.antigravity-remote.org")
+	m := NewManager("pangolin")
+	url, err := m.StartAutoTunnel(8090)
+	if err != nil {
+		t.Fatalf("StartAutoTunnel(pangolin static): %v", err)
+	}
+	if url != "https://custom.antigravity-remote.org" {
+		t.Fatalf("Attendu https://custom.antigravity-remote.org, reçu %q", url)
+	}
+	if m.Provider != "pangolin" {
+		t.Fatalf("Provider attendu pangolin, reçu %q", m.Provider)
+	}
+}
+
+
