@@ -5,6 +5,11 @@ on:
     branches: [main, master]
     tags:
       - 'v*'
+    paths:
+      - 'remote/mobile/**'
+      - 'ag-doctor/**'
+      - 'ag-doctor-ui/**'
+      - '.github/workflows/flutter-mobile.yml'
   pull_request:
     paths:
       - 'remote/mobile/**'
@@ -51,9 +56,9 @@ jobs:
         working-directory: remote/mobile
         run: flutter analyze --no-fatal-infos
 
-      - name: Run unit tests
+      - name: Run unit & widget tests
         working-directory: remote/mobile
-        run: flutter test test/core/
+        run: flutter test --exclude-tags=live
 
   # ── 2. Build Android (APK & AAB) ──
   build-android:

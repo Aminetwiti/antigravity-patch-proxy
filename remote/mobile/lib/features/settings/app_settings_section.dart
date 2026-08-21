@@ -228,14 +228,18 @@ class _AppSettingsSectionState extends State<AppSettingsSection> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('SSL / TLS (WSS)', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
-                          const SizedBox(height: 6),
-                          SwitchListTile.adaptive(
-                            contentPadding: EdgeInsets.zero,
-                            value: _useSsl,
-                            activeColor: const Color(0xFF007AFF),
-                            onChanged: (val) => setState(() => _useSsl = val),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('SSL / TLS (WSS)', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                              Switch.adaptive(
+                                value: _useSsl,
+                                activeColor: const Color(0xFF007AFF),
+                                onChanged: (val) => setState(() => _useSsl = val),
+                              ),
+                            ],
                           ),
+
                         ],
                       ),
                     ),

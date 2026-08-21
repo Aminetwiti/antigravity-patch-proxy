@@ -16,10 +16,14 @@ void main() {
               runningTasks: const ['flutter test --exclude-tags=live'],
               onStopTask: (_) => stopped = true,
               onTapTask: (_) => tapped = true,
+              initiallyExpanded: true,
             ),
           ),
         ),
       );
+      await tester.pump(const Duration(milliseconds: 250));
+
+
 
       expect(find.text('1 task running'), findsOneWidget);
       expect(find.text('flutter test --exclude-tags=live'), findsOneWidget);
@@ -28,9 +32,10 @@ void main() {
       await tester.pump();
       expect(stopped, isTrue);
 
-      await tester.tap(find.text('1 task running'));
+      await tester.tap(find.text('flutter test --exclude-tags=live'));
       await tester.pump();
       expect(tapped, isTrue);
+
     });
 
     testWidgets('renders multiple tasks with expandable chevron', (tester) async {

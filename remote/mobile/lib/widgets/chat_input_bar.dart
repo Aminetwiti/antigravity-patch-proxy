@@ -489,6 +489,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
             clean = clean.startsWith('/') ? 'file://$clean' : 'file:///$clean';
           }
           buffer.writeln('![${img.name}]($clean)\n');
+
         }
         mediaList.add({
           'uri': clean,

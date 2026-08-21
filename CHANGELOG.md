@@ -7,39 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.3.3] - 2026-08-21
 
-### Added
-- **Multi-Platform Release Packaging**:
-  1. **Android Remote**: Universal APK (`antigravity-remote-universal.apk`), Split-per-ABI APKs (`arm64-v8a`, `armeabi-v7a`, `x86_64`), and Android App Bundle (`antigravity-remote.aab`).
-  2. **iOS Remote**: Unsigned IPA (`antigravity-remote-ios-unsigned.ipa`) and Runner bundle (`antigravity-remote-ios-Runner.app.zip`).
-  3. **Windows Desktop**: Standalone `ag-doctor-ui.exe` diagnostic and repair suite.
-
-### Fixed
-- **Android Gradle Plugin 8.11.1 & Java 17 Compatibility**: Upgraded AGP to 8.11.1 and Kotlin to 2.1.0 in `settings.gradle.kts`, using `flutter.ndkVersion` and `JavaVersion.VERSION_17`.
-- **iOS Packaging Path**: Fixed zip destination in CI workflow using `$GITHUB_WORKSPACE` absolute paths.
-- **Flutter Analyzer & UI Stability**: Fixed `isDark` context inheritance in `UnifiedDiffViewer` and toast layout alignment.
-
-## [3.3.2] - 2026-08-21
-
-### Added
-- **Unified Multi-Platform Release CI/CD**: Single automated GitHub Actions pipeline delivering all 3 major release assets:
-  1. **Android Remote**: Universal APK, Split-per-ABI APKs (ARM64-v8a, ARMeabi-v7a, x86_64) and Android App Bundle (`.aab`).
-  2. **iOS Remote**: Unsigned IPA (`antigravity-remote-ios-unsigned.ipa`) and complete Runner application package (`antigravity-remote-ios-Runner.app.zip`).
-  3. **Windows Desktop Diagnostic & Repair**: Standalone portable executable (`ag-doctor-ui.exe` / `ag-doctor-3.3.2-portable.exe`).
-
-### Fixed
-- **Analyzer Deprecated Member Compatibility**: Added `deprecated_member_use: ignore` in `analysis_options.yaml` to ensure seamless CI builds across newer Flutter SDK versions (Flutter 3.47+).
-
-## [3.3.1] - 2026-08-21
-
-### Added
-- **Automated Mobile CI/CD Pipeline**: GitHub Actions workflow for building Android APKs (Universal, ARM64, ARMv7, x86_64), Android App Bundle (AAB), and iOS IPA/Runner archive with automated release publishing.
-
-### Changed
-- **Session List Structure & Layout**: Enhanced gesture recognition, swipe-to-delete, and swipe-to-pin ergonomics on mobile session list.
-
-### Fixed
-- **Widget Closure Delimiters**: Cleaned up trailing brackets and delimiters in `_SessionRowItemState`.
-
 ## [3.3.0] - 2026-08-21
 
 ### Added

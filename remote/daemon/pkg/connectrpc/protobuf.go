@@ -155,6 +155,7 @@ func buildImageData(m MediaAttachment) []byte {
 		mime = "image/png"
 	}
 	iw.stringField(2, mime)
+
 	if m.Description != "" {
 		iw.stringField(3, m.Description)
 	}
@@ -195,6 +196,20 @@ func BuildSendMessageWithMedia(cascadeID, text, apiKey, sessionID, modelUID stri
 		w.bytesField(3, buildMetadata(apiKey, sessionID))
 	}
 	w.bytesField(5, BuildCascadeConfig(modelUID, modelEnum, noTools...))
+
+	// Propagation directe du modèle demandé au niveau de la requête SendUserCascadeMessage
+	// pour forcer le basculement de modèle sur une session existante.
+	effectiveEnum := modelEnum
+	if effectiveEnum == 0 && modelUID != "" {
+		effectiveEnum = ResolveStandardModelEnum(modelUID)
+	}
+	if effectiveEnum != 0 {
+		w.varintField(4, effectiveEnum)
+		w.varintField(14, effectiveEnum)
+	}
+	if modelUID != "" {
+		w.stringField(15, modelUID)
+	}
 	return w.b
 }
 
@@ -250,7 +265,26 @@ func ResolveStandardModelEnum(nameOrID string) uint64 {
 	}
 }
 
-// BuildCascadeConfig construit un CascadeConfig standard.
+// BuildCascadeConfig construit le sous-message cascade_config.
+//
+// Format validé contre le vrai Language Server 2.8.0 :
+//
+//	CascadeConfig {
+//	  1: planner_config (CascadePlannerConfig) {
+//	    1: plan_model (enum, ex: 246 = GOOGLE_GEMINI_2_5_PRO)
+//	    2: conversational_config {1: planner_mode}
+//	    8: last_selected_model_name (string)
+//	    15: requested_model (ModelOrAlias {1: model, 3: model_name})
+//	    28: model_name (string, ex: "claude-sonnet-4.6-thinking" ou custom model UID)
+//	    30: last_selected_cascade_model_or_alias (ModelOrAlias)
+//	    46: last_model_override (enum)
+//	  }
+//	  4: requested_model_id (enum)
+//	  14: requested_model (enum)
+//	  15: requested_model_uid (string)
+//	  28: model_name (string)
+//	}
+
 //
 // planner_mode 3 = NO_TOOL (pas de boucle d'outils — le mobile ne voit
 // que le texte). requested_model (15) et plan_model (1) contrôlent le modèle du tour.
@@ -296,10 +330,23 @@ func BuildCascadeConfig(modelUID string, modelEnum uint64, noTools ...bool) []by
 
 	if modelUID != "" {
 		planner.stringField(28, modelUID)
+		planner.stringField(8, modelUID)
+		planner.bytesField(30, reqModel.b)
+	}
+	if effectiveEnum != 0 && effectiveEnum != DefaultModelEnum {
+		planner.varintField(46, effectiveEnum)
 	}
 
 	w := &writer{}
 	w.bytesField(1, planner.b)
+	if modelUID != "" {
+		w.stringField(15, modelUID)
+		w.stringField(28, modelUID)
+	}
+	if effectiveEnum != 0 {
+		w.varintField(14, effectiveEnum)
+		w.varintField(4, effectiveEnum)
+	}
 	return w.b
 }
 

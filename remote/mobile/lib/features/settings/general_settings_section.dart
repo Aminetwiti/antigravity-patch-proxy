@@ -418,25 +418,38 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
           _buildCard(
             isDark: isDark,
             scheme: scheme,
-            child: SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text(
-                'Tool Approval Notifications',
-                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
-              ),
-              subtitle: const Text(
-                'Notify on device when the agent requests tool approval.',
-                style: TextStyle(fontSize: 12),
-              ),
-              value: _toolNotifications,
-              onChanged: (val) {
-                setState(() => _toolNotifications = val);
-                HapticFeedback.selectionClick();
-                widget.notifier?.setEnabled(val);
-                SettingsStore.save({'toolNotifications': val});
-              },
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Tool Approval Notifications',
+                        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: scheme.onSurface),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'Notify on device when the agent requests tool approval.',
+                        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Switch.adaptive(
+                  value: _toolNotifications,
+                  onChanged: (val) {
+                    setState(() => _toolNotifications = val);
+                    HapticFeedback.selectionClick();
+                    widget.notifier?.setEnabled(val);
+                    SettingsStore.save({'toolNotifications': val});
+                  },
+                ),
+              ],
             ),
           ),
+
 
           const SizedBox(height: 24),
 

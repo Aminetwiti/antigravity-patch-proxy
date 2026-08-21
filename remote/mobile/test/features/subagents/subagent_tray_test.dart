@@ -29,7 +29,9 @@ void main() {
               subagents: subagents,
               onSelectSubagent: (s) => selected = s,
               onOpenFullTree: () => fullTreeOpened = true,
+              initiallyExpanded: true,
             ),
+
           ),
         ),
       );
