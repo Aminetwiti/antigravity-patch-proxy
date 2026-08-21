@@ -96,7 +96,7 @@ const api = {
     ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.ANTIGRAVITY_LAUNCH_LOGS),
 
   // Proxy stub lifecycle — emergency fallback when Antigravity's bundled proxy fails
-  proxyStartStub: (): Promise<{ ok: boolean; pid?: number; note?: string; error?: string }> =>
+  proxyStartStub: (): Promise<{ ok: boolean; pid?: number; port?: number; note?: string; error?: string }> =>
     ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.PROXY_START_STUB),
   proxyStubStatus: (): Promise<{ ok: boolean; data?: { ok: boolean; stub: boolean; latencyMs: number; error?: string }; error?: string }> =>
     ipcRenderer.invoke(DOCTOR_IPC_CHANNELS.PROXY_STUB_STATUS),

@@ -5,11 +5,12 @@
 
 .DESCRIPTION
     Resets the WinHTTP proxy, kills any lingering Antigravity processes that may
-    be holding port 50999, then relaunches the app. Use this when the bundled
+    be holding the configured proxy port, then relaunches the app. Use this when the bundled
     proxy (app.asar\dist\proxy.js) crashes with ERR_HTTP_HEADERS_SENT.
 #>
 
 $ErrorActionPreference = 'Stop'
+$PROXY_PORT = if ($env:AG_PROXY_PORT) { $env:AG_PROXY_PORT } else { '51074' }
 
 Write-Host "[fix-proxy] resetting WinHTTP proxy..." -ForegroundColor Cyan
 netsh winhttp reset proxy | Out-Null

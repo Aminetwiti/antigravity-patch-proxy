@@ -27,6 +27,8 @@ var (
 	// https?://[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.pinggy\.link — couvre aussi
 	// "a.pinggy.link" (sous-domaine à label unique) et le préfixe ssh://.
 	pinggyURLRe = regexp.MustCompile(`(?:https?|ssh)://[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.pinggy\.link`)
+	// Pangolin / Newt URL : https://*.pangolin.link ou nom de domaine custom https://*.*
+	pangolinURLRe = regexp.MustCompile(`(?:https?|wss?)://[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+(?::\d+)?`)
 )
 
 type Manager struct {
@@ -52,7 +54,7 @@ func (m *Manager) SetAuthToken(token string) {
 	m.AuthToken = token
 }
 
-// StartAutoTunnel tente de lancer Cloudflare Quick Tunnel ou Pinggy SSH Tunnel.
+// StartAutoTunnel tente de lancer Pangolin, Cloudflare Quick Tunnel ou Pinggy SSH Tunnel.
 func (m *Manager) StartAutoTunnel(localPort int) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -63,7 +65,9 @@ func (m *Manager) StartAutoTunnel(localPort int) (string, error) {
 	}
 
 	// Si un provider est forcé
-	if m.ProviderPref == "cloudflare" {
+	if m.ProviderPref == "pangolin" {
+		return m.tryPangolin(localPort)
+	} else if m.ProviderPref == "cloudflare" {
 		return m.tryCloudflare(localPort)
 	} else if m.ProviderPref == "pinggy" {
 		return m.tryPinggy(localPort)
@@ -71,20 +75,79 @@ func (m *Manager) StartAutoTunnel(localPort int) (string, error) {
 		log.Printf("⚠️ Fournisseur de tunnel inconnu: %s. Essai automatique...", m.ProviderPref)
 	}
 
-	// 1. Essayer Cloudflare Quick Tunnel (cloudflared)
+	// 1. Essayer Pangolin si configuré via env (PANGOLIN_URL)
+	if os.Getenv("PANGOLIN_URL") != "" {
+		if url, err := m.tryPangolin(localPort); err == nil {
+			return url, nil
+		}
+	}
+
+	// 2. Essayer Cloudflare Quick Tunnel (cloudflared)
 	if url, err := m.tryCloudflare(localPort); err == nil {
 		return url, nil
 	}
 
-	// 2. Essayer Pinggy SSH Tunnel (ssh)
+	// 3. Essayer Pinggy SSH Tunnel (ssh)
 	if url, err := m.tryPinggy(localPort); err == nil {
 		return url, nil
 	}
 
-	return "", fmt.Errorf("aucun fournisseur de tunnel disponible (cloudflared ou ssh introuvable sur $PATH)")
+	// 4. Essayer Pangolin (newt / pangolin binaire)
+	if url, err := m.tryPangolin(localPort); err == nil {
+		return url, nil
+	}
+
+	return "", fmt.Errorf("aucun fournisseur de tunnel disponible (pangolin, cloudflared ou ssh introuvable sur $PATH)")
+}
+
+func (m *Manager) tryPangolin(localPort int) (string, error) {
+	// 1. Si une URL statique personnalisée est définie dans l'environnement (ex: reverse proxy VPS existant)
+	if staticURL := os.Getenv("PANGOLIN_URL"); staticURL != "" {
+		if !strings.HasPrefix(staticURL, "http://") && !strings.HasPrefix(staticURL, "https://") {
+			staticURL = "https://" + staticURL
+		}
+		m.Provider = "pangolin"
+		m.PublicURL = staticURL
+		m.printBanner(staticURL)
+		return staticURL, nil
+	}
+
+	// 2. Recherche du binaire client Pangolin (newt ou pangolin)
+	binPath := ""
+	if envBin := os.Getenv("PANGOLIN_BIN"); envBin != "" {
+		binPath = envBin
+	} else if _, err := os.Stat("newt.exe"); err == nil {
+		binPath = ".\\newt.exe"
+	} else if _, err := os.Stat("newt"); err == nil {
+		binPath = "./newt"
+	} else if p, err := execLookPath("newt"); err == nil {
+		binPath = p
+	} else if _, err := os.Stat("pangolin.exe"); err == nil {
+		binPath = ".\\pangolin.exe"
+	} else if _, err := os.Stat("pangolin"); err == nil {
+		binPath = "./pangolin"
+	} else if p, err := execLookPath("pangolin"); err == nil {
+		binPath = p
+	}
+
+	if binPath == "" {
+		return "", fmt.Errorf("client Pangolin (newt ou pangolin) introuvable (définissez PANGOLIN_URL ou installez newt)")
+	}
+
+	log.Printf("[Tunnel] Lancement de Pangolin Tunnel (%s)...", binPath)
+	url, err := m.startPangolin(binPath, localPort)
+	if err == nil {
+		m.Provider = "pangolin"
+		m.PublicURL = url
+		m.printBanner(url)
+		return url, nil
+	}
+	log.Printf("[Tunnel] Échec Pangolin: %v", err)
+	return "", err
 }
 
 func (m *Manager) tryCloudflare(localPort int) (string, error) {
+
 	path := "cloudflared"
 	if _, err := os.Stat("cloudflared.exe"); err == nil {
 		path = ".\\cloudflared.exe"
@@ -224,8 +287,73 @@ func (m *Manager) startPinggy(binPath string, localPort int) (string, error) {
 	}
 }
 
+func (m *Manager) startPangolin(binPath string, localPort int) (string, error) {
+	// Syntaxe newt/pangolin standard : newt http <port> ou newt --server ... --token ... http <port>
+	var args []string
+	if server := os.Getenv("PANGOLIN_SERVER"); server != "" {
+		args = append(args, "--server", server)
+	}
+	if token := os.Getenv("PANGOLIN_TOKEN"); token != "" {
+		args = append(args, "--token", token)
+	}
+	args = append(args, "http", fmt.Sprintf("%d", localPort))
+
+	cmd := execCommand(binPath, args...)
+	m.cmd = cmd
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return "", err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+
+	urlChan := make(chan string, 1)
+	re := pangolinURLRe
+
+	scanFunc := func(scanner *bufio.Scanner) {
+		for scanner.Scan() {
+			line := scanner.Text()
+			if match := re.FindString(line); match != "" {
+				if !strings.HasPrefix(match, "https://") && !strings.HasPrefix(match, "http://") {
+					match = "https://" + match
+				}
+				match = strings.Replace(match, "http://", "https://", 1)
+				select {
+				case urlChan <- match:
+				default:
+				}
+			}
+		}
+	}
+
+	go scanFunc(bufio.NewScanner(stdout))
+	go scanFunc(bufio.NewScanner(stderr))
+
+	select {
+	case url := <-urlChan:
+		return url, nil
+	case <-time.After(20 * time.Second):
+		if fallbackURL := os.Getenv("PANGOLIN_URL"); fallbackURL != "" {
+			if !strings.HasPrefix(fallbackURL, "http://") && !strings.HasPrefix(fallbackURL, "https://") {
+				fallbackURL = "https://" + fallbackURL
+			}
+			return fallbackURL, nil
+		}
+		cmd.Process.Kill()
+		return "", fmt.Errorf("timeout d'attente de l'URL Pangolin")
+	}
+}
+
 // WebSocketURL convertit l'URL HTTPS publique d'un tunnel en endpoint WebSocket WSS.
 func WebSocketURL(publicURL string) string {
+
 	return strings.Replace(publicURL, "https://", "wss://", 1) + "/ws"
 }
 

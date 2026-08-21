@@ -68,7 +68,7 @@ antigravity-add-model-main/
 ## 2. Architecture
 
 ```
-IDE Chat UI ↔ Language Server (Go Binary, patched) ↔ Local Proxy :50999
+IDE Chat UI ↔ Language Server (Go Binary, patched) ↔ Local Proxy :${AG_PROXY_PORT:-51074}
                                                            │
                                               ┌────────────┴────────────┐
                                          Translator Registry   Protobuf Injector
@@ -84,8 +84,8 @@ Language Server (Hub :55256) ◄── gRPC-Web ── Daemon Go (:8090 / Cloudf
                                         Mobile Client (Flutter App)
 ```
 
-**Core mechanisms:**
-1. **Binary Patching** — Go binary string tables: `daily-cloudcode-pa.googleapis.com` → `127.0.0.1:50999`
+**Three core mechanisms:**
+1. **Binary Patching** — Go binary string tables: `daily-cloudcode-pa.googleapis.com` → `127.0.0.1:${AG_PROXY_PORT:-51074}`
 2. **HTTP Interception** — `session.defaultSession.webRequest.onBeforeRequest` + proxy server
 3. **Protobuf Injection** — Parse gRPC-Web `GetAvailableModels` response → append custom models → re-encode
 4. **Remote Daemon Bridge** — Automatic PID discovery, CSRF watchdog, gRPC-Web framing, and WebSocket multiplexing with StepRecovery buffer
@@ -322,7 +322,7 @@ What was changed and why.
 - **safeStorage fallback** — headless Linux without keychain → base64 (reversible, not OS-protected)
 - **No protobuf library** — manual varint encoding only
 - **Partial strict mode** — `noImplicitAny: false`, `strictNullChecks: false`
-- **Binary patch is version-sensitive** — separate scripts for 2.2.1, 2.3.x/2.4.x, vs 2.5.x
+- **Binary patch is version-sensitive** — separate scripts for 2.2.1, 2.3.x/2.4.x, vs 2.5.x/2.6.x. The VS Code-based "Antigravity IDE" (v1.107.0+) is patched via the `jetski.cloudCodeUrl` settings override (ag-doctor/src/core/ide-patch.ts), not binary surgery; `ag-doctor models rekey` re-enters language-server-encrypted (v10) API keys in a proxy-compatible format.
 - **Windows** — repatch.bat requires PowerShell ExecutionPolicy Bypass
 
 ---

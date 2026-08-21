@@ -285,6 +285,7 @@ interface MitmStatus {
   interception: {
     listening: boolean;
     reachable: boolean;
+    bypassed: boolean;
   };
 }
 
@@ -296,7 +297,7 @@ const OBJECTIVE_LABELS: Record<ObjectiveKey, string> = {
   doctor: "Run system diagnostic (Doctor)",
   patch: "Apply repair patch",
   logs: "View & follow system logs",
-  proxy: "Start/stop proxy stub on 50999",
+  proxy: "Start/stop proxy stub",
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -492,6 +493,7 @@ function navigate(viewName: string): void {
   views.forEach((v) => v.classList.toggle('active', v.id === `view-${viewName}`));
   // Trigger view-specific loaders
   if (viewName === 'models') void loadModels();
+
   if (viewName === 'patch') void loadPatchStatus();
   if (viewName === 'info') void loadInfo();
   if (viewName === 'logs') void loadLogs();
@@ -920,7 +922,7 @@ $('#repairBtn').addEventListener('click', () => void handleRepair());
 // Fix All: full auto-repair with admin elevation (UAC prompt will appear)
 $('#fixAllBtn')?.addEventListener('click', () => void runFixAll());
 
-// Start Stub: emergency proxy stub on port 50999 (no admin needed)
+// Start Stub: emergency proxy stub (no admin needed)
 $('#startStubBtn')?.addEventListener('click', () => void runStartStub());
 
 async function runRepair(): Promise<void> {
@@ -955,7 +957,7 @@ async function runFixAll(): Promise<void> {
   const ok = await confirmModal(
     'Run full auto-repair?',
     'This will launch <code>ag-doctor repair --yes --auto-elevate</code> with admin elevation (UAC). ' +
-    'All repair actions will run: patch, port 50999, proxy, CA certificate.',
+    'All repair actions will run: patch, proxy, CA certificate.',
     { confirmLabel: 'Run full repair', danger: true },
   );
   if (!ok) return;
@@ -986,8 +988,8 @@ async function runStartStub(): Promise<void> {
   try {
     const r = await window.ag.proxyStartStub();
     if (r?.ok) {
-      toast(`Proxy stub started (pid=${r.pid ?? '?'}) on port 50999`, 'ok', 5000);
-      setObjective('proxy', 'ok', 'Proxy stub active on 50999');
+      toast(`Proxy stub started (pid=${r.pid ?? '?'}) on port ${r.port}`, 'ok', 5000);
+      setObjective('proxy', 'ok', `Proxy stub active on ${r.port}`);
     } else {
       toast(`Proxy stub failed: ${r?.error ?? 'unknown'}`, 'err', 6000);
       setObjective('proxy', 'error', 'Proxy stub failed');
@@ -1409,6 +1411,9 @@ async function loadModels(): Promise<void> {
     const result = await window.ag.run(['models', 'list', '--json']);
     const data = JSON.parse(result.stdout) as ModelsFile;
     allLoadedModels = data.models || [];
+    // Keep the dashboard models stat in sync with the live list (it is a
+    // doctor-run snapshot otherwise and goes stale when models change).
+    statModels.textContent = String(allLoadedModels.length);
     renderModelsView();
     setStatus(`${allLoadedModels.length} model(s) loaded`);
   } catch (e) {
@@ -2004,7 +2009,7 @@ async function loadMitmStatus(): Promise<void> {
     // Dynamically toggle top required warning banner based on actual interception health
     const reqBanner = document.getElementById('mitmRequiredBanner') as HTMLDivElement | null;
     if (reqBanner) {
-      const isFullyFunctional = s.interception.reachable && s.ca.installed && !s.ca.isExpired && s.proxy.redirected;
+      const isFullyFunctional = (s.interception.reachable || s.interception.bypassed) && s.ca.installed && !s.ca.isExpired;
       reqBanner.style.display = isFullyFunctional ? 'none' : 'flex';
     }
 
@@ -2053,14 +2058,22 @@ async function loadMitmStatus(): Promise<void> {
            </div>
          </div>`;
 
-    const interceptionBanner = s.interception.reachable
-      ? `<div class="patch-banner ok">
+    const interceptionBanner = (s.interception.reachable || s.interception.bypassed)
+      ? (s.interception.bypassed
+        ? `<div class="patch-banner ok">
+           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+           <div class="patch-banner-body">
+             <div class="patch-banner-title">Interception bypassed</div>
+             <div class="patch-banner-text">The binary patch redirects the language server to the local proxy — MITM interception is not required.</div>
+           </div>
+         </div>`
+        : `<div class="patch-banner ok">
            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
            <div class="patch-banner-body">
              <div class="patch-banner-title">Interception reachable</div>
              <div class="patch-banner-text">The proxy is listening and responding to requests.</div>
            </div>
-         </div>`
+         </div>`)
       : `<div class="patch-banner err">
            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
            <div class="patch-banner-body">
@@ -2090,7 +2103,7 @@ async function loadMitmStatus(): Promise<void> {
           ${proxyBanner}
         </div>
         <div class="mitm-card">
-          <div class="mitm-card-header"><h3>Interception status</h3><span class="badge ${s.interception.reachable ? 'ok' : 'err'}">${s.interception.reachable ? 'reachable' : 'unreachable'}</span></div>
+          <div class="mitm-card-header"><h3>Interception status</h3><span class="badge ${s.interception.bypassed ? 'ok' : s.interception.reachable ? 'ok' : 'err'}">${s.interception.bypassed ? 'bypassed' : s.interception.reachable ? 'reachable' : 'unreachable'}</span></div>
           <div class="mitm-card-body">
             <div class="patch-row"><div class="patch-row-label">Listening</div><div class="patch-row-value ${s.interception.listening ? 'ok' : ''}">${s.interception.listening ? 'yes' : 'no'}</div></div>
             <div class="patch-row"><div class="patch-row-label">Connectivity</div><div class="patch-row-value ${s.interception.reachable ? 'ok' : 'err'}">${s.interception.reachable ? 'ok' : 'failed'}</div></div>
@@ -2098,7 +2111,7 @@ async function loadMitmStatus(): Promise<void> {
           ${interceptionBanner}
         </div>
       </div>
-      ${(!s.ca.installed || !s.proxy.redirected || !s.interception.reachable) ? `
+      ${(!s.interception.bypassed && (!s.ca.installed || !s.proxy.redirected || !s.interception.reachable)) ? `
       <div style="margin-top: 20px; text-align: center;">
         <button id="repair-all-btn" class="btn btn-primary" style="padding: 10px 20px; font-size: 14px;">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: text-bottom; margin-right: 6px;"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 9.36l-7.1 7.1a1 1 0 0 1-1.4 0l-2.8-2.8a1 1 0 0 1 0-1.4l7.1-7.1a6 6 0 0 1 9.36-7.94z"/></svg>
@@ -3213,7 +3226,7 @@ async function loadSettings(): Promise<void> {
       window.ag.run(['config', 'list', '--json']),
     ]);
     const theme = (cfg.ui as Record<string, string> | undefined)?.theme ?? 'dark';
-    themeToggle.textContent = theme === 'dark' ? 'Switch to light' : 'Switch to dark';
+    themeToggle.textContent = theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
     settingsConfigPath.textContent = pathResult.stdout.trim();
     settingsConfigBody.textContent = JSON.stringify(JSON.parse(listResult.stdout), null, 2);
     setStatus('Ready');
@@ -3378,7 +3391,7 @@ const PALETTE_COMMANDS: Array<{ id: string; label: string; view: string; action?
   { id: 'models', label: 'Go to Custom Models', view: 'models' },
   { id: 'mitm', label: 'Go to MITM Proxy Manager', view: 'mitm' },
   { id: 'patch', label: 'Go to Binary Patch Manager', view: 'patch' },
-  { id: 'proxy-stub', label: 'Start Emergency Proxy Stub (Port 50999)', view: 'mitm', action: () => void runStartStub() },
+  { id: 'proxy-stub', label: 'Start Emergency Proxy Stub', view: 'mitm', action: () => void runStartStub() },
   { id: 'logs', label: 'Go to System Logs', view: 'logs' },
   { id: 'settings', label: 'Go to Settings', view: 'settings' },
   { id: 'theme', label: 'Toggle Light / Dark Theme', view: 'settings', action: () => {
@@ -3582,6 +3595,17 @@ const pmModalClose2 = $('#pmModalClose2') as HTMLButtonElement;
 const pmFormTest = $('#pmFormTest') as HTMLButtonElement;
 
 let providersCache: ProviderEntry[] = [];
+
+// Live sync: react to external custom_models.json changes (CLI add/remove,
+// file edits, proxy migrations). The main process broadcasts
+// ag:providers:changed via its file watcher; without this subscription the
+// UI only refreshes on navigation, so CLI-side changes would stay invisible
+// until the user re-navigates. Register once at boot.
+window.ag.providers.onChanged(() => {
+  providersCache = [];
+  const modelsViewActive = !!document.getElementById('view-models')?.classList.contains('active');
+  if (modelsViewActive) void loadModels();
+});
 let editingProviderId: string | null = null;
 let currentFetchedModels: Array<{ id: string; displayName?: string; enabled: boolean }> = [];
 let pmModelsSearchQuery = '';
@@ -3922,6 +3946,11 @@ function openProviderManagerModal(): void {
 }
 
 pmClose.addEventListener('click', () => { pmBackdrop.hidden = true; });
+// Close the provider manager with Escape or a backdrop click (standard modal UX).
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !pmBackdrop.hidden) pmBackdrop.hidden = true;
+});
+pmBackdrop.addEventListener('click', (e) => { if (e.target === pmBackdrop) pmBackdrop.hidden = true; });
 if (pmModalClose2) pmModalClose2.addEventListener('click', () => { pmBackdrop.hidden = true; });
 pmAddBtn.addEventListener('click', () => openProviderForm());
 pmFormBack.addEventListener('click', () => showPmView('list'));

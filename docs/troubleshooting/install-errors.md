@@ -22,9 +22,9 @@ se manifestent ensemble si on n'en corrige qu'une :
 2. **Cause #2 (corrigée par `scripts/mitm/mitm_443.js`)** : le language server
    d'Antigravity fait des appels HTTPS directs à `daily-cloudcode-pa.googleapis.com`,
    qui est redirigé par le `hosts` file vers `127.0.0.1:443`. Le MITM doit y
-   écouter pour terminer le TLS et forwarder vers le proxy HTTP sur 50999.
+   écouter pour terminer le TLS et forwarder vers le proxy HTTP sur ${AG_PROXY_PORT:-51074}.
 
-**Les deux fixes sont nécessaires.** Sans le MITM sur 443, le proxy sur 50999
+**Les deux fixes sont nécessaires.** Sans le MITM sur 443, le proxy sur ${AG_PROXY_PORT:-51074}
 tourne mais le LS continue à échouer avec `127.0.0.1:443 refused`.
 
 ---
@@ -42,7 +42,7 @@ target machine actively refused it.
 
 L'IDE s'ouvre mais :
 - Aucun modèle custom n'est utilisable (erreur systématique sur `loadCodeAssist`).
-- Le port `50999` peut écouter ou non selon la cause racine (cf. TL;DR).
+- Le port `${AG_PROXY_PORT:-51074}` peut écouter ou non selon la cause racine (cf. TL;DR).
 - Le port `443` n'écoute que sur `127.0.0.2` (PID `svchost.exe` — service Windows
   légitime, sans rapport) **tant que le MITM n'est pas démarré**.
 
@@ -62,7 +62,7 @@ L'IDE s'ouvre mais :
 | `dist/customModelStore.js` | ❌ absent |
 | `dist/schemaValidator.js` | ❌ absent |
 | `hosts` file | `127.0.0.1 daily-cloudcode-pa.googleapis.com` (légitime) |
-| Port 50999 | **DOIT écouter** (proxy HTTP, démarré par `proxy-runner.js`) |
+| Port ${AG_PROXY_PORT:-51074} | **DOIT écouter** (proxy HTTP, démarré par `proxy-runner.js`) |
 | Port 443 sur 127.0.0.1 | **DOIT écouter** (MITM TLS, démarré par `scripts/mitm/mitm_443.js`) |
 
 ---
@@ -150,15 +150,15 @@ certaines itérations.
 ### Cause #2 — MITM sur 443 jamais démarré automatiquement
 
 **Le language server d'Antigravity fait certains appels HTTPS directs** à
-`daily-cloudcode-pa.googleapis.com` qui **bypassent** le proxy sur 50999.
+`daily-cloudcode-pa.googleapis.com` qui **bypassent** le proxy sur ${AG_PROXY_PORT:-51074}.
 Le `hosts` file redirige ces appels vers `127.0.0.1:443` (HTTPS par défaut),
-mais le proxy sur 50999 est en HTTP plain — il ne peut pas intercepter du
+mais le proxy sur ${AG_PROXY_PORT:-51074} est en HTTP plain — il ne peut pas intercepter du
 HTTPS. **Le MITM `scripts/mitm/mitm_443.js` doit tourner en parallèle** pour
 terminer le TLS et forwarder vers le proxy.
 
 > **Erreur d'analyse initiale** : lors du diagnostic du 2026-07-11, j'avais
 > affirmé à tort « le MITM sur 443 n'est pas requis pour le flow actuel »
-> parce que `languageServer.ts` passe `http://localhost:50999` au LS via
+> parce que `languageServer.ts` passe `http://localhost:${AG_PROXY_PORT:-51074}` au LS via
 > `--api_server_url`. En réalité, le LS garde des appels HTTPS codés en dur
 > pour `daily-cloudcode-pa.googleapis.com` (vu dans le `language_server.log`
 > : `failed to get load code assist response: Post "https://cloudcode-pa.googleapis.com/...`)
@@ -259,7 +259,7 @@ cp "/tmp/app.asar.fixed-$TS" "$RES/app.asar"
 
 ```bash
 powershell.exe -Command "
-Get-NetTCPConnection -LocalPort 50999 -State Listen -ErrorAction SilentlyContinue |
+Get-NetTCPConnection -LocalPort ${AG_PROXY_PORT:-51074} -State Listen -ErrorAction SilentlyContinue |
   Format-Table LocalAddress,LocalPort,OwningProcess,State -AutoSize
 "
 ```
@@ -269,7 +269,7 @@ Attendu :
 ```
 LocalAddress  LocalPort  OwningProcess  State
 ------------  ---------  -------------  -----
-127.0.0.1     50999      <PID>          Listen
+127.0.0.1     ${AG_PROXY_PORT:-51074}      <PID>          Listen
 ```
 
 ### 6.2 Log
@@ -282,7 +282,7 @@ Attendu :
 
 ```
 […] [info]  [LS] before startProxy
-[…] [info]  [LS] after startProxy, port: 50999
+[…] [info]  [LS] after startProxy, port: ${AG_PROXY_PORT:-51074}
 […] [info]  [Proxy] Loaded custom models count: 5
 […] [info]  [Proxy] Custom model "minimax-m3" => slug: custom-minimax-m3 …
 […] [info]  [Proxy] Custom model "kimi-k2.7" => slug: custom-kimi-k2-7 …

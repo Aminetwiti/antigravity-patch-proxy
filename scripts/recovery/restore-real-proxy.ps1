@@ -8,14 +8,15 @@ $StubJs = Join-Path $ScriptDir 'proxy-stub.js'
 $LogFile = Join-Path $env:TEMP 'ag-proxy-stub.log'
 $OutFile = Join-Path $env:TEMP 'ag-proxy-stub.out'
 $ErrFile = Join-Path $env:TEMP 'ag-proxy-stub.err'
+$PROXY_PORT = if ($env:AG_PROXY_PORT) { $env:AG_PROXY_PORT } else { '51074' }
 
-# 1. Kill the stub so port 50999 is free for the real proxy
-Write-Host '== [1] Stop proxy stub (free 50999) ==' -ForegroundColor Cyan
+# 1. Kill the stub so port $PROXY_PORT is free for the real proxy
+Write-Host "== [1] Stop proxy stub (free $PROXY_PORT) ==" -ForegroundColor Cyan
 Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
   Where-Object { $_.CommandLine -match 'proxy-stub' } |
   ForEach-Object { Write-Host ("  killing stub pid=" + $_.ProcessId); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-Get-NetTCPConnection -LocalPort 50999 -State Listen -ErrorAction SilentlyContinue |
-  ForEach-Object { Write-Host ("  killing PID " + $_.OwningProcess + " on 50999"); Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+Get-NetTCPConnection -LocalPort $PROXY_PORT -State Listen -ErrorAction SilentlyContinue |
+  ForEach-Object { Write-Host ("  killing PID " + $_.OwningProcess + " on ${PROXY_PORT}"); Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Seconds 2
 
 # 2. Kill Antigravity so repack is clean
@@ -61,15 +62,15 @@ Write-Host '== [5] Launch Antigravity ==' -ForegroundColor Cyan
 $exe = Join-Path $env:LOCALAPPDATA 'Programs\antigravity\Antigravity.exe'
 if (Test-Path $exe) { Start-Process -FilePath $exe; Write-Host '  launched.' } else { Write-Host ("  MISSING: " + $exe) -ForegroundColor Red }
 
-# 6. Poll 50999
+# 6. Poll $PROXY_PORT
 Write-Host ''
-Write-Host '== [6] Wait for 127.0.0.1:50999 (up to 60s) ==' -ForegroundColor Cyan
+Write-Host "== [6] Wait for 127.0.0.1:${PROXY_PORT} (up to 60s) ==" -ForegroundColor Cyan
 $ready = $false
 for ($i = 1; $i -le 60; $i++) {
   $tcp = $null
   try {
     $tcp = New-Object System.Net.Sockets.TcpClient
-    $iar = $tcp.BeginConnect('127.0.0.1', 50999, $null, $null)
+    $iar = $tcp.BeginConnect('127.0.0.1', [int]$PROXY_PORT, $null, $null)
     if ($iar.AsyncWaitHandle.WaitOne(1000, $false)) { $tcp.EndConnect($iar); $ready = $true; Write-Host ("  OPEN after {0}s" -f $i) -ForegroundColor Green; break }
   } catch {} finally { if ($tcp) { $tcp.Close() } }
   if ($i % 10 -eq 0) { Write-Host ("  waiting... {0}s" -f $i) -ForegroundColor Yellow }
@@ -80,7 +81,7 @@ for ($i = 1; $i -le 60; $i++) {
 $stub = $false
 if ($ready) {
   try {
-    $r = Invoke-WebRequest -Uri 'http://127.0.0.1:50999/health' -UseBasicParsing -TimeoutSec 3
+    $r = Invoke-WebRequest -Uri "http://127.0.0.1:${PROXY_PORT}/health" -UseBasicParsing -TimeoutSec 3
     Write-Host ("  /health -> " + $r.StatusCode + " " + $r.Content)
     if ($r.Content -match '"stub":true') { $stub = $true }
   } catch { Write-Host "  /health probe failed: $($_.Exception.Message)" -ForegroundColor Yellow }
@@ -98,9 +99,9 @@ Write-Host ''
 if ($ready -and -not $stub) {
   Write-Host 'REAL PROXY IS UP.' -ForegroundColor Green
 } elseif ($ready -and $stub) {
-  Write-Host 'STUB is still answering (real proxy did not take 50999).' -ForegroundColor Yellow
+  Write-Host "STUB is still answering (real proxy did not take $PROXY_PORT)." -ForegroundColor Yellow
 } else {
-  Write-Host 'REAL PROXY DID NOT START on 50999 after 60s.' -ForegroundColor Red
+  Write-Host "REAL PROXY DID NOT START on $PROXY_PORT after 60s." -ForegroundColor Red
   Write-Host 'Restarting stub to restore connectivity...' -ForegroundColor Yellow
   if (Test-Path $StubJs) {
     Start-Process -FilePath $nodeCmd.Source -ArgumentList "`"$StubJs`"" -WindowStyle Hidden `

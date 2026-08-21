@@ -1,6 +1,4 @@
 const PRELOAD_LOG_MARKER = '// 2.3.x patch: electron-log is initialized by dist/main.js';
-const LANGUAGE_SERVER_MARKER =
-  '// 2.3.x patch: proxy is owned by proxy-runner.js on port 50999';
 
 function stripPreloadLogInitialization(source) {
   if (source.includes(PRELOAD_LOG_MARKER)) return source;
@@ -17,7 +15,9 @@ function stripPreloadLogInitialization(source) {
 }
 
 function removeLanguageServerProxyStartup(source) {
-  if (source.includes(LANGUAGE_SERVER_MARKER)) return source;
+  const proxyPort = process.env.AG_PROXY_PORT || '51074';
+  const marker = `// 2.3.x patch: proxy is owned by proxy-runner.js on port ${proxyPort}`;
+  if (source.includes(marker)) return source;
 
   const start = source.indexOf('        let proxyPort;');
   const endMarker = "        const apiServerUrl = proxyPort ? `http://localhost:${proxyPort}` : 'https://generativelanguage.googleapis.com';";
@@ -28,7 +28,7 @@ function removeLanguageServerProxyStartup(source) {
     );
   }
 
-  const replacement = `        ${LANGUAGE_SERVER_MARKER}\n        const proxyPort = 50999;\n`;
+  const replacement = `        ${marker}\n        const proxyPort = ${proxyPort};\n`;
   return source.slice(0, start) + replacement + source.slice(end);
 }
 

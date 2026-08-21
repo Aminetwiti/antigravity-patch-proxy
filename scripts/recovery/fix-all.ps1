@@ -4,13 +4,14 @@
 #   1. Stop Antigravity + LS + proxy-stub
 #   2. Binary patch (ag-doctor patch apply)
 #   3. MITM CA install (ag-doctor mitm install)
-#   4. Kill proxy-stub so real proxy gets port 50999
+#   4. Kill proxy-stub so real proxy gets the configured proxy port
 #   5. Repack app.asar with patched proxy code
 #   6. Restart Antigravity
 param([switch]$NoPause)
 
 $ErrorActionPreference = "Continue"
 $ScriptDir = $PSScriptRoot
+$PROXY_PORT = if ($env:AG_PROXY_PORT) { $env:AG_PROXY_PORT } else { '51074' }
 
 function Write-Step($msg) { Write-Host "`n=== $msg ===" -ForegroundColor Cyan }
 function Write-Ok($msg)   { Write-Host "  [OK] $msg" -ForegroundColor Green }
@@ -63,16 +64,16 @@ if (Test-Path $AgDoctor) {
     } finally { Pop-Location }
 }
 
-# -- 4. Kill proxy-stub (port 50999 must be free for real proxy)
-Write-Step "Ensuring port 50999 is free for real proxy"
-$busy = Get-NetTCPConnection -LocalPort 50999 -ErrorAction SilentlyContinue
+# -- 4. Kill proxy-stub (port $PROXY_PORT must be free for real proxy)
+Write-Step "Ensuring port $PROXY_PORT is free for real proxy"
+$busy = Get-NetTCPConnection -LocalPort $PROXY_PORT -ErrorAction SilentlyContinue
 if ($busy) {
-    Write-Host "  Port 50999 occupied by PID $($busy.OwningProcess) -- killing" -ForegroundColor Yellow
+    Write-Host "  Port $PROXY_PORT occupied by PID $($busy.OwningProcess) -- killing" -ForegroundColor Yellow
     Stop-Process -Id $busy.OwningProcess -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 1
 }
-$busy2 = Get-NetTCPConnection -LocalPort 50999 -ErrorAction SilentlyContinue
-if (-not $busy2) { Write-Ok "Port 50999 free" }
+$busy2 = Get-NetTCPConnection -LocalPort $PROXY_PORT -ErrorAction SilentlyContinue
+if (-not $busy2) { Write-Ok "Port $PROXY_PORT free" }
 
 # -- 5. Repack app.asar
 Write-Step "Repacking app.asar"

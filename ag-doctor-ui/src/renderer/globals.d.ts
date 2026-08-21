@@ -107,7 +107,7 @@ interface AgAPI {
   repairRun(): Promise<{ ok: boolean; proxy?: boolean; ca?: boolean; error?: string }>;
 
   // Proxy stub lifecycle — emergency fallback when Antigravity's bundled proxy fails
-  proxyStartStub(): Promise<{ ok: boolean; pid?: number; note?: string; error?: string }>;
+  proxyStartStub(): Promise<{ ok: boolean; pid?: number; port?: number; note?: string; error?: string }>;
   proxyStubStatus(): Promise<{ ok: boolean; data?: { ok: boolean; stub: boolean; latencyMs: number; error?: string }; error?: string }>;
 }
 

@@ -7,7 +7,7 @@
 #   - Which versions are installed
 #   - Which binary is currently active
 #   - Whether the running process is v1.x or v2.0+
-#   - Port 50999 ownership (which PID is bound to it)
+#   - Port ${AG_PROXY_PORT:-51074} ownership (which PID is bound to it)
 #
 # Exit codes:
 #   0 = single, unambiguous installation found
@@ -129,18 +129,18 @@ else
 fi
 echo ""
 
-# ─── 3. Port 50999 ownership ──────────────────────────────────────────────
+# ─── 3. Port ${AG_PROXY_PORT:-51074} ownership ──────────────────────────────────────────────
 
-section '3. Port 50999 Ownership'
+section '3. Port ${AG_PROXY_PORT:-51074} Ownership'
 
-# Try multiple methods to find the owner of port 50999
+# Try multiple methods to find the owner of the proxy port
 owner=""
 if command -v ss >/dev/null 2>&1; then
-    owner=$(ss -tlnp 2>/dev/null | grep ':50999 ' | head -1)
+    owner=$(ss -tlnp 2>/dev/null | grep ":${AG_PROXY_PORT:-51074} " | head -1)
 elif command -v netstat >/dev/null 2>&1; then
-    owner=$(netstat -tlnp 2>/dev/null | grep ':50999 ' | head -1)
+    owner=$(netstat -tlnp 2>/dev/null | grep ":${AG_PROXY_PORT:-51074} " | head -1)
 elif command -v lsof >/dev/null 2>&1; then
-    owner=$(lsof -i :50999 2>/dev/null | grep LISTEN | head -1)
+    owner=$(lsof -i :${AG_PROXY_PORT:-51074} 2>/dev/null | grep LISTEN | head -1)
 fi
 
 if [ -n "$owner" ]; then
@@ -151,7 +151,7 @@ if [ -n "$owner" ]; then
     processName=$(ps -p "$pid" -o comm= 2>/dev/null || echo "unknown")
     processPath=$(ps -p "$pid" -o args= 2>/dev/null || echo "unknown")
 
-    echo -e "  ${YELLOW}⚠️  Port 50999 is bound by:${NC}"
+    echo -e "  ${YELLOW}⚠️  Port ${AG_PROXY_PORT:-51074} is bound by:${NC}"
     echo -e "     ${WHITE}PID:     $pid${NC}"
     echo -e "     ${WHITE}Process: $processName${NC}"
     echo -e "     ${GRAY}Path:    $processPath${NC}"
@@ -163,12 +163,12 @@ if [ -n "$owner" ]; then
         echo ""
         echo -e "  ${YELLOW}⚠️  This is NOT our patched build.${NC}"
         echo -e "     ${YELLOW}If you started Antigravity 2.0 (uppercase), its proxy cannot start${NC}"
-        echo -e "     ${YELLOW}because port 50999 is taken. Either:${NC}"
+        echo -e "     ${YELLOW}because port ${AG_PROXY_PORT:-51074} is taken. Either:${NC}"
         echo -e "       ${YELLOW}(a) Kill PID $pid: kill $pid${NC}"
         echo -e "       ${YELLOW}(b) Run Antigravity 2.0 with AG_PROXY_PORT=51999${NC}"
     fi
 else
-    echo -e "  ${GREEN}✅ Port 50999 is FREE.${NC}"
+    echo -e "  ${GREEN}✅ Port ${AG_PROXY_PORT:-51074} is FREE.${NC}"
 fi
 echo ""
 

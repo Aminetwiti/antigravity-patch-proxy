@@ -15,6 +15,7 @@ import { getPlatform } from './platform';
 import { ensureCa, readCa, getCaCertPath, CA_NAME } from './cert';
 import { probeWithProxy } from './probe';
 import { runElevated } from './elevation';
+import { DEFAULT_MITM_PORT } from './config';
 
 const execFileAsync = promisify(execFile);
 
@@ -41,13 +42,11 @@ function describe(r: { ok: boolean; message: string; stderr: string; stdout: str
   return text;
 }
 
-export const DEFAULT_MITM_PORT = 50999;
-
 /**
  * Well-known MITM forwarder port. The `mitm_443.js` forwarder binds port 443
  * and transparently forwards to {@link DEFAULT_MITM_PORT}. A system proxy set
- * to 443 is therefore functionally equivalent to one set to 50999 and must not
- * be reported as a port mismatch.
+ * to 443 is therefore functionally equivalent to one set to the configured MITM
+ * port and must not be reported as a port mismatch.
  */
 export const MITM_FORWARDER_PORTS = new Set<number>([DEFAULT_MITM_PORT, 443]);
 
@@ -80,6 +79,8 @@ export interface MitmStatus {
   interception: {
     listening: boolean;
     reachable: boolean;
+    /** True when the classic binary patch redirects traffic, so MITM interception is not required. */
+    bypassed: boolean;
   };
 }
 
@@ -148,6 +149,21 @@ export async function getMitmStatus(port = DEFAULT_MITM_PORT): Promise<MitmStatu
     }
   }
 
+  // When the classic binary patch is active, MITM interception is bypassed
+  // by design (the language server talks to the local proxy directly). The
+  // doctor's MITM check reflects this; surface it here too so mitm status
+  // does not look like a failure when no MITM proxy is running.
+  let binaryPatchBypass = false;
+  try {
+    const { getPatchStatus } = require('./binary-patch');
+    binaryPatchBypass = getPatchStatus().applied;
+  } catch {
+    // ignore
+  }
+  if (binaryPatchBypass) {
+    details.push('Interception bypassed ' + String.fromCharCode(8212) + ' binary patch active (MITM not required)');
+  }
+
   let expiresAt: string | null = null;
   let isExpired = false;
   if (ca?.certPath && fs.existsSync(ca.certPath)) {
@@ -195,6 +211,7 @@ export async function getMitmStatus(port = DEFAULT_MITM_PORT): Promise<MitmStatu
       // listening: check if something is actually listening on the proxy port
       listening: proxyListening,
       reachable: interceptionOk === true,
+      bypassed: binaryPatchBypass,
     },
   };
 }

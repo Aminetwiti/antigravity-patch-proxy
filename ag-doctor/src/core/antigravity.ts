@@ -23,13 +23,14 @@ import {
 } from './paths';
 import { isWsl } from './platform';
 import { findAntigravityProcesses, killAntigravityProcesses } from './process';
+import { DEFAULT_MITM_PORT } from './config';
 
 const execFileAsync = promisify(execFile);
 
 export interface AntigravityVersion {
   version: string;
   channel?: string;
-  source: 'asar' | 'product.json' | 'app-update.yml' | 'exe' | 'pak' | 'unknown';
+  source: 'asar' | 'product.json' | 'app-update.yml' | 'exe' | 'asar.bak' | 'pak' | 'unknown';
   raw?: string;
 }
 
@@ -92,15 +93,24 @@ function readWindowsFileVersion(exePath: string): string | null {
   }
 }
 
-/** Parse the asar archive to find package.json using @electron/asar. */
+/**
+ * Read package.json out of an asar archive — dependency-free.
+ *
+ * The asar container format:
+ *   [4B: pickle size][4B: JSON header string size][JSON header (4B-aligned)]
+ *   [file data]
+ * The header JSON maps file paths to { offset, size } relative to the start
+ * of the file data region. A native reader is required because the
+ * @electron/asar package requires Node >= 22 (its engines field), which
+ * silently broke version detection on Node 18 ("vunknown").
+ */
 function readAsarPackageJson(asarPath: string): { version?: string; name?: string; productName?: string } | null {
   try {
-    // Lazy-require so the rest of the module loads even if the native dep is missing
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const asar = require('@electron/asar');
-    const pkgJsonText = asar.extractFile(asarPath, 'package.json');
-    if (!pkgJsonText) return null;
-    return JSON.parse(pkgJsonText.toString('utf-8')) as {
+    // Shared dependency-free reader (works on Node 18 / Electron-as-node too).
+    const { readAsarFile } = require('./asar-reader') as typeof import('./asar-reader');
+    const buf = readAsarFile(asarPath, 'package.json');
+    if (!buf) return null;
+    return JSON.parse(buf.toString('utf-8')) as {
       version?: string;
       name?: string;
       productName?: string;
@@ -153,13 +163,34 @@ export function detectAntigravityVersion(installDir?: string): AntigravityVersio
   const asarPath = getAppAsarPath(dir);
   if (asarPath && fs.existsSync(asarPath)) {
     const pkg = readAsarPackageJson(asarPath);
-    if (pkg?.version) {
+    // Guard: only trust the asar when it actually is the Antigravity package.
+    // A junk repack (e.g. repack.ps1 packing the repo root, or a half-written
+    // asar) would surface bogus versions like "3.0.2 Antigravity Patch Proxy".
+    if (pkg?.version && (!pkg.name || pkg.name === "antigravity")) {
       return {
         version: pkg.version,
         channel: pkg.productName && pkg.productName !== pkg.name ? pkg.productName : undefined,
         source: 'asar',
         raw: JSON.stringify({ name: pkg.name, productName: pkg.productName }),
       };
+    }
+  }
+
+  // 1b. app.asar.bak fallback: the backup always holds the original
+  // Antigravity package.json even when app.asar was repacked from this repo
+  // (name "antigravity-patch-proxy") or is being rewritten.
+  if (asarPath) {
+    const bakPath = asarPath + '.bak';
+    if (fs.existsSync(bakPath)) {
+      const bakPkg = readAsarPackageJson(bakPath);
+      if (bakPkg?.version && (!bakPkg.name || bakPkg.name === 'antigravity')) {
+        return {
+          version: bakPkg.version,
+          channel: bakPkg.productName && bakPkg.productName !== bakPkg.name ? bakPkg.productName : undefined,
+          source: 'asar.bak',
+          raw: JSON.stringify({ name: bakPkg.name, productName: bakPkg.productName }),
+        };
+      }
     }
   }
 
@@ -222,17 +253,16 @@ async function isPortReachable(port: number, host = '127.0.0.1'): Promise<boolea
 async function findLanguageServerProcesses(): Promise<Array<{ pid: number; command: string }>> {
   try {
     if (process.platform === 'win32') {
-      const { stdout } = await execFileAsync('tasklist', [
-        '/FI',
-        'IMAGENAME eq language_server.exe',
-        '/FO',
-        'CSV',
-        '/NH',
-      ]);
+      // Classic app ships language_server.exe; the VS Code-based IDE ships
+      // language_server_windows_x64.exe inside its bundled extension.
+      const imageNames = ['language_server.exe', 'language_server_windows_x64.exe'];
       const out: Array<{ pid: number; command: string }> = [];
-      for (const line of stdout.split(/\r?\n/)) {
-        const m = line.match(/^"language_server\.exe","(\d+)"/);
-        if (m) out.push({ pid: parseInt(m[1]!, 10), command: 'language_server.exe' });
+      for (const name of imageNames) {
+        const { stdout } = await execFileAsync('tasklist', ['/FI', `IMAGENAME eq ${name}`, '/FO', 'CSV', '/NH']);
+        for (const line of stdout.split(/\r?\n/)) {
+          const m = line.match(/^"([^"]+\.exe)","(\d+)"/);
+          if (m) out.push({ pid: parseInt(m[2]!, 10), command: m[1] });
+        }
       }
       return out;
     }
@@ -248,7 +278,7 @@ async function findLanguageServerProcesses(): Promise<Array<{ pid: number; comma
 }
 
 /** Get the full status of Antigravity: install, version, running PIDs, proxy, paths, system info. */
-export async function getAntigravityStatus(proxyPort = 50999): Promise<AntigravityStatus> {
+export async function getAntigravityStatus(proxyPort = DEFAULT_MITM_PORT): Promise<AntigravityStatus> {
   const installDir = findAntigravityInstallDir();
   const appAsar = getAppAsarPath();
   const version = detectAntigravityVersion();

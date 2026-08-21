@@ -47,12 +47,13 @@ function buildRepairAction(actionId: string, options?: { autoElevate?: boolean; 
         description: 'Restore original binary from backup snapshot',
       };
     case 'start-stub':
+      const stubPort = process.env.AG_PROXY_STUB_PORT || '51999';
       return {
         id: 'start-stub',
-        command: ['proxy', 'stub', '--port', '50999'],
+        command: ['proxy', 'stub', '--port', stubPort],
         requiresElevation: false,
         prerequisites: [],
-        description: 'Start emergency proxy stub on port 50999',
+        description: 'Start emergency proxy stub',
       };
     default:
       throw new Error(`Unknown repair action ID: ${actionId}`);
@@ -107,11 +108,22 @@ describe('Repair Action Builder & Elevation Validation (25 tests)', () => {
     expect(act.command).toEqual(['patch', 'restore']);
   });
 
-  it('builds start-stub action on port 50999', () => {
+  it('builds start-stub action with default port 51999', () => {
     const act = buildRepairAction('start-stub');
     expect(act.id).toBe('start-stub');
     expect(act.requiresElevation).toBe(false);
-    expect(act.command).toEqual(['proxy', 'stub', '--port', '50999']);
+    expect(act.command).toEqual(['proxy', 'stub', '--port', '51999']);
+  });
+
+  it('builds start-stub action with AG_PROXY_STUB_PORT when set', () => {
+    const orig = process.env.AG_PROXY_STUB_PORT;
+    process.env.AG_PROXY_STUB_PORT = '50999';
+    try {
+      const act = buildRepairAction('start-stub');
+      expect(act.command).toEqual(['proxy', 'stub', '--port', '50999']);
+    } finally {
+      process.env.AG_PROXY_STUB_PORT = orig;
+    }
   });
 
   it('throws error for unknown repair action ID', () => {
@@ -175,7 +187,7 @@ describe('Repair Action Builder & Elevation Validation (25 tests)', () => {
 
   it('has human readable descriptions for start-stub', () => {
     const act = buildRepairAction('start-stub');
-    expect(act.description).toContain('port 50999');
+    expect(act.description).toContain('proxy stub');
   });
 
   it('command arguments start with sub-command name', () => {
@@ -193,11 +205,9 @@ describe('Repair Action Builder & Elevation Validation (25 tests)', () => {
     expect(cmd[portIdx + 1]).toBe('443');
   });
 
-  it('start-stub includes port 50999 argument', () => {
-    const cmd = buildRepairAction('start-stub').command;
-    const portIdx = cmd.indexOf('--port');
-    expect(portIdx).not.toBe(-1);
-    expect(cmd[portIdx + 1]).toBe('50999');
+  it('start-stub description is generic', () => {
+    const act = buildRepairAction('start-stub');
+    expect(act.description).toContain('proxy stub');
   });
 
   it('install-ca subcommand is install', () => {

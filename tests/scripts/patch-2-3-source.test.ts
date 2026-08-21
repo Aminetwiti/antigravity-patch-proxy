@@ -31,12 +31,26 @@ describe('removeLanguageServerProxyStartup', () => {
     });
 }`;
 
-  it('keeps fixed port 50999 and removes the second startProxy call', () => {
+  it('defaults to port 51074 when AG_PROXY_PORT is unset and removes the second startProxy call', () => {
     const once = removeLanguageServerProxyStartup(source);
-    expect(once).toContain('const proxyPort = 50999;');
+    expect(once).toContain('const proxyPort = 51074;');
     expect(once).not.toContain('proxy_1.startProxy');
-    expect(once).toContain('2.3.x patch: proxy is owned by proxy-runner.js on port 50999');
+    expect(once).toContain('2.3.x patch: proxy is owned by proxy-runner.js on port 51074');
     expect(removeLanguageServerProxyStartup(once)).toBe(once);
+  });
+
+  it('uses AG_PROXY_PORT when set and is idempotent', () => {
+    const orig = process.env.AG_PROXY_PORT;
+    process.env.AG_PROXY_PORT = '51999';
+    try {
+      const once = removeLanguageServerProxyStartup(source);
+      expect(once).toContain('const proxyPort = 51999;');
+      expect(once).not.toContain('proxy_1.startProxy');
+      expect(once).toContain('2.3.x patch: proxy is owned by proxy-runner.js on port 51999');
+      expect(removeLanguageServerProxyStartup(once)).toBe(once);
+    } finally {
+      process.env.AG_PROXY_PORT = orig;
+    }
   });
 
   it('fails clearly when upstream source shape changes', () => {

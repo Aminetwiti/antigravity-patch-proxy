@@ -8,6 +8,8 @@
  */
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
+import path from 'path';
+import fs from 'fs';
 import { getPlatform, isWsl } from './platform';
 
 const execFileAsync = promisify(execFile);
@@ -17,19 +19,34 @@ export interface ProcessInfo {
   command: string;
 }
 
+/**
+ * Known Antigravity process image names (Windows).
+ * The classic desktop app runs as Antigravity.exe; the newer VS Code-based
+ * "Antigravity IDE" runs as Antigravity IDE.exe. Both count as "running".
+ */
+const WINDOWS_IMAGE_NAMES = ['Antigravity.exe', 'Antigravity IDE.exe'];
+
 /** Find running Antigravity processes. */
 export async function findAntigravityProcesses(): Promise<ProcessInfo[]> {
   const platform = getPlatform();
   try {
     if (platform === 'win32') {
-      const { stdout } = await execFileAsync('tasklist', ['/FI', 'IMAGENAME eq Antigravity.exe', '/FO', 'CSV', '/NH']);
-      return parseWindowsTasklist(stdout);
+      const results: ProcessInfo[] = [];
+      for (const name of WINDOWS_IMAGE_NAMES) {
+        const { stdout } = await execFileAsync('tasklist', ['/FI', `IMAGENAME eq ${name}`, '/FO', 'CSV', '/NH']);
+        results.push(...parseWindowsTasklist(stdout));
+      }
+      return results;
     }
     if (isWsl()) {
       // WSL can see Windows processes through tasklist.exe
       try {
-        const { stdout } = await execFileAsync('/mnt/c/Windows/System32/tasklist.exe', ['/FI', 'IMAGENAME eq Antigravity.exe', '/FO', 'CSV', '/NH']);
-        return parseWindowsTasklist(stdout);
+        const results: ProcessInfo[] = [];
+        for (const name of WINDOWS_IMAGE_NAMES) {
+          const { stdout } = await execFileAsync('/mnt/c/Windows/System32/tasklist.exe', ['/FI', `IMAGENAME eq ${name}`, '/FO', 'CSV', '/NH']);
+          results.push(...parseWindowsTasklist(stdout));
+        }
+        return results;
       } catch {
         // fall through to pgrep
       }
@@ -48,8 +65,8 @@ function parseWindowsTasklist(stdout: string): ProcessInfo[] {
   const out: ProcessInfo[] = [];
   const lines = stdout.split(/\r?\n/);
   for (const line of lines) {
-    const m = line.match(/^"Antigravity\.exe","(\d+)"/);
-    if (m) out.push({ pid: parseInt(m[1], 10), command: 'Antigravity.exe' });
+    const m = line.match(/^"([^"]+\.exe)","(\d+)"/);
+    if (m) out.push({ pid: parseInt(m[2], 10), command: m[1] });
   }
   return out;
 }
@@ -139,4 +156,39 @@ export function spawnInherit(cmd: string, args: string[]): Promise<number> {
     child.on('exit', (code) => resolve(code ?? 0));
     child.on('error', reject);
   });
+}
+
+/**
+ * Resolve the best runtime for the standalone proxy.
+ *
+ * Prefers a real Electron binary (bundled with ag-doctor-ui) so Electron's
+ * safeStorage is available and DPAPI-encrypted API keys (`enc:`) can be
+ * decrypted. Falls back to plain node, where the proxy runs with a mocked
+ * safeStorage (only `fallback:`-style keys decrypt).
+ */
+export function resolveProxyRuntime(): { bin: string; args: string[]; isElectron: boolean } {
+  const platform = getPlatform();
+  if (platform === 'win32' || platform === 'linux' || platform === 'darwin') {
+    const exeName = platform === 'win32' ? 'electron.exe' : 'electron';
+    const candidates = [
+      path.resolve(__dirname, '..', '..', '..', 'ag-doctor-ui', 'node_modules', 'electron', 'dist', exeName),
+      path.resolve(__dirname, '..', '..', '..', 'node_modules', 'electron', 'dist', exeName),
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c)) return { bin: c, args: [], isElectron: true };
+    }
+  }
+  return { bin: process.execPath, args: [], isElectron: false };
+}
+
+/**
+ * Environment for a spawned proxy process. When running under Electron,
+ * ELECTRON_RUN_AS_NODE must be cleared: some shells/agents set it globally,
+ * and with it set, electron.exe behaves as plain node (no `electron` builtin,
+ * no safeStorage) and the proxy cannot decrypt `enc:` keys.
+ */
+export function proxySpawnEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env = { ...base };
+  delete env.ELECTRON_RUN_AS_NODE;
+  return env;
 }

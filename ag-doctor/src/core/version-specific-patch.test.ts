@@ -31,6 +31,7 @@ vi.mock('./antigravity', () => ({
 
 vi.mock('./config', () => ({
   getPatchVersionOverride: vi.fn(() => ({ range: null, reason: null, setAt: null })),
+  DEFAULT_MITM_PORT: 51074,
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires

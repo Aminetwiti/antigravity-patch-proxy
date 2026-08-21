@@ -1,21 +1,21 @@
 /**
- * MITM HTTPS forwarder on port 443.
- *
- * Dual-mode server:
- *   - TLS connections (Antigravity's patched binary): terminates TLS using
- *     the user-trusted CA, then forwards the decrypted HTTP request to the
- *     local Antigravity proxy on localhost:50999.
- *   - Plain HTTP CONNECT requests (ag-doctor interception test): tunnels
- *     raw bytes between the client and the requested host:port. This lets
- *     ag-doctor's `probeWithProxy` succeed without changing the test code.
- *
- * Requires:
- *   - CA cert trusted in Windows (LocalMachine\Root)
- *   - Run with admin rights so Node can bind port 443
- *
- * Usage (PowerShell admin):
- *   node C:\Users\amine\Downloads\antigravity-add-model-main\antigravity-add-model-main\scripts\mitm\mitm_443.js
- */
+* MITM HTTPS forwarder on port 443.
+*
+* Dual-mode server:
+*   - TLS connections (Antigravity's patched binary): terminates TLS using
+*     the user-trusted CA, then forwards the decrypted HTTP request to the
+*     local Antigravity proxy on localhost:${AG_PROXY_PORT:-51074}.
+*   - Plain HTTP CONNECT requests (ag-doctor interception test): tunnels
+*     raw bytes between the client and the requested host:port. This lets
+*     ag-doctor's `probeWithProxy` succeed without changing the test code.
+*
+* Requires:
+*   - CA cert trusted in Windows (LocalMachine\Root)
+*   - Run with admin rights so Node can bind port 443
+*
+* Usage (PowerShell admin):
+*   node C:\Users\amine\Downloads\antigravity-add-model-main\antigravity-add-model-main\scripts\mitm\mitm_443.js
+*/
 
 const https = require('https');
 const http = require('http');
@@ -24,7 +24,8 @@ const fs = require('fs');
 const path = require('path');
 
 const CERT_DIR = path.resolve(__dirname, '..', '..');
-const PROXY_TARGET = process.env.AG_PROXY_TARGET || 'http://127.0.0.1:50999';
+const proxyPort = process.env.AG_PROXY_PORT || '51074';
+const PROXY_TARGET = process.env.AG_PROXY_TARGET || `http://127.0.0.1:${proxyPort}`;
 const LISTEN_HOST = process.env.AG_MITM_HOST || '127.0.0.1';
 const LISTEN_PORT = parseInt(process.env.AG_MITM_PORT || '443', 10);
 

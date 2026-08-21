@@ -27,10 +27,14 @@ export interface CustomModel {
   timeout?: number;
   maxRetries?: number;
   enabled?: boolean;
+  /** True when apiKey is stored in an encrypted/opaque format. */
+  encrypted?: boolean;
 }
 
 export interface CustomModelsFile {
   models: CustomModel[];
+  /** Newer dual-format section managed by the doctor UI / language server. */
+  providers?: Array<Record<string, any>>;
 }
 
 export interface SystemInfo {

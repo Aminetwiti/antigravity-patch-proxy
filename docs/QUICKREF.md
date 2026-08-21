@@ -29,7 +29,7 @@ npm run doctor:repair
 npm run start:mitm
 ```
 
-Launches `scripts/mitm/start_mitm_443.ps1` with UAC, imports CA, forwards to 50999.
+Launches `scripts/mitm/start_mitm_443.ps1` with UAC, imports CA, forwards to ${AG_PROXY_PORT:-51074}.
 
 ## 4. "Rebuild without redeploying"
 

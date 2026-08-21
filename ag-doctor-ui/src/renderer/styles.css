@@ -1313,6 +1313,11 @@ body {
 .chip-badge.reasoning { background: rgba(139, 92, 246, 0.15); color: #a78bfa; border-color: rgba(139, 92, 246, 0.3); }
 .chip-badge.vision    { background: rgba(6, 182, 212, 0.15); color: #22d3ee; border-color: rgba(6, 182, 212, 0.3); }
 .chip-badge.code      { background: rgba(37, 99, 235, 0.15); color: #60a5fa; border-color: rgba(37, 99, 235, 0.3); }
+/* Light-mode chip badge text: the dark pastels (#a78bfa etc.) fail WCAG on
+   light surfaces — use darker tint variants for >= 4.5:1. */
+:root[data-theme="light"] .chip-badge.reasoning { color: #7c3aed; }
+:root[data-theme="light"] .chip-badge.vision    { color: #0e7490; }
+:root[data-theme="light"] .chip-badge.code      { color: #1d4ed8; }
 
 /* Grouped models by provider */
 .models-provider-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
@@ -1948,7 +1953,7 @@ body {
   --ok: #1a7f37;
   --ok-bg: hsla(136, 60%, 40%, 0.1);
   --ok-border: hsla(136, 60%, 40%, 0.3);
-  --warn: #9a6700;
+  --warn: #8a5f00;
   --warn-bg: hsla(40, 80%, 40%, 0.1);
   --warn-border: hsla(40, 80%, 40%, 0.3);
   --err: #cf222e;
@@ -1967,6 +1972,24 @@ body {
   --shadow-md: 0 3px 6px hsla(220, 14%, 30%, 0.08);
   --shadow-lg: 0 8px 24px hsla(220, 14%, 30%, 0.12);
   --shadow-glow: 0 0 0 1px hsla(217, 91%, 60%, 0.3), 0 0 12px hsla(217, 91%, 60%, 0.15);
+}
+
+/* Provider manager / model card tokens (qc family) — light equivalents.
+   The qc tokens are only defined for the dark theme; without these overrides
+   the provider manager modal and model cards stay dark in light mode. */
+:root[data-theme="light"] {
+  --qc-surface-base: #ffffff;
+  --qc-surface-raised: #f6f8fa;
+  --qc-surface-input: #ffffff;
+  --qc-border-subtle: #eaeef2;
+  --qc-border-strong: #d0d7de;
+  --qc-ink-primary: #1f2328;
+  --qc-ink-secondary: #57606a;
+  --qc-ink-muted: #6e7781;
+  --qc-accent-blue: #0969da;
+  --qc-accent-blue-hover: #0a56b0;
+  --qc-positive: #1a7f37;
+  --qc-danger: #cf222e;
 }
 
 :root[data-theme="light"] .titlebar { background: var(--bg-1); }

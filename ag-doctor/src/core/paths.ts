@@ -95,6 +95,85 @@ export function getLanguageServerBinary(installDir?: string): string | null {
   return path.join(dir, 'resources', 'bin', 'language_server');
 }
 
+/**
+ * Detect the newer VS Code-based "Antigravity IDE" product install.
+ *
+ * Since mid-2026 the desktop client ships as "Antigravity IDE" (a VS Code
+ * fork, e.g. v1.107.0) at %LOCALAPPDATA%\Programs\Antigravity IDE. It is a
+ * different product layout from the classic 2.x shell: no resources/app.asar,
+ * and the language server lives inside the bundled extension:
+ *   resources\app\extensions\antigravity\bin\language_server_windows_x64.exe
+ *
+ * The classic install (Programs\antigravity) is still the patch-tooling
+ * primary; this helper lets the doctor/repair pipeline also see the IDE.
+ */
+export function findAntigravityIdeInstallDir(): string | null {
+  const platform = getPlatform();
+  if (platform === 'win32') {
+    const local = process.env.LOCALAPPDATA;
+    if (local) {
+      const p = path.join(local, 'Programs', 'Antigravity IDE');
+      if (fs.existsSync(p)) return p;
+    }
+    const fallback = path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Antigravity IDE');
+    if (fs.existsSync(fallback)) return fallback;
+  } else if (platform === 'darwin') {
+    const p = '/Applications/Antigravity IDE.app';
+    if (fs.existsSync(p)) return p;
+  } else if (platform === 'linux') {
+    const p = path.join(os.homedir(), '.local', 'share', 'Programs', 'Antigravity IDE');
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+/** Executable inside the IDE install (Antigravity IDE.exe on Windows). */
+export function getIdeExecutable(installDir?: string): string | null {
+  const dir = installDir ?? findAntigravityIdeInstallDir();
+  if (!dir) return null;
+  const platform = getPlatform();
+  const exeName = platform === 'win32' ? 'Antigravity IDE.exe' : 'Antigravity IDE';
+  const exe = path.join(dir, exeName);
+  return fs.existsSync(exe) ? exe : null;
+}
+
+/**
+ * Path to the IDE's bundled language server binary
+ * (resources\app\extensions\antigravity\bin\language_server_windows_x64.exe).
+ */
+export function getIdeLanguageServerBinary(installDir?: string): string | null {
+  const dir = installDir ?? findAntigravityIdeInstallDir();
+  if (!dir) return null;
+  const platform = getPlatform();
+  const name = platform === 'win32' ? 'language_server_windows_x64.exe' : 'language_server';
+  const p = path.join(dir, 'resources', 'app', 'extensions', 'antigravity', 'bin', name);
+  return fs.existsSync(p) ? p : null;
+}
+
+/**
+ * Path to the IDE's VS Code user settings.json. The IDE patch (cloud endpoint
+ * override) is a plain settings write, so this file is the patch target.
+ */
+export function getIdeSettingsJson(installDir?: string): string | null {
+  const dir = installDir ?? findAntigravityIdeInstallDir();
+  if (!dir) return null;
+  const platform = getPlatform();
+  let base: string | null = null;
+  if (platform === 'win32') {
+    base = process.env.APPDATA ?? null;
+  } else if (platform === 'darwin') {
+    base = path.join(os.homedir(), 'Library', 'Application Support');
+  } else {
+    base = path.join(os.homedir(), '.config');
+  }
+  if (!base) return null;
+  const candidates = [
+    path.join(base, 'Antigravity IDE', 'User', 'settings.json'),
+    path.join(base, 'Antigravity', 'User', 'settings.json'),
+  ];
+  return candidates.find((p) => fs.existsSync(p)) ?? candidates[0]!;
+}
+
 /** Path to the backup of the original (unpatched) language server binary. */
 export function getLanguageServerBackup(installDir?: string): string | null {
   const binary = getLanguageServerBinary(installDir);

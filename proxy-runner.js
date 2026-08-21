@@ -1,5 +1,5 @@
 // Standalone proxy runner — loaded by Antigravity.exe (electron) to start
-// the local proxy (dist/proxy.js) on 127.0.0.1:50999.
+// the local proxy (dist/proxy.js) on 127.0.0.1:${AG_PROXY_PORT:-51074}.
 //
 // v2.3.x patch: also auto-launches the MITM HTTPS forwarder on port 443
 // so the patched binary can talk to the local proxy over TLS. The MITM

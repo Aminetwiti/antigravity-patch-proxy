@@ -14,6 +14,7 @@ import { runRepairAsar, runCheckAsar } from './commands/repair-asar';
 import { runModelsList } from './commands/models/list';
 import { runModelsAdd } from './commands/models/add';
 import { runModelsRemove } from './commands/models/remove';
+import { runModelsRekey } from './commands/models/rekey';
 import { runModelsTest } from './commands/models/test';
 import { runModelsFetch } from './commands/models/fetch';
 import { runPatchStatus } from './commands/patch/status';
@@ -57,6 +58,7 @@ Commands:
   models list            List configured custom models
   models add             Interactive model creation
   models remove <name>   Delete a model (snapshots first)
+  models rekey           Re-enter API keys encrypted by the language server (v10)
   models test [name]     Test connectivity for one or all models
   models fetch           Query /v1/models for a provider and list available models
   patch status           Show binary patch state
@@ -219,6 +221,7 @@ export async function main(argv: string[]): Promise<number> {
         if (sub === 'list' || sub === 'ls') return runModelsList(ctx);
         if (sub === 'add') return await runModelsAdd(ctx);
         if (sub === 'remove' || sub === 'rm') return await runModelsRemove(ctx, rest[0]);
+        if (sub === 'rekey') return await runModelsRekey(ctx);
         if (sub === 'test') return await runModelsTest(ctx, rest[0]);
         if (sub === 'fetch') return await runModelsFetch(ctx);
         console.error(`Unknown models subcommand: ${sub}`);

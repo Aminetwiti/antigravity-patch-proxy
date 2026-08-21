@@ -11,9 +11,9 @@
 - **Diagnostic Suite (`ag-doctor`)**: Built-in CLI and Electron UI (`ag-doctor-ui`) for automatic binary patching, port binding checks, live log inspection, and 1-click repairs.
 
 ## System Architecture & Data Flow
-- **Local Proxy Address**: `127.0.0.1:50999`
+- **Local Proxy Address**: `127.0.0.1:${AG_PROXY_PORT:-51074}`
 - **Internal API Interception**: Intercepts `fetchAvailableModels`, `streamGenerateContent`, and `generateContent`.
-- **Language Server Patching**: Modifies compiled Go binary string tables to redirect hardcoded Google endpoints to `127.0.0.1:50999`.
+- **Language Server Patching**: Modifies compiled Go binary string tables to redirect hardcoded Google endpoints to `127.0.0.1:${AG_PROXY_PORT:-51074}`.
 - **Config Storage**: Stored at `%APPDATA%/antigravity/custom_models.json` (or OS equivalent).
 
 ## Key Files & Documentation

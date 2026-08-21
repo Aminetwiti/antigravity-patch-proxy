@@ -27,7 +27,7 @@
 
 **Antigravity** is a binary patch and proxy injection system for Google's Electron-based IDE. It enables **external AI models** (OpenAI, Anthropic, Together API, Ollama, Google AI Studio, and any OpenAI-compatible provider) to be used alongside the built-in Gemini models. The system works by:
 
-- Running a **local HTTP proxy** (`http://127.0.0.1:50999`) that intercepts Cloud Code internal API calls
+- Running a **local HTTP proxy** (`http://127.0.0.1:${AG_PROXY_PORT:-51074}`) that intercepts Cloud Code internal API calls
 - **Translating** request/response formats between providers (Gemini ↔ OpenAI/Anthropic/Ollama)
 - **Injecting** custom model definitions into `GetAvailableModels` responses via protobuf modification
 - **Patching** the Language Server binary to route all `fetchAvailableModels` calls through the proxy
@@ -92,7 +92,7 @@ src/
 `constants.ts` centralizes all configuration values (ports, timeouts, provider names, retry config) — no magic numbers scattered across files.
 
 #### ✅ Port Fallback
-The proxy attempts the fixed port `50999` first and falls back to a list of reserved ports (`FALLBACK_PROXY_PORTS = [51000…51010]` in `src/constants.ts`) if the primary is busy. The README previously described this as "random dynamic port allocation" — that's a simplification; the actual implementation is a deterministic fallback list.
+The proxy attempts the fixed port `${AG_PROXY_PORT:-51074}` first and falls back to a list of reserved ports (`FALLBACK_PROXY_PORTS = [51075…51084]` in `src/constants.ts`) if the primary is busy. The README previously described this as "random dynamic port allocation" — that's a simplification; the actual implementation is a deterministic fallback list.
 
 #### ✅ Stream Isolation
 All cross-turn state (tool call IDs, reasoning content, stream contexts) uses **per-model `Map` structures** instead of global variables, preventing parallel request contamination.

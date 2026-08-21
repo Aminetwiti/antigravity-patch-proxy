@@ -18,8 +18,8 @@ import {
   uninstallCaCert,
   setSystemProxy,
   clearSystemProxy,
-  DEFAULT_MITM_PORT,
 } from '../core/mitm';
+import { DEFAULT_MITM_PORT } from '../core/config';
 import { ensureCa, getCaCertPath } from '../core/cert';
 import { c, header, ok, warn, error, info, table } from '../cli/output';
 import { loadConfig } from '../core/config';

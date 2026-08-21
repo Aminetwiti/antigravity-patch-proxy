@@ -39,7 +39,7 @@ export const PATCH_REGISTRY: PatchDefinition[] = [
     minVersion: '2.0.1',
     maxVersion: '2.1.99',
     originalUrl: 'https://daily-cloudcode-pa.googleapis.com',
-    patchedUrl: 'http://localhost:50999/v1internal/xxxxxxx',
+    patchedUrl: 'http://localhost:${AG_PROXY_PORT:-51074}/v1internal/xxxxxxx',
     description: 'Patch for Antigravity 2.0.1 to 2.1.x (41 bytes)',
   },
   // Patches futurs pour 2.2.x peuvent être ajoutés ici
@@ -68,7 +68,7 @@ Recommended Patch:
   Version Range: 2.0.1 - 2.1.x
   Description: Patch for Antigravity 2.0.1 to 2.1.x (41 bytes)
   Original URL: https://daily-cloudcode-pa.googleapis.com
-  Patched URL:  http://localhost:50999/v1internal/xxxxxxx
+  Patched URL:  http://localhost:${AG_PROXY_PORT:-51074}/v1internal/xxxxxxx
 
 Detected URL patterns in binary:
   • 2.0.1 - 2.1.x: https://daily-cloudcode-pa.googleapis.com
@@ -113,7 +113,7 @@ $text -match 'https?://[a-z0-9-]+\.googleapis\.com'
   minVersion: '2.2.0',
   maxVersion: null, // null = pas de limite supérieure
   originalUrl: 'https://nouvelle-url-trouvee.googleapis.com',
-  patchedUrl: 'http://localhost:50999/v1internal/xxxxxxx', // même longueur!
+  patchedUrl: 'http://localhost:${AG_PROXY_PORT:-51074}/v1internal/xxxxxxx', // même longueur!
   description: 'Patch for Antigravity 2.2.0+',
 },
 ```
@@ -123,7 +123,7 @@ $text -match 'https?://[a-z0-9-]+\.googleapis\.com'
 ```typescript
 // Les URLs doivent avoir EXACTEMENT la même longueur
 'https://nouvelle-url-trouvee.googleapis.com'.length ===
-'http://localhost:50999/v1internal/xxxxxxx'.length
+'http://localhost:${AG_PROXY_PORT:-51074}/v1internal/xxxxxxx'.length
 ```
 
 4. **Rebuild:**

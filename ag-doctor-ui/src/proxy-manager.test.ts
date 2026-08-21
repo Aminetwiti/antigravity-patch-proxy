@@ -30,7 +30,7 @@ describe('ProxyManager Status Evaluation (15 Tests)', () => {
     const mgr = getProxyManager();
     const status: ProxyServerStatus = await mgr.getStatus();
     expect(status.running).toBe(false);
-    expect(status.port).toBe(50999);
+    expect(status.port).toBe(parseInt(process.env.AG_MITM_PORT || '443', 10));
     expect(status.pid).toBeUndefined();
     expect(status.error).toBeUndefined();
   });

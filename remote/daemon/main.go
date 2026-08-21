@@ -43,7 +43,7 @@ func main() {
 
 	flag.IntVar(&listenPort, "port", cfg.Port, "Port for the WebSocket server")
 	flag.StringVar(&host, "host", cfg.Host, "Host for the WebSocket server")
-	flag.StringVar(&tunnelFlag, "tunnel", cfg.TunnelProvider, "Tunnel provider (ngrok, cloudflare, pinggy)")
+	flag.StringVar(&tunnelFlag, "tunnel", cfg.TunnelProvider, "Tunnel provider (cloudflare, pinggy, pangolin, ngrok, local)")
 	flag.StringVar(&authToken, "auth-token", "", "Authentication token for Mobile App (generates dynamic CSPRNG if omitted, or 'none' to disable)")
 	flag.BoolVar(&noAuth, "no-auth", false, "Disable authentication (allow any client without token)")
 	flag.IntVar(&approvalTimeoutMin, "approval-timeout", int(cfg.ApprovalTimeout.Minutes()), "Auto-deny timeout for pending approvals in minutes (0 = disabled)")
@@ -58,7 +58,8 @@ func main() {
 
 	authMgr, resolvedToken, err := auth.NewTokenManager(authToken)
 	if err != nil {
-		log.Fatalf("❌ Failed to initialize auth manager: %v", err)
+		fmt.Fprintf(os.Stderr, "❌ Failed to initialize auth manager: %v\n", err)
+		os.Exit(1)
 	}
 
 	fmt.Printf("🚀 Starting Antigravity Remote Daemon Bridge on %s:%d...\n", host, listenPort)
@@ -72,10 +73,11 @@ func main() {
 
 	info, err := discovery.Discover()
 	if err != nil {
-		log.Fatalf("ÔØî Failed to discover localharness process: %v", err)
+		fmt.Fprintf(os.Stderr, "❌ Failed to discover localharness process: %v\n", err)
+		os.Exit(1)
 	}
 
-	fmt.Println("Ô£à LocalHarness Discovered:")
+	fmt.Println("✅ LocalHarness Discovered:")
 	fmt.Printf("   PID: %d\n", info.PID)
 	token := info.ExtensionCSRF
 	if token == "" {
@@ -88,7 +90,7 @@ func main() {
 	// Lancement du Watchdog CSRF
 	watchdog := discovery.NewWatchdog(rpcClient, 10*time.Second)
 	watchdog.Start()
-	fmt.Println("­ƒøí´©Å Watchdog CSRF d├®marr├® (v├®rification toutes les 10s)")
+	fmt.Println("🛡️ Watchdog CSRF démarré (vérification toutes les 10s)")
 
 	// Lancement asynchrone du Tunnel Distant (Cloudflare / Pinggy / Ngrok)
 	tunnelMgr := tunnel.NewManager(tunnelFlag)
@@ -97,11 +99,12 @@ func main() {
 	}
 	go func() {
 		if url, err := tunnelMgr.StartAutoTunnel(listenPort); err == nil {
-			log.Printf("­ƒîÉ Tunnel public actif : %s", url)
+			fmt.Printf("🌐 Tunnel public actif : %s\n", url)
 		} else {
-			log.Printf("ÔÜá´©Å Tunnel non d├®marr├® (acc├¿s local Wi-Fi disponible sur port %d) : %v", listenPort, err)
+			fmt.Fprintf(os.Stderr, "⚠️ Tunnel non démarré (accès local Wi-Fi disponible sur port %d) : %v\n", listenPort, err)
 		}
 	}()
+
 
 	// Lancement du Beacon de D├®couverte Automatique LAN (Zero-Config UDP).
 	// Aucun jeton n'y est pass├® : le beacon ne diffuse JAMAIS le token sur le
