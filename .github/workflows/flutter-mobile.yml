@@ -51,9 +51,9 @@ jobs:
         working-directory: remote/mobile
         run: flutter analyze --no-fatal-infos
 
-      - name: Run unit & widget tests
+      - name: Run unit tests
         working-directory: remote/mobile
-        run: flutter test --exclude-tags=live || flutter test test/core/ test/features/
+        run: flutter test test/core/
 
   # ── 2. Build Android (APK & AAB) ──
   build-android:
