@@ -2797,9 +2797,10 @@ func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, 
 		base = fmt.Sprintf("upload_%d%s", timestamp, ext)
 	} else {
 		extLower := strings.ToLower(filepath.Ext(base))
-		if extLower == ".jpg" || extLower == ".jpeg" || extLower == ".webp" || extLower == ".gif" || extLower == ".png" {
-			// Garder l'extension d'origine valide
-		} else {
+		if extLower == ".jpg" || extLower == ".jpeg" || extLower == ".webp" || extLower == ".gif" {
+			// Contenu déjà transcodé en PNG par ensurePngData — aligner l'extension
+			base = strings.TrimSuffix(base, filepath.Ext(base)) + ".png"
+		} else if extLower != ".png" {
 			base += ext
 		}
 	}
@@ -4210,7 +4211,20 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		// Démarre le streaming temps réel (transcript.jsonl + trajectoire)
 		go s.runLiveTurnStreamer(watcherCtx, msg.CascadeID, msg.RequestID, &frameIndex, &hasTextDelivered, doneChan)
 
-		err = s.RPCClient.SendMessageStreamModelWithMedia(msg.CascadeID, promptText, modelUID, modelEnum, mediaAttachments, onFrameHandler, noTools)
+		// Le LS processMediaData (generation.go:742) rejette TOUT mime image
+		// inline dans le protobuf (unsupported mime type image/png|jpeg).
+		// L'IDE native sauvegarde les images dans .user_uploaded/ et le
+		// système LS les découvre automatiquement (ADDITIONAL_METADATA).
+		// On filtre donc les images du protobuf — elles sont déjà sur disque
+		// (saveUploadedImage ci-dessus). Les non-images (PDF, audio) restent.
+		var nonImageMedia []connectrpc.MediaAttachment
+		for _, m := range mediaAttachments {
+			if !strings.HasPrefix(m.MimeType, "image/") {
+				nonImageMedia = append(nonImageMedia, m)
+			}
+		}
+
+		err = s.RPCClient.SendMessageStreamModelWithMedia(msg.CascadeID, promptText, modelUID, modelEnum, nonImageMedia, onFrameHandler, noTools)
 
 		if err != nil {
 			cancelWatcher()

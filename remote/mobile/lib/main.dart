@@ -550,52 +550,21 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           }
           if (sessions.isNotEmpty) {
             final stillActive = sessions.any((s) => s.id == _activeSessionId);
-            if (_activeSessionId.isNotEmpty) {
-              if (stillActive) {
-                _sessions = sessions;
-                final cur = sessions.firstWhere((s) => s.id == _activeSessionId);
-                _activeSessionTitle = cur.title.isNotEmpty
-                    ? cur.title
-                    : (_activeSessionTitle.isNotEmpty ? _activeSessionTitle : 'Nouvelle conversation');
-              } else {
-                // Si la session active locale n'est pas encore synchronisée sur le serveur,
-                // la préserver en tête de liste sans changer de session active.
-                final curLocal = _sessions.firstWhere(
-                  (s) => s.id == _activeSessionId,
-                  orElse: () => CascadeSession(
-                    id: _activeSessionId,
-                    workspacePath: _projects.isNotEmpty ? _projects.first.path : '',
-                    title: _activeSessionTitle.isNotEmpty ? _activeSessionTitle : 'Nouvelle conversation',
-                    status: 'CASCADE_STATUS_READY',
-                    time: 'Maintenant',
-                    projectId: _projects.isNotEmpty ? _projects.first.id : '',
-                  ),
-                );
-                _sessions = [curLocal, ...sessions.where((s) => s.id != _activeSessionId)];
-              }
+            if (_activeSessionId.isNotEmpty && stillActive) {
+              _sessions = sessions;
+              final cur = sessions.firstWhere((s) => s.id == _activeSessionId);
+              _activeSessionTitle = cur.title.isNotEmpty
+                  ? cur.title
+                  : (_activeSessionTitle.isNotEmpty ? _activeSessionTitle : 'Nouvelle conversation');
             } else {
               _sessions = sessions;
               _activeSessionId = sessions.first.id;
               _activeSessionTitle = sessions.first.title;
             }
           } else {
-            if (_activeSessionId.isNotEmpty) {
-              final curLocal = _sessions.firstWhere(
-                (s) => s.id == _activeSessionId,
-                orElse: () => CascadeSession(
-                  id: _activeSessionId,
-                  workspacePath: _projects.isNotEmpty ? _projects.first.path : '',
-                  title: _activeSessionTitle.isNotEmpty ? _activeSessionTitle : 'Nouvelle conversation',
-                  status: 'CASCADE_STATUS_READY',
-                  time: 'Maintenant',
-                ),
-              );
-              _sessions = [curLocal];
-            } else {
-              _sessions = const [];
-              _activeSessionId = '';
-              _activeSessionTitle = '';
-            }
+            _sessions = const [];
+            _activeSessionId = '';
+            _activeSessionTitle = 'Nouvelle conversation';
           }
         });
         if (_activeSessionId.isNotEmpty) {
@@ -755,27 +724,12 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
             }
             if (parsed.isNotEmpty) {
               final stillActive = parsed.any((s) => s.id == _activeSessionId);
-              if (_activeSessionId.isNotEmpty) {
-                if (stillActive) {
-                  _sessions = parsed;
-                  final current = parsed.firstWhere((s) => s.id == _activeSessionId);
-                  _activeSessionTitle = current.title.isNotEmpty
-                      ? current.title
-                      : (_activeSessionTitle.isNotEmpty ? _activeSessionTitle : 'Nouvelle conversation');
-                } else {
-                  // Garde : préserver la session active locale sans basculer sur l'ancienne
-                  final curLocal = _sessions.firstWhere(
-                    (s) => s.id == _activeSessionId,
-                    orElse: () => CascadeSession(
-                      id: _activeSessionId,
-                      workspacePath: _projects.isNotEmpty ? _projects.first.path : '',
-                      title: _activeSessionTitle.isNotEmpty ? _activeSessionTitle : 'Nouvelle conversation',
-                      status: 'CASCADE_STATUS_READY',
-                      time: 'Maintenant',
-                    ),
-                  );
-                  _sessions = [curLocal, ...parsed.where((s) => s.id != _activeSessionId)];
-                }
+              if (_activeSessionId.isNotEmpty && stillActive) {
+                _sessions = parsed;
+                final current = parsed.firstWhere((s) => s.id == _activeSessionId);
+                _activeSessionTitle = current.title.isNotEmpty
+                    ? current.title
+                    : (_activeSessionTitle.isNotEmpty ? _activeSessionTitle : 'Nouvelle conversation');
               } else {
                 _sessions = parsed;
                 _activeSessionId = parsed.first.id;
@@ -852,26 +806,24 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     final api = _api;
     if (api == null) return;
     try {
-      await api.deleteCascade(id);
       final wasActive = (id == _activeSessionId);
-      await _refreshSessions();
-      if (wasActive) {
-        final remaining = _sessions.where((s) => s.id != id).toList();
-        if (remaining.isNotEmpty) {
-          if (mounted) {
-            setState(() {
-              _activeSessionId = remaining.first.id;
-              _activeSessionTitle = remaining.first.title;
-            });
-          }
-        } else {
-          if (mounted) {
-            setState(() {
+      if (mounted) {
+        setState(() {
+          _sessions = _sessions.where((s) => s.id != id).toList();
+          if (wasActive) {
+            if (_sessions.isNotEmpty) {
+              _activeSessionId = _sessions.first.id;
+              _activeSessionTitle = _sessions.first.title;
+            } else {
               _activeSessionId = '';
               _activeSessionTitle = 'Nouvelle conversation';
-            });
+            }
           }
-        }
+        });
+      }
+      await api.deleteCascade(id);
+      await _refreshSessions();
+      if (wasActive) {
         await _refreshContext();
       }
       if (mounted) {
@@ -891,26 +843,24 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     final api = _api;
     if (api == null) return;
     try {
-      await api.archiveCascade(id);
       final wasActive = (id == _activeSessionId);
-      await _refreshSessions();
-      if (wasActive) {
-        final remaining = _sessions.where((s) => s.id != id).toList();
-        if (remaining.isNotEmpty) {
-          if (mounted) {
-            setState(() {
-              _activeSessionId = remaining.first.id;
-              _activeSessionTitle = remaining.first.title;
-            });
-          }
-        } else {
-          if (mounted) {
-            setState(() {
+      if (mounted) {
+        setState(() {
+          _sessions = _sessions.where((s) => s.id != id).toList();
+          if (wasActive) {
+            if (_sessions.isNotEmpty) {
+              _activeSessionId = _sessions.first.id;
+              _activeSessionTitle = _sessions.first.title;
+            } else {
               _activeSessionId = '';
               _activeSessionTitle = 'Nouvelle conversation';
-            });
+            }
           }
-        }
+        });
+      }
+      await api.archiveCascade(id);
+      await _refreshSessions();
+      if (wasActive) {
         await _refreshContext();
       }
       if (mounted) {

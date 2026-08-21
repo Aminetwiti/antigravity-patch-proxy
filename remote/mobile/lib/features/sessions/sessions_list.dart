@@ -1452,37 +1452,48 @@ class _SessionRowItemState extends State<_SessionRowItem> {
   ),
 );
 
-    // P4 : swipe gauche = supprimer (endToStart), swipe droite = épingler
-    // (startToEnd). Un seul Dismissible horizontal, chaque direction branchée
-    // sur son action — confirmDismiss retourne false pour ne jamais supprimer
-    // l'item de la liste (les actions passent par les callbacks parents).
-    if (widget.onDelete != null || widget.onTogglePin != null) {
+    // Swipe gesture : glisser vers la droite (startToEnd) = Archiver,
+    // glisser vers la gauche (endToStart) = Supprimer.
+    if (widget.onArchive != null || widget.onDelete != null || widget.onTogglePin != null) {
       return Dismissible(
         key: ValueKey('dismiss-${widget.session.id}'),
         direction: DismissDirection.horizontal,
         confirmDismiss: (dir) async {
-          if (dir == DismissDirection.endToStart) {
-            if (widget.onDelete != null) _confirmDelete(context);
-          } else {
-            widget.onTogglePin?.call();
+          HapticFeedback.mediumImpact();
+          if (dir == DismissDirection.startToEnd) {
+            // Swipe droite : Archiver
+            if (widget.onArchive != null) {
+              widget.onArchive?.call();
+            } else if (widget.onTogglePin != null) {
+              widget.onTogglePin?.call();
+            }
+          } else if (dir == DismissDirection.endToStart) {
+            // Swipe gauche : Supprimer
+            if (widget.onDelete != null) {
+              _confirmDelete(context);
+            } else if (widget.onArchive != null) {
+              widget.onArchive?.call();
+            }
           }
           return false;
         },
-        background: widget.onTogglePin != null
+        background: widget.onArchive != null || widget.onTogglePin != null
             ? Container(
                 alignment: Alignment.centerLeft,
                 padding: const EdgeInsets.only(left: 16),
                 margin: const EdgeInsets.only(left: 14, right: 6, top: 1, bottom: 1),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF3D5AFE).withValues(alpha: 0.85),
+                  color: widget.onArchive != null
+                      ? const Color(0xFF6366F1).withValues(alpha: 0.85)
+                      : const Color(0xFF3D5AFE).withValues(alpha: 0.85),
                   borderRadius: BorderRadius.circular(AppRadius.md),
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.push_pin_outlined, color: Colors.white, size: 18),
-                    SizedBox(width: 4),
-                    Text('Épingler', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                    Icon(widget.onArchive != null ? Icons.archive_outlined : Icons.push_pin_outlined, color: Colors.white, size: 18),
+                    const SizedBox(width: 6),
+                    Text(widget.onArchive != null ? 'Archiver' : 'Épingler', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
                   ],
                 ),
               )
@@ -1500,7 +1511,7 @@ class _SessionRowItemState extends State<_SessionRowItem> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.delete_outline_rounded, color: Colors.white, size: 18),
-                    SizedBox(width: 4),
+                    SizedBox(width: 6),
                     Text('Supprimer', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
                   ],
                 ),

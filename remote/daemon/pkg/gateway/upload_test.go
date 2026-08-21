@@ -45,8 +45,8 @@ func TestSaveUploadedImage_DataUrlPrefix(t *testing.T) {
 	}
 	defer os.Remove(filePath)
 
-	if !strings.HasSuffix(filePath, ".jpg") {
-		t.Fatalf("expected .jpg extension, got %s", filePath)
+	if !strings.HasSuffix(filePath, ".png") {
+		t.Fatalf("expected .png extension (transcoded), got %s", filePath)
 	}
 }
 
@@ -90,9 +90,9 @@ func TestReadFile_UploadedImageLeadingSlash(t *testing.T) {
 		t.Skip("brain directory not available in test environment")
 	}
 
-	cleanPath := "/photo_1787194458484.jpg"
+	cleanPath := "/photo_1787194458484.png"
 	relCleanPath := strings.TrimLeft(cleanPath, "/\\")
-	baseFileName := "photo_1787194458484.jpg"
+	baseFileName := "photo_1787194458484.png"
 
 	candidates := []string{
 		filePath,
@@ -139,7 +139,10 @@ func TestSendPrompt_MediaAttachmentsAndCleanPrompt(t *testing.T) {
 	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
 	defer client.conn.Close()
 
-	// 1. Envoi d'un prompt avec pièces jointes structurées media
+	// 1. Envoi d'un prompt avec pièces jointes structurées media (image/png)
+	// Le LS rejette les images inline dans le protobuf → elles sont filtrées
+	// silencieusement (déjà sur disque dans .user_uploaded/, le LS les découvre
+	// automatiquement). Le prompt texte reste propre.
 	client.sendJSON(t, IncomingMessage{
 		Type:      "send_prompt",
 		RequestID: "req-media-1",
@@ -157,17 +160,17 @@ func TestSendPrompt_MediaAttachmentsAndCleanPrompt(t *testing.T) {
 	_ = client.recv(t) // stream_delta
 	_ = client.recv(t) // stream_end
 
-	if !strings.Contains(backend.lastPrompt, "analyser cette image") {
-		t.Errorf("expected prompt to contain 'analyser cette image', got %q", backend.lastPrompt)
+	// Prompt texte intact, pas de refs markdown injectées
+	if backend.lastPrompt != "analyser cette image" {
+		t.Errorf("expected clean prompt 'analyser cette image', got %q", backend.lastPrompt)
 	}
-	if len(backend.lastMedia) != 1 {
-		t.Fatalf("expected 1 media attachment, got %d", len(backend.lastMedia))
-	}
-	if backend.lastMedia[0].URI != "file:///C:/test/path/photo.png" {
-		t.Errorf("expected URI 'file:///C:/test/path/photo.png', got %q", backend.lastMedia[0].URI)
+	// Images filtrées du protobuf
+	if len(backend.lastMedia) != 0 {
+		t.Fatalf("expected 0 media attachments (images filtered), got %d", len(backend.lastMedia))
 	}
 
-	// 2. Envoi d'un prompt avec markdown tag legacy ![name](file:///...) -> extrait vers mediaAttachments et nettoyé du prompt text
+	// 2. Envoi d'un prompt avec markdown tag legacy ![name](file:///...)
+	// Les refs markdown sont extraites (nettoyées du texte) puis filtrées du protobuf
 	client.sendJSON(t, IncomingMessage{
 		Type:      "send_prompt",
 		RequestID: "req-media-2",
@@ -181,14 +184,8 @@ func TestSendPrompt_MediaAttachmentsAndCleanPrompt(t *testing.T) {
 	if !strings.Contains(backend.lastPrompt, "voici mon texte") {
 		t.Errorf("expected prompt to contain 'voici mon texte', got %q", backend.lastPrompt)
 	}
-	if strings.Contains(backend.lastPrompt, "![screenshot.jpg]") {
-		t.Errorf("expected raw markdown image tag to be cleaned from prompt, got %q", backend.lastPrompt)
-	}
-	if len(backend.lastMedia) != 1 {
-		t.Fatalf("expected 1 extracted media attachment from markdown, got %d", len(backend.lastMedia))
-	}
-	if backend.lastMedia[0].URI != "file:///C:/Users/test/screenshot.jpg" {
-		t.Errorf("expected URI 'file:///C:/Users/test/screenshot.jpg', got %q", backend.lastMedia[0].URI)
+	if len(backend.lastMedia) != 0 {
+		t.Fatalf("expected 0 media attachments (images filtered), got %d", len(backend.lastMedia))
 	}
 }
 
@@ -225,18 +222,12 @@ func TestSendPrompt_MediaFileAutoRead(t *testing.T) {
 	_ = client.recv(t) // stream_delta
 	_ = client.recv(t) // stream_end
 
-	if len(backend.lastMedia) != 1 {
-		t.Fatalf("expected 1 media attachment, got %d", len(backend.lastMedia))
+	// Images filtrées du protobuf, prompt propre
+	if len(backend.lastMedia) != 0 {
+		t.Fatalf("expected 0 media attachments (images filtered), got %d", len(backend.lastMedia))
 	}
-	m := backend.lastMedia[0]
-	if len(m.Data) != len(dummyBytes) || string(m.Data) != string(dummyBytes) {
-		t.Errorf("expected m.Data to contain read file bytes (%d bytes), got %d bytes", len(dummyBytes), len(m.Data))
-	}
-	if m.Base64Data == "" {
-		t.Errorf("expected m.Base64Data to be populated")
-	}
-	if m.MimeType != "image/png" {
-		t.Errorf("expected mimeType 'image/png', got %q", m.MimeType)
+	if !strings.Contains(backend.lastPrompt, "analyser mon image") {
+		t.Errorf("expected user text in prompt, got %q", backend.lastPrompt)
 	}
 }
 

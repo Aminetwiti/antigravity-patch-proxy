@@ -239,17 +239,17 @@ func listeningPortsForPID(pid int) []int {
 }
 
 // probeService vérifie que le port expose bien le LanguageServerService.
-// 1. Sonde HTTP : frame gRPC-Web Heartbeat (chemin principal).
-// 2. Sonde HTTPS : frame gRPC-Web Heartbeat (sur port TLS auto-signé).
-// 3. Sonde HTTPS : GetUserStatus en JSON.
+// 1. Sonde HTTPS : frame gRPC-Web Heartbeat (prioritaire — le LS Antigravity écoute en HTTPS TLS).
+// 2. Sonde HTTPS : GetUserStatus en JSON.
+// 3. Sonde HTTP : repli pour les environnements en clair sans TLS.
 func probeService(port int, csrfToken string) bool {
-	if probeHTTPHeartbeat(port, csrfToken) {
-		return true
-	}
 	if probeHTTPSHeartbeat(port, csrfToken) {
 		return true
 	}
-	return probeHTTPSGetUserStatus(port, csrfToken)
+	if probeHTTPSGetUserStatus(port, csrfToken) {
+		return true
+	}
+	return probeHTTPHeartbeat(port, csrfToken)
 }
 
 func probeHTTPHeartbeat(port int, csrfToken string) bool {

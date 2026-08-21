@@ -187,6 +187,10 @@ func cascadeExistsOnDisk(home, cascadeID string) bool {
 	if fi, err := os.Stat(brainDir); err == nil && fi.IsDir() {
 		return true
 	}
+	dbPath := filepath.Join(home, ".gemini", subDir, "conversations", cascadeID+".db")
+	if _, err := os.Stat(dbPath); err == nil {
+		return true
+	}
 	convDir := filepath.Join(home, ".gemini", subDir, "conversations", cascadeID)
 	if fi, err := os.Stat(convDir); err == nil && fi.IsDir() {
 		return true
@@ -201,9 +205,6 @@ func cascadeExistsOnDisk(home, cascadeID string) bool {
 func pinSessionOnDisk(home, cascadeID string, pinned bool) error {
 	if cascadeID == "" {
 		return fmt.Errorf("cascadeId requis")
-	}
-	if !cascadeExistsOnDisk(home, cascadeID) {
-		return fmt.Errorf("conversation introuvable sur le disque (impossible d'épingler)")
 	}
 	annoDir := filepath.Join(home, ".gemini", resolveGeminiSubDir(home, cascadeID), "annotations")
 	_ = os.MkdirAll(annoDir, 0o755)
@@ -240,9 +241,6 @@ func pinSessionOnDisk(home, cascadeID string, pinned bool) error {
 func archiveSessionOnDisk(home, cascadeID string, archived bool) error {
 	if cascadeID == "" {
 		return fmt.Errorf("cascadeId requis")
-	}
-	if !cascadeExistsOnDisk(home, cascadeID) {
-		return fmt.Errorf("conversation introuvable sur le disque (impossible d'archiver)")
 	}
 	annoDir := filepath.Join(home, ".gemini", resolveGeminiSubDir(home, cascadeID), "annotations")
 	_ = os.MkdirAll(annoDir, 0o755)
