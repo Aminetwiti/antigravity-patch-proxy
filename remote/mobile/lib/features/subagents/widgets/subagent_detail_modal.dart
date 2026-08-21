@@ -398,6 +398,7 @@ class _SubagentDetailModalState extends State<SubagentDetailModal> {
                         ),
                       ],
                     ),
+
                     const SizedBox(height: 14),
 
                     // 1. User Prompt Bubble (Mission from parent agent)

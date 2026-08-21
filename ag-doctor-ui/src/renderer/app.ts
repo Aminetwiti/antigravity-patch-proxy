@@ -4297,11 +4297,12 @@ if (window.ag && window.ag.onDaemonLog) {
           wsUrl += `${wsUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
         }
       } else {
-        const httpsMatch = data.match(/https:\/\/([a-zA-Z0-9.-]+\.trycloudflare\.com|[a-zA-Z0-9.-]+\.pinggy\.link)/);
+        const httpsMatch = data.match(/https:\/\/([a-zA-Z0-9.-]+\.(?:trycloudflare\.com|pinggy\.link|pangolin\.link|[a-zA-Z]{2,}))/);
         if (httpsMatch) {
           const host = httpsMatch[1];
           wsUrl = `wss://${host}/ws?token=${token}`;
         }
+
       }
 
       if (wsUrl && remoteQrImage) {

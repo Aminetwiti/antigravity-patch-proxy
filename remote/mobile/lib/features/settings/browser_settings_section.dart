@@ -129,41 +129,66 @@ class _BrowserSettingsSectionState extends State<BrowserSettingsSection> {
                   ],
                 ),
                 const Divider(height: 24, thickness: 0.5),
-                SwitchListTile.adaptive(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(
-                    'Mode Headless Silencieux',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: scheme.onSurface),
-                  ),
-                  subtitle: Text(
-                    'Exécute le navigateur sans fenêtre visible pour des interactions ultra-rapides.',
-                    style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
-                  ),
-                  value: _headlessMode,
-                  activeColor: const Color(0xFF007AFF),
-                  onChanged: (val) {
-                    setState(() => _headlessMode = val);
-                    SettingsStore.save({'browserHeadlessMode': val});
-                  },
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Mode Headless Silencieux',
+                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: scheme.onSurface),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            'Exécute le navigateur sans fenêtre visible pour des interactions ultra-rapides.',
+                            style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Switch.adaptive(
+                      value: _headlessMode,
+                      activeColor: const Color(0xFF007AFF),
+                      onChanged: (val) {
+                        setState(() => _headlessMode = val);
+                        SettingsStore.save({'browserHeadlessMode': val});
+                      },
+                    ),
+                  ],
                 ),
                 const Divider(height: 20, thickness: 0.5),
-                SwitchListTile.adaptive(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(
-                    'Captures d\'écran automatiques',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: scheme.onSurface),
-                  ),
-                  subtitle: Text(
-                    'Prend automatiquement une capture visuelle lors des tests d\'interface et des erreurs.',
-                    style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
-                  ),
-                  value: _autoCapture,
-                  activeColor: const Color(0xFF007AFF),
-                  onChanged: (val) {
-                    setState(() => _autoCapture = val);
-                    SettingsStore.save({'browserAutoCapture': val});
-                  },
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Captures d\'écran automatiques',
+                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: scheme.onSurface),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            'Prend automatiquement une capture visuelle lors des tests d\'interface et des erreurs.',
+                            style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Switch.adaptive(
+                      value: _autoCapture,
+                      activeColor: const Color(0xFF007AFF),
+                      onChanged: (val) {
+                        setState(() => _autoCapture = val);
+                        SettingsStore.save({'browserAutoCapture': val});
+                      },
+                    ),
+                  ],
                 ),
+
               ],
             ),
           ),
