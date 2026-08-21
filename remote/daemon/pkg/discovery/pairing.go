@@ -163,13 +163,20 @@ func (pm *PairingManager) VerifyPIN(remoteAddr, pin, deviceID string, allowedPro
 	token := hex.EncodeToString(tokenBytes)
 	expiresAt := now.Add(pm.sessionTTL)
 
+	isAdmin := false
+	if len(pm.sessions) == 0 {
+		isAdmin = true
+	} else {
+		isAdmin = pm.hasAdminSessionLocked(deviceID)
+	}
+
 	pm.sessions[token] = SessionInfo{
 		DeviceID:        deviceID,
 		Name:            "",
 		AllowedProjects: allowed,
 		CreatedAt:       now,
 		ExpiresAt:       expiresAt,
-		Admin:           pm.hasSessionLocked(deviceID),
+		Admin:           isAdmin,
 		IP:              ip,
 	}
 
@@ -217,15 +224,15 @@ func (pm *PairingManager) RevokeDevice(deviceID string) bool {
 	return revoked
 }
 
-// hasSessionLocked rapporte si un device poss�de d�j� une session active
-// (lock d�tenu). Le premier appairage d'un device devient administrateur.
-func (pm *PairingManager) hasSessionLocked(deviceID string) bool {
+
+// hasAdminSessionLocked rapporte si un device possède déjà une session Admin active.
+func (pm *PairingManager) hasAdminSessionLocked(deviceID string) bool {
 	if deviceID == "" {
 		return false
 	}
 	now := time.Now()
 	for _, sess := range pm.sessions {
-		if sess.DeviceID == deviceID && now.Before(sess.ExpiresAt) {
+		if sess.DeviceID == deviceID && sess.Admin && now.Before(sess.ExpiresAt) {
 			return true
 		}
 	}
@@ -274,15 +281,21 @@ func (pm *PairingManager) HTTPHandler() http.HandlerFunc {
 		}
 
 		if r.Method == http.MethodDelete {
-			// Sécurité (VULN-07) : la révocation exige une authentification session valide.
+			// Sécurité (VULN-06) : la révocation exige une authentification session avec droits Admin.
 			token := r.URL.Query().Get("token")
 			if token == "" {
 				authHeader := r.Header.Get("Authorization")
 				token = strings.TrimPrefix(authHeader, "Bearer ")
 			}
-			if !pm.ValidateToken(token) {
+			sess, ok := pm.ValidateSession(token)
+			if !ok {
 				w.WriteHeader(http.StatusUnauthorized)
 				json.NewEncoder(w).Encode(map[string]string{"error": "Authentification requise"})
+				return
+			}
+			if !sess.Admin {
+				w.WriteHeader(http.StatusForbidden)
+				json.NewEncoder(w).Encode(map[string]string{"error": "Action réservée à l'administrateur"})
 				return
 			}
 

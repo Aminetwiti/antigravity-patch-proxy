@@ -1,6 +1,8 @@
 package discovery
 
 import (
+	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -12,11 +14,14 @@ type GitWorktree struct {
 	Bare   bool   `json:"bare"`
 }
 
-// gitCmd exécute git dans un workspace. Sur Windows, l'invocation directe de
-// git depuis Go échoue avec un code d'erreur étrange dès que la sortie est
-// redirigée (pager/pipe, cf. tests manuels 2026-08-14) — le wrapper cmd.exe
-// restaure le comportement normal. Autres OS : appel direct.
+// gitCmd exécute git dans un workspace validé.
 func gitCmd(workspacePath string, args ...string) ([]byte, error) {
+	if workspacePath == "" {
+		return nil, fmt.Errorf("chemin de workspace vide")
+	}
+	if fi, err := os.Stat(workspacePath); err != nil || !fi.IsDir() {
+		return nil, fmt.Errorf("workspace introuvable ou invalide: %s", workspacePath)
+	}
 	cmdArgs := append([]string{"-c", "safe.directory=*", "--no-pager"}, args...)
 	cmd := exec.Command("git", cmdArgs...)
 	cmd.Dir = workspacePath

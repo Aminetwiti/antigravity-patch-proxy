@@ -83,6 +83,27 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
     _loadCollapsedFolders();
   }
 
+  @override
+  void didUpdateWidget(covariant LeftSidebarDrawer old) {
+    super.didUpdateWidget(old);
+    // BUG-B fix : synchroniser les pins venant du daemon (isPinned dans le payload)
+    // sans écraser les pins locaux de l'utilisateur.
+    final newPinned = widget.sessions?.where((s) => s.isPinned).map((s) => s.id) ?? const [];
+    if (newPinned.isNotEmpty) {
+      final added = newPinned.where((id) => !_pinnedIds.contains(id)).toList();
+      if (added.isNotEmpty) {
+        setState(() => _pinnedIds.addAll(added));
+      }
+    }
+    if (widget.sessions != old.sessions) {
+      _loadPins();
+      _loadReadSessions();
+    }
+    if (widget.activeSessionId != old.activeSessionId && widget.activeSessionId.isNotEmpty) {
+      _markSessionAsRead(widget.activeSessionId);
+    }
+  }
+
   Future<void> _loadCollapsedFolders() async {
     final prefs = await SharedPreferences.getInstance();
     final collapsed = prefs.getStringList('collapsed_folder_names') ?? const [];
@@ -147,18 +168,6 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
     SharedPreferences.getInstance().then((prefs) =>
         prefs.setStringList('pinned_session_ids', _pinnedIds.toList()));
     widget.api?.pinCascade(id, pinned: isNowPinned);
-  }
-
-  @override
-  void didUpdateWidget(covariant LeftSidebarDrawer oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.sessions != oldWidget.sessions) {
-      _loadPins();
-      _loadReadSessions();
-    }
-    if (widget.activeSessionId != oldWidget.activeSessionId && widget.activeSessionId.isNotEmpty) {
-      _markSessionAsRead(widget.activeSessionId);
-    }
   }
 
   @override

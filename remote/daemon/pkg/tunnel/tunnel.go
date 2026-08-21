@@ -112,26 +112,18 @@ func (m *Manager) tryPangolin(localPort int) (string, error) {
 		return staticURL, nil
 	}
 
-	// 2. Recherche du binaire client Pangolin (newt ou pangolin)
+	// 2. Recherche du binaire client Pangolin (newt ou pangolin) dans le PATH système
 	binPath := ""
 	if envBin := os.Getenv("PANGOLIN_BIN"); envBin != "" {
 		binPath = envBin
-	} else if _, err := os.Stat("newt.exe"); err == nil {
-		binPath = ".\\newt.exe"
-	} else if _, err := os.Stat("newt"); err == nil {
-		binPath = "./newt"
 	} else if p, err := execLookPath("newt"); err == nil {
 		binPath = p
-	} else if _, err := os.Stat("pangolin.exe"); err == nil {
-		binPath = ".\\pangolin.exe"
-	} else if _, err := os.Stat("pangolin"); err == nil {
-		binPath = "./pangolin"
 	} else if p, err := execLookPath("pangolin"); err == nil {
 		binPath = p
 	}
 
 	if binPath == "" {
-		return "", fmt.Errorf("client Pangolin (newt ou pangolin) introuvable (définissez PANGOLIN_URL ou installez newt)")
+		return "", fmt.Errorf("client Pangolin (newt ou pangolin) introuvable sur $PATH (définissez PANGOLIN_URL ou installez newt)")
 	}
 
 	log.Printf("[Tunnel] Lancement de Pangolin Tunnel (%s)...", binPath)
@@ -147,18 +139,9 @@ func (m *Manager) tryPangolin(localPort int) (string, error) {
 }
 
 func (m *Manager) tryCloudflare(localPort int) (string, error) {
-
-	path := "cloudflared"
-	if _, err := os.Stat("cloudflared.exe"); err == nil {
-		path = ".\\cloudflared.exe"
-	} else if _, err := os.Stat("cloudflared"); err == nil {
-		path = "./cloudflared"
-	} else {
-		var err error
-		path, err = execLookPath("cloudflared")
-		if err != nil {
-			return "", fmt.Errorf("cloudflared introuvable")
-		}
+	path, err := execLookPath("cloudflared")
+	if err != nil {
+		return "", fmt.Errorf("cloudflared introuvable sur $PATH")
 	}
 	log.Printf("[Tunnel] Lancement de Cloudflare Quick Tunnel (%s)...", path)
 	url, err := m.startCloudflare(path, localPort)

@@ -861,15 +861,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         if (rawMessages != null && rawMessages.isNotEmpty) {
           for (final m in rawMessages) {
             if (m is Map) {
-              parsed.add(ChatMessage(
-                id: m['id']?.toString() ?? '',
-                sender: m['sender']?.toString() ?? 'assistant',
-                text: m['text']?.toString() ?? '',
-                thought: m['thought']?.toString(),
-                timestamp: m['timestamp']?.toString() ?? '',
-                stepIndex: (m['stepIndex'] as num?)?.toInt(),
-                isError: m['isError'] == true && (m['text']?.toString().trim().isEmpty ?? true),
-              ));
+              final map = Map<String, dynamic>.from(m);
+              final msg = ChatMessage.fromJson(map);
+              final isError = map['isError'] == true && msg.text.trim().isEmpty;
+              parsed.add(isError ? msg.copyWith(isError: true) : msg);
             }
           }
         }
@@ -1699,20 +1694,25 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       } else if (type == 'stream_delta') {
         final userInput = StreamDeltaParser.userInputOf(msg);
         if (userInput.isNotEmpty) {
-          final hasUserMsg = buf.any((m) => m.sender == 'user' && m.text.trim() == userInput.trim());
-          if (!hasUserMsg) {
-            final userMsg = ChatMessage(
-              id: 'user-ext-$requestId',
-              sender: 'user',
-              text: userInput,
-              timestamp: _timestamp(),
-            );
-            final targetId = _streamRequestToMessageId[thKey] ?? 'ext-$requestId';
-            final assistantIdx = buf.indexWhere((m) => m.id == targetId || (m.isStreaming && m.sender == 'assistant'));
-            if (assistantIdx >= 0) {
-              buf.insert(assistantIdx, userMsg);
-            } else {
-              buf.add(userMsg);
+          final queuedIdx = buf.indexWhere((m) => m.sender == 'user' && m.text.trim() == userInput.trim() && m.isQueued);
+          if (queuedIdx >= 0) {
+            buf[queuedIdx] = buf[queuedIdx].copyWith(isQueued: false);
+          } else {
+            final hasUserMsg = buf.any((m) => m.sender == 'user' && m.text.trim() == userInput.trim());
+            if (!hasUserMsg) {
+              final userMsg = ChatMessage(
+                id: 'user-ext-$requestId',
+                sender: 'user',
+                text: userInput,
+                timestamp: _timestamp(),
+              );
+              final targetId = _streamRequestToMessageId[thKey] ?? 'ext-$requestId';
+              final assistantIdx = buf.indexWhere((m) => m.id == targetId || (m.isStreaming && m.sender == 'assistant'));
+              if (assistantIdx >= 0) {
+                buf.insert(assistantIdx, userMsg);
+              } else {
+                buf.add(userMsg);
+              }
             }
           }
         }
@@ -1978,6 +1978,44 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             }
           });
           ApprovalNotifier.instance.cancelApprovalByCascadeId(cascadeId);
+        }
+      } else if (type == 'stream_error' || type == 'error') {
+        final errText = msg['error']?.toString() ??
+            msg['data']?['error']?.toString() ??
+            msg['message']?.toString() ??
+            'Une erreur est survenue lors de l\'exécution du flux.';
+        final targetId = _streamRequestToMessageId[thKey] ?? 'ext-$requestId';
+        final idx = buf.indexWhere((m) => m.id == targetId);
+        if (idx >= 0) {
+          buf[idx] = buf[idx].copyWith(
+            isStreaming: false,
+            isError: true,
+            text: buf[idx].text.isEmpty ? errText : '${buf[idx].text}\n\n$errText',
+          );
+        } else {
+          final lastStreamingIdx = buf.lastIndexWhere((m) => m.isStreaming);
+          if (lastStreamingIdx >= 0) {
+            buf[lastStreamingIdx] = buf[lastStreamingIdx].copyWith(
+              isStreaming: false,
+              isError: true,
+              text: buf[lastStreamingIdx].text.isEmpty ? errText : '${buf[lastStreamingIdx].text}\n\n$errText',
+            );
+          } else {
+            buf.add(ChatMessage(
+              id: 'err-${DateTime.now().millisecondsSinceEpoch}',
+              sender: 'assistant',
+              text: errText,
+              timestamp: _timestamp(),
+              isError: true,
+            ));
+          }
+        }
+        _onStreamEnded(targetSessionId);
+        _externalThoughts.remove(thKey);
+        _streamRequestToMessageId.remove(thKey);
+        SessionHistoryCacheStore.instance.saveSessionHistory(targetSessionId, buf);
+        if (isActiveSession && mounted) {
+          setState(() {});
         }
       }
     });
@@ -4861,6 +4899,9 @@ class _ExtractedMedia {
   for (final match in artifactRe.allMatches(text)) {
     final artName = match.group(1)?.trim() ?? 'Artifact';
     final artPath = match.group(2)?.trim() ?? artName;
+    if (artName == '...' || artPath == 'file:///...' || artPath == '...' || artPath.endsWith('/...')) {
+      continue;
+    }
     final cleanP = artPath.startsWith('file://') ? artPath.substring(7) : artPath;
     final name = artName.isNotEmpty ? artName : cleanP.split(RegExp(r'[\\/]')).last;
     final lower = cleanP.toLowerCase();

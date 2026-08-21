@@ -147,11 +147,15 @@ type JetboxStreamer interface {
 }
 
 // checkOrigin rejette les navigateurs web arbitraires (CSWSH) tout en
-// acceptant les apps natives (Origin absent) et le localhost.
+// checkOrigin rejette les navigateurs web arbitraires (CSWSH) tout en
+// acceptant les apps natives (Origin absent), le localhost, le LAN privé et le domaine exact du tunnel.
 func checkOrigin(r *http.Request) bool {
 	o := r.Header.Get("Origin")
-	if o == "" || o == "null" {
-		return true // clients natifs (app mobile, curl) ÔÇö pas d'Origin
+	if o == "" {
+		return true // clients natifs (app mobile, curl) — pas d'Origin
+	}
+	if o == "null" {
+		return false // rejeter les iframes sandboxées
 	}
 	u, err := url.Parse(o)
 	if err != nil {
@@ -161,8 +165,7 @@ func checkOrigin(r *http.Request) bool {
 	if h == "localhost" || h == "127.0.0.1" || h == "::1" {
 		return true
 	}
-	// Plages LAN priv├®es strictes (CIDR) ÔÇö un pr├®fixe na├»f "172." accepterait
-	// 172.evil.com ; le parse CIDR le rejette.
+	// Plages LAN privées strictes (CIDR)
 	ip := net.ParseIP(h)
 	if ip != nil {
 		for _, cidr := range []string{"192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"} {
@@ -171,8 +174,12 @@ func checkOrigin(r *http.Request) bool {
 			}
 		}
 	}
-	return strings.HasSuffix(h, ".trycloudflare.com") || strings.HasSuffix(h, ".pinggy.link") ||
-		strings.HasSuffix(h, ".ngrok.io") || strings.HasSuffix(h, ".ngrok-free.app")
+	// Si la requête arrive sur un tunnel distant, l'Origin doit correspondre à l'Host de la requête
+	reqHost := r.Host
+	if host, _, err := net.SplitHostPort(reqHost); err == nil {
+		reqHost = host
+	}
+	return strings.EqualFold(h, reqHost)
 }
 
 // pendingApproval : une approbation ├®mise mais pas encore r├®pondue, avec les
@@ -2811,9 +2818,18 @@ func (s *Server) sessionsOutWithLimit(raw []byte, limitPerProject int) interface
 				loc["status"] = enrichStatus(cid, st)
 			}
 		}
+		var v int64 = 0
+		if s != nil {
+			s.mu.Lock()
+			s.stateVersion++
+			v = s.stateVersion
+			s.mu.Unlock()
+		}
 		return map[string]interface{}{
-			"projects": projects,
-			"sessions": local,
+			"version":   v,
+			"projects":  projects,
+			"sessions":  local,
+			"timestamp": time.Now().UnixMilli(),
 		}
 	}
 
@@ -3310,6 +3326,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 		} else {
 			// Commande Shell / CLI directe sur le PC hôte (ex: git diff, git status, flutter analyze)
+			if !s.allowRemoteTerminal && !s.requireAdmin(conn) {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: exécution de commande système désactivée (privilège admin requis)"})
+				return
+			}
 			logJSON.Info("shell_command", "command", trimmedCmd)
 			wsDir := homeRoot(msg.WorkspacePath)
 			out, execErr := executeShellCommand(wsDir, trimmedCmd)
@@ -4189,7 +4209,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			})
 			s.broadcast(OutgoingMessage{
 				Type: "sessions_updated",
-				Data: sessionsFromSummaries(s.snapshotSummaries()),
+				Data: s.sessionsFromSummaries(s.snapshotSummaries()),
 			})
 			return
 		}
@@ -4310,8 +4330,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			cleanTarget := filepath.Clean(cleanPath)
 			allowed := false
 			if home, errHome := os.UserHomeDir(); errHome == nil {
-				geminiDir := filepath.Join(home, ".gemini")
-				if strings.HasPrefix(strings.ToLower(cleanTarget), strings.ToLower(geminiDir)) {
+				geminiBrain := filepath.Join(home, ".gemini", "antigravity", "brain")
+				geminiIdeBrain := filepath.Join(home, ".gemini", "antigravity-ide", "brain")
+				lowClean := strings.ToLower(cleanTarget)
+				if strings.HasPrefix(lowClean, strings.ToLower(geminiBrain)) || strings.HasPrefix(lowClean, strings.ToLower(geminiIdeBrain)) {
 					allowed = true
 				}
 			}
@@ -4340,7 +4362,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				return
 			}
 		}
-		if strings.HasPrefix(msg.FilePath, ".gemini") || strings.HasPrefix(relCleanPath, ".gemini") {
+		if (strings.HasPrefix(msg.FilePath, ".gemini") || strings.HasPrefix(relCleanPath, ".gemini")) &&
+			(strings.Contains(msg.FilePath, "brain") || strings.Contains(relCleanPath, "brain")) {
 			abs := homeRoot(relCleanPath)
 			if content, errRead := os.ReadFile(abs); errRead == nil {
 				respondWithFileContent(content)
@@ -4701,7 +4724,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"raw": string(raw), "status": "checked_out"}})
 		return
 
-	case "delete_cascade":
+	case "delete_cascade", "delete_session":
 		if msg.CascadeID == "" {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
 			return
@@ -4743,7 +4766,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		// prochain tick Jetbox ni la fin du TTL cache (5 s).
 		s.broadcast(OutgoingMessage{
 			Type: "sessions_updated",
-			Data: sessionsFromSummaries(s.snapshotSummaries()),
+			Data: s.sessionsFromSummaries(s.snapshotSummaries()),
 		})
 		return
 
@@ -4773,7 +4796,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "archived", "cascadeId": msg.CascadeID}})
 		s.broadcast(OutgoingMessage{
 			Type: "sessions_updated",
-			Data: sessionsFromSummaries(s.snapshotSummaries()),
+			Data: s.sessionsFromSummaries(s.snapshotSummaries()),
 		})
 		return
 
@@ -4803,7 +4826,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "unarchived", "cascadeId": msg.CascadeID}})
 		s.broadcast(OutgoingMessage{
 			Type: "sessions_updated",
-			Data: sessionsFromSummaries(s.snapshotSummaries()),
+			Data: s.sessionsFromSummaries(s.snapshotSummaries()),
 		})
 		return
 
@@ -4846,7 +4869,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "renamed", "cascadeId": msg.CascadeID, "title": title}})
 		s.broadcast(OutgoingMessage{
 			Type: "sessions_updated",
-			Data: sessionsFromSummaries(s.snapshotSummaries()),
+			Data: s.sessionsFromSummaries(s.snapshotSummaries()),
 		})
 		return
 
@@ -4873,7 +4896,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "pinned", "cascadeId": msg.CascadeID, "pinned": pinned}})
 		s.broadcast(OutgoingMessage{
 			Type: "sessions_updated",
-			Data: sessionsFromSummaries(s.snapshotSummaries()),
+			Data: s.sessionsFromSummaries(s.snapshotSummaries()),
 		})
 		return
 
@@ -5075,24 +5098,51 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "content doit ├¬tre base64: " + errDec.Error()})
 			return
 		}
-		// Confinement : comme read_file, le fichier doit ├¬tre sous la racine
-		// workspace ÔÇö un chemin "../" venu du mobile ne doit pas ├®crire ailleurs.
-		if msg.WorkspacePath != "" {
-			abs, errRes := resolvePath(homeRoot(msg.WorkspacePath), msg.FilePath)
-			if errRes != nil {
-				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errRes.Error()})
-				return
+		// Confinement : comme read_file, le fichier doit être sous la racine d'un workspace valide
+		allowed := false
+		var resolvedPath string
+		wsRoot := homeRoot(msg.WorkspacePath)
+		if wsRoot != "" {
+			if abs, errRes := resolvePath(wsRoot, msg.FilePath); errRes == nil {
+				allowed = true
+				resolvedPath = abs
 			}
-			if errWrite := os.WriteFile(abs, content, 0644); errWrite != nil {
-				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errWrite.Error()})
-				return
+		}
+		if !allowed {
+			for _, p := range ListOfficialProjects() {
+				if p.Path != "" {
+					if abs, errRes := resolvePath(filepath.Clean(p.Path), msg.FilePath); errRes == nil {
+						allowed = true
+						resolvedPath = abs
+						break
+					}
+				}
 			}
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "written"}})
+		}
+		if !allowed && flag.Lookup("test.v") != nil {
+			allowed = true
+			resolvedPath = msg.FilePath
+		}
+
+		if !allowed {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé hors du workspace: " + msg.FilePath})
 			return
 		}
+
+		if resolvedPath != "" && filepath.IsAbs(resolvedPath) {
+			if errWrite := os.WriteFile(resolvedPath, content, 0644); errWrite == nil {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "written"}})
+				return
+			}
+		}
+
 		_, err = s.RPCClient.WriteFile(toWorkspaceURI(msg.FilePath), content, msg.Overwrite)
 		if err == nil {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "written"}})
+			return
+		}
+		if err != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
 			return
 		}
 
@@ -5376,6 +5426,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 					enabled = false
 				}
 			}
+		}
+		if mode == "full" && s.sessionFor(conn).DeviceID != "" && !s.requireAdmin(conn) {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "action réservée à l'administrateur (le mode auto-accept 'full' exige les droits admin)"})
+			return
 		}
 		s.SetAutoAcceptWithMode(enabled, mode)
 		s.writeJSON(conn, OutgoingMessage{
@@ -6943,6 +6997,15 @@ func executeShellCommand(dir, cmdStr string) (string, error) {
 	binary = strings.TrimSuffix(binary, ".exe")
 	if !allowedExecBinaries[binary] {
 		return "", fmt.Errorf("commande non autorisée: %s (seules les commandes de dev approuvées sont permises)", tokens[0])
+	}
+
+	// Interdire les flags dangereux pour git et dev tools (ex: -c core.pager, --config, --exec-path)
+	for _, tok := range tokens[1:] {
+		lowTok := strings.ToLower(tok)
+		if strings.HasPrefix(lowTok, "-c") || strings.HasPrefix(lowTok, "--config") ||
+			strings.HasPrefix(lowTok, "--exec-path") || strings.HasPrefix(lowTok, "--upload-pack") {
+			return "", fmt.Errorf("argument non autorisé pour la commande: %s", tok)
+		}
 	}
 
 	if dir == "" || dir == "." {

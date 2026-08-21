@@ -131,7 +131,7 @@ func (s *Server) reactiveSyncUpdates(updates map[string]connectrpc.ReactiveUpdat
 			})
 			s.broadcast(OutgoingMessage{
 				Type: "sessions_updated",
-				Data: sessionsFromSummaries(s.snapshotSummaries()),
+				Data: s.sessionsFromSummaries(s.snapshotSummaries()),
 			})
 		}
 	}

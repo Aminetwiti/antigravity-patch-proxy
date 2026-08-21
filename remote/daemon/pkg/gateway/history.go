@@ -1343,7 +1343,7 @@ func parseTranscriptFullTurns(transcriptPath string) ([]HistoryMessage, error) {
 			continue
 		}
 
-		// Thinking
+		// 1. Thinking
 		if entry.Thinking != "" {
 			thoughtClean := cleanRawContent(entry.Thinking)
 			if thoughtClean != "" {
@@ -1351,7 +1351,31 @@ func parseTranscriptFullTurns(transcriptPath string) ([]HistoryMessage, error) {
 			}
 		}
 
-		// Tool Calls
+		// 2. Assistant text / narrative
+		if entry.Type == "PLANNER_RESPONSE" {
+			if entry.Error != "" {
+				currentTurnHasError = true
+			}
+			if entry.Content != "" {
+				cleaned := cleanAssistantText(entry.Content)
+				if cleaned != "" {
+					if len(currentTurnSteps) > 0 {
+						currentTurnSegments = append(currentTurnSegments, HistorySegment{
+							Type:    "thought",
+							Content: strings.Join(currentTurnSteps, "\n"),
+						})
+						currentTurnSteps = nil
+					}
+					currentTurnSegments = append(currentTurnSegments, HistorySegment{
+						Type:    "text",
+						Content: cleaned,
+					})
+					currentTurnAnswers = append(currentTurnAnswers, cleaned)
+				}
+			}
+		}
+
+		// 3. Tool Calls
 		if len(entry.ToolCalls) > 0 {
 			var toolCalls []struct {
 				Name      string          `json:"name"`
@@ -1397,34 +1421,6 @@ func parseTranscriptFullTurns(transcriptPath string) ([]HistoryMessage, error) {
 						} else if strings.HasPrefix(stepStr, "Ran ") {
 							lastCmdIdx = len(currentTurnSteps) - 1
 						}
-					}
-				}
-			}
-		}
-
-		// Assistant text / narrative
-		if entry.Type == "PLANNER_RESPONSE" {
-			if entry.Error != "" {
-				currentTurnHasError = true
-			}
-			if entry.Content != "" {
-				cleaned := cleanAssistantText(entry.Content)
-				if cleaned != "" {
-					if len(entry.ToolCalls) > 0 {
-						currentTurnSteps = append(currentTurnSteps, cleaned)
-					} else {
-						if len(currentTurnSteps) > 0 {
-							currentTurnSegments = append(currentTurnSegments, HistorySegment{
-								Type:    "thought",
-								Content: strings.Join(currentTurnSteps, "\n"),
-							})
-							currentTurnSteps = nil
-						}
-						currentTurnSegments = append(currentTurnSegments, HistorySegment{
-							Type:    "text",
-							Content: cleaned,
-						})
-						currentTurnAnswers = append(currentTurnAnswers, cleaned)
 					}
 				}
 			}

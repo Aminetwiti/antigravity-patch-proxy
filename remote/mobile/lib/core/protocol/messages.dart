@@ -130,6 +130,7 @@ class CascadeSession {
     int? stepCount,
     bool? hasUnread,
     bool? isPinned,
+    bool? isArchived,
   }) {
     return CascadeSession(
       id: id ?? this.id,
@@ -143,6 +144,7 @@ class CascadeSession {
       stepCount: stepCount ?? this.stepCount,
       hasUnread: hasUnread ?? this.hasUnread,
       isPinned: isPinned ?? this.isPinned,
+      isArchived: isArchived ?? this.isArchived,
     );
   }
 
@@ -338,8 +340,8 @@ class ChatMessage {
     List<ChatSegment> segs = const [];
     if (json['segments'] is List) {
       segs = (json['segments'] as List)
-          .whereType<Map<String, dynamic>>()
-          .map((m) => ChatSegment.fromJson(m))
+          .whereType<Map>()
+          .map((m) => ChatSegment.fromJson(Map<String, dynamic>.from(m)))
           .toList();
     }
     return ChatMessage(
