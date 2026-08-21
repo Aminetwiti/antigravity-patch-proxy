@@ -232,6 +232,7 @@ func TestArchiveAndUnarchiveCascadeActions(t *testing.T) {
 
 	testID := "feedface-0000-4000-8000-00000000act2"
 	annoPath := filepath.Join(annoDir, testID+".pbtxt")
+	_ = os.WriteFile(annoPath, []byte("cascade_id: \""+testID+"\"\n"), 0o644)
 	defer os.Remove(annoPath)
 
 	ts, gw := newTestServerWithGW(&fakeRPCClient{})

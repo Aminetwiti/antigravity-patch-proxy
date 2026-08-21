@@ -93,11 +93,13 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
   int _secondsElapsed = 0;
   Timer? _timer;
   late AnimationController _pulseAnim;
-  bool _showAllSteps = true;
+  bool _showAllSteps = false;
+  late bool _isExpanded;
 
   @override
   void initState() {
     super.initState();
+    _isExpanded = widget.initiallyExpanded || widget.isStreaming;
     _pulseAnim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
@@ -113,9 +115,14 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
     super.didUpdateWidget(oldWidget);
     if (widget.isStreaming && !oldWidget.isStreaming) {
       _secondsElapsed = 0;
+      _isExpanded = true;
       _startTimer();
     } else if (!widget.isStreaming && oldWidget.isStreaming) {
       _timer?.cancel();
+      // Lorsque l'agent termine son travail, replier automatiquement la réflexion
+      _isExpanded = widget.initiallyExpanded;
+    } else if (widget.initiallyExpanded != oldWidget.initiallyExpanded) {
+      _isExpanded = widget.initiallyExpanded;
     }
   }
 
@@ -770,6 +777,10 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
       return const SizedBox.shrink();
     }
 
+    if (!widget.isStreaming && !_isExpanded) {
+      return _buildCollapsedSummary(steps, scheme, isDark);
+    }
+
     final showAll = _showAllSteps || widget.initiallyExpanded;
     final displaySteps = (!widget.isStreaming && steps.length > 8 && !showAll)
         ? steps.take(6).toList()
@@ -789,7 +800,41 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
           mainAxisSize: MainAxisSize.min,
           children: [
             if (widget.isStreaming)
-              _buildLiveAgentHeader(scheme, isDark),
+              _buildLiveAgentHeader(scheme, isDark)
+            else
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: InkWell(
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    setState(() => _isExpanded = false);
+                    widget.onToggleExpand?.call();
+                  },
+                  borderRadius: BorderRadius.circular(4),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.expand_more_rounded,
+                          size: 15,
+                          color: isDark ? const Color(0xFF8B8D98) : scheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Hide details',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: isDark ? const Color(0xFF8B8D98) : scheme.onSurfaceVariant,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             for (int i = 0; i < displaySteps.length; i++)
               _buildStepRow(displaySteps[i], i, scheme, isDark, isFirstThought: i == firstThoughtIndex),
             if (widget.isStreaming)
@@ -853,6 +898,110 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
                 ),
               ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCollapsedSummary(List<ExecutionStepItem> steps, ColorScheme scheme, bool isDark) {
+    String primaryTitle = '';
+    String? secondaryTitle;
+
+    for (final s in steps) {
+      if (s.type == ExecutionStepType.workedDuration) {
+        primaryTitle = '${s.action} ${s.title}';
+        break;
+      }
+    }
+    if (primaryTitle.isEmpty) {
+      primaryTitle = _secondsElapsed > 0
+          ? 'Worked for ${_formatDuration(_secondsElapsed)}'
+          : 'Worked for 4m';
+    }
+
+    for (int i = steps.length - 1; i >= 0; i--) {
+      final s = steps[i];
+      if (s.type == ExecutionStepType.command ||
+          s.type == ExecutionStepType.taskFinished ||
+          s.type == ExecutionStepType.fileEdit ||
+          s.type == ExecutionStepType.exploredGroup) {
+        if (s.type == ExecutionStepType.command) {
+          secondaryTitle = '${s.action} ${s.title} finished';
+        } else if (s.type == ExecutionStepType.taskFinished) {
+          secondaryTitle = s.title;
+        } else if (s.type == ExecutionStepType.exploredGroup) {
+          secondaryTitle = '${s.action} ${s.title}';
+        } else {
+          secondaryTitle = '${s.action} ${s.title}';
+        }
+        break;
+      }
+    }
+
+    return RepaintBoundary(
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        child: InkWell(
+          onTap: () {
+            HapticFeedback.selectionClick();
+            setState(() => _isExpanded = true);
+            widget.onToggleExpand?.call();
+          },
+          borderRadius: BorderRadius.circular(6),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 2),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      primaryTitle,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w500,
+                        color: isDark ? const Color(0xFF9E9FA8) : scheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      size: 15,
+                      color: isDark ? const Color(0xFF71717A) : scheme.outline,
+                    ),
+                  ],
+                ),
+                if (secondaryTitle != null && secondaryTitle.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          secondaryTitle,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w400,
+                            color: isDark ? const Color(0xFF71717A) : scheme.outline,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        size: 13,
+                        color: isDark ? const Color(0xFF52525B) : scheme.outlineVariant,
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );
