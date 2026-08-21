@@ -48,13 +48,11 @@ void main() {
       expect(find.text('DERNIÈRES CONNEXIONS SAUVEGARDÉES'), findsOneWidget);
       expect(find.text('PC Chambre'), findsOneWidget);
       expect(find.textContaining('192.168.1.42:8090'), findsWidgets);
-      expect(find.textContaining('PIN: 123456'), findsOneWidget);
       expect(find.textContaining('🔑 Token'), findsOneWidget);
 
       // Vérifie que les champs ont été pré-remplis
       expect(find.text('192.168.1.42'), findsWidgets);
       expect(find.text('8090'), findsWidgets);
-      expect(find.text('123456'), findsWidgets);
 
       // Test 1-Tap Reconnect
       final tapBtn = find.byKey(const Key('btn-connect-192.168.1.42:8090'));

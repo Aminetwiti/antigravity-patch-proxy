@@ -25,7 +25,12 @@ class SessionParser {
             // Point bleu : session avec activité (≥ 1 étape) mais pas en cours
             // Identique au comportement de l'indicateur Antigravity IDE
             final status = (sMap['status'] as String? ?? '').toUpperCase();
-            final isRunning = status.contains('RUNNING');
+            final isRunning = status.contains('RUNNING') ||
+                status.contains('BUSY') ||
+                status.contains('STREAMING') ||
+                status.contains('TASK') ||
+                status.contains('EXECUTING') ||
+                status.contains('BACKGROUND');
             final hasUnread = stepCount >= 1 && !isRunning;
             final session = CascadeSession.fromJson({
               ...sMap,

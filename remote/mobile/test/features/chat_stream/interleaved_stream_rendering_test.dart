@@ -22,8 +22,7 @@ void main() {
         final map = d as Map<String, dynamic>;
         out.add(map);
         final reqId = map['requestId'] as String?;
-        final type = map['type'] as String?;
-        if (reqId != null && type == 'get_session_history') {
+        if (reqId != null) {
           scheduleMicrotask(() {
             if (!ctrl.isClosed) {
               ctrl.add(jsonEncode({'requestId': reqId, 'data': {'messages': []}}));

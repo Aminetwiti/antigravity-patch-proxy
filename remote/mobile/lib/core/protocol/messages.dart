@@ -90,7 +90,12 @@ class CascadeSession {
 
   bool get isRunning {
     final st = status.toUpperCase();
-    return st.contains('RUNNING') || st.contains('BUSY') || st.contains('STREAMING');
+    return st.contains('RUNNING') ||
+        st.contains('BUSY') ||
+        st.contains('STREAMING') ||
+        st.contains('TASK') ||
+        st.contains('EXECUTING') ||
+        st.contains('BACKGROUND');
   }
 
   bool get isBackgroundTask {
