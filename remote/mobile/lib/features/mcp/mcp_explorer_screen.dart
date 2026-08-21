@@ -62,6 +62,7 @@ class _McpExplorerScreenState extends State<McpExplorerScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => _SidecarLogsSheet(
         api: widget.api,
@@ -530,103 +531,75 @@ class _SidecarLogsSheetState extends State<_SidecarLogsSheet> {
     final scheme = Theme.of(context).colorScheme;
     final maxH = MediaQuery.sizeOf(context).height * 0.82;
 
-    return Container(
-      constraints: BoxConstraints(maxHeight: maxH),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainer,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Drag handle & header
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: Row(
-              children: [
-                Icon(Icons.terminal_rounded, size: 20, color: scheme.primary),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Logs Sidecar : ${widget.sidecarId}',
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.refresh, size: 18),
-                  tooltip: 'Rafraîchir les logs',
-                  onPressed: _loadingLogs ? null : () {
-                    if (_selectedFile != null) _fetchLogs(_selectedFile!);
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.copy_all, size: 18),
-                  tooltip: 'Copier les logs',
-                  onPressed: _logs.isEmpty ? null : () async {
-                    await Clipboard.setData(ClipboardData(text: _logs));
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Logs copiés dans le presse-papier')),
-                      );
-                    }
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close, size: 18),
-                  onPressed: () => Navigator.of(context).pop(),
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-
-          // File selection chips & control actions
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: _logFiles.map((f) {
-                        final isSel = f == _selectedFile;
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child: ChoiceChip(
-                            label: Text(f, style: const TextStyle(fontSize: 11)),
-                            selected: isSel,
-                            visualDensity: VisualDensity.compact,
-                            onSelected: (_) => _fetchLogs(f),
-                          ),
-                        );
-                      }).toList(),
+    return SafeArea(
+      top: false,
+      child: Container(
+        constraints: BoxConstraints(maxHeight: maxH),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainer,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Drag handle & header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Row(
+                children: [
+                  Icon(Icons.terminal_rounded, size: 20, color: scheme.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Logs Sidecar : ${widget.sidecarId}',
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                // Lifecycle buttons
-                PopupMenuButton<int>(
-                  tooltip: 'Gérer le cycle de vie',
-                  enabled: !_actionInProgress,
-                  icon: _actionInProgress
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.more_vert, size: 18),
-                  onSelected: (action) {
-                    final names = {1: 'Démarrer', 2: 'Arrêter', 3: 'Redémarrer', 4: 'Supprimer'};
-                    _manageAction(action, names[action] ?? '$action');
-                  },
-                  itemBuilder: (ctx) => const [
-                    PopupMenuItem(value: 3, child: Text('Redémarrer (restart)')),
-                    PopupMenuItem(value: 1, child: Text('Démarrer (start)')),
-                    PopupMenuItem(value: 2, child: Text('Arrêter (stop)')),
-                  ],
-                ),
-              ],
+                  IconButton(
+                    icon: const Icon(Icons.refresh, size: 18),
+                    tooltip: 'Rafraîchir les logs',
+                    onPressed: _loadingLogs ? null : () {
+                      if (_selectedFile != null) _fetchLogs(_selectedFile!);
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.copy_all, size: 18),
+                    tooltip: 'Copier les logs',
+                    onPressed: _logs.isEmpty ? null : () async {
+                      await Clipboard.setData(ClipboardData(text: _logs));
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Logs copiés dans le presse-papier')),
+                        );
+                      }
+                    },
+                  ),
+                  PopupMenuButton<int>(
+                    tooltip: 'Gérer le cycle de vie',
+                    enabled: !_actionInProgress,
+                    icon: _actionInProgress
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.more_vert, size: 18),
+                    onSelected: (action) {
+                      final names = {1: 'Démarrer', 2: 'Arrêter', 3: 'Redémarrer', 4: 'Supprimer'};
+                      _manageAction(action, names[action] ?? '$action');
+                    },
+                    itemBuilder: (ctx) => const [
+                      PopupMenuItem(value: 3, child: Text('Redémarrer (restart)')),
+                      PopupMenuItem(value: 1, child: Text('Démarrer (start)')),
+                      PopupMenuItem(value: 2, child: Text('Arrêter (stop)')),
+                    ],
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
             ),
-          ),
+            const Divider(height: 1),
 
           if (_error != null)
             Padding(
@@ -660,6 +633,7 @@ class _SidecarLogsSheetState extends State<_SidecarLogsSheet> {
           ),
         ],
       ),
+    ),
     );
   }
 }

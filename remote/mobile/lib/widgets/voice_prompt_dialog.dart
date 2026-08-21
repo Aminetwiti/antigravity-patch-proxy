@@ -14,11 +14,12 @@ class VoicePromptDialog extends StatefulWidget {
 
   static Future<void> show(BuildContext context, {required ValueChanged<String> onInsert}) {
     final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      backgroundColor: scheme.surfaceContainer,
+      backgroundColor: isDark ? AppColors.surfaceBase : scheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
       ),
@@ -81,33 +82,47 @@ class _VoicePromptDialogState extends State<VoicePromptDialog> with SingleTicker
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final viewInsets = MediaQuery.of(context).viewInsets.bottom;
 
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 16,
-        right: 16,
-        top: 16,
-        bottom: viewInsets + 16,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Header
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 10,
+          bottom: viewInsets > 0 ? viewInsets + 8 : 16,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Drag Handle
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                width: 36,
+                height: 4,
                 decoration: BoxDecoration(
-                  color: AppColors.accent.withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
+                  color: isDark ? AppColors.borderStrong : scheme.outlineVariant,
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
                 ),
-                child: const Icon(Icons.mic, size: 20, color: AppColors.accent),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+            ),
+            // Header
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppColors.accent.withValues(alpha: 0.15),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.mic, size: 20, color: AppColors.accent),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                     Text(
                       'Saisie Vocale & Formatage Code',
                       style: TextStyle(
@@ -337,8 +352,9 @@ class _VoicePromptDialogState extends State<VoicePromptDialog> with SingleTicker
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildQuickChip(String text) {
     return ActionChip(

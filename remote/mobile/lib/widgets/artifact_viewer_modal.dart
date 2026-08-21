@@ -43,6 +43,7 @@ class ArtifactViewerModal extends StatefulWidget {
     return showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => ArtifactViewerModal(
         api: api,

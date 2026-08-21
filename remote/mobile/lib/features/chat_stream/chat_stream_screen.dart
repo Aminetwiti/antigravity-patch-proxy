@@ -471,20 +471,24 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => DraggableScrollableSheet(
         initialChildSize: 0.85,
         minChildSize: 0.5,
         maxChildSize: 0.95,
-        builder: (_, scrollController) => Container(
-          decoration: BoxDecoration(
-            color: Theme.of(context).brightness == Brightness.dark
-                ? AppColors.surfaceRaised
-                : Theme.of(context).colorScheme.surface,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-          ),
-          child: ModelsSettingsSection(
-            api: widget.api,
+        builder: (_, scrollController) => SafeArea(
+          top: false,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? AppColors.surfaceRaised
+                  : Theme.of(context).colorScheme.surface,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+            ),
+            child: ModelsSettingsSection(
+              api: widget.api,
+            ),
           ),
         ),
       ),
