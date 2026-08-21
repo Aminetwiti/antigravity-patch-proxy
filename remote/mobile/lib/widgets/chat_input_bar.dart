@@ -475,6 +475,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
           if (!clean.startsWith('file:///')) {
             clean = clean.startsWith('/') ? 'file://$clean' : 'file:///$clean';
           }
+          buffer.writeln('[ARTIFACT: ${img.name}]\nPath: $clean\n');
         }
         mediaList.add({
           'uri': clean,
@@ -496,7 +497,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
           if (!clean.startsWith('file:///')) {
             clean = clean.startsWith('/') ? 'file://$clean' : 'file:///$clean';
           }
-          buffer.writeln('[Fichier: $clean]');
+          buffer.writeln('[ARTIFACT: ${f.name}]\nPath: $clean\n');
         } else {
           buffer.writeln('[Fichier joint: ${f.name} (${_formatBytes(f.size)})]');
         }

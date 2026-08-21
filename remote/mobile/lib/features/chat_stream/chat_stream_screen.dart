@@ -198,6 +198,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   // ignore: prefer_final_fields
   bool _isInitialScrollSettling = true;
 
+  /// Persistance statique de la position de défilement par session (survit aux
+  /// changements d'écrans, d'onglets et aux switches de session).
+  static final Map<String, double> _globalSessionScrollOffsets = {};
+  static final Map<String, bool> _globalSessionUserScrolled = {};
+
   // Bouton flottant « retour en bas » (P1) : visible quand l'utilisateur
   // scrolle loin du bas pendant un stream. Compte les nouveaux messages
   // arrivés pendant qu'il lit l'historique, et se cache dès qu'il revient
@@ -535,9 +540,15 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   void _onScroll() {
     if (!_scrollController.hasClients || _isInitialScrollSettling) return;
     final pos = _scrollController.position;
+    final current = pos.pixels;
+    final max = pos.maxScrollExtent;
     // P1 : bascule du bouton flottant — on ne setState que lors d'un
     // changement d'état (une fois par départ/retour, pas à chaque pixel).
-    final nearBottom = (pos.maxScrollExtent - pos.pixels) < 120;
+    final nearBottom = (max - current) < 120;
+
+    _globalSessionScrollOffsets[widget.activeSessionId] = current;
+    _globalSessionUserScrolled[widget.activeSessionId] = !nearBottom;
+
     if (!nearBottom && !_userScrollLocked) {
       _userScrollLocked = true;
     } else if (nearBottom && _userScrollLocked) {
@@ -565,6 +576,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   void _jumpToBottom() {
     HapticFeedback.lightImpact();
     _userScrollLocked = false;
+    _globalSessionUserScrolled[widget.activeSessionId] = false;
+    _globalSessionScrollOffsets.remove(widget.activeSessionId);
     if (_scrollController.hasClients) {
       _scrollController.animateTo(
         _scrollController.position.maxScrollExtent,
@@ -620,7 +633,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     _refreshRunningTasks();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        _scrollToBottomSettled();
+        _restoreOrScrollToBottom(widget.activeSessionId);
       }
     });
   }
@@ -756,6 +769,61 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     });
   }
 
+  /// Restaure la position de défilement persistée d'une session, ou défile
+  /// tout en bas si la session est ouverte pour la première fois.
+  void _restoreOrScrollToBottom(String sessionId) {
+    if (!mounted) return;
+    final savedOffset = _globalSessionScrollOffsets[sessionId];
+    final isUserScrolled = _globalSessionUserScrolled[sessionId] == true;
+
+    if (savedOffset != null && isUserScrolled) {
+      _restoreScrollOffset(savedOffset);
+    } else {
+      _scrollToBottomSettled();
+    }
+  }
+
+  void _restoreScrollOffset(double targetOffset, {int maxAttempts = 3}) {
+    if (!mounted) return;
+    _isInitialScrollSettling = true;
+    _userScrollLocked = true;
+    _showJumpToBottom = true;
+    for (final t in _settleTimers) {
+      t.cancel();
+    }
+    _settleTimers.clear();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) {
+        _isInitialScrollSettling = false;
+        return;
+      }
+      final clamped = targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent);
+      _scrollController.jumpTo(clamped);
+      if (maxAttempts > 1) {
+        _settleTimers.add(Timer(const Duration(milliseconds: 60), () {
+          if (mounted && _scrollController.hasClients) {
+            final c = targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent);
+            _scrollController.jumpTo(c);
+          }
+          if (maxAttempts > 2) {
+            _settleTimers.add(Timer(const Duration(milliseconds: 150), () {
+              if (mounted && _scrollController.hasClients) {
+                final c = targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent);
+                _scrollController.jumpTo(c);
+              }
+              _isInitialScrollSettling = false;
+            }));
+          } else {
+            _isInitialScrollSettling = false;
+          }
+        }));
+      } else {
+        _isInitialScrollSettling = false;
+      }
+    });
+  }
+
   void _loadHistoryIfEmpty([String? targetSessionId]) {
     final targetSession = targetSessionId ?? widget.activeSessionId;
     _loadSessionContextAndArtifacts(targetSession);
@@ -768,7 +836,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         if (cached != null && cached.isNotEmpty) {
           buf.addAll(cached);
           if (targetSession == widget.activeSessionId) {
-            _scrollToBottomSettled();
+            _restoreOrScrollToBottom(targetSession);
           }
         } else {
           _loadingHistorySessions.add(targetSession);
@@ -778,7 +846,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                 _sessionMessages.putIfAbsent(targetSession, () => []).addAll(cachedList);
               });
               if (targetSession == widget.activeSessionId) {
-                _scrollToBottomSettled();
+                _restoreOrScrollToBottom(targetSession);
               }
             }
           });
@@ -838,7 +906,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             _refreshRunningTasks();
           }
           setState(() {});
-          _scrollToBottomSettled();
+          _restoreOrScrollToBottom(targetSession);
         }
       }).catchError((_) {
         _loadingHistorySessions.remove(targetSession);
@@ -1085,11 +1153,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     // les approbations/notifications même écran éteint. Le throttle 100ms
     // évite toute surconsommation CPU en fond.
     if (state == AppLifecycleState.resumed && mounted) {
-      _userScrollLocked = false;
-      _showJumpToBottom = false;
-      _hiddenNewCount = 0;
       setState(() {});
-      _scrollToBottomSettled();
+      _restoreOrScrollToBottom(widget.activeSessionId);
     }
   }
 
@@ -1097,13 +1162,18 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   void didUpdateWidget(covariant ChatStreamScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.activeSessionId != widget.activeSessionId) {
+      if (_scrollController.hasClients) {
+        _globalSessionScrollOffsets[oldWidget.activeSessionId] = _scrollController.position.pixels;
+        _globalSessionUserScrolled[oldWidget.activeSessionId] = _userScrollLocked;
+      }
       _sessionApprovalIndices.putIfAbsent(
         widget.activeSessionId,
         () => _currentSessionApprovals.isEmpty ? -1 : 0,
       );
-      _visibleCounts[widget.activeSessionId] = _pageSize;
-      _userScrollLocked = false;
-      _showJumpToBottom = false;
+      _visibleCounts.putIfAbsent(widget.activeSessionId, () => _pageSize);
+      final isUserScrolled = _globalSessionUserScrolled[widget.activeSessionId] == true;
+      _userScrollLocked = isUserScrolled;
+      _showJumpToBottom = isUserScrolled;
       _hiddenNewCount = 0;
       if (!_activeStreamingSessions.contains(widget.activeSessionId)) {
         _stillWorkingTimer?.cancel();
@@ -1117,7 +1187,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       _loadPersistedDraft();
       _loadOfflineOutbox(widget.activeSessionId);
       _refreshRunningTasks();
-      _scrollToBottomSettled();
+      _restoreOrScrollToBottom(widget.activeSessionId);
     }
     if (!oldWidget.isConnected && widget.isConnected) {
       _checkAndFlushOfflineOutbox();
@@ -1775,7 +1845,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
         if (isActiveSession && mounted) {
           setState(() {});
-          _scrollToBottomSettled();
+          if (!_userScrollLocked) {
+            _scrollToBottomSettled();
+          }
         }
       } else if (type == 'session_status_update') {
         final data = msg['data'] as Map<String, dynamic>? ?? const {};
@@ -2020,6 +2092,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       _activeStreamingSessions.add(targetSession);
     });
     if (targetSession == widget.activeSessionId) {
+      _globalSessionUserScrolled[targetSession] = false;
+      _globalSessionScrollOffsets.remove(targetSession);
       _userScrollLocked = false;
       _showJumpToBottom = false;
       _hiddenNewCount = 0;
@@ -2465,13 +2539,30 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
     if (reverted == true && mounted) {
       HapticFeedback.mediumImpact();
+
+      // 1. Restaure le texte du message dans l'input de saisie pour réédition
+      _chatInputKey.currentState?.setText(message.text);
+
+      // 2. Annule et fait disparaître immédiatement le message x et tous ses descendants
+      final buf = _sessionMessages[targetSession];
+      if (buf != null) {
+        final idx = buf.indexOf(message);
+        if (idx >= 0) {
+          buf.removeRange(idx, buf.length);
+        } else if (stepIndex >= 0) {
+          buf.removeWhere((m) => (m.stepIndex != null && m.stepIndex! >= stepIndex));
+        }
+      }
+      setState(() {});
+
+      // 3. Vide le cache persistant et recharge l'état propre jusqu'à l'étape x - 1
       SessionHistoryCacheStore.instance.saveSessionHistory(targetSession, const []);
       _loadHistoryIfEmpty(targetSession);
       _fetchVcsChanges();
       _refreshRunningTasks();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Modifications annulées jusqu\'à cette étape'),
+          content: Text('Modifications annulées. Message restauré dans la zone de saisie.'),
           duration: Duration(seconds: 2),
         ),
       );
@@ -2880,6 +2971,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               await Future.delayed(const Duration(milliseconds: 300));
             },
             child: ListView.builder(
+              key: PageStorageKey('chat_list_${widget.activeSessionId}'),
               controller: _scrollController,
               physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -3712,24 +3804,28 @@ class _MessageBubble extends StatelessWidget {
                     // Bouton Copier
                     Tooltip(
                       message: 'Copier le message',
-                      child: InkWell(
-                        onTap: () {
-                          HapticFeedback.lightImpact();
-                          Clipboard.setData(ClipboardData(text: message.text));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Prompt copié dans le presse-papiers'),
-                              duration: Duration(seconds: 1),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () {
+                            HapticFeedback.lightImpact();
+                            Clipboard.setData(ClipboardData(text: message.text));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Prompt copié dans le presse-papiers'),
+                                duration: Duration(seconds: 1),
+                              ),
+                            );
+                          },
+                          borderRadius: BorderRadius.circular(6),
+                          hoverColor: (isDark ? AppColors.accentBlue : scheme.primary).withValues(alpha: 0.08),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                            child: Icon(
+                              Icons.copy_rounded,
+                              size: 14.5,
+                              color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
                             ),
-                          );
-                        },
-                        borderRadius: BorderRadius.circular(4),
-                        child: Padding(
-                          padding: const EdgeInsets.all(4),
-                          child: Icon(
-                            Icons.copy_rounded,
-                            size: 14,
-                            color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
                           ),
                         ),
                       ),
@@ -3739,18 +3835,22 @@ class _MessageBubble extends StatelessWidget {
                       // Bouton Revert / Undo changes up to this point
                       Tooltip(
                         message: 'Undo changes up to this point',
-                        child: InkWell(
-                          onTap: () {
-                            HapticFeedback.lightImpact();
-                            onRevertStep!(message);
-                          },
-                          borderRadius: BorderRadius.circular(4),
-                          child: Padding(
-                            padding: const EdgeInsets.all(4),
-                            child: Icon(
-                              Icons.undo_rounded,
-                              size: 15,
-                              color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () {
+                              HapticFeedback.lightImpact();
+                              onRevertStep!(message);
+                            },
+                            borderRadius: BorderRadius.circular(6),
+                            hoverColor: const Color(0xFFD97706).withValues(alpha: 0.1),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                              child: Icon(
+                                Icons.undo_rounded,
+                                size: 15.5,
+                                color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                              ),
                             ),
                           ),
                         ),
@@ -3934,6 +4034,15 @@ class _MessageBubble extends StatelessWidget {
                   summary: 'Le plan d\'implémentation est prêt. Vous pouvez l\'examiner ou approuver directement.',
                   onProceed: onProceedPlan ?? () {},
                   onViewPlan: onViewPlan ?? () {},
+                ),
+              if (!message.isStreaming &&
+                  (message.text.contains('walkthrough.md') ||
+                      message.text.contains('Walkthrough') ||
+                      message.text.contains('# Walkthrough')))
+                WalkthroughCard(
+                  onViewWalkthrough: () {
+                    onOpenArtifact?.call('walkthrough.md');
+                  },
                 ),
               if (!message.isStreaming && message.filesChanged.isNotEmpty)
                 Padding(

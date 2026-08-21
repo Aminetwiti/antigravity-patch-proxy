@@ -367,7 +367,81 @@ class MarkdownRenderer {
         continue;
       }
 
-      // 3. Bracketed Attachment Tag [Images jointes: ...], [Image: ...], [Fichier: ...]
+      // 3. Artifact Tag [ARTIFACT: name]\nPath: file:///...
+      final artifactRe = RegExp(r'^\[ARTIFACT:\s*([^\]]+)\](?:\s*\r?\n\s*Path:\s*([^\r\n]+))?', caseSensitive: false);
+      final artifactMatch = artifactRe.firstMatch(remaining);
+      if (artifactMatch != null) {
+        final artName = artifactMatch.group(1)?.trim() ?? 'Artifact';
+        final artPath = artifactMatch.group(2)?.trim() ?? artName;
+        final isLocalFile = artPath.startsWith('file://') || artPath.contains(':\\') || artPath.startsWith('/');
+        final filePath = isLocalFile ? _filePathOf(artPath) : artPath;
+        final lower = filePath.toLowerCase();
+        final isImg = lower.endsWith('.png') ||
+            lower.endsWith('.jpg') ||
+            lower.endsWith('.jpeg') ||
+            lower.endsWith('.gif') ||
+            lower.endsWith('.webp') ||
+            lower.endsWith('.svg');
+
+        if (isImg) {
+          spans.add(WidgetSpan(
+            alignment: PlaceholderAlignment.middle,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: _buildImageWidget(
+                url: artPath,
+                alt: artName,
+                filePath: filePath,
+                isLocalFile: isLocalFile,
+                isDataUri: artPath.startsWith('data:image/'),
+                scheme: scheme,
+                onLocalFile: onLocalFile,
+              ),
+            ),
+          ));
+        } else {
+          final fileName = filePath.split(RegExp(r'[\\/]')).last;
+          spans.add(WidgetSpan(
+            alignment: PlaceholderAlignment.middle,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: InkWell(
+                onTap: onLocalFile == null ? null : () => onLocalFile(filePath),
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.6)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.insert_drive_file_outlined, size: 16, color: scheme.primary),
+                      const SizedBox(width: 6),
+                      Text(
+                        fileName.isNotEmpty ? fileName : filePath,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: scheme.onSurface,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(Icons.open_in_new, size: 13, color: scheme.onSurfaceVariant),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ));
+        }
+        remaining = remaining.substring(artifactMatch.end);
+        continue;
+      }
+
+      // 4. Bracketed Attachment Tag [Images jointes: ...], [Image: ...], [Fichier: ...]
       final attachmentRe = RegExp(r'^\[(Images? jointes?|Image|Fichier|File|Pièce jointe|Piece jointe):\s*([^\]]+)\]', caseSensitive: false);
       final attachmentMatch = attachmentRe.firstMatch(remaining);
       if (attachmentMatch != null) {
@@ -519,8 +593,9 @@ class MarkdownRenderer {
 
       // 7. Plain text up to the next markdown token.
       final matchAttach = RegExp(r'\[(Images? jointes?|Image|Fichier|File|Pièce jointe|Piece jointe):\s*[^\]]+\]', caseSensitive: false);
+      final matchArtifact = RegExp(r'\[ARTIFACT:\s*[^\]]+\]', caseSensitive: false);
       final nextIndex = <int>[
-        for (final r in [codeRe, imageRe, linkRe, matchAttach, boldRe, italicRe])
+        for (final r in [codeRe, imageRe, linkRe, matchArtifact, matchAttach, boldRe, italicRe])
           r.firstMatch(remaining)?.start ?? remaining.length,
       ].reduce((a, b) => a < b ? a : b);
       if (nextIndex == 0) {
@@ -551,12 +626,16 @@ class MarkdownRenderer {
         if (commaIdx != -1) {
           final b64 = url.substring(commaIdx + 1);
           final bytes = base64Decode(b64);
-          return ClipRRect(
+          return InkWell(
+            onTap: onLocalFile == null ? null : () => onLocalFile(url),
             borderRadius: BorderRadius.circular(8),
-            child: Image.memory(
-              bytes,
-              fit: BoxFit.contain,
-              errorBuilder: (_, __, ___) => _imageErrorTile(alt.isNotEmpty ? alt : 'Image', scheme),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.memory(
+                bytes,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => _imageErrorTile(alt.isNotEmpty ? alt : 'Image', scheme),
+              ),
             ),
           );
         }
@@ -567,12 +646,16 @@ class MarkdownRenderer {
       try {
         final file = File(filePath);
         if (file.existsSync()) {
-          return ClipRRect(
+          return InkWell(
+            onTap: onLocalFile == null ? null : () => onLocalFile(filePath),
             borderRadius: BorderRadius.circular(8),
-            child: Image.file(
-              file,
-              fit: BoxFit.contain,
-              errorBuilder: (_, __, ___) => _imageErrorTile(alt.isNotEmpty ? alt : filePath, scheme),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.file(
+                file,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => _imageErrorTile(alt.isNotEmpty ? alt : filePath, scheme),
+              ),
             ),
           );
         }

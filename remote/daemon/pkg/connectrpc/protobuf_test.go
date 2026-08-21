@@ -379,17 +379,33 @@ func TestBuildSendMessageWithMedia(t *testing.T) {
 			}
 		case 6:
 			imgFields := DecodeFields(f.Bytes)
+			hasURI := false
+			hasB64 := false
 			for _, imgField := range imgFields {
 				if imgField.Num == 4 && string(imgField.Bytes) == "file:///C:/Users/test/.gemini/antigravity/brain/c1/.user_uploaded/photo.png" {
-					foundImages = true
+					hasURI = true
 				}
+				if imgField.Num == 1 && len(imgField.Bytes) > 0 {
+					hasB64 = true
+				}
+			}
+			if hasURI && hasB64 {
+				foundImages = true
 			}
 		case 14:
 			mFields := DecodeFields(f.Bytes)
+			hasURI := false
+			hasInlineData := false
 			for _, mField := range mFields {
 				if mField.Num == 5 && string(mField.Bytes) == "file:///C:/Users/test/.gemini/antigravity/brain/c1/.user_uploaded/photo.png" {
-					foundMedia = true
+					hasURI = true
 				}
+				if mField.Num == 2 && string(mField.Bytes) == "fake_image_bytes" {
+					hasInlineData = true
+				}
+			}
+			if hasURI && hasInlineData {
+				foundMedia = true
 			}
 		case 5:
 			foundConfig = true

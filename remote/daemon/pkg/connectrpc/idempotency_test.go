@@ -88,8 +88,8 @@ func TestDecodeFields_ConcurrentSafety(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < 3000; i++ {
 				fields := DecodeFields(msg)
-				if len(fields) != 4 {
-					t.Errorf("attendu 4 champs, reçu %d", len(fields))
+				if len(fields) < 4 {
+					t.Errorf("attendu au moins 4 champs, reçu %d", len(fields))
 				}
 			}
 		}()

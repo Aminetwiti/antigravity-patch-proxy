@@ -2518,7 +2518,7 @@ func cleanAssistantText(s string) string {
 
 var (
 	artifactMediaRe = regexp.MustCompile(`(?i)\[ARTIFACT:\s*([^\]]+)\]\s*\r?\n\s*Path:\s*([^\r\n]+)`)
-	userUploadedRe  = regexp.MustCompile(`(?i)(?:file:///|[a-zA-Z]:[\\/]|/)[^\r\n\t\"'<>]+\.(?:png|jpg|jpeg|gif|webp|svg)`)
+	userUploadedRe  = regexp.MustCompile(`(?i)(?:file:///|[a-zA-Z]:[\\/]|/)[^\r\n\t\"'<>]+\.(?:png|jpg|jpeg|gif|webp|svg|pdf|mp4|webm)`)
 )
 
 func extractMediaArtifacts(content string) []string {
@@ -2540,7 +2540,10 @@ func extractMediaArtifacts(content string) []string {
 				strings.HasSuffix(lowerP, ".jpeg") ||
 				strings.HasSuffix(lowerP, ".gif") ||
 				strings.HasSuffix(lowerP, ".webp") ||
-				strings.HasSuffix(lowerP, ".svg")
+				strings.HasSuffix(lowerP, ".svg") ||
+				strings.HasSuffix(lowerP, ".pdf") ||
+				strings.HasSuffix(lowerP, ".mp4") ||
+				strings.HasSuffix(lowerP, ".webm")
 
 			if isMedia && !seen[p] {
 				seen[p] = true

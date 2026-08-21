@@ -3763,9 +3763,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 		}
 
-		// Backward-compat: si promptText contient des tags markdown d'images ![name](file:///path) ou ![name](C:/path),
-		// on les extrait vers mediaAttachments et on nettoie promptText pour que l'IDE Antigravity affiche
-		// un texte propre sans code markdown brut.
+		// Si promptText contient des tags markdown d'images ![name](file:///path), on les extrait vers mediaAttachments
 		imgTagRe := regexp.MustCompile(`!\[([^\]]*)\]\((?:file:///)?([a-zA-Z]:[^\)\r\n]+|/[^\)\r\n]+)\)`)
 		if imgMatches := imgTagRe.FindAllStringSubmatch(promptText, -1); len(imgMatches) > 0 {
 			for _, m := range imgMatches {
@@ -3799,7 +3797,52 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 					}
 				}
 			}
+			// Nettoyer les tags markdown d'images du texte pour éviter le rendu markdown brut dans l'IDE
 			promptText = strings.TrimSpace(imgTagRe.ReplaceAllString(promptText, ""))
+		}
+
+		// Populer Data et Base64Data pour chaque mediaAttachment en lisant le fichier sur disque
+		for i := range mediaAttachments {
+			m := &mediaAttachments[i]
+			if len(m.Data) == 0 && m.Base64Data != "" {
+				cleanB64 := m.Base64Data
+				if idx := strings.Index(cleanB64, ","); idx != -1 {
+					cleanB64 = cleanB64[idx+1:]
+				}
+				if b, err := base64.StdEncoding.DecodeString(cleanB64); err == nil && len(b) > 0 {
+					m.Data = b
+				}
+			}
+			if len(m.Data) == 0 && m.URI != "" {
+				localPath := strings.TrimPrefix(m.URI, "file:///")
+				localPath = filepath.FromSlash(localPath)
+				if data, err := os.ReadFile(localPath); err == nil && len(data) > 0 {
+					m.Data = data
+					if m.Base64Data == "" {
+						m.Base64Data = base64.StdEncoding.EncodeToString(data)
+					}
+				}
+			}
+			if m.MimeType == "" || m.MimeType == "application/octet-stream" {
+				if len(m.Data) > 0 {
+					m.MimeType = http.DetectContentType(m.Data)
+				} else if m.URI != "" {
+					lower := strings.ToLower(m.URI)
+					if strings.HasSuffix(lower, ".png") {
+						m.MimeType = "image/png"
+					} else if strings.HasSuffix(lower, ".jpg") || strings.HasSuffix(lower, ".jpeg") {
+						m.MimeType = "image/jpeg"
+					} else if strings.HasSuffix(lower, ".webp") {
+						m.MimeType = "image/webp"
+					} else if strings.HasSuffix(lower, ".gif") {
+						m.MimeType = "image/gif"
+					} else if strings.HasSuffix(lower, ".svg") {
+						m.MimeType = "image/svg+xml"
+					} else if strings.HasSuffix(lower, ".pdf") {
+						m.MimeType = "application/pdf"
+					}
+				}
+			}
 		}
 
 		// Offline buffering (3.2) : le prompt part vers le hub → on le persiste
