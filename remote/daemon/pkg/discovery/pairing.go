@@ -108,6 +108,10 @@ func (pm *PairingManager) CurrentPIN() (string, time.Duration) {
 // allowedProjects (optionnel) restreint le device aux projets donnés (scope 3.3).
 func (pm *PairingManager) VerifyPIN(remoteAddr, pin, deviceID string, allowedProjects ...[]string) (string, time.Time, error) {
 	ip := extractIP(remoteAddr)
+	attemptKey := ip
+	if deviceID != "" {
+		attemptKey = ip + ":" + deviceID
+	}
 
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
@@ -119,15 +123,15 @@ func (pm *PairingManager) VerifyPIN(remoteAddr, pin, deviceID string, allowedPro
 
 	now := time.Now()
 
-	// 1. Vérification anti-brute-force
-	rec := pm.attempts[ip]
+	// 1. Vérification anti-brute-force (isolée par IP et deviceId)
+	rec := pm.attempts[attemptKey]
 	if rec != nil {
 		if now.Before(rec.lockedUntil) {
 			return "", time.Time{}, fmt.Errorf("%w (réessayez dans %v)", ErrLockedOut, time.Until(rec.lockedUntil).Round(time.Second))
 		}
 		if now.After(rec.lockedUntil) && rec.count >= pm.maxAttempts {
 			// Verrouillage expiré : reset
-			delete(pm.attempts, ip)
+			delete(pm.attempts, attemptKey)
 			rec = nil
 		}
 	}
@@ -143,7 +147,7 @@ func (pm *PairingManager) VerifyPIN(remoteAddr, pin, deviceID string, allowedPro
 	if !match {
 		if rec == nil {
 			rec = &attemptRecord{}
-			pm.attempts[ip] = rec
+			pm.attempts[attemptKey] = rec
 		}
 		rec.count++
 		if rec.count >= pm.maxAttempts {
@@ -154,7 +158,7 @@ func (pm *PairingManager) VerifyPIN(remoteAddr, pin, deviceID string, allowedPro
 	}
 
 	// 4. Succès : reset des tentatives et génération du token de session
-	delete(pm.attempts, ip)
+	delete(pm.attempts, attemptKey)
 
 	tokenBytes := make([]byte, 32)
 	if _, err := io.ReadFull(rand.Reader, tokenBytes); err != nil {

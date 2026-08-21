@@ -65,11 +65,18 @@ export async function mcpListServers(): Promise<{ servers: McpServerEntry[] }> {
 
   for (const [name, entry] of Object.entries(servers)) {
     if (MCP_HIDDEN_SERVERS.has(name)) continue;
+    // Mask all environment values to prevent leaking API keys / tokens to remote clients
+    const maskedEnv: Record<string, string> = {};
+    if (entry.env) {
+      for (const k of Object.keys(entry.env)) {
+        maskedEnv[k] = '********';
+      }
+    }
     result.push({
       name,
       command: entry.command,
       args: entry.args ?? [],
-      env: entry.env ?? {},
+      env: maskedEnv,
       description: entry.description,
     });
   }

@@ -80,6 +80,8 @@ func normalizeWorkspace(uri string) string {
 	uri = strings.TrimPrefix(uri, "file:///")
 	uri = strings.TrimPrefix(uri, "file://")
 	uri = strings.ReplaceAll(uri, `\`, `/`)
+	uri = strings.TrimPrefix(uri, "//?/")
+	uri = strings.TrimPrefix(uri, "//./")
 	uri = strings.TrimRight(uri, "/")
 	return uri
 }
@@ -480,28 +482,17 @@ func ListLocalSessions() []map[string]interface{} {
 			}
 
 			cleanWs := normalizeWorkspace(workspacePath)
-			lowerWs := strings.ToLower(cleanWs)
 
 			// Si nous avons des projets officiels Antigravity 2.0, ne garder QUE les sessions
 			// rattachées à un projet officiel
-			matchedProjectName := ""
-			matchedProjectPath := workspacePath
-			matchedProjectID := ""
-			if len(officialProjs) > 0 {
-				for _, p := range officialProjs {
-					pPath := strings.ToLower(normalizeWorkspace(p.Path))
-					pName := strings.ToLower(p.Name)
-					if (pPath != "" && (strings.Contains(lowerWs, pPath) || strings.Contains(pPath, lowerWs))) ||
-						(pName != "" && (strings.Contains(lowerWs, pName) || strings.Contains(pName, lowerWs))) {
-						matchedProjectName = p.Name
-						matchedProjectPath = p.Path
-						matchedProjectID = p.ID
-						break
-					}
-				}
-				if matchedProjectName == "" {
-					continue
-				}
+			matchedProjectName, matchedProjectPath, matchedProjectID := matchOfficialProject(
+				"",
+				workspacePath,
+				cleanWs,
+				officialProjs,
+			)
+			if len(officialProjs) > 0 && matchedProjectName == "" {
+				continue
 			}
 
 			// Nettoyage du titre si c'est un chemin brut
@@ -2844,6 +2835,74 @@ func projectIDFromRegistry(uri string) string {
 		}
 	}
 	return ""
+}
+
+// matchOfficialProject associe de manière déterministe et hiérarchique une session à un projet officiel.
+// Priorités : 1) ID exact, 2) Chemin exact, 3) Sous-dossier le plus spécifique, 4) Nom exact.
+func matchOfficialProject(projID, wsPath, wsName string, projects []ProjectSummary) (matchedName, matchedPath, matchedID string) {
+	if len(projects) == 0 {
+		return wsName, wsPath, projID
+	}
+
+	// 1. Priorité 1 : ID exact
+	if projID != "" {
+		for _, p := range projects {
+			if p.ID == projID {
+				return p.Name, p.Path, p.ID
+			}
+		}
+	}
+
+	normWs := strings.ToLower(normalizeWorkspace(wsPath))
+	if normWs != "" {
+		// 2. Priorité 2 : Chemin ou URI exact
+		for _, p := range projects {
+			pNormPath := strings.ToLower(normalizeWorkspace(p.Path))
+			pNormUri := strings.ToLower(normalizeWorkspace(p.FolderURI))
+			if (pNormPath != "" && pNormPath == normWs) || (pNormUri != "" && pNormUri == normWs) {
+				return p.Name, p.Path, p.ID
+			}
+		}
+
+		// 3. Priorité 3 : Sous-dossier le plus spécifique (parent le plus long)
+		var bestParent *ProjectSummary
+		longestLen := -1
+		for i, p := range projects {
+			pNormPath := strings.ToLower(normalizeWorkspace(p.Path))
+			if pNormPath != "" {
+				prefixSlash := pNormPath + "/"
+				prefixBack := pNormPath + "\\"
+				if strings.HasPrefix(normWs, prefixSlash) || strings.HasPrefix(normWs, prefixBack) {
+					if len(pNormPath) > longestLen {
+						longestLen = len(pNormPath)
+						bestParent = &projects[i]
+					}
+				}
+			}
+		}
+		if bestParent != nil {
+			return bestParent.Name, bestParent.Path, bestParent.ID
+		}
+	}
+
+	// 4. Priorité 4 : Nom de dossier ou de projet exact
+	if wsName != "" {
+		for _, p := range projects {
+			if strings.EqualFold(p.Name, wsName) {
+				return p.Name, p.Path, p.ID
+			}
+		}
+	}
+	if normWs != "" {
+		base := strings.ToLower(filepath.Base(normWs))
+		for _, p := range projects {
+			if strings.EqualFold(p.Name, base) {
+				return p.Name, p.Path, p.ID
+			}
+		}
+	}
+
+	return "", wsPath, projID
 }
 
 // GetUniqueWorkspaces returns the list of unique workspace names discovered on the machine.

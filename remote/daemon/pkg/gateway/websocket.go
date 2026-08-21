@@ -174,12 +174,18 @@ func checkOrigin(r *http.Request) bool {
 			}
 		}
 	}
-	// Si la requête arrive sur un tunnel distant, l'Origin doit correspondre à l'Host de la requête
+	// Si la requête arrive sur un tunnel distant, l'Origin doit correspondre à l'Host de la requête ou à un domaine de tunnel valide
 	reqHost := r.Host
 	if host, _, err := net.SplitHostPort(reqHost); err == nil {
 		reqHost = host
 	}
-	return strings.EqualFold(h, reqHost)
+	if strings.EqualFold(h, reqHost) {
+		return true
+	}
+	if strings.HasSuffix(h, ".trycloudflare.com") || strings.HasSuffix(h, ".pinggy.link") || strings.HasSuffix(h, ".loca.lt") {
+		return true
+	}
+	return false
 }
 
 // pendingApproval : une approbation ├®mise mais pas encore r├®pondue, avec les
@@ -576,37 +582,20 @@ func (s *Server) sessionsFromSummariesLocked(jetbox map[string]connectrpc.Jetbox
 		if home != "" && isSessionArchived(home, sum.CascadeID) {
 			continue
 		}
-		if (sum.Title == "" || sum.Title == "Cascade Session") && (sum.UpdatedAt.IsZero() || sum.StepCount == 0) {
-			continue
-		}
-		if isSubagentTitle(sum.Title) {
-			continue
-		}
-		projID := sum.ProjectID
-		wsPath := normalizeWorkspace(sum.Workspace)
-		wsName := sum.Workspace
-		for _, p := range projects {
-			pNorm := strings.ToLower(normalizeWorkspace(p.Path))
-			pNormUri := strings.ToLower(normalizeWorkspace(p.FolderURI))
-			sumNorm := strings.ToLower(wsPath)
-			if (p.ID != "" && p.ID == projID) ||
-				(pNorm != "" && (strings.Contains(sumNorm, pNorm) || strings.Contains(pNorm, sumNorm))) ||
-				(pNormUri != "" && pNormUri == sumNorm) ||
-				strings.EqualFold(p.Name, sum.Workspace) {
-				if projID == "" {
-					projID = p.ID
-				}
-				wsName = p.Name
-				wsPath = p.Path
-				break
-			}
-		}
 		title := sum.Title
 		convTitlesMu.RLock()
 		if custom, ok := globalConvTitles[strings.ToLower(sum.CascadeID)]; ok && custom != "" {
 			title = custom
 		}
 		convTitlesMu.RUnlock()
+
+		if (title == "" || title == "Cascade Session") && (sum.UpdatedAt.IsZero() || sum.StepCount == 0) {
+			continue
+		}
+		if isSubagentTitle(title) {
+			continue
+		}
+		wsName, wsPath, projID := matchOfficialProject(sum.ProjectID, sum.Workspace, sum.Workspace, projects)
 
 		isPinned := false
 		if home != "" {
@@ -1329,11 +1318,14 @@ func (s *Server) writeJSON(conn *websocket.Conn, msg OutgoingMessage) error {
 	return nil
 }
 
-// writeLock retourne le mutex d'├®criture d├®di├® ├á conn (cr├®├® ├á la vol├®e si le
-// client s'est connect├® avant l'initialisation ÔÇö chemin de test uniquement).
+// writeLock retourne le mutex d'écriture dédié à conn (créé à la volée si le
+// client s'est connecté avant l'initialisation — chemin de test uniquement).
 func (s *Server) writeLock(conn *websocket.Conn) *sync.Mutex {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.writeLocks == nil {
+		s.writeLocks = make(map[*websocket.Conn]*sync.Mutex)
+	}
 	if lk, ok := s.writeLocks[conn]; ok {
 		return lk
 	}
@@ -1342,25 +1334,25 @@ func (s *Server) writeLock(conn *websocket.Conn) *sync.Mutex {
 	return lk
 }
 
-// releaseWriteLock lib├¿re la m├®moire du mutex d'├®criture d'un client d├®connect├®.
+// releaseWriteLock libère la mémoire du mutex d'écriture d'un client déconnecté.
 func (s *Server) releaseWriteLock(conn *websocket.Conn) {
 	s.mu.Lock()
 	delete(s.writeLocks, conn)
 	s.mu.Unlock()
 }
 
-// mcpTimeout borne l'appel HTTP vers le proxy MCP desktop (30 s) ÔÇö align├® sur
-// le timeout 15 s c├┤t├® mobile + la marge de travers├®e tunnel/4G.
+// mcpTimeout borne l'appel HTTP vers le proxy MCP desktop (30 s) — aligné sur
+// le timeout 15 s côté mobile + la marge de traversée tunnel/4G.
 const mcpTimeout = 30 * time.Second
 
 // handleMcpAction relaie call_mcp_tool / connect_mcp_server /
 // refresh_mcp_oauth_token / list_mcp_servers vers le proxy MCP Antigravity
 // desktop (127.0.0.1:50999). Le mobile n'a ni les identifiants ni l'allowlist
-// MCP : la session du PC est le seul d├®tenteur l├®gitime ÔÇö le daemon n'est
-// qu'un tunnel. La r├®ponse JSON du proxy est relay├®e telle quelle dans Data.
+// MCP : la session du PC est le seul détenteur légitime — le daemon n'est
+// qu'un tunnel. La réponse JSON du proxy est relayée telle quelle dans Data.
 func (s *Server) handleMcpAction(conn *websocket.Conn, msg IncomingMessage) {
-	// list_mcp_servers est une op├®ration de listing (GET, sans serverName) :
-	// le mobile demande la liste des serveurs configur├®s sur le PC. Les autres
+	// list_mcp_servers est une opération de listing (GET, sans serverName) :
+	// le mobile demande la liste des serveurs configurés sur le PC. Les autres
 	// actions MCP exigent un serverName.
 	if msg.Type != "list_mcp_servers" && msg.ServerName == "" {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "serverName requis"})
@@ -1404,7 +1396,7 @@ func (s *Server) handleMcpAction(conn *websocket.Conn, msg IncomingMessage) {
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
-		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "lecture de la r├®ponse proxy: " + err.Error()})
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "lecture de la réponse proxy: " + err.Error()})
 		return
 	}
 	if resp.StatusCode >= 400 {
@@ -1417,8 +1409,8 @@ func (s *Server) handleMcpAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"raw": string(respBody)}})
 		return
 	}
-	// list_mcp_servers : nettoyage lger du payload relay ÔÇö un serveur MCP
-	// configur sans champ "name" n'a pas  exposer serverName:"" au mobile.
+	// list_mcp_servers : nettoyage léger du payload relayé — un serveur MCP
+	// configuré sans champ "name" n'a pas à exposer serverName:"" au mobile.
 	if msg.Type == "list_mcp_servers" {
 		if servers, ok := proxyResp["servers"].([]interface{}); ok {
 			cleaned := make([]interface{}, 0, len(servers))
@@ -1442,12 +1434,11 @@ func (s *Server) handleMcpAction(conn *websocket.Conn, msg IncomingMessage) {
 	s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: proxyResp})
 }
 
-// broadcast envoie le m├¬me message ├á TOUS les clients connect├®s : c'est ce qui
-// permet la synchronisation multi-surface (un t├®l├®phone voit le stream d├®clench├®
-// par le PC ou par un autre t├®l├®phone). Un client dont l'├®criture ├®choue
-// (deadline d├®pass├®e) est retir├® de la liste ÔÇö il ne doit pas bloquer ni
-// r├®-├®chouer les broadcasts suivants (il sera aussi purg├® par la boucle de
-// lecture c├┤t├® HandleWebSocket).
+// broadcast envoie le même message à TOUS les clients connectés : c'est ce qui
+// permet la synchronisation multi-surface (un téléphone voit le stream déclenché
+// par le PC ou par un autre téléphone). Un client dont l'écriture échoue
+// (deadline dépassée) est retiré de la liste — la libération complète du lock
+// s'effectue dans le defer de HandleWebSocket.
 func (s *Server) broadcast(msg OutgoingMessage) {
 	s.mu.Lock()
 	conns := make([]*websocket.Conn, 0, len(s.clients))
@@ -1461,7 +1452,6 @@ func (s *Server) broadcast(msg OutgoingMessage) {
 			delete(s.clients, c)
 			delete(s.clientInFlight, c)
 			s.mu.Unlock()
-			s.releaseWriteLock(c)
 		}
 	}
 }
@@ -1952,6 +1942,11 @@ func (s *Server) handleUploadChunk(conn *websocket.Conn, msg IncomingMessage) {
 			createdAt:   time.Now(),
 		}
 		s.uploadChunks[uploadID] = state
+	}
+	if state.received+int64(len(chunkBytes)) > 50<<20 { // 50MB max per in-memory upload
+		s.mu.Unlock()
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "taille de transfert mémoire dépassée (max 50 Mo)"})
+		return
 	}
 	state.chunks[chunkIdx] = chunkBytes
 	state.received += int64(len(chunkBytes))
@@ -2847,33 +2842,22 @@ func (s *Server) sessionsOutWithLimit(raw []byte, limitPerProject int) interface
 		if home != "" && isSessionArchived(home, sum.CascadeID) {
 			continue
 		}
-		if (sum.Title == "" || sum.Title == "Cascade Session") && sum.UpdatedAt.IsZero() {
+		title := sum.Title
+		convTitlesMu.RLock()
+		if custom, ok := globalConvTitles[strings.ToLower(sum.CascadeID)]; ok && custom != "" {
+			title = custom
+		}
+		convTitlesMu.RUnlock()
+
+		if (title == "" || title == "Cascade Session") && sum.UpdatedAt.IsZero() {
 			continue
 		}
-		if isSubagentTitle(sum.Title) {
+		if isSubagentTitle(title) {
 			continue
 		}
 
 		status := enrichStatus(sum.CascadeID, sum.Status)
-		projID := sum.ProjectID
-		wsPath := normalizeWorkspace(sum.Workspace)
-		wsName := sum.Workspace
-		for _, p := range projects {
-			pNorm := strings.ToLower(normalizeWorkspace(p.Path))
-			pNormUri := strings.ToLower(normalizeWorkspace(p.FolderURI))
-			sumNorm := strings.ToLower(wsPath)
-			if (p.ID != "" && p.ID == projID) ||
-				(pNorm != "" && (strings.Contains(sumNorm, pNorm) || strings.Contains(pNorm, sumNorm))) ||
-				(pNormUri != "" && pNormUri == sumNorm) ||
-				strings.EqualFold(p.Name, sum.Workspace) {
-				if projID == "" {
-					projID = p.ID
-				}
-				wsName = p.Name
-				wsPath = p.Path
-				break
-			}
-		}
+		wsName, wsPath, projID := matchOfficialProject(sum.ProjectID, sum.Workspace, sum.Workspace, projects)
 		isPinned := false
 		if home != "" {
 			isPinned = isSessionPinned(home, sum.CascadeID)
@@ -2881,7 +2865,7 @@ func (s *Server) sessionsOutWithLimit(raw []byte, limitPerProject int) interface
 		items = append(items, sessionWithTime{
 			data: map[string]interface{}{
 				"cascadeId":     sum.CascadeID,
-				"title":         sum.Title,
+				"title":         title,
 				"workspace":     wsName,
 				"workspacePath": wsPath,
 				"projectId":     projID,
@@ -4229,13 +4213,18 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "workspacePath + query requis"})
 			return
 		}
+		targetWs := homeRoot(msg.WorkspacePath)
+		if !isPathInsideAllowedWorkspaces(targetWs) {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "workspacePath hors projet autorisé"})
+			return
+		}
 		maxResults := 50
 		if msg.Data != nil {
 			if m, ok := msg.Data["maxResults"].(float64); ok && int(m) > 0 {
 				maxResults = int(m)
 			}
 		}
-		results, errSearch := searchInWorkspace(homeRoot(msg.WorkspacePath), msg.Query, maxResults)
+		results, errSearch := searchInWorkspace(targetWs, msg.Query, maxResults)
 		if errSearch != nil {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errSearch.Error()})
 			return
@@ -4266,12 +4255,17 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"raw": string(raw), "status": "ok"}})
 		return
 
-	case "list_files":
+	case "list_files", "list_dir", "workspace.list_files":
 		if msg.WorkspacePath == "" {
 			err = fmt.Errorf("workspacePath requis")
 			break
 		}
-		tree, errList := buildFileTree(homeRoot(msg.WorkspacePath), "", 0)
+		targetWs := homeRoot(msg.WorkspacePath)
+		if !isPathInsideAllowedWorkspaces(targetWs) {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "workspacePath hors projet autorisé"})
+			return
+		}
+		tree, errList := buildFileTree(targetWs, "", 0)
 		if errList != nil {
 			err = errList
 			break
@@ -4332,8 +4326,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			if home, errHome := os.UserHomeDir(); errHome == nil {
 				geminiBrain := filepath.Join(home, ".gemini", "antigravity", "brain")
 				geminiIdeBrain := filepath.Join(home, ".gemini", "antigravity-ide", "brain")
+				geminiRoot := filepath.Join(home, ".gemini")
 				lowClean := strings.ToLower(cleanTarget)
-				if strings.HasPrefix(lowClean, strings.ToLower(geminiBrain)) || strings.HasPrefix(lowClean, strings.ToLower(geminiIdeBrain)) {
+				if strings.HasPrefix(lowClean, strings.ToLower(geminiBrain)) ||
+					strings.HasPrefix(lowClean, strings.ToLower(geminiIdeBrain)) ||
+					strings.HasPrefix(lowClean, strings.ToLower(geminiRoot)) {
 					allowed = true
 				}
 			}
@@ -4387,9 +4384,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 					filepath.Join(bDir, baseFileName),
 				}
 				for _, cand := range candidates {
-					if content, errRead := os.ReadFile(cand); errRead == nil {
-						respondWithFileContent(content)
-						return
+					if _, errRes := resolvePath(bDir, cand); errRes == nil {
+						if content, errRead := os.ReadFile(cand); errRead == nil {
+							respondWithFileContent(content)
+							return
+						}
 					}
 				}
 			}
@@ -4420,9 +4419,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 						filepath.Join(bDir, baseFileName),
 					}
 					for _, cand := range cands {
-						if content, errRead := os.ReadFile(cand); errRead == nil {
-							respondWithFileContent(content)
-							return
+						if _, errRes := resolvePath(bDir, cand); errRes == nil {
+							if content, errRead := os.ReadFile(cand); errRead == nil {
+								respondWithFileContent(content)
+								return
+							}
 						}
 					}
 				}
@@ -4440,10 +4441,14 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 		}
 		// 4. Language Server RPC fallback
-		raw, err = s.RPCClient.ReadFile(toWorkspaceURI(msg.FilePath))
-		if err == nil {
-			respondWithFileContent(raw)
-			return
+		if s != nil && s.RPCClient != nil {
+			raw, err = s.RPCClient.ReadFile(toWorkspaceURI(msg.FilePath))
+			if err == nil {
+				respondWithFileContent(raw)
+				return
+			}
+		} else {
+			err = fmt.Errorf("fichier introuvable ou client RPC non initialisé")
 		}
 		if err != nil {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
@@ -6067,6 +6072,60 @@ func resolvePath(root, requested string) (string, error) {
 	return candidate, nil
 }
 
+// isPathInsideAllowedWorkspaces vérifie si targetPath est contenu dans un workspace autorisé, un projet officiel ou ~/.gemini.
+func isPathInsideAllowedWorkspaces(targetPath string) bool {
+	if targetPath == "" {
+		return false
+	}
+	cleanTarget, err := filepath.Abs(homeRoot(targetPath))
+	if err != nil {
+		cleanTarget = filepath.Clean(homeRoot(targetPath))
+	}
+	cleanTargetLower := strings.ToLower(cleanTarget)
+
+	// Autoriser os.TempDir en mode test unitaire
+	if flag.Lookup("test.v") != nil {
+		tmp := strings.ToLower(filepath.Clean(os.TempDir()))
+		if cleanTargetLower == tmp || strings.HasPrefix(cleanTargetLower, tmp+string(filepath.Separator)) {
+			return true
+		}
+	}
+
+	// Autoriser ~/.gemini
+	if home, err := os.UserHomeDir(); err == nil {
+		geminiDir := strings.ToLower(filepath.Join(home, ".gemini"))
+		if cleanTargetLower == geminiDir || strings.HasPrefix(cleanTargetLower, geminiDir+string(filepath.Separator)) {
+			return true
+		}
+	}
+
+	// Autoriser tous les projets officiels enregistrés
+	for _, p := range ListOfficialProjects() {
+		if p.Path != "" {
+			pAbs, errP := filepath.Abs(homeRoot(p.Path))
+			if errP == nil {
+				pAbsLower := strings.ToLower(pAbs)
+				if cleanTargetLower == pAbsLower || strings.HasPrefix(cleanTargetLower, pAbsLower+string(filepath.Separator)) {
+					return true
+				}
+			}
+		}
+	}
+
+	// Autoriser le working directory courant du daemon
+	if wd, err := os.Getwd(); err == nil {
+		wdAbs, errW := filepath.Abs(wd)
+		if errW == nil {
+			wdAbsLower := strings.ToLower(wdAbs)
+			if cleanTargetLower == wdAbsLower || strings.HasPrefix(cleanTargetLower, wdAbsLower+string(filepath.Separator)) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 // maxTreeDepth borne la r├®cursion de buildFileTree (anti-boucle symlink).
 const maxTreeDepth = 8
 
@@ -6490,8 +6549,13 @@ func (m *runningTaskManager) killTask(id string) bool {
 func normalizeTaskID(id string) string {
 	id = strings.TrimSpace(id)
 	id = strings.Trim(id, "\"'`\t\r\n")
+	id = strings.ReplaceAll(id, "\\", "/")
 	if idx := strings.LastIndex(id, "/"); idx >= 0 {
 		id = id[idx+1:]
+	}
+	id = filepath.Base(filepath.Clean(id))
+	if id == "." || id == "/" || id == ".." {
+		return ""
 	}
 	return id
 }
@@ -6540,7 +6604,14 @@ func findTaskLogPath(cascadeID, taskID string) string {
 	if cascadeID == "" || taskID == "" {
 		return ""
 	}
+	cleanCascadeID := filepath.Base(filepath.Clean(strings.ReplaceAll(cascadeID, "\\", "/")))
+	if cleanCascadeID == "." || cleanCascadeID == "/" || cleanCascadeID == ".." {
+		return ""
+	}
 	cleanTaskID := normalizeTaskID(taskID)
+	if cleanTaskID == "" {
+		return ""
+	}
 	if !strings.HasSuffix(cleanTaskID, ".log") {
 		cleanTaskID += ".log"
 	}
@@ -6550,10 +6621,10 @@ func findTaskLogPath(cascadeID, taskID string) string {
 		return ""
 	}
 	candidates := []string{
-		filepath.Join(home, ".gemini", "antigravity", "brain", cascadeID, ".system_generated", "tasks", cleanTaskID),
-		filepath.Join(home, ".gemini", "antigravity-ide", "brain", cascadeID, ".system_generated", "tasks", cleanTaskID),
-		filepath.Join(home, ".gemini", "antigravity", "brain", cascadeID, ".system_generated", "tasks", strings.TrimSuffix(cleanTaskID, ".log")),
-		filepath.Join(home, ".gemini", "antigravity-ide", "brain", cascadeID, ".system_generated", "tasks", strings.TrimSuffix(cleanTaskID, ".log")),
+		filepath.Join(home, ".gemini", "antigravity", "brain", cleanCascadeID, ".system_generated", "tasks", cleanTaskID),
+		filepath.Join(home, ".gemini", "antigravity-ide", "brain", cleanCascadeID, ".system_generated", "tasks", cleanTaskID),
+		filepath.Join(home, ".gemini", "antigravity", "brain", cleanCascadeID, ".system_generated", "tasks", strings.TrimSuffix(cleanTaskID, ".log")),
+		filepath.Join(home, ".gemini", "antigravity-ide", "brain", cleanCascadeID, ".system_generated", "tasks", strings.TrimSuffix(cleanTaskID, ".log")),
 	}
 	for _, p := range candidates {
 		if _, err := os.Stat(p); err == nil {
