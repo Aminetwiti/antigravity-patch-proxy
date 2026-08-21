@@ -43,12 +43,14 @@ func resolveBinaryPath(name string) (string, error) {
 		filepath.Join(".", name),
 		filepath.Join(".", "bin", name),
 		filepath.Join("..", "bin", name),
+		filepath.Join("..", "..", "bin", name),
 	}
 	if exeDir != "" {
 		candidates = append(candidates,
 			filepath.Join(exeDir, name),
 			filepath.Join(exeDir, "bin", name),
 			filepath.Join(exeDir, "..", "bin", name),
+			filepath.Join(exeDir, "..", "..", "bin", name),
 		)
 	}
 
@@ -57,6 +59,7 @@ func resolveBinaryPath(name string) (string, error) {
 			filepath.Join(".", name+".exe"),
 			filepath.Join(".", "bin", name+".exe"),
 			filepath.Join("..", "bin", name+".exe"),
+			filepath.Join("..", "..", "bin", name+".exe"),
 			filepath.Join("C:\\Windows\\System32\\OpenSSH", name+".exe"),
 			filepath.Join("C:\\Program Files\\Git\\usr\\bin", name+".exe"),
 		)
@@ -65,9 +68,11 @@ func resolveBinaryPath(name string) (string, error) {
 				filepath.Join(exeDir, name+".exe"),
 				filepath.Join(exeDir, "bin", name+".exe"),
 				filepath.Join(exeDir, "..", "bin", name+".exe"),
+				filepath.Join(exeDir, "..", "..", "bin", name+".exe"),
 			)
 		}
 	}
+
 
 	if home, err := os.UserHomeDir(); err == nil {
 		candidates = append(candidates,
