@@ -9,8 +9,12 @@ import 'package:mobile/features/settings/customizations_settings_section.dart';
 import 'package:mobile/features/settings/general_settings_section.dart';
 import 'package:mobile/features/settings/models_settings_section.dart';
 import 'package:mobile/features/settings/settings_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
   testWidgets('SettingsScreen renders master-detail layout on wide screen', (WidgetTester tester) async {
     // Set wide screen dimensions (tablet/desktop)
     tester.view.physicalSize = const Size(1200, 800);
@@ -149,19 +153,15 @@ void main() {
         final reqId = map['requestId'] as String?;
         final type = map['type'] as String?;
         if (reqId != null && type == 'get_project_settings') {
-          scheduleMicrotask(() {
-            if (!ctrl.isClosed) {
-              ctrl.add(jsonEncode({
-                'type': 'response',
-                'requestId': reqId,
-                'data': {
-                  'projectId': 'p1',
-                  'securityPreset': 'Turbo mode',
-                  'artifactReviewPolicy': 'Auto Approve',
-                },
-              }));
-            }
-          });
+          ctrl.add(jsonEncode({
+            'type': 'response',
+            'requestId': reqId,
+            'data': {
+              'projectId': 'p1',
+              'securityPreset': 'Turbo mode',
+              'artifactReviewPolicy': 'Auto Approve',
+            },
+          }));
         }
       },
     );
@@ -173,6 +173,9 @@ void main() {
         ),
       ),
     );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 50));
     await tester.pumpAndSettle();
 
     // Verify presence of Security Preset & Execution
@@ -188,6 +191,8 @@ void main() {
         'artifactReviewPolicy': 'Always Ask',
       },
     }));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.pumpAndSettle();
 
     // Verify updated UI description from real-time sync

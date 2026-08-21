@@ -499,16 +499,22 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                         ProjectItem? matchingProj;
                         if (widget.projects != null) {
                           for (final p in widget.projects!) {
-                            if (p.name == proj || p.path == proj || p.id == proj) {
+                            if (p.name == proj || p.path == proj || p.id == proj || WorkspacePath.isSameWorkspace(p.path, proj)) {
                               matchingProj = p;
                               break;
                             }
                           }
                         }
+                        final effectiveProj = matchingProj ?? ProjectItem(
+                          id: '',
+                          name: proj,
+                          folderUri: sessions.isNotEmpty ? sessions.first.workspacePath : proj,
+                          path: sessions.isNotEmpty ? sessions.first.workspacePath : proj,
+                        );
                         return _WorkspaceFolderSection(
                           folderName: proj,
                           sessions: sessions,
-                          project: matchingProj,
+                          project: effectiveProj,
                           isCollapsed: isCollapsed,
                           showSubtitle: _subtitle == SessionSubtitle.worktree,
                           hideHeader: _groupBy == SessionGroupBy.none,
@@ -534,7 +540,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                             if (Navigator.of(context).canPop()) {
                               Navigator.of(context).pop();
                             }
-                            _callNewConversation(p ?? matchingProj);
+                            _callNewConversation(p ?? effectiveProj);
                           },
                           onOpenSettings: () {
                             Navigator.of(context).pop();

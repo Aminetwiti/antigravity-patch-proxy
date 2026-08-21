@@ -14,6 +14,7 @@ import 'display_options.dart';
 class ConversationHistoryScreen extends StatefulWidget {
   final DaemonApi? api;
   final List<CascadeSession> sessions;
+  final List<ProjectItem>? projects;
   final String activeSessionId;
   final Function(String sessionId) onSessionSelected;
   final VoidCallback? onRefresh;
@@ -23,6 +24,7 @@ class ConversationHistoryScreen extends StatefulWidget {
     super.key,
     this.api,
     required this.sessions,
+    this.projects,
     required this.activeSessionId,
     required this.onSessionSelected,
     this.onRefresh,
@@ -43,9 +45,11 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
   SessionSubtitle _subtitle = SessionSubtitle.worktree;
 
   List<CascadeSession>? _fetchedSessions;
+  List<ProjectItem>? _fetchedProjects;
   bool _isLoading = false;
 
   List<CascadeSession> get _allSessions => _fetchedSessions ?? widget.sessions;
+  List<ProjectItem>? get _allProjects => _fetchedProjects ?? widget.projects;
 
   @override
   void initState() {
@@ -66,10 +70,20 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
     try {
       final res = await widget.api!.listAllSessions();
       final parsed = SessionParser.parseListSessions(res);
+      List<ProjectItem>? projs;
+      if (res['projects'] is List) {
+        projs = (res['projects'] as List)
+            .whereType<Map>()
+            .map((p) => ProjectItem.fromJson(Map<String, dynamic>.from(p)))
+            .toList();
+      }
       if (!mounted) return;
       setState(() {
         if (parsed.isNotEmpty) {
           _fetchedSessions = parsed;
+        }
+        if (projs != null && projs.isNotEmpty) {
+          _fetchedProjects = projs;
         }
         _isLoading = false;
       });
@@ -114,10 +128,11 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
     // Tri dynamique selon Display Options
     filtered = sortSessions(sessions: filtered, sortBy: _sortBy);
 
-    // Groupement dynamique selon Display Options
+    // Groupement dynamique selon Display Options avec la même liste de projets canonique
     final groupedSessions = groupSessions(
       sessions: filtered,
       groupBy: _groupBy,
+      projects: _allProjects,
     );
 
     // Flatten for list rendering with headers

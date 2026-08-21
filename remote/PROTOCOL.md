@@ -660,6 +660,37 @@ Retourne la télémétrie complète du Daemon et de sa liaison avec le Language 
 }
 ```
 
+#### 51b. `get_project_settings` & `update_project_settings` (Synchronisation 1:1 Agent Settings Desktop)
+```json
+{ "type": "get_project_settings", "requestId": "req_151b", "workspacePath": "C:/projects/myapp" }
+```
+```json
+{
+  "type": "update_project_settings",
+  "requestId": "req_151c",
+  "workspacePath": "C:/projects/myapp",
+  "data": {
+    "securityPreset": "Turbo mode",
+    "artifactReviewPolicy": "Auto Approve"
+  }
+}
+```
+*Événement diffusé en broadcast temps réel à tous les clients connectés :*
+```json
+{
+  "type": "project_settings_updated",
+  "data": {
+    "projectId": "4964e3d9-2519-40f1-8e3e-e4cb34232b75",
+    "projectName": "myapp",
+    "securityPreset": "Turbo mode",
+    "artifactReviewPolicy": "Auto Approve",
+    "fileAccessPolicy": "AGENT_SETTING_POLICY_ALLOW",
+    "autoExecutionPolicy": "CASCADE_COMMANDS_AUTO_EXECUTION_EAGER",
+    "artifactReviewMode": "ARTIFACT_REVIEW_MODE_TURBO"
+  }
+}
+```
+
 ---
 
 ### K. Trajectoires & Historique de Conversation

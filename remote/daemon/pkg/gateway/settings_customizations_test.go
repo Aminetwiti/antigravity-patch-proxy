@@ -163,3 +163,60 @@ func TestProjectSettings_GetAndUpdate(t *testing.T) {
 	}
 }
 
+// TestProjectSettings_CustomPresetPreservesPolicies vérifie que le preset
+// "Custom" conserve les politiques déjà persistées au lieu de les écraser
+// (BUG-SET-003).
+func TestProjectSettings_CustomPresetPreservesPolicies(t *testing.T) {
+	projectID := "custom-preset-test"
+
+	// 1. Établit une base avec des politiques explicites via Full machine.
+	if _, err := UpdateProjectSettings(projectID, ProjectSettings{
+		SecurityPreset:       "Full machine",
+		ArtifactReviewPolicy: "Always Ask",
+	}); err != nil {
+		t.Fatalf("seed error: %v", err)
+	}
+
+	// 2. Bascule sur Custom sans fournir de politiques → elles doivent être
+	// conservées (pas remises aux défauts de "Default").
+	updated, err := UpdateProjectSettings(projectID, ProjectSettings{
+		SecurityPreset: "Custom",
+	})
+	if err != nil {
+		t.Fatalf("update error: %v", err)
+	}
+	if updated.SecurityPreset != "Custom" {
+		t.Fatalf("expected Custom, got: %s", updated.SecurityPreset)
+	}
+	if updated.FileAccessPolicy != "AGENT_SETTING_POLICY_ALLOW" {
+		t.Fatalf("expected preserved ALLOW policy, got: %s", updated.FileAccessPolicy)
+	}
+	if updated.ArtifactReviewPolicy != "Always Ask" {
+		t.Fatalf("expected preserved Always Ask, got: %s", updated.ArtifactReviewPolicy)
+	}
+}
+
+// TestAccountPreferences_PersistRoundTrip vérifie que les préférences de
+// compte survivent à un cycle set→load (BUG-SET-004).
+func TestAccountPreferences_PersistRoundTrip(t *testing.T) {
+	SetAccountPreferences(true, true)
+	loadAccountPrefs()
+	accountMu.RLock()
+	tel := accountTelemetryEnabled
+	mkt := accountMarketingEmails
+	accountMu.RUnlock()
+	if !tel || !mkt {
+		t.Fatalf("expected persisted telemetry=true marketing=true, got %v/%v", tel, mkt)
+	}
+
+	SetAccountPreferences(false, false)
+	loadAccountPrefs()
+	accountMu.RLock()
+	tel = accountTelemetryEnabled
+	mkt = accountMarketingEmails
+	accountMu.RUnlock()
+	if tel || mkt {
+		t.Fatalf("expected persisted telemetry=false marketing=false, got %v/%v", tel, mkt)
+	}
+}
+

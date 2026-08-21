@@ -52,6 +52,10 @@ class SettingsStore {
   static const _kDarkPreset = 'settings.darkPreset';
   static const _kEnableCreditOverages = 'settings.enableCreditOverages';
   static const _kReasoningEffort = 'settings.reasoningEffort';
+  static const _kBrowserHeadlessMode = 'settings.browserHeadlessMode';
+  static const _kBrowserAutoCapture = 'settings.browserAutoCapture';
+  static const _kFileAccessPolicy = 'settings.fileAccessPolicy';
+  static const _kInternetPolicy = 'settings.internetPolicy';
 
   SettingsStore._();
 
@@ -90,6 +94,10 @@ class SettingsStore {
       'darkPreset': prefs.getString(_kDarkPreset) ?? 'Default Dark',
       'enableCreditOverages': prefs.getBool(_kEnableCreditOverages) ?? false,
       'reasoningEffort': prefs.getString(_kReasoningEffort) ?? 'medium',
+      'browserHeadlessMode': prefs.getBool(_kBrowserHeadlessMode) ?? true,
+      'browserAutoCapture': prefs.getBool(_kBrowserAutoCapture) ?? true,
+      'fileAccessPolicy': prefs.getString(_kFileAccessPolicy) ?? 'AGENT_SETTING_POLICY_ASK',
+      'internetPolicy': prefs.getString(_kInternetPolicy) ?? 'AGENT_SETTING_POLICY_ASK',
     };
   }
 
@@ -160,6 +168,14 @@ class SettingsStore {
           await prefs.setBool(_kEnableCreditOverages, entry.value as bool);
         case 'reasoningEffort':
           await prefs.setString(_kReasoningEffort, entry.value as String);
+        case 'browserHeadlessMode':
+          await prefs.setBool(_kBrowserHeadlessMode, entry.value as bool);
+        case 'browserAutoCapture':
+          await prefs.setBool(_kBrowserAutoCapture, entry.value as bool);
+        case 'fileAccessPolicy':
+          await prefs.setString(_kFileAccessPolicy, entry.value as String);
+        case 'internetPolicy':
+          await prefs.setString(_kInternetPolicy, entry.value as String);
       }
     }
   }

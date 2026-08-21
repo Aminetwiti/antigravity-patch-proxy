@@ -46,7 +46,9 @@ class _AccountSettingsSectionState extends State<AccountSettingsSection> {
     setState(() => _telemetryEnabled = val);
     HapticFeedback.selectionClick();
     if (widget.api != null) {
-      await widget.api!.setAccountPreferences(telemetryEnabled: val);
+      try {
+        await widget.api!.setAccountPreferences(telemetryEnabled: val);
+      } catch (_) {}
     }
   }
 
@@ -54,7 +56,9 @@ class _AccountSettingsSectionState extends State<AccountSettingsSection> {
     setState(() => _marketingEmails = val);
     HapticFeedback.selectionClick();
     if (widget.api != null) {
-      await widget.api!.setAccountPreferences(marketingEmails: val);
+      try {
+        await widget.api!.setAccountPreferences(marketingEmails: val);
+      } catch (_) {}
     }
   }
 

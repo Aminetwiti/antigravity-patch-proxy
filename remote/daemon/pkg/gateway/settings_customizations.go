@@ -54,6 +54,42 @@ var (
 	accountMarketingEmails  = false
 )
 
+// accountPrefsFile est le fichier de persistance des préférences de compte.
+// ponytail: fichier JSON simple réutilisant le pattern des projets — pas de
+// schéma versionné; ajouter un version si le nombre de clés grandit.
+const accountPrefsFile = ".gemini/config/prefs.json"
+
+func accountPrefsPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, accountPrefsFile)
+}
+
+// loadAccountPrefs charge les préférences persistées au démarrage.
+func loadAccountPrefs() {
+	path := accountPrefsPath()
+	if path == "" {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var prefs struct {
+		Telemetry       bool `json:"telemetryEnabled"`
+		MarketingEmails bool `json:"marketingEmails"`
+	}
+	if err := json.Unmarshal(data, &prefs); err != nil {
+		return
+	}
+	accountMu.Lock()
+	accountTelemetryEnabled = prefs.Telemetry
+	accountMarketingEmails = prefs.MarketingEmails
+	accountMu.Unlock()
+}
+
 // GetAccountInfo retourne les informations de compte avec quotas temps réel.
 func (s *Server) GetAccountInfo() AccountInfo {
 	accountMu.RLock()
@@ -83,9 +119,23 @@ func (s *Server) GetAccountInfo() AccountInfo {
 // SetAccountPreferences enregistre les préférences de télémétrie / marketing.
 func SetAccountPreferences(telemetry, marketing bool) {
 	accountMu.Lock()
-	defer accountMu.Unlock()
 	accountTelemetryEnabled = telemetry
 	accountMarketingEmails = marketing
+	accountMu.Unlock()
+
+	// Persistance best-effort sur disque (BUG-SET-004).
+	path := accountPrefsPath()
+	if path == "" {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(path), 0755)
+	prefs := map[string]interface{}{
+		"telemetryEnabled": telemetry,
+		"marketingEmails":  marketing,
+	}
+	if b, err := json.MarshalIndent(prefs, "", "  "); err == nil {
+		_ = os.WriteFile(path, b, 0644)
+	}
 }
 
 // ListDiscoveredSkills recherche les skills dans ~/.gemini/antigravity/builtin/skills et ~/.gemini/config/skills.
@@ -349,7 +399,22 @@ func UpdateProjectSettings(projectIDOrWorkspace string, settings ProjectSettings
 		conf.Settings = make(map[string]interface{})
 	}
 
-	// Application du Security Preset
+	// Application du Security Preset. Pour "Custom", on conserve les politiques
+	// déjà persistées (édition avancée) au lieu de les écraser par des défauts.
+	if settings.SecurityPreset == "Custom" {
+		if v, ok := conf.Settings["fileAccessPolicy"].(string); ok && settings.FileAccessPolicy == "" {
+			settings.FileAccessPolicy = v
+		}
+		if v, ok := conf.Settings["internetPolicy"].(string); ok && settings.InternetPolicy == "" {
+			settings.InternetPolicy = v
+		}
+		if v, ok := conf.Settings["autoExecutionPolicy"].(string); ok && settings.AutoExecutionPolicy == "" {
+			settings.AutoExecutionPolicy = v
+		}
+		if v, ok := conf.Settings["artifactReviewMode"].(string); ok && settings.ArtifactReviewMode == "" {
+			settings.ArtifactReviewMode = v
+		}
+	}
 	switch settings.SecurityPreset {
 	case "Turbo mode":
 		settings.AutoExecutionPolicy = "CASCADE_COMMANDS_AUTO_EXECUTION_EAGER"

@@ -318,7 +318,8 @@ type Server struct {
 		ListSessions() []discovery.SessionInfo
 		RevokeDevice(deviceID string) bool
 	}
-	scheduler *Scheduler
+	scheduler    *Scheduler
+	stateVersion int64
 }
 
 // ScheduledTask repr├®sente une t├óche planifi├®e / cron job g├®r├®e par le daemon.
@@ -395,6 +396,7 @@ func NewServer(client RPCClient, authToken string) *Server {
 	}
 	s.startTranscriptWatchdog()
 	StartScratchCleanupRoutine(context.Background(), 24*time.Hour, DefaultScratchMaxAge)
+	loadAccountPrefs()
 	return s
 }
 
@@ -593,9 +595,16 @@ func (s *Server) sessionsFromSummariesLocked(jetbox map[string]connectrpc.Jetbox
 			"isPinned":      isPinned,
 		})
 	}
+	var v int64 = 0
+	if s != nil {
+		s.stateVersion++
+		v = s.stateVersion
+	}
 	return map[string]interface{}{
-		"projects": projects,
-		"sessions": items,
+		"version":   v,
+		"projects":  projects,
+		"sessions":  items,
+		"timestamp": time.Now().UnixMilli(),
 	}
 }
 
@@ -2836,9 +2845,16 @@ func (s *Server) sessionsOutWithLimit(raw []byte, limitPerProject int) interface
 		}
 	}
 
+	var v int64 = 0
+	if s != nil {
+		s.stateVersion++
+		v = s.stateVersion
+	}
 	return map[string]interface{}{
-		"projects": projects,
-		"sessions": resultSessions,
+		"version":   v,
+		"projects":  projects,
+		"sessions":  resultSessions,
+		"timestamp": time.Now().UnixMilli(),
 	}
 }
 

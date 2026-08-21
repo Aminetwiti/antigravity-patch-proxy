@@ -131,6 +131,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
   List<ProjectItem> _projects = const [];
   // Bug #15 : guard pour éviter le double fetch concurrent de sessions.
   bool _sessionsFetching = false;
+  int _lastStateVersion = 0;
 
   ConnectionStatus _prevStatus = ConnectionStatus.disconnected;
 
@@ -436,27 +437,36 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     }
     try {
       var ws = targetProject?.path ?? '';
+      if (ws.isEmpty && targetProject != null) {
+        ws = targetProject.folderUri.isNotEmpty ? targetProject.folderUri : targetProject.name;
+      }
       var projId = targetProject?.id ?? '';
 
+      // Si aucun projet/workspace cible n'est spécifié (bouton général), utiliser le workspace actif courant
       if (ws.isEmpty) {
-        if (_projects.isNotEmpty) {
-          ws = _projects.first.path;
-          projId = _projects.first.id;
-        } else if (_sessions.isNotEmpty) {
+        if (_activeSessionId.isNotEmpty) {
           final cur = _sessions.where((s) => s.id == _activeSessionId);
-          if (cur.isNotEmpty) {
+          if (cur.isNotEmpty && cur.first.workspacePath.isNotEmpty) {
             ws = cur.first.workspacePath;
             projId = cur.first.projectId ?? '';
-          } else {
+          }
+        }
+        if (ws.isEmpty) {
+          if (_projects.isNotEmpty) {
+            ws = _projects.first.path.isNotEmpty ? _projects.first.path : _projects.first.folderUri;
+            projId = _projects.first.id;
+          } else if (_sessions.isNotEmpty) {
             ws = _sessions.first.workspacePath;
             projId = _sessions.first.projectId ?? '';
           }
         }
       }
       if (projId.isEmpty && ws.isNotEmpty && _projects.isNotEmpty) {
-        final match = _projects.where((p) => p.path == ws || p.folderUri == ws);
-        if (match.isNotEmpty) {
-          projId = match.first.id;
+        for (final p in _projects) {
+          if (p.id.isNotEmpty && (p.path == ws || p.folderUri == ws || WorkspacePath.isSameWorkspace(p.path, ws) || WorkspacePath.isSameWorkspace(p.folderUri, ws))) {
+            projId = p.id;
+            break;
+          }
         }
       }
       final res = await api.createCascade(ws, projectId: projId);
@@ -514,6 +524,15 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     if (api == null) { _sessionsFetching = false; return; }
     try {
       final data = await api.listSessions();
+      final version = (data['version'] as num?)?.toInt() ?? 0;
+      if (version > 0 && version < _lastStateVersion) {
+        // Réponse plus ancienne qu'un push plus récent — ignorer pour éviter la régression
+        return;
+      }
+      if (version > 0) {
+        _lastStateVersion = version;
+      }
+
       final sessions = SessionParser.parseListSessions(data);
 
       List<ProjectItem> projects = [];
@@ -710,11 +729,31 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       if (type == 'sessions_updated') {
         final data = msg['data'];
         if (data is Map) {
-          final parsed = SessionParser.parseListSessions(
-            Map<String, dynamic>.from(data),
-          );
-          if (parsed.isNotEmpty) {
-            setState(() {
+          final dataMap = Map<String, dynamic>.from(data);
+          final version = (dataMap['version'] as num?)?.toInt() ?? 0;
+          if (version > 0 && version < _lastStateVersion) {
+            // Événement obsolète arrivé dans le désordre — ignorer
+            return;
+          }
+          if (version > 0) {
+            _lastStateVersion = version;
+          }
+
+          List<ProjectItem> projects = [];
+          if (dataMap['projects'] is List) {
+            projects = (dataMap['projects'] as List)
+                .whereType<Map>()
+                .map((p) => ProjectItem.fromJson(Map<String, dynamic>.from(p)))
+                .toList();
+          }
+
+          final parsed = SessionParser.parseListSessions(dataMap);
+
+          setState(() {
+            if (projects.isNotEmpty) {
+              _projects = projects;
+            }
+            if (parsed.isNotEmpty) {
               final stillActive = parsed.any((s) => s.id == _activeSessionId);
               if (_activeSessionId.isNotEmpty) {
                 if (stillActive) {
@@ -743,9 +782,17 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                 _activeSessionTitle = parsed.first.title;
                 _refreshContext();
               }
-            });
-            return;
-          }
+            } else {
+              // Liste vide : toutes les sessions ont été supprimées/archivées
+              _sessions = const [];
+              if (_activeSessionId.isNotEmpty) {
+                _activeSessionId = '';
+                _activeSessionTitle = '';
+                _contextStats = {};
+              }
+            }
+          });
+          return;
         }
         return;
       }
@@ -769,6 +816,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         builder: (context) => ConversationHistoryScreen(
           api: _api,
           sessions: _sessions,
+          projects: _projects,
           activeSessionId: _activeSessionId,
           onRefresh: _refreshSessions,
           onSessionSelected: (id) {

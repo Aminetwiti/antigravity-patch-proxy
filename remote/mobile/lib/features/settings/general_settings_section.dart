@@ -35,6 +35,10 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
   // Agent Behavior
   String _artifactReviewPolicy = 'Always Ask'; // 'Always Ask' | 'Auto Approve' | 'Never'
 
+  // Permissions
+  String _fileAccessPolicy = 'AGENT_SETTING_POLICY_ASK'; // ALLOW | ASK
+  String _internetPolicy = 'AGENT_SETTING_POLICY_ASK'; // ALLOW | ASK
+
   // Tool Approvals & Notifications
   bool _toolNotifications = true;
 
@@ -99,6 +103,12 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
             }
             if (pSettings['queuedMessagesMode'] is String) {
               _queuedMessagesMode = pSettings['queuedMessagesMode'] as String;
+            }
+            if (pSettings['fileAccessPolicy'] is String) {
+              _fileAccessPolicy = pSettings['fileAccessPolicy'] as String;
+            }
+            if (pSettings['internetPolicy'] is String) {
+              _internetPolicy = pSettings['internetPolicy'] as String;
             }
           });
         }
@@ -173,6 +183,58 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
       context,
       message: 'Artifact Review Policy : $policy',
       icon: Icons.rate_review_outlined,
+    );
+  }
+
+  Future<void> _setFileAccessPolicy(String policy) async {
+    setState(() => _fileAccessPolicy = policy);
+    HapticFeedback.selectionClick();
+    await SettingsStore.save({'fileAccessPolicy': policy});
+    if (widget.api != null) {
+      try {
+        await widget.api!.updateProjectSettings(
+          settings: {
+            'securityPreset': _securityPreset,
+            'artifactReviewPolicy': _artifactReviewPolicy,
+            'fileAccessPolicy': policy,
+          },
+          workspacePath: widget.workspacePath,
+        );
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    AppToast.show(
+      context,
+      message: policy == 'AGENT_SETTING_POLICY_ALLOW'
+          ? 'Accès fichiers autorisé.'
+          : 'Accès fichiers : demande de confirmation.',
+      icon: Icons.folder_open_outlined,
+    );
+  }
+
+  Future<void> _setInternetPolicy(String policy) async {
+    setState(() => _internetPolicy = policy);
+    HapticFeedback.selectionClick();
+    await SettingsStore.save({'internetPolicy': policy});
+    if (widget.api != null) {
+      try {
+        await widget.api!.updateProjectSettings(
+          settings: {
+            'securityPreset': _securityPreset,
+            'artifactReviewPolicy': _artifactReviewPolicy,
+            'internetPolicy': policy,
+          },
+          workspacePath: widget.workspacePath,
+        );
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    AppToast.show(
+      context,
+      message: policy == 'AGENT_SETTING_POLICY_ALLOW'
+          ? 'Accès réseau autorisé.'
+          : 'Accès réseau : demande de confirmation.',
+      icon: Icons.lan_outlined,
     );
   }
 
@@ -352,6 +414,32 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
 
           const SizedBox(height: 24),
 
+          // ── 3.5 Tool Approval Notifications
+          _buildCard(
+            isDark: isDark,
+            scheme: scheme,
+            child: SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text(
+                'Tool Approval Notifications',
+                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+              ),
+              subtitle: const Text(
+                'Notify on device when the agent requests tool approval.',
+                style: TextStyle(fontSize: 12),
+              ),
+              value: _toolNotifications,
+              onChanged: (val) {
+                setState(() => _toolNotifications = val);
+                HapticFeedback.selectionClick();
+                widget.notifier?.setEnabled(val);
+                SettingsStore.save({'toolNotifications': val});
+              },
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
           // ── 4. File Permissions
           _buildSectionHeader('File Permissions', scheme),
           const SizedBox(height: 8),
@@ -380,7 +468,11 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
                 const SizedBox(width: 12),
                 OutlinedButton(
                   onPressed: () {
-                    AppToast.show(context, message: 'Règles de fichiers configurées via le workspace.', icon: Icons.folder_open_outlined);
+                    _setFileAccessPolicy(
+                      _fileAccessPolicy == 'AGENT_SETTING_POLICY_ALLOW'
+                          ? 'AGENT_SETTING_POLICY_ASK'
+                          : 'AGENT_SETTING_POLICY_ALLOW',
+                    );
                   },
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -388,7 +480,7 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                   ),
                   child: Text(
-                    'Open',
+                    _fileAccessPolicy == 'AGENT_SETTING_POLICY_ALLOW' ? 'Restrict' : 'Open',
                     style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: scheme.onSurface),
                   ),
                 ),
@@ -426,7 +518,11 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
                 const SizedBox(width: 12),
                 OutlinedButton(
                   onPressed: () {
-                    AppToast.show(context, message: 'Trafic réseau géré par le proxy local.', icon: Icons.lan_outlined);
+                    _setInternetPolicy(
+                      _internetPolicy == 'AGENT_SETTING_POLICY_ALLOW'
+                          ? 'AGENT_SETTING_POLICY_ASK'
+                          : 'AGENT_SETTING_POLICY_ALLOW',
+                    );
                   },
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -434,7 +530,7 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                   ),
                   child: Text(
-                    'Open',
+                    _internetPolicy == 'AGENT_SETTING_POLICY_ALLOW' ? 'Restrict' : 'Open',
                     style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: scheme.onSurface),
                   ),
                 ),
