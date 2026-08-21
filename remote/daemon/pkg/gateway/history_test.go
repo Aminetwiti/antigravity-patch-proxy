@@ -355,6 +355,32 @@ Last Edited: 2026-08-19T14:46:18Z`
 		t.Errorf("extractUserRequest(userWithImage) = %q, attendu text + markdown image", gotWithImg)
 	}
 
+	userWithArtifactInside := `<USER_REQUEST>
+[ARTIFACT: photo_1787324794109.jpg]
+Path: file:///C:/Users/amine/.gemini/antigravity/brain/test-cascade/scratch/upload_1787324800703.jpg
+
+hi
+</USER_REQUEST>`
+	gotInside := extractUserRequest(userWithArtifactInside)
+	if strings.Contains(gotInside, "[ARTIFACT:") || strings.Contains(gotInside, "Path:") {
+		t.Errorf("extractUserRequest(userWithArtifactInside) contains raw artifact tag: %q", gotInside)
+	}
+	if !strings.Contains(gotInside, "hi") || !strings.Contains(gotInside, "![Image](file:///C:/Users/amine/.gemini/antigravity/brain/test-cascade/scratch/upload_1787324800703.jpg)") {
+		t.Errorf("extractUserRequest(userWithArtifactInside) = %q, want hi + markdown image", gotInside)
+	}
+
+	userWithOnlyArtifact := `<USER_REQUEST>
+[ARTIFACT: scaled_10050.jpg]
+Path: file:///C:/Users/amine/.gemini/antigravity/brain/test-cascade/scratch/upload_1787325227558.jpg
+</USER_REQUEST>`
+	gotOnlyArt := extractUserRequest(userWithOnlyArtifact)
+	if strings.Contains(gotOnlyArt, "[ARTIFACT:") || strings.Contains(gotOnlyArt, "Path:") {
+		t.Errorf("extractUserRequest(userWithOnlyArtifact) contains raw artifact tag: %q", gotOnlyArt)
+	}
+	if gotOnlyArt != "![Image](file:///C:/Users/amine/.gemini/antigravity/brain/test-cascade/scratch/upload_1787325227558.jpg)" {
+		t.Errorf("extractUserRequest(userWithOnlyArtifact) = %q", gotOnlyArt)
+	}
+
 	rawAssistant := `<SYSTEM_MESSAGE>
 [Message] timestamp=2026-08-17T16:13:24Z
 sender=task-146
@@ -406,5 +432,70 @@ func TestListSessionModifiedFiles(t *testing.T) {
 	counts := countTranscriptActivity(testCascadeID)
 	if counts["files"] != 2 {
 		t.Errorf("countTranscriptActivity files = %d, want 2", counts["files"])
+	}
+}
+
+func TestParseTranscriptFullTurns_InterleavedSegments(t *testing.T) {
+	tmpDir := t.TempDir()
+	transcriptPath := filepath.Join(tmpDir, "transcript.jsonl")
+
+	transcriptContent := `{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","content":"Fais les verifications","created_at":"2026-08-21T16:00:00Z"}
+{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","content":"","thinking":"Thinking about checks","tool_calls":[{"name":"view_file","args":{"AbsolutePath":"/app/main.go"}}],"created_at":"2026-08-21T16:00:05Z"}
+{"step_index":2,"source":"SYSTEM","type":"VIEW_FILE","content":"package main","created_at":"2026-08-21T16:00:06Z"}
+{"step_index":3,"source":"MODEL","type":"PLANNER_RESPONSE","content":"Je lance la vérification des tests existants.","created_at":"2026-08-21T16:00:07Z"}
+{"step_index":4,"source":"MODEL","type":"PLANNER_RESPONSE","content":"","tool_calls":[{"name":"schedule","args":{"DurationSeconds":10,"Prompt":"Wait 10s"}}],"created_at":"2026-08-21T16:00:08Z"}
+{"step_index":5,"source":"MODEL","type":"PLANNER_RESPONSE","content":"Je prépare les modifications pour les images.","created_at":"2026-08-21T16:00:18Z"}
+{"step_index":6,"source":"MODEL","type":"PLANNER_RESPONSE","content":"Les tests Go sont terminés.","status":"DONE","created_at":"2026-08-21T16:00:20Z"}
+`
+	if err := os.WriteFile(transcriptPath, []byte(transcriptContent), 0644); err != nil {
+		t.Fatalf("write mock transcript failed: %v", err)
+	}
+
+	msgs, err := parseTranscriptFullTurns(transcriptPath)
+	if err != nil {
+		t.Fatalf("parseTranscriptFullTurns failed: %v", err)
+	}
+
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages (1 user, 1 assistant), got %d", len(msgs))
+	}
+
+	asst := msgs[1]
+	if asst.Sender != "assistant" {
+		t.Fatalf("expected assistant sender, got %s", asst.Sender)
+	}
+
+	if len(asst.Segments) < 3 {
+		t.Fatalf("expected at least 3 segments (interleaved thought/text), got %d: %+v", len(asst.Segments), asst.Segments)
+	}
+
+	// Vérifier la présence des segments de pensée et de texte
+	hasThoughtSeg := false
+	hasTextSeg1 := false
+	hasTextSeg2 := false
+	for _, seg := range asst.Segments {
+		if seg.Type == "thought" {
+			hasThoughtSeg = true
+		}
+		if seg.Type == "text" && strings.Contains(seg.Content, "Je lance la vérification") {
+			hasTextSeg1 = true
+		}
+		if seg.Type == "text" && strings.Contains(seg.Content, "Je prépare les modifications") {
+			hasTextSeg2 = true
+		}
+	}
+
+	if !hasThoughtSeg {
+		t.Error("missing thought segment in assistant message")
+	}
+	if !hasTextSeg1 {
+		t.Error("missing text segment 1 in assistant message")
+	}
+	if !hasTextSeg2 {
+		t.Error("missing text segment 2 in assistant message")
+	}
+
+	if !strings.Contains(asst.Text, "Je lance la vérification") || !strings.Contains(asst.Text, "Je prépare les modifications") {
+		t.Errorf("asst.Text does not contain all paragraphs: %q", asst.Text)
 	}
 }

@@ -378,6 +378,19 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
     }
   });
 
+function isPrivateOrLoopbackHost(hostname: string): boolean {
+  const lower = (hostname || '').toLowerCase();
+  if (lower === 'localhost' || lower === '127.0.0.1' || lower === '::1' || lower.endsWith('.local')) {
+    return true;
+  }
+  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(lower) ||
+      /^192\.168\.\d{1,3}\.\d{1,3}$/.test(lower) ||
+      /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(lower)) {
+    return true;
+  }
+  return false;
+}
+
   // P3-17: Test model connectivity — sends a lightweight HEAD/GET to the model endpoint
   ipcMain.handle('storage:test-model-connection', async (_event, model: TestModelParams) => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -427,7 +440,7 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
           port: parseInt(url.port || (url.protocol === 'https:' ? '443' : '80'), 10),
           path: url.pathname + url.search,
           timeout: 10000,
-          rejectUnauthorized: !model.allowUnauthorized,
+          rejectUnauthorized: model.allowUnauthorized && isPrivateOrLoopbackHost(url.hostname) ? false : true,
         };
 
         // Add auth header
@@ -582,7 +595,7 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
           port: parseInt(url.port || (url.protocol === 'https:' ? '443' : '80'), 10),
           path: url.pathname + url.search,
           timeout: 15000,
-          rejectUnauthorized: !params.allowUnauthorized,
+          rejectUnauthorized: params.allowUnauthorized && isPrivateOrLoopbackHost(url.hostname) ? false : true,
           headers: {
             'Content-Type': 'application/json',
           },

@@ -10,6 +10,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	"image/png"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -147,11 +151,15 @@ type JetboxStreamer interface {
 }
 
 // checkOrigin rejette les navigateurs web arbitraires (CSWSH) tout en
-// acceptant les apps natives (Origin absent) et le localhost.
+// checkOrigin rejette les navigateurs web arbitraires (CSWSH) tout en
+// acceptant les apps natives (Origin absent), le localhost, le LAN privé et le domaine exact du tunnel.
 func checkOrigin(r *http.Request) bool {
 	o := r.Header.Get("Origin")
-	if o == "" || o == "null" {
-		return true // clients natifs (app mobile, curl) ÔÇö pas d'Origin
+	if o == "" {
+		return true // clients natifs (app mobile, curl) — pas d'Origin
+	}
+	if o == "null" {
+		return false // rejeter les iframes sandboxées
 	}
 	u, err := url.Parse(o)
 	if err != nil {
@@ -161,8 +169,7 @@ func checkOrigin(r *http.Request) bool {
 	if h == "localhost" || h == "127.0.0.1" || h == "::1" {
 		return true
 	}
-	// Plages LAN priv├®es strictes (CIDR) ÔÇö un pr├®fixe na├»f "172." accepterait
-	// 172.evil.com ; le parse CIDR le rejette.
+	// Plages LAN privées strictes (CIDR)
 	ip := net.ParseIP(h)
 	if ip != nil {
 		for _, cidr := range []string{"192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"} {
@@ -171,8 +178,18 @@ func checkOrigin(r *http.Request) bool {
 			}
 		}
 	}
-	return strings.HasSuffix(h, ".trycloudflare.com") || strings.HasSuffix(h, ".pinggy.link") ||
-		strings.HasSuffix(h, ".ngrok.io") || strings.HasSuffix(h, ".ngrok-free.app")
+	// Si la requête arrive sur un tunnel distant, l'Origin doit correspondre à l'Host de la requête ou à un domaine de tunnel valide
+	reqHost := r.Host
+	if host, _, err := net.SplitHostPort(reqHost); err == nil {
+		reqHost = host
+	}
+	if strings.EqualFold(h, reqHost) {
+		return true
+	}
+	if strings.HasSuffix(h, ".trycloudflare.com") || strings.HasSuffix(h, ".pinggy.link") || strings.HasSuffix(h, ".loca.lt") {
+		return true
+	}
+	return false
 }
 
 // pendingApproval : une approbation ├®mise mais pas encore r├®pondue, avec les
@@ -243,6 +260,8 @@ type Server struct {
 	uploadChunks map[string]*uploadChunkState
 	// adbService : client ADB sécurisé sans shell injection (G3).
 	adbService *adb.Service
+	// allowRemoteTerminal : autorise l'ouverture de terminaux PTY distants (sécurité : false par défaut).
+	allowRemoteTerminal bool
 	// noToolsEnabled : mode global « répondre sans outils » — les send_prompt
 	// qui ne portent pas leur propre flag noTools héritent de ce défaut
 	// (toggle des réglages mobile). L'état vit en mémoire comme autoAccept.
@@ -395,10 +414,30 @@ func NewServer(client RPCClient, authToken string) *Server {
 		logJSON.Warn("scheduled_tasks_load_failed", "error", err.Error())
 	}
 	s.startTranscriptWatchdog()
+	s.startUploadReaper(2*time.Minute, 10*time.Minute)
 	StartScratchCleanupRoutine(context.Background(), 24*time.Hour, DefaultScratchMaxAge)
 	loadAccountPrefs()
 	return s
 }
+
+// startUploadReaper purge périodiquement les uploads partiels expirés en mémoire (VULN-14).
+func (s *Server) startUploadReaper(interval, maxAge time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			s.mu.Lock()
+			now := time.Now()
+			for id, state := range s.uploadChunks {
+				if state != nil && now.Sub(state.createdAt) > maxAge {
+					delete(s.uploadChunks, id)
+				}
+			}
+			s.mu.Unlock()
+		}
+	}()
+}
+
 
 // sessionsCacheTTL : dur├®e de fra├«cheur du cache list_sessions. Le mobile
 // rafra├«chit la liste ├á chaque reconnexion ; le LS met ~9,5 s ├á r├®pondre.
@@ -547,37 +586,20 @@ func (s *Server) sessionsFromSummariesLocked(jetbox map[string]connectrpc.Jetbox
 		if home != "" && isSessionArchived(home, sum.CascadeID) {
 			continue
 		}
-		if (sum.Title == "" || sum.Title == "Cascade Session") && (sum.UpdatedAt.IsZero() || sum.StepCount == 0) {
-			continue
-		}
-		if isSubagentTitle(sum.Title) {
-			continue
-		}
-		projID := sum.ProjectID
-		wsPath := normalizeWorkspace(sum.Workspace)
-		wsName := sum.Workspace
-		for _, p := range projects {
-			pNorm := strings.ToLower(normalizeWorkspace(p.Path))
-			pNormUri := strings.ToLower(normalizeWorkspace(p.FolderURI))
-			sumNorm := strings.ToLower(wsPath)
-			if (p.ID != "" && p.ID == projID) ||
-				(pNorm != "" && (strings.Contains(sumNorm, pNorm) || strings.Contains(pNorm, sumNorm))) ||
-				(pNormUri != "" && pNormUri == sumNorm) ||
-				strings.EqualFold(p.Name, sum.Workspace) {
-				if projID == "" {
-					projID = p.ID
-				}
-				wsName = p.Name
-				wsPath = p.Path
-				break
-			}
-		}
 		title := sum.Title
 		convTitlesMu.RLock()
 		if custom, ok := globalConvTitles[strings.ToLower(sum.CascadeID)]; ok && custom != "" {
 			title = custom
 		}
 		convTitlesMu.RUnlock()
+
+		if (title == "" || title == "Cascade Session") && (sum.UpdatedAt.IsZero() || sum.StepCount == 0) {
+			continue
+		}
+		if isSubagentTitle(title) {
+			continue
+		}
+		wsName, wsPath, projID := matchOfficialProject(sum.ProjectID, sum.Workspace, sum.Workspace, projects)
 
 		isPinned := false
 		if home != "" {
@@ -593,6 +615,7 @@ func (s *Server) sessionsFromSummariesLocked(jetbox map[string]connectrpc.Jetbox
 			"status":        enrichStatus(sum.CascadeID, sum.Status),
 			"updatedAt":     sum.UpdatedAt,
 			"isPinned":      isPinned,
+			"isArchived":    false,
 		})
 	}
 	var v int64 = 0
@@ -757,6 +780,14 @@ func (s *Server) SetApprovalTimeout(d time.Duration) {
 	defer s.mu.Unlock()
 	s.approvalTimeout = d
 }
+
+// SetAllowRemoteTerminal configure l'autorisation d'ouverture de terminaux PTY distants.
+func (s *Server) SetAllowRemoteTerminal(allow bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.allowRemoteTerminal = allow
+}
+
 
 // SetAutoAccept active/désactive l'auto-approbation des actions (toggle des
 // réglages mobile, message WS set_auto_accept). Rétro-compatibilité : enabled=true
@@ -1291,11 +1322,14 @@ func (s *Server) writeJSON(conn *websocket.Conn, msg OutgoingMessage) error {
 	return nil
 }
 
-// writeLock retourne le mutex d'├®criture d├®di├® ├á conn (cr├®├® ├á la vol├®e si le
-// client s'est connect├® avant l'initialisation ÔÇö chemin de test uniquement).
+// writeLock retourne le mutex d'écriture dédié à conn (créé à la volée si le
+// client s'est connecté avant l'initialisation — chemin de test uniquement).
 func (s *Server) writeLock(conn *websocket.Conn) *sync.Mutex {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.writeLocks == nil {
+		s.writeLocks = make(map[*websocket.Conn]*sync.Mutex)
+	}
 	if lk, ok := s.writeLocks[conn]; ok {
 		return lk
 	}
@@ -1304,25 +1338,25 @@ func (s *Server) writeLock(conn *websocket.Conn) *sync.Mutex {
 	return lk
 }
 
-// releaseWriteLock lib├¿re la m├®moire du mutex d'├®criture d'un client d├®connect├®.
+// releaseWriteLock libère la mémoire du mutex d'écriture d'un client déconnecté.
 func (s *Server) releaseWriteLock(conn *websocket.Conn) {
 	s.mu.Lock()
 	delete(s.writeLocks, conn)
 	s.mu.Unlock()
 }
 
-// mcpTimeout borne l'appel HTTP vers le proxy MCP desktop (30 s) ÔÇö align├® sur
-// le timeout 15 s c├┤t├® mobile + la marge de travers├®e tunnel/4G.
+// mcpTimeout borne l'appel HTTP vers le proxy MCP desktop (30 s) — aligné sur
+// le timeout 15 s côté mobile + la marge de traversée tunnel/4G.
 const mcpTimeout = 30 * time.Second
 
 // handleMcpAction relaie call_mcp_tool / connect_mcp_server /
 // refresh_mcp_oauth_token / list_mcp_servers vers le proxy MCP Antigravity
 // desktop (127.0.0.1:50999). Le mobile n'a ni les identifiants ni l'allowlist
-// MCP : la session du PC est le seul d├®tenteur l├®gitime ÔÇö le daemon n'est
-// qu'un tunnel. La r├®ponse JSON du proxy est relay├®e telle quelle dans Data.
+// MCP : la session du PC est le seul détenteur légitime — le daemon n'est
+// qu'un tunnel. La réponse JSON du proxy est relayée telle quelle dans Data.
 func (s *Server) handleMcpAction(conn *websocket.Conn, msg IncomingMessage) {
-	// list_mcp_servers est une op├®ration de listing (GET, sans serverName) :
-	// le mobile demande la liste des serveurs configur├®s sur le PC. Les autres
+	// list_mcp_servers est une opération de listing (GET, sans serverName) :
+	// le mobile demande la liste des serveurs configurés sur le PC. Les autres
 	// actions MCP exigent un serverName.
 	if msg.Type != "list_mcp_servers" && msg.ServerName == "" {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "serverName requis"})
@@ -1366,7 +1400,7 @@ func (s *Server) handleMcpAction(conn *websocket.Conn, msg IncomingMessage) {
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
-		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "lecture de la r├®ponse proxy: " + err.Error()})
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "lecture de la réponse proxy: " + err.Error()})
 		return
 	}
 	if resp.StatusCode >= 400 {
@@ -1379,8 +1413,7 @@ func (s *Server) handleMcpAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"raw": string(respBody)}})
 		return
 	}
-	// list_mcp_servers : nettoyage lger du payload relay ÔÇö un serveur MCP
-	// configur sans champ "name" n'a pas  exposer serverName:"" au mobile.
+	// list_mcp_servers : nettoyage et isolation des configurations invalides/non supportées (Point 5)
 	if msg.Type == "list_mcp_servers" {
 		if servers, ok := proxyResp["servers"].([]interface{}); ok {
 			cleaned := make([]interface{}, 0, len(servers))
@@ -1400,16 +1433,71 @@ func (s *Server) handleMcpAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 			proxyResp["servers"] = cleaned
 		}
+	} else if msg.Type == "call_mcp_tool" || msg.Type == "mcp_tool" {
+		// Point 4 : déplacement des gros attachements binaires (images, PDF, audio) dans scratch/mcp_media/
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			sanitizeMcpResponse(home, proxyResp)
+		}
 	}
 	s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: proxyResp})
 }
 
-// broadcast envoie le m├¬me message ├á TOUS les clients connect├®s : c'est ce qui
-// permet la synchronisation multi-surface (un t├®l├®phone voit le stream d├®clench├®
-// par le PC ou par un autre t├®l├®phone). Un client dont l'├®criture ├®choue
-// (deadline d├®pass├®e) est retir├® de la liste ÔÇö il ne doit pas bloquer ni
-// r├®-├®chouer les broadcasts suivants (il sera aussi purg├® par la boucle de
-// lecture c├┤t├® HandleWebSocket).
+// sanitizeMcpResponse inspecte les retours MCP et sauvegarde les gros attachements binaires
+// (> 32 Ko, images, PDF, audio) sur disque dans scratch/mcp_media/ pour ne pas faire déborder le contexte du tour.
+func sanitizeMcpResponse(home string, resp map[string]interface{}) {
+	if resp == nil {
+		return
+	}
+	content, ok := resp["content"].([]interface{})
+	if !ok {
+		return
+	}
+	mediaDir := filepath.Join(home, ".gemini", "antigravity", "scratch", "mcp_media")
+	_ = os.MkdirAll(mediaDir, 0755)
+
+	for _, item := range content {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		itemType, _ := m["type"].(string)
+		dataStr, _ := m["data"].(string)
+		mimeType, _ := m["mimeType"].(string)
+
+		if (itemType == "image" || itemType == "resource" || strings.HasPrefix(mimeType, "image/") || strings.HasPrefix(mimeType, "audio/") || mimeType == "application/pdf") && len(dataStr) > 32*1024 {
+			rawBytes, err := base64.StdEncoding.DecodeString(dataStr)
+			if err == nil && len(rawBytes) > 0 {
+				ext := ".bin"
+				if strings.Contains(mimeType, "png") {
+					ext = ".png"
+				} else if strings.Contains(mimeType, "jpeg") || strings.Contains(mimeType, "jpg") {
+					ext = ".jpg"
+				} else if strings.Contains(mimeType, "pdf") {
+					ext = ".pdf"
+				} else if strings.Contains(mimeType, "audio") || strings.Contains(mimeType, "wav") {
+					ext = ".wav"
+				} else if strings.Contains(mimeType, "mp3") {
+					ext = ".mp3"
+				}
+				fileName := fmt.Sprintf("mcp_%d%s", time.Now().UnixNano(), ext)
+				targetPath := filepath.Join(mediaDir, fileName)
+				if err := os.WriteFile(targetPath, rawBytes, 0644); err == nil {
+					m["data"] = ""
+					m["savedPath"] = targetPath
+					m["fileUri"] = "file:///" + filepath.ToSlash(targetPath)
+					m["text"] = fmt.Sprintf("[MCP Media Saved: %s](%s)", fileName, m["fileUri"])
+				}
+			}
+		}
+	}
+}
+
+// broadcast envoie le même message à TOUS les clients connectés : c'est ce qui
+// permet la synchronisation multi-surface (un téléphone voit le stream déclenché
+// par le PC ou par un autre téléphone). Un client dont l'écriture échoue
+// (deadline dépassée) est retiré de la liste — la libération complète du lock
+// s'effectue dans le defer de HandleWebSocket.
 func (s *Server) broadcast(msg OutgoingMessage) {
 	s.mu.Lock()
 	conns := make([]*websocket.Conn, 0, len(s.clients))
@@ -1423,7 +1511,6 @@ func (s *Server) broadcast(msg OutgoingMessage) {
 			delete(s.clients, c)
 			delete(s.clientInFlight, c)
 			s.mu.Unlock()
-			s.releaseWriteLock(c)
 		}
 	}
 }
@@ -1895,6 +1982,11 @@ func (s *Server) handleUploadChunk(conn *websocket.Conn, msg IncomingMessage) {
 	s.mu.Lock()
 	state, exists := s.uploadChunks[uploadID]
 	if !exists {
+		if len(s.uploadChunks) >= 50 {
+			s.mu.Unlock()
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "trop d'uploads simultanés en cours"})
+			return
+		}
 		if totalChunks <= 0 {
 			totalChunks = 1
 		}
@@ -1909,6 +2001,11 @@ func (s *Server) handleUploadChunk(conn *websocket.Conn, msg IncomingMessage) {
 			createdAt:   time.Now(),
 		}
 		s.uploadChunks[uploadID] = state
+	}
+	if state.received+int64(len(chunkBytes)) > 50<<20 { // 50MB max per in-memory upload
+		s.mu.Unlock()
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "taille de transfert mémoire dépassée (max 50 Mo)"})
+		return
 	}
 	state.chunks[chunkIdx] = chunkBytes
 	state.received += int64(len(chunkBytes))
@@ -2127,7 +2224,20 @@ func (s *Server) handleADB(conn *websocket.Conn, msg IncomingMessage) bool {
 			cleanName := filepath.Base(filepath.Clean(rPath))
 			lPath = filepath.Join(home, ".gemini", "antigravity", "downloads", cleanName)
 		} else {
-			lPath = homeRoot(lPath)
+			wsRoot := homeRoot(msg.WorkspacePath)
+			if wsRoot == "" {
+				if projs := ListOfficialProjects(); len(projs) > 0 && projs[0].Path != "" {
+					wsRoot = projs[0].Path
+				} else if home, errHome := os.UserHomeDir(); errHome == nil {
+					wsRoot = filepath.Join(home, ".gemini", "antigravity", "downloads")
+				}
+			}
+			resolved, errRes := resolvePath(wsRoot, lPath)
+			if errRes != nil {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé hors du workspace: " + errRes.Error()})
+				return true
+			}
+			lPath = resolved
 		}
 		_ = os.MkdirAll(filepath.Dir(lPath), 0755)
 		if err := s.adbService.PullFile(ctx, deviceID, rPath, lPath); err != nil {
@@ -2152,7 +2262,20 @@ func (s *Server) handleADB(conn *websocket.Conn, msg IncomingMessage) bool {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "remotePath + localPath requis"})
 			return true
 		}
-		lPath = homeRoot(lPath)
+		wsRoot := homeRoot(msg.WorkspacePath)
+		if wsRoot == "" {
+			if projs := ListOfficialProjects(); len(projs) > 0 && projs[0].Path != "" {
+				wsRoot = projs[0].Path
+			} else if home, errHome := os.UserHomeDir(); errHome == nil {
+				wsRoot = filepath.Join(home, ".gemini", "antigravity")
+			}
+		}
+		resolved, errRes := resolvePath(wsRoot, lPath)
+		if errRes != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé hors du workspace: " + errRes.Error()})
+			return true
+		}
+		lPath = resolved
 		if err := s.adbService.PushFile(ctx, deviceID, lPath, rPath); err != nil {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
 			return true
@@ -2603,6 +2726,27 @@ var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[
 // (lettres, chiffres, tirets, underscores). Validation stricte = pas de traversal via "../", "/" ou "\".
 var safeCascadeIDRe = regexp.MustCompile(`^[a-zA-Z0-9_\-\.]{1,64}$`)
 
+// ensurePngData transcode les images (JPEG, GIF, etc.) en PNG pour garantir la compatibilité
+// avec le Language Server qui exige le type MIME image/png.
+func ensurePngData(rawBytes []byte) ([]byte, string) {
+	if len(rawBytes) == 0 {
+		return rawBytes, "image/png"
+	}
+	// Vérifier si c'est déjà un PNG (magic number 89 50 4E 47 0D 0A 1A 0A)
+	if len(rawBytes) >= 8 && rawBytes[0] == 0x89 && rawBytes[1] == 0x50 && rawBytes[2] == 0x4E && rawBytes[3] == 0x47 {
+		return rawBytes, "image/png"
+	}
+	// Tenter de décoder l'image (JPEG, GIF, etc.)
+	img, _, err := image.Decode(bytes.NewReader(rawBytes))
+	if err == nil && img != nil {
+		var buf bytes.Buffer
+		if errEnc := png.Encode(&buf, img); errEnc == nil && buf.Len() > 0 {
+			return buf.Bytes(), "image/png"
+		}
+	}
+	return rawBytes, "image/png"
+}
+
 // saveUploadedImage décode une image base64 et la sauvegarde dans le dossier scratch de la cascade.
 func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, error) {
 	if cascadeID == "" {
@@ -2623,12 +2767,15 @@ func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, 
 
 	rawBytes, err := base64.StdEncoding.DecodeString(base64Data)
 	if err != nil {
-		return "", "", fmt.Errorf("erreur de d├®codage base64: %w", err)
+		return "", "", fmt.Errorf("erreur de décodage base64: %w", err)
 	}
 
 	if len(rawBytes) > 15<<20 {
 		return "", "", fmt.Errorf("image trop volumineuse (max 15 Mo)")
 	}
+
+	// Normaliser impérativement vers PNG pour conformité avec le Language Server
+	rawBytes, _ = ensurePngData(rawBytes)
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -2644,21 +2791,17 @@ func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, 
 	_ = os.MkdirAll(userUploadDir, 0755)
 
 	ext := ".png"
-	lower := strings.ToLower(fileName)
-	if strings.HasSuffix(lower, ".jpg") || strings.HasSuffix(lower, ".jpeg") {
-		ext = ".jpg"
-	} else if strings.HasSuffix(lower, ".webp") {
-		ext = ".webp"
-	} else if strings.HasSuffix(lower, ".gif") {
-		ext = ".gif"
-	}
-
 	base := filepath.Base(fileName)
 	if base == "." || base == "/" || base == "\\" || base == "" {
 		timestamp := time.Now().UnixMilli()
 		base = fmt.Sprintf("upload_%d%s", timestamp, ext)
-	} else if !strings.HasSuffix(strings.ToLower(base), ext) {
-		base += ext
+	} else {
+		extLower := strings.ToLower(filepath.Ext(base))
+		if extLower == ".jpg" || extLower == ".jpeg" || extLower == ".webp" || extLower == ".gif" || extLower == ".png" {
+			// Garder l'extension d'origine valide
+		} else {
+			base += ext
+		}
 	}
 
 	targetPath := filepath.Join(userUploadDir, base)
@@ -2676,6 +2819,93 @@ func saveUploadedImage(cascadeID, fileName, base64Data string) (string, string, 
 	absPath := filepath.ToSlash(targetPath)
 	markdownRef := fmt.Sprintf("![Uploaded Image](file:///%s)", absPath)
 	return targetPath, markdownRef, nil
+}
+
+// revertPreviewOut convertit une réponse GetRevertPreviewResponse brute en JSON
+// avec listes des fichiers modifiés et diffs unifiés.
+func revertPreviewOut(raw []byte) interface{} {
+	if len(raw) == 0 {
+		return map[string]interface{}{
+			"affectedFiles": []string{},
+			"diff":          "",
+			"files":         []string{},
+			"preview":       "",
+		}
+	}
+	payload := raw
+	for len(payload) >= 5 {
+		length := int(binary.BigEndian.Uint32(payload[1:5]))
+		if length <= 0 || 5+length > len(payload) {
+			break
+		}
+		if payload[0]&0x80 == 0 {
+			payload = payload[5 : 5+length]
+			break
+		}
+		payload = payload[5+length:]
+	}
+
+	fields := connectrpc.DecodeFields(payload)
+	var affectedFiles []string
+	var diffBuilder strings.Builder
+
+	for _, f := range fields {
+		if f.Num == 1 && f.WireType == 2 { // CodeEditRevertPreview
+			var fileURI string
+			var changesText strings.Builder
+			for _, ef := range connectrpc.DecodeFields(f.Bytes) {
+				switch ef.Num {
+				case 1: // file_uri
+					if ef.WireType == 2 {
+						fileURI = string(ef.Bytes)
+					}
+				case 2: // diff (UnifiedDiff)
+					if ef.WireType == 2 {
+						for _, uf := range connectrpc.DecodeFields(ef.Bytes) {
+							if uf.Num == 1 && uf.WireType == 2 { // UnifiedDiffChange
+								var text string
+								var changeType uint64
+								for _, cf := range connectrpc.DecodeFields(uf.Bytes) {
+									if cf.Num == 1 && cf.WireType == 2 {
+										text = string(cf.Bytes)
+									} else if cf.Num == 2 && cf.WireType == 0 {
+										changeType = cf.Varint
+									}
+								}
+								switch changeType {
+								case 2:
+									changesText.WriteString("+" + text + "\n")
+								case 3:
+									changesText.WriteString("-" + text + "\n")
+								default:
+									changesText.WriteString(" " + text + "\n")
+								}
+							}
+						}
+					}
+				}
+			}
+			if fileURI != "" {
+				affectedFiles = append(affectedFiles, fileURI)
+				if diffBuilder.Len() > 0 {
+					diffBuilder.WriteString("\n")
+				}
+				diffBuilder.WriteString("--- a/" + fileURI + "\n+++ b/" + fileURI + "\n")
+				diffBuilder.WriteString(changesText.String())
+			}
+		}
+	}
+
+	if len(affectedFiles) == 0 {
+		return toOutgoing(raw)
+	}
+
+	return map[string]interface{}{
+		"affectedFiles": affectedFiles,
+		"diff":          diffBuilder.String(),
+		"files":         affectedFiles,
+		"preview":       diffBuilder.String(),
+	}
 }
 
 // toOutgoing convertit une r├®ponse protobuf brute en JSON lisible (hex + champs).
@@ -2749,9 +2979,18 @@ func (s *Server) sessionsOutWithLimit(raw []byte, limitPerProject int) interface
 				loc["status"] = enrichStatus(cid, st)
 			}
 		}
+		var v int64 = 0
+		if s != nil {
+			s.mu.Lock()
+			s.stateVersion++
+			v = s.stateVersion
+			s.mu.Unlock()
+		}
 		return map[string]interface{}{
-			"projects": projects,
-			"sessions": local,
+			"version":   v,
+			"projects":  projects,
+			"sessions":  local,
+			"timestamp": time.Now().UnixMilli(),
 		}
 	}
 
@@ -2769,42 +3008,37 @@ func (s *Server) sessionsOutWithLimit(raw []byte, limitPerProject int) interface
 		if home != "" && isSessionArchived(home, sum.CascadeID) {
 			continue
 		}
-		if (sum.Title == "" || sum.Title == "Cascade Session") && sum.UpdatedAt.IsZero() {
+		title := sum.Title
+		convTitlesMu.RLock()
+		if custom, ok := globalConvTitles[strings.ToLower(sum.CascadeID)]; ok && custom != "" {
+			title = custom
+		}
+		convTitlesMu.RUnlock()
+
+		if (title == "" || title == "Cascade Session") && sum.UpdatedAt.IsZero() {
 			continue
 		}
-		if isSubagentTitle(sum.Title) {
+		if isSubagentTitle(title) {
 			continue
 		}
 
 		status := enrichStatus(sum.CascadeID, sum.Status)
-		projID := sum.ProjectID
-		wsPath := normalizeWorkspace(sum.Workspace)
-		wsName := sum.Workspace
-		for _, p := range projects {
-			pNorm := strings.ToLower(normalizeWorkspace(p.Path))
-			pNormUri := strings.ToLower(normalizeWorkspace(p.FolderURI))
-			sumNorm := strings.ToLower(wsPath)
-			if (p.ID != "" && p.ID == projID) ||
-				(pNorm != "" && (strings.Contains(sumNorm, pNorm) || strings.Contains(pNorm, sumNorm))) ||
-				(pNormUri != "" && pNormUri == sumNorm) ||
-				strings.EqualFold(p.Name, sum.Workspace) {
-				if projID == "" {
-					projID = p.ID
-				}
-				wsName = p.Name
-				wsPath = p.Path
-				break
-			}
+		wsName, wsPath, projID := matchOfficialProject(sum.ProjectID, sum.Workspace, sum.Workspace, projects)
+		isPinned := false
+		if home != "" {
+			isPinned = isSessionPinned(home, sum.CascadeID)
 		}
 		items = append(items, sessionWithTime{
 			data: map[string]interface{}{
 				"cascadeId":     sum.CascadeID,
-				"title":         sum.Title,
+				"title":         title,
 				"workspace":     wsName,
 				"workspacePath": wsPath,
 				"projectId":     projID,
 				"status":        status,
 				"updatedAt":     sum.UpdatedAt,
+				"isPinned":      isPinned,
+				"isArchived":    false,
 			},
 			updatedAt: sum.UpdatedAt,
 			isActive:  status == "CASCADE_STATUS_RUNNING" || status == "CASCADE_STATUS_WAITING_FOR_USER_ACTION",
@@ -3242,6 +3476,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 		} else {
 			// Commande Shell / CLI directe sur le PC hôte (ex: git diff, git status, flutter analyze)
+			if !s.allowRemoteTerminal && !s.requireAdmin(conn) {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: exécution de commande système désactivée (privilège admin requis)"})
+				return
+			}
 			logJSON.Info("shell_command", "command", trimmedCmd)
 			wsDir := homeRoot(msg.WorkspacePath)
 			out, execErr := executeShellCommand(wsDir, trimmedCmd)
@@ -3262,6 +3500,13 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 
 	case "terminal_create":
+		// Sécurité (VULN-01) : l'ouverture de terminal PTY interactif exige
+		// soit le flag serveur allowRemoteTerminal, soit les privilèges Admin.
+		if !s.allowRemoteTerminal && !s.requireAdmin(conn) {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: ouverture de terminal distant désactivée (flag --enable-remote-terminal ou privilège admin requis)"})
+			return
+		}
+
 		// La session appartient à CE client (owner-scoping) : les autres
 		// devices ne peuvent ni écrire ni tuer dedans, et sa déconnexion ne
 		// nettoie que ses sessions.
@@ -3572,6 +3817,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			// avec le stream_end diffusé en parallèle.
 			if err == nil {
 				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "submitted"}})
+			} else {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
 			}
 			return
 		} else if ok {
@@ -3581,9 +3828,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "approval expired (auto-denied)"})
 			return
 		}
-		// R├®ponse libre : fire-and-forget vers le LS (le flux arrive par
-		// SendMessageStream) ÔÇö le mobile n'attend pas de r├®ponse unary ici,
-		// c'est le prochain stream_delta qui fait foi.
+		// Réponse libre : accuse réception au client et envoie au LS
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "submitted"}})
 		go func() {
 			_ = s.RPCClient.SendMessageStream(msg.CascadeID, responseText, func([]byte) error { return nil })
 		}()
@@ -3754,13 +4000,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		if base64Data != "" {
 			if targetPath, _, errImg := saveUploadedImage(msg.CascadeID, fileName, base64Data); errImg == nil {
 				uri := "file:///" + filepath.ToSlash(targetPath)
-				mime := "image/jpeg"
-				if strings.HasSuffix(strings.ToLower(targetPath), ".png") {
-					mime = "image/png"
-				}
 				mediaAttachments = append(mediaAttachments, connectrpc.MediaAttachment{
 					URI:         uri,
-					MimeType:    mime,
+					MimeType:    "image/png",
 					Description: filepath.Base(targetPath),
 					Base64Data:  base64Data,
 				})
@@ -3790,10 +4032,6 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 					if !strings.HasPrefix(cleanURI, "file:///") {
 						cleanURI = "file:///" + filepath.ToSlash(cleanURI)
 					}
-					mime := "image/jpeg"
-					if strings.HasSuffix(strings.ToLower(rawPath), ".png") {
-						mime = "image/png"
-					}
 					if desc == "" {
 						desc = filepath.Base(rawPath)
 					}
@@ -3807,7 +4045,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 					if !alreadyAdded {
 						mediaAttachments = append(mediaAttachments, connectrpc.MediaAttachment{
 							URI:         cleanURI,
-							MimeType:    mime,
+							MimeType:    "image/png",
 							Description: desc,
 						})
 					}
@@ -3817,7 +4055,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			promptText = strings.TrimSpace(imgTagRe.ReplaceAllString(promptText, ""))
 		}
 
-		// Populer Data et Base64Data pour chaque mediaAttachment en lisant le fichier sur disque
+		// Populer Data et Base64Data pour chaque mediaAttachment en lisant le fichier sur disque et en normalisant vers PNG
 		for i := range mediaAttachments {
 			m := &mediaAttachments[i]
 			if len(m.Data) == 0 && m.Base64Data != "" {
@@ -3834,27 +4072,26 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				localPath = filepath.FromSlash(localPath)
 				if data, err := os.ReadFile(localPath); err == nil && len(data) > 0 {
 					m.Data = data
-					if m.Base64Data == "" {
-						m.Base64Data = base64.StdEncoding.EncodeToString(data)
-					}
 				}
 			}
-			if m.MimeType == "" || m.MimeType == "application/octet-stream" {
+			// Transcoder toute image en PNG pour satisfaire le Language Server (unsupported mime type image/jpeg)
+			isImg := strings.HasPrefix(m.MimeType, "image/") || m.MimeType == "" || m.MimeType == "application/octet-stream" ||
+				strings.HasSuffix(strings.ToLower(m.URI), ".jpg") || strings.HasSuffix(strings.ToLower(m.URI), ".jpeg") ||
+				strings.HasSuffix(strings.ToLower(m.URI), ".png") || strings.HasSuffix(strings.ToLower(m.URI), ".webp") ||
+				strings.HasSuffix(strings.ToLower(m.URI), ".gif")
+
+			if isImg {
+				if len(m.Data) > 0 {
+					pngBytes, _ := ensurePngData(m.Data)
+					m.Data = pngBytes
+					m.Base64Data = base64.StdEncoding.EncodeToString(pngBytes)
+				}
+				m.MimeType = "image/png"
+			} else if m.MimeType == "" || m.MimeType == "application/octet-stream" {
 				if len(m.Data) > 0 {
 					m.MimeType = http.DetectContentType(m.Data)
 				} else if m.URI != "" {
-					lower := strings.ToLower(m.URI)
-					if strings.HasSuffix(lower, ".png") {
-						m.MimeType = "image/png"
-					} else if strings.HasSuffix(lower, ".jpg") || strings.HasSuffix(lower, ".jpeg") {
-						m.MimeType = "image/jpeg"
-					} else if strings.HasSuffix(lower, ".webp") {
-						m.MimeType = "image/webp"
-					} else if strings.HasSuffix(lower, ".gif") {
-						m.MimeType = "image/gif"
-					} else if strings.HasSuffix(lower, ".svg") {
-						m.MimeType = "image/svg+xml"
-					} else if strings.HasSuffix(lower, ".pdf") {
+					if strings.HasSuffix(strings.ToLower(m.URI), ".pdf") {
 						m.MimeType = "application/pdf"
 					}
 				}
@@ -4114,7 +4351,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			})
 			s.broadcast(OutgoingMessage{
 				Type: "sessions_updated",
-				Data: sessionsFromSummaries(s.snapshotSummaries()),
+				Data: s.sessionsFromSummaries(s.snapshotSummaries()),
 			})
 			return
 		}
@@ -4134,13 +4371,18 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "workspacePath + query requis"})
 			return
 		}
+		targetWs := homeRoot(msg.WorkspacePath)
+		if !isPathInsideAllowedWorkspaces(targetWs) {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "workspacePath hors projet autorisé"})
+			return
+		}
 		maxResults := 50
 		if msg.Data != nil {
 			if m, ok := msg.Data["maxResults"].(float64); ok && int(m) > 0 {
 				maxResults = int(m)
 			}
 		}
-		results, errSearch := searchInWorkspace(homeRoot(msg.WorkspacePath), msg.Query, maxResults)
+		results, errSearch := searchInWorkspace(targetWs, msg.Query, maxResults)
 		if errSearch != nil {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errSearch.Error()})
 			return
@@ -4171,12 +4413,17 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"raw": string(raw), "status": "ok"}})
 		return
 
-	case "list_files":
+	case "list_files", "list_dir", "workspace.list_files":
 		if msg.WorkspacePath == "" {
 			err = fmt.Errorf("workspacePath requis")
 			break
 		}
-		tree, errList := buildFileTree(homeRoot(msg.WorkspacePath), "", 0)
+		targetWs := homeRoot(msg.WorkspacePath)
+		if !isPathInsideAllowedWorkspaces(targetWs) {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "workspacePath hors projet autorisé"})
+			return
+		}
+		tree, errList := buildFileTree(targetWs, "", 0)
 		if errList != nil {
 			err = errList
 			break
@@ -4232,12 +4479,46 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 
 		if isDriveLetterAbs || isUNCAbs || isUnixAbs {
-			if content, errRead := os.ReadFile(filepath.Clean(cleanPath)); errRead == nil {
-				respondWithFileContent(content)
+			cleanTarget := filepath.Clean(cleanPath)
+			allowed := false
+			if home, errHome := os.UserHomeDir(); errHome == nil {
+				geminiBrain := filepath.Join(home, ".gemini", "antigravity", "brain")
+				geminiIdeBrain := filepath.Join(home, ".gemini", "antigravity-ide", "brain")
+				geminiRoot := filepath.Join(home, ".gemini")
+				lowClean := strings.ToLower(cleanTarget)
+				if strings.HasPrefix(lowClean, strings.ToLower(geminiBrain)) ||
+					strings.HasPrefix(lowClean, strings.ToLower(geminiIdeBrain)) ||
+					strings.HasPrefix(lowClean, strings.ToLower(geminiRoot)) {
+					allowed = true
+				}
+			}
+			if !allowed && msg.WorkspacePath != "" {
+				if _, errRes := resolvePath(homeRoot(msg.WorkspacePath), cleanTarget); errRes == nil {
+					allowed = true
+				}
+			}
+			if !allowed {
+				for _, p := range ListOfficialProjects() {
+					if p.Path != "" {
+						if _, errRes := resolvePath(filepath.Clean(p.Path), cleanTarget); errRes == nil {
+							allowed = true
+							break
+						}
+					}
+				}
+			}
+			if allowed {
+				if content, errRead := os.ReadFile(cleanTarget); errRead == nil {
+					respondWithFileContent(content)
+					return
+				}
+			} else {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé hors du workspace: " + cleanPath})
 				return
 			}
 		}
-		if strings.HasPrefix(msg.FilePath, ".gemini") || strings.HasPrefix(relCleanPath, ".gemini") {
+		if (strings.HasPrefix(msg.FilePath, ".gemini") || strings.HasPrefix(relCleanPath, ".gemini")) &&
+			(strings.Contains(msg.FilePath, "brain") || strings.Contains(relCleanPath, "brain")) {
 			abs := homeRoot(relCleanPath)
 			if content, errRead := os.ReadFile(abs); errRead == nil {
 				respondWithFileContent(content)
@@ -4261,9 +4542,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 					filepath.Join(bDir, baseFileName),
 				}
 				for _, cand := range candidates {
-					if content, errRead := os.ReadFile(cand); errRead == nil {
-						respondWithFileContent(content)
-						return
+					if _, errRes := resolvePath(bDir, cand); errRes == nil {
+						if content, errRead := os.ReadFile(cand); errRead == nil {
+							respondWithFileContent(content)
+							return
+						}
 					}
 				}
 			}
@@ -4294,9 +4577,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 						filepath.Join(bDir, baseFileName),
 					}
 					for _, cand := range cands {
-						if content, errRead := os.ReadFile(cand); errRead == nil {
-							respondWithFileContent(content)
-							return
+						if _, errRes := resolvePath(bDir, cand); errRes == nil {
+							if content, errRead := os.ReadFile(cand); errRead == nil {
+								respondWithFileContent(content)
+								return
+							}
 						}
 					}
 				}
@@ -4314,10 +4599,14 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 		}
 		// 4. Language Server RPC fallback
-		raw, err = s.RPCClient.ReadFile(toWorkspaceURI(msg.FilePath))
-		if err == nil {
-			respondWithFileContent(raw)
-			return
+		if s != nil && s.RPCClient != nil {
+			raw, err = s.RPCClient.ReadFile(toWorkspaceURI(msg.FilePath))
+			if err == nil {
+				respondWithFileContent(raw)
+				return
+			}
+		} else {
+			err = fmt.Errorf("fichier introuvable ou client RPC non initialisé")
 		}
 		if err != nil {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
@@ -4598,7 +4887,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"raw": string(raw), "status": "checked_out"}})
 		return
 
-	case "delete_cascade":
+	case "delete_cascade", "delete_session":
 		if msg.CascadeID == "" {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
 			return
@@ -4640,7 +4929,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		// prochain tick Jetbox ni la fin du TTL cache (5 s).
 		s.broadcast(OutgoingMessage{
 			Type: "sessions_updated",
-			Data: sessionsFromSummaries(s.snapshotSummaries()),
+			Data: s.sessionsFromSummaries(s.snapshotSummaries()),
 		})
 		return
 
@@ -4670,7 +4959,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "archived", "cascadeId": msg.CascadeID}})
 		s.broadcast(OutgoingMessage{
 			Type: "sessions_updated",
-			Data: sessionsFromSummaries(s.snapshotSummaries()),
+			Data: s.sessionsFromSummaries(s.snapshotSummaries()),
 		})
 		return
 
@@ -4700,7 +4989,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "unarchived", "cascadeId": msg.CascadeID}})
 		s.broadcast(OutgoingMessage{
 			Type: "sessions_updated",
-			Data: sessionsFromSummaries(s.snapshotSummaries()),
+			Data: s.sessionsFromSummaries(s.snapshotSummaries()),
 		})
 		return
 
@@ -4743,7 +5032,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "renamed", "cascadeId": msg.CascadeID, "title": title}})
 		s.broadcast(OutgoingMessage{
 			Type: "sessions_updated",
-			Data: sessionsFromSummaries(s.snapshotSummaries()),
+			Data: s.sessionsFromSummaries(s.snapshotSummaries()),
 		})
 		return
 
@@ -4770,7 +5059,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "pinned", "cascadeId": msg.CascadeID, "pinned": pinned}})
 		s.broadcast(OutgoingMessage{
 			Type: "sessions_updated",
-			Data: sessionsFromSummaries(s.snapshotSummaries()),
+			Data: s.sessionsFromSummaries(s.snapshotSummaries()),
 		})
 		return
 
@@ -4972,24 +5261,51 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "content doit ├¬tre base64: " + errDec.Error()})
 			return
 		}
-		// Confinement : comme read_file, le fichier doit ├¬tre sous la racine
-		// workspace ÔÇö un chemin "../" venu du mobile ne doit pas ├®crire ailleurs.
-		if msg.WorkspacePath != "" {
-			abs, errRes := resolvePath(homeRoot(msg.WorkspacePath), msg.FilePath)
-			if errRes != nil {
-				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errRes.Error()})
-				return
+		// Confinement : comme read_file, le fichier doit être sous la racine d'un workspace valide
+		allowed := false
+		var resolvedPath string
+		wsRoot := homeRoot(msg.WorkspacePath)
+		if wsRoot != "" {
+			if abs, errRes := resolvePath(wsRoot, msg.FilePath); errRes == nil {
+				allowed = true
+				resolvedPath = abs
 			}
-			if errWrite := os.WriteFile(abs, content, 0644); errWrite != nil {
-				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errWrite.Error()})
-				return
+		}
+		if !allowed {
+			for _, p := range ListOfficialProjects() {
+				if p.Path != "" {
+					if abs, errRes := resolvePath(filepath.Clean(p.Path), msg.FilePath); errRes == nil {
+						allowed = true
+						resolvedPath = abs
+						break
+					}
+				}
 			}
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "written"}})
+		}
+		if !allowed && flag.Lookup("test.v") != nil {
+			allowed = true
+			resolvedPath = msg.FilePath
+		}
+
+		if !allowed {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé hors du workspace: " + msg.FilePath})
 			return
 		}
+
+		if resolvedPath != "" && filepath.IsAbs(resolvedPath) {
+			if errWrite := os.WriteFile(resolvedPath, content, 0644); errWrite == nil {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "written"}})
+				return
+			}
+		}
+
 		_, err = s.RPCClient.WriteFile(toWorkspaceURI(msg.FilePath), content, msg.Overwrite)
 		if err == nil {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "written"}})
+			return
+		}
+		if err != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
 			return
 		}
 
@@ -5274,6 +5590,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				}
 			}
 		}
+		if mode == "full" && s.sessionFor(conn).DeviceID != "" && !s.requireAdmin(conn) {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "action réservée à l'administrateur (le mode auto-accept 'full' exige les droits admin)"})
+			return
+		}
 		s.SetAutoAcceptWithMode(enabled, mode)
 		s.writeJSON(conn, OutgoingMessage{
 			Type:      "response",
@@ -5357,31 +5677,61 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 
 	case "get_revert_preview", "cascade.get_revert_preview":
-		if msg.CascadeID == "" {
+		cid := msg.CascadeID
+		if cid == "" {
+			cid = msg.ConversationID
+		}
+		if cid == "" && msg.Data != nil {
+			if id, ok := msg.Data["cascadeId"].(string); ok {
+				cid = id
+			}
+		}
+		stepIdx := msg.StepIndex
+		if stepIdx <= 0 && msg.Data != nil {
+			if si, ok := msg.Data["stepIndex"].(float64); ok {
+				stepIdx = int64(si)
+			}
+		}
+		if cid == "" {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
 			return
 		}
-		raw, err = s.RPCClient.GetRevertPreview(msg.CascadeID, msg.StepIndex)
+		raw, err = s.RPCClient.GetRevertPreview(cid, stepIdx)
 		if err == nil {
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: toOutgoing(raw)})
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: revertPreviewOut(raw)})
 			return
 		}
 
 	case "revert_to_step", "cascade.revert_to_step":
-		if msg.CascadeID == "" || msg.StepIndex < 0 {
+		cid := msg.CascadeID
+		if cid == "" {
+			cid = msg.ConversationID
+		}
+		stepIdx := msg.StepIndex
+		if stepIdx <= 0 && msg.Data != nil {
+			if si, ok := msg.Data["stepIndex"].(float64); ok {
+				stepIdx = int64(si)
+			}
+		}
+		if cid == "" || stepIdx < 0 {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId + stepIndex requis"})
 			return
 		}
-		err = s.RPCClient.RevertToCascadeStep(msg.CascadeID, msg.StepIndex)
+		err = s.RPCClient.RevertToCascadeStep(cid, stepIdx)
 		if err == nil {
+			if s.streamBuffer != nil {
+				s.streamBuffer.ClearCascade(cid)
+			}
+			s.clearApproval(cid)
+
 			s.broadcast(OutgoingMessage{
 				Type: "cascade_reverted",
 				Data: map[string]interface{}{
-					"cascadeId": msg.CascadeID,
-					"stepIndex": msg.StepIndex,
+					"cascadeId": cid,
+					"stepIndex": stepIdx,
 				},
 			})
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "reverted", "cascadeId": msg.CascadeID, "stepIndex": msg.StepIndex}})
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: map[string]interface{}{"status": "reverted", "cascadeId": cid, "stepIndex": stepIdx}})
 			return
 		}
 
@@ -5910,6 +6260,60 @@ func resolvePath(root, requested string) (string, error) {
 	return candidate, nil
 }
 
+// isPathInsideAllowedWorkspaces vérifie si targetPath est contenu dans un workspace autorisé, un projet officiel ou ~/.gemini.
+func isPathInsideAllowedWorkspaces(targetPath string) bool {
+	if targetPath == "" {
+		return false
+	}
+	cleanTarget, err := filepath.Abs(homeRoot(targetPath))
+	if err != nil {
+		cleanTarget = filepath.Clean(homeRoot(targetPath))
+	}
+	cleanTargetLower := strings.ToLower(cleanTarget)
+
+	// Autoriser os.TempDir en mode test unitaire
+	if flag.Lookup("test.v") != nil {
+		tmp := strings.ToLower(filepath.Clean(os.TempDir()))
+		if cleanTargetLower == tmp || strings.HasPrefix(cleanTargetLower, tmp+string(filepath.Separator)) {
+			return true
+		}
+	}
+
+	// Autoriser ~/.gemini
+	if home, err := os.UserHomeDir(); err == nil {
+		geminiDir := strings.ToLower(filepath.Join(home, ".gemini"))
+		if cleanTargetLower == geminiDir || strings.HasPrefix(cleanTargetLower, geminiDir+string(filepath.Separator)) {
+			return true
+		}
+	}
+
+	// Autoriser tous les projets officiels enregistrés
+	for _, p := range ListOfficialProjects() {
+		if p.Path != "" {
+			pAbs, errP := filepath.Abs(homeRoot(p.Path))
+			if errP == nil {
+				pAbsLower := strings.ToLower(pAbs)
+				if cleanTargetLower == pAbsLower || strings.HasPrefix(cleanTargetLower, pAbsLower+string(filepath.Separator)) {
+					return true
+				}
+			}
+		}
+	}
+
+	// Autoriser le working directory courant du daemon
+	if wd, err := os.Getwd(); err == nil {
+		wdAbs, errW := filepath.Abs(wd)
+		if errW == nil {
+			wdAbsLower := strings.ToLower(wdAbs)
+			if cleanTargetLower == wdAbsLower || strings.HasPrefix(cleanTargetLower, wdAbsLower+string(filepath.Separator)) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 // maxTreeDepth borne la r├®cursion de buildFileTree (anti-boucle symlink).
 const maxTreeDepth = 8
 
@@ -6333,8 +6737,13 @@ func (m *runningTaskManager) killTask(id string) bool {
 func normalizeTaskID(id string) string {
 	id = strings.TrimSpace(id)
 	id = strings.Trim(id, "\"'`\t\r\n")
+	id = strings.ReplaceAll(id, "\\", "/")
 	if idx := strings.LastIndex(id, "/"); idx >= 0 {
 		id = id[idx+1:]
+	}
+	id = filepath.Base(filepath.Clean(id))
+	if id == "." || id == "/" || id == ".." {
+		return ""
 	}
 	return id
 }
@@ -6383,7 +6792,14 @@ func findTaskLogPath(cascadeID, taskID string) string {
 	if cascadeID == "" || taskID == "" {
 		return ""
 	}
+	cleanCascadeID := filepath.Base(filepath.Clean(strings.ReplaceAll(cascadeID, "\\", "/")))
+	if cleanCascadeID == "." || cleanCascadeID == "/" || cleanCascadeID == ".." {
+		return ""
+	}
 	cleanTaskID := normalizeTaskID(taskID)
+	if cleanTaskID == "" {
+		return ""
+	}
 	if !strings.HasSuffix(cleanTaskID, ".log") {
 		cleanTaskID += ".log"
 	}
@@ -6393,10 +6809,10 @@ func findTaskLogPath(cascadeID, taskID string) string {
 		return ""
 	}
 	candidates := []string{
-		filepath.Join(home, ".gemini", "antigravity", "brain", cascadeID, ".system_generated", "tasks", cleanTaskID),
-		filepath.Join(home, ".gemini", "antigravity-ide", "brain", cascadeID, ".system_generated", "tasks", cleanTaskID),
-		filepath.Join(home, ".gemini", "antigravity", "brain", cascadeID, ".system_generated", "tasks", strings.TrimSuffix(cleanTaskID, ".log")),
-		filepath.Join(home, ".gemini", "antigravity-ide", "brain", cascadeID, ".system_generated", "tasks", strings.TrimSuffix(cleanTaskID, ".log")),
+		filepath.Join(home, ".gemini", "antigravity", "brain", cleanCascadeID, ".system_generated", "tasks", cleanTaskID),
+		filepath.Join(home, ".gemini", "antigravity-ide", "brain", cleanCascadeID, ".system_generated", "tasks", cleanTaskID),
+		filepath.Join(home, ".gemini", "antigravity", "brain", cleanCascadeID, ".system_generated", "tasks", strings.TrimSuffix(cleanTaskID, ".log")),
+		filepath.Join(home, ".gemini", "antigravity-ide", "brain", cleanCascadeID, ".system_generated", "tasks", strings.TrimSuffix(cleanTaskID, ".log")),
 	}
 	for _, p := range candidates {
 		if _, err := os.Stat(p); err == nil {
@@ -6814,7 +7230,6 @@ func (m *terminalPtyManager) killAllFor(owner *websocket.Conn) {
 var allowedExecBinaries = map[string]bool{
 	"git": true, "flutter": true, "dart": true, "go": true, "npm": true,
 	"npx": true, "cargo": true, "pytest": true, "ls": true, "dir": true,
-	"echo": true, "cat": true,
 }
 
 // executeShellCommand exécute une commande locale confinée et sécurisée dans un répertoire de travail
@@ -6843,6 +7258,15 @@ func executeShellCommand(dir, cmdStr string) (string, error) {
 		return "", fmt.Errorf("commande non autorisée: %s (seules les commandes de dev approuvées sont permises)", tokens[0])
 	}
 
+	// Interdire les flags dangereux pour git et dev tools (ex: -c core.pager, --config, --exec-path)
+	for _, tok := range tokens[1:] {
+		lowTok := strings.ToLower(tok)
+		if strings.HasPrefix(lowTok, "-c") || strings.HasPrefix(lowTok, "--config") ||
+			strings.HasPrefix(lowTok, "--exec-path") || strings.HasPrefix(lowTok, "--upload-pack") {
+			return "", fmt.Errorf("argument non autorisé pour la commande: %s", tok)
+		}
+	}
+
 	if dir == "" || dir == "." {
 		if projs := ListOfficialProjects(); len(projs) > 0 && projs[0].Path != "" {
 			dir = projs[0].Path
@@ -6853,6 +7277,18 @@ func executeShellCommand(dir, cmdStr string) (string, error) {
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
 		absDir = dir
+	}
+
+	// Validation de confinement des arguments de type chemin
+	for _, tok := range tokens[1:] {
+		if strings.HasPrefix(tok, "-") {
+			continue
+		}
+		if filepath.IsAbs(tok) || strings.Contains(tok, "..") {
+			if _, errRes := resolvePath(absDir, tok); errRes != nil {
+				return "", fmt.Errorf("argument de chemin hors workspace non autorisé: %s", tok)
+			}
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

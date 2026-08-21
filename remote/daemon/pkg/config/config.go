@@ -21,6 +21,7 @@ type DaemonConfig struct {
 	QuotaPollInterval    time.Duration `json:"quota_poll_interval"`
 	ApprovalTimeout      time.Duration `json:"approval_timeout"`
 	DiscoveryPort        int           `json:"discovery_port"`
+	AllowRemoteTerminal  bool          `json:"allow_remote_terminal"`
 }
 
 // LoadConfig charge la configuration en appliquant la hiérarchie :
@@ -40,6 +41,7 @@ func LoadConfig() *DaemonConfig {
 		QuotaPollInterval:    getEnvDuration("AG_QUOTA_INTERVAL", 60*time.Second),
 		ApprovalTimeout:      getEnvDuration("AG_APPROVAL_TIMEOUT", 5*time.Minute),
 		DiscoveryPort:        getEnvInt("AG_DISCOVERY_PORT", 41234),
+		AllowRemoteTerminal:  getEnvBool("AG_ALLOW_REMOTE_TERMINAL", false),
 	}
 
 	// Tentative de lecture d'un fichier de configuration local si présent
@@ -89,3 +91,13 @@ func getEnvDuration(key string, fallback time.Duration) time.Duration {
 	}
 	return fallback
 }
+
+func getEnvBool(key string, fallback bool) bool {
+	if val := os.Getenv(key); val != "" {
+		if b, err := strconv.ParseBool(val); err == nil {
+			return b
+		}
+	}
+	return fallback
+}
+

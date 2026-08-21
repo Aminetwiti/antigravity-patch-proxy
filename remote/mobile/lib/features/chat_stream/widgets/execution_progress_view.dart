@@ -93,11 +93,13 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
   int _secondsElapsed = 0;
   Timer? _timer;
   late AnimationController _pulseAnim;
-  bool _showAllSteps = true;
+  bool _showAllSteps = false;
+  late bool _isExpanded;
 
   @override
   void initState() {
     super.initState();
+    _isExpanded = widget.initiallyExpanded || widget.isStreaming;
     _pulseAnim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
@@ -113,9 +115,14 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
     super.didUpdateWidget(oldWidget);
     if (widget.isStreaming && !oldWidget.isStreaming) {
       _secondsElapsed = 0;
+      _isExpanded = true;
       _startTimer();
     } else if (!widget.isStreaming && oldWidget.isStreaming) {
       _timer?.cancel();
+      // Lorsque l'agent termine son travail, replier automatiquement la réflexion
+      _isExpanded = widget.initiallyExpanded;
+    } else if (widget.initiallyExpanded != oldWidget.initiallyExpanded) {
+      _isExpanded = widget.initiallyExpanded;
     }
   }
 
@@ -563,57 +570,68 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
       ));
     }
 
-    return _groupConsecutiveToolSteps(items);
+    return _groupExplorationSteps(items);
   }
 
-  List<ExecutionStepItem> _groupConsecutiveToolSteps(List<ExecutionStepItem> source) {
-    if (source.length < 2) return source;
+  List<ExecutionStepItem> _groupExplorationSteps(List<ExecutionStepItem> source) {
+    if (source.isEmpty) return source;
 
     final result = <ExecutionStepItem>[];
-    final currentToolGroup = <ExecutionStepItem>[];
+    final explorationGroup = <ExecutionStepItem>[];
 
-    bool isToolStep(ExecutionStepType type) {
-      return type == ExecutionStepType.command ||
-          type == ExecutionStepType.fileEdit ||
-          type == ExecutionStepType.fileAnalysis ||
+    bool isExplorationStep(ExecutionStepType type) {
+      return type == ExecutionStepType.fileAnalysis ||
           type == ExecutionStepType.search ||
           type == ExecutionStepType.exploredGroup;
     }
 
-    void flushGroup() {
-      if (currentToolGroup.isEmpty) return;
-      if (currentToolGroup.length >= 2) {
-        final counts = <String, int>{};
-        for (final item in currentToolGroup) {
-          final label = item.action.isNotEmpty ? item.action : item.type.name;
-          counts[label] = (counts[label] ?? 0) + 1;
-        }
-        final summary = counts.entries
-            .map((e) => e.value > 1 ? '${e.value}× ${e.key}' : e.key)
-            .join(' · ');
+    void flushExploration(bool isLastGroup) {
+      if (explorationGroup.isEmpty) return;
 
-        result.add(ExecutionStepItem(
-          type: ExecutionStepType.processingGroup,
-          action: 'Tools',
-          title: '${currentToolGroup.length} tools executed ($summary)',
-          subItems: List.from(currentToolGroup),
-          isExpandable: true,
-        ));
-      } else {
-        result.addAll(currentToolGroup);
+      int fileCount = 0;
+      int searchCount = 0;
+      for (final item in explorationGroup) {
+        if (item.type == ExecutionStepType.search) {
+          searchCount++;
+        } else {
+          fileCount++;
+        }
       }
-      currentToolGroup.clear();
+
+      final parts = <String>[];
+      if (fileCount > 0) {
+        parts.add(fileCount == 1 ? '1 file' : '$fileCount files');
+      }
+      if (searchCount > 0) {
+        parts.add(searchCount == 1 ? '1 search' : '$searchCount searches');
+      }
+      final title = parts.join(', ');
+
+      final bool isRunning = widget.isStreaming && isLastGroup;
+      final action = isRunning ? 'Exploring' : 'Explored';
+
+      result.add(ExecutionStepItem(
+        type: ExecutionStepType.exploredGroup,
+        action: action,
+        title: title.isNotEmpty ? title : 'files',
+        subItems: List.from(explorationGroup),
+        isExpandable: true,
+        isRunning: isRunning,
+      ));
+
+      explorationGroup.clear();
     }
 
-    for (final item in source) {
-      if (isToolStep(item.type)) {
-        currentToolGroup.add(item);
+    for (int i = 0; i < source.length; i++) {
+      final item = source[i];
+      if (isExplorationStep(item.type)) {
+        explorationGroup.add(item);
       } else {
-        flushGroup();
+        flushExploration(false);
         result.add(item);
       }
     }
-    flushGroup();
+    flushExploration(true);
 
     return result;
   }
@@ -770,6 +788,10 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
       return const SizedBox.shrink();
     }
 
+    if (!widget.isStreaming && !_isExpanded) {
+      return _buildCollapsedSummary(steps, scheme, isDark);
+    }
+
     final showAll = _showAllSteps || widget.initiallyExpanded;
     final displaySteps = (!widget.isStreaming && steps.length > 8 && !showAll)
         ? steps.take(6).toList()
@@ -782,14 +804,52 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
         s.type == ExecutionStepType.workedDuration);
 
     return RepaintBoundary(
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
+      child: AnimatedSize(
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.fastOutSlowIn,
+        alignment: Alignment.topLeft,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
             if (widget.isStreaming)
-              _buildLiveAgentHeader(scheme, isDark),
+              _buildLiveAgentHeader(scheme, isDark)
+            else
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: InkWell(
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    setState(() => _isExpanded = false);
+                    widget.onToggleExpand?.call();
+                  },
+                  borderRadius: BorderRadius.circular(4),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 3),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _getMasterTitle(steps),
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w500,
+                            color: isDark ? const Color(0xFF9E9FA8) : scheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(
+                          Icons.keyboard_arrow_down_rounded,
+                          size: 15,
+                          color: isDark ? const Color(0xFF8B8D98) : scheme.onSurfaceVariant,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             for (int i = 0; i < displaySteps.length; i++)
               _buildStepRow(displaySteps[i], i, scheme, isDark, isFirstThought: i == firstThoughtIndex),
             if (widget.isStreaming)
@@ -853,6 +913,58 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
                 ),
               ),
           ],
+        ),
+      ),
+    ),
+  );
+}
+
+  String _getMasterTitle(List<ExecutionStepItem> steps) {
+    for (final s in steps) {
+      if (s.type == ExecutionStepType.workedDuration) {
+        return '${s.action} ${s.title}';
+      }
+    }
+    return _secondsElapsed > 0
+        ? 'Worked for ${_formatDuration(_secondsElapsed)}'
+        : 'Worked for 2m';
+  }
+
+  Widget _buildCollapsedSummary(List<ExecutionStepItem> steps, ColorScheme scheme, bool isDark) {
+    final title = _getMasterTitle(steps);
+
+    return RepaintBoundary(
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        child: InkWell(
+          onTap: () {
+            HapticFeedback.selectionClick();
+            setState(() => _isExpanded = true);
+            widget.onToggleExpand?.call();
+          },
+          borderRadius: BorderRadius.circular(6),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 2),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w500,
+                    color: isDark ? const Color(0xFF9E9FA8) : scheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 15,
+                  color: isDark ? const Color(0xFF71717A) : scheme.outline,
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -963,7 +1075,9 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
       );
     }
 
+    final isExploredGroup = item.type == ExecutionStepType.exploredGroup;
     final isExpanded = _expandedIndices.contains(index) ||
+        (isExploredGroup && item.isRunning) ||
         (widget.initiallyExpanded &&
             (item.type == ExecutionStepType.thought ||
              item.type == ExecutionStepType.timer ||
@@ -1207,93 +1321,129 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
           ),
 
           // Sub-items for Explored Group (Indented Children)
-          if (isExpanded && item.subItems != null && item.subItems!.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(left: 16, top: 2, bottom: 2),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (final sub in item.subItems!)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            sub.action,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Color(0xFF9E9FA8),
-                              fontWeight: FontWeight.w400,
+          AnimatedSize(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.fastOutSlowIn,
+            alignment: Alignment.topLeft,
+            child: (isExpanded && item.subItems != null && item.subItems!.isNotEmpty)
+                ? Padding(
+                    padding: const EdgeInsets.only(left: 14, top: 2, bottom: 2),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final sub in item.subItems!)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  sub.action,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Color(0xFF9E9FA8),
+                                    fontWeight: FontWeight.w400,
+                                  ),
+                                ),
+                                const SizedBox(width: 5),
+                                if (sub.type == ExecutionStepType.search) ...[
+                                  Container(
+                                    margin: const EdgeInsets.only(right: 5),
+                                    width: 13,
+                                    height: 13,
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFF0D9488),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Center(
+                                      child: Icon(
+                                        Icons.search_rounded,
+                                        size: 8.5,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ] else if (sub.type == ExecutionStepType.fileAnalysis || sub.type == ExecutionStepType.fileEdit) ...[
+                                  Container(
+                                    margin: const EdgeInsets.only(right: 5),
+                                    width: 13,
+                                    height: 13,
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFF0284C7),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Center(
+                                      child: Icon(
+                                        Icons.description_rounded,
+                                        size: 8.5,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                                Flexible(
+                                  child: Text(
+                                    sub.title,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontFamily: (sub.type == ExecutionStepType.fileAnalysis || sub.type == ExecutionStepType.fileEdit)
+                                          ? 'monospace'
+                                          : null,
+                                      fontWeight: FontWeight.w500,
+                                      color: const Color(0xFFF4F4F5),
+                                    ),
+                                  ),
+                                ),
+                                if (sub.lineRange != null) ...[
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    sub.lineRange!,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontFamily: 'monospace',
+                                      color: Color(0xFF71717A),
+                                    ),
+                                  ),
+                                ],
+                                if (sub.diffAdded != null && sub.type == ExecutionStepType.search) ...[
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    sub.diffAdded!,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Color(0xFF71717A),
+                                    ),
+                                  ),
+                                ] else if (sub.diffAdded != null) ...[
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    sub.diffAdded!,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontFamily: 'monospace',
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF4ADE80),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    sub.diffRemoved ?? '-0',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontFamily: 'monospace',
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFFF87171),
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
-                          const SizedBox(width: 5),
-                          Container(
-                            margin: const EdgeInsets.only(right: 5),
-                            width: 13,
-                            height: 13,
-                            decoration: const BoxDecoration(
-                              color: Color(0xFF0284C7),
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Center(
-                              child: Icon(
-                                Icons.description_rounded,
-                                size: 8.5,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                          Flexible(
-                            child: Text(
-                              sub.title,
-                              style: const TextStyle(
-                                fontSize: 12,
-                                fontFamily: 'monospace',
-                                fontWeight: FontWeight.w500,
-                                color: Color(0xFFF4F4F5),
-                              ),
-                            ),
-                          ),
-                          if (sub.lineRange != null) ...[
-                            const SizedBox(width: 5),
-                            Text(
-                              sub.lineRange!,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontFamily: 'monospace',
-                                color: Color(0xFF71717A),
-                              ),
-                            ),
-                          ],
-                          if (sub.diffAdded != null) ...[
-                            const SizedBox(width: 6),
-                            Text(
-                              sub.diffAdded!,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontFamily: 'monospace',
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF4ADE80),
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              sub.diffRemoved ?? '-0',
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontFamily: 'monospace',
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFFF87171),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
+                      ],
                     ),
-                ],
-              ),
-            ),
+                  )
+                : const SizedBox.shrink(),
+          ),
 
           // Inset Box for Timers & Wait Events (e.g. "Check flutter test results" + "Status: Fired")
           if (isExpanded && item.type == ExecutionStepType.timer)
@@ -1378,13 +1528,14 @@ class _ExecutionProgressViewState extends State<ExecutionProgressView>
                 children: [
                   if (item.consolePrompt != null && item.consolePrompt!.isNotEmpty)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Text(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: SelectableText(
                         item.consolePrompt!,
                         style: const TextStyle(
                           fontSize: 11,
                           fontFamily: 'monospace',
                           color: Color(0xFF71717A),
+                          height: 1.35,
                         ),
                       ),
                     ),

@@ -99,7 +99,9 @@ Task 424 finished
               messageId: 'msg-test-done',
               thoughtText: rawThought,
               isStreaming: false,
+              initiallyExpanded: true,
             ),
+
           ),
         ),
       );

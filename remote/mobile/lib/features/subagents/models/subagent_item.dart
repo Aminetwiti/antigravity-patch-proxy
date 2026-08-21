@@ -9,6 +9,7 @@ class SubagentItem {
   final int? createdAt;
   final int? durationSeconds;
   final String? workedFor;
+  final bool inheritCustomizations;
 
   const SubagentItem({
     required this.id,
@@ -21,6 +22,7 @@ class SubagentItem {
     this.createdAt,
     this.durationSeconds,
     this.workedFor,
+    this.inheritCustomizations = true,
   });
 
   String get displayWorkedFor {
@@ -36,6 +38,9 @@ class SubagentItem {
   factory SubagentItem.fromJson(Map<String, dynamic> json) {
     final dur = json['durationSeconds'] as int? ?? json['duration'] as int?;
     final wf = json['workedFor'] as String?;
+    final inherit = json['inheritCustomizations'] as bool? ??
+        json['inherit_customizations'] as bool? ??
+        true;
     return SubagentItem(
       id: json['conversationId'] as String? ?? json['id'] as String? ?? '',
       role: json['role'] as String? ?? json['name'] as String? ?? 'Subagent',
@@ -47,6 +52,7 @@ class SubagentItem {
       createdAt: json['createdAt'] as int?,
       durationSeconds: dur,
       workedFor: wf,
+      inheritCustomizations: inherit,
     );
   }
 
@@ -55,6 +61,7 @@ class SubagentItem {
       'id': id,
       'role': role,
       'status': status,
+      'inheritCustomizations': inheritCustomizations,
       if (stateDetail != null) 'stateDetail': stateDetail,
       if (typeName != null) 'typeName': typeName,
       if (prompt != null) 'prompt': prompt,
@@ -76,6 +83,7 @@ class SubagentItem {
     int? createdAt,
     int? durationSeconds,
     String? workedFor,
+    bool? inheritCustomizations,
   }) {
     return SubagentItem(
       id: id ?? this.id,
@@ -88,6 +96,7 @@ class SubagentItem {
       createdAt: createdAt ?? this.createdAt,
       durationSeconds: durationSeconds ?? this.durationSeconds,
       workedFor: workedFor ?? this.workedFor,
+      inheritCustomizations: inheritCustomizations ?? this.inheritCustomizations,
     );
   }
 }

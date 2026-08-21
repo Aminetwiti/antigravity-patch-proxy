@@ -288,6 +288,7 @@ class _RevertStepPreviewDialogState extends State<RevertStepPreviewDialog> {
                     ),
                   ),
                   ElevatedButton.icon(
+                    autofocus: true,
                     onPressed: _isReverting ? null : _handleConfirmRevert,
                     icon: _isReverting
                         ? const SizedBox(

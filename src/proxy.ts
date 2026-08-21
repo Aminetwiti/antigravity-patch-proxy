@@ -1306,12 +1306,19 @@ function isAllowedOrigin(req: http.IncomingMessage): boolean {
   if (!origin) return true;
 
   // 3. Validate Origin/Referer header against known trusted local and Google origins
-  return (
-    origin.startsWith('https://127.0.0.1') ||
-    origin.startsWith('http://127.0.0.1') ||
-    origin.startsWith('http://localhost') ||
-    origin.includes('googleapis.com')
-  );
+  try {
+    const parsed = new URL(origin);
+    const h = parsed.hostname.toLowerCase();
+    return (
+      h === '127.0.0.1' ||
+      h === 'localhost' ||
+      h === '::1' ||
+      h === 'googleapis.com' ||
+      h.endsWith('.googleapis.com')
+    );
+  } catch {
+    return false;
+  }
 }
 
 function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {

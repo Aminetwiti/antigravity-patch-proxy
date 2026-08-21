@@ -48,6 +48,7 @@ class _AddCommentDialogState extends State<AddCommentDialog> {
       filePath: widget.filePath,
       snippet: widget.selectedSnippet,
       commentText: text,
+      lineNumber: widget.lineNumber,
     );
 
     widget.onCommentAdded(comment);

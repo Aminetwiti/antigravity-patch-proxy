@@ -1,5 +1,6 @@
 import { safeStorage } from 'electron';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import log from 'electron-log';
 
 /**
@@ -151,14 +152,23 @@ export function decryptModels(models: ModelWithKey[] | null): ModelWithKey[] {
 
 export function exportAgBoxPackage(payload: unknown, passphrase = 'default-secret'): string {
   const jsonStr = JSON.stringify(payload);
-  const base64Str = Buffer.from(jsonStr, 'utf-8').toString('base64');
+  const salt = crypto.randomBytes(16);
+  const key = crypto.pbkdf2Sync(passphrase, salt, 100000, 32, 'sha256');
+  const iv = crypto.randomBytes(12);
+
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(jsonStr, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+
   const boxed = {
-    version: '1.0',
+    version: '2.0',
     format: 'agbox',
     timestamp: Date.now(),
     encrypted: true,
-    passphraseHash: Buffer.from(passphrase).toString('base64'),
-    data: base64Str,
+    salt: salt.toString('hex'),
+    iv: iv.toString('hex'),
+    tag: tag.toString('hex'),
+    data: encrypted.toString('base64'),
   };
   return Buffer.from(JSON.stringify(boxed), 'utf-8').toString('base64');
 }
@@ -170,6 +180,28 @@ export function importAgBoxPackage(base64Box: string, passphrase = 'default-secr
     if (!parsed || parsed.format !== 'agbox' || !parsed.data) {
       return { success: false, error: 'Invalid .agbox package format' };
     }
+
+    // Version 2.0: AES-256-GCM authenticated encryption
+    if (parsed.version === '2.0' && parsed.salt && parsed.iv && parsed.tag) {
+      try {
+        const salt = Buffer.from(parsed.salt, 'hex');
+        const iv = Buffer.from(parsed.iv, 'hex');
+        const tag = Buffer.from(parsed.tag, 'hex');
+        const encryptedData = Buffer.from(parsed.data, 'base64');
+
+        const key = crypto.pbkdf2Sync(passphrase, salt, 100000, 32, 'sha256');
+        const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+        decipher.setAuthTag(tag);
+
+        const decrypted = Buffer.concat([decipher.update(encryptedData), decipher.final()]);
+        const data = JSON.parse(decrypted.toString('utf8'));
+        return { success: true, data };
+      } catch (err: any) {
+        return { success: false, error: 'Déchiffrement échoué : mot de passe incorrect ou données corrompues' };
+      }
+    }
+
+    // Version 1.0 legacy fallback (Base64)
     const jsonStr = Buffer.from(parsed.data, 'base64').toString('utf-8');
     const data = JSON.parse(jsonStr);
     return { success: true, data };

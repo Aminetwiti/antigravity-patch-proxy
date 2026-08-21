@@ -1,4 +1,4 @@
-﻿package discovery
+package discovery
 
 import (
 	"bytes"
@@ -133,21 +133,30 @@ func TestPairingManager_HTTPRevoke(t *testing.T) {
 		t.Fatalf("Token doit ├¬tre valide apr├¿s pairing")
 	}
 
-	reqDel := httptest.NewRequest(http.MethodDelete, "/pair?deviceId=dev-1", nil)
+	reqDel := httptest.NewRequest(http.MethodDelete, "/pair?deviceId=dev-1&token="+token, nil)
 	rrDel := httptest.NewRecorder()
 	handler.ServeHTTP(rrDel, reqDel)
 	if rrDel.Code != http.StatusOK {
 		t.Fatalf("DELETE /pair statut %d != 200", rrDel.Code)
 	}
 	if !strings.Contains(rrDel.Body.String(), "revoked") {
-		t.Fatalf("R├®ponse DELETE = %s, attendu status revoked", rrDel.Body.String())
+		t.Fatalf("Réponse DELETE = %s, attendu status revoked", rrDel.Body.String())
 	}
 	if pm.ValidateToken(token) {
-		t.Fatalf("Token doit ├¬tre r├®voqu├® apr├¿s DELETE /pair")
+		t.Fatalf("Token doit être révoqué après DELETE /pair")
 	}
 
-	// DELETE sans deviceId ÔåÆ 400
-	reqBad := httptest.NewRequest(http.MethodDelete, "/pair", nil)
+	// DELETE sans deviceId → 400 (avec token valide pour tester le paramètre manquant)
+	// On crée une nouvelle session d'abord
+	_, _, _ = pm.VerifyPIN("127.0.0.1:9999", pm.GeneratePIN(), "dev-2")
+	tok2 := ""
+	for tok, s := range pm.sessions {
+		if s.DeviceID == "dev-2" {
+			tok2 = tok
+			break
+		}
+	}
+	reqBad := httptest.NewRequest(http.MethodDelete, "/pair?token="+tok2, nil)
 	rrBad := httptest.NewRecorder()
 	handler.ServeHTTP(rrBad, reqBad)
 	if rrBad.Code != http.StatusBadRequest {

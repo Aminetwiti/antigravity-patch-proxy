@@ -10,6 +10,8 @@ class AskQuestionChoiceCard extends StatefulWidget {
   final QuestionChoicePayload? payload;
   final AskQuestionChoiceRequest? request;
   final Function? onSubmit;
+  final VoidCallback? onDismiss;
+  final Function(String reason)? onReject;
   final String? submitButtonText;
 
   const AskQuestionChoiceCard({
@@ -17,6 +19,8 @@ class AskQuestionChoiceCard extends StatefulWidget {
     this.payload,
     this.request,
     this.onSubmit,
+    this.onDismiss,
+    this.onReject,
     this.submitButtonText,
   }) : assert(payload != null || request != null,
             'Either payload or request must be provided');

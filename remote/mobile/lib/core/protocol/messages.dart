@@ -12,6 +12,8 @@ class CascadeSession {
   final int stepCount;
   /// Indicateur d'activité non-consultée — identique au point bleu de l'IDE
   final bool hasUnread;
+  /// Session archivée — double garde si l'état Jetbox daemon est stale
+  final bool isArchived;
   /// Session épinglée
   final bool isPinned;
 
@@ -27,6 +29,7 @@ class CascadeSession {
     this.stepCount = 0,
     this.hasUnread = false,
     this.isPinned = false,
+    this.isArchived = false,
   });
 
   factory CascadeSession.fromJson(Map<String, dynamic> json) {
@@ -42,6 +45,7 @@ class CascadeSession {
       stepCount: (json['stepCount'] as num?)?.toInt() ?? 0,
       hasUnread: json['hasUnread'] == true,
       isPinned: json['isPinned'] == true || json['pinned'] == true,
+      isArchived: json['isArchived'] == true,
     );
   }
 
@@ -58,6 +62,7 @@ class CascadeSession {
 
   bool get isAvailable {
     if (id.isEmpty) return false;
+    if (isArchived) return false;
     final st = status.toUpperCase();
     if (st.contains('ARCHIV') ||
         st.contains('DELET') ||
@@ -85,7 +90,12 @@ class CascadeSession {
 
   bool get isRunning {
     final st = status.toUpperCase();
-    return st.contains('RUNNING') || st.contains('BUSY') || st.contains('STREAMING');
+    return st.contains('RUNNING') ||
+        st.contains('BUSY') ||
+        st.contains('STREAMING') ||
+        st.contains('TASK') ||
+        st.contains('EXECUTING') ||
+        st.contains('BACKGROUND');
   }
 
   bool get isBackgroundTask {
@@ -120,6 +130,7 @@ class CascadeSession {
     int? stepCount,
     bool? hasUnread,
     bool? isPinned,
+    bool? isArchived,
   }) {
     return CascadeSession(
       id: id ?? this.id,
@@ -133,6 +144,7 @@ class CascadeSession {
       stepCount: stepCount ?? this.stepCount,
       hasUnread: hasUnread ?? this.hasUnread,
       isPinned: isPinned ?? this.isPinned,
+      isArchived: isArchived ?? this.isArchived,
     );
   }
 
@@ -188,11 +200,63 @@ class ProjectItem {
       };
 }
 
+/// Type de segment pour le flux chronologique entrelacé d'Antigravity 2.0.
+enum ChatSegmentType {
+  thought, // Pensées, outils, diffs, minuteurs
+  text,    // Paragraphe de texte émis par l'assistant
+}
+
+/// Segment unitaire dans une bulle de message pour le rendu chronologique séquentiel.
+class ChatSegment {
+  final ChatSegmentType type;
+  final String content;
+  final String? title;
+  final bool isRunning;
+
+  const ChatSegment({
+    required this.type,
+    required this.content,
+    this.title,
+    this.isRunning = false,
+  });
+
+  ChatSegment copyWith({
+    ChatSegmentType? type,
+    String? content,
+    String? title,
+    bool? isRunning,
+  }) {
+    return ChatSegment(
+      type: type ?? this.type,
+      content: content ?? this.content,
+      title: title ?? this.title,
+      isRunning: isRunning ?? this.isRunning,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'type': type.name,
+        'content': content,
+        if (title != null) 'title': title,
+        if (isRunning) 'isRunning': isRunning,
+      };
+
+  factory ChatSegment.fromJson(Map<String, dynamic> json) => ChatSegment(
+        type: json['type'] == 'thought'
+            ? ChatSegmentType.thought
+            : ChatSegmentType.text,
+        content: json['content']?.toString() ?? '',
+        title: json['title']?.toString(),
+        isRunning: json['isRunning'] == true,
+      );
+}
+
 class ChatMessage {
   final String id;
   final String sender; // 'user' or 'assistant'
   final String text;
   final String? thought;
+  final List<ChatSegment> segments;
   final String timestamp;
   final bool isStreaming;
   final bool isError;
@@ -211,6 +275,7 @@ class ChatMessage {
     required this.sender,
     required this.text,
     this.thought,
+    this.segments = const [],
     required this.timestamp,
     this.isStreaming = false,
     this.isError = false,
@@ -225,6 +290,7 @@ class ChatMessage {
   ChatMessage copyWith({
     String? text,
     String? thought,
+    List<ChatSegment>? segments,
     bool? isStreaming,
     bool? isError,
     bool? isQueued,
@@ -239,6 +305,7 @@ class ChatMessage {
       sender: sender,
       text: text ?? this.text,
       thought: thought ?? this.thought,
+      segments: segments ?? this.segments,
       timestamp: timestamp,
       isStreaming: isStreaming ?? this.isStreaming,
       isError: isError ?? this.isError,
@@ -256,6 +323,8 @@ class ChatMessage {
         'sender': sender,
         'text': text,
         if (thought != null) 'thought': thought,
+        if (segments.isNotEmpty)
+          'segments': segments.map((s) => s.toJson()).toList(),
         'timestamp': timestamp,
         'isStreaming': isStreaming,
         'isError': isError,
@@ -267,21 +336,31 @@ class ChatMessage {
         'deletions': deletions,
       };
 
-  factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
-        id: json['id']?.toString() ?? '',
-        sender: json['sender']?.toString() ?? 'assistant',
-        text: json['text']?.toString() ?? '',
-        thought: json['thought']?.toString(),
-        timestamp: json['timestamp']?.toString() ?? '',
-        isStreaming: json['isStreaming'] == true,
-        isError: json['isError'] == true,
-        isQueued: json['isQueued'] == true,
-        modelLabel: json['modelLabel']?.toString(),
-        stepIndex: (json['stepIndex'] as num?)?.toInt(),
-        filesChanged: (json['filesChanged'] as List?)?.map((e) => e.toString()).toList() ?? const [],
-        additions: json['additions'] is int ? json['additions'] as int : int.tryParse(json['additions']?.toString() ?? '0') ?? 0,
-        deletions: json['deletions'] is int ? json['deletions'] as int : int.tryParse(json['deletions']?.toString() ?? '0') ?? 0,
-      );
+  factory ChatMessage.fromJson(Map<String, dynamic> json) {
+    List<ChatSegment> segs = const [];
+    if (json['segments'] is List) {
+      segs = (json['segments'] as List)
+          .whereType<Map>()
+          .map((m) => ChatSegment.fromJson(Map<String, dynamic>.from(m)))
+          .toList();
+    }
+    return ChatMessage(
+      id: json['id']?.toString() ?? '',
+      sender: json['sender']?.toString() ?? 'assistant',
+      text: json['text']?.toString() ?? '',
+      thought: json['thought']?.toString(),
+      segments: segs,
+      timestamp: json['timestamp']?.toString() ?? '',
+      isStreaming: json['isStreaming'] == true,
+      isError: json['isError'] == true,
+      isQueued: json['isQueued'] == true,
+      modelLabel: json['modelLabel']?.toString(),
+      stepIndex: (json['stepIndex'] as num?)?.toInt(),
+      filesChanged: (json['filesChanged'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+      additions: json['additions'] is int ? json['additions'] as int : int.tryParse(json['additions']?.toString() ?? '0') ?? 0,
+      deletions: json['deletions'] is int ? json['deletions'] as int : int.tryParse(json['deletions']?.toString() ?? '0') ?? 0,
+    );
+  }
 }
 
 enum ToolDecision { allow, deny }

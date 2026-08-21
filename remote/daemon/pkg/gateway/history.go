@@ -18,16 +18,23 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// HistorySegment represents an interleaved part of an assistant message turn.
+type HistorySegment struct {
+	Type    string `json:"type"` // "thought" or "text"
+	Content string `json:"content"`
+}
+
 // HistoryMessage represents a parsed message to be sent to the mobile app
 type HistoryMessage struct {
-	ID          string `json:"id"`
-	Sender      string `json:"sender"`
-	Text        string `json:"text"`
-	Thought     string `json:"thought,omitempty"`
-	Timestamp   string `json:"timestamp"`
-	IsStreaming bool   `json:"isStreaming"`
-	IsError     bool   `json:"isError"`
-	StepIndex   int64  `json:"stepIndex,omitempty"`
+	ID          string           `json:"id"`
+	Sender      string           `json:"sender"`
+	Text        string           `json:"text"`
+	Thought     string           `json:"thought,omitempty"`
+	Segments    []HistorySegment `json:"segments,omitempty"`
+	Timestamp   string           `json:"timestamp"`
+	IsStreaming bool             `json:"isStreaming"`
+	IsError     bool             `json:"isError"`
+	StepIndex   int64            `json:"stepIndex,omitempty"`
 }
 
 var (
@@ -73,6 +80,8 @@ func normalizeWorkspace(uri string) string {
 	uri = strings.TrimPrefix(uri, "file:///")
 	uri = strings.TrimPrefix(uri, "file://")
 	uri = strings.ReplaceAll(uri, `\`, `/`)
+	uri = strings.TrimPrefix(uri, "//?/")
+	uri = strings.TrimPrefix(uri, "//./")
 	uri = strings.TrimRight(uri, "/")
 	return uri
 }
@@ -168,9 +177,33 @@ func renameSessionOnDisk(home, cascadeID, title string) error {
 }
 
 // pinSessionOnDisk persiste le statut épinglé dans annotations/<cascadeID>.pbtxt
+// cascadeExistsOnDisk vérifie si une session/cascade existe physiquement sur le disque.
+func cascadeExistsOnDisk(home, cascadeID string) bool {
+	if cascadeID == "" {
+		return false
+	}
+	subDir := resolveGeminiSubDir(home, cascadeID)
+	brainDir := filepath.Join(home, ".gemini", subDir, "brain", cascadeID)
+	if fi, err := os.Stat(brainDir); err == nil && fi.IsDir() {
+		return true
+	}
+	convDir := filepath.Join(home, ".gemini", subDir, "conversations", cascadeID)
+	if fi, err := os.Stat(convDir); err == nil && fi.IsDir() {
+		return true
+	}
+	annoPath := filepath.Join(home, ".gemini", subDir, "annotations", cascadeID+".pbtxt")
+	if _, err := os.Stat(annoPath); err == nil {
+		return true
+	}
+	return false
+}
+
 func pinSessionOnDisk(home, cascadeID string, pinned bool) error {
 	if cascadeID == "" {
 		return fmt.Errorf("cascadeId requis")
+	}
+	if !cascadeExistsOnDisk(home, cascadeID) {
+		return fmt.Errorf("conversation introuvable sur le disque (impossible d'épingler)")
 	}
 	annoDir := filepath.Join(home, ".gemini", resolveGeminiSubDir(home, cascadeID), "annotations")
 	_ = os.MkdirAll(annoDir, 0o755)
@@ -207,6 +240,9 @@ func pinSessionOnDisk(home, cascadeID string, pinned bool) error {
 func archiveSessionOnDisk(home, cascadeID string, archived bool) error {
 	if cascadeID == "" {
 		return fmt.Errorf("cascadeId requis")
+	}
+	if !cascadeExistsOnDisk(home, cascadeID) {
+		return fmt.Errorf("conversation introuvable sur le disque (impossible d'archiver)")
 	}
 	annoDir := filepath.Join(home, ".gemini", resolveGeminiSubDir(home, cascadeID), "annotations")
 	_ = os.MkdirAll(annoDir, 0o755)
@@ -473,28 +509,17 @@ func ListLocalSessions() []map[string]interface{} {
 			}
 
 			cleanWs := normalizeWorkspace(workspacePath)
-			lowerWs := strings.ToLower(cleanWs)
 
 			// Si nous avons des projets officiels Antigravity 2.0, ne garder QUE les sessions
 			// rattachées à un projet officiel
-			matchedProjectName := ""
-			matchedProjectPath := workspacePath
-			matchedProjectID := ""
-			if len(officialProjs) > 0 {
-				for _, p := range officialProjs {
-					pPath := strings.ToLower(normalizeWorkspace(p.Path))
-					pName := strings.ToLower(p.Name)
-					if (pPath != "" && (strings.Contains(lowerWs, pPath) || strings.Contains(pPath, lowerWs))) ||
-						(pName != "" && (strings.Contains(lowerWs, pName) || strings.Contains(pName, lowerWs))) {
-						matchedProjectName = p.Name
-						matchedProjectPath = p.Path
-						matchedProjectID = p.ID
-						break
-					}
-				}
-				if matchedProjectName == "" {
-					continue
-				}
+			matchedProjectName, matchedProjectPath, matchedProjectID := matchOfficialProject(
+				"",
+				workspacePath,
+				cleanWs,
+				officialProjs,
+			)
+			if len(officialProjs) > 0 && matchedProjectName == "" {
+				continue
 			}
 
 			// Nettoyage du titre si c'est un chemin brut
@@ -517,6 +542,10 @@ func ListLocalSessions() []map[string]interface{} {
 				}
 			}
 
+			pinned := false
+			if home != "" {
+				pinned = isSessionPinned(home, cascadeID)
+			}
 			sMap := map[string]interface{}{
 				"cascadeId":     cascadeID,
 				"title":         title,
@@ -525,6 +554,8 @@ func ListLocalSessions() []map[string]interface{} {
 				"projectId":     matchedProjectID,
 				"status":        "idle",
 				"updatedAt":     modTime.Format(time.RFC3339),
+				"isPinned":      pinned,
+				"isArchived":    false,
 			}
 			items = append(items, sessionItem{data: sMap, updatedAt: modTime})
 		}
@@ -708,11 +739,14 @@ func extractSessionMetadata(transcriptPath, cascadeID string) (title string, wor
 				}
 			}
 
-			// 3. Titre depuis USER_INPUT
-			if title == "" && entry.Type == "USER_INPUT" && entry.Content != "" {
+			// 3. Titre depuis USER_INPUT (uniquement si aucun titre officiel ou valide n'a encore été assigné)
+			if !hasOfficialTitle && title == "" && entry.Type == "USER_INPUT" && entry.Content != "" {
 				clean := extractUserRequest(entry.Content)
 				if !strings.HasPrefix(clean, "<identity>") && !strings.HasPrefix(clean, "<user_information>") && clean != "" {
-					title = cleanPromptTitle(clean)
+					cand := cleanPromptTitle(clean)
+					if cand != "" && !isSubagentTitle(cand) {
+						title = cand
+					}
 				}
 			}
 		}
@@ -1166,8 +1200,9 @@ func parseTranscriptFullTurns(transcriptPath string) ([]HistoryMessage, error) {
 	scanner.Buffer(*hBuf, len(*hBuf))
 
 	var currentTurnUser *HistoryMessage
+	var currentTurnSegments []HistorySegment
 	var currentTurnSteps []string
-	var currentTurnAnswer string
+	var currentTurnAnswers []string
 	var currentTurnStart time.Time
 	var currentTurnEnd time.Time
 	var currentTurnLastIdx int
@@ -1178,10 +1213,10 @@ func parseTranscriptFullTurns(transcriptPath string) ([]HistoryMessage, error) {
 	lastCmdIdx := -1
 
 	flushAssistantTurn := func() {
-		if currentTurnUser == nil && len(currentTurnSteps) == 0 && currentTurnAnswer == "" {
+		if currentTurnUser == nil && len(currentTurnSteps) == 0 && len(currentTurnSegments) == 0 && len(currentTurnAnswers) == 0 {
 			return
 		}
-		if len(currentTurnSteps) == 0 && currentTurnAnswer == "" {
+		if len(currentTurnSteps) == 0 && len(currentTurnSegments) == 0 && len(currentTurnAnswers) == 0 {
 			return
 		}
 
@@ -1189,14 +1224,41 @@ func parseTranscriptFullTurns(transcriptPath string) ([]HistoryMessage, error) {
 		exploredStr := formatExploredHeader(turnFilesExplored, turnSearchesCount)
 
 		var allThoughtLines []string
-		if durStr != "" && (len(currentTurnSteps) > 0 || currentTurnAnswer != "") {
+		if durStr != "" && (len(currentTurnSteps) > 0 || len(currentTurnSegments) > 0 || len(currentTurnAnswers) > 0) {
 			allThoughtLines = append(allThoughtLines, durStr)
 		}
 		if exploredStr != "" {
 			allThoughtLines = append(allThoughtLines, exploredStr)
 		}
-		allThoughtLines = append(allThoughtLines, currentTurnSteps...)
+
+		// Flush trailing steps to segments if any
+		if len(currentTurnSteps) > 0 {
+			currentTurnSegments = append(currentTurnSegments, HistorySegment{
+				Type:    "thought",
+				Content: strings.Join(currentTurnSteps, "\n"),
+			})
+			allThoughtLines = append(allThoughtLines, currentTurnSteps...)
+			currentTurnSteps = nil
+		}
+
+		// Prepend duration and exploration headers to the very first thought segment if present
+		if len(currentTurnSegments) > 0 && durStr != "" {
+			if currentTurnSegments[0].Type == "thought" {
+				if !strings.HasPrefix(currentTurnSegments[0].Content, "Worked for") &&
+					!strings.HasPrefix(currentTurnSegments[0].Content, "Thought for") {
+					var headerParts []string
+					headerParts = append(headerParts, durStr)
+					if exploredStr != "" {
+						headerParts = append(headerParts, exploredStr)
+					}
+					headerParts = append(headerParts, currentTurnSegments[0].Content)
+					currentTurnSegments[0].Content = strings.Join(headerParts, "\n")
+				}
+			}
+		}
+
 		fullThought := strings.Join(allThoughtLines, "\n")
+		fullText := strings.Join(currentTurnAnswers, "\n\n")
 
 		msgID := fmt.Sprintf("h-%d", currentTurnLastIdx)
 		if currentTurnLastIdx == 0 && currentTurnUser != nil {
@@ -1212,14 +1274,16 @@ func parseTranscriptFullTurns(transcriptPath string) ([]HistoryMessage, error) {
 		messages = append(messages, HistoryMessage{
 			ID:        msgID,
 			Sender:    "assistant",
-			Text:      currentTurnAnswer,
+			Text:      strings.TrimSpace(fullText),
 			Thought:   strings.TrimSpace(fullThought),
+			Segments:  currentTurnSegments,
 			Timestamp: ts,
 			IsError:   currentTurnHasError,
 		})
 
+		currentTurnSegments = nil
 		currentTurnSteps = nil
-		currentTurnAnswer = ""
+		currentTurnAnswers = nil
 		currentTurnHasError = false
 		turnFilesExplored = make(map[string]bool)
 		turnSearchesCount = 0
@@ -1300,7 +1364,7 @@ func parseTranscriptFullTurns(transcriptPath string) ([]HistoryMessage, error) {
 			continue
 		}
 
-		// Thinking
+		// 1. Thinking
 		if entry.Thinking != "" {
 			thoughtClean := cleanRawContent(entry.Thinking)
 			if thoughtClean != "" {
@@ -1308,7 +1372,31 @@ func parseTranscriptFullTurns(transcriptPath string) ([]HistoryMessage, error) {
 			}
 		}
 
-		// Tool Calls
+		// 2. Assistant text / narrative
+		if entry.Type == "PLANNER_RESPONSE" {
+			if entry.Error != "" {
+				currentTurnHasError = true
+			}
+			if entry.Content != "" {
+				cleaned := cleanAssistantText(entry.Content)
+				if cleaned != "" {
+					if len(currentTurnSteps) > 0 {
+						currentTurnSegments = append(currentTurnSegments, HistorySegment{
+							Type:    "thought",
+							Content: strings.Join(currentTurnSteps, "\n"),
+						})
+						currentTurnSteps = nil
+					}
+					currentTurnSegments = append(currentTurnSegments, HistorySegment{
+						Type:    "text",
+						Content: cleaned,
+					})
+					currentTurnAnswers = append(currentTurnAnswers, cleaned)
+				}
+			}
+		}
+
+		// 3. Tool Calls
 		if len(entry.ToolCalls) > 0 {
 			var toolCalls []struct {
 				Name      string          `json:"name"`
@@ -1354,23 +1442,6 @@ func parseTranscriptFullTurns(transcriptPath string) ([]HistoryMessage, error) {
 						} else if strings.HasPrefix(stepStr, "Ran ") {
 							lastCmdIdx = len(currentTurnSteps) - 1
 						}
-					}
-				}
-			}
-		}
-
-		// Assistant text / narrative
-		if entry.Type == "PLANNER_RESPONSE" {
-			if entry.Error != "" {
-				currentTurnHasError = true
-			}
-			if entry.Content != "" {
-				cleaned := cleanAssistantText(entry.Content)
-				if cleaned != "" {
-					if len(entry.ToolCalls) > 0 {
-						currentTurnSteps = append(currentTurnSteps, cleaned)
-					} else {
-						currentTurnAnswer = cleaned
 					}
 				}
 			}
@@ -2601,16 +2672,22 @@ func extractUserRequest(content string) string {
 		}
 	}
 
-	// Extraire les pièces jointes / images uploadées (ex. depuis Antigravity Desktop)
+	// Extraire les pièces jointes / images uploadées (ex. depuis Antigravity Desktop ou Mobile)
 	mediaArtifacts := extractMediaArtifacts(content)
+
+	// Nettoyer les balises [ARTIFACT: ...] brutes qui étaient dans le prompt utilisateur
+	userReq = artifactMediaRe.ReplaceAllString(userReq, "")
+	userReq = regexp.MustCompile(`(?i)(?:Path|Last Edited):\s*[^\r\n]+`).ReplaceAllString(userReq, "")
+	userReq = strings.TrimSpace(userReq)
+
 	if len(mediaArtifacts) > 0 {
 		for _, imgPath := range mediaArtifacts {
-			if !strings.Contains(userReq, imgPath) {
-				cleanP := imgPath
-				if !strings.HasPrefix(cleanP, "file://") && (strings.HasPrefix(cleanP, "/") || (len(cleanP) >= 2 && cleanP[1] == ':')) {
-					cleanP = "file:///" + filepath.ToSlash(cleanP)
-				}
-				imgTag := fmt.Sprintf("![Image](%s)", cleanP)
+			cleanP := imgPath
+			if !strings.HasPrefix(cleanP, "file://") && (strings.HasPrefix(cleanP, "/") || (len(cleanP) >= 2 && cleanP[1] == ':')) {
+				cleanP = "file:///" + filepath.ToSlash(cleanP)
+			}
+			imgTag := fmt.Sprintf("![Image](%s)", cleanP)
+			if !strings.Contains(userReq, imgTag) {
 				if userReq == "" {
 					userReq = imgTag
 				} else {
@@ -2620,7 +2697,7 @@ func extractUserRequest(content string) string {
 		}
 	}
 
-	return userReq
+	return strings.TrimSpace(userReq)
 }
 
 func cleanPromptTitle(s string) string {
@@ -2788,6 +2865,74 @@ func projectIDFromRegistry(uri string) string {
 		}
 	}
 	return ""
+}
+
+// matchOfficialProject associe de manière déterministe et hiérarchique une session à un projet officiel.
+// Priorités : 1) ID exact, 2) Chemin exact, 3) Sous-dossier le plus spécifique, 4) Nom exact.
+func matchOfficialProject(projID, wsPath, wsName string, projects []ProjectSummary) (matchedName, matchedPath, matchedID string) {
+	if len(projects) == 0 {
+		return wsName, wsPath, projID
+	}
+
+	// 1. Priorité 1 : ID exact
+	if projID != "" {
+		for _, p := range projects {
+			if p.ID == projID {
+				return p.Name, p.Path, p.ID
+			}
+		}
+	}
+
+	normWs := strings.ToLower(normalizeWorkspace(wsPath))
+	if normWs != "" {
+		// 2. Priorité 2 : Chemin ou URI exact
+		for _, p := range projects {
+			pNormPath := strings.ToLower(normalizeWorkspace(p.Path))
+			pNormUri := strings.ToLower(normalizeWorkspace(p.FolderURI))
+			if (pNormPath != "" && pNormPath == normWs) || (pNormUri != "" && pNormUri == normWs) {
+				return p.Name, p.Path, p.ID
+			}
+		}
+
+		// 3. Priorité 3 : Sous-dossier le plus spécifique (parent le plus long)
+		var bestParent *ProjectSummary
+		longestLen := -1
+		for i, p := range projects {
+			pNormPath := strings.ToLower(normalizeWorkspace(p.Path))
+			if pNormPath != "" {
+				prefixSlash := pNormPath + "/"
+				prefixBack := pNormPath + "\\"
+				if strings.HasPrefix(normWs, prefixSlash) || strings.HasPrefix(normWs, prefixBack) {
+					if len(pNormPath) > longestLen {
+						longestLen = len(pNormPath)
+						bestParent = &projects[i]
+					}
+				}
+			}
+		}
+		if bestParent != nil {
+			return bestParent.Name, bestParent.Path, bestParent.ID
+		}
+	}
+
+	// 4. Priorité 4 : Nom de dossier ou de projet exact
+	if wsName != "" {
+		for _, p := range projects {
+			if strings.EqualFold(p.Name, wsName) {
+				return p.Name, p.Path, p.ID
+			}
+		}
+	}
+	if normWs != "" {
+		base := strings.ToLower(filepath.Base(normWs))
+		for _, p := range projects {
+			if strings.EqualFold(p.Name, base) {
+				return p.Name, p.Path, p.ID
+			}
+		}
+	}
+
+	return "", wsPath, projID
 }
 
 // GetUniqueWorkspaces returns the list of unique workspace names discovered on the machine.

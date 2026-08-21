@@ -7,6 +7,8 @@ class MentionAutocompleteOverlay extends StatelessWidget {
   final List<MentionItem> items;
   final ValueChanged<MentionItem> onSelected;
   final double maxHeight;
+  final int selectedIndex;
+  final ScrollController? scrollController;
 
   const MentionAutocompleteOverlay({
     super.key,
@@ -14,6 +16,8 @@ class MentionAutocompleteOverlay extends StatelessWidget {
     required this.items,
     required this.onSelected,
     this.maxHeight = 260.0,
+    this.selectedIndex = 0,
+    this.scrollController,
   });
 
   List<MentionItem> get _filteredItems {
@@ -27,10 +31,15 @@ class MentionAutocompleteOverlay extends StatelessWidget {
     }).toList();
   }
 
-  IconData _iconForType(MentionType type) {
-    switch (type) {
+  IconData _iconForItem(MentionItem item) {
+    if (item.isDirectory || item.type == MentionType.folder) {
+      return Icons.folder_outlined;
+    }
+    switch (item.type) {
       case MentionType.file:
         return Icons.insert_drive_file_outlined;
+      case MentionType.folder:
+        return Icons.folder_outlined;
       case MentionType.rule:
         return Icons.rule_outlined;
       case MentionType.mcp:
@@ -45,6 +54,7 @@ class MentionAutocompleteOverlay extends StatelessWidget {
   Color _badgeColorForType(MentionType type, ColorScheme scheme) {
     switch (type) {
       case MentionType.file:
+      case MentionType.folder:
         return scheme.primary;
       case MentionType.rule:
         return scheme.tertiary;
@@ -111,6 +121,7 @@ class MentionAutocompleteOverlay extends StatelessWidget {
             else
               Flexible(
                 child: ListView.separated(
+                  controller: scrollController,
                   padding: const EdgeInsets.symmetric(vertical: 4),
                   shrinkWrap: true,
                   itemCount: filtered.length,
@@ -121,9 +132,11 @@ class MentionAutocompleteOverlay extends StatelessWidget {
                   ),
                   itemBuilder: (context, index) {
                     final item = filtered[index];
+                    final isHighlighted = index == selectedIndex;
                     return InkWell(
                       onTap: () => onSelected(item),
-                      child: Padding(
+                      child: Container(
+                        color: isHighlighted ? scheme.primary.withValues(alpha: 0.1) : Colors.transparent,
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         child: Row(
                           children: [
@@ -134,7 +147,7 @@ class MentionAutocompleteOverlay extends StatelessWidget {
                                 borderRadius: BorderRadius.circular(AppRadius.sm),
                               ),
                               child: Icon(
-                                _iconForType(item.type),
+                                _iconForItem(item),
                                 size: 16,
                                 color: _badgeColorForType(item.type, scheme),
                               ),

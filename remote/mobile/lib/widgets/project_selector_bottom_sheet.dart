@@ -9,12 +9,14 @@ class ProjectSelectorBottomSheet extends StatelessWidget {
   final List<ProjectItem> projects;
   final String? activeProjectPath;
   final ValueChanged<ProjectItem> onSelectProject;
+  final ValueChanged<ProjectItem>? onDeleteProject;
 
   const ProjectSelectorBottomSheet({
     super.key,
     required this.projects,
     this.activeProjectPath,
     required this.onSelectProject,
+    this.onDeleteProject,
   });
 
   /// Affiche le sélecteur de projet sous forme de modal bottom sheet contrôlé.
@@ -23,6 +25,7 @@ class ProjectSelectorBottomSheet extends StatelessWidget {
     required List<ProjectItem> projects,
     String? activeProjectPath,
     ValueChanged<ProjectItem>? onSelectProject,
+    ValueChanged<ProjectItem>? onDeleteProject,
   }) {
     if (projects.isEmpty) return Future.value(null);
 
@@ -44,6 +47,7 @@ class ProjectSelectorBottomSheet extends StatelessWidget {
           onSelectProject?.call(p);
           Navigator.of(ctx).pop(p);
         },
+        onDeleteProject: onDeleteProject,
       ),
     );
   }
@@ -218,6 +222,24 @@ class ProjectSelectorBottomSheet extends StatelessWidget {
                                     color: scheme.primary,
                                   ),
                                 ],
+                                if (onDeleteProject != null) ...[
+                                  const SizedBox(width: 4),
+                                  Tooltip(
+                                    message: 'Supprimer définitivement le projet',
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(4),
+                                      onTap: () => _confirmDeleteProject(context, p),
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(6),
+                                        child: Icon(
+                                          Icons.delete_outline_rounded,
+                                          size: 16,
+                                          color: AppColors.danger,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ],
                             ),
                           ),
@@ -230,6 +252,48 @@ class ProjectSelectorBottomSheet extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  void _confirmDeleteProject(BuildContext context, ProjectItem project) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1F2127) : scheme.surfaceContainerHighest,
+        title: Text(
+          'Supprimer définitivement le projet ?',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: scheme.onSurface,
+          ),
+        ),
+        content: Text(
+          'Supprimer définitivement "${project.name}" le supprime, ainsi que toutes les conversations actives et archivées associées.',
+          style: TextStyle(
+            fontSize: 13,
+            color: scheme.onSurfaceVariant,
+            height: 1.4,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            child: Text('Annuler', style: TextStyle(color: scheme.onSurfaceVariant)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () {
+              Navigator.of(dialogCtx).pop();
+              onDeleteProject?.call(project);
+            },
+            child: const Text('Supprimer définitivement'),
+          ),
+        ],
       ),
     );
   }

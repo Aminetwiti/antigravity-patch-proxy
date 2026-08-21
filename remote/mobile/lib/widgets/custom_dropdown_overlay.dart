@@ -79,7 +79,10 @@ class CustomDropdownOverlay {
                     ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(AppRadius.md),
-                      child: child,
+                      child: NotificationListener<ScrollNotification>(
+                        onNotification: (notification) => true,
+                        child: child,
+                      ),
                     ),
                   );
                 }),

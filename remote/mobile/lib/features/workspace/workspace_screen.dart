@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -9,6 +10,8 @@ import '../../core/protocol/daemon_api.dart';
 import '../../core/protocol/messages.dart';
 import '../../core/protocol/workspace_path.dart';
 import '../../widgets/custom_dropdown_overlay.dart';
+import '../../widgets/markdown_bubble.dart';
+import '../../widgets/syntax_highlighter.dart';
 import 'git_commit_dialog.dart';
 import 'package:mobile/theme/app_colors.dart';
 
@@ -37,6 +40,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   String? _loadError;
   List<Map<String, dynamic>> _files = [];
   String _codeContent = '// Sélectionnez un fichier';
+  Uint8List? _imageBytes;
+  bool _isMarkdownPreview = false;
+  int? _targetLineNumber;
+  final Set<String> _collapsedFolders = {};
   // Bug #5 : recherche substring dans l'arbre
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
@@ -251,6 +258,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       _selectedFilePath = path;
       _isLoadingCode = true;
       _codeContent = '';
+      _imageBytes = null;
     });
     try {
       final res = await widget.api!.readFile(
@@ -258,9 +266,22 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         workspacePath: _workspaceResolved,
       );
       if (mounted) {
+        Uint8List? imgBytes;
+        final rawB64 = res['base64Data'] ?? (res['data'] is Map ? res['data']['base64Data'] : null);
+        if (rawB64 is String && rawB64.isNotEmpty) {
+          try {
+            imgBytes = base64Decode(rawB64);
+          } catch (_) {}
+        }
+        if (imgBytes == null && File(path).existsSync()) {
+          try {
+            imgBytes = File(path).readAsBytesSync();
+          } catch (_) {}
+        }
         setState(() {
           final rawContent = res['content'] ?? res['text'] ?? (res['data'] is Map ? (res['data']['content'] ?? res['data']['text']) : null);
           _codeContent = rawContent?.toString() ?? '';
+          _imageBytes = imgBytes;
           _isLoadingCode = false;
         });
       }
@@ -268,6 +289,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       if (mounted) {
         setState(() {
           _codeContent = 'Erreur: $e';
+          _imageBytes = null;
           _isLoadingCode = false;
         });
       }
@@ -694,13 +716,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text(
-                  _buildFileStats(),
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
+                child: _buildFileStatsRow(),
               ),
               const SizedBox(height: 6),
               const Divider(height: 1),
@@ -781,7 +797,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 14,
-                        vertical: 10,
+                        vertical: 8,
                       ),
                       color: Theme.of(context).colorScheme.surfaceContainer,
                       child: Row(
@@ -796,30 +812,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                           ),
                           const SizedBox(width: 8),
                           Expanded(
-                            child: Tooltip(
-                              message:
-                                  _selectedFilePath.isEmpty
-                                      ? 'Sélectionnez un fichier'
-                                      : _selectedFilePath,
-                              child: Text(
-                                _selectedFilePath.isEmpty
-                                    ? 'Sélectionnez un fichier'
-                                    : _selectedFilePath,
-                                style: TextStyle(
-                                  fontSize: 12.5,
-                                  color:
-                                      _selectedFilePath.isEmpty
-                                          ? Theme.of(
-                                            context,
-                                          ).colorScheme.onSurfaceVariant
-                                          : Theme.of(
-                                            context,
-                                          ).colorScheme.onSurface,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                                maxLines: 1,
-                              ),
-                            ),
+                            child: _buildBreadcrumbs(),
                           ),
                           IconButton(
                             icon: Icon(
@@ -870,6 +863,40 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                                         ),
                                       );
                                     },
+                          ),
+                          // Markdown preview toggle (si fichier .md)
+                          if (_selectedFilePath.toLowerCase().endsWith('.md') ||
+                              _selectedFilePath.toLowerCase().endsWith('.markdown'))
+                            IconButton(
+                              icon: Icon(
+                                _isMarkdownPreview
+                                    ? Icons.code_rounded
+                                    : Icons.menu_book_rounded,
+                                size: 16,
+                                color: _isMarkdownPreview
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                              tooltip: _isMarkdownPreview
+                                  ? 'Afficher le code source'
+                                  : 'Afficher l\'aperçu formaté',
+                              onPressed: () => setState(() {
+                                _isMarkdownPreview = !_isMarkdownPreview;
+                              }),
+                            ),
+                          // Jump to line button
+                          IconButton(
+                            icon: Icon(
+                              Icons.format_list_numbered_rounded,
+                              size: 16,
+                              color: _targetLineNumber != null
+                                  ? Theme.of(context).colorScheme.primary
+                                  : Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                            tooltip: 'Aller à la ligne...',
+                            onPressed: _selectedFilePath.isEmpty || _isLoadingCode
+                                ? null
+                                : () => _showJumpToLineDialog(context),
                           ),
                           // Find-in-page toggle
                           IconButton(
@@ -1160,6 +1187,78 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
+  /// Fil d'Ariane interactif pour la navigation dans l'en-tête de code.
+  Widget _buildBreadcrumbs() {
+    if (_selectedFilePath.isEmpty) {
+      return Text(
+        'Sélectionnez un fichier',
+        style: TextStyle(
+          fontSize: 12.5,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      );
+    }
+    final normalized = _selectedFilePath.replaceAll(r'\', '/');
+    final segments = normalized.split('/');
+    final scheme = Theme.of(context).colorScheme;
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (int i = 0; i < segments.length; i++) ...[
+            if (i > 0)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: Icon(
+                  Icons.chevron_right_rounded,
+                  size: 14,
+                  color: scheme.outlineVariant,
+                ),
+              ),
+            if (i == segments.length - 1)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  segments[i],
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.primary,
+                  ),
+                ),
+              )
+            else
+              InkWell(
+                onTap: () {
+                  final folderPath = segments.sublist(0, i + 1).join('/');
+                  setState(() {
+                    _collapsedFolders.remove(folderPath);
+                  });
+                },
+                borderRadius: BorderRadius.circular(4),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  child: Text(
+                    segments[i],
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
   // Bug #3 : perf — construit la liste une seule fois, filtrée par _searchQuery.
   /// Puce de filtre d'extension rapide (Axe 2).
   Widget _buildFilterChip(String? ext, String label, [IconData? icon]) {
@@ -1173,7 +1272,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             Icon(icon, size: 12, color: selected ? scheme.onPrimary : scheme.onSurfaceVariant),
             const SizedBox(width: 4),
           ],
-          Text(label, style: TextStyle(fontSize: 10.5)),
+          Text(label, style: const TextStyle(fontSize: 10.5)),
         ],
       ),
       selected: selected,
@@ -1194,7 +1293,70 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
-  /// Compteur fichiers/dossiers affichés (Axe 2).
+  /// Bascule l'expansion de tous les dossiers
+  void _toggleCollapseAll() {
+    setState(() {
+      if (_collapsedFolders.isNotEmpty) {
+        _collapsedFolders.clear();
+      } else {
+        for (final f in _files) {
+          if (f['isDir'] == true) {
+            final p = (f['fullPath'] as String?) ?? (f['name'] as String);
+            _collapsedFolders.add(p);
+          }
+        }
+      }
+    });
+  }
+
+  /// Compteur fichiers/dossiers affichés avec bouton plier/déplier.
+  Widget _buildFileStatsRow() {
+    final scheme = Theme.of(context).colorScheme;
+    final hasFolders = _files.any((f) => f['isDir'] == true);
+    final allCollapsed = hasFolders && _collapsedFolders.isNotEmpty;
+
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            _buildFileStats(),
+            style: TextStyle(
+              fontSize: 10.5,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        if (hasFolders)
+          InkWell(
+            onTap: _toggleCollapseAll,
+            borderRadius: BorderRadius.circular(4),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    allCollapsed ? Icons.unfold_more_rounded : Icons.unfold_less_rounded,
+                    size: 13,
+                    color: scheme.primary,
+                  ),
+                  const SizedBox(width: 3),
+                  Text(
+                    allCollapsed ? 'Déplier' : 'Plier',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.primary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
   String _buildFileStats() {
     final files = _files.where((f) => f['isDir'] != true).length;
     final dirs = _files.length - files;
@@ -1294,11 +1456,40 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       );
     }
 
+    // Gestion du masquage des enfants de dossiers pliés
+    final List<Map<String, dynamic>> visibleItems = [];
+    int? activeCollapsedDepth;
+
+    for (final file in filtered) {
+      final isDir = file['isDir'] == true;
+      final fullPath = (file['fullPath'] as String?) ?? (file['name'] as String);
+      final depth = (file['depth'] as num?)?.toInt() ?? 0;
+
+      if (_searchQuery.isNotEmpty) {
+        visibleItems.add(file);
+        continue;
+      }
+
+      if (activeCollapsedDepth != null) {
+        if (depth > activeCollapsedDepth) {
+          continue;
+        } else {
+          activeCollapsedDepth = null;
+        }
+      }
+
+      visibleItems.add(file);
+
+      if (isDir && _collapsedFolders.contains(fullPath)) {
+        activeCollapsedDepth = depth;
+      }
+    }
+
     return ListView.builder(
       padding: const EdgeInsets.only(bottom: 12),
-      itemCount: filtered.length,
+      itemCount: visibleItems.length,
       itemBuilder: (context, index) {
-        final file = filtered[index];
+        final file = visibleItems[index];
         final isDir = file['isDir'] == true;
         final name = file['name'] as String;
         final depth = (file['depth'] as num?)?.toInt() ?? 0;
@@ -1306,7 +1497,23 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         final isSelected = fullPath == _selectedFilePath;
 
         if (isDir) {
-          return _TreeFolder(title: name, depth: depth);
+          final isCollapsed = _collapsedFolders.contains(fullPath);
+          return _TreeFolder(
+            title: name,
+            depth: depth,
+            isCollapsed: isCollapsed,
+            searchQuery: _searchQuery,
+            onTap: () {
+              setState(() {
+                if (isCollapsed) {
+                  _collapsedFolders.remove(fullPath);
+                } else {
+                  _collapsedFolders.add(fullPath);
+                }
+              });
+            },
+            onLongPress: () => _showFileContextMenu(context, fullPath, true),
+          );
         } else {
           final status = _fileGitStatuses[fullPath] ?? _fileGitStatuses[name];
           return _TreeFile(
@@ -1314,6 +1521,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             depth: depth,
             isSelected: isSelected,
             gitStatus: status,
+            searchQuery: _searchQuery,
             onTap: () {
               // Mobile : le drawer reste ouvert après sélection sinon.
               final scaffold = Scaffold.maybeOf(context);
@@ -1322,6 +1530,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
               }
               _loadFile(fullPath);
             },
+            onLongPress: () => _showFileContextMenu(context, fullPath, false),
           );
         }
       },
@@ -1544,44 +1753,56 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       );
     }
 
-    // Fichiers binaires (images, audio, vidéo) : pas de numéros de ligne
+    // Fichiers images réels avec zoom interactif
+    final lowerPath = _selectedFilePath.toLowerCase();
+    final isImg = lowerPath.endsWith('.png') ||
+        lowerPath.endsWith('.jpg') ||
+        lowerPath.endsWith('.jpeg') ||
+        lowerPath.endsWith('.gif') ||
+        lowerPath.endsWith('.webp') ||
+        lowerPath.endsWith('.ico') ||
+        lowerPath.endsWith('.bmp');
+    if (isImg) {
+      return _buildImagePreview();
+    }
+
+    // Fichiers binaires (audio, vidéo, archives, PDF) : pas de numéros de ligne
     final isBinary =
-        _selectedFilePath.endsWith('.png') ||
-        _selectedFilePath.endsWith('.jpg') ||
-        _selectedFilePath.endsWith('.mp3') ||
-        _selectedFilePath.endsWith('.mp4');
+        lowerPath.endsWith('.mp3') ||
+        lowerPath.endsWith('.wav') ||
+        lowerPath.endsWith('.ogg') ||
+        lowerPath.endsWith('.flac') ||
+        lowerPath.endsWith('.mp4') ||
+        lowerPath.endsWith('.webm') ||
+        lowerPath.endsWith('.mov') ||
+        lowerPath.endsWith('.mkv') ||
+        lowerPath.endsWith('.avi') ||
+        lowerPath.endsWith('.pdf') ||
+        lowerPath.endsWith('.zip') ||
+        lowerPath.endsWith('.tar') ||
+        lowerPath.endsWith('.gz');
     if (isBinary) {
+      final ext = _selectedFilePath.contains('.') ? _selectedFilePath.split('.').last.toUpperCase() : 'BIN';
       return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              _selectedFilePath.endsWith('.mp3')
-                  ? Icons.audio_file_outlined
-                  : _selectedFilePath.endsWith('.mp4')
-                  ? Icons.video_file_outlined
-                  : Icons.image_outlined,
-              size: 48,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Aperçu multimédia (${_selectedFilePath.split('.').last.toUpperCase()})',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Fichier binaire — numéros de ligne masqués',
-              style: TextStyle(
-                fontSize: 12,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
+        child: _buildBinaryPlaceholder(ext),
+      );
+    }
+
+    // Markdown preview si activé
+    if (_isMarkdownPreview &&
+        (_selectedFilePath.toLowerCase().endsWith('.md') ||
+            _selectedFilePath.toLowerCase().endsWith('.markdown'))) {
+      return Container(
+        width: double.infinity,
+        color: Theme.of(context).colorScheme.surface,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: MarkdownBubble(
+            text: _codeContent,
+            workspacePath: _workspaceResolved,
+            api: widget.api,
+            onLocalFile: (path) => _loadFile(path),
+          ),
         ),
       );
     }
@@ -1608,56 +1829,116 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       ).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
     );
 
-    // Lignes du viewer : numéros + contenu (softWrap:false pour permettre le
-    // scroll horizontal du conteneur parent au lieu du wrap silencieux).
+    final ext = _selectedFilePath.contains('.') ? _selectedFilePath.split('.').last.toLowerCase() : '';
+    // Lignes du viewer : numéros + contenu avec ciblage et sélection de ligne
     final codeList = ListView.builder(
       padding: const EdgeInsets.symmetric(vertical: 4),
       itemCount: lines.length,
       itemBuilder: (context, index) {
         final lineNum = '${index + 1}'.padLeft(4, ' ');
         final line = lines[index];
+        final isTargetLine = _targetLineNumber != null && (index + 1) == _targetLineNumber;
+
+        Widget contentWidget;
         if (_findQuery.isEmpty) {
-          return Row(
+          final highlightedSpans = SyntaxHighlighter.highlight(
+            line,
+            ext,
+            defaultTextColor: Theme.of(context).colorScheme.onSurface,
+          );
+          contentWidget = Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('$lineNum │ ', style: lineNumberStyle),
+              Text(
+                '$lineNum │ ',
+                style: isTargetLine
+                    ? lineNumberStyle.copyWith(
+                        color: Theme.of(context).colorScheme.primary,
+                        fontWeight: FontWeight.bold,
+                      )
+                    : lineNumberStyle,
+              ),
               Expanded(
-                child: SelectableText(
-                  line,
-                  style: textStyle,
-                  // Longues lignes → scroll horizontal, pas de wrap.
+                child: SelectableText.rich(
+                  TextSpan(
+                    style: textStyle,
+                    children: highlightedSpans,
+                  ),
+                  maxLines: null,
+                ),
+              ),
+            ],
+          );
+        } else {
+          // Surlignage : découper la ligne en spans autour de chaque match.
+          final spans = <TextSpan>[];
+          final pattern = RegExp(RegExp.escape(_findQuery), caseSensitive: false);
+          int cursor = 0;
+          for (final match in pattern.allMatches(line)) {
+            if (match.start > cursor) {
+              spans.add(TextSpan(text: line.substring(cursor, match.start)));
+            }
+            spans.add(
+              TextSpan(
+                text: line.substring(match.start, match.end),
+                style: TextStyle(
+                  backgroundColor: Theme.of(
+                    context,
+                  ).colorScheme.primary.withValues(alpha: 0.30),
+                  color: Theme.of(context).colorScheme.onSurface,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            );
+            cursor = match.end;
+          }
+          if (cursor < line.length) {
+            spans.add(TextSpan(text: line.substring(cursor)));
+          }
+          contentWidget = Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '$lineNum │ ',
+                style: isTargetLine
+                    ? lineNumberStyle.copyWith(
+                        color: Theme.of(context).colorScheme.primary,
+                        fontWeight: FontWeight.bold,
+                      )
+                    : lineNumberStyle,
+              ),
+              Expanded(
+                child: SelectableText.rich(
+                  TextSpan(style: textStyle, children: spans),
                   maxLines: null,
                 ),
               ),
             ],
           );
         }
-        // Surlignage : découper la ligne en spans autour de chaque match.
-        final spans = <TextSpan>[];
-        final pattern = RegExp(RegExp.escape(_findQuery), caseSensitive: false);
-        int cursor = 0;
-        for (final match in pattern.allMatches(line)) {
-          if (match.start > cursor) {
-            spans.add(TextSpan(text: line.substring(cursor, match.start)));
-          }
-          spans.add(
-            TextSpan(
-              text: line.substring(match.start, match.end),
-              style: TextStyle(
-                backgroundColor: Theme.of(
-                  context,
-                ).colorScheme.primary.withValues(alpha: 0.30),
-                color: Theme.of(context).colorScheme.onSurface,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          );
-          cursor = match.end;
-        }
-        if (cursor < line.length) {
-          spans.add(TextSpan(text: line.substring(cursor)));
-        }
-        return RichText(text: TextSpan(style: textStyle, children: spans));
+
+        return InkWell(
+          onTap: () {
+            setState(() {
+              _targetLineNumber = isTargetLine ? null : (index + 1);
+            });
+          },
+          child: Container(
+            decoration: isTargetLine
+                ? BoxDecoration(
+                    color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
+                    border: Border(
+                      left: BorderSide(
+                        color: Theme.of(context).colorScheme.primary,
+                        width: 3.0,
+                      ),
+                    ),
+                  )
+                : null,
+            padding: EdgeInsets.only(left: isTargetLine ? 0 : 3.0),
+            child: contentWidget,
+          ),
+        );
       },
     );
 
@@ -1704,6 +1985,112 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
+  Widget _buildImagePreview() {
+    final scheme = Theme.of(context).colorScheme;
+    final fileName = _selectedFilePath.split(RegExp(r'[/\\]')).last;
+    final ext = fileName.contains('.') ? fileName.split('.').last.toUpperCase() : 'IMG';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          color: scheme.surfaceContainer,
+          child: Row(
+            children: [
+              Icon(Icons.image_outlined, size: 16, color: scheme.primary),
+              const SizedBox(width: 8),
+              Text(
+                'Aperçu Image $ext',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.primary,
+                ),
+              ),
+              const Spacer(),
+              if (_imageBytes != null)
+                Text(
+                  '${(_imageBytes!.length / 1024).toStringAsFixed(1)} Ko',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: Center(
+            child: _imageBytes != null
+                ? Container(
+                    margin: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainerLow,
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                      border: Border.all(color: scheme.outlineVariant, width: 0.5),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: InteractiveViewer(
+                      minScale: 0.5,
+                      maxScale: 4.0,
+                      child: Image.memory(
+                        _imageBytes!,
+                        fit: BoxFit.contain,
+                        errorBuilder: (ctx, err, stack) => _buildBinaryPlaceholder(ext),
+                      ),
+                    ),
+                  )
+                : _buildBinaryPlaceholder(ext),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBinaryPlaceholder(String ext) {
+    final scheme = Theme.of(context).colorScheme;
+    final lower = ext.toLowerCase();
+    final isAudio = lower == 'mp3' || lower == 'wav' || lower == 'ogg' || lower == 'flac';
+    final isVideo = lower == 'mp4' || lower == 'webm' || lower == 'mov' || lower == 'mkv' || lower == 'avi';
+    final isArchive = lower == 'zip' || lower == 'tar' || lower == 'gz';
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          isAudio
+              ? Icons.audio_file_outlined
+              : isVideo
+                  ? Icons.video_file_outlined
+                  : isArchive
+                      ? Icons.folder_zip_outlined
+                      : Icons.image_outlined,
+          size: 48,
+          color: scheme.primary,
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'Fichier $ext',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: scheme.onSurface,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Aperçu binaire — numéros de ligne masqués',
+          style: TextStyle(
+            fontSize: 12,
+            color: scheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildSkeletonTree() {
     return ListView.builder(
       itemCount: 8,
@@ -1737,6 +2124,178 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
+  void _showJumpToLineDialog(BuildContext context) {
+    final controller = TextEditingController();
+    final scheme = Theme.of(context).colorScheme;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: scheme.surfaceContainer,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
+        title: Row(
+          children: [
+            Icon(Icons.format_list_numbered_rounded, size: 18, color: scheme.primary),
+            const SizedBox(width: 8),
+            Text(
+              'Aller à la ligne',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: scheme.onSurface),
+            ),
+          ],
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          style: TextStyle(fontSize: 13, color: scheme.onSurface),
+          decoration: InputDecoration(
+            hintText: 'Numéro de ligne (ex: 42)',
+            hintStyle: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant),
+            filled: true,
+            fillColor: scheme.surfaceContainerHighest,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          ),
+          onSubmitted: (val) {
+            final line = int.tryParse(val.trim());
+            if (line != null && line > 0) {
+              Navigator.of(ctx).pop();
+              setState(() => _targetLineNumber = line);
+            }
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final line = int.tryParse(controller.text.trim());
+              if (line != null && line > 0) {
+                Navigator.of(ctx).pop();
+                setState(() => _targetLineNumber = line);
+              }
+            },
+            child: const Text('Aller'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showFileContextMenu(BuildContext context, String fullPath, bool isDir) {
+    final scheme = Theme.of(context).colorScheme;
+    final fileName = fullPath.split(RegExp(r'[/\\]')).last;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: scheme.surfaceContainer,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 36,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: scheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  child: Row(
+                    children: [
+                      Icon(isDir ? Icons.folder_rounded : Icons.description_outlined, size: 18, color: scheme.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          fileName,
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: scheme.onSurface),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 12),
+                ListTile(
+                  leading: const Icon(Icons.copy_rounded, size: 18),
+                  title: const Text('Copier le chemin relatif', style: TextStyle(fontSize: 13)),
+                  subtitle: Text(fullPath, style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant), overflow: TextOverflow.ellipsis),
+                  onTap: () async {
+                    Navigator.of(ctx).pop();
+                    await Clipboard.setData(ClipboardData(text: fullPath));
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Chemin relatif copié !'), duration: Duration(seconds: 1)),
+                      );
+                    }
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.alternate_email_rounded, size: 18),
+                  title: const Text('Citer dans le chat (@fichier)', style: TextStyle(fontSize: 13)),
+                  subtitle: Text('@$fullPath', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+                  onTap: () async {
+                    Navigator.of(ctx).pop();
+                    await Clipboard.setData(ClipboardData(text: '@$fullPath'));
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Mention @fichier copiée dans le presse-papier !'), duration: Duration(seconds: 1)),
+                      );
+                    }
+                  },
+                ),
+                if (!isDir)
+                  ListTile(
+                    leading: const Icon(Icons.share_outlined, size: 18),
+                    title: const Text('Partager le fichier', style: TextStyle(fontSize: 13)),
+                    onTap: () {
+                      Navigator.of(ctx).pop();
+                      _shareFile();
+                    },
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  static List<InlineSpan> _buildHighlightedSpans(
+    String text,
+    String query,
+    TextStyle baseStyle,
+    TextStyle highlightStyle,
+  ) {
+    if (query.isEmpty) return [TextSpan(text: text, style: baseStyle)];
+    final spans = <InlineSpan>[];
+    final pattern = RegExp(RegExp.escape(query), caseSensitive: false);
+    int cursor = 0;
+    for (final match in pattern.allMatches(text)) {
+      if (match.start > cursor) {
+        spans.add(TextSpan(text: text.substring(cursor, match.start), style: baseStyle));
+      }
+      spans.add(TextSpan(text: text.substring(match.start, match.end), style: highlightStyle));
+      cursor = match.end;
+    }
+    if (cursor < text.length) {
+      spans.add(TextSpan(text: text.substring(cursor), style: baseStyle));
+    }
+    return spans;
+  }
+
   Widget _buildSkeletonCode() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1760,36 +2319,87 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
 class _TreeFolder extends StatelessWidget {
   final String title;
   final int depth;
+  final bool isCollapsed;
+  final String? searchQuery;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
-  const _TreeFolder({required this.title, required this.depth});
+  const _TreeFolder({
+    required this.title,
+    required this.depth,
+    required this.isCollapsed,
+    required this.onTap,
+    this.searchQuery,
+    this.onLongPress,
+  });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 8.0 + depth * 14,
-        top: 4,
-        bottom: 4,
-        right: 8,
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.folder_rounded, size: 15, color: scheme.onSurfaceVariant),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              title,
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w500,
-                color: scheme.onSurface,
-              ),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 1,
+    final baseStyle = TextStyle(
+      fontSize: 12.5,
+      fontWeight: FontWeight.w600,
+      color: scheme.onSurface,
+    );
+    final highlightStyle = TextStyle(
+      fontSize: 12.5,
+      fontWeight: FontWeight.w800,
+      color: scheme.primary,
+      backgroundColor: scheme.primary.withValues(alpha: 0.15),
+    );
+
+    return InkWell(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      onLongPress: onLongPress,
+      borderRadius: BorderRadius.circular(4),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+        padding: EdgeInsets.only(
+          left: 4.0 + depth * 14,
+          top: 4,
+          bottom: 4,
+          right: 8,
+        ),
+        child: Row(
+          children: [
+            Icon(
+              isCollapsed ? Icons.chevron_right_rounded : Icons.expand_more_rounded,
+              size: 16,
+              color: scheme.outline,
             ),
-          ),
-        ],
+            const SizedBox(width: 4),
+            Icon(
+              isCollapsed ? Icons.folder_rounded : Icons.folder_open_rounded,
+              size: 15,
+              color: scheme.primary.withValues(alpha: 0.85),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: searchQuery != null && searchQuery!.isNotEmpty
+                  ? Text.rich(
+                      TextSpan(
+                        children: _WorkspaceScreenState._buildHighlightedSpans(
+                          title,
+                          searchQuery!,
+                          baseStyle,
+                          highlightStyle,
+                        ),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    )
+                  : Text(
+                      title,
+                      style: baseStyle,
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1800,7 +2410,9 @@ class _TreeFile extends StatelessWidget {
   final int depth;
   final bool isSelected;
   final String? gitStatus;
+  final String? searchQuery;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   const _TreeFile({
     required this.title,
@@ -1808,6 +2420,8 @@ class _TreeFile extends StatelessWidget {
     required this.onTap,
     this.isSelected = false,
     this.gitStatus,
+    this.searchQuery,
+    this.onLongPress,
   });
 
   IconData _iconForName(String name) {
@@ -1897,16 +2511,29 @@ class _TreeFile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final baseStyle = TextStyle(
+      fontSize: 12.5,
+      color: isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
+      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+    );
+    final highlightStyle = TextStyle(
+      fontSize: 12.5,
+      fontWeight: FontWeight.w800,
+      color: scheme.primary,
+      backgroundColor: scheme.primary.withValues(alpha: 0.15),
+    );
+
     return InkWell(
       onTap: () {
         HapticFeedback.selectionClick();
         onTap();
       },
+      onLongPress: onLongPress,
       borderRadius: BorderRadius.circular(4),
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
         padding: EdgeInsets.only(
-          left: 8.0 + depth * 14,
+          left: 4.0 + depth * 14,
           top: 4,
           bottom: 4,
           right: 8,
@@ -1929,17 +2556,25 @@ class _TreeFile extends StatelessWidget {
             ),
             const SizedBox(width: 6),
             Expanded(
-              child: Text(
-                title,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  color:
-                      isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                ),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
-              ),
+              child: searchQuery != null && searchQuery!.isNotEmpty
+                  ? Text.rich(
+                      TextSpan(
+                        children: _WorkspaceScreenState._buildHighlightedSpans(
+                          title,
+                          searchQuery!,
+                          baseStyle,
+                          highlightStyle,
+                        ),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    )
+                  : Text(
+                      title,
+                      style: baseStyle,
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
             ),
             if (gitStatus != null && gitStatus!.isNotEmpty) ...[
               const SizedBox(width: 6),

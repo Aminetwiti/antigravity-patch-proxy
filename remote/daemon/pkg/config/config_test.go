@@ -12,6 +12,9 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	_ = os.Unsetenv("AG_WS_WRITE_TIMEOUT")
 
 	cfg := LoadConfig()
+	if cfg.Host != "0.0.0.0" {
+		t.Errorf("Expected default host 0.0.0.0, got %s", cfg.Host)
+	}
 	if cfg.Port != 8090 {
 		t.Errorf("Expected default port 8090, got %d", cfg.Port)
 	}

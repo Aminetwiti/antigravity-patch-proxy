@@ -14,6 +14,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import '../../widgets/artifact_cards.dart';
 
 class CodeBlock {
   final String language;
@@ -100,7 +101,7 @@ typedef LocalFileTap = void Function(String filePath);
 
 class MarkdownRenderer {
   static final Map<String, List<MarkdownBlock>> _blocksCache = {};
-  static const int _maxCacheEntries = 100;
+  static const int _maxCacheEntries = 500;
   static final _toolArgRe = RegExp(r'"(command|query|file|path|TargetFile|AbsolutePath)"\s*:\s*"([^"]+)"');
   static final _whitespaceRe = RegExp(r'\s+');
 
@@ -311,6 +312,7 @@ class MarkdownRenderer {
     TextStyle base, {
     required ColorScheme scheme,
     LocalFileTap? onLocalFile,
+    String? searchQuery,
   }) {
     final spans = <InlineSpan>[];
     final codeRe = RegExp(r'`([^`]+)`');
@@ -321,18 +323,47 @@ class MarkdownRenderer {
     // must be preceded by non-space (so `a * b * c` stays literal).
     final italicRe = RegExp(r'\*(?=\S)([^*\n]+?)(?<=\S)\*(?!\*)');
 
+    List<TextSpan> highlightText(String content, TextStyle style) {
+      if (searchQuery == null || searchQuery.isEmpty) {
+        return [TextSpan(text: content, style: style)];
+      }
+      final pattern = RegExp(RegExp.escape(searchQuery), caseSensitive: false);
+      final res = <TextSpan>[];
+      int cursor = 0;
+      for (final match in pattern.allMatches(content)) {
+        if (match.start > cursor) {
+          res.add(TextSpan(text: content.substring(cursor, match.start), style: style));
+        }
+        res.add(TextSpan(
+          text: content.substring(match.start, match.end),
+          style: style.copyWith(
+            backgroundColor: Colors.amber.withValues(alpha: 0.35),
+            fontWeight: FontWeight.bold,
+          ),
+        ));
+        cursor = match.end;
+      }
+      if (cursor < content.length) {
+        res.add(TextSpan(text: content.substring(cursor), style: style));
+      }
+      return res;
+    }
+
     var remaining = text;
     while (remaining.isNotEmpty) {
       // 1. Inline code — highest priority, its content must not be restyled.
       final codeMatch = codeRe.firstMatch(remaining);
       if (codeMatch != null && codeMatch.start == 0) {
+        final isDark = scheme.brightness == Brightness.dark;
         spans.add(TextSpan(
           text: codeMatch.group(1),
           style: base.copyWith(
             fontFamily: 'monospace',
-            fontSize: base.fontSize! * 0.92,
-            color: scheme.primary,
-            backgroundColor: scheme.surfaceContainerHighest,
+            fontSize: (base.fontSize ?? 13) * 0.92,
+            color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF1E293B),
+            backgroundColor: isDark
+                ? const Color(0xFF27272A).withValues(alpha: 0.85)
+                : const Color(0xFFE2E8F0).withValues(alpha: 0.85),
           ),
         ));
         remaining = remaining.substring(codeMatch.end);
@@ -373,6 +404,15 @@ class MarkdownRenderer {
       if (artifactMatch != null) {
         final artName = artifactMatch.group(1)?.trim() ?? 'Artifact';
         final artPath = artifactMatch.group(2)?.trim() ?? artName;
+        // Ignorer les placeholders d'exemples comme "..." ou "file:///..."
+        if (artName == '...' || artPath == 'file:///...' || artPath == '...' || artPath.endsWith('/...')) {
+          spans.add(TextSpan(
+            text: artifactMatch.group(0),
+            style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: scheme.onSurfaceVariant),
+          ));
+          remaining = remaining.substring(artifactMatch.end);
+          continue;
+        }
         final isLocalFile = artPath.startsWith('file://') || artPath.contains(':\\') || artPath.startsWith('/');
         final filePath = isLocalFile ? _filePathOf(artPath) : artPath;
         final lower = filePath.toLowerCase();
@@ -548,6 +588,18 @@ class MarkdownRenderer {
               ),
             ),
           ));
+        } else if (WorkspaceProductHelper.detect(url) != WorkspaceProductType.generic) {
+          spans.add(WidgetSpan(
+            alignment: PlaceholderAlignment.middle,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: WorkspaceUrlArtifactCard(
+                url: url,
+                title: label,
+                onTap: onLocalFile == null ? null : () => onLocalFile(url),
+              ),
+            ),
+          ));
         } else {
           spans.add(WidgetSpan(
             alignment: PlaceholderAlignment.baseline,
@@ -600,11 +652,11 @@ class MarkdownRenderer {
       ].reduce((a, b) => a < b ? a : b);
       if (nextIndex == 0) {
         // Defensive: a token matched but not at position 0 (shouldn't happen).
-        spans.add(TextSpan(text: remaining[0]));
+        spans.addAll(highlightText(remaining[0], base));
         remaining = remaining.substring(1);
         continue;
       }
-      spans.add(TextSpan(text: remaining.substring(0, nextIndex)));
+      spans.addAll(highlightText(remaining.substring(0, nextIndex), base));
       remaining = remaining.substring(nextIndex);
     }
     return spans;
@@ -653,6 +705,7 @@ class MarkdownRenderer {
               borderRadius: BorderRadius.circular(8),
               child: Image.file(
                 file,
+                key: ValueKey('${file.path}_${file.existsSync() ? file.lastModifiedSync().millisecondsSinceEpoch : 0}'),
                 fit: BoxFit.contain,
                 errorBuilder: (_, __, ___) => _imageErrorTile(alt.isNotEmpty ? alt : filePath, scheme),
               ),

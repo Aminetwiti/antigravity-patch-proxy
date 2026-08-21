@@ -29,7 +29,9 @@ Thinking about next optimization
             body: ExecutionProgressView(
               thoughtText: thoughtText,
               isStreaming: true,
+              initiallyExpanded: true,
             ),
+
           ),
         ),
       );

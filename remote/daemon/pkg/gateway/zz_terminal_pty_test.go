@@ -79,6 +79,7 @@ func recvResponse(t *testing.T, client *wsTestClient, reqID string) map[string]i
 func TestTerminalWriteHandlerWorks(t *testing.T) {
 	srv, gw := newTestServerWithGW(&fakeRPCClient{})
 	defer srv.Close()
+	gw.SetAllowRemoteTerminal(true)
 
 	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
 	defer client.conn.Close()
@@ -136,6 +137,7 @@ func TestTerminalWriteHandlerWorks(t *testing.T) {
 func TestTerminalOwnerScopedKill(t *testing.T) {
 	srv, gw := newTestServerWithGW(&fakeRPCClient{})
 	defer srv.Close()
+	gw.SetAllowRemoteTerminal(true)
 
 	url := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
 	clientA := dialWS(t, url)
@@ -178,8 +180,9 @@ func TestTerminalOwnerScopedKill(t *testing.T) {
 // TestTerminalOwnerCannotWriteForeign : le owner-scoping interdit à un client
 // d'écrire dans la session d'un autre (shell sur le PC hôte = surface sensible).
 func TestTerminalOwnerCannotWriteForeign(t *testing.T) {
-	srv, _ := newTestServerWithGW(&fakeRPCClient{})
+	srv, gw := newTestServerWithGW(&fakeRPCClient{})
 	defer srv.Close()
+	gw.SetAllowRemoteTerminal(true)
 
 	url := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
 	clientA := dialWS(t, url)
@@ -213,6 +216,7 @@ func TestTerminalOwnerCannotWriteForeign(t *testing.T) {
 func TestTerminalSpontaneousExitCleansUp(t *testing.T) {
 	srv, gw := newTestServerWithGW(&fakeRPCClient{})
 	defer srv.Close()
+	gw.SetAllowRemoteTerminal(true)
 
 	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
 	defer client.conn.Close()
@@ -268,5 +272,33 @@ func TestTerminalIDAltParsing(t *testing.T) {
 		t.Fatalf("Parsing TerminalIDAlt échoué: %+v", msg)
 	}
 }
+
+// TestTerminalCreateForbiddenWithoutPermission (VULN-01) : sans flag serveur
+// allowRemoteTerminal ni statut Admin, terminal_create doit être rejeté.
+func TestTerminalCreateForbiddenWithoutPermission(t *testing.T) {
+	srv, gw := newTestServerWithGW(&fakeRPCClient{})
+	defer srv.Close()
+	// allowRemoteTerminal est false par défaut
+
+	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	client.send(t, map[string]string{"type": "terminal_create", "requestId": "deny1", "workspacePath": "."})
+	resp := recvResponse(t, client, "deny1")
+	if resp["error"] == nil {
+		t.Fatalf("terminal_create aurait dû être rejeté sans permission: %v", resp)
+	}
+	errStr, _ := resp["error"].(string)
+	if !strings.Contains(errStr, "accès refusé") {
+		t.Fatalf("Message d'erreur inattendu: %q", errStr)
+	}
+	gw.terminals.mu.Lock()
+	sessCount := len(gw.terminals.sessions)
+	gw.terminals.mu.Unlock()
+	if sessCount != 0 {
+		t.Fatalf("Aucune session terminal ne devrait être créée: count=%d", sessCount)
+	}
+}
+
 
 var _ = fmt.Sprintf // garde-import si les cas changent

@@ -14,6 +14,8 @@ class WorkspacePath {
     var clean = rawPath.replaceAll('\\', '/');
     if (clean.startsWith('file:///')) clean = clean.substring(8);
     if (clean.startsWith('file://')) clean = clean.substring(7);
+    if (clean.startsWith('//?/') || clean.startsWith('//./')) clean = clean.substring(4);
+
     try {
       clean = Uri.decodeFull(clean);
     } catch (_) {}

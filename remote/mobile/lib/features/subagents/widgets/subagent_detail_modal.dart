@@ -346,6 +346,59 @@ class _SubagentDetailModalState extends State<SubagentDetailModal> {
                         ],
                       ),
                     ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: widget.agent.inheritCustomizations
+                                  ? (isDark ? const Color(0xFF16251E) : scheme.surfaceContainerHighest)
+                                  : (isDark ? const Color(0xFF222630) : scheme.surfaceContainer),
+                              borderRadius: BorderRadius.circular(AppRadius.pill),
+                              border: Border.all(
+                                color: widget.agent.inheritCustomizations
+                                    ? AppColors.positive.withValues(alpha: 0.4)
+                                    : scheme.outlineVariant,
+                                width: 0.8,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  widget.agent.inheritCustomizations
+                                      ? Icons.auto_awesome_rounded
+                                      : Icons.shield_outlined,
+                                  size: 12,
+                                  color: widget.agent.inheritCustomizations
+                                      ? AppColors.positive
+                                      : scheme.onSurfaceVariant,
+                                ),
+                                const SizedBox(width: 5),
+                                Flexible(
+                                  child: Text(
+                                    widget.agent.inheritCustomizations
+                                        ? 'inheritCustomizations: true (Skills & Rules héritées)'
+                                        : 'inheritCustomizations: false (Isolé)',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500,
+                                      color: widget.agent.inheritCustomizations
+                                          ? AppColors.positive
+                                          : scheme.onSurfaceVariant,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+
                     const SizedBox(height: 14),
 
                     // 1. User Prompt Bubble (Mission from parent agent)

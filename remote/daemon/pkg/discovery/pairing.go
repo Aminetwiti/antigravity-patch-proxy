@@ -77,10 +77,10 @@ func (pm *PairingManager) GeneratePIN() string {
 
 	n, err := rand.Int(rand.Reader, big.NewInt(1000000))
 	if err != nil {
-		pm.currentPIN = "123456" // fallback
-	} else {
-		pm.currentPIN = fmt.Sprintf("%06d", n.Int64())
+		pm.currentPIN = ""
+		return ""
 	}
+	pm.currentPIN = fmt.Sprintf("%06d", n.Int64())
 	pm.pinExpiresAt = time.Now().Add(pm.pinTTL)
 	return pm.currentPIN
 }
@@ -91,13 +91,13 @@ func (pm *PairingManager) CurrentPIN() (string, time.Duration) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	if time.Now().After(pm.pinExpiresAt) {
+	if time.Now().After(pm.pinExpiresAt) || pm.currentPIN == "" {
 		n, err := rand.Int(rand.Reader, big.NewInt(1000000))
 		if err != nil {
-			pm.currentPIN = "123456"
-		} else {
-			pm.currentPIN = fmt.Sprintf("%06d", n.Int64())
+			pm.currentPIN = ""
+			return "", 0
 		}
+		pm.currentPIN = fmt.Sprintf("%06d", n.Int64())
 		pm.pinExpiresAt = time.Now().Add(pm.pinTTL)
 	}
 	return pm.currentPIN, time.Until(pm.pinExpiresAt)
@@ -108,6 +108,10 @@ func (pm *PairingManager) CurrentPIN() (string, time.Duration) {
 // allowedProjects (optionnel) restreint le device aux projets donnés (scope 3.3).
 func (pm *PairingManager) VerifyPIN(remoteAddr, pin, deviceID string, allowedProjects ...[]string) (string, time.Time, error) {
 	ip := extractIP(remoteAddr)
+	attemptKey := ip
+	if deviceID != "" {
+		attemptKey = ip + ":" + deviceID
+	}
 
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
@@ -119,15 +123,15 @@ func (pm *PairingManager) VerifyPIN(remoteAddr, pin, deviceID string, allowedPro
 
 	now := time.Now()
 
-	// 1. Vérification anti-brute-force
-	rec := pm.attempts[ip]
+	// 1. Vérification anti-brute-force (isolée par IP et deviceId)
+	rec := pm.attempts[attemptKey]
 	if rec != nil {
 		if now.Before(rec.lockedUntil) {
 			return "", time.Time{}, fmt.Errorf("%w (réessayez dans %v)", ErrLockedOut, time.Until(rec.lockedUntil).Round(time.Second))
 		}
 		if now.After(rec.lockedUntil) && rec.count >= pm.maxAttempts {
 			// Verrouillage expiré : reset
-			delete(pm.attempts, ip)
+			delete(pm.attempts, attemptKey)
 			rec = nil
 		}
 	}
@@ -143,7 +147,7 @@ func (pm *PairingManager) VerifyPIN(remoteAddr, pin, deviceID string, allowedPro
 	if !match {
 		if rec == nil {
 			rec = &attemptRecord{}
-			pm.attempts[ip] = rec
+			pm.attempts[attemptKey] = rec
 		}
 		rec.count++
 		if rec.count >= pm.maxAttempts {
@@ -154,7 +158,7 @@ func (pm *PairingManager) VerifyPIN(remoteAddr, pin, deviceID string, allowedPro
 	}
 
 	// 4. Succès : reset des tentatives et génération du token de session
-	delete(pm.attempts, ip)
+	delete(pm.attempts, attemptKey)
 
 	tokenBytes := make([]byte, 32)
 	if _, err := io.ReadFull(rand.Reader, tokenBytes); err != nil {
@@ -163,13 +167,20 @@ func (pm *PairingManager) VerifyPIN(remoteAddr, pin, deviceID string, allowedPro
 	token := hex.EncodeToString(tokenBytes)
 	expiresAt := now.Add(pm.sessionTTL)
 
+	isAdmin := false
+	if len(pm.sessions) == 0 {
+		isAdmin = true
+	} else {
+		isAdmin = pm.hasAdminSessionLocked(deviceID)
+	}
+
 	pm.sessions[token] = SessionInfo{
 		DeviceID:        deviceID,
 		Name:            "",
 		AllowedProjects: allowed,
 		CreatedAt:       now,
 		ExpiresAt:       expiresAt,
-		Admin:           pm.hasSessionLocked(deviceID),
+		Admin:           isAdmin,
 		IP:              ip,
 	}
 
@@ -217,15 +228,15 @@ func (pm *PairingManager) RevokeDevice(deviceID string) bool {
 	return revoked
 }
 
-// hasSessionLocked rapporte si un device poss�de d�j� une session active
-// (lock d�tenu). Le premier appairage d'un device devient administrateur.
-func (pm *PairingManager) hasSessionLocked(deviceID string) bool {
+
+// hasAdminSessionLocked rapporte si un device possède déjà une session Admin active.
+func (pm *PairingManager) hasAdminSessionLocked(deviceID string) bool {
 	if deviceID == "" {
 		return false
 	}
 	now := time.Now()
 	for _, sess := range pm.sessions {
-		if sess.DeviceID == deviceID && now.Before(sess.ExpiresAt) {
+		if sess.DeviceID == deviceID && sess.Admin && now.Before(sess.ExpiresAt) {
 			return true
 		}
 	}
@@ -274,6 +285,24 @@ func (pm *PairingManager) HTTPHandler() http.HandlerFunc {
 		}
 
 		if r.Method == http.MethodDelete {
+			// Sécurité (VULN-06) : la révocation exige une authentification session avec droits Admin.
+			token := r.URL.Query().Get("token")
+			if token == "" {
+				authHeader := r.Header.Get("Authorization")
+				token = strings.TrimPrefix(authHeader, "Bearer ")
+			}
+			sess, ok := pm.ValidateSession(token)
+			if !ok {
+				w.WriteHeader(http.StatusUnauthorized)
+				json.NewEncoder(w).Encode(map[string]string{"error": "Authentification requise"})
+				return
+			}
+			if !sess.Admin {
+				w.WriteHeader(http.StatusForbidden)
+				json.NewEncoder(w).Encode(map[string]string{"error": "Action réservée à l'administrateur"})
+				return
+			}
+
 			// Révocation d'un device : DELETE /pair?deviceId=xxx (admin hôte).
 			deviceID := r.URL.Query().Get("deviceId")
 			if deviceID == "" {

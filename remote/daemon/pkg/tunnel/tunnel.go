@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -20,6 +21,75 @@ var (
 	execCommand  = exec.Command
 	execLookPath = exec.LookPath
 )
+
+// resolveBinaryPath recherche un binaire dans le PATH système puis dans les dossiers locaux du projet.
+func resolveBinaryPath(name string) (string, error) {
+	if p, err := execLookPath(name); err == nil {
+		return p, nil
+	}
+	if runtime.GOOS == "windows" && !strings.HasSuffix(name, ".exe") {
+		if p, err := execLookPath(name + ".exe"); err == nil {
+			return p, nil
+		}
+	}
+
+	exePath, err := os.Executable()
+	var exeDir string
+	if err == nil {
+		exeDir = filepath.Dir(exePath)
+	}
+
+	candidates := []string{
+		filepath.Join(".", name),
+		filepath.Join(".", "bin", name),
+		filepath.Join("..", "bin", name),
+	}
+	if exeDir != "" {
+		candidates = append(candidates,
+			filepath.Join(exeDir, name),
+			filepath.Join(exeDir, "bin", name),
+			filepath.Join(exeDir, "..", "bin", name),
+		)
+	}
+
+	if runtime.GOOS == "windows" {
+		candidates = append(candidates,
+			filepath.Join(".", name+".exe"),
+			filepath.Join(".", "bin", name+".exe"),
+			filepath.Join("..", "bin", name+".exe"),
+			filepath.Join("C:\\Windows\\System32\\OpenSSH", name+".exe"),
+			filepath.Join("C:\\Program Files\\Git\\usr\\bin", name+".exe"),
+		)
+		if exeDir != "" {
+			candidates = append(candidates,
+				filepath.Join(exeDir, name+".exe"),
+				filepath.Join(exeDir, "bin", name+".exe"),
+				filepath.Join(exeDir, "..", "bin", name+".exe"),
+			)
+		}
+	}
+
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates,
+			filepath.Join(home, ".gemini", "antigravity", "bin", name),
+			filepath.Join(home, ".cloudflared", name),
+		)
+		if runtime.GOOS == "windows" {
+			candidates = append(candidates,
+				filepath.Join(home, ".gemini", "antigravity", "bin", name+".exe"),
+				filepath.Join(home, ".cloudflared", name+".exe"),
+			)
+		}
+	}
+
+	for _, cand := range candidates {
+		if info, err := os.Stat(cand); err == nil && !info.IsDir() {
+			return cand, nil
+		}
+	}
+
+	return "", fmt.Errorf("%s introuvable sur $PATH ou dans les dossiers locaux du projet", name)
+}
 
 // Regexes d'extraction d'URL (package-level pour testabilité sans binaire réel).
 var (
@@ -112,26 +182,18 @@ func (m *Manager) tryPangolin(localPort int) (string, error) {
 		return staticURL, nil
 	}
 
-	// 2. Recherche du binaire client Pangolin (newt ou pangolin)
+	// 2. Recherche du binaire client Pangolin (newt ou pangolin) dans le PATH ou localement
 	binPath := ""
 	if envBin := os.Getenv("PANGOLIN_BIN"); envBin != "" {
 		binPath = envBin
-	} else if _, err := os.Stat("newt.exe"); err == nil {
-		binPath = ".\\newt.exe"
-	} else if _, err := os.Stat("newt"); err == nil {
-		binPath = "./newt"
-	} else if p, err := execLookPath("newt"); err == nil {
+	} else if p, err := resolveBinaryPath("newt"); err == nil {
 		binPath = p
-	} else if _, err := os.Stat("pangolin.exe"); err == nil {
-		binPath = ".\\pangolin.exe"
-	} else if _, err := os.Stat("pangolin"); err == nil {
-		binPath = "./pangolin"
-	} else if p, err := execLookPath("pangolin"); err == nil {
+	} else if p, err := resolveBinaryPath("pangolin"); err == nil {
 		binPath = p
 	}
 
 	if binPath == "" {
-		return "", fmt.Errorf("client Pangolin (newt ou pangolin) introuvable (définissez PANGOLIN_URL ou installez newt)")
+		return "", fmt.Errorf("client Pangolin (newt ou pangolin) introuvable sur $PATH (définissez PANGOLIN_URL ou installez newt)")
 	}
 
 	log.Printf("[Tunnel] Lancement de Pangolin Tunnel (%s)...", binPath)
@@ -147,18 +209,9 @@ func (m *Manager) tryPangolin(localPort int) (string, error) {
 }
 
 func (m *Manager) tryCloudflare(localPort int) (string, error) {
-
-	path := "cloudflared"
-	if _, err := os.Stat("cloudflared.exe"); err == nil {
-		path = ".\\cloudflared.exe"
-	} else if _, err := os.Stat("cloudflared"); err == nil {
-		path = "./cloudflared"
-	} else {
-		var err error
-		path, err = execLookPath("cloudflared")
-		if err != nil {
-			return "", fmt.Errorf("cloudflared introuvable")
-		}
+	path, err := resolveBinaryPath("cloudflared")
+	if err != nil {
+		return "", fmt.Errorf("cloudflared introuvable sur $PATH ou dans remote/daemon/bin/")
 	}
 	log.Printf("[Tunnel] Lancement de Cloudflare Quick Tunnel (%s)...", path)
 	url, err := m.startCloudflare(path, localPort)
@@ -173,7 +226,7 @@ func (m *Manager) tryCloudflare(localPort int) (string, error) {
 }
 
 func (m *Manager) tryPinggy(localPort int) (string, error) {
-	path, err := execLookPath("ssh")
+	path, err := resolveBinaryPath("ssh")
 	if err != nil {
 		return "", fmt.Errorf("ssh introuvable")
 	}

@@ -96,7 +96,7 @@ void main() {
       final list = await SavedConnectionsStore.getSavedConnections();
       expect(list.length, 2);
       expect(list.first.label, 'Tunnel Cloudflare'); // Le plus récent en premier
-      expect(list.first.pin, '222222');
+      expect(list.first.pin, ''); // PIN non persisté par sécurité
       expect(list.first.authToken, 'token-tunnel-2');
 
       final last = await SavedConnectionsStore.getLastConnection();

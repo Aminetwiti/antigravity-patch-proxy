@@ -77,13 +77,9 @@ const (
 // StartCascadeRequest : field 4 source=1, 5 trajectory_type=1,
 // 8 workspace_uris (string), 14 requested_model (varint),
 // 15 requested_model_uid (string).
-// BuildStartCascade génère un message StartCascadeRequest brut. Le modèle
-// demandé est transmis par le mobile : requested_model_uid (15) si fourni,
-// sinon repli sur requested_model (14, enum historique).
+// BuildStartCascade génère un message StartCascadeRequest brut.
 func BuildStartCascade(workspaceURI, projectID, modelUID string, modelEnum uint64) []byte {
 	w := &writer{}
-	w.varintField(4, 1)
-	w.varintField(5, 1)
 	if projectID != "" {
 		envW := &writer{}
 		envW.stringField(1, projectID)
@@ -96,10 +92,12 @@ func BuildStartCascade(workspaceURI, projectID, modelUID string, modelEnum uint6
 		normURI = "file:///" + strings.TrimPrefix(normURI, "/")
 		w.stringField(8, normURI)
 	}
-	if modelUID != "" {
-		w.stringField(15, modelUID)
-	} else if modelEnum != 0 {
-		w.varintField(14, modelEnum)
+	enum := modelEnum
+	if enum == 0 && modelUID != "" {
+		enum = ResolveStandardModelEnum(modelUID)
+	}
+	if enum > 0 {
+		w.varintField(14, enum)
 	}
 	return w.b
 }
@@ -116,8 +114,8 @@ type MediaAttachment struct {
 func buildMediaItem(m MediaAttachment) []byte {
 	mw := &writer{}
 	mime := m.MimeType
-	if mime == "" {
-		mime = "image/jpeg"
+	if mime == "" || mime == "image/jpeg" || mime == "image/jpg" {
+		mime = "image/png"
 	}
 	mw.stringField(1, mime)
 	if len(m.Data) > 0 {
@@ -153,10 +151,11 @@ func buildImageData(m MediaAttachment) []byte {
 		iw.stringField(1, b64)
 	}
 	mime := m.MimeType
-	if mime == "" {
-		mime = "image/jpeg"
+	if mime == "" || mime == "image/jpeg" || mime == "image/jpg" {
+		mime = "image/png"
 	}
 	iw.stringField(2, mime)
+
 	if m.Description != "" {
 		iw.stringField(3, m.Description)
 	}
@@ -238,11 +237,29 @@ func ResolveStandardModelEnum(nameOrID string) uint64 {
 	case strings.Contains(lower, "3.1-pro") || strings.Contains(lower, "2.5-pro") || strings.Contains(lower, "gemini-pro"):
 		return 246
 	case strings.Contains(lower, "sonnet") || strings.Contains(lower, "claude-3-7") || strings.Contains(lower, "claude-3.7") || strings.Contains(lower, "claude-3-5"):
-		return 334
+		return 384
+	case strings.Contains(lower, "haiku"):
+		return 394
 	case strings.Contains(lower, "opus"):
-		return 291
-	case strings.Contains(lower, "gpt-oss") || strings.Contains(lower, "120b") || strings.Contains(lower, "gpt-4"):
-		return 342
+		return 393
+	case strings.Contains(lower, "gpt-4o-mini") || strings.Contains(lower, "4o-mini"):
+		return 281
+	case strings.Contains(lower, "gpt-4o") || strings.Contains(lower, "4o"):
+		return 280
+	case strings.Contains(lower, "o3-mini"):
+		return 395
+	case strings.Contains(lower, "o1-mini"):
+		return 368
+	case strings.Contains(lower, "o1"):
+		return 367
+	case strings.Contains(lower, "deepseek-r1") || strings.Contains(lower, "r1"):
+		return 401
+	case strings.Contains(lower, "deepseek-v3") || strings.Contains(lower, "v3"):
+		return 400
+	case strings.Contains(lower, "qwen"):
+		return 450
+	case strings.Contains(lower, "grok"):
+		return 460
 	default:
 		return 0
 	}
@@ -267,6 +284,7 @@ func ResolveStandardModelEnum(nameOrID string) uint64 {
 //	  15: requested_model_uid (string)
 //	  28: model_name (string)
 //	}
+
 //
 // planner_mode 3 = NO_TOOL (pas de boucle d'outils — le mobile ne voit
 // que le texte). requested_model (15) et plan_model (1) contrôlent le modèle du tour.
@@ -353,22 +371,29 @@ func BuildHandleStreamingCommand(commandText string, source uint64) []byte {
 	return w.b
 }
 
-// Champs oneof de CascadeUserInteraction (vérifiés dans cortex_pb.ts et language_server binary).
+// Champs oneof de CascadeUserInteraction (vérifiés dans cortex.proto et language_server binary).
 const (
+	InteractionDeploy            = 4   // CascadeDeployInteraction
 	InteractionRunCommand        = 5   // CascadeRunCommandInteraction
 	InteractionOpenBrowserURL    = 6   // CascadeOpenBrowserUrlInteraction
+	InteractionRunExtensionCode  = 7   // CascadeRunExtensionCodeInteraction
+	InteractionExecuteBrowserJS  = 8   // CascadeExecuteBrowserJavaScriptInteraction
+	InteractionCaptureScreenshot = 9   // CascadeCaptureBrowserScreenshotInteraction
+	InteractionClickPixel        = 10  // CascadeClickBrowserPixelInteraction
+	InteractionBrowserAction     = 13  // CascadeBrowserActionInteraction
+	InteractionOpenBrowserSetup  = 14  // CascadeOpenBrowserSetupInteraction
+	InteractionConfirmBrowserSetup = 15 // CascadeConfirmBrowserSetupInteraction
+	InteractionSendCommandInput  = 16  // CascadeSendCommandInputInteraction
 	InteractionReadUrlContent    = 17  // CascadeReadUrlContentInteraction
+	InteractionMcp               = 18  // CascadeMcpInteraction
 	InteractionFilePermission    = 19  // FilePermissionInteraction
+	InteractionElicitation       = 20  // ElicitationInteraction
 	InteractionPermission        = 21  // PermissionInteraction
 	InteractionAskQuestion       = 22  // AskQuestionInteraction
 	InteractionApproval          = 23  // ApprovalInteraction
-	InteractionMcp               = 47  // CascadeMcpInteraction
-	InteractionDeploy            = 59  // CascadeDeployInteraction
-	InteractionRunExtensionCode  = 68  // CascadeRunExtensionCodeInteraction
-	InteractionDeleteDirectory   = 105 // CascadeDeleteDirectoryInteraction
-	InteractionSendCommandInput  = 113 // CascadeSendCommandInputInteraction
-	InteractionInvokeSubagent    = 143 // CascadeInvokeSubagentInteraction
-	InteractionCloudSQL          = 153 // CascadeCloudSqlInteraction
+	InteractionDeleteDirectory   = 105 // CascadeDeleteDirectoryInteraction (legacy)
+	InteractionInvokeSubagent    = 143 // CascadeInvokeSubagentInteraction (legacy)
+	InteractionCloudSQL          = 153 // CascadeCloudSqlInteraction (legacy)
 )
 
 // Valeurs enum PermissionScope (cortex_pb)
@@ -406,13 +431,15 @@ func BuildOpenBrowserUrlInteraction(confirm bool) []byte {
 	return w.b
 }
 
-// BuildPermissionInteraction : {1: allow, 2: scope, 3: path_or_url}.
+// BuildPermissionInteraction : {1: allow, 2: scope, 6: edited_target}.
 func BuildPermissionInteraction(allow bool, scope uint64, pathOrURL ...string) []byte {
 	w := &writer{}
 	w.varintField(1, boolToUint64(allow))
-	w.varintField(2, scope)
+	if scope != 0 {
+		w.varintField(2, scope)
+	}
 	if len(pathOrURL) > 0 && pathOrURL[0] != "" {
-		w.stringField(3, pathOrURL[0])
+		w.stringField(6, pathOrURL[0])
 	}
 	return w.b
 }
@@ -421,43 +448,35 @@ func BuildPermissionInteraction(allow bool, scope uint64, pathOrURL ...string) [
 func BuildFilePermissionInteraction(allow bool, scope uint64, pathURI string) []byte {
 	w := &writer{}
 	w.varintField(1, boolToUint64(allow))
-	w.varintField(2, scope)
-	w.stringField(3, pathURI)
-	return w.b
-}
-
-// BuildSendCommandInputInteraction : {1: input, 2: end_of_input}.
-func BuildSendCommandInputInteraction(input string, endOfInput bool) []byte {
-	w := &writer{}
-	w.stringField(1, input)
-	if endOfInput {
-		w.varintField(2, 1)
+	if scope != 0 {
+		w.varintField(2, scope)
+	}
+	if pathURI != "" {
+		w.stringField(3, pathURI)
 	}
 	return w.b
 }
 
-// BuildMcpInteraction : {1: confirm, 2: server_name, 3: tool_name, 4: arguments_json}.
+// BuildSendCommandInputInteraction : {1: confirm}.
+func BuildSendCommandInputInteraction(input string, endOfInput bool) []byte {
+	w := &writer{}
+	w.varintField(1, boolToUint64(!endOfInput))
+	return w.b
+}
+
+// BuildMcpInteraction : {1: confirm}.
 func BuildMcpInteraction(confirm bool, serverName, toolName, argumentsJson string) []byte {
 	w := &writer{}
 	w.varintField(1, boolToUint64(confirm))
-	if serverName != "" {
-		w.stringField(2, serverName)
-	}
-	if toolName != "" {
-		w.stringField(3, toolName)
-	}
-	if argumentsJson != "" {
-		w.stringField(4, argumentsJson)
-	}
 	return w.b
 }
 
-// BuildDeployInteraction : {1: confirm, 2: target_env}.
+// BuildDeployInteraction : {1: cancel, 3: subdomain}.
 func BuildDeployInteraction(confirm bool, targetEnv string) []byte {
 	w := &writer{}
-	w.varintField(1, boolToUint64(confirm))
+	w.varintField(1, boolToUint64(!confirm)) // 1: cancel (bool)
 	if targetEnv != "" {
-		w.stringField(2, targetEnv)
+		w.stringField(3, targetEnv) // 3: subdomain (string)
 	}
 	return w.b
 }
@@ -476,7 +495,7 @@ func BuildSubagentSpawnInteraction(confirm bool, subagentTypes ...string) []byte
 
 // BuildAskQuestionInteraction encode la réponse à un questionnaire interactif
 // (AskQuestionInteraction tag 22 dans CascadeUserInteraction).
-// responses (1) -> AskQuestionEntry { selected_option_ids (4), write_in_response (5) }, cancelled (2).
+// responses (1) -> AskQuestionEntry { selected_option_ids (4), write_in_response (5), skipped (6) }, cancelled (2).
 func BuildAskQuestionInteraction(selectedIDs []string, writeInResponse string, cancelled bool) []byte {
 	w := &writer{}
 	entry := &writer{}
@@ -485,6 +504,9 @@ func BuildAskQuestionInteraction(selectedIDs []string, writeInResponse string, c
 	}
 	if writeInResponse != "" {
 		entry.stringField(5, writeInResponse)
+	}
+	if cancelled {
+		entry.varintField(6, 1)
 	}
 	w.bytesField(1, entry.b)
 	if cancelled {
@@ -710,15 +732,15 @@ func BuildGetRevertPreview(cascadeID string, stepIndex int64, apiKey, sessionID 
 }
 
 // BuildRevertToCascadeStep construit un RevertToCascadeStepRequest :
-// {1: metadata, 2: cascade_id, 3: step_index, 5: override_config}
+// {1: cascade_id, 2: step_index, 3: metadata, 5: override_config}
 func BuildRevertToCascadeStep(cascadeID string, stepIndex int64, apiKey, sessionID string, modelUID string, modelEnum uint64) []byte {
 	w := &writer{}
-	if apiKey != "" {
-		w.bytesField(1, buildMetadata(apiKey, sessionID))
-	}
-	w.stringField(2, cascadeID)
+	w.stringField(1, cascadeID)
 	if stepIndex >= 0 {
-		w.varintField(3, uint64(stepIndex))
+		w.varintField(2, uint64(stepIndex))
+	}
+	if apiKey != "" {
+		w.bytesField(3, buildMetadata(apiKey, sessionID))
 	}
 	if modelUID != "" || modelEnum != 0 {
 		w.bytesField(5, BuildCascadeConfig(modelUID, modelEnum))
@@ -825,16 +847,21 @@ func BuildListSidecarLogFiles(sidecarID string) []byte {
 }
 
 // BuildGetSidecarLogs construit un GetSidecarLogsRequest :
-// {1: sidecar_id, 2: log_file_name} — schéma cascade_plugins.proto.
-func BuildGetSidecarLogs(sidecarID, logFileName string) []byte {
+// {1: sidecar_id, 2: tail_lines, 3: log_filename} — schéma cascade_plugins.proto.
+func BuildGetSidecarLogs(sidecarID, logFileName string, tailLines ...int32) []byte {
 	w := &writer{}
 	w.stringField(1, sidecarID)
-	w.stringField(2, logFileName)
+	if len(tailLines) > 0 && tailLines[0] > 0 {
+		w.varintField(2, uint64(tailLines[0]))
+	}
+	if logFileName != "" {
+		w.stringField(3, logFileName)
+	}
 	return w.b
 }
 
 // BuildManageSidecar construit un ManageSidecarRequest :
-// {1: sidecar_id, 2: action, 3: error_message} — schéma cascade_plugins.proto.
+// {1: sidecar_id, 2: action, 3: config} — schéma cascade_plugins.proto.
 // action : 1=start, 2=stop, 3=restart, 4=remove.
 func BuildManageSidecar(sidecarID string, action uint64) []byte {
 	w := &writer{}
@@ -846,50 +873,78 @@ func BuildManageSidecar(sidecarID string, action uint64) []byte {
 // --- RPC Colosseum / Battle Mode (exa.language_server_pb) ---
 
 // BuildStartBattleMode construit un StartBattleModeRequest :
-// {1: workspace_uri, 2: prompt, 3: model_uid_a, 4: model_enum_a, 5: model_uid_b, 6: model_enum_b}.
+// {1: request (SendUserCascadeMessageRequest), 2: num_forks, 3: models (repeated enum)}.
 func BuildStartBattleMode(workspaceURI, prompt, modelUIDA string, modelEnumA uint64, modelUIDB string, modelEnumB uint64) []byte {
+	userMsg := &writer{}
+	if prompt != "" {
+		item := &writer{}
+		item.stringField(1, prompt)
+		userMsg.bytesField(2, item.b)
+	}
+
 	w := &writer{}
-	w.stringField(1, workspaceURI)
-	w.stringField(2, prompt)
-	if modelUIDA != "" {
-		w.stringField(3, modelUIDA)
+	w.bytesField(1, userMsg.b)
+	w.varintField(2, 2) // num_forks = 2
+
+	enumA := modelEnumA
+	if enumA == 0 && modelUIDA != "" {
+		enumA = ResolveStandardModelEnum(modelUIDA)
 	}
-	if modelEnumA > 0 {
-		w.varintField(4, modelEnumA)
+	if enumA > 0 {
+		w.varintField(3, enumA)
 	}
-	if modelUIDB != "" {
-		w.stringField(5, modelUIDB)
+
+	enumB := modelEnumB
+	if enumB == 0 && modelUIDB != "" {
+		enumB = ResolveStandardModelEnum(modelUIDB)
 	}
-	if modelEnumB > 0 {
-		w.varintField(6, modelEnumB)
+	if enumB > 0 {
+		w.varintField(3, enumB)
 	}
 	return w.b
 }
 
 // BuildGetBattleWorktreeDiff construit un GetBattleWorktreeDiffRequest :
-// {1: workspace_uri}.
-func BuildGetBattleWorktreeDiff(workspaceURI string) []byte {
+// {1: arm_workspace_uri, 2: parent_workspace_uri}.
+func BuildGetBattleWorktreeDiff(workspaceURI string, parentWorkspaceURI ...string) []byte {
 	w := &writer{}
 	w.stringField(1, workspaceURI)
+	if len(parentWorkspaceURI) > 0 && parentWorkspaceURI[0] != "" {
+		w.stringField(2, parentWorkspaceURI[0])
+	}
 	return w.b
 }
 
 // BuildEliminateBattleModeArm construit un EliminateBattleModeArmRequest :
-// {1: arm_id}.
-func BuildEliminateBattleModeArm(armID string) []byte {
+// {1: source_conversation_id, 2: eliminated_conversation_id}.
+func BuildEliminateBattleModeArm(armID string, sourceConversationID ...string) []byte {
 	w := &writer{}
-	w.stringField(1, armID)
+	sourceID := ""
+	if len(sourceConversationID) > 0 {
+		sourceID = sourceConversationID[0]
+	}
+	if sourceID != "" {
+		w.stringField(1, sourceID)
+		w.stringField(2, armID)
+	} else {
+		w.stringField(1, armID)
+		w.stringField(2, armID)
+	}
 	return w.b
 }
 
 // BuildEndBattleMode construit un EndBattleModeRequest :
-// {1: winning_arm_id, 2: merge_strategy}.
+// {1: winner_conversation_id, 2: merge_strategy, 3: end_type, 4: source_conversation_id}.
 // mergeStrategy : 1=OVERWRITE, 2=SAFE_MERGE, 3=MERGE_WITH_CONFLICTS.
-func BuildEndBattleMode(winningArmID string, mergeStrategy uint64) []byte {
+func BuildEndBattleMode(winningArmID string, mergeStrategy uint64, sourceConversationID ...string) []byte {
 	w := &writer{}
 	w.stringField(1, winningArmID)
 	if mergeStrategy > 0 {
 		w.varintField(2, mergeStrategy)
+	}
+	w.varintField(3, 1) // default end_type = 1
+	if len(sourceConversationID) > 0 && sourceConversationID[0] != "" {
+		w.stringField(4, sourceConversationID[0])
 	}
 	return w.b
 }

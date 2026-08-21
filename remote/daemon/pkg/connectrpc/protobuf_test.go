@@ -43,22 +43,15 @@ func TestBuildStartCascadeAndDecode(t *testing.T) {
 // l'inverse quand l'UID est vide.
 func TestBuildStartCascadeModelUID(t *testing.T) {
 	t.Run("UID prioritaire", func(t *testing.T) {
-		buf := BuildStartCascade("file:///C:/x", "", "gemini-3.1-pro-low", 190)
-		fields := DecodeFields(buf)
-		foundUID, foundEnum := false, false
-		for _, f := range fields {
-			if f.Num == 15 && string(f.Bytes) == "gemini-3.1-pro-low" {
-				foundUID = true
-			}
-			if f.Num == 14 {
+		buf := BuildStartCascade("file:///C:/x", "", "gemini-3.1-pro-low", 0)
+		foundEnum := false
+		for _, f := range DecodeFields(buf) {
+			if f.Num == 14 && f.Varint == 246 {
 				foundEnum = true
 			}
 		}
-		if !foundUID {
-			t.Error("Attendu requested_model_uid (champ 15) encodé avec le modelUID")
-		}
-		if foundEnum {
-			t.Error("Ne devrait PAS encoder requested_model (14) quand le UID est fourni")
+		if !foundEnum {
+			t.Error("Attendu requested_model (champ 14) résolu vers l'enum du modèle")
 		}
 	})
 
@@ -176,10 +169,11 @@ func TestResolveStandardModelEnum(t *testing.T) {
 	}{
 		{"gemini-3.7-flash", 312},
 		{"gemini-3.1-pro", 246},
-		{"claude-sonnet-4.6-thinking", 334},
-		{"claude-3-7-sonnet", 334},
-		{"claude-opus-4.6-thinking", 291},
-		{"gpt-oss-120b", 342},
+		{"claude-sonnet-4.6-thinking", 384},
+		{"claude-3-7-sonnet", 384},
+		{"claude-opus-4.6-thinking", 393},
+		{"deepseek-r1", 401},
+		{"gpt-4o-mini", 281},
 		{"unknown-custom-model", 0},
 	}
 	for _, tc := range cases {
@@ -429,4 +423,84 @@ func TestBuildSendMessageWithMedia(t *testing.T) {
 	}
 }
 
+func TestBuildRevertToCascadeStep(t *testing.T) {
+	cascadeID := "casc-undo-test"
+	stepIndex := int64(11)
+	apiKey := "test-key"
+	sessionID := "sess-1"
 
+	buf := BuildRevertToCascadeStep(cascadeID, stepIndex, apiKey, sessionID, "gemini-flash", 0)
+	fields := DecodeFields(buf)
+
+	var foundCascadeID string
+	var foundStepIndex int64 = -1
+	var foundMetadata bool
+	var foundOverrideConfig bool
+
+	for _, f := range fields {
+		switch f.Num {
+		case 1:
+			foundCascadeID = string(f.Bytes)
+		case 2:
+			foundStepIndex = int64(f.Varint)
+		case 3:
+			foundMetadata = true
+		case 5:
+			foundOverrideConfig = true
+		}
+	}
+
+	if foundCascadeID != cascadeID {
+		t.Errorf("field 1 (cascade_id) expected %q, got %q", cascadeID, foundCascadeID)
+	}
+	if foundStepIndex != stepIndex {
+		t.Errorf("field 2 (step_index) expected %d, got %d", stepIndex, foundStepIndex)
+	}
+	if !foundMetadata {
+		t.Errorf("field 3 (metadata) expected to be present")
+	}
+	if !foundOverrideConfig {
+		t.Errorf("field 5 (override_config) expected to be present")
+	}
+}
+
+func TestBuildGetRevertPreview(t *testing.T) {
+	cascadeID := "casc-prev-test"
+	stepIndex := int64(5)
+	apiKey := "test-key"
+	sessionID := "sess-1"
+
+	buf := BuildGetRevertPreview(cascadeID, stepIndex, apiKey, sessionID, "gemini-flash", 0)
+	fields := DecodeFields(buf)
+
+	var foundCascadeID string
+	var foundStepIndex int64 = -1
+	var foundMetadata bool
+	var foundOverrideConfig bool
+
+	for _, f := range fields {
+		switch f.Num {
+		case 1:
+			foundCascadeID = string(f.Bytes)
+		case 2:
+			foundStepIndex = int64(f.Varint)
+		case 3:
+			foundMetadata = true
+		case 4:
+			foundOverrideConfig = true
+		}
+	}
+
+	if foundCascadeID != cascadeID {
+		t.Errorf("field 1 (cascade_id) expected %q, got %q", cascadeID, foundCascadeID)
+	}
+	if foundStepIndex != stepIndex {
+		t.Errorf("field 2 (step_index) expected %d, got %d", stepIndex, foundStepIndex)
+	}
+	if !foundMetadata {
+		t.Errorf("field 3 (metadata) expected to be present")
+	}
+	if !foundOverrideConfig {
+		t.Errorf("field 4 (override_config) expected to be present")
+	}
+}

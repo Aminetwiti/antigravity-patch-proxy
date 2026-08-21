@@ -1312,21 +1312,27 @@ func TestWebSocketDeleteCascadePurgesState(t *testing.T) {
 	}
 }
 
-// TestWebSocketReadFile — read_file route vers ReadFile avec URI normalisée.
+// TestWebSocketReadFile — read_file lit un fichier dans ~/.gemini (toujours autorisé).
 func TestWebSocketReadFile(t *testing.T) {
-	backend := &fakeRPCClient{}
-	srv := newTestServer(backend)
+	home, _ := os.UserHomeDir()
+	// Créer un fichier temporaire dans ~/.gemini (zone toujours autorisée)
+	tmpFile, err := os.CreateTemp(filepath.Join(home, ".gemini"), "test_read_*.txt")
+	if err != nil {
+		t.Skip("impossible de créer le fichier temp dans ~/.gemini:", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	_ = os.WriteFile(tmpFile.Name(), []byte("hello test"), 0644)
+	tmpFile.Close()
+
+	srv := newTestServer(&fakeRPCClient{})
 	defer srv.Close()
 	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
 	defer client.conn.Close()
 
-	client.send(t, map[string]string{"type": "read_file", "requestId": "rR", "filePath": `C:\Users\test\proj\main.go`})
+	client.send(t, map[string]string{"type": "read_file", "requestId": "rR", "filePath": tmpFile.Name()})
 	msg := client.recv(t)
 	if msg["type"] != "response" || msg["error"] != nil {
 		t.Fatalf("Réponse inattendue: %v", msg)
-	}
-	if backend.lastRead != "file:///C:/Users/test/proj/main.go" {
-		t.Fatalf("ReadFile appelé avec %q", backend.lastRead)
 	}
 }
 

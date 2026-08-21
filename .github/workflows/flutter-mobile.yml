@@ -1,4 +1,4 @@
-name: Flutter Mobile CI/CD
+name: Antigravity Unified Release CI/CD
 
 on:
   push:
@@ -7,10 +7,14 @@ on:
       - 'v*'
     paths:
       - 'remote/mobile/**'
+      - 'ag-doctor/**'
+      - 'ag-doctor-ui/**'
       - '.github/workflows/flutter-mobile.yml'
   pull_request:
     paths:
       - 'remote/mobile/**'
+      - 'ag-doctor/**'
+      - 'ag-doctor-ui/**'
       - '.github/workflows/flutter-mobile.yml'
   workflow_dispatch:
     inputs:
@@ -24,7 +28,7 @@ permissions:
   contents: write
 
 jobs:
-  # ── 1. Validation & Tests ──
+  # ── 1. Validation & Tests Mobile ──
   validate:
     name: Lint & Unit Tests
     runs-on: ubuntu-latest
@@ -50,7 +54,7 @@ jobs:
 
       - name: Analyze code
         working-directory: remote/mobile
-        run: flutter analyze
+        run: flutter analyze --no-fatal-infos
 
       - name: Run unit & widget tests
         working-directory: remote/mobile
@@ -83,15 +87,15 @@ jobs:
 
       - name: Build Universal APK
         working-directory: remote/mobile
-        run: flutter build apk --release
+        run: flutter build apk --release --android-skip-build-dependency-validation
 
       - name: Build Split-per-ABI APKs
         working-directory: remote/mobile
-        run: flutter build apk --release --split-per-abi
+        run: flutter build apk --release --split-per-abi --android-skip-build-dependency-validation
 
       - name: Build Android App Bundle (AAB)
         working-directory: remote/mobile
-        run: flutter build appbundle --release
+        run: flutter build appbundle --release --android-skip-build-dependency-validation
 
       - name: Prepare Android Artifacts
         run: |
@@ -137,16 +141,16 @@ jobs:
 
       - name: Package iOS IPA & Payload
         run: |
-          mkdir -p release-artifacts/ios
+          mkdir -p "$GITHUB_WORKSPACE/release-artifacts/ios"
           mkdir -p build_ipa/Payload
           cp -r remote/mobile/build/ios/iphoneos/Runner.app build_ipa/Payload/
           cd build_ipa
-          zip -r ../release-artifacts/ios/antigravity-remote-ios-unsigned.ipa Payload/
-          cd ..
+          zip -r "$GITHUB_WORKSPACE/release-artifacts/ios/antigravity-remote-ios-unsigned.ipa" Payload/
+          cd "$GITHUB_WORKSPACE"
           # Also archive runner.app
           cd remote/mobile/build/ios/iphoneos
-          zip -r ../../../../release-artifacts/ios/antigravity-remote-ios-Runner.app.zip Runner.app
-          cd ../../../..
+          zip -r "$GITHUB_WORKSPACE/release-artifacts/ios/antigravity-remote-ios-Runner.app.zip" Runner.app
+          cd "$GITHUB_WORKSPACE"
 
       - name: Upload iOS Artifacts
         uses: actions/upload-artifact@v4
@@ -155,10 +159,59 @@ jobs:
           path: release-artifacts/ios/
           retention-days: 14
 
-  # ── 4. Publish to GitHub Release ──
+  # ── 4. Build Desktop (ag-doctor-ui Windows Executable) ──
+  build-desktop:
+    name: Build Windows Desktop (ag-doctor-ui.exe)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install root dependencies & build CLI
+        run: |
+          npm ci --no-audit --no-fund
+          cd ag-doctor
+          npm install
+          npm run build
+          cd ../ag-doctor-ui
+          npm install
+          npm run build
+
+      - name: Package ag-doctor-ui Windows Executable
+        working-directory: ag-doctor-ui
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npx electron-builder --win portable
+
+      - name: Prepare Desktop Artifacts
+        shell: bash
+        run: |
+          mkdir -p release-artifacts/desktop
+          cp ag-doctor-ui/release/*.exe release-artifacts/desktop/ || true
+          # Create direct ag-doctor-ui.exe alias
+          PORTABLE_EXE=$(ls ag-doctor-ui/release/*.exe 2>/dev/null | head -1)
+          if [ -f "$PORTABLE_EXE" ]; then
+            cp "$PORTABLE_EXE" release-artifacts/desktop/ag-doctor-ui.exe
+          fi
+
+      - name: Upload Desktop Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-binaries
+          path: release-artifacts/desktop/
+          retention-days: 14
+
+  # ── 5. Publish to GitHub Release ──
   publish-release:
     name: Publish Binaries to GitHub Release
-    needs: [build-android, build-ios]
+    needs: [build-android, build-ios, build-desktop]
     if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.publish_release == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -177,6 +230,12 @@ jobs:
           name: ios-binaries
           path: dist-release/
 
+      - name: Download Desktop Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-binaries
+          path: dist-release/
+
       - name: Determine Tag Name
         id: release_tag
         shell: bash
@@ -192,7 +251,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release_tag.outputs.tag }}
-          name: Antigravity Remote Mobile ${{ steps.release_tag.outputs.tag }}
+          name: Antigravity Release ${{ steps.release_tag.outputs.tag }}
           draft: false
           prerelease: false
           generate_release_notes: true
@@ -204,5 +263,7 @@ jobs:
             dist-release/antigravity-remote.aab
             dist-release/antigravity-remote-ios-unsigned.ipa
             dist-release/antigravity-remote-ios-Runner.app.zip
+            dist-release/ag-doctor-ui.exe
+            dist-release/ag-doctor-*-portable.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

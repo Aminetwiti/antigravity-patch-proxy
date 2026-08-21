@@ -125,4 +125,24 @@ func TestPairingManager_HTTPHandler(t *testing.T) {
 	if !pm.ValidateToken(token) {
 		t.Fatalf("Le token de session doit être validé par PairingManager")
 	}
+
+	// 4. DELETE /pair sans token -> 401 Unauthorized (VULN-07)
+	reqDelNoAuth := httptest.NewRequest(http.MethodDelete, "/pair?deviceId=dev1", nil)
+	rrDelNoAuth := httptest.NewRecorder()
+	handler.ServeHTTP(rrDelNoAuth, reqDelNoAuth)
+	if rrDelNoAuth.Code != http.StatusUnauthorized {
+		t.Fatalf("DELETE /pair sans token doit être 401, reçu %d", rrDelNoAuth.Code)
+	}
+
+	// 5. DELETE /pair avec token valide -> 200 OK
+	reqDelAuth := httptest.NewRequest(http.MethodDelete, "/pair?deviceId=dev1&token="+token, nil)
+	rrDelAuth := httptest.NewRecorder()
+	handler.ServeHTTP(rrDelAuth, reqDelAuth)
+	if rrDelAuth.Code != http.StatusOK {
+		t.Fatalf("DELETE /pair avec token doit être 200, reçu %d", rrDelAuth.Code)
+	}
+	if pm.ValidateToken(token) {
+		t.Fatalf("Le token révoqué ne doit plus être valide")
+	}
 }
+

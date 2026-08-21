@@ -299,44 +299,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
           width: 1,
         ),
       ),
-      child: ListTile(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
-        leading: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: const Color(0xFF007AFF).withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(icon, size: 18, color: const Color(0xFF007AFF)),
-        ),
-        title: Text(
-          title,
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: scheme.onSurface),
-        ),
-        subtitle: Text(
-          subtitle,
-          style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
-        ),
-        trailing: Icon(Icons.arrow_forward_ios_rounded, size: 13, color: scheme.onSurfaceVariant),
-        onTap: () {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (ctx) => Scaffold(
-                backgroundColor: isDark ? const Color(0xFF0F1012) : scheme.surface,
-                appBar: AppBar(
-                  backgroundColor: isDark ? const Color(0xFF0F1012) : scheme.surfaceContainer,
-                  elevation: 0,
-                  leading: IconButton(
-                    icon: Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: scheme.onSurface),
-                    onPressed: () => Navigator.of(ctx).pop(),
-                  ),
-                  title: Text(title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: scheme.onSurface)),
-                ),
-                body: _buildCategoryContent(category),
-              ),
+      child: Material(
+        type: MaterialType.transparency,
+        child: ListTile(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
+          leading: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF007AFF).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
             ),
-          );
-        },
+            child: Icon(icon, size: 18, color: const Color(0xFF007AFF)),
+          ),
+          title: Text(
+            title,
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: scheme.onSurface),
+          ),
+          subtitle: Text(
+            subtitle,
+            style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
+          ),
+          trailing: Icon(Icons.arrow_forward_ios_rounded, size: 13, color: scheme.onSurfaceVariant),
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (ctx) => Scaffold(
+                  backgroundColor: isDark ? const Color(0xFF0F1012) : scheme.surface,
+                  appBar: AppBar(
+                    backgroundColor: isDark ? const Color(0xFF0F1012) : scheme.surfaceContainer,
+                    elevation: 0,
+                    leading: IconButton(
+                      icon: Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: scheme.onSurface),
+                      onPressed: () => Navigator.of(ctx).pop(),
+                    ),
+                    title: Text(title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: scheme.onSurface)),
+                  ),
+                  body: _buildCategoryContent(category),
+                ),
+              ),
+            );
+          },
+        ),
       ),
     );
   }
