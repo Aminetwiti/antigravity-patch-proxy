@@ -5602,18 +5602,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 		err = s.RPCClient.RevertToCascadeStep(cid, stepIdx)
 		if err == nil {
-			// Invalider le buffer de récupération pour les étapes postérieures au rollback
-			s.recoveryMu.Lock()
-			if buf, ok := s.stepRecovery[cid]; ok && len(buf) > 0 {
-				newBuf := make([]OutgoingMessage, 0, len(buf))
-				for _, m := range buf {
-					if m.StepIndex <= stepIdx {
-						newBuf = append(newBuf, m)
-					}
-				}
-				s.stepRecovery[cid] = newBuf
+			if s.streamBuffer != nil {
+				s.streamBuffer.ClearCascade(cid)
 			}
-			s.recoveryMu.Unlock()
 			s.clearApproval(cid)
 
 			s.broadcast(OutgoingMessage{

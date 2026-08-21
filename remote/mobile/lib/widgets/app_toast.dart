@@ -13,6 +13,7 @@ class _ToastItem {
   final ToastType type;
   final DateTime createdAt;
   final Duration duration;
+  Timer? timer;
 
   _ToastItem({
     required this.id,
@@ -30,6 +31,17 @@ class AppToast {
   static OverlayEntry? _overlayEntry;
   static final ValueNotifier<bool> _isHovered = ValueNotifier(false);
   static int _idCounter = 0;
+
+  @visibleForTesting
+  static void resetForTest() {
+    for (final t in _activeToasts) {
+      t.timer?.cancel();
+    }
+    _activeToasts.clear();
+    _overlayEntry?.remove();
+    _overlayEntry = null;
+    _isHovered.value = false;
+  }
 
   static void show(
     BuildContext context, {
@@ -64,13 +76,17 @@ class AppToast {
     _activeToasts.add(item);
     _ensureOverlay(context);
 
-    Timer(duration, () {
+    item.timer = Timer(duration, () {
       _removeToast(item.id);
     });
   }
 
   static void _removeToast(String id) {
-    _activeToasts.removeWhere((t) => t.id == id);
+    final idx = _activeToasts.indexWhere((t) => t.id == id);
+    if (idx != -1) {
+      _activeToasts[idx].timer?.cancel();
+      _activeToasts.removeAt(idx);
+    }
     if (_activeToasts.isEmpty) {
       _overlayEntry?.remove();
       _overlayEntry = null;

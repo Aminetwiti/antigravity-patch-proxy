@@ -85,6 +85,14 @@ class SyntaxHighlighter {
       'do', 'done', 'in', 'function', 'export', 'return', 'exit', 'set', 'unset',
       'source', 'eval', 'alias', 'echo', 'printf', 'read', 'cd', 'pwd', 'test',
     },
+    'sql': {
+      'select', 'from', 'where', 'insert', 'into', 'update', 'delete', 'create',
+      'table', 'drop', 'alter', 'add', 'join', 'inner', 'left', 'right', 'full',
+      'outer', 'on', 'group', 'by', 'order', 'having', 'as', 'distinct', 'count',
+      'sum', 'avg', 'min', 'max', 'null', 'not', 'and', 'or', 'in', 'between',
+      'like', 'is', 'union', 'all', 'limit', 'offset', 'values', 'set', 'case',
+      'when', 'then', 'else', 'end', 'primary', 'key', 'foreign', 'references',
+    },
   };
 
   static String _normalizeLang(String lang) {
@@ -96,6 +104,7 @@ class SyntaxHighlighter {
     if (l == 'powershell' || l == 'pwsh' || l == 'ps1' || l == 'psm1' || l == 'psd1') return 'powershell';
     if (l == 'zsh') return 'zsh';
     if (l == 'sh' || l == 'bash' || l == 'shell' || l == 'cmd') return 'shell';
+    if (l == 'sql' || l == 'pgsql' || l == 'mysql' || l == 'sqlite') return 'sql';
     return l;
   }
 

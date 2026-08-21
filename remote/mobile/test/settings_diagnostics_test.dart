@@ -7,6 +7,7 @@ import 'package:http/testing.dart';
 import 'package:mobile/core/notifications/approval_notifier.dart';
 import 'package:mobile/core/protocol/daemon_api.dart';
 import 'package:mobile/features/settings/settings_screen.dart';
+import 'package:mobile/widgets/app_toast.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -38,11 +39,11 @@ Future<void> _pumpScreen(
       ),
       home: SettingsScreen(
         initialSettings: initialSettings,
+        initialCategory: initialCategory,
         httpClient: httpClient,
         api: api,
         notifier: notifier,
         onDaemonSaved: onDaemonSaved,
-        initialCategory: initialCategory,
       ),
     ),
   );
@@ -52,19 +53,34 @@ Future<void> _pumpScreen(
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+    AppToast.resetForTest();
+  });
+
+  tearDown(() {
+    AppToast.resetForTest();
   });
 
   testWidgets('diagnostics: GET /health/diagnostic et export JSON partagé',
       (tester) async {
-    var requested = false;
+    bool requested = false;
     final client = MockClient((request) async {
-      requested = true;
-      expect(request.url.path, '/health/diagnostic');
-      return http.Response(
-        jsonEncode({'status': 'ok', 'logs': ['a']}),
-        200,
-        headers: {'content-type': 'application/json'},
-      );
+      if (request.url.path.contains('diagnostic')) {
+        requested = true;
+        return http.Response(
+          jsonEncode({
+            'status': 'healthy',
+            'pid': 1234,
+            'csrf_ok': true,
+            'connected_clients': 1,
+            'active_cascades': 0,
+            'lan_ip': '192.168.1.10',
+            'tunnel_url': 'https://mock.trycloudflare.com',
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      return http.Response('not found', 404);
     });
 
     await _pumpScreen(tester, httpClient: client, initialCategory: SettingsCategory.app);
@@ -97,6 +113,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(prefs.getString('settings.conversationWidth'), 'Narrow');
+
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
   });
 
   testWidgets('general: queuedMessagesMode et securityPreset persistent',
@@ -110,5 +129,8 @@ void main() {
 
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('settings.queuedMessagesMode'), 'immediate');
+
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
   });
 }

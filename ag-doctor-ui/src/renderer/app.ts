@@ -4314,10 +4314,20 @@ if (window.ag && window.ag.onDaemonLog) {
             attachCopyButton(wsUrl);
           }
         });
-      } else if (data.includes('Échec') || data.includes('Tunnel non démarré') || data.includes('introuvable')) {
-        if (remoteStatusText) remoteStatusText.innerHTML = `<span style="color: var(--bs-danger, #ef4444);">Tunnel Failed. Check console.</span>`;
-        if (remoteQrPlaceholder) remoteQrPlaceholder.style.display = 'flex';
-        if (remoteQrContainer) remoteQrContainer.style.display = 'none';
+      } else if (data.includes('Daemon listening on') || data.includes('Tunnel non démarré') || data.includes('introuvable')) {
+        const port = parseInt(remotePort?.value || '8090');
+        window.ag.getLocalIp().then((localIp: string) => {
+          const localWsUrl = `ws://${localIp}:${port}/ws?token=${encodeURIComponent(token)}`;
+          window.ag.generateQr(localWsUrl).then((dataUrl: string) => {
+            if (remoteQrImage) remoteQrImage.src = dataUrl;
+            if (remoteQrPlaceholder) remoteQrPlaceholder.style.display = 'none';
+            if (remoteQrContainer) remoteQrContainer.style.display = 'block';
+            if (remoteStatusText) {
+              remoteStatusText.innerHTML = `Mode Local Wi-Fi actif : <b style="word-break: break-all;">${localWsUrl}</b><br/><span style="font-size: 11px; opacity: 0.75;">(Scannez avec votre mobile connecté au même Wi-Fi)</span><br/><button class="btn btn-ghost" id="copyRemoteWsBtn" type="button" style="margin-top: 8px; padding: 2px 10px; font-size: 11px;">📋 Copier l'URL</button>`;
+              attachCopyButton(localWsUrl);
+            }
+          });
+        });
       }
     }
   });

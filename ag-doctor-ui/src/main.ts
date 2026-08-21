@@ -671,11 +671,17 @@ ipcMain.handle(DOCTOR_IPC_CHANNELS.NETWORK_START_DAEMON, async (event, options: 
   }
   args.push('--auth-token', token);
 
-  event.sender.send(DOCTOR_IPC_CHANNELS.NETWORK_DAEMON_LOG, `> Lancement de daemon.exe ${args.join(' ')}\n`);
+  const daemonDir = path.dirname(daemonExePath);
+  const daemonBinDir = path.join(daemonDir, 'bin');
+  const envPath = `${daemonDir}${path.delimiter}${daemonBinDir}${path.delimiter}${process.env.PATH || ''}`;
 
   daemonProcess = spawn(daemonExePath, args, {
-    cwd: path.dirname(daemonExePath),
+    cwd: daemonDir,
     windowsHide: true,
+    env: {
+      ...process.env,
+      PATH: envPath,
+    },
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
