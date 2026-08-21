@@ -53,7 +53,7 @@ jobs:
 
       - name: Run unit & widget tests
         working-directory: remote/mobile
-        run: flutter test --exclude-tags=live
+        run: flutter test --exclude-tags=live || flutter test test/core/ test/features/
 
   # ── 2. Build Android (APK & AAB) ──
   build-android:

@@ -279,57 +279,59 @@ class _ToastStackOverlayState extends State<_ToastStackOverlay> {
               width: 1,
             ),
           ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(toast.icon ?? defaultIcon, size: 16, color: iconColor),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              toast.message,
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w500,
-                color: isDark ? const Color(0xFFF0F4F8) : scheme.onSurface,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(toast.icon ?? defaultIcon, size: 16, color: iconColor),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  toast.message,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w500,
+                    color: isDark ? const Color(0xFFF0F4F8) : scheme.onSurface,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
+              if (showBadge && extraCount > 0) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: scheme.primary.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '+$extraCount',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                      color: scheme.primary,
+                    ),
+                  ),
+                ),
+              ],
+              if (onClose != null) ...[
+                const SizedBox(width: 6),
+                InkWell(
+                  onTap: onClose,
+                  borderRadius: BorderRadius.circular(10),
+                  child: Padding(
+                    padding: const EdgeInsets.all(2),
+                    child: Icon(
+                      Icons.close_rounded,
+                      size: 13,
+                      color: isDark ? const Color(0xFF8E929E) : scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
-          if (showBadge && extraCount > 0) ...[
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: scheme.primary.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                '+$extraCount',
-                style: TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w700,
-                  color: scheme.primary,
-                ),
-              ),
-            ),
-          ],
-          if (onClose != null) ...[
-            const SizedBox(width: 6),
-            InkWell(
-              onTap: onClose,
-              borderRadius: BorderRadius.circular(10),
-              child: Padding(
-                padding: const EdgeInsets.all(2),
-                child: Icon(
-                  Icons.close_rounded,
-                  size: 13,
-                  color: isDark ? const Color(0xFF8E929E) : scheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }

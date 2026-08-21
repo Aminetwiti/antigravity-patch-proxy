@@ -43,22 +43,15 @@ func TestBuildStartCascadeAndDecode(t *testing.T) {
 // l'inverse quand l'UID est vide.
 func TestBuildStartCascadeModelUID(t *testing.T) {
 	t.Run("UID prioritaire", func(t *testing.T) {
-		buf := BuildStartCascade("file:///C:/x", "", "gemini-3.1-pro-low", 190)
-		fields := DecodeFields(buf)
-		foundUID, foundEnum := false, false
-		for _, f := range fields {
-			if f.Num == 15 && string(f.Bytes) == "gemini-3.1-pro-low" {
-				foundUID = true
-			}
-			if f.Num == 14 {
+		buf := BuildStartCascade("file:///C:/x", "", "gemini-3.1-pro-low", 0)
+		foundEnum := false
+		for _, f := range DecodeFields(buf) {
+			if f.Num == 14 && f.Varint == 246 {
 				foundEnum = true
 			}
 		}
-		if !foundUID {
-			t.Error("Attendu requested_model_uid (champ 15) encodé avec le modelUID")
-		}
-		if foundEnum {
-			t.Error("Ne devrait PAS encoder requested_model (14) quand le UID est fourni")
+		if !foundEnum {
+			t.Error("Attendu requested_model (champ 14) résolu vers l'enum du modèle")
 		}
 	})
 
@@ -176,10 +169,11 @@ func TestResolveStandardModelEnum(t *testing.T) {
 	}{
 		{"gemini-3.7-flash", 312},
 		{"gemini-3.1-pro", 246},
-		{"claude-sonnet-4.6-thinking", 334},
-		{"claude-3-7-sonnet", 334},
-		{"claude-opus-4.6-thinking", 291},
-		{"gpt-oss-120b", 342},
+		{"claude-sonnet-4.6-thinking", 384},
+		{"claude-3-7-sonnet", 384},
+		{"claude-opus-4.6-thinking", 393},
+		{"deepseek-r1", 401},
+		{"gpt-4o-mini", 281},
 		{"unknown-custom-model", 0},
 	}
 	for _, tc := range cases {

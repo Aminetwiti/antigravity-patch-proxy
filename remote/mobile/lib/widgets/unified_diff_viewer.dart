@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile/features/code_review/models/code_comment.dart';
 import 'package:mobile/features/code_review/widgets/add_comment_dialog.dart';
+import '../theme/app_colors.dart';
 
 /// Unifié et interactif : affiche un diff de code et permet d'annoter
 /// des lignes spécifiques pour envoyer une revue de code groupée à l'agent.
@@ -847,6 +848,7 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
   }
 
   Widget _buildLineRow(_DiffLine line, bool hasComment, ColorScheme scheme) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     Color bg = Colors.transparent;
     Color textColor = isDark ? AppColors.inkPrimary : scheme.onSurface;
     String prefix = ' ';

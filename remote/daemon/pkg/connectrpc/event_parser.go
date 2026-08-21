@@ -98,7 +98,7 @@ func ParseFrameEvents(raw []byte, cascadeID string) []StreamEvent {
 					}
 				}
 			}
-			if isInteraction {
+			if isInteraction && (trajectoryID != "" || stepIndex > 0) {
 				return []StreamEvent{{
 					Kind:         EventKindApprovalRequired,
 					CascadeID:    cascadeID,
