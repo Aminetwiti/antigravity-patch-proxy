@@ -148,6 +148,7 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (context) => _NewScheduledTaskModal(
         workspaces: widget.workspaces ?? const ['Workspace'],
@@ -666,18 +667,20 @@ class _NewScheduledTaskModalState extends State<_NewScheduledTaskModal> {
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF131416) : scheme.surfaceContainer,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-        border: Border(top: BorderSide(color: scheme.outlineVariant, width: 1)),
-      ),
-      padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(context).viewInsets.bottom + 20),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
+    return SafeArea(
+      top: false,
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF131416) : scheme.surfaceContainer,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+          border: Border(top: BorderSide(color: scheme.outlineVariant, width: 1)),
+        ),
+        padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
             // Header: Title + Close Icon
             Row(
               children: [
@@ -934,6 +937,7 @@ class _NewScheduledTaskModalState extends State<_NewScheduledTaskModal> {
               ),
             ),
           ],
+        ),
         ),
       ),
     );

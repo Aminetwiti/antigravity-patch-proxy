@@ -31,15 +31,17 @@ class _ModelsSettingsSectionState extends State<ModelsSettingsSection> {
   bool _isLoadingQuotas = false;
   Map<String, String> _modelStatuses = {};
 
-  // Real-time Quota metrics (1:1 with Antigravity IDE)
-  int _geminiWeeklyPercent = 59;
+  // Real-time Quota metrics (1:1 with Antigravity IDE).
+  // null = pas encore chargé (push quota_update ou fetch) — on affiche un état
+  // de chargement au lieu de valeurs factices (BUG-SET-008).
+  int? _geminiWeeklyPercent;
   final String _geminiWeeklyRefresh = 'in 2 days, 21 hours';
-  int _gemini5HourPercent = 51;
+  int? _gemini5HourPercent;
   final String _gemini5HourRefresh = 'in 2 hours, 32 minutes';
 
-  int _claudeWeeklyPercent = 62;
+  int? _claudeWeeklyPercent;
   final String _claudeWeeklyRefresh = 'in 5 days, 18 hours';
-  int _claude5HourPercent = 87;
+  int? _claude5HourPercent;
   final String _claude5HourRefresh = 'in 4 hours, 2 minutes';
 
   final List<String> _models = [
@@ -463,7 +465,7 @@ class _ModelsSettingsSectionState extends State<ModelsSettingsSection> {
   Widget _buildQuotaRow({
     required String title,
     required String subtitle,
-    required int percent,
+    required int? percent,
     required bool isDark,
     required ColorScheme scheme,
   }) {
@@ -488,7 +490,7 @@ class _ModelsSettingsSectionState extends State<ModelsSettingsSection> {
         ),
         const SizedBox(width: 16),
         Text(
-          '$percent%',
+          percent == null ? '--' : '$percent%',
           style: TextStyle(
             fontSize: 13.5,
             fontWeight: FontWeight.w700,
@@ -496,15 +498,19 @@ class _ModelsSettingsSectionState extends State<ModelsSettingsSection> {
           ),
         ),
         const SizedBox(width: 8),
+        // ponytail: placeholder statique '--' quand la valeur est null — un
+        // spinner indéterminé animerait en continu et casserait pumpAndSettle.
         SizedBox(
           width: 22,
           height: 22,
-          child: CircularProgressIndicator(
-            value: percent / 100.0,
-            strokeWidth: 3,
-            backgroundColor: isDark ? const Color(0xFF26282E) : scheme.outlineVariant,
-            color: percent > 20 ? const Color(0xFF34C759) : const Color(0xFFFF9500),
-          ),
+          child: percent == null
+              ? const Icon(Icons.more_horiz, size: 18)
+              : CircularProgressIndicator(
+                  value: percent / 100.0,
+                  strokeWidth: 3,
+                  backgroundColor: isDark ? const Color(0xFF26282E) : scheme.outlineVariant,
+                  color: percent > 20 ? const Color(0xFF34C759) : const Color(0xFFFF9500),
+                ),
         ),
       ],
     );

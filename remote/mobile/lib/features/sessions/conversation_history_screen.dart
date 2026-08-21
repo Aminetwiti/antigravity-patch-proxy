@@ -5,6 +5,7 @@ import 'package:mobile/core/protocol/messages.dart';
 import 'package:mobile/core/protocol/session_parser.dart';
 import 'package:mobile/core/protocol/workspace_path.dart';
 import 'package:mobile/theme/app_colors.dart';
+import '../../widgets/antigravity_spinning_arc.dart';
 import 'display_options.dart';
 
 /// Écran Conversation History (Antigravity 2.0)
@@ -13,6 +14,7 @@ import 'display_options.dart';
 class ConversationHistoryScreen extends StatefulWidget {
   final DaemonApi? api;
   final List<CascadeSession> sessions;
+  final List<ProjectItem>? projects;
   final String activeSessionId;
   final Function(String sessionId) onSessionSelected;
   final VoidCallback? onRefresh;
@@ -22,6 +24,7 @@ class ConversationHistoryScreen extends StatefulWidget {
     super.key,
     this.api,
     required this.sessions,
+    this.projects,
     required this.activeSessionId,
     required this.onSessionSelected,
     this.onRefresh,
@@ -42,9 +45,11 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
   SessionSubtitle _subtitle = SessionSubtitle.worktree;
 
   List<CascadeSession>? _fetchedSessions;
+  List<ProjectItem>? _fetchedProjects;
   bool _isLoading = false;
 
   List<CascadeSession> get _allSessions => _fetchedSessions ?? widget.sessions;
+  List<ProjectItem>? get _allProjects => _fetchedProjects ?? widget.projects;
 
   @override
   void initState() {
@@ -65,10 +70,20 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
     try {
       final res = await widget.api!.listAllSessions();
       final parsed = SessionParser.parseListSessions(res);
+      List<ProjectItem>? projs;
+      if (res['projects'] is List) {
+        projs = (res['projects'] as List)
+            .whereType<Map>()
+            .map((p) => ProjectItem.fromJson(Map<String, dynamic>.from(p)))
+            .toList();
+      }
       if (!mounted) return;
       setState(() {
         if (parsed.isNotEmpty) {
           _fetchedSessions = parsed;
+        }
+        if (projs != null && projs.isNotEmpty) {
+          _fetchedProjects = projs;
         }
         _isLoading = false;
       });
@@ -113,10 +128,11 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
     // Tri dynamique selon Display Options
     filtered = sortSessions(sessions: filtered, sortBy: _sortBy);
 
-    // Groupement dynamique selon Display Options
+    // Groupement dynamique selon Display Options avec la même liste de projets canonique
     final groupedSessions = groupSessions(
       sessions: filtered,
       groupBy: _groupBy,
+      projects: _allProjects,
     );
 
     // Flatten for list rendering with headers
@@ -525,23 +541,23 @@ class _ConversationHistoryRow extends StatelessWidget {
               Divider(color: isDark ? const Color(0xFF2C2F36) : scheme.outlineVariant),
               ListTile(
                 leading: Icon(Icons.copy_rounded, size: 18, color: scheme.onSurface),
-                title: Text('Copy Title', style: TextStyle(fontSize: 13, color: scheme.onSurface)),
+                title: Text('Copier le titre', style: TextStyle(fontSize: 13, color: scheme.onSurface)),
                 onTap: () {
                   Navigator.of(ctx).pop();
                   Clipboard.setData(ClipboardData(text: session.title));
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Titre copié'), duration: Duration(seconds: 2)),
+                    const SnackBar(content: Text('Titre copié dans le presse-papiers'), duration: Duration(seconds: 2)),
                   );
                 },
               ),
               ListTile(
                 leading: Icon(Icons.tag_rounded, size: 18, color: scheme.onSurface),
-                title: Text('Copy Session ID', style: TextStyle(fontSize: 13, color: scheme.onSurface)),
+                title: Text('Copier l\'identifiant de session', style: TextStyle(fontSize: 13, color: scheme.onSurface)),
                 onTap: () {
                   Navigator.of(ctx).pop();
                   Clipboard.setData(ClipboardData(text: session.id));
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('ID de session copié'), duration: Duration(seconds: 2)),
+                    const SnackBar(content: Text('Identifiant de session copié dans le presse-papiers'), duration: Duration(seconds: 2)),
                   );
                 },
               ),
@@ -595,113 +611,120 @@ class _ConversationHistoryRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final displayTitle = session.title.trim().isNotEmpty
+        ? session.title.trim()
+        : 'Nouvelle conversation';
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        onLongPress: () => _showContextMenu(context),
-        onSecondaryTap: () => _showContextMenu(context),
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        hoverColor: isDark ? const Color(0xFF1E2127) : scheme.surfaceContainerHighest,
-        splashColor: scheme.primary.withValues(alpha: 0.1),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(
-            children: [
-              // Colonne Titre + Workspace
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      session.title.isEmpty ? 'Untitled Conversation' : session.title,
-                      style: TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
-                        color: isActive ? scheme.primary : (isDark ? const Color(0xFFE4E4E7) : scheme.onSurface),
-                        letterSpacing: -0.1,
+    final runningText = isRunning ? "En cours d'exécution, " : "";
+    final timeText = session.time.isNotEmpty ? session.time : "récent";
+    return Semantics(
+      button: true,
+      selected: isActive,
+      label: '$displayTitle, $runningText$timeText',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          onLongPress: () => _showContextMenu(context),
+          onSecondaryTap: () => _showContextMenu(context),
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          hoverColor: isDark ? const Color(0xFF1E2127) : scheme.surfaceContainerHighest,
+          splashColor: scheme.primary.withValues(alpha: 0.1),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                // Colonne Titre + Workspace
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        displayTitle,
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+                          color: isActive ? scheme.primary : (isDark ? const Color(0xFFE4E4E7) : scheme.onSurface),
+                          letterSpacing: -0.1,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (showSubtitle) ...[
-                      const SizedBox(height: 3),
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.folder_outlined,
-                            size: 12,
-                            color: scheme.onSurfaceVariant,
-                          ),
-                          const SizedBox(width: 5),
-                          Expanded(
-                            child: Text(
-                              workspaceName,
-                              style: TextStyle(
-                                fontSize: 11.5,
-                                color: scheme.onSurfaceVariant,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                      if (showSubtitle) ...[
+                        const SizedBox(height: 3),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.folder_outlined,
+                              size: 12,
+                              color: scheme.onSurfaceVariant,
                             ),
+                            const SizedBox(width: 5),
+                            Expanded(
+                              child: Text(
+                                workspaceName,
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // Trailing Status: Active blue dot, Spinner, or relative time
+                if (isRunning)
+                  Tooltip(
+                    message: 'En cours d\'exécution',
+                    child: AntigravitySpinningArc(
+                      size: 13.5,
+                      color: isActive ? scheme.primary : (isDark ? const Color(0xFF8E929E) : scheme.outline),
+                    ),
+                  )
+                else if (session.hasUnread && !isActive)
+                  Tooltip(
+                    message: 'Session terminée — non lue',
+                    child: Container(
+                      width: 7,
+                      height: 7,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF1A73E8),
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Color(0x661A73E8),
+                            blurRadius: 4,
+                            spreadRadius: 0.5,
                           ),
                         ],
                       ),
-                    ],
-                  ],
-                ),
-              ),
-
-              const SizedBox(width: 12),
-
-              // Trailing Status: Active blue dot, Spinner, or relative time
-              if (isRunning)
-                SizedBox(
-                  width: 13,
-                  height: 13,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 1.5,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      isActive ? scheme.primary : scheme.onSurfaceVariant,
                     ),
-                  ),
-                )
-              else if (session.hasUnread && !isActive)
-                Tooltip(
-                  message: 'Session terminée — non lue',
-                  child: Container(
-                    width: 7,
-                    height: 7,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF1A73E8),
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Color(0x661A73E8),
-                          blurRadius: 4,
-                          spreadRadius: 0.5,
-                        ),
-                      ],
+                  )
+                else if (session.time.isNotEmpty)
+                  Text(
+                    session.time,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: scheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w400,
                     ),
+                  )
+                else
+                  Icon(
+                    Icons.arrow_forward_ios_rounded,
+                    size: 11,
+                    color: isDark ? const Color(0xFF3F424E) : scheme.outlineVariant,
                   ),
-                )
-              else if (session.time.isNotEmpty)
-                Text(
-                  session.time,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: scheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w400,
-                  ),
-                )
-              else
-                Icon(
-                  Icons.arrow_forward_ios_rounded,
-                  size: 11,
-                  color: isDark ? const Color(0xFF3F424E) : scheme.outlineVariant,
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

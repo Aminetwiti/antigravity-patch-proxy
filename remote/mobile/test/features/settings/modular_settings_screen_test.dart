@@ -6,10 +6,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/core/protocol/daemon_api.dart';
 import 'package:mobile/features/settings/account_settings_section.dart';
 import 'package:mobile/features/settings/customizations_settings_section.dart';
+import 'package:mobile/features/settings/general_settings_section.dart';
 import 'package:mobile/features/settings/models_settings_section.dart';
 import 'package:mobile/features/settings/settings_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
   testWidgets('SettingsScreen renders master-detail layout on wide screen', (WidgetTester tester) async {
     // Set wide screen dimensions (tablet/desktop)
     tester.view.physicalSize = const Size(1200, 800);
@@ -131,6 +136,67 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(sent.any((m) => m['type'] == 'set_account_preferences'), isTrue);
+
+    api.dispose();
+    await ctrl.close();
+  });
+
+  testWidgets('GeneralSettingsSection displays security presets and syncs with daemon', (WidgetTester tester) async {
+    final ctrl = StreamController<dynamic>.broadcast();
+    final sent = <Map<String, dynamic>>[];
+
+    final api = DaemonApi(
+      incoming: ctrl.stream,
+      send: (d) {
+        final map = d as Map<String, dynamic>;
+        sent.add(map);
+        final reqId = map['requestId'] as String?;
+        final type = map['type'] as String?;
+        if (reqId != null && type == 'get_project_settings') {
+          ctrl.add(jsonEncode({
+            'type': 'response',
+            'requestId': reqId,
+            'data': {
+              'projectId': 'p1',
+              'securityPreset': 'Turbo mode',
+              'artifactReviewPolicy': 'Auto Approve',
+            },
+          }));
+        }
+      },
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: GeneralSettingsSection(api: api),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pumpAndSettle();
+
+    // Verify presence of Security Preset & Execution
+    expect(find.text('Security Preset'), findsOneWidget);
+    expect(find.text('Artifact Review Policy'), findsOneWidget);
+    expect(find.text('Disables all safety barriers for maximal iteration velocity.'), findsOneWidget);
+
+    // Simulate WebSocket event from Desktop IDE changing settings to Full machine
+    ctrl.add(jsonEncode({
+      'type': 'project_settings_updated',
+      'data': {
+        'securityPreset': 'Full machine',
+        'artifactReviewPolicy': 'Always Ask',
+      },
+    }));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pumpAndSettle();
+
+    // Verify updated UI description from real-time sync
+    expect(find.text('All terminal commands require review. The agent can read or write to any file in the machine.'), findsOneWidget);
 
     api.dispose();
     await ctrl.close();

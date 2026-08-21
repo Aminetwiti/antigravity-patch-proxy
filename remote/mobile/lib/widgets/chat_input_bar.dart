@@ -475,6 +475,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
           if (!clean.startsWith('file:///')) {
             clean = clean.startsWith('/') ? 'file://$clean' : 'file:///$clean';
           }
+          buffer.writeln('[ARTIFACT: ${img.name}]\nPath: $clean\n');
         }
         mediaList.add({
           'uri': clean,
@@ -496,11 +497,26 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
           if (!clean.startsWith('file:///')) {
             clean = clean.startsWith('/') ? 'file://$clean' : 'file:///$clean';
           }
-          buffer.writeln('[Fichier: $clean]');
+          buffer.writeln('[ARTIFACT: ${f.name}]\nPath: $clean\n');
         } else {
           buffer.writeln('[Fichier joint: ${f.name} (${_formatBytes(f.size)})]');
         }
       }
+      final fp = uploadedPaths[f.name];
+      var clean = '';
+      if (fp != null && fp.isNotEmpty) {
+        clean = fp.replaceAll(r'\', '/');
+        if (!clean.startsWith('file:///')) {
+          clean = clean.startsWith('/') ? 'file://$clean' : 'file:///$clean';
+        }
+      }
+      mediaList.add({
+        'uri': clean,
+        'mimeType': f.mimeType ?? _detectMime(f.name),
+        'description': f.name,
+        'name': f.name,
+        if (f.base64Data != null) 'base64Data': f.base64Data,
+      });
     }
 
     if (finalPayload.isNotEmpty) {
@@ -575,6 +591,26 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  static String _detectMime(String name) {
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    if (lower.endsWith('.gif')) return 'image/gif';
+    if (lower.endsWith('.svg')) return 'image/svg+xml';
+    if (lower.endsWith('.pdf')) return 'application/pdf';
+    if (lower.endsWith('.csv')) return 'text/csv';
+    if (lower.endsWith('.json')) return 'application/json';
+    if (lower.endsWith('.md')) return 'text/markdown';
+    if (lower.endsWith('.txt')) return 'text/plain';
+    if (lower.endsWith('.mp3')) return 'audio/mpeg';
+    if (lower.endsWith('.wav')) return 'audio/wav';
+    if (lower.endsWith('.ogg')) return 'audio/ogg';
+    if (lower.endsWith('.webm')) return 'audio/webm';
+    if (lower.endsWith('.mp4')) return 'video/mp4';
+    return 'application/octet-stream';
   }
 
   Color _badgeColorForExtension(String name, ColorScheme scheme) {
@@ -1395,11 +1431,13 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (ctx) => SafeArea(
+        top: false,
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Column(
@@ -1491,95 +1529,98 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder:
-          (ctx) => SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Drag handle
-                Center(
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 16),
-                    width: 36,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Theme.of(ctx).colorScheme.outlineVariant,
-                      borderRadius: BorderRadius.circular(AppRadius.pill),
+          (ctx) => SafeArea(
+            top: false,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Drag handle
+                  Center(
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 16),
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Theme.of(ctx).colorScheme.outlineVariant,
+                        borderRadius: BorderRadius.circular(AppRadius.pill),
+                      ),
                     ),
                   ),
-                ),
-                Text(
-                  "Mode d'envoi",
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: Theme.of(context).colorScheme.onSurface,
+                  Text(
+                    "Mode d'envoi",
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  "Configurer le comportement d'exécution des messages.",
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  const SizedBox(height: 4),
+                  Text(
+                    "Configurer le comportement d'exécution des messages.",
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 16),
-                _QueueTile(
-                  title: 'Envoyer immédiatement',
-                  subtitle: "Le message part dès l'envoi.",
-                  icon: Icons.send_outlined,
-                  selected: _sendMode == SendMode.immediate,
-                  onTap: () {
-                    setState(() => _sendMode = SendMode.immediate);
-                    Navigator.of(ctx).pop();
-                  },
-                ),
-                const SizedBox(height: 8),
-                _QueueTile(
-                  title: "Mettre en file d'attente",
-                  subtitle: 'Le message sera exécuté après la tâche en cours.',
-                  icon: Icons.playlist_add_outlined,
-                  selected: _sendMode == SendMode.queued,
-                  onTap: () {
-                    setState(() => _sendMode = SendMode.queued);
-                    Navigator.of(ctx).pop();
-                  },
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  "Effort de raisonnement par modèle",
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: Theme.of(context).colorScheme.onSurface,
+                  const SizedBox(height: 16),
+                  _QueueTile(
+                    title: 'Envoyer immédiatement',
+                    subtitle: "Le message part dès l'envoi.",
+                    icon: Icons.send_outlined,
+                    selected: _sendMode == SendMode.immediate,
+                    onTap: () {
+                      setState(() => _sendMode = SendMode.immediate);
+                      Navigator.of(ctx).pop();
+                    },
                   ),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children:
-                      ['Faible', 'Moyen', 'Élevé'].map((effort) {
-                        final selected = _reasoningEffort == effort;
-                        return Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 4),
-                            child: ChoiceChip(
-                              label: Text(effort),
-                              selected: selected,
-                              onSelected: (val) {
-                                if (val) {
-                                  setState(() => _reasoningEffort = effort);
-                                  Navigator.of(ctx).pop();
-                                }
-                              },
+                  const SizedBox(height: 8),
+                  _QueueTile(
+                    title: "Mettre en file d'attente",
+                    subtitle: 'Le message sera exécuté après la tâche en cours.',
+                    icon: Icons.playlist_add_outlined,
+                    selected: _sendMode == SendMode.queued,
+                    onTap: () {
+                      setState(() => _sendMode = SendMode.queued);
+                      Navigator.of(ctx).pop();
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    "Effort de raisonnement par modèle",
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children:
+                        ['Faible', 'Moyen', 'Élevé'].map((effort) {
+                          final selected = _reasoningEffort == effort;
+                          return Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 4),
+                              child: ChoiceChip(
+                                label: Text(effort),
+                                selected: selected,
+                                onSelected: (val) {
+                                  if (val) {
+                                    setState(() => _reasoningEffort = effort);
+                                    Navigator.of(ctx).pop();
+                                  }
+                                },
+                              ),
                             ),
-                          ),
-                        );
-                      }).toList(),
-                ),
-                const SizedBox(height: 12),
-              ],
+                          );
+                        }).toList(),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+              ),
             ),
           ),
     );
@@ -1871,90 +1912,153 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
+      useSafeArea: true,
       builder: (ctx) => Container(
         constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.5,
+          maxHeight: MediaQuery.of(context).size.height * 0.55,
         ),
         decoration: BoxDecoration(
-          color: isDark ? AppColors.surfaceBase : AppColors.surfaceInput,
+          color: isDark ? AppColors.surfaceBase : scheme.surface,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
           border: Border(
             top: BorderSide(
-              color: isDark ? AppColors.borderStrong : AppColors.borderSubtle,
+              color: isDark ? AppColors.borderStrong : scheme.outlineVariant,
+              width: 1,
             ),
           ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Center(
-              child: Container(
-                margin: const EdgeInsets.only(top: 8, bottom: 6),
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: isDark ? AppColors.borderStrong : AppColors.borderSubtle,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                  const Icon(Icons.history_rounded, size: 16, color: AppColors.accentBlue),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Historique des messages envoyés',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                      color: isDark ? AppColors.inkPrimary : Colors.black87,
-                    ),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    visualDensity: VisualDensity.compact,
-                    icon: const Icon(Icons.close_rounded, size: 16),
-                    onPressed: () => Navigator.of(ctx).pop(),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            Flexible(
-              child: ListView.separated(
-                shrinkWrap: true,
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                itemCount: _promptHistory.length,
-                separatorBuilder: (_, __) => const Divider(height: 1),
-                itemBuilder: (context, idx) {
-                  final item = _promptHistory[_promptHistory.length - 1 - idx];
-                  return ListTile(
-                    dense: true,
-                    title: Text(
-                      item,
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        color: isDark ? AppColors.inkPrimary : scheme.onSurface,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: const Icon(Icons.north_west_rounded, size: 14, color: AppColors.inkMuted),
-                    onTap: () {
-                      HapticFeedback.selectionClick();
-                      _controller.text = item;
-                      _controller.selection = TextSelection.collapsed(offset: item.length);
-                      widget.onDraftChanged?.call(item);
-                      Navigator.of(ctx).pop();
-                    },
-                  );
-                },
-              ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.4 : 0.12),
+              blurRadius: 16,
+              offset: const Offset(0, -4),
             ),
           ],
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(top: 8, bottom: 6),
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: isDark ? AppColors.borderStrong : scheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(AppRadius.pill),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: AppColors.accentBlue.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(AppRadius.sm),
+                      ),
+                      child: const Icon(Icons.history_rounded, size: 16, color: AppColors.accentBlue),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Historique des messages envoyés',
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                        color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                      decoration: BoxDecoration(
+                        color: isDark ? AppColors.surfaceHover : scheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(AppRadius.pill),
+                      ),
+                      child: Text(
+                        '${_promptHistory.length}',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.close_rounded, size: 16),
+                      tooltip: 'Fermer',
+                      onPressed: () => Navigator.of(ctx).pop(),
+                    ),
+                  ],
+                ),
+              ),
+              Divider(
+                height: 1,
+                thickness: 1,
+                color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.4),
+              ),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
+                  itemCount: _promptHistory.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 4),
+                  itemBuilder: (context, idx) {
+                    final item = _promptHistory[_promptHistory.length - 1 - idx];
+                    return InkWell(
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        _controller.text = item;
+                        _controller.selection = TextSelection.collapsed(offset: item.length);
+                        widget.onDraftChanged?.call(item);
+                        Navigator.of(ctx).pop();
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: isDark ? AppColors.surfaceRaised.withValues(alpha: 0.5) : scheme.surfaceContainerLow,
+                          borderRadius: BorderRadius.circular(AppRadius.md),
+                          border: Border.all(
+                            color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.3),
+                            width: 0.8,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                item,
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  height: 1.35,
+                                  color: isDark ? AppColors.inkPrimary : scheme.onSurface,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Icon(
+                              Icons.north_west_rounded,
+                              size: 14,
+                              color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

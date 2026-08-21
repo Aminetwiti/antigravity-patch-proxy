@@ -1,20 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile/theme/app_colors.dart';
-import 'bouncing_tap.dart';
 
-/// Carte interactive d'Implementation Plan dans le chat avec bouton d'action Proceed
+/// Carte interactive d'Implementation Plan dans le chat (Antigravity 2.0 Desktop Style)
 class ImplementationPlanCard extends StatelessWidget {
   final String title;
-  final String summary;
-  final VoidCallback onProceed;
+  final String? summary;
+  final VoidCallback? onProceed;
   final VoidCallback onViewPlan;
 
   const ImplementationPlanCard({
     super.key,
     this.title = 'Implementation Plan',
-    required this.summary,
-    required this.onProceed,
+    this.summary,
+    this.onProceed,
     required this.onViewPlan,
   });
 
@@ -24,156 +23,83 @@ class ImplementationPlanCard extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
+      margin: const EdgeInsets.only(top: 8, bottom: 4),
       decoration: BoxDecoration(
-        color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
-        gradient: AppGradients.cardCool(isDark: isDark),
-        borderRadius: BorderRadius.circular(AppRadius.lg),
+        color: isDark ? const Color(0xFF14161B) : scheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isDark ? const Color(0xFF3186FF).withValues(alpha: 0.3) : scheme.primary.withValues(alpha: 0.25),
+          color: isDark ? const Color(0xFF262930) : scheme.outlineVariant,
           width: 1,
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header
-          InkWell(
-            onTap: onViewPlan,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(5),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF3186FF).withValues(alpha: isDark ? 0.18 : 0.12),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: const Icon(Icons.assignment_outlined, size: 16, color: Color(0xFF3186FF)),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          style: TextStyle(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w700,
-                            color: scheme.onSurface,
-                            letterSpacing: -0.1,
-                          ),
-                        ),
-                        Text(
-                          'PLAN D\'EXÉCUTION AGENT',
-                          style: TextStyle(
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.6,
-                            color: isDark ? const Color(0xFF749BFF) : const Color(0xFF3186FF),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Icon(Icons.chevron_right, size: 16, color: scheme.onSurfaceVariant),
-                ],
-              ),
-            ),
-          ),
-
-          // Summary
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-            child: Text(
-              summary,
-              style: TextStyle(
-                fontSize: 12.5,
-                color: isDark ? const Color(0xFFD4D4D8) : scheme.onSurfaceVariant,
-                height: 1.45,
-              ),
-              maxLines: 4,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-
-          // Action button
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () {
+            HapticFeedback.selectionClick();
+            onViewPlan();
+          },
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             child: Row(
               children: [
-                BouncingTap(
-                  hapticType: BouncingHapticType.heavy,
-                  onTap: onProceed,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                    decoration: BoxDecoration(
-                      gradient: AppGradients.accentCta,
-                      borderRadius: BorderRadius.circular(AppRadius.pill),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFF3186FF).withValues(alpha: isDark ? 0.35 : 0.2),
-                          blurRadius: 6,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.play_arrow_rounded, size: 15, color: Colors.white),
-                        SizedBox(width: 4),
-                        Text(
-                          'Proceed ⌘↵',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                            letterSpacing: 0.2,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                Icon(
+                  Icons.description_outlined,
+                  size: 16,
+                  color: isDark ? const Color(0xFFE4E4E7) : scheme.onSurface,
                 ),
                 const SizedBox(width: 8),
-                BouncingTap(
-                  hapticType: BouncingHapticType.selection,
-                  onTap: onViewPlan,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                    decoration: BoxDecoration(
-                      color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(AppRadius.pill),
-                      border: Border.all(
-                        color: isDark ? AppColors.borderSubtle : scheme.outlineVariant,
-                        width: 0.8,
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.menu_book_outlined, size: 13.5, color: scheme.onSurfaceVariant),
-                        const SizedBox(width: 5),
-                        Text(
-                          'Lire le plan',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: scheme.onSurface,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? const Color(0xFFE4E4E7) : scheme.onSurface,
                     ),
                   ),
                 ),
+                if (onProceed != null) ...[
+                  const SizedBox(width: 8),
+                  InkWell(
+                    onTap: () {
+                      HapticFeedback.heavyImpact();
+                      onProceed!();
+                    },
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF1E2838) : scheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: scheme.primary.withValues(alpha: 0.5),
+                          width: 0.8,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.play_arrow_rounded, size: 13, color: scheme.primary),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Proceed',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: scheme.primary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -182,13 +108,13 @@ class ImplementationPlanCard extends StatelessWidget {
 /// Carte interactive de Walkthrough dans le chat (Antigravity 2.0 Desktop Style)
 class WalkthroughCard extends StatelessWidget {
   final String title;
-  final String summary;
+  final String? summary;
   final VoidCallback onViewWalkthrough;
 
   const WalkthroughCard({
     super.key,
     this.title = 'Walkthrough',
-    required this.summary,
+    this.summary,
     required this.onViewWalkthrough,
   });
 
@@ -198,109 +124,43 @@ class WalkthroughCard extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
+      margin: const EdgeInsets.only(top: 8, bottom: 4),
       decoration: BoxDecoration(
-        color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
-        gradient: AppGradients.cardCool(isDark: isDark),
-        borderRadius: BorderRadius.circular(AppRadius.lg),
+        color: isDark ? const Color(0xFF14161B) : scheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isDark ? const Color(0xFF00B95C).withValues(alpha: 0.3) : const Color(0xFF00B95C).withValues(alpha: 0.25),
+          color: isDark ? const Color(0xFF262930) : scheme.outlineVariant,
           width: 1,
         ),
       ),
-      child: InkWell(
-        onTap: () {
-          HapticFeedback.selectionClick();
-          onViewWalkthrough();
-        },
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(5),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF00B95C).withValues(alpha: isDark ? 0.18 : 0.12),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: const Icon(Icons.verified_outlined, size: 16, color: Color(0xFF00B95C)),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          style: TextStyle(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w700,
-                            color: scheme.onSurface,
-                            letterSpacing: -0.1,
-                          ),
-                        ),
-                        const Text(
-                          'RÉSUMÉ DES CHANGEMENTS & VALIDATION',
-                          style: TextStyle(
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.6,
-                            color: Color(0xFF00B95C),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Icon(Icons.chevron_right, size: 16, color: scheme.onSurfaceVariant),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                summary,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  color: isDark ? const Color(0xFFD4D4D8) : scheme.onSurfaceVariant,
-                  height: 1.45,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () {
+            HapticFeedback.selectionClick();
+            onViewWalkthrough();
+          },
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.menu_book_outlined,
+                  size: 16,
+                  color: isDark ? const Color(0xFFE4E4E7) : scheme.onSurface,
                 ),
-                maxLines: 4,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF14241B) : const Color(0xFFE6F7EC),
-                      borderRadius: BorderRadius.circular(AppRadius.pill),
-                      border: Border.all(
-                        color: const Color(0xFF00B95C).withValues(alpha: isDark ? 0.4 : 0.3),
-                        width: 0.8,
-                      ),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.menu_book_outlined, size: 13, color: Color(0xFF00B95C)),
-                        SizedBox(width: 5),
-                        Text(
-                          'Consulter le Walkthrough',
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF00B95C),
-                          ),
-                        ),
-                      ],
-                    ),
+                const SizedBox(width: 8),
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? const Color(0xFFE4E4E7) : scheme.onSurface,
                   ),
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
         ),
       ),

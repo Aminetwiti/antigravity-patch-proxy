@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/protocol/daemon_api.dart';
@@ -43,6 +44,7 @@ class ArtifactViewerModal extends StatefulWidget {
     return showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => ArtifactViewerModal(
         api: api,
@@ -90,6 +92,35 @@ class _ArtifactViewerModalState extends State<ArtifactViewerModal> {
 
   Future<void> _fetchArtifactContent() async {
     try {
+      if (widget.artifactPath.startsWith('data:image/')) {
+        final commaIdx = widget.artifactPath.indexOf(',');
+        if (commaIdx != -1) {
+          final b64 = widget.artifactPath.substring(commaIdx + 1);
+          final bytes = base64Decode(b64);
+          if (mounted) {
+            setState(() {
+              _imageBytes = bytes;
+              _isLoading = false;
+            });
+          }
+          return;
+        }
+      }
+
+      try {
+        final localF = File(widget.artifactPath);
+        if (localF.existsSync()) {
+          final bytes = await localF.readAsBytes();
+          if (mounted) {
+            setState(() {
+              _imageBytes = bytes;
+              _isLoading = false;
+            });
+          }
+          return;
+        }
+      } catch (_) {}
+
       Map<String, dynamic> res;
       final cleanP = widget.artifactPath.replaceFirst(RegExp(r'^/+'), '');
       try {

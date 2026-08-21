@@ -318,7 +318,8 @@ type Server struct {
 		ListSessions() []discovery.SessionInfo
 		RevokeDevice(deviceID string) bool
 	}
-	scheduler *Scheduler
+	scheduler    *Scheduler
+	stateVersion int64
 }
 
 // ScheduledTask repr├®sente une t├óche planifi├®e / cron job g├®r├®e par le daemon.
@@ -395,6 +396,7 @@ func NewServer(client RPCClient, authToken string) *Server {
 	}
 	s.startTranscriptWatchdog()
 	StartScratchCleanupRoutine(context.Background(), 24*time.Hour, DefaultScratchMaxAge)
+	loadAccountPrefs()
 	return s
 }
 
@@ -593,9 +595,16 @@ func (s *Server) sessionsFromSummariesLocked(jetbox map[string]connectrpc.Jetbox
 			"isPinned":      isPinned,
 		})
 	}
+	var v int64 = 0
+	if s != nil {
+		s.stateVersion++
+		v = s.stateVersion
+	}
 	return map[string]interface{}{
-		"projects": projects,
-		"sessions": items,
+		"version":   v,
+		"projects":  projects,
+		"sessions":  items,
+		"timestamp": time.Now().UnixMilli(),
 	}
 }
 
@@ -2836,9 +2845,16 @@ func (s *Server) sessionsOutWithLimit(raw []byte, limitPerProject int) interface
 		}
 	}
 
+	var v int64 = 0
+	if s != nil {
+		s.stateVersion++
+		v = s.stateVersion
+	}
 	return map[string]interface{}{
-		"projects": projects,
-		"sessions": resultSessions,
+		"version":   v,
+		"projects":  projects,
+		"sessions":  resultSessions,
+		"timestamp": time.Now().UnixMilli(),
 	}
 }
 
@@ -3763,9 +3779,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 		}
 
-		// Backward-compat: si promptText contient des tags markdown d'images ![name](file:///path) ou ![name](C:/path),
-		// on les extrait vers mediaAttachments et on nettoie promptText pour que l'IDE Antigravity affiche
-		// un texte propre sans code markdown brut.
+		// Si promptText contient des tags markdown d'images ![name](file:///path), on les extrait vers mediaAttachments
 		imgTagRe := regexp.MustCompile(`!\[([^\]]*)\]\((?:file:///)?([a-zA-Z]:[^\)\r\n]+|/[^\)\r\n]+)\)`)
 		if imgMatches := imgTagRe.FindAllStringSubmatch(promptText, -1); len(imgMatches) > 0 {
 			for _, m := range imgMatches {
@@ -3799,7 +3813,52 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 					}
 				}
 			}
+			// Nettoyer les tags markdown d'images du texte pour éviter le rendu markdown brut dans l'IDE
 			promptText = strings.TrimSpace(imgTagRe.ReplaceAllString(promptText, ""))
+		}
+
+		// Populer Data et Base64Data pour chaque mediaAttachment en lisant le fichier sur disque
+		for i := range mediaAttachments {
+			m := &mediaAttachments[i]
+			if len(m.Data) == 0 && m.Base64Data != "" {
+				cleanB64 := m.Base64Data
+				if idx := strings.Index(cleanB64, ","); idx != -1 {
+					cleanB64 = cleanB64[idx+1:]
+				}
+				if b, err := base64.StdEncoding.DecodeString(cleanB64); err == nil && len(b) > 0 {
+					m.Data = b
+				}
+			}
+			if len(m.Data) == 0 && m.URI != "" {
+				localPath := strings.TrimPrefix(m.URI, "file:///")
+				localPath = filepath.FromSlash(localPath)
+				if data, err := os.ReadFile(localPath); err == nil && len(data) > 0 {
+					m.Data = data
+					if m.Base64Data == "" {
+						m.Base64Data = base64.StdEncoding.EncodeToString(data)
+					}
+				}
+			}
+			if m.MimeType == "" || m.MimeType == "application/octet-stream" {
+				if len(m.Data) > 0 {
+					m.MimeType = http.DetectContentType(m.Data)
+				} else if m.URI != "" {
+					lower := strings.ToLower(m.URI)
+					if strings.HasSuffix(lower, ".png") {
+						m.MimeType = "image/png"
+					} else if strings.HasSuffix(lower, ".jpg") || strings.HasSuffix(lower, ".jpeg") {
+						m.MimeType = "image/jpeg"
+					} else if strings.HasSuffix(lower, ".webp") {
+						m.MimeType = "image/webp"
+					} else if strings.HasSuffix(lower, ".gif") {
+						m.MimeType = "image/gif"
+					} else if strings.HasSuffix(lower, ".svg") {
+						m.MimeType = "image/svg+xml"
+					} else if strings.HasSuffix(lower, ".pdf") {
+						m.MimeType = "application/pdf"
+					}
+				}
+			}
 		}
 
 		// Offline buffering (3.2) : le prompt part vers le hub → on le persiste
@@ -5414,6 +5473,56 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 	case "get_browser_status", "browser.get_status":
 		status := GetBrowserStatus()
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: status})
+		return
+
+	case "get_project_settings", "project.get_settings", "get_agent_settings":
+		target := msg.WorkspacePath
+		if target == "" {
+			target = msg.WorkspaceURI
+		}
+		if target == "" {
+			target = msg.ProjectID
+		}
+		if target == "" && msg.Data != nil {
+			if ws, ok := msg.Data["workspacePath"].(string); ok && ws != "" {
+				target = ws
+			} else if pid, ok := msg.Data["projectId"].(string); ok && pid != "" {
+				target = pid
+			}
+		}
+		settings := GetProjectSettings(target)
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: settings})
+		return
+
+	case "update_project_settings", "project.update_settings", "set_agent_settings":
+		target := msg.WorkspacePath
+		if target == "" {
+			target = msg.WorkspaceURI
+		}
+		if target == "" {
+			target = msg.ProjectID
+		}
+		var pSettings ProjectSettings
+		if msg.Data != nil {
+			if ws, ok := msg.Data["workspacePath"].(string); ok && ws != "" && target == "" {
+				target = ws
+			} else if pid, ok := msg.Data["projectId"].(string); ok && pid != "" && target == "" {
+				target = pid
+			}
+			if b, errMarshal := json.Marshal(msg.Data); errMarshal == nil {
+				_ = json.Unmarshal(b, &pSettings)
+			}
+		}
+		updated, errUp := UpdateProjectSettings(target, pSettings)
+		if errUp != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errUp.Error()})
+			return
+		}
+		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: updated})
+		s.broadcast(OutgoingMessage{
+			Type: "project_settings_updated",
+			Data: updated,
+		})
 		return
 
 	case "get_available_models", "models.get_available_models", "list_models":

@@ -157,8 +157,8 @@ func TestSendPrompt_MediaAttachmentsAndCleanPrompt(t *testing.T) {
 	_ = client.recv(t) // stream_delta
 	_ = client.recv(t) // stream_end
 
-	if backend.lastPrompt != "analyser cette image" {
-		t.Errorf("expected clean prompt 'analyser cette image', got %q", backend.lastPrompt)
+	if !strings.Contains(backend.lastPrompt, "analyser cette image") {
+		t.Errorf("expected prompt to contain 'analyser cette image', got %q", backend.lastPrompt)
 	}
 	if len(backend.lastMedia) != 1 {
 		t.Fatalf("expected 1 media attachment, got %d", len(backend.lastMedia))
@@ -167,7 +167,7 @@ func TestSendPrompt_MediaAttachmentsAndCleanPrompt(t *testing.T) {
 		t.Errorf("expected URI 'file:///C:/test/path/photo.png', got %q", backend.lastMedia[0].URI)
 	}
 
-	// 2. Envoi d'un prompt avec markdown tag legacy ![name](file:///...) -> doit être extrait et nettoyé
+	// 2. Envoi d'un prompt avec markdown tag legacy ![name](file:///...) -> extrait vers mediaAttachments et nettoyé du prompt text
 	client.sendJSON(t, IncomingMessage{
 		Type:      "send_prompt",
 		RequestID: "req-media-2",
@@ -178,14 +178,65 @@ func TestSendPrompt_MediaAttachmentsAndCleanPrompt(t *testing.T) {
 	_ = client.recv(t) // stream_delta
 	_ = client.recv(t) // stream_end
 
-	if backend.lastPrompt != "voici mon texte" {
-		t.Errorf("expected cleaned prompt 'voici mon texte', got %q", backend.lastPrompt)
+	if !strings.Contains(backend.lastPrompt, "voici mon texte") {
+		t.Errorf("expected prompt to contain 'voici mon texte', got %q", backend.lastPrompt)
+	}
+	if strings.Contains(backend.lastPrompt, "![screenshot.jpg]") {
+		t.Errorf("expected raw markdown image tag to be cleaned from prompt, got %q", backend.lastPrompt)
 	}
 	if len(backend.lastMedia) != 1 {
 		t.Fatalf("expected 1 extracted media attachment from markdown, got %d", len(backend.lastMedia))
 	}
 	if backend.lastMedia[0].URI != "file:///C:/Users/test/screenshot.jpg" {
 		t.Errorf("expected URI 'file:///C:/Users/test/screenshot.jpg', got %q", backend.lastMedia[0].URI)
+	}
+}
+
+func TestSendPrompt_MediaFileAutoRead(t *testing.T) {
+	// Créer un fichier image temporaire
+	tmpDir := t.TempDir()
+	imgFile := filepath.Join(tmpDir, "test_sample.png")
+	dummyBytes := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDRtest_data")
+	if err := os.WriteFile(imgFile, dummyBytes, 0644); err != nil {
+		t.Fatalf("failed to create temp test image: %v", err)
+	}
+
+	backend := &mediaCapturingRPCClient{}
+	srv := newTestServer(backend)
+	defer srv.Close()
+
+	client := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/ws")
+	defer client.conn.Close()
+
+	fileURI := "file:///" + filepath.ToSlash(imgFile)
+	client.sendJSON(t, IncomingMessage{
+		Type:      "send_prompt",
+		RequestID: "req-autoread-1",
+		CascadeID: "casc-1",
+		Prompt:    "analyser mon image",
+		Media: []connectrpc.MediaAttachment{
+			{
+				URI:         fileURI,
+				Description: "test_sample.png",
+			},
+		},
+	})
+	_ = client.recv(t) // stream_start
+	_ = client.recv(t) // stream_delta
+	_ = client.recv(t) // stream_end
+
+	if len(backend.lastMedia) != 1 {
+		t.Fatalf("expected 1 media attachment, got %d", len(backend.lastMedia))
+	}
+	m := backend.lastMedia[0]
+	if len(m.Data) != len(dummyBytes) || string(m.Data) != string(dummyBytes) {
+		t.Errorf("expected m.Data to contain read file bytes (%d bytes), got %d bytes", len(dummyBytes), len(m.Data))
+	}
+	if m.Base64Data == "" {
+		t.Errorf("expected m.Base64Data to be populated")
+	}
+	if m.MimeType != "image/png" {
+		t.Errorf("expected mimeType 'image/png', got %q", m.MimeType)
 	}
 }
 

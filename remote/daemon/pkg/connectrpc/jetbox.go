@@ -50,7 +50,9 @@ type jetboxSummaryJSON struct {
 	Status       any    `json:"status"` // string "CASCADE_RUN_STATUS_*" ou nombre
 	WaitingSteps []any  `json:"waitingSteps"`
 	Annotations  *struct {
-		Archived bool `json:"archived"`
+		Archived                bool `json:"archived"`
+		ArchivalStatusTimestamp any  `json:"archivalStatusTimestamp"`
+		ArchivalStatus          any  `json:"archivalStatus"`
 	} `json:"annotations"`
 	TrajectoryMetadata *struct {
 		ProjectID        string `json:"projectId"`
@@ -98,8 +100,10 @@ func (j jetboxSummaryJSON) toSummary(id string) JetboxSummary {
 	if s.Source == 16 {
 		s.IsSubagent = true
 	}
-	if j.Annotations != nil && j.Annotations.Archived {
-		s.Archived = true
+	if j.Annotations != nil {
+		if j.Annotations.Archived || j.Annotations.ArchivalStatusTimestamp != nil || j.Annotations.ArchivalStatus != nil {
+			s.Archived = true
+		}
 	}
 	if j.TrajectoryMetadata != nil {
 		s.ProjectID = j.TrajectoryMetadata.ProjectID

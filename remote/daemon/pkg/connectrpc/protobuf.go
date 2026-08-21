@@ -1,6 +1,7 @@
 package connectrpc
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"sync"
@@ -114,11 +115,21 @@ type MediaAttachment struct {
 
 func buildMediaItem(m MediaAttachment) []byte {
 	mw := &writer{}
-	if m.MimeType != "" {
-		mw.stringField(1, m.MimeType)
+	mime := m.MimeType
+	if mime == "" {
+		mime = "image/jpeg"
 	}
+	mw.stringField(1, mime)
 	if len(m.Data) > 0 {
 		mw.bytesField(2, m.Data)
+	} else if m.Base64Data != "" {
+		cleanB64 := m.Base64Data
+		if idx := strings.Index(cleanB64, ","); idx != -1 {
+			cleanB64 = cleanB64[idx+1:]
+		}
+		if b, err := base64.StdEncoding.DecodeString(cleanB64); err == nil && len(b) > 0 {
+			mw.bytesField(2, b)
+		}
 	}
 	if m.Description != "" {
 		mw.stringField(4, m.Description)
@@ -131,12 +142,21 @@ func buildMediaItem(m MediaAttachment) []byte {
 
 func buildImageData(m MediaAttachment) []byte {
 	iw := &writer{}
-	if m.Base64Data != "" {
-		iw.stringField(1, m.Base64Data)
+	b64 := m.Base64Data
+	if b64 == "" && len(m.Data) > 0 {
+		b64 = base64.StdEncoding.EncodeToString(m.Data)
 	}
-	if m.MimeType != "" {
-		iw.stringField(2, m.MimeType)
+	if idx := strings.Index(b64, ","); idx != -1 {
+		b64 = b64[idx+1:]
 	}
+	if b64 != "" {
+		iw.stringField(1, b64)
+	}
+	mime := m.MimeType
+	if mime == "" {
+		mime = "image/jpeg"
+	}
+	iw.stringField(2, mime)
 	if m.Description != "" {
 		iw.stringField(3, m.Description)
 	}
@@ -177,6 +197,20 @@ func BuildSendMessageWithMedia(cascadeID, text, apiKey, sessionID, modelUID stri
 		w.bytesField(3, buildMetadata(apiKey, sessionID))
 	}
 	w.bytesField(5, BuildCascadeConfig(modelUID, modelEnum, noTools...))
+
+	// Propagation directe du modèle demandé au niveau de la requête SendUserCascadeMessage
+	// pour forcer le basculement de modèle sur une session existante.
+	effectiveEnum := modelEnum
+	if effectiveEnum == 0 && modelUID != "" {
+		effectiveEnum = ResolveStandardModelEnum(modelUID)
+	}
+	if effectiveEnum != 0 {
+		w.varintField(4, effectiveEnum)
+		w.varintField(14, effectiveEnum)
+	}
+	if modelUID != "" {
+		w.stringField(15, modelUID)
+	}
 	return w.b
 }
 
@@ -222,9 +256,16 @@ func ResolveStandardModelEnum(nameOrID string) uint64 {
 //	  1: planner_config (CascadePlannerConfig) {
 //	    1: plan_model (enum, ex: 246 = GOOGLE_GEMINI_2_5_PRO)
 //	    2: conversational_config {1: planner_mode}
-//	    15: requested_model (ModelOrAlias {1: model})
+//	    8: last_selected_model_name (string)
+//	    15: requested_model (ModelOrAlias {1: model, 3: model_name})
 //	    28: model_name (string, ex: "claude-sonnet-4.6-thinking" ou custom model UID)
+//	    30: last_selected_cascade_model_or_alias (ModelOrAlias)
+//	    46: last_model_override (enum)
 //	  }
+//	  4: requested_model_id (enum)
+//	  14: requested_model (enum)
+//	  15: requested_model_uid (string)
+//	  28: model_name (string)
 //	}
 //
 // planner_mode 3 = NO_TOOL (pas de boucle d'outils — le mobile ne voit
@@ -254,13 +295,16 @@ func BuildCascadeConfig(modelUID string, modelEnum uint64, noTools ...bool) []by
 	conv.varintField(1, mode)
 	planner.bytesField(2, conv.b)
 
-	// requested_model (field 15) = ModelOrAlias {1: model}.
-	// Si un modèle explicite (UID ou enum) est fourni, on transmet l'enum demandé.
+	// requested_model (field 15) = ModelOrAlias {1: model, 3: model_name}.
+	// Si un modèle explicite (UID ou enum) est fourni, on transmet l'enum demandé ainsi que son nom/UID.
 	// Si AUCUN modèle n'est spécifié (modelUID == "" && modelEnum == 0), on retombe sur
 	// ModelOrAlias.alias = CASCADE_BASE (1) pour hériter du modèle initial de la cascade.
 	reqModel := &writer{}
 	if modelEnum != 0 || modelUID != "" {
 		reqModel.varintField(1, effectiveEnum)
+		if modelUID != "" {
+			reqModel.stringField(3, modelUID)
+		}
 	} else {
 		reqModel.varintField(2, 1)
 	}
@@ -268,10 +312,23 @@ func BuildCascadeConfig(modelUID string, modelEnum uint64, noTools ...bool) []by
 
 	if modelUID != "" {
 		planner.stringField(28, modelUID)
+		planner.stringField(8, modelUID)
+		planner.bytesField(30, reqModel.b)
+	}
+	if effectiveEnum != 0 && effectiveEnum != DefaultModelEnum {
+		planner.varintField(46, effectiveEnum)
 	}
 
 	w := &writer{}
 	w.bytesField(1, planner.b)
+	if modelUID != "" {
+		w.stringField(15, modelUID)
+		w.stringField(28, modelUID)
+	}
+	if effectiveEnum != 0 {
+		w.varintField(14, effectiveEnum)
+		w.varintField(4, effectiveEnum)
+	}
 	return w.b
 }
 

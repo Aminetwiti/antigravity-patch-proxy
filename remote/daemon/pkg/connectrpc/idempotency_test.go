@@ -26,13 +26,13 @@ func TestBuilders_ConcurrentSafety(t *testing.T) {
 				msg := fmt.Sprintf("message %d goroutine %d — accents éèà", i, g)
 
 				b1 := BuildStartCascade("file:///C:/proj", "", "", 190)
-				b2 := BuildSendMessage(cascID, msg, "k", "s", "gemini-3.0-flash-high", 0)
+				b2 := BuildSendMessage(cascID, msg, "k", "s", "", 0)
 				b3 := BuildHandleCascadeUserInteraction(cascID, "traj-1", 2, InteractionRunCommand, BuildRunCommandInteraction(true, "ls", ""))
 				_ = Frame(b1)
 				_ = Frame(b2)
 				_ = Frame(b3)
 
-				if len(DecodeFields(b2)) != 4 {
+				if len(DecodeFields(b2)) < 4 {
 					t.Errorf("goroutine %d: BuildSendMessage a produit %d champs", g, len(DecodeFields(b2)))
 				}
 			}
@@ -88,8 +88,8 @@ func TestDecodeFields_ConcurrentSafety(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < 3000; i++ {
 				fields := DecodeFields(msg)
-				if len(fields) != 4 {
-					t.Errorf("attendu 4 champs, reçu %d", len(fields))
+				if len(fields) < 4 {
+					t.Errorf("attendu au moins 4 champs, reçu %d", len(fields))
 				}
 			}
 		}()

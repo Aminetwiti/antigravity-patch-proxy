@@ -107,54 +107,68 @@ Map<String, List<CascadeSession>> groupSessions({
     }
 
     for (final s in sessions) {
-      bool matched = false;
-      var cleanSPath = s.workspacePath.replaceAll('\\', '/');
-      try {
-        cleanSPath = Uri.decodeFull(cleanSPath);
-      } catch (_) {}
-      cleanSPath = cleanSPath.toLowerCase().trim();
-      while (cleanSPath.endsWith('/')) {
-        cleanSPath = cleanSPath.substring(0, cleanSPath.length - 1);
-      }
+      ProjectItem? matchedProject;
 
-      for (final p in officialProjects) {
-        if (s.projectId != null && s.projectId!.isNotEmpty && s.projectId == p.id) {
-          grouped[p.name]?.add(s);
-          matched = true;
-          break;
-        }
-
-        var cleanPPath = p.path.replaceAll('\\', '/');
-        try {
-          cleanPPath = Uri.decodeFull(cleanPPath);
-        } catch (_) {}
-        cleanPPath = cleanPPath.toLowerCase().trim();
-        while (cleanPPath.endsWith('/')) {
-          cleanPPath = cleanPPath.substring(0, cleanPPath.length - 1);
-        }
-
-        var cleanPUri = p.folderUri.replaceAll('\\', '/');
-        try {
-          cleanPUri = Uri.decodeFull(cleanPUri);
-        } catch (_) {}
-        cleanPUri = cleanPUri.toLowerCase().trim();
-
-        final cleanName = p.name.replaceAll('\\', '/').toLowerCase().trim();
-
-        if ((cleanPPath.isNotEmpty && (cleanSPath == cleanPPath || cleanSPath.contains(cleanPPath) || cleanPPath.contains(cleanSPath))) ||
-            (cleanPUri.isNotEmpty && (cleanSPath.contains(cleanPUri) || cleanPUri.contains(cleanSPath))) ||
-            (cleanName.isNotEmpty && (cleanSPath == cleanName || cleanSPath.endsWith('/$cleanName')))) {
-          grouped[p.name]?.add(s);
-          matched = true;
-          break;
+      // 1. Priorité 1 : correspondance projectId explicite
+      if (s.projectId != null && s.projectId!.isNotEmpty) {
+        for (final p in officialProjects) {
+          if (s.projectId == p.id) {
+            matchedProject = p;
+            break;
+          }
         }
       }
 
-      if (!matched) {
-        final fallbackName = 'Outside of Project';
+      // 2. Priorité 2 : correspondance exacte de chemin ou d'URI canonique
+      if (matchedProject == null && s.workspacePath.isNotEmpty) {
+        for (final p in officialProjects) {
+          if (WorkspacePath.isSameWorkspace(s.workspacePath, p.path) ||
+              WorkspacePath.isSameWorkspace(s.workspacePath, p.folderUri)) {
+            matchedProject = p;
+            break;
+          }
+        }
+      }
+
+      // 3. Priorité 3 : parent le plus spécifique (le plus profond) pour les sous-projets / monorepos
+      if (matchedProject == null && s.workspacePath.isNotEmpty) {
+        ProjectItem? mostSpecificParent;
+        int longestParentPathLength = -1;
+
+        for (final p in officialProjects) {
+          final pPath = WorkspacePath.canonicalPath(p.path);
+          final pUri = WorkspacePath.canonicalPath(p.folderUri);
+          final effectiveP = pPath.isNotEmpty ? pPath : pUri;
+
+          if (effectiveP.isNotEmpty && WorkspacePath.isSubdirOf(s.workspacePath, effectiveP)) {
+            if (effectiveP.length > longestParentPathLength) {
+              longestParentPathLength = effectiveP.length;
+              mostSpecificParent = p;
+            }
+          }
+        }
+        matchedProject = mostSpecificParent;
+      }
+
+      // 4. Priorité 4 : nom de projet exact correspondant au nom de dossier
+      if (matchedProject == null && s.workspacePath.isNotEmpty) {
+        final sessionFolder = WorkspacePath.displayName(s.workspacePath).toLowerCase();
+        for (final p in officialProjects) {
+          if (p.name.trim().toLowerCase() == sessionFolder) {
+            matchedProject = p;
+            break;
+          }
+        }
+      }
+
+      if (matchedProject != null) {
+        grouped[matchedProject.name]?.add(s);
+      } else {
+        const fallbackName = 'Outside of Project';
         grouped.putIfAbsent(fallbackName, () => []).add(s);
       }
     }
+
     if (grouped['Outside of Project']?.isEmpty ?? false) {
       grouped.remove('Outside of Project');
     }

@@ -344,6 +344,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
 
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: scheme.surfaceContainer,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile/core/notifications/approval_notifier.dart';
@@ -11,11 +12,13 @@ import 'package:mobile/widgets/app_toast.dart';
 class GeneralSettingsSection extends StatefulWidget {
   final DaemonApi? api;
   final ApprovalNotifier? notifier;
+  final String workspacePath;
 
   const GeneralSettingsSection({
     super.key,
     this.api,
     this.notifier,
+    this.workspacePath = '',
   });
 
   @override
@@ -26,19 +29,53 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
   // Execution
   String _queuedMessagesMode = 'queue'; // 'queue' | 'immediate'
 
-  // Agent Settings
-  String _securityPreset = 'Default'; // 'Default' | 'Strict' | 'Permissive'
+  // Agent Settings (1:1 Antigravity 2.0 Desktop)
+  String _securityPreset = 'Default'; // 'Default' | 'Full machine' | 'Turbo mode' | 'Custom'
 
   // Agent Behavior
   String _artifactReviewPolicy = 'Always Ask'; // 'Always Ask' | 'Auto Approve' | 'Never'
 
+  // Permissions
+  String _fileAccessPolicy = 'AGENT_SETTING_POLICY_ASK'; // ALLOW | ASK
+  String _internetPolicy = 'AGENT_SETTING_POLICY_ASK'; // ALLOW | ASK
+
   // Tool Approvals & Notifications
   bool _toolNotifications = true;
+
+  StreamSubscription<Map<String, dynamic>>? _eventsSub;
 
   @override
   void initState() {
     super.initState();
     _loadSettings();
+    if (widget.api != null) {
+      _eventsSub = widget.api!.events.listen(_onWsEvent);
+    }
+  }
+
+  @override
+  void dispose() {
+    _eventsSub?.cancel();
+    super.dispose();
+  }
+
+  void _onWsEvent(Map<String, dynamic> event) {
+    if (event['type'] == 'project_settings_updated' && event['data'] is Map) {
+      final data = Map<String, dynamic>.from(event['data'] as Map);
+      if (mounted) {
+        setState(() {
+          if (data['securityPreset'] is String) {
+            _securityPreset = data['securityPreset'] as String;
+          }
+          if (data['artifactReviewPolicy'] is String) {
+            _artifactReviewPolicy = data['artifactReviewPolicy'] as String;
+          }
+          if (data['queuedMessagesMode'] is String) {
+            _queuedMessagesMode = data['queuedMessagesMode'] as String;
+          }
+        });
+      }
+    }
   }
 
   Future<void> _loadSettings() async {
@@ -52,12 +89,49 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
       });
       widget.notifier?.setEnabled(_toolNotifications);
     }
+
+    if (widget.api != null) {
+      try {
+        final pSettings = await widget.api!.getProjectSettings(workspacePath: widget.workspacePath);
+        if (mounted && pSettings.isNotEmpty) {
+          setState(() {
+            if (pSettings['securityPreset'] is String) {
+              _securityPreset = pSettings['securityPreset'] as String;
+            }
+            if (pSettings['artifactReviewPolicy'] is String) {
+              _artifactReviewPolicy = pSettings['artifactReviewPolicy'] as String;
+            }
+            if (pSettings['queuedMessagesMode'] is String) {
+              _queuedMessagesMode = pSettings['queuedMessagesMode'] as String;
+            }
+            if (pSettings['fileAccessPolicy'] is String) {
+              _fileAccessPolicy = pSettings['fileAccessPolicy'] as String;
+            }
+            if (pSettings['internetPolicy'] is String) {
+              _internetPolicy = pSettings['internetPolicy'] as String;
+            }
+          });
+        }
+      } catch (_) {}
+    }
   }
 
   Future<void> _setQueuedMessagesMode(String mode) async {
     setState(() => _queuedMessagesMode = mode);
     HapticFeedback.selectionClick();
     await SettingsStore.save({'queuedMessagesMode': mode});
+    if (widget.api != null) {
+      try {
+        await widget.api!.updateProjectSettings(
+          settings: {
+            'queuedMessagesMode': mode,
+            'securityPreset': _securityPreset,
+            'artifactReviewPolicy': _artifactReviewPolicy,
+          },
+          workspacePath: widget.workspacePath,
+        );
+      } catch (_) {}
+    }
     if (!mounted) return;
     AppToast.show(
       context,
@@ -70,6 +144,17 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
     setState(() => _securityPreset = preset);
     HapticFeedback.selectionClick();
     await SettingsStore.save({'securityPreset': preset});
+    if (widget.api != null) {
+      try {
+        await widget.api!.updateProjectSettings(
+          settings: {
+            'securityPreset': preset,
+            'artifactReviewPolicy': _artifactReviewPolicy,
+          },
+          workspacePath: widget.workspacePath,
+        );
+      } catch (_) {}
+    }
     if (!mounted) return;
     AppToast.show(
       context,
@@ -82,11 +167,74 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
     setState(() => _artifactReviewPolicy = policy);
     HapticFeedback.selectionClick();
     await SettingsStore.save({'artifactReviewPolicy': policy});
+    if (widget.api != null) {
+      try {
+        await widget.api!.updateProjectSettings(
+          settings: {
+            'securityPreset': _securityPreset,
+            'artifactReviewPolicy': policy,
+          },
+          workspacePath: widget.workspacePath,
+        );
+      } catch (_) {}
+    }
     if (!mounted) return;
     AppToast.show(
       context,
       message: 'Artifact Review Policy : $policy',
       icon: Icons.rate_review_outlined,
+    );
+  }
+
+  Future<void> _setFileAccessPolicy(String policy) async {
+    setState(() => _fileAccessPolicy = policy);
+    HapticFeedback.selectionClick();
+    await SettingsStore.save({'fileAccessPolicy': policy});
+    if (widget.api != null) {
+      try {
+        await widget.api!.updateProjectSettings(
+          settings: {
+            'securityPreset': _securityPreset,
+            'artifactReviewPolicy': _artifactReviewPolicy,
+            'fileAccessPolicy': policy,
+          },
+          workspacePath: widget.workspacePath,
+        );
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    AppToast.show(
+      context,
+      message: policy == 'AGENT_SETTING_POLICY_ALLOW'
+          ? 'Accès fichiers autorisé.'
+          : 'Accès fichiers : demande de confirmation.',
+      icon: Icons.folder_open_outlined,
+    );
+  }
+
+  Future<void> _setInternetPolicy(String policy) async {
+    setState(() => _internetPolicy = policy);
+    HapticFeedback.selectionClick();
+    await SettingsStore.save({'internetPolicy': policy});
+    if (widget.api != null) {
+      try {
+        await widget.api!.updateProjectSettings(
+          settings: {
+            'securityPreset': _securityPreset,
+            'artifactReviewPolicy': _artifactReviewPolicy,
+            'internetPolicy': policy,
+          },
+          workspacePath: widget.workspacePath,
+        );
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    AppToast.show(
+      context,
+      message: policy == 'AGENT_SETTING_POLICY_ALLOW'
+          ? 'Accès réseau autorisé.'
+          : 'Accès réseau : demande de confirmation.',
+      icon: Icons.lan_outlined,
     );
   }
 
@@ -192,7 +340,7 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        'Choose a predefined security preset for the agent. This controls terminal auto-execution policy, and file access policy.',
+                        _getSecurityPresetDescription(_securityPreset),
                         style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                       ),
                       const SizedBox(height: 2),
@@ -214,7 +362,7 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
                   isDark: isDark,
                   scheme: scheme,
                   value: _securityPreset,
-                  items: const ['Default', 'Strict', 'Permissive'],
+                  items: const ['Default', 'Full machine', 'Turbo mode', 'Custom'],
                   onChanged: (val) {
                     if (val != null) _setSecurityPreset(val);
                   },
@@ -266,6 +414,32 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
 
           const SizedBox(height: 24),
 
+          // ── 3.5 Tool Approval Notifications
+          _buildCard(
+            isDark: isDark,
+            scheme: scheme,
+            child: SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text(
+                'Tool Approval Notifications',
+                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+              ),
+              subtitle: const Text(
+                'Notify on device when the agent requests tool approval.',
+                style: TextStyle(fontSize: 12),
+              ),
+              value: _toolNotifications,
+              onChanged: (val) {
+                setState(() => _toolNotifications = val);
+                HapticFeedback.selectionClick();
+                widget.notifier?.setEnabled(val);
+                SettingsStore.save({'toolNotifications': val});
+              },
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
           // ── 4. File Permissions
           _buildSectionHeader('File Permissions', scheme),
           const SizedBox(height: 8),
@@ -294,7 +468,11 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
                 const SizedBox(width: 12),
                 OutlinedButton(
                   onPressed: () {
-                    AppToast.show(context, message: 'Règles de fichiers configurées via le workspace.', icon: Icons.folder_open_outlined);
+                    _setFileAccessPolicy(
+                      _fileAccessPolicy == 'AGENT_SETTING_POLICY_ALLOW'
+                          ? 'AGENT_SETTING_POLICY_ASK'
+                          : 'AGENT_SETTING_POLICY_ALLOW',
+                    );
                   },
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -302,7 +480,7 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                   ),
                   child: Text(
-                    'Open',
+                    _fileAccessPolicy == 'AGENT_SETTING_POLICY_ALLOW' ? 'Restrict' : 'Open',
                     style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: scheme.onSurface),
                   ),
                 ),
@@ -340,7 +518,11 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
                 const SizedBox(width: 12),
                 OutlinedButton(
                   onPressed: () {
-                    AppToast.show(context, message: 'Trafic réseau géré par le proxy local.', icon: Icons.lan_outlined);
+                    _setInternetPolicy(
+                      _internetPolicy == 'AGENT_SETTING_POLICY_ALLOW'
+                          ? 'AGENT_SETTING_POLICY_ASK'
+                          : 'AGENT_SETTING_POLICY_ALLOW',
+                    );
                   },
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -348,7 +530,7 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                   ),
                   child: Text(
-                    'Open',
+                    _internetPolicy == 'AGENT_SETTING_POLICY_ALLOW' ? 'Restrict' : 'Open',
                     style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: scheme.onSurface),
                   ),
                 ),
@@ -468,4 +650,19 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
       ),
     );
   }
+
+  String _getSecurityPresetDescription(String preset) {
+    switch (preset) {
+      case 'Full machine':
+        return 'All terminal commands require review. The agent can read or write to any file in the machine.';
+      case 'Turbo mode':
+        return 'Disables all safety barriers for maximal iteration velocity.';
+      case 'Custom':
+        return 'Manually customize individual settings.';
+      case 'Default':
+      default:
+        return 'Requires manual review for all terminal commands and file accesses outside of the working folders.';
+    }
+  }
 }
+

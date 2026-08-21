@@ -393,6 +393,39 @@ class DaemonApi {
     }
   }
 
+  Future<Map<String, dynamic>> getProjectSettings({
+    String? projectId,
+    String? workspacePath,
+  }) async {
+    try {
+      return await rpc('get_project_settings', {
+        if (projectId != null && projectId.isNotEmpty) 'projectId': projectId,
+        if (workspacePath != null && workspacePath.isNotEmpty)
+          'workspacePath': workspacePath,
+      });
+    } catch (_) {
+      return const {
+        'securityPreset': 'Default',
+        'artifactReviewPolicy': 'Always Ask',
+        'fileAccessPolicy': 'AGENT_SETTING_POLICY_ASK',
+        'autoExecutionPolicy': 'CASCADE_COMMANDS_AUTO_EXECUTION_ASK',
+      };
+    }
+  }
+
+  Future<Map<String, dynamic>> updateProjectSettings({
+    required Map<String, dynamic> settings,
+    String? projectId,
+    String? workspacePath,
+  }) async {
+    return await rpc('update_project_settings', {
+      'data': settings,
+      if (projectId != null && projectId.isNotEmpty) 'projectId': projectId,
+      if (workspacePath != null && workspacePath.isNotEmpty)
+        'workspacePath': workspacePath,
+    });
+  }
+
   Future<Map<String, dynamic>> listModels() async {
     try {
       return await rpc('get_available_models');

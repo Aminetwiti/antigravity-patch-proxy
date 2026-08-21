@@ -291,8 +291,87 @@ class _SubagentDetailModalState extends State<SubagentDetailModal> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    // Conversation / Subagent ID Card
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHigh,
+                        borderRadius: BorderRadius.circular(AppRadius.md),
+                        border: Border.all(
+                          color: isDark ? AppColors.borderSubtle : scheme.outlineVariant.withValues(alpha: 0.5),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.fingerprint_rounded, size: 16, color: scheme.onSurfaceVariant),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'ID DU SOUS-AGENT',
+                                  style: TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.5,
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  widget.agent.id.isNotEmpty ? widget.agent.id : '(Généré à l\'exécution)',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontFamily: 'monospace',
+                                    fontWeight: FontWeight.w600,
+                                    color: scheme.onSurface,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (widget.agent.id.isNotEmpty)
+                            IconButton(
+                              icon: const Icon(Icons.copy_rounded, size: 16),
+                              tooltip: 'Copier l\'ID',
+                              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                              onPressed: () {
+                                Clipboard.setData(ClipboardData(text: widget.agent.id));
+                                HapticFeedback.selectionClick();
+                              },
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
                     // 1. User Prompt Bubble (Mission from parent agent)
                     if (userPrompt.isNotEmpty) ...[
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Mission / Instructions',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
+                            ),
+                          ),
+                          TextButton.icon(
+                            onPressed: () {
+                              Clipboard.setData(ClipboardData(text: userPrompt));
+                              HapticFeedback.selectionClick();
+                            },
+                            icon: const Icon(Icons.copy_rounded, size: 13),
+                            label: const Text('Copier Mission', style: TextStyle(fontSize: 11)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
                       Container(
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(

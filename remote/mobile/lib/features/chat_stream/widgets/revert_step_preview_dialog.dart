@@ -261,21 +261,14 @@ class _RevertStepPreviewDialogState extends State<RevertStepPreviewDialog> {
                 if (_previewDiff != null && _previewDiff!.isNotEmpty)
                   Expanded(
                     child: Container(
-                      padding: const EdgeInsets.all(10),
+                      padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
                         color: isDark ? const Color(0xFF141518) : const Color(0xFFF4F4F6),
                         borderRadius: BorderRadius.circular(AppRadius.sm),
                         border: Border.all(color: borderColor),
                       ),
                       child: SingleChildScrollView(
-                        child: Text(
-                          _previewDiff!,
-                          style: TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 11,
-                            color: isDark ? const Color(0xFFD4D4D8) : const Color(0xFF27272A),
-                          ),
-                        ),
+                        child: _buildSyntaxHighlightedDiff(_previewDiff!, isDark),
                       ),
                     ),
                   ),
@@ -322,6 +315,43 @@ class _RevertStepPreviewDialogState extends State<RevertStepPreviewDialog> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildSyntaxHighlightedDiff(String diff, bool isDark) {
+    final lines = diff.split('\n');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: lines.map((line) {
+        Color lineBg = Colors.transparent;
+        Color textColor = isDark ? const Color(0xFFD4D4D8) : const Color(0xFF27272A);
+        if (line.startsWith('+') && !line.startsWith('+++')) {
+          textColor = isDark ? const Color(0xFF4ADE80) : const Color(0xFF16A34A);
+          lineBg = (isDark ? const Color(0xFF4ADE80) : const Color(0xFF16A34A)).withValues(alpha: 0.12);
+        } else if (line.startsWith('-') && !line.startsWith('---')) {
+          textColor = isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626);
+          lineBg = (isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626)).withValues(alpha: 0.12);
+        } else if (line.startsWith('@@')) {
+          textColor = isDark ? const Color(0xFF60A5FA) : const Color(0xFF2563EB);
+          lineBg = (isDark ? const Color(0xFF60A5FA) : const Color(0xFF2563EB)).withValues(alpha: 0.08);
+        }
+
+        return Container(
+          width: double.infinity,
+          color: lineBg,
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+          child: Text(
+            line,
+            style: TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 11,
+              height: 1.35,
+              color: textColor,
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 }

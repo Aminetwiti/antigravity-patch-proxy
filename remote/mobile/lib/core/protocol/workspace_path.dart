@@ -6,19 +6,54 @@
 /// `conversation_history_screen.dart` et `sessions_list.dart` (audit
 /// clean-code-guard H5) — un seul helper à maintenir désormais.
 class WorkspacePath {
-  static String displayName(
-    String rawPath, {
-    String fallback = 'Outside of Project',
-  }) {
-    if (rawPath.isEmpty || rawPath == '.') return fallback;
+  /// Normalisation canonique unique pour toutes les couches Flutter.
+  /// Traite de façon identique : file:///, lettres de lecteur Windows (c:/ vs C:/),
+  /// barres obliques (/ vs \), encodage URL (%20, %3A), et supprime les trailing slashes.
+  static String canonicalPath(String rawPath) {
+    if (rawPath.isEmpty || rawPath == '.') return '';
     var clean = rawPath.replaceAll('\\', '/');
     if (clean.startsWith('file:///')) clean = clean.substring(8);
     if (clean.startsWith('file://')) clean = clean.substring(7);
     try {
       clean = Uri.decodeFull(clean);
     } catch (_) {}
+    clean = clean.trim();
+    while (clean.endsWith('/') && clean.length > 1) {
+      clean = clean.substring(0, clean.length - 1);
+    }
+    // Normalisation de la lettre de lecteur Windows en minuscule (ex: "C:/foo" -> "c:/foo")
+    final winMatch = RegExp(r'^([a-zA-Z]):/(.*)$').firstMatch(clean);
+    if (winMatch != null) {
+      clean = '${winMatch.group(1)!.toLowerCase()}:/${winMatch.group(2)}';
+    }
+    return clean;
+  }
+
+  static String displayName(
+    String rawPath, {
+    String fallback = 'Outside of Project',
+  }) {
+    final clean = canonicalPath(rawPath);
+    if (clean.isEmpty) return fallback;
     final segments = clean.split('/').where((s) => s.isNotEmpty).toList();
     if (segments.isNotEmpty) return segments.last;
     return fallback;
+  }
+
+  /// Vérifie si deux chemins ou URIs désignent le même workspace.
+  static bool isSameWorkspace(String pathA, String pathB) {
+    final cA = canonicalPath(pathA).toLowerCase();
+    final cB = canonicalPath(pathB).toLowerCase();
+    if (cA.isEmpty || cB.isEmpty) return false;
+    return cA == cB;
+  }
+
+  /// Vérifie si [childPath] est situé à l'intérieur de [parentPath] avec une vraie frontière de chemin.
+  static bool isSubdirOf(String childPath, String parentPath) {
+    final cChild = canonicalPath(childPath).toLowerCase();
+    final cParent = canonicalPath(parentPath).toLowerCase();
+    if (cChild.isEmpty || cParent.isEmpty) return false;
+    if (cChild == cParent) return true;
+    return cChild.startsWith('$cParent/');
   }
 }

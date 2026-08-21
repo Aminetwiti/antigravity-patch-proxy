@@ -150,7 +150,7 @@ void main() {
       expect(scrollPos2.maxScrollExtent, greaterThan(0));
       expect(scrollPos2.pixels, equals(scrollPos2.maxScrollExtent));
 
-      // Retour vers session-1 : même si l'utilisateur était en haut, session-1 redémarre en bas
+      // Retour vers session-1 : la position de défilement de l'utilisateur est fidèlement restaurée
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
@@ -173,7 +173,7 @@ void main() {
       final scrollable1Ret = find.descendant(of: chatListView1Ret, matching: find.byType(Scrollable)).first;
       final scrollPos1Ret = tester.state<ScrollableState>(scrollable1Ret).position;
       expect(scrollPos1Ret.maxScrollExtent, greaterThan(0));
-      expect(scrollPos1Ret.pixels, equals(scrollPos1Ret.maxScrollExtent));
+      expect(scrollPos1Ret.pixels, equals(scrollPos.pixels));
 
       await tester.pumpWidget(const SizedBox());
       await ctrl.close();

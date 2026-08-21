@@ -1,0 +1,208 @@
+name: Flutter Mobile CI/CD
+
+on:
+  push:
+    branches: [main, master]
+    tags:
+      - 'v*'
+    paths:
+      - 'remote/mobile/**'
+      - '.github/workflows/flutter-mobile.yml'
+  pull_request:
+    paths:
+      - 'remote/mobile/**'
+      - '.github/workflows/flutter-mobile.yml'
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Publier les binaires sur GitHub Release'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  # ── 1. Validation & Tests ──
+  validate:
+    name: Lint & Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        working-directory: remote/mobile
+        run: flutter pub get
+
+      - name: Analyze code
+        working-directory: remote/mobile
+        run: flutter analyze
+
+      - name: Run unit & widget tests
+        working-directory: remote/mobile
+        run: flutter test --exclude-tags=live
+
+  # ── 2. Build Android (APK & AAB) ──
+  build-android:
+    name: Build Android (APK & AAB)
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        working-directory: remote/mobile
+        run: flutter pub get
+
+      - name: Build Universal APK
+        working-directory: remote/mobile
+        run: flutter build apk --release
+
+      - name: Build Split-per-ABI APKs
+        working-directory: remote/mobile
+        run: flutter build apk --release --split-per-abi
+
+      - name: Build Android App Bundle (AAB)
+        working-directory: remote/mobile
+        run: flutter build appbundle --release
+
+      - name: Prepare Android Artifacts
+        run: |
+          mkdir -p release-artifacts/android
+          # Universal APK
+          cp remote/mobile/build/app/outputs/flutter-apk/app-release.apk release-artifacts/android/antigravity-remote-universal.apk
+          # Split APKs
+          cp remote/mobile/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release-artifacts/android/antigravity-remote-arm64-v8a.apk || true
+          cp remote/mobile/build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk release-artifacts/android/antigravity-remote-armeabi-v7a.apk || true
+          cp remote/mobile/build/app/outputs/flutter-apk/app-x86_64-release.apk release-artifacts/android/antigravity-remote-x86_64.apk || true
+          # AAB
+          cp remote/mobile/build/app/outputs/bundle/release/app-release.aab release-artifacts/android/antigravity-remote.aab
+
+      - name: Upload Android Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-binaries
+          path: release-artifacts/android/
+          retention-days: 14
+
+  # ── 3. Build iOS (No-codesign IPA / App) ──
+  build-ios:
+    name: Build iOS (Payload & IPA)
+    needs: validate
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        working-directory: remote/mobile
+        run: flutter pub get
+
+      - name: Build iOS Archive (No Codesign)
+        working-directory: remote/mobile
+        run: flutter build ios --release --no-codesign
+
+      - name: Package iOS IPA & Payload
+        run: |
+          mkdir -p release-artifacts/ios
+          mkdir -p build_ipa/Payload
+          cp -r remote/mobile/build/ios/iphoneos/Runner.app build_ipa/Payload/
+          cd build_ipa
+          zip -r ../release-artifacts/ios/antigravity-remote-ios-unsigned.ipa Payload/
+          cd ..
+          # Also archive runner.app
+          cd remote/mobile/build/ios/iphoneos
+          zip -r ../../../../release-artifacts/ios/antigravity-remote-ios-Runner.app.zip Runner.app
+          cd ../../../..
+
+      - name: Upload iOS Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-binaries
+          path: release-artifacts/ios/
+          retention-days: 14
+
+  # ── 4. Publish to GitHub Release ──
+  publish-release:
+    name: Publish Binaries to GitHub Release
+    needs: [build-android, build-ios]
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.publish_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Android Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: android-binaries
+          path: dist-release/
+
+      - name: Download iOS Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-binaries
+          path: dist-release/
+
+      - name: Determine Tag Name
+        id: release_tag
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            VERSION=$(grep 'version:' remote/mobile/pubspec.yaml | head -1 | awk '{print $2}' | cut -d'+' -f1)
+            echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_tag.outputs.tag }}
+          name: Antigravity Remote Mobile ${{ steps.release_tag.outputs.tag }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist-release/antigravity-remote-universal.apk
+            dist-release/antigravity-remote-arm64-v8a.apk
+            dist-release/antigravity-remote-armeabi-v7a.apk
+            dist-release/antigravity-remote-x86_64.apk
+            dist-release/antigravity-remote.aab
+            dist-release/antigravity-remote-ios-unsigned.ipa
+            dist-release/antigravity-remote-ios-Runner.app.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

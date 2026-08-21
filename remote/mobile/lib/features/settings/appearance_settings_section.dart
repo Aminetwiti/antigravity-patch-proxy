@@ -33,15 +33,34 @@ class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
 
   // Light Theme Tokens
   String _lightPreset = 'Default Light';
-  final String _lightBg = '# EEEEEE';
-  final String _lightFg = '# 101010';
-  final String _lightAccent = '# 007ACC';
+
+  // Couleurs par preset (Light). ponytail: visuel uniquement — aucun thème
+  // réel ne consomme ces tokens; la sélection reste FRONTEND-ONLY.
+  static const Map<String, Map<String, String>> _lightPalettes = {
+    'Default Light': {'bg': '#EEEEEE', 'fg': '#101010', 'accent': '#007ACC'},
+    'Monokai Light': {'bg': '#F5F5F5', 'fg': '#272822', 'accent': '#A6E22E'},
+    'GitHub Light': {'bg': '#FFFFFF', 'fg': '#24292F', 'accent': '#0969DA'},
+  };
 
   // Dark Theme Tokens
   String _darkPreset = 'Default Dark';
-  final String _darkBg = '# 141619';
-  final String _darkFg = '# E6EDF3';
-  final String _darkAccent = '# 007ACC';
+
+  static const Map<String, Map<String, String>> _darkPalettes = {
+    'Default Dark': {'bg': '#141619', 'fg': '#E6EDF3', 'accent': '#007ACC'},
+    'One Dark Pro': {'bg': '#282C34', 'fg': '#ABB2BF', 'accent': '#61AFEF'},
+    'GitHub Dark': {'bg': '#0D1117', 'fg': '#C9D1D9', 'accent': '#58A6FF'},
+    'Dracula': {'bg': '#282A36', 'fg': '#F8F8F2', 'accent': '#BD93F9'},
+  };
+
+  String get _lightBg => _lightPalettes[_lightPreset]?['bg'] ?? '#EEEEEE';
+  String get _lightFg => _lightPalettes[_lightPreset]?['fg'] ?? '#101010';
+  String get _lightAccent => _lightPalettes[_lightPreset]?['accent'] ?? '#007ACC';
+
+  String get _darkBg => _darkPalettes[_darkPreset]?['bg'] ?? '#141619';
+  String get _darkFg => _darkPalettes[_darkPreset]?['fg'] ?? '#E6EDF3';
+  String get _darkAccent => _darkPalettes[_darkPreset]?['accent'] ?? '#007ACC';
+
+  Color _hex(String s) => Color(int.parse(s.replaceFirst('#', ''), radix: 16) | 0xFF000000);
 
   @override
   void initState() {
@@ -269,17 +288,17 @@ class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
                 const SizedBox(height: 12),
                 _buildThemeRow(
                   label: 'Background',
-                  child: _buildColorPreview(const Color(0xFFEEEEEE), _lightBg, isDark, scheme),
+                  child: _buildColorPreview(_hex(_lightBg), _lightBg, isDark, scheme),
                 ),
                 const SizedBox(height: 12),
                 _buildThemeRow(
                   label: 'Foreground',
-                  child: _buildColorPreview(const Color(0xFF101010), _lightFg, isDark, scheme),
+                  child: _buildColorPreview(_hex(_lightFg), _lightFg, isDark, scheme),
                 ),
                 const SizedBox(height: 12),
                 _buildThemeRow(
                   label: 'Accent',
-                  child: _buildColorPreview(const Color(0xFF007ACC), _lightAccent, isDark, scheme),
+                  child: _buildColorPreview(_hex(_lightAccent), _lightAccent, isDark, scheme),
                 ),
               ],
             ),
@@ -313,17 +332,17 @@ class _AppearanceSettingsSectionState extends State<AppearanceSettingsSection> {
                 const SizedBox(height: 12),
                 _buildThemeRow(
                   label: 'Background',
-                  child: _buildColorPreview(const Color(0xFF141619), _darkBg, isDark, scheme),
+                  child: _buildColorPreview(_hex(_darkBg), _darkBg, isDark, scheme),
                 ),
                 const SizedBox(height: 12),
                 _buildThemeRow(
                   label: 'Foreground',
-                  child: _buildColorPreview(const Color(0xFFE6EDF3), _darkFg, isDark, scheme),
+                  child: _buildColorPreview(_hex(_darkFg), _darkFg, isDark, scheme),
                 ),
                 const SizedBox(height: 12),
                 _buildThemeRow(
                   label: 'Accent',
-                  child: _buildColorPreview(const Color(0xFF007ACC), _darkAccent, isDark, scheme),
+                  child: _buildColorPreview(_hex(_darkAccent), _darkAccent, isDark, scheme),
                 ),
               ],
             ),

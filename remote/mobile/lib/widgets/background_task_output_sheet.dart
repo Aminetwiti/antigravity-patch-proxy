@@ -42,6 +42,7 @@ class BackgroundTaskOutputSheet extends StatefulWidget {
     return showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => BackgroundTaskOutputSheet(
         taskId: taskId,
@@ -202,16 +203,18 @@ class _BackgroundTaskOutputSheetState extends State<BackgroundTaskOutputSheet> {
         ? AppColors.accentBlue
         : (hasError ? AppColors.danger : AppColors.positive);
 
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.75,
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.surfaceBase : AppColors.surfaceInput,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
-        border: Border(
-          top: BorderSide(color: isDark ? AppColors.borderStrong : AppColors.borderSubtle, width: 1),
+    return SafeArea(
+      top: false,
+      child: Container(
+        height: MediaQuery.of(context).size.height * 0.75,
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.surfaceBase : AppColors.surfaceInput,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+          border: Border(
+            top: BorderSide(color: isDark ? AppColors.borderStrong : AppColors.borderSubtle, width: 1),
+          ),
         ),
-      ),
-      child: Column(
+        child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // Drag handle
@@ -536,6 +539,7 @@ class _BackgroundTaskOutputSheetState extends State<BackgroundTaskOutputSheet> {
           ),
         ],
       ),
+    ),
     );
   }
 }
