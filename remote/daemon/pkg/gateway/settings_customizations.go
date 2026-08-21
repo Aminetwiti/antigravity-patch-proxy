@@ -414,6 +414,18 @@ func UpdateProjectSettings(projectIDOrWorkspace string, settings ProjectSettings
 		if v, ok := conf.Settings["artifactReviewMode"].(string); ok && settings.ArtifactReviewMode == "" {
 			settings.ArtifactReviewMode = v
 		}
+		// Déduit l'ArtifactReviewPolicy depuis le mode conservé pour que la
+		// valeur retournée soit complète.
+		if settings.ArtifactReviewPolicy == "" {
+			switch settings.ArtifactReviewMode {
+			case "ARTIFACT_REVIEW_MODE_TURBO", "ARTIFACT_REVIEW_MODE_AUTO_APPROVE":
+				settings.ArtifactReviewPolicy = "Auto Approve"
+			case "ARTIFACT_REVIEW_MODE_NEVER":
+				settings.ArtifactReviewPolicy = "Never"
+			default:
+				settings.ArtifactReviewPolicy = "Always Ask"
+			}
+		}
 	}
 	switch settings.SecurityPreset {
 	case "Turbo mode":

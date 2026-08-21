@@ -498,15 +498,13 @@ class _ModelsSettingsSectionState extends State<ModelsSettingsSection> {
           ),
         ),
         const SizedBox(width: 8),
+        // ponytail: placeholder statique '--' quand la valeur est null — un
+        // spinner indéterminé animerait en continu et casserait pumpAndSettle.
         SizedBox(
           width: 22,
           height: 22,
           child: percent == null
-              ? const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
+              ? const Icon(Icons.more_horiz, size: 18)
               : CircularProgressIndicator(
                   value: percent / 100.0,
                   strokeWidth: 3,
