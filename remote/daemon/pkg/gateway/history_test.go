@@ -355,6 +355,32 @@ Last Edited: 2026-08-19T14:46:18Z`
 		t.Errorf("extractUserRequest(userWithImage) = %q, attendu text + markdown image", gotWithImg)
 	}
 
+	userWithArtifactInside := `<USER_REQUEST>
+[ARTIFACT: photo_1787324794109.jpg]
+Path: file:///C:/Users/amine/.gemini/antigravity/brain/test-cascade/scratch/upload_1787324800703.jpg
+
+hi
+</USER_REQUEST>`
+	gotInside := extractUserRequest(userWithArtifactInside)
+	if strings.Contains(gotInside, "[ARTIFACT:") || strings.Contains(gotInside, "Path:") {
+		t.Errorf("extractUserRequest(userWithArtifactInside) contains raw artifact tag: %q", gotInside)
+	}
+	if !strings.Contains(gotInside, "hi") || !strings.Contains(gotInside, "![Image](file:///C:/Users/amine/.gemini/antigravity/brain/test-cascade/scratch/upload_1787324800703.jpg)") {
+		t.Errorf("extractUserRequest(userWithArtifactInside) = %q, want hi + markdown image", gotInside)
+	}
+
+	userWithOnlyArtifact := `<USER_REQUEST>
+[ARTIFACT: scaled_10050.jpg]
+Path: file:///C:/Users/amine/.gemini/antigravity/brain/test-cascade/scratch/upload_1787325227558.jpg
+</USER_REQUEST>`
+	gotOnlyArt := extractUserRequest(userWithOnlyArtifact)
+	if strings.Contains(gotOnlyArt, "[ARTIFACT:") || strings.Contains(gotOnlyArt, "Path:") {
+		t.Errorf("extractUserRequest(userWithOnlyArtifact) contains raw artifact tag: %q", gotOnlyArt)
+	}
+	if gotOnlyArt != "![Image](file:///C:/Users/amine/.gemini/antigravity/brain/test-cascade/scratch/upload_1787325227558.jpg)" {
+		t.Errorf("extractUserRequest(userWithOnlyArtifact) = %q", gotOnlyArt)
+	}
+
 	rawAssistant := `<SYSTEM_MESSAGE>
 [Message] timestamp=2026-08-17T16:13:24Z
 sender=task-146

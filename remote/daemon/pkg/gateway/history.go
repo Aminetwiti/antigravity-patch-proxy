@@ -18,16 +18,23 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// HistorySegment represents an interleaved part of an assistant message turn.
+type HistorySegment struct {
+	Type    string `json:"type"` // "thought" or "text"
+	Content string `json:"content"`
+}
+
 // HistoryMessage represents a parsed message to be sent to the mobile app
 type HistoryMessage struct {
-	ID          string `json:"id"`
-	Sender      string `json:"sender"`
-	Text        string `json:"text"`
-	Thought     string `json:"thought,omitempty"`
-	Timestamp   string `json:"timestamp"`
-	IsStreaming bool   `json:"isStreaming"`
-	IsError     bool   `json:"isError"`
-	StepIndex   int64  `json:"stepIndex,omitempty"`
+	ID          string           `json:"id"`
+	Sender      string           `json:"sender"`
+	Text        string           `json:"text"`
+	Thought     string           `json:"thought,omitempty"`
+	Segments    []HistorySegment `json:"segments,omitempty"`
+	Timestamp   string           `json:"timestamp"`
+	IsStreaming bool             `json:"isStreaming"`
+	IsError     bool             `json:"isError"`
+	StepIndex   int64            `json:"stepIndex,omitempty"`
 }
 
 var (
@@ -517,6 +524,10 @@ func ListLocalSessions() []map[string]interface{} {
 				}
 			}
 
+			pinned := false
+			if home != "" {
+				pinned = isSessionPinned(home, cascadeID)
+			}
 			sMap := map[string]interface{}{
 				"cascadeId":     cascadeID,
 				"title":         title,
@@ -525,6 +536,8 @@ func ListLocalSessions() []map[string]interface{} {
 				"projectId":     matchedProjectID,
 				"status":        "idle",
 				"updatedAt":     modTime.Format(time.RFC3339),
+				"isPinned":      pinned,
+				"isArchived":    false,
 			}
 			items = append(items, sessionItem{data: sMap, updatedAt: modTime})
 		}
@@ -1166,8 +1179,9 @@ func parseTranscriptFullTurns(transcriptPath string) ([]HistoryMessage, error) {
 	scanner.Buffer(*hBuf, len(*hBuf))
 
 	var currentTurnUser *HistoryMessage
+	var currentTurnSegments []HistorySegment
 	var currentTurnSteps []string
-	var currentTurnAnswer string
+	var currentTurnAnswers []string
 	var currentTurnStart time.Time
 	var currentTurnEnd time.Time
 	var currentTurnLastIdx int
@@ -1178,10 +1192,10 @@ func parseTranscriptFullTurns(transcriptPath string) ([]HistoryMessage, error) {
 	lastCmdIdx := -1
 
 	flushAssistantTurn := func() {
-		if currentTurnUser == nil && len(currentTurnSteps) == 0 && currentTurnAnswer == "" {
+		if currentTurnUser == nil && len(currentTurnSteps) == 0 && len(currentTurnSegments) == 0 && len(currentTurnAnswers) == 0 {
 			return
 		}
-		if len(currentTurnSteps) == 0 && currentTurnAnswer == "" {
+		if len(currentTurnSteps) == 0 && len(currentTurnSegments) == 0 && len(currentTurnAnswers) == 0 {
 			return
 		}
 
@@ -1189,14 +1203,41 @@ func parseTranscriptFullTurns(transcriptPath string) ([]HistoryMessage, error) {
 		exploredStr := formatExploredHeader(turnFilesExplored, turnSearchesCount)
 
 		var allThoughtLines []string
-		if durStr != "" && (len(currentTurnSteps) > 0 || currentTurnAnswer != "") {
+		if durStr != "" && (len(currentTurnSteps) > 0 || len(currentTurnSegments) > 0 || len(currentTurnAnswers) > 0) {
 			allThoughtLines = append(allThoughtLines, durStr)
 		}
 		if exploredStr != "" {
 			allThoughtLines = append(allThoughtLines, exploredStr)
 		}
-		allThoughtLines = append(allThoughtLines, currentTurnSteps...)
+
+		// Flush trailing steps to segments if any
+		if len(currentTurnSteps) > 0 {
+			currentTurnSegments = append(currentTurnSegments, HistorySegment{
+				Type:    "thought",
+				Content: strings.Join(currentTurnSteps, "\n"),
+			})
+			allThoughtLines = append(allThoughtLines, currentTurnSteps...)
+			currentTurnSteps = nil
+		}
+
+		// Prepend duration and exploration headers to the very first thought segment if present
+		if len(currentTurnSegments) > 0 && durStr != "" {
+			if currentTurnSegments[0].Type == "thought" {
+				if !strings.HasPrefix(currentTurnSegments[0].Content, "Worked for") &&
+					!strings.HasPrefix(currentTurnSegments[0].Content, "Thought for") {
+					var headerParts []string
+					headerParts = append(headerParts, durStr)
+					if exploredStr != "" {
+						headerParts = append(headerParts, exploredStr)
+					}
+					headerParts = append(headerParts, currentTurnSegments[0].Content)
+					currentTurnSegments[0].Content = strings.Join(headerParts, "\n")
+				}
+			}
+		}
+
 		fullThought := strings.Join(allThoughtLines, "\n")
+		fullText := strings.Join(currentTurnAnswers, "\n\n")
 
 		msgID := fmt.Sprintf("h-%d", currentTurnLastIdx)
 		if currentTurnLastIdx == 0 && currentTurnUser != nil {
@@ -1212,14 +1253,16 @@ func parseTranscriptFullTurns(transcriptPath string) ([]HistoryMessage, error) {
 		messages = append(messages, HistoryMessage{
 			ID:        msgID,
 			Sender:    "assistant",
-			Text:      currentTurnAnswer,
+			Text:      strings.TrimSpace(fullText),
 			Thought:   strings.TrimSpace(fullThought),
+			Segments:  currentTurnSegments,
 			Timestamp: ts,
 			IsError:   currentTurnHasError,
 		})
 
+		currentTurnSegments = nil
 		currentTurnSteps = nil
-		currentTurnAnswer = ""
+		currentTurnAnswers = nil
 		currentTurnHasError = false
 		turnFilesExplored = make(map[string]bool)
 		turnSearchesCount = 0
@@ -1370,7 +1413,18 @@ func parseTranscriptFullTurns(transcriptPath string) ([]HistoryMessage, error) {
 					if len(entry.ToolCalls) > 0 {
 						currentTurnSteps = append(currentTurnSteps, cleaned)
 					} else {
-						currentTurnAnswer = cleaned
+						if len(currentTurnSteps) > 0 {
+							currentTurnSegments = append(currentTurnSegments, HistorySegment{
+								Type:    "thought",
+								Content: strings.Join(currentTurnSteps, "\n"),
+							})
+							currentTurnSteps = nil
+						}
+						currentTurnSegments = append(currentTurnSegments, HistorySegment{
+							Type:    "text",
+							Content: cleaned,
+						})
+						currentTurnAnswers = append(currentTurnAnswers, cleaned)
 					}
 				}
 			}
@@ -2601,16 +2655,22 @@ func extractUserRequest(content string) string {
 		}
 	}
 
-	// Extraire les pièces jointes / images uploadées (ex. depuis Antigravity Desktop)
+	// Extraire les pièces jointes / images uploadées (ex. depuis Antigravity Desktop ou Mobile)
 	mediaArtifacts := extractMediaArtifacts(content)
+
+	// Nettoyer les balises [ARTIFACT: ...] brutes qui étaient dans le prompt utilisateur
+	userReq = artifactMediaRe.ReplaceAllString(userReq, "")
+	userReq = regexp.MustCompile(`(?i)(?:Path|Last Edited):\s*[^\r\n]+`).ReplaceAllString(userReq, "")
+	userReq = strings.TrimSpace(userReq)
+
 	if len(mediaArtifacts) > 0 {
 		for _, imgPath := range mediaArtifacts {
-			if !strings.Contains(userReq, imgPath) {
-				cleanP := imgPath
-				if !strings.HasPrefix(cleanP, "file://") && (strings.HasPrefix(cleanP, "/") || (len(cleanP) >= 2 && cleanP[1] == ':')) {
-					cleanP = "file:///" + filepath.ToSlash(cleanP)
-				}
-				imgTag := fmt.Sprintf("![Image](%s)", cleanP)
+			cleanP := imgPath
+			if !strings.HasPrefix(cleanP, "file://") && (strings.HasPrefix(cleanP, "/") || (len(cleanP) >= 2 && cleanP[1] == ':')) {
+				cleanP = "file:///" + filepath.ToSlash(cleanP)
+			}
+			imgTag := fmt.Sprintf("![Image](%s)", cleanP)
+			if !strings.Contains(userReq, imgTag) {
 				if userReq == "" {
 					userReq = imgTag
 				} else {
@@ -2620,7 +2680,7 @@ func extractUserRequest(content string) string {
 		}
 	}
 
-	return userReq
+	return strings.TrimSpace(userReq)
 }
 
 func cleanPromptTitle(s string) string {

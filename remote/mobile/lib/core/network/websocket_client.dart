@@ -135,14 +135,17 @@ class DaemonWebSocketClient {
     _messageController ??= StreamController<dynamic>.broadcast();
 
     try {
-      var finalUrl = _targetUrl;
+      final uri = Uri.parse(_targetUrl);
+      final headers = <String, dynamic>{};
       if (_authToken != null && _authToken!.isNotEmpty) {
-        finalUrl += '${finalUrl.contains('?') ? '&' : '?'}token=$_authToken';
+        headers['Authorization'] = 'Bearer $_authToken';
       }
-      final uri = Uri.parse(finalUrl);
 
       WebSocket? socket;
-      final connectFuture = WebSocket.connect(uri.toString());
+      final connectFuture = WebSocket.connect(
+        uri.toString(),
+        headers: headers.isNotEmpty ? headers : null,
+      );
 
       _connectTimeout?.cancel();
       _connectTimeout = Timer(const Duration(seconds: 15), () {

@@ -24,14 +24,14 @@ func TestFlagDefaults(t *testing.T) {
 		approvalTimeoutMin int
 	)
 	fs.IntVar(&listenPort, "port", 8090, "")
-	fs.StringVar(&host, "host", "0.0.0.0", "")
+	fs.StringVar(&host, "host", "127.0.0.1", "")
 	fs.StringVar(&tunnelFlag, "tunnel", "", "")
 	fs.StringVar(&authToken, "auth-token", "", "")
 	fs.IntVar(&approvalTimeoutMin, "approval-timeout", 5, "")
 	if err := fs.Parse([]string{}); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if listenPort != 8090 || host != "0.0.0.0" || tunnelFlag != "" || authToken != "" || approvalTimeoutMin != 5 {
+	if listenPort != 8090 || host != "127.0.0.1" || tunnelFlag != "" || authToken != "" || approvalTimeoutMin != 5 {
 		t.Fatalf("défauts inattendus: port=%d host=%q tunnel=%q token=%q timeout=%d",
 			listenPort, host, tunnelFlag, authToken, approvalTimeoutMin)
 	}

@@ -77,10 +77,10 @@ func (pm *PairingManager) GeneratePIN() string {
 
 	n, err := rand.Int(rand.Reader, big.NewInt(1000000))
 	if err != nil {
-		pm.currentPIN = "123456" // fallback
-	} else {
-		pm.currentPIN = fmt.Sprintf("%06d", n.Int64())
+		pm.currentPIN = ""
+		return ""
 	}
+	pm.currentPIN = fmt.Sprintf("%06d", n.Int64())
 	pm.pinExpiresAt = time.Now().Add(pm.pinTTL)
 	return pm.currentPIN
 }
@@ -91,13 +91,13 @@ func (pm *PairingManager) CurrentPIN() (string, time.Duration) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	if time.Now().After(pm.pinExpiresAt) {
+	if time.Now().After(pm.pinExpiresAt) || pm.currentPIN == "" {
 		n, err := rand.Int(rand.Reader, big.NewInt(1000000))
 		if err != nil {
-			pm.currentPIN = "123456"
-		} else {
-			pm.currentPIN = fmt.Sprintf("%06d", n.Int64())
+			pm.currentPIN = ""
+			return "", 0
 		}
+		pm.currentPIN = fmt.Sprintf("%06d", n.Int64())
 		pm.pinExpiresAt = time.Now().Add(pm.pinTTL)
 	}
 	return pm.currentPIN, time.Until(pm.pinExpiresAt)
@@ -274,6 +274,18 @@ func (pm *PairingManager) HTTPHandler() http.HandlerFunc {
 		}
 
 		if r.Method == http.MethodDelete {
+			// Sécurité (VULN-07) : la révocation exige une authentification session valide.
+			token := r.URL.Query().Get("token")
+			if token == "" {
+				authHeader := r.Header.Get("Authorization")
+				token = strings.TrimPrefix(authHeader, "Bearer ")
+			}
+			if !pm.ValidateToken(token) {
+				w.WriteHeader(http.StatusUnauthorized)
+				json.NewEncoder(w).Encode(map[string]string{"error": "Authentification requise"})
+				return
+			}
+
 			// Révocation d'un device : DELETE /pair?deviceId=xxx (admin hôte).
 			deviceID := r.URL.Query().Get("deviceId")
 			if deviceID == "" {

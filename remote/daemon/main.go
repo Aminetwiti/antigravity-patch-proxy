@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -40,6 +41,7 @@ func main() {
 	var authToken string
 	var noAuth bool
 	var approvalTimeoutMin int
+	var enableRemoteTerminal bool
 
 	flag.IntVar(&listenPort, "port", cfg.Port, "Port for the WebSocket server")
 	flag.StringVar(&host, "host", cfg.Host, "Host for the WebSocket server")
@@ -47,6 +49,7 @@ func main() {
 	flag.StringVar(&authToken, "auth-token", "", "Authentication token for Mobile App (generates dynamic CSPRNG if omitted, or 'none' to disable)")
 	flag.BoolVar(&noAuth, "no-auth", false, "Disable authentication (allow any client without token)")
 	flag.IntVar(&approvalTimeoutMin, "approval-timeout", int(cfg.ApprovalTimeout.Minutes()), "Auto-deny timeout for pending approvals in minutes (0 = disabled)")
+	flag.BoolVar(&enableRemoteTerminal, "enable-remote-terminal", cfg.AllowRemoteTerminal, "Allow remote interactive PTY terminal creation")
 	flag.Parse()
 
 	// Silencer le logger standard Go pour éliminer le spam brut de gorilla/websocket (qui échappe à slog)
@@ -140,13 +143,14 @@ func main() {
 	// (gestion administrative des appareils pairÃ©s depuis le mobile admin).
 	server.SetPairingManager(pairingMgr)
 	server.SetApprovalTimeout(time.Duration(approvalTimeoutMin) * time.Minute)
-	// Flux temps r├®el Jetbox : la sidebar mobile est aliment├®e par le stream
-	// JetboxSubscribeToSummaries (snapshot initial + updates incr├®mentaux) au
+	server.SetAllowRemoteTerminal(enableRemoteTerminal)
+	// Flux temps réel Jetbox : la sidebar mobile est alimentée par le stream
+	// JetboxSubscribeToSummaries (snapshot initial + updates incrémentaux) au
 	// lieu de GetAllCascades (~9,5 s). Reconnecte automatiquement en boucle.
 	server.RunJetboxSubscription(rpcClient)
-	// Flux r├®actif StreamReactiveUpdates : source secondaire de fiabilit├®
-	// (approbations + d├®tection instantan├®e "waiting for input") — le parsing
-	// des frames de r├®ponse reste le chemin principal. Goroutine autonome.
+	// Flux réactif StreamReactiveUpdates : source secondaire de fiabilité
+	// (approbations + détection instantanée "waiting for input") — le parsing
+	// des frames de réponse reste le chemin principal. Goroutine autonome.
 	server.RunReactiveSubscription(rpcClient)
 	sched := gateway.NewScheduler(server)
 	sched.Start()
@@ -157,6 +161,18 @@ func main() {
 	mux.HandleFunc("/health", server.HTTPHandler)
 	mux.HandleFunc("/health/diagnostic", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if !authMgr.IsDisabled() {
+			clientToken := r.URL.Query().Get("token")
+			if clientToken == "" {
+				clientToken = r.Header.Get("Authorization")
+				clientToken = strings.TrimPrefix(clientToken, "Bearer ")
+			}
+			if !authMgr.Validate(clientToken) && !pairingMgr.ValidateToken(clientToken) {
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "Unauthorized"})
+				return
+			}
+		}
 		hbErr := ""
 		if _, err := rpcClient.Heartbeat(); err != nil {
 			hbErr = err.Error()

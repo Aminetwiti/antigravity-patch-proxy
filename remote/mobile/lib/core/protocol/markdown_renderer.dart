@@ -373,6 +373,15 @@ class MarkdownRenderer {
       if (artifactMatch != null) {
         final artName = artifactMatch.group(1)?.trim() ?? 'Artifact';
         final artPath = artifactMatch.group(2)?.trim() ?? artName;
+        // Ignorer les placeholders d'exemples comme "..." ou "file:///..."
+        if (artName == '...' || artPath == 'file:///...' || artPath == '...' || artPath.endsWith('/...')) {
+          spans.add(TextSpan(
+            text: artifactMatch.group(0),
+            style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: scheme.onSurfaceVariant),
+          ));
+          remaining = remaining.substring(artifactMatch.end);
+          continue;
+        }
         final isLocalFile = artPath.startsWith('file://') || artPath.contains(':\\') || artPath.startsWith('/');
         final filePath = isLocalFile ? _filePathOf(artPath) : artPath;
         final lower = filePath.toLowerCase();

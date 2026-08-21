@@ -1754,9 +1754,45 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           final newThought = (_externalThoughts[thKey] != null && _externalThoughts[thKey]!.isNotEmpty)
               ? _externalThoughts[thKey]!.trim()
               : current.thought;
+
+          // Mise à jour de la séquence ordonnée de segments chronologiques
+          final List<ChatSegment> updatedSegments = List.of(current.segments);
+          if (thoughtDelta.isNotEmpty) {
+            if (updatedSegments.isNotEmpty && updatedSegments.last.type == ChatSegmentType.thought) {
+              final last = updatedSegments.last;
+              final newContent = last.content.isEmpty
+                  ? thoughtDelta
+                  : (last.content.endsWith('\n') ? '${last.content}$thoughtDelta' : '${last.content}\n$thoughtDelta');
+              updatedSegments[updatedSegments.length - 1] = last.copyWith(content: newContent, isRunning: true);
+            } else {
+              updatedSegments.add(ChatSegment(
+                type: ChatSegmentType.thought,
+                content: thoughtDelta,
+                isRunning: true,
+              ));
+            }
+          }
+          if (textDelta.isNotEmpty) {
+            // Si le dernier segment était une pensée en cours, on la marque terminée
+            if (updatedSegments.isNotEmpty && updatedSegments.last.type == ChatSegmentType.thought && updatedSegments.last.isRunning) {
+              final last = updatedSegments.last;
+              updatedSegments[updatedSegments.length - 1] = last.copyWith(isRunning: false);
+            }
+            if (updatedSegments.isNotEmpty && updatedSegments.last.type == ChatSegmentType.text) {
+              final last = updatedSegments.last;
+              updatedSegments[updatedSegments.length - 1] = last.copyWith(content: last.content + textDelta);
+            } else {
+              updatedSegments.add(ChatSegment(
+                type: ChatSegmentType.text,
+                content: textDelta,
+              ));
+            }
+          }
+
           buf[idx] = current.copyWith(
             text: newText,
             thought: newThought,
+            segments: updatedSegments,
             isStreaming: true,
           );
         }
@@ -1817,10 +1853,33 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           finalThought = currentThought;
         }
 
+        final targetMsg = idx >= 0
+            ? buf[idx]
+            : (buf.lastIndexWhere((m) => m.isStreaming) >= 0
+                ? buf[buf.lastIndexWhere((m) => m.isStreaming)]
+                : null);
+
+        List<ChatSegment> finalizedSegments = [];
+        if (targetMsg != null && targetMsg.segments.isNotEmpty) {
+          finalizedSegments = targetMsg.segments.map((s) => s.copyWith(isRunning: false)).toList();
+          if (finalizedSegments.isNotEmpty && finalizedSegments.first.type == ChatSegmentType.thought) {
+            final firstThought = finalizedSegments.first.content.trim();
+            if (!firstThought.startsWith('Worked for') &&
+                !firstThought.startsWith('Thought for') &&
+                !firstThought.startsWith('Thinking for') &&
+                !firstThought.startsWith('Working')) {
+              finalizedSegments[0] = finalizedSegments[0].copyWith(
+                content: '$workedDurationStr\n${finalizedSegments[0].content}',
+              );
+            }
+          }
+        }
+
         if (idx >= 0) {
           buf[idx] = buf[idx].copyWith(
             isStreaming: false,
             thought: finalThought,
+            segments: finalizedSegments.isNotEmpty ? finalizedSegments : buf[idx].segments,
             filesChanged: changedFiles.isNotEmpty ? changedFiles : null,
             additions: changedFiles.isNotEmpty ? totalAdded : null,
             deletions: changedFiles.isNotEmpty ? totalRemoved : null,
@@ -1831,6 +1890,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             buf[lastStreamingIdx] = buf[lastStreamingIdx].copyWith(
               isStreaming: false,
               thought: finalThought,
+              segments: finalizedSegments.isNotEmpty ? finalizedSegments : buf[lastStreamingIdx].segments,
               filesChanged: changedFiles.isNotEmpty ? changedFiles : null,
               additions: changedFiles.isNotEmpty ? totalAdded : null,
               deletions: changedFiles.isNotEmpty ? totalRemoved : null,
@@ -3925,17 +3985,6 @@ class _MessageBubble extends StatelessWidget {
                 ],
               ),
             ),
-            if (hasThought || message.isStreaming) ...[
-              ExecutionProgressView(
-                messageId: message.id,
-                thoughtText: message.thought,
-                isStreaming: message.isStreaming,
-                modelLabel: message.modelLabel,
-                initiallyExpanded: isThoughtExpanded,
-                onToggleExpand: onToggleThought,
-                onOpenArtifact: onOpenArtifact,
-              ),
-            ],
             if (isError)
               Container(
                 width: double.infinity,
@@ -4017,7 +4066,72 @@ class _MessageBubble extends StatelessWidget {
                   ],
                 ),
               )
-            else ...[
+            else if (message.segments.isNotEmpty) ...[
+              for (int segIdx = 0; segIdx < message.segments.length; segIdx++) ...[
+                if (message.segments[segIdx].type == ChatSegmentType.thought &&
+                    message.segments[segIdx].content.trim().isNotEmpty) ...[
+                  ExecutionProgressView(
+                    messageId: '${message.id}-$segIdx',
+                    thoughtText: message.segments[segIdx].content,
+                    isStreaming: message.isStreaming &&
+                        (segIdx == message.segments.length - 1 || message.segments[segIdx].isRunning),
+                    modelLabel: message.modelLabel,
+                    initiallyExpanded: isThoughtExpanded,
+                    onToggleExpand: onToggleThought,
+                    onOpenArtifact: onOpenArtifact,
+                  ),
+                ] else if (message.segments[segIdx].type == ChatSegmentType.text &&
+                    message.segments[segIdx].content.trim().isNotEmpty) ...[
+                  MarkdownBubble(
+                    text: message.segments[segIdx].content,
+                    isStreaming: message.isStreaming && (segIdx == message.segments.length - 1),
+                    api: api,
+                    workspacePath: workspacePath,
+                    onLocalFile: onLocalFile,
+                  ),
+                ],
+              ],
+              if (!message.isStreaming &&
+                  (message.text.contains('Implementation Plan') ||
+                      message.text.contains('implementation_plan.md') ||
+                      message.text.contains('# Plan')))
+                ImplementationPlanCard(
+                  summary: 'Le plan d\'implémentation est prêt. Vous pouvez l\'examiner ou approuver directement.',
+                  onProceed: onProceedPlan ?? () {},
+                  onViewPlan: onViewPlan ?? () {},
+                ),
+              if (!message.isStreaming &&
+                  (message.text.contains('walkthrough.md') ||
+                      message.text.contains('Walkthrough') ||
+                      message.text.contains('# Walkthrough')))
+                WalkthroughCard(
+                  onViewWalkthrough: () {
+                    onOpenArtifact?.call('walkthrough.md');
+                  },
+                ),
+              if (!message.isStreaming && message.filesChanged.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: FilesChangedCard(
+                    files: message.filesChanged,
+                    additions: message.additions,
+                    deletions: message.deletions,
+                    onReview: onViewReview ?? () {},
+                    onOpenFile: onOpenFile,
+                  ),
+                ),
+            ] else ...[
+              if (hasThought || message.isStreaming) ...[
+                ExecutionProgressView(
+                  messageId: message.id,
+                  thoughtText: message.thought,
+                  isStreaming: message.isStreaming,
+                  modelLabel: message.modelLabel,
+                  initiallyExpanded: isThoughtExpanded,
+                  onToggleExpand: onToggleThought,
+                  onOpenArtifact: onOpenArtifact,
+                ),
+              ],
               if (hasContent || (message.isStreaming && message.text.isNotEmpty))
                 MarkdownBubble(
                   text: message.text,
@@ -4738,6 +4852,37 @@ class _ExtractedMedia {
     }
   }
   text = text.replaceAll(attachRe, '').trim();
+
+  // 3. Artifact tags: [ARTIFACT: name]\nPath: file:///...
+  final artifactRe = RegExp(
+    r'\[ARTIFACT:\s*([^\]]+)\](?:\s*\r?\n\s*Path:\s*([^\r\n]+))?',
+    caseSensitive: false,
+  );
+  for (final match in artifactRe.allMatches(text)) {
+    final artName = match.group(1)?.trim() ?? 'Artifact';
+    final artPath = match.group(2)?.trim() ?? artName;
+    final cleanP = artPath.startsWith('file://') ? artPath.substring(7) : artPath;
+    final name = artName.isNotEmpty ? artName : cleanP.split(RegExp(r'[\\/]')).last;
+    final lower = cleanP.toLowerCase();
+    final isImg = lower.endsWith('.png') ||
+        lower.endsWith('.jpg') ||
+        lower.endsWith('.jpeg') ||
+        lower.endsWith('.gif') ||
+        lower.endsWith('.webp') ||
+        lower.endsWith('.svg') ||
+        cleanP.startsWith('data:image/');
+    mediaList.add(_ExtractedMedia(
+      path: artPath,
+      name: name,
+      isImage: isImg,
+      dataUri: cleanP.startsWith('data:image/') ? cleanP : null,
+    ));
+  }
+  text = text.replaceAll(artifactRe, '').trim();
+
+  // 4. Nettoyage de balises de métadonnées résiduelles (Path:, Last Edited:)
+  final metaResidualRe = RegExp(r'(?:Path|Last Edited):\s*[^\r\n]+', caseSensitive: false);
+  text = text.replaceAll(metaResidualRe, '').trim();
 
   return (media: mediaList, cleanText: text);
 }

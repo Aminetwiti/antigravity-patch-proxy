@@ -243,6 +243,8 @@ type Server struct {
 	uploadChunks map[string]*uploadChunkState
 	// adbService : client ADB sécurisé sans shell injection (G3).
 	adbService *adb.Service
+	// allowRemoteTerminal : autorise l'ouverture de terminaux PTY distants (sécurité : false par défaut).
+	allowRemoteTerminal bool
 	// noToolsEnabled : mode global « répondre sans outils » — les send_prompt
 	// qui ne portent pas leur propre flag noTools héritent de ce défaut
 	// (toggle des réglages mobile). L'état vit en mémoire comme autoAccept.
@@ -395,10 +397,30 @@ func NewServer(client RPCClient, authToken string) *Server {
 		logJSON.Warn("scheduled_tasks_load_failed", "error", err.Error())
 	}
 	s.startTranscriptWatchdog()
+	s.startUploadReaper(2*time.Minute, 10*time.Minute)
 	StartScratchCleanupRoutine(context.Background(), 24*time.Hour, DefaultScratchMaxAge)
 	loadAccountPrefs()
 	return s
 }
+
+// startUploadReaper purge périodiquement les uploads partiels expirés en mémoire (VULN-14).
+func (s *Server) startUploadReaper(interval, maxAge time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			s.mu.Lock()
+			now := time.Now()
+			for id, state := range s.uploadChunks {
+				if state != nil && now.Sub(state.createdAt) > maxAge {
+					delete(s.uploadChunks, id)
+				}
+			}
+			s.mu.Unlock()
+		}
+	}()
+}
+
 
 // sessionsCacheTTL : dur├®e de fra├«cheur du cache list_sessions. Le mobile
 // rafra├«chit la liste ├á chaque reconnexion ; le LS met ~9,5 s ├á r├®pondre.
@@ -593,6 +615,7 @@ func (s *Server) sessionsFromSummariesLocked(jetbox map[string]connectrpc.Jetbox
 			"status":        enrichStatus(sum.CascadeID, sum.Status),
 			"updatedAt":     sum.UpdatedAt,
 			"isPinned":      isPinned,
+			"isArchived":    false,
 		})
 	}
 	var v int64 = 0
@@ -757,6 +780,14 @@ func (s *Server) SetApprovalTimeout(d time.Duration) {
 	defer s.mu.Unlock()
 	s.approvalTimeout = d
 }
+
+// SetAllowRemoteTerminal configure l'autorisation d'ouverture de terminaux PTY distants.
+func (s *Server) SetAllowRemoteTerminal(allow bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.allowRemoteTerminal = allow
+}
+
 
 // SetAutoAccept active/désactive l'auto-approbation des actions (toggle des
 // réglages mobile, message WS set_auto_accept). Rétro-compatibilité : enabled=true
@@ -1895,6 +1926,11 @@ func (s *Server) handleUploadChunk(conn *websocket.Conn, msg IncomingMessage) {
 	s.mu.Lock()
 	state, exists := s.uploadChunks[uploadID]
 	if !exists {
+		if len(s.uploadChunks) >= 50 {
+			s.mu.Unlock()
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "trop d'uploads simultanés en cours"})
+			return
+		}
 		if totalChunks <= 0 {
 			totalChunks = 1
 		}
@@ -2127,7 +2163,20 @@ func (s *Server) handleADB(conn *websocket.Conn, msg IncomingMessage) bool {
 			cleanName := filepath.Base(filepath.Clean(rPath))
 			lPath = filepath.Join(home, ".gemini", "antigravity", "downloads", cleanName)
 		} else {
-			lPath = homeRoot(lPath)
+			wsRoot := homeRoot(msg.WorkspacePath)
+			if wsRoot == "" {
+				if projs := ListOfficialProjects(); len(projs) > 0 && projs[0].Path != "" {
+					wsRoot = projs[0].Path
+				} else if home, errHome := os.UserHomeDir(); errHome == nil {
+					wsRoot = filepath.Join(home, ".gemini", "antigravity", "downloads")
+				}
+			}
+			resolved, errRes := resolvePath(wsRoot, lPath)
+			if errRes != nil {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé hors du workspace: " + errRes.Error()})
+				return true
+			}
+			lPath = resolved
 		}
 		_ = os.MkdirAll(filepath.Dir(lPath), 0755)
 		if err := s.adbService.PullFile(ctx, deviceID, rPath, lPath); err != nil {
@@ -2152,7 +2201,20 @@ func (s *Server) handleADB(conn *websocket.Conn, msg IncomingMessage) bool {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "remotePath + localPath requis"})
 			return true
 		}
-		lPath = homeRoot(lPath)
+		wsRoot := homeRoot(msg.WorkspacePath)
+		if wsRoot == "" {
+			if projs := ListOfficialProjects(); len(projs) > 0 && projs[0].Path != "" {
+				wsRoot = projs[0].Path
+			} else if home, errHome := os.UserHomeDir(); errHome == nil {
+				wsRoot = filepath.Join(home, ".gemini", "antigravity")
+			}
+		}
+		resolved, errRes := resolvePath(wsRoot, lPath)
+		if errRes != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé hors du workspace: " + errRes.Error()})
+			return true
+		}
+		lPath = resolved
 		if err := s.adbService.PushFile(ctx, deviceID, lPath, rPath); err != nil {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
 			return true
@@ -2796,6 +2858,10 @@ func (s *Server) sessionsOutWithLimit(raw []byte, limitPerProject int) interface
 				break
 			}
 		}
+		isPinned := false
+		if home != "" {
+			isPinned = isSessionPinned(home, sum.CascadeID)
+		}
 		items = append(items, sessionWithTime{
 			data: map[string]interface{}{
 				"cascadeId":     sum.CascadeID,
@@ -2805,6 +2871,8 @@ func (s *Server) sessionsOutWithLimit(raw []byte, limitPerProject int) interface
 				"projectId":     projID,
 				"status":        status,
 				"updatedAt":     sum.UpdatedAt,
+				"isPinned":      isPinned,
+				"isArchived":    false,
 			},
 			updatedAt: sum.UpdatedAt,
 			isActive:  status == "CASCADE_STATUS_RUNNING" || status == "CASCADE_STATUS_WAITING_FOR_USER_ACTION",
@@ -3262,6 +3330,13 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 
 	case "terminal_create":
+		// Sécurité (VULN-01) : l'ouverture de terminal PTY interactif exige
+		// soit le flag serveur allowRemoteTerminal, soit les privilèges Admin.
+		if !s.allowRemoteTerminal && !s.requireAdmin(conn) {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: ouverture de terminal distant désactivée (flag --enable-remote-terminal ou privilège admin requis)"})
+			return
+		}
+
 		// La session appartient à CE client (owner-scoping) : les autres
 		// devices ne peuvent ni écrire ni tuer dedans, et sa déconnexion ne
 		// nettoie que ses sessions.
@@ -4232,8 +4307,36 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 
 		if isDriveLetterAbs || isUNCAbs || isUnixAbs {
-			if content, errRead := os.ReadFile(filepath.Clean(cleanPath)); errRead == nil {
-				respondWithFileContent(content)
+			cleanTarget := filepath.Clean(cleanPath)
+			allowed := false
+			if home, errHome := os.UserHomeDir(); errHome == nil {
+				geminiDir := filepath.Join(home, ".gemini")
+				if strings.HasPrefix(strings.ToLower(cleanTarget), strings.ToLower(geminiDir)) {
+					allowed = true
+				}
+			}
+			if !allowed && msg.WorkspacePath != "" {
+				if _, errRes := resolvePath(homeRoot(msg.WorkspacePath), cleanTarget); errRes == nil {
+					allowed = true
+				}
+			}
+			if !allowed {
+				for _, p := range ListOfficialProjects() {
+					if p.Path != "" {
+						if _, errRes := resolvePath(filepath.Clean(p.Path), cleanTarget); errRes == nil {
+							allowed = true
+							break
+						}
+					}
+				}
+			}
+			if allowed {
+				if content, errRead := os.ReadFile(cleanTarget); errRead == nil {
+					respondWithFileContent(content)
+					return
+				}
+			} else {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé hors du workspace: " + cleanPath})
 				return
 			}
 		}
@@ -6814,7 +6917,6 @@ func (m *terminalPtyManager) killAllFor(owner *websocket.Conn) {
 var allowedExecBinaries = map[string]bool{
 	"git": true, "flutter": true, "dart": true, "go": true, "npm": true,
 	"npx": true, "cargo": true, "pytest": true, "ls": true, "dir": true,
-	"echo": true, "cat": true,
 }
 
 // executeShellCommand exécute une commande locale confinée et sécurisée dans un répertoire de travail
@@ -6853,6 +6955,18 @@ func executeShellCommand(dir, cmdStr string) (string, error) {
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
 		absDir = dir
+	}
+
+	// Validation de confinement des arguments de type chemin
+	for _, tok := range tokens[1:] {
+		if strings.HasPrefix(tok, "-") {
+			continue
+		}
+		if filepath.IsAbs(tok) || strings.Contains(tok, "..") {
+			if _, errRes := resolvePath(absDir, tok); errRes != nil {
+				return "", fmt.Errorf("argument de chemin hors workspace non autorisé: %s", tok)
+			}
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
