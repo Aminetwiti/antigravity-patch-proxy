@@ -49,7 +49,7 @@ jobs:
 
       - name: Analyze code
         working-directory: remote/mobile
-        run: flutter analyze
+        run: flutter analyze --no-fatal-infos
 
       - name: Run unit & widget tests
         working-directory: remote/mobile

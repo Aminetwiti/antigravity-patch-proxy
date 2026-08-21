@@ -2350,6 +2350,16 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
                     ? scheme.primary.withValues(alpha: 0.15)
                     : (isDark ? AppColors.surfaceRaised : AppColors.panel(context)),
                 borderRadius: BorderRadius.circular(16),
+                boxShadow: _focusNode.hasFocus
+                    ? [
+                        BoxShadow(
+                          color: (isDark ? AppColors.accentBlue : scheme.primary).withValues(alpha: 0.1),
+                          blurRadius: 10,
+                          spreadRadius: 0,
+                          offset: const Offset(0, 2),
+                        ),
+                      ]
+                    : null,
                 border: Border.all(
                   color: candidateData.isNotEmpty
                       ? scheme.primary

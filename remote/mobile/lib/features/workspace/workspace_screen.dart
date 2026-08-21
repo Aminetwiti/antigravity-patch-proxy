@@ -11,6 +11,7 @@ import '../../core/protocol/daemon_api.dart';
 import '../../core/protocol/messages.dart';
 import '../../core/protocol/workspace_path.dart';
 import '../../widgets/custom_dropdown_overlay.dart';
+import '../../widgets/markdown_bubble.dart';
 import '../../widgets/syntax_highlighter.dart';
 import 'git_commit_dialog.dart';
 import 'package:mobile/theme/app_colors.dart';
@@ -41,6 +42,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   List<Map<String, dynamic>> _files = [];
   String _codeContent = '// Sélectionnez un fichier';
   Uint8List? _imageBytes;
+  bool _isMarkdownPreview = false;
+  int? _targetLineNumber;
   final Set<String> _collapsedFolders = {};
   // Bug #5 : recherche substring dans l'arbre
   final TextEditingController _searchController = TextEditingController();
@@ -861,7 +864,40 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                                         ),
                                       );
                                     },
-                          ),     },
+                          ),
+                          // Markdown preview toggle (si fichier .md)
+                          if (_selectedFilePath.toLowerCase().endsWith('.md') ||
+                              _selectedFilePath.toLowerCase().endsWith('.markdown'))
+                            IconButton(
+                              icon: Icon(
+                                _isMarkdownPreview
+                                    ? Icons.code_rounded
+                                    : Icons.menu_book_rounded,
+                                size: 16,
+                                color: _isMarkdownPreview
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                              tooltip: _isMarkdownPreview
+                                  ? 'Afficher le code source'
+                                  : 'Afficher l\'aperçu formaté',
+                              onPressed: () => setState(() {
+                                _isMarkdownPreview = !_isMarkdownPreview;
+                              }),
+                            ),
+                          // Jump to line button
+                          IconButton(
+                            icon: Icon(
+                              Icons.format_list_numbered_rounded,
+                              size: 16,
+                              color: _targetLineNumber != null
+                                  ? Theme.of(context).colorScheme.primary
+                                  : Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                            tooltip: 'Aller à la ligne...',
+                            onPressed: _selectedFilePath.isEmpty || _isLoadingCode
+                                ? null
+                                : () => _showJumpToLineDialog(context),
                           ),
                           // Find-in-page toggle
                           IconButton(

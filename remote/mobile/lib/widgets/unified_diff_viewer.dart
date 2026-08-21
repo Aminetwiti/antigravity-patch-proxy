@@ -848,39 +848,38 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
 
   Widget _buildLineRow(_DiffLine line, bool hasComment, ColorScheme scheme) {
     Color bg = Colors.transparent;
-    Color textColor = scheme.onSurface;
+    Color textColor = isDark ? AppColors.inkPrimary : scheme.onSurface;
     String prefix = ' ';
 
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     switch (line.type) {
       case _DiffLineType.addition:
-        bg = isDark ? const Color(0x2222C55E) : const Color(0x1816A34A);
-        textColor = isDark ? const Color(0xFF4ADE80) : const Color(0xFF15803D);
+        bg = isDark ? AppColors.diffInsertedLine : const Color(0x1816A34A);
+        textColor = isDark ? const Color(0xFF81C995) : const Color(0xFF15803D);
         prefix = '+';
         break;
       case _DiffLineType.deletion:
-        bg = isDark ? const Color(0x22EF4444) : const Color(0x18DC2626);
-        textColor = isDark ? const Color(0xFFF87171) : const Color(0xFFB91C1C);
+        bg = isDark ? AppColors.diffRemovedLine : const Color(0x18DC2626);
+        textColor = isDark ? const Color(0xFFF28B82) : const Color(0xFFB91C1C);
         prefix = '-';
         break;
       case _DiffLineType.hunkHeader:
-        bg = scheme.primary.withValues(alpha: 0.10);
-        textColor = scheme.primary;
+        bg = isDark ? const Color(0x228AB4F8) : scheme.primary.withValues(alpha: 0.10);
+        textColor = isDark ? AppColors.accentBlue : scheme.primary;
         prefix = ' ';
         break;
       case _DiffLineType.meta:
-        textColor = isDark ? const Color(0xFF7E808A) : scheme.outline;
+        textColor = isDark ? AppColors.inkMuted : scheme.outline;
         prefix = ' ';
         break;
       case _DiffLineType.context:
-        textColor = scheme.onSurfaceVariant;
+        textColor = isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant;
         prefix = ' ';
         break;
     }
 
     return Container(
       color: bg,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -890,7 +889,7 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
               line.oldLine?.toString() ?? '',
               textAlign: TextAlign.right,
               style: TextStyle(
-                color: isDark ? const Color(0xFF5E606A) : scheme.outline,
+                color: isDark ? AppColors.inkDisabled : scheme.outline,
                 fontSize: 11,
                 fontFamily: 'monospace',
                 height: 1.4,
@@ -904,7 +903,7 @@ class _UnifiedDiffViewerState extends State<UnifiedDiffViewer> {
               line.newLine?.toString() ?? '',
               textAlign: TextAlign.right,
               style: TextStyle(
-                color: isDark ? const Color(0xFF5E606A) : scheme.outline,
+                color: isDark ? AppColors.inkDisabled : scheme.outline,
                 fontSize: 11,
                 fontFamily: 'monospace',
                 height: 1.4,
