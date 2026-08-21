@@ -186,7 +186,7 @@ class SyntaxHighlighter {
       }
 
       // Variable starting with $ ($var, $1, $?)
-      if (char == '$' && (lang == 'shell' || lang == 'zsh' || lang == 'powershell' || lang == 'typescript' || lang == 'dart')) {
+      if (char == r'$' && (lang == 'shell' || lang == 'zsh' || lang == 'powershell' || lang == 'typescript' || lang == 'dart')) {
         int end = cursor + 1;
         while (end < line.length && (_isWordChar(line[end]) || line[end] == '?' || line[end] == '!')) {
           end++;

@@ -2351,10 +2351,8 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       type: ToastType.info,
     );
 
-    _sendPrompt(
+    _handleSendMessage(
       lastUserPrompt,
-      modelUID: _selectedModelUID,
-      modelEnum: _selectedModelEnum,
     );
   }
 
@@ -2629,26 +2627,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
   void _showProjectSelector(BuildContext context) {
     final projs = List<ProjectItem>.from(widget.projects ?? []);
-    final knownPaths = projs.map((p) => p.path).toSet();
-
-    // Compléter avec les projets/workspaces découverts dans les sessions
-    for (final s in widget.sessions ?? []) {
-      if (s.workspacePath.isNotEmpty && knownPaths.add(s.workspacePath)) {
-        final name = WorkspacePath.displayName(s.workspacePath);
-        projs.add(ProjectItem(
-          id: s.workspacePath,
-          name: name,
-          path: s.workspacePath,
-          folderUri: s.workspacePath,
-        ));
-      }
-    }
-
     if (projs.isEmpty) return;
     ProjectSelectorBottomSheet.show(
       context,
       projects: projs,
-      activeProjectPath: widget.activeProjectName,
+      activeProjectPath: widget.workspacePath ?? '',
       onSelectProject: (p) => widget.onSelectProject?.call(p),
     );
   }

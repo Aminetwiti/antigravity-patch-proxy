@@ -321,7 +321,6 @@ class _McpExplorerScreenState extends State<McpExplorerScreen> {
                               return Card(
                                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                                 shape: RoundedRectangleBorder(
-),
                                   borderRadius: BorderRadius.circular(AppRadius.md),
                                   side: BorderSide(color: scheme.outlineVariant),
                                 ),

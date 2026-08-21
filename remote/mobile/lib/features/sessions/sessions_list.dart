@@ -74,7 +74,6 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
 
   // Top-level sections collapsible states
   bool _quickNavExpanded = true;
-  bool _projectsTreeExpanded = true;
 
   // Suivi des sessions consultées pour afficher le point bleu (activité terminée non lue)
   final Set<String> _readSessionIds = {};
@@ -1450,7 +1449,8 @@ class _SessionRowItemState extends State<_SessionRowItem> {
         ),
       ),
     ),
-  );
+  ),
+);
 
     // P4 : swipe gauche = supprimer (endToStart), swipe droite = épingler
     // (startToEnd). Un seul Dismissible horizontal, chaque direction branchée

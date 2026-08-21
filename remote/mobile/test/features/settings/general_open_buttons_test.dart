@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -43,6 +43,9 @@ void main() {
     expect(update, isNotEmpty);
     final data = update.first['data'] as Map;
     expect(data['fileAccessPolicy'], isNotNull);
+
+    // Evacuer le timer du Toast de confirmation
+    await tester.pump(const Duration(seconds: 4));
 
     api.dispose();
     await ctrl.close();

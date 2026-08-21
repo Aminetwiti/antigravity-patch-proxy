@@ -477,7 +477,7 @@ class _ChangedFileRow extends StatelessWidget {
                   FileCommentPill(
                     comments: file.comments,
                     onSelectComment: (c) {
-                      onTap?.call();
+                      onTap();
                     },
                   ),
                   const SizedBox(width: 8),
