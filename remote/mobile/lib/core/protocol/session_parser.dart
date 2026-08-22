@@ -15,6 +15,7 @@ class SessionParser {
   static List<CascadeSession> parseListSessions(Map<String, dynamic> data) {
     final sessions = data['sessions'] ?? (data['data'] is Map ? data['data']['sessions'] : null);
     if (sessions is List) {
+      final now = DateTime.now();
       final entries = <(CascadeSession, int)>[];
       for (final s in sessions) {
         if (s is Map) {
@@ -30,15 +31,27 @@ class SessionParser {
                 status.contains('EXECUTING') ||
                 status.contains('BACKGROUND');
             final hasUnread = stepCount >= 1 && !isRunning;
-            final session = CascadeSession.fromJson({
-              ...sMap,
-              'stepCount': stepCount,
-              'hasUnread': hasUnread,
-            });
+            final updatedParsed = sMap['updatedAt'] is String
+                ? DateTime.tryParse(sMap['updatedAt'] as String)
+                : null;
+            final updatedMs = updatedParsed?.millisecondsSinceEpoch ?? 0;
+            final timeStr = sMap['time']?.toString() ??
+                (updatedParsed != null ? CascadeSession.formatRelativeTime(updatedParsed, now) : 'Just now');
+            final session = CascadeSession(
+              id: id,
+              workspacePath: sMap['workspacePath'] ?? sMap['workspace'] ?? '',
+              title: sMap['title'] ?? 'Cascade Session',
+              status: sMap['status'] ?? 'CASCADE_STATUS_READY',
+              time: timeStr,
+              lastPrompt: sMap['lastPrompt']?.toString(),
+              worktree: sMap['worktree']?.toString(),
+              projectId: sMap['projectId']?.toString(),
+              stepCount: stepCount,
+              hasUnread: hasUnread,
+              isPinned: sMap['isPinned'] == true || sMap['pinned'] == true,
+              isArchived: sMap['isArchived'] == true,
+            );
             if (session.isAvailable) {
-              final updatedMs = DateTime.tryParse(sMap['updatedAt'] as String? ?? '')
-                      ?.millisecondsSinceEpoch ??
-                  0;
               entries.add((session, updatedMs));
             }
           }

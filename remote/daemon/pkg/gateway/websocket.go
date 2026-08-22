@@ -3242,13 +3242,18 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	logJSON.Info("client_connected", "remote", conn.RemoteAddr().String())
 
-	// Goroutine de ping : si le pair est mort, l'├®criture ├®choue et la
-	// prochaine lecture ├®choue aussi ÔåÆ le client est purg├® du broadcast.
+	done := make(chan struct{})
+	defer close(done)
+
+	// Goroutine de ping : si le pair est mort, l'écriture échoue et la
+	// prochaine lecture échoue aussi → le client est purgé du broadcast.
 	go func() {
 		ticker := time.NewTicker(pingInterval)
 		defer ticker.Stop()
 		for {
 			select {
+			case <-done:
+				return
 			case <-ticker.C:
 				mu := s.writeLock(conn)
 				mu.Lock()
@@ -5186,12 +5191,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "workspacePath requis"})
 			return
 		}
-		resolvedDir, errWs := validatedWorkspaceRoot(targetWs)
-		if errWs != nil || resolvedDir == "" {
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: racine workspace non autorisée"})
-			return
+		if resolvedDir, errWs := validatedWorkspaceRoot(targetWs); errWs == nil && resolvedDir != "" {
+			targetWs = resolvedDir
 		}
-		raw, err = s.RPCClient.GetVersionControlState(resolvedDir)
+		raw, err = s.RPCClient.GetVersionControlState(targetWs)
 		if err == nil {
 			if st := connectrpc.VcsStateToJSON(raw); st != nil {
 				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Data: st})
@@ -5201,7 +5204,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			return
 		}
 		// Fallback local git status si le Language Server ne répond pas
-		if wdFiles, stFiles, errGit := discovery.ListGitChanges(resolvedDir); errGit == nil {
+		if wdFiles, stFiles, errGit := discovery.ListGitChanges(targetWs); errGit == nil {
 			wdList := make([]map[string]interface{}, 0, len(wdFiles))
 			for _, f := range wdFiles {
 				wdList = append(wdList, map[string]interface{}{"uri": f, "operation": "MODIFIED"})

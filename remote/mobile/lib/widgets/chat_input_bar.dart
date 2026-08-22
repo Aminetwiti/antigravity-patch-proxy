@@ -2553,7 +2553,9 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
                                 const SizedBox(width: 5),
                                 Flexible(
                                   child: ConstrainedBox(
-                                    constraints: const BoxConstraints(maxWidth: 130),
+                                    constraints: BoxConstraints(
+                                      maxWidth: MediaQuery.of(context).size.width < 360 ? 70 : 130,
+                                    ),
                                     child: Text(
                                       _displayModelName,
                                       maxLines: 1,
@@ -2642,7 +2644,8 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
                       const SizedBox(width: 2),
 
                       // Historique des messages envoyés
-                      if (_promptHistory.isNotEmpty) ...[
+                      if (_promptHistory.isNotEmpty &&
+                          (MediaQuery.of(context).size.width >= 360 || _controller.text.isEmpty)) ...[
                         BouncingTap(
                           hapticType: BouncingHapticType.selection,
                           onTap: () => _showPromptHistoryMenu(context),

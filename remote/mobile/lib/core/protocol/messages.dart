@@ -32,13 +32,13 @@ class CascadeSession {
     this.isArchived = false,
   });
 
-  factory CascadeSession.fromJson(Map<String, dynamic> json) {
+  factory CascadeSession.fromJson(Map<String, dynamic> json, [DateTime? now]) {
     return CascadeSession(
       id: json['cascadeId'] ?? json['id'] ?? '',
       workspacePath: json['workspacePath'] ?? json['workspace'] ?? '',
       title: json['title'] ?? 'Cascade Session',
       status: json['status'] ?? 'CASCADE_STATUS_READY',
-      time: json['time'] ?? _relativeTime(json['updatedAt']),
+      time: json['time'] ?? _relativeTime(json['updatedAt'], now),
       lastPrompt: json['lastPrompt']?.toString(),
       worktree: json['worktree']?.toString(),
       projectId: json['projectId']?.toString(),
@@ -49,41 +49,50 @@ class CascadeSession {
     );
   }
 
-  static String _relativeTime(Object? iso) {
-    if (iso is! String) return 'Just now';
-    final parsed = DateTime.tryParse(iso);
-    if (parsed == null || parsed.year < 2000) return 'Just now';
-    final diff = DateTime.now().difference(parsed.toLocal());
+  static String formatRelativeTime(DateTime parsed, [DateTime? now]) {
+    if (parsed.year < 2000) return 'Just now';
+    final currentNow = now ?? DateTime.now();
+    final diff = currentNow.difference(parsed.toLocal());
     if (diff.inMinutes < 1) return 'Just now';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m';
     if (diff.inHours < 24) return '${diff.inHours}h';
     return '${diff.inDays}d';
   }
 
+  static String _relativeTime(Object? iso, [DateTime? now]) {
+    if (iso is! String || iso.isEmpty) return 'Just now';
+    final parsed = DateTime.tryParse(iso);
+    if (parsed == null) return 'Just now';
+    return formatRelativeTime(parsed, now);
+  }
+
   bool get isAvailable {
     if (id.isEmpty) return false;
     if (isArchived) return false;
-    final st = status.toUpperCase();
-    if (st.contains('ARCHIV') ||
-        st.contains('DELET') ||
-        st.contains('TRASH') ||
-        st.contains('KILLED') ||
-        st.contains('SUBAGENT') ||
-        st == 'CASCADE_STATUS_ARCHIVED' ||
-        st == 'CASCADE_STATUS_DELETED' ||
-        st == 'CASCADE_STATUS_KILLED' ||
-        st == 'CASCADE_STATUS_SUBAGENT') {
-      return false;
+    if (status.isNotEmpty) {
+      final st = status.toUpperCase();
+      if (st.contains('ARCHIV') ||
+          st.contains('DELET') ||
+          st.contains('TRASH') ||
+          st.contains('KILLED') ||
+          st.contains('SUBAGENT')) {
+        return false;
+      }
     }
-    final lowerTitle = title.toLowerCase();
-    final lowerWs = workspacePath.toLowerCase();
-    if (lowerTitle.startsWith('subagent') ||
-        lowerTitle.contains('subagent-') ||
-        lowerTitle.contains('subagent_') ||
-        lowerWs.startsWith('subagent') ||
-        lowerWs.contains('subagent-') ||
-        lowerWs.contains('subagent_')) {
-      return false;
+    if (title.contains('subagent') ||
+        title.contains('Subagent') ||
+        workspacePath.contains('subagent') ||
+        workspacePath.contains('Subagent')) {
+      final lowerTitle = title.toLowerCase();
+      final lowerWs = workspacePath.toLowerCase();
+      if (lowerTitle.startsWith('subagent') ||
+          lowerTitle.contains('subagent-') ||
+          lowerTitle.contains('subagent_') ||
+          lowerWs.startsWith('subagent') ||
+          lowerWs.contains('subagent-') ||
+          lowerWs.contains('subagent_')) {
+        return false;
+      }
     }
     return true;
   }
