@@ -88,9 +88,12 @@ func normalizeWorkspace(uri string) string {
 	return uri
 }
 
-// isSubagentTitle détecte si un titre ou prompt correspond à un sous-agent interne
+// isSubagentTitle détecte si un titre ou prompt correspond à un sous-agent interne ou tâche système
 func isSubagentTitle(title string) bool {
 	lowerTitle := strings.ToLower(strings.TrimSpace(title))
+	if lowerTitle == "" {
+		return false
+	}
 	return strings.HasPrefix(lowerTitle, "you are") ||
 		strings.HasPrefix(lowerTitle, "en tant qu'") ||
 		strings.HasPrefix(lowerTitle, "tu es ") ||
@@ -103,7 +106,22 @@ func isSubagentTitle(title string) bool {
 		strings.HasPrefix(lowerTitle, "analyzing stream delta") ||
 		strings.HasPrefix(lowerTitle, "subagent") ||
 		strings.Contains(lowerTitle, "subagent-") ||
-		strings.Contains(lowerTitle, "subagent_")
+		strings.Contains(lowerTitle, "subagent_") ||
+		strings.HasPrefix(lowerTitle, "to begin the **claim verification**") ||
+		strings.HasPrefix(lowerTitle, "examine the project") ||
+		strings.HasPrefix(lowerTitle, "compris. je commence") ||
+		strings.Contains(lowerTitle, "audit backoffice navicab") ||
+		strings.Contains(lowerTitle, "audit technique architecture navicab") ||
+		strings.Contains(lowerTitle, "analyze flutter taxi app") ||
+		strings.Contains(lowerTitle, "analyze prepayservice") ||
+		strings.Contains(lowerTitle, "debugging chauffeur bank data") ||
+		strings.Contains(lowerTitle, "empty conversation") ||
+		strings.Contains(lowerTitle, "initial conversation setup") ||
+		strings.Contains(lowerTitle, "new conversation start") ||
+		strings.Contains(lowerTitle, "general conversation inquiry") ||
+		strings.Contains(lowerTitle, "general inquiry") ||
+		strings.Contains(lowerTitle, "casual greeting") ||
+		strings.Contains(lowerTitle, "conversation title generation")
 }
 
 // isSessionArchived vérifie si la session est archivée dans ~/.gemini/antigravity/annotations/<cascadeID>.pbtxt ou antigravity-ide

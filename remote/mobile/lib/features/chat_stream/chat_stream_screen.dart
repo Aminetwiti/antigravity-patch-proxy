@@ -538,7 +538,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   }
 
   String _resolveModelLabel(dynamic rawModel) {
-    final str = rawModel?.toString()?.trim() ?? '';
+    final str = rawModel != null ? rawModel.toString().trim() : '';
     if (str.isNotEmpty && str != 'Gemini 3.7 Flash') {
       return str;
     }
@@ -1727,8 +1727,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
         final userPrompt = msg['data']?['userPrompt']?.toString() ?? '';
         if (userPrompt.isNotEmpty) {
-          final hasUserMsg = buf.any((m) => m.sender == 'user' && m.text.trim() == userPrompt.trim());
-          if (!hasUserMsg) {
+          final alreadyPresent = buf.isNotEmpty &&
+              buf.last.sender == 'user' &&
+              (buf.last.id == 'user-ext-$requestId' || buf.last.text.trim() == userPrompt.trim());
+          if (!alreadyPresent) {
             buf.add(ChatMessage(
               id: 'user-ext-$requestId',
               sender: 'user',
@@ -1777,20 +1779,15 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               final evMap = rawEv.cast<String, dynamic>();
               final reqId = evMap['requestId'] as String? ?? '';
               final textDelta = StreamDeltaParser.textOf(evMap);
-              final thoughtDelta = StreamDeltaParser.thinkingOf(evMap);
               final key = '${targetSessionId}_$reqId';
               final idx = buf.indexWhere((m) =>
                   m.id == 'ext-$reqId' ||
-                  (buf.isNotEmpty && m == buf.last && m.isStreaming));
+                  m.id == _streamRequestToMessageId[key] ||
+                  (m.isStreaming && m.sender == 'assistant'));
               if (idx >= 0) {
-                final current = buf[idx];
-                _externalThoughts[key] = (_externalThoughts[key] ?? '') + thoughtDelta;
-                buf[idx] = current.copyWith(
-                  text: current.text + textDelta,
-                  thought: _externalThoughts[key]!.isNotEmpty
-                      ? _externalThoughts[key]!.trim()
-                      : current.thought,
-                );
+                final cur = buf[idx];
+                final newText = textDelta.isNotEmpty ? cur.text + textDelta : cur.text;
+                buf[idx] = cur.copyWith(text: newText);
               }
             }
           }
@@ -1827,8 +1824,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
           if (queuedIdx >= 0) {
             buf[queuedIdx] = buf[queuedIdx].copyWith(isQueued: false);
           } else {
-            final hasUserMsg = buf.any((m) => m.sender == 'user' && m.text.trim() == userInput.trim());
-            if (!hasUserMsg) {
+            final targetId = _streamRequestToMessageId[thKey] ?? 'ext-$requestId';
+            final assistantIdx = buf.indexWhere((m) => m.id == targetId || (m.isStreaming && m.sender == 'assistant'));
+            final hasImmediateUserMsg = assistantIdx > 0 &&
+                buf[assistantIdx - 1].sender == 'user' &&
+                (buf[assistantIdx - 1].id == 'user-ext-$requestId' || buf[assistantIdx - 1].text.trim() == userInput.trim());
+            if (!hasImmediateUserMsg) {
               final userMsg = ChatMessage(
                 id: 'user-ext-$requestId',
                 sender: 'user',
@@ -3075,63 +3076,81 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             ),
           ),
           _buildApprovalArea(),
-          if (_sideQuestion != null)
-            SideQuestionCard(
-              question: _sideQuestion!,
-              answer: _sideQuestionAnswer,
-              isLoading: _isSideQuestionLoading,
-              onClose: () => setState(() {
-                _sideQuestion = null;
-                _sideQuestionAnswer = null;
-              }),
-            ),
-          if (_runningBackgroundTasks.isNotEmpty)
-            BackgroundTasksBar(
-              runningTasks: _runningBackgroundTasks,
-              onTapTask: _openTaskOutputSheet,
-              onStopTask: _handleStopBackgroundTask,
-              onViewTasks: () {
-                if (_runningBackgroundTasks.isNotEmpty) {
-                  _openTaskOutputSheet(_runningBackgroundTasks.first);
-                }
-              },
-            ),
-          if (_subagents.isNotEmpty)
-            SubagentTreeCard(
-              subagents: _subagents,
-              projectName: widget.activeProjectName,
-              sessionTitle: widget.activeSessionTitle,
-              onOpenFullTree: () {
-                SubagentsTreeSheet.show(
-                  context,
-                  api: widget.api,
-                  cascadeId: widget.activeSessionId,
-                  sessionTitle: widget.activeSessionTitle,
-                );
-              },
-              onSelectSubagent: (sub) {
-                SubagentDetailModal.show(
-                  context,
-                  agent: sub,
-                  api: widget.api,
-                  cascadeId: widget.activeSessionId,
-                  projectName: widget.activeProjectName,
-                  sessionTitle: widget.activeSessionTitle,
-                  onKill: () => _fetchSubagentsForSession(widget.activeSessionId),
-                );
-              },
-            ),
-          if ((_sessionMessageQueues[widget.activeSessionId]?.isNotEmpty ?? false))
-            QueuedMessagesCard(
-              queuedMessages: _sessionMessageQueues[widget.activeSessionId]!,
-              onSendNow: _handleQueueSendNow,
-              onEdit: _handleQueueEdit,
-              onDelete: _handleQueueDelete,
-            ),
-          if (_topActiveBanner != null)
-            AppNotificationBanner(
-              data: _topActiveBanner!,
-              isCompact: hasKeyboard,
+          if (_sideQuestion != null ||
+              _runningBackgroundTasks.isNotEmpty ||
+              _subagents.isNotEmpty ||
+              (_sessionMessageQueues[widget.activeSessionId]?.isNotEmpty ?? false) ||
+              _topActiveBanner != null)
+            Flexible(
+              flex: 0,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: hasKeyboard ? 110 : 200),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_sideQuestion != null)
+                        SideQuestionCard(
+                          question: _sideQuestion!,
+                          answer: _sideQuestionAnswer,
+                          isLoading: _isSideQuestionLoading,
+                          onClose: () => setState(() {
+                            _sideQuestion = null;
+                            _sideQuestionAnswer = null;
+                          }),
+                        ),
+                      if (_runningBackgroundTasks.isNotEmpty)
+                        BackgroundTasksBar(
+                          runningTasks: _runningBackgroundTasks,
+                          onTapTask: _openTaskOutputSheet,
+                          onStopTask: _handleStopBackgroundTask,
+                          onViewTasks: () {
+                            if (_runningBackgroundTasks.isNotEmpty) {
+                              _openTaskOutputSheet(_runningBackgroundTasks.first);
+                            }
+                          },
+                        ),
+                      if (_subagents.isNotEmpty)
+                        SubagentTreeCard(
+                          subagents: _subagents,
+                          projectName: widget.activeProjectName,
+                          sessionTitle: widget.activeSessionTitle,
+                          onOpenFullTree: () {
+                            SubagentsTreeSheet.show(
+                              context,
+                              api: widget.api,
+                              cascadeId: widget.activeSessionId,
+                              sessionTitle: widget.activeSessionTitle,
+                            );
+                          },
+                          onSelectSubagent: (sub) {
+                            SubagentDetailModal.show(
+                              context,
+                              agent: sub,
+                              api: widget.api,
+                              cascadeId: widget.activeSessionId,
+                              projectName: widget.activeProjectName,
+                              sessionTitle: widget.activeSessionTitle,
+                              onKill: () => _fetchSubagentsForSession(widget.activeSessionId),
+                            );
+                          },
+                        ),
+                      if ((_sessionMessageQueues[widget.activeSessionId]?.isNotEmpty ?? false))
+                        QueuedMessagesCard(
+                          queuedMessages: _sessionMessageQueues[widget.activeSessionId]!,
+                          onSendNow: _handleQueueSendNow,
+                          onEdit: _handleQueueEdit,
+                          onDelete: _handleQueueDelete,
+                        ),
+                      if (_topActiveBanner != null)
+                        AppNotificationBanner(
+                          data: _topActiveBanner!,
+                          isCompact: hasKeyboard,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ChatInputBar(
             key: _chatInputKey,

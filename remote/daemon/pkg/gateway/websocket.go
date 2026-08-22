@@ -628,6 +628,23 @@ func (s *Server) sessionsFromSummariesLocked(jetbox map[string]connectrpc.Jetbox
 			"isArchived":    false,
 		})
 	}
+	// Ne garder dans la sidebar que les projets ayant des sessions actives (ou le projet principal)
+	activeProjectNames := make(map[string]bool)
+	for _, it := range items {
+		if ws, ok := it["workspace"].(string); ok && ws != "" {
+			activeProjectNames[strings.ToLower(ws)] = true
+		}
+	}
+	var filteredProjects []ProjectSummary
+	for _, p := range projects {
+		if activeProjectNames[strings.ToLower(p.Name)] || activeProjectNames[strings.ToLower(p.Path)] {
+			filteredProjects = append(filteredProjects, p)
+		}
+	}
+	if len(filteredProjects) == 0 && len(projects) > 0 {
+		filteredProjects = []ProjectSummary{projects[0]}
+	}
+
 	sort.Slice(items, func(i, j int) bool {
 		tI, _ := items[i]["updatedAt"].(time.Time)
 		tJ, _ := items[j]["updatedAt"].(time.Time)
@@ -640,7 +657,7 @@ func (s *Server) sessionsFromSummariesLocked(jetbox map[string]connectrpc.Jetbox
 	}
 	return map[string]interface{}{
 		"version":   v,
-		"projects":  projects,
+		"projects":  filteredProjects,
 		"sessions":  items,
 		"timestamp": time.Now().UnixMilli(),
 	}
@@ -3051,7 +3068,7 @@ func (s *Server) sessionsOutWithLimit(raw []byte, limitPerProject int) interface
 		return "CASCADE_STATUS_READY"
 	}
 
-	if len(summaries) == 0 {
+	if len(summaries) == 0 && len(raw) == 0 {
 		local := ListLocalSessions()
 		for _, loc := range local {
 			if cid, ok := loc["cascadeId"].(string); ok {
@@ -3125,6 +3142,21 @@ func (s *Server) sessionsOutWithLimit(raw []byte, limitPerProject int) interface
 		})
 	}
 	if len(items) == 0 {
+		if len(raw) > 0 {
+			var v int64 = 0
+			if s != nil {
+				s.mu.Lock()
+				s.stateVersion++
+				v = s.stateVersion
+				s.mu.Unlock()
+			}
+			return map[string]interface{}{
+				"version":   v,
+				"projects":  projects,
+				"sessions":  []map[string]interface{}{},
+				"timestamp": time.Now().UnixMilli(),
+			}
+		}
 		local := ListLocalSessions()
 		for _, loc := range local {
 			if cid, ok := loc["cascadeId"].(string); ok {
@@ -3136,6 +3168,23 @@ func (s *Server) sessionsOutWithLimit(raw []byte, limitPerProject int) interface
 			"projects": projects,
 			"sessions": local,
 		}
+	}
+
+	// Ne garder dans la sidebar que les projets ayant des sessions actives (ou le projet principal)
+	activeProjectNames := make(map[string]bool)
+	for _, it := range items {
+		if ws, ok := it.data["workspace"].(string); ok && ws != "" {
+			activeProjectNames[strings.ToLower(ws)] = true
+		}
+	}
+	var filteredProjects []ProjectSummary
+	for _, p := range projects {
+		if activeProjectNames[strings.ToLower(p.Name)] || activeProjectNames[strings.ToLower(p.Path)] {
+			filteredProjects = append(filteredProjects, p)
+		}
+	}
+	if len(filteredProjects) == 0 && len(projects) > 0 {
+		filteredProjects = []ProjectSummary{projects[0]}
 	}
 
 	// Tri décroissant par date de mise à jour (plus récentes d'abord)
@@ -3166,7 +3215,7 @@ func (s *Server) sessionsOutWithLimit(raw []byte, limitPerProject int) interface
 	}
 	return map[string]interface{}{
 		"version":   v,
-		"projects":  projects,
+		"projects":  filteredProjects,
 		"sessions":  resultSessions,
 		"timestamp": time.Now().UnixMilli(),
 	}
@@ -4086,9 +4135,24 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		if len(msg.Media) > 0 {
 			for _, m := range msg.Media {
 				uri := m.URI
-				if m.Base64Data != "" && uri == "" {
-					if targetPath, _, errImg := saveUploadedImage(msg.CascadeID, m.Description, m.Base64Data); errImg == nil {
+				if m.Base64Data != "" {
+					desc := m.Description
+					if desc == "" && uri != "" {
+						desc = filepath.Base(strings.TrimPrefix(strings.TrimPrefix(uri, "file:///"), "file://"))
+					}
+					if targetPath, _, errImg := saveUploadedImage(msg.CascadeID, desc, m.Base64Data); errImg == nil {
 						uri = "file:///" + filepath.ToSlash(targetPath)
+					}
+				} else if uri != "" {
+					srcLocal := strings.TrimPrefix(strings.TrimPrefix(uri, "file:///"), "file://")
+					if data, errRead := os.ReadFile(srcLocal); errRead == nil {
+						desc := m.Description
+						if desc == "" {
+							desc = filepath.Base(srcLocal)
+						}
+						if targetPath, _, errImg := saveUploadedImage(msg.CascadeID, desc, base64.StdEncoding.EncodeToString(data)); errImg == nil {
+							uri = "file:///" + filepath.ToSlash(targetPath)
+						}
 					}
 				}
 				if uri != "" || m.Base64Data != "" {
@@ -4199,6 +4263,22 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				} else if m.URI != "" {
 					if strings.HasSuffix(strings.ToLower(m.URI), ".pdf") {
 						m.MimeType = "application/pdf"
+					}
+				}
+			}
+			// Si l'image a des données et que son URI ne pointe pas déjà vers
+			// le dossier .user_uploaded/ de la cascade cible, on l'y copie pour
+			// que le Language Server la découvre via ADDITIONAL_METADATA.
+			// (cas : upload depuis une cascade temporaire ou chemin externe)
+			if len(m.Data) > 0 && m.URI != "" && strings.HasPrefix(m.MimeType, "image/") {
+				home, _ := os.UserHomeDir()
+				targetUploadDir := filepath.Join(home, ".gemini", "antigravity", "brain", msg.CascadeID, ".user_uploaded")
+				targetUploadDirSlash := filepath.ToSlash(targetUploadDir)
+				uriPath := strings.TrimPrefix(m.URI, "file:///")
+				if !strings.HasPrefix(filepath.ToSlash(uriPath), targetUploadDirSlash) {
+					b64Copy := base64.StdEncoding.EncodeToString(m.Data)
+					if newPath, _, errCopy := saveUploadedImage(msg.CascadeID, filepath.Base(uriPath), b64Copy); errCopy == nil {
+						m.URI = "file:///" + filepath.ToSlash(newPath)
 					}
 				}
 			}
@@ -4327,6 +4407,31 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			if !strings.HasPrefix(m.MimeType, "image/") {
 				nonImageMedia = append(nonImageMedia, m)
 			}
+		}
+
+		// Injecter les références des images uploadées dans le promptText
+		// sous forme de bloc ADDITIONAL_METADATA + [ARTIFACT: ...], comme
+		// le fait l'IDE native. Le LS ne scanne pas .user_uploaded/ — il
+		// découvre les images via ces références dans le texte du prompt.
+		var imageRefs []string
+		for _, m := range mediaAttachments {
+			if strings.HasPrefix(m.MimeType, "image/") && m.URI != "" {
+				cleanURI := m.URI
+				desc := m.Description
+				if desc == "" {
+					desc = filepath.Base(strings.TrimPrefix(cleanURI, "file:///"))
+				}
+				imageRefs = append(imageRefs, fmt.Sprintf("[ARTIFACT: %s]\nPath: %s", desc, cleanURI))
+			}
+		}
+		if len(imageRefs) > 0 {
+			metaBlock := "\n<ADDITIONAL_METADATA>\n"
+			metaBlock += fmt.Sprintf("The user has uploaded %d image(s):\n", len(imageRefs))
+			for _, ref := range imageRefs {
+				metaBlock += ref + "\n"
+			}
+			metaBlock += "</ADDITIONAL_METADATA>"
+			promptText = promptText + metaBlock
 		}
 
 		err = s.RPCClient.SendMessageStreamModelWithMedia(msg.CascadeID, promptText, modelUID, modelEnum, nonImageMedia, onFrameHandler, noTools)
@@ -5067,14 +5172,6 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.broadcast(OutgoingMessage{
 			Type: "sessions_updated",
 			Data: s.sessionsFromSummaries(s.snapshotSummaries()),
-		})
-		s.broadcast(OutgoingMessage{
-			Type:      "session_deleted",
-			CascadeID: msg.CascadeID,
-			Data: map[string]interface{}{
-				"cascadeId": msg.CascadeID,
-				"status":    "deleted",
-			},
 		})
 		return
 

@@ -41,6 +41,7 @@ void main() {
       inputState.setModel('gpt-4o');
       await tester.pump();
 
+      expect(selectedModelName, 'gpt-4o');
       expect(find.textContaining('gpt-4o', findRichText: true), findsWidgets);
 
       await tester.pumpWidget(const SizedBox());

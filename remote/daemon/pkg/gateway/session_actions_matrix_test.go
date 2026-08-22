@@ -122,7 +122,7 @@ func TestSessionActionsMatrix_AllScenarios(t *testing.T) {
 			"confirm":   true,
 		})
 
-		var gotDeletedBroadcast bool
+		var gotResponse bool
 		var gotSessionsUpdated bool
 		for i := 0; i < 15; i++ {
 			msg := client.recv(t)
@@ -130,9 +130,7 @@ func TestSessionActionsMatrix_AllScenarios(t *testing.T) {
 				if msg["error"] != nil {
 					t.Fatalf("delete_session échoué: %v", msg["error"])
 				}
-			}
-			if msg["type"] == "session_deleted" && msg["cascadeId"] == "session-beta" {
-				gotDeletedBroadcast = true
+				gotResponse = true
 			}
 			if msg["type"] == "sessions_updated" {
 				gotSessionsUpdated = true
@@ -145,9 +143,12 @@ func TestSessionActionsMatrix_AllScenarios(t *testing.T) {
 					}
 				}
 			}
-			if gotDeletedBroadcast && gotSessionsUpdated {
+			if gotResponse && gotSessionsUpdated {
 				break
 			}
+		}
+		if !gotResponse {
+			t.Fatal("réponse delete_session non reçue")
 		}
 		if !gotSessionsUpdated {
 			t.Fatal("sessions_updated non reçu après suppression confirmée")

@@ -438,14 +438,18 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
       }
       if (!collapsedSnapshot.contains(folder)) {
         if (sessions.isEmpty) {
-          entries.add(_SidebarEntry.empty(folder));
+          if (folder.isNotEmpty) {
+            entries.add(_SidebarEntry.empty(folder));
+          }
         } else {
           entries.addAll(
             sessions.take(baseLimit).map((s) => _SidebarEntry.row(s, folder)),
           );
         }
       }
-      entries.add(const _SidebarEntry.spacer());
+      if (folder.isNotEmpty || sessions.isNotEmpty) {
+        entries.add(const _SidebarEntry.spacer());
+      }
     });
 
     _flatInput = projectSessions;
