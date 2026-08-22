@@ -271,14 +271,21 @@ class WorkerPool {
       expect(MarkdownRenderer.debugBlocksCacheSize, before,
           reason: 'Le streaming ne doit pas écrire ses snapshots dans le LRU');
 
-      // Le texte final stabilisé passe par blocksOf → entre en cache.
+      // Le texte final stabilisé passe par blocksOf → entre en cache (borné
+      // à 500 entrées : si le cache était plein, une eviction compense).
       MarkdownRenderer.blocksOf(text);
-      expect(MarkdownRenderer.debugBlocksCacheSize, before + 1);
+      expect(
+        MarkdownRenderer.debugBlocksCacheSize,
+        inInclusiveRange(before, before + 1),
+        reason: 'blocksOf doit insérer le texte stabilisé (cache borné à 500)',
+      );
 
-      // Un re-parse du même texte stabilisé est servi par le cache.
+      // Un re-parse du même texte stabilisé est servi par le cache — taille
+      // strictement inchangée.
+      final sizeAfterInsert = MarkdownRenderer.debugBlocksCacheSize;
       final again = MarkdownRenderer.blocksOf(text);
       expect(again, isNotEmpty);
-      expect(MarkdownRenderer.debugBlocksCacheSize, before + 1);
+      expect(MarkdownRenderer.debugBlocksCacheSize, sizeAfterInsert);
     });
 
     test('P3-08 — OutboxQueue : les sets de dedup restent bornés (FIFO)', () {
