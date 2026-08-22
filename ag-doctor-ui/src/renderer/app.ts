@@ -4290,19 +4290,22 @@ if (window.ag && window.ag.onDaemonLog) {
       // Extract tunnel URL (Pinggy or Cloudflare or wss://) from logs to generate QR Code dynamically!
       let wsUrl = '';
       const token = remoteAuthToken?.value?.trim() || localStorage.getItem('ag_remote_auth_token') || '11';
-      const wssMatch = data.match(/wss:\/\/[^\s"'<>|┌┐└┘│]+/);
+      const cleanData = data
+        .replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '')
+        .replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+
+      const wssMatch = cleanData.match(/wss:\/\/[^\s"'<>|┌┐└┘│+]+/);
       if (wssMatch) {
-        wsUrl = wssMatch[0];
+        wsUrl = wssMatch[0].trim().replace(/[\]\)\>\}\│\|\s]+$/, '');
         if (!wsUrl.includes('token=')) {
           wsUrl += `${wsUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
         }
       } else {
-        const httpsMatch = data.match(/https:\/\/([a-zA-Z0-9.-]+\.(?:trycloudflare\.com|pinggy\.link|pangolin\.link|[a-zA-Z]{2,}))/);
+        const httpsMatch = cleanData.match(/https:\/\/([a-zA-Z0-9.-]+\.(?:trycloudflare\.com|pinggy\.link|pangolin\.link|[a-zA-Z]{2,}))/);
         if (httpsMatch) {
-          const host = httpsMatch[1];
+          const host = httpsMatch[1].trim();
           wsUrl = `wss://${host}/ws?token=${token}`;
         }
-
       }
 
       if (wsUrl && remoteQrImage) {
@@ -4314,8 +4317,14 @@ if (window.ag && window.ag.onDaemonLog) {
             remoteStatusText.innerHTML = `Tunnel ready: <b style="word-break: break-all;">${wsUrl}</b><br/><button class="btn btn-ghost" id="copyRemoteWsBtn" type="button" style="margin-top: 8px; padding: 2px 10px; font-size: 11px;">📋 Copier l'URL</button>`;
             attachCopyButton(wsUrl);
           }
+        }).catch((err) => {
+          console.error('[ag-doctor-ui] QR generation failed for tunnel URL:', err);
+          if (remoteStatusText) {
+            remoteStatusText.innerHTML = `Tunnel ready: <b style="word-break: break-all;">${wsUrl}</b><br/><button class="btn btn-ghost" id="copyRemoteWsBtn" type="button" style="margin-top: 8px; padding: 2px 10px; font-size: 11px;">📋 Copier l'URL</button>`;
+            attachCopyButton(wsUrl);
+          }
         });
-      } else if (data.includes('Daemon listening on') || data.includes('Tunnel non démarré') || data.includes('introuvable')) {
+      } else if (cleanData.includes('Daemon listening on') || cleanData.includes('Tunnel non démarré') || cleanData.includes('introuvable')) {
         const port = parseInt(remotePort?.value || '8090');
         window.ag.getLocalIp().then((localIp: string) => {
           const localWsUrl = `ws://${localIp}:${port}/ws?token=${encodeURIComponent(token)}`;
@@ -4327,9 +4336,16 @@ if (window.ag && window.ag.onDaemonLog) {
               remoteStatusText.innerHTML = `Mode Local Wi-Fi actif : <b style="word-break: break-all;">${localWsUrl}</b><br/><span style="font-size: 11px; opacity: 0.75;">(Scannez avec votre mobile connecté au même Wi-Fi)</span><br/><button class="btn btn-ghost" id="copyRemoteWsBtn" type="button" style="margin-top: 8px; padding: 2px 10px; font-size: 11px;">📋 Copier l'URL</button>`;
               attachCopyButton(localWsUrl);
             }
+          }).catch((err) => {
+            console.error('[ag-doctor-ui] QR generation failed for local URL:', err);
+            if (remoteStatusText) {
+              remoteStatusText.innerHTML = `Mode Local Wi-Fi actif : <b style="word-break: break-all;">${localWsUrl}</b><br/><span style="font-size: 11px; opacity: 0.75;">(Scannez avec votre mobile connecté au même Wi-Fi)</span><br/><button class="btn btn-ghost" id="copyRemoteWsBtn" type="button" style="margin-top: 8px; padding: 2px 10px; font-size: 11px;">📋 Copier l'URL</button>`;
+              attachCopyButton(localWsUrl);
+            }
           });
         });
       }
+
     }
   });
 }
