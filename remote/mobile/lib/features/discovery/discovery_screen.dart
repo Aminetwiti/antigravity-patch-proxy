@@ -364,11 +364,13 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                                   ),
                                 ),
                               if (c.pin.isNotEmpty)
-                                Text(
-                                  '• PIN: ${c.pin}',
+                                // SEC-04 : PIN jamais affiché en clair
+                                // (shoulder-surfing) — présence seulement.
+                                const Text(
+                                  '• PIN: ••••••',
                                   style: TextStyle(
                                     fontSize: 11,
-                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                    color: Color(0xFF9CA3AF),
                                   ),
                                 ),
                               Text(

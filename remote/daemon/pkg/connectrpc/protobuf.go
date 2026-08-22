@@ -78,6 +78,8 @@ const (
 // 8 workspace_uris (string), 14 requested_model (varint),
 // 15 requested_model_uid (string).
 // BuildStartCascade génère un message StartCascadeRequest brut.
+// Note cruciale gRPC : Le Language Server refuse la requête avec "cannot specify both workspace URIs and project environment config"
+// si field 17 et field 8 sont tous les deux présents. Si projectID != "", on met UNIQUEMENT field 17. Sinon, field 8.
 func BuildStartCascade(workspaceURI, projectID, modelUID string, modelEnum uint64) []byte {
 	w := &writer{}
 	w.varintField(4, 1) // CortexTrajectorySource = 1
@@ -87,8 +89,7 @@ func BuildStartCascade(workspaceURI, projectID, modelUID string, modelEnum uint6
 		envW.stringField(1, projectID)
 		envW.bytesField(4, []byte{}) // defaultProjectEnvironment
 		w.bytesField(17, envW.b)
-	}
-	if workspaceURI != "" {
+	} else if workspaceURI != "" {
 		normURI := strings.TrimPrefix(workspaceURI, "file:///")
 		normURI = strings.TrimPrefix(normURI, "file://")
 		normURI = strings.ReplaceAll(normURI, `\`, `/`)
@@ -101,6 +102,9 @@ func BuildStartCascade(workspaceURI, projectID, modelUID string, modelEnum uint6
 	}
 	if enum > 0 {
 		w.varintField(14, enum)
+	}
+	if modelUID != "" {
+		w.stringField(15, modelUID)
 	}
 	return w.b
 }

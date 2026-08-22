@@ -91,15 +91,19 @@ class _GitCommitDialogState extends State<GitCommitDialog> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
+    final hasTightKeyboard = MediaQuery.of(context).viewInsets.bottom > 150 && MediaQuery.of(context).size.height < 450;
+
     return AlertDialog(
+      scrollable: true,
+      insetPadding: EdgeInsets.symmetric(horizontal: 16, vertical: hasTightKeyboard ? 4 : 16),
       backgroundColor: scheme.surfaceContainer,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
         side: BorderSide(color: scheme.outlineVariant, width: 0.8),
       ),
-      titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 20),
-      actionsPadding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      titlePadding: EdgeInsets.fromLTRB(16, hasTightKeyboard ? 8 : 18, 16, hasTightKeyboard ? 6 : 10),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+      actionsPadding: EdgeInsets.fromLTRB(16, hasTightKeyboard ? 6 : 10, 16, hasTightKeyboard ? 8 : 16),
       actionsOverflowButtonSpacing: 8,
       actionsOverflowDirection: VerticalDirection.down,
       title: Row(

@@ -290,8 +290,11 @@ class SettingsStore {
     final resolvedHost = host.isNotEmpty ? host : (Uri.tryParse(wsUrl)?.host ?? '127.0.0.1');
     final resolvedPort = port ?? Uri.tryParse(wsUrl)?.port ?? EnvConfig.daemonPort;
     final resolvedSsl = ssl ?? (wsUrl.startsWith('wss') || wsUrl.startsWith('https'));
-    final effectiveToken = token.isNotEmpty ? token : (prefs.getString(_kLastWsToken) ?? '');
-    final effectivePin = pin.isNotEmpty ? pin : (prefs.getString(_kLastPin) ?? '');
+    final effectiveToken = token.isNotEmpty
+        ? token
+        : (await SecureCredentials.read(_kSecToken) ?? '');
+    final effectivePin =
+        pin.isNotEmpty ? pin : (await SecureCredentials.read(_kSecPin) ?? '');
 
     final conn = SavedConnection(
       id: '$resolvedHost:$resolvedPort',
@@ -318,5 +321,7 @@ class SettingsStore {
     await prefs.remove(_kLastPort);
     await prefs.remove(_kLastSsl);
     await prefs.remove(_kSessionSavedAt);
+    await SecureCredentials.delete(_kSecToken);
+    await SecureCredentials.delete(_kSecPin);
   }
 }

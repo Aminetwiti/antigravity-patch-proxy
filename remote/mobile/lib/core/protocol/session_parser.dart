@@ -19,7 +19,7 @@ class SessionParser {
       final entries = <(CascadeSession, int)>[];
       for (final s in sessions) {
         if (s is Map) {
-          final sMap = Map<String, dynamic>.from(s);
+          final sMap = s;
           final id = sMap['cascadeId'] ?? sMap['id'];
           if (id is String && id.isNotEmpty) {
             final stepCount = (sMap['stepCount'] as num?)?.toInt() ?? 0;

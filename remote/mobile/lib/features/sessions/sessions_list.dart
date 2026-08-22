@@ -294,12 +294,94 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
     return result;
   }
 
+  // Aplatissement virtualise : dossiers + lignes en UNE ListView.builder.
+  // Avant, chaque dossier etait un Column qui construisait TOUTES ses lignes
+  // de maniere avide (aucune virtualisation) ; le matching projet/dossier
+  // etait en O(projects x dossiers) a chaque build. Ici la liste aplatie est
+  // memoisee et seuls les items visibles sont construits par le builder.
+  final Map<String, int> _folderExpansions = {};
+  Map<String, List<CascadeSession>>? _flatInput;
+  Set<String>? _flatCollapsed;
+  Map<String, int>? _flatExpansions;
+  SessionGroupBy? _flatGroup;
+  List<_SidebarEntry>? _flatResult;
+
+  List<_SidebarEntry> _entriesOf(Map<String, List<CascadeSession>> projectSessions) {
+    final collapsedSnapshot = Set<String>.of(_collapsedFolders);
+    final expansionsSnapshot = Map<String, int>.of(_folderExpansions);
+    if (_flatResult != null &&
+        identical(projectSessions, _flatInput) &&
+        setEquals(collapsedSnapshot, _flatCollapsed) &&
+        mapEquals(expansionsSnapshot, _flatExpansions) &&
+        _groupBy == _flatGroup) {
+      return _flatResult!;
+    }
+
+    final hideHeader = _groupBy == SessionGroupBy.none;
+    final baseLimit = hideHeader ? 30 : 6;
+    final projs = widget.projects;
+    final entries = <_SidebarEntry>[];
+    final matchCache = <String, ProjectItem?>{};
+
+    ProjectItem? projectFor(String folder, List<CascadeSession> sessions) {
+      return matchCache.putIfAbsent(folder, () {
+        ProjectItem? m;
+        if (projs != null) {
+          for (final p in projs) {
+            if (p.name == folder || p.path == folder || p.id == folder || WorkspacePath.isSameWorkspace(p.path, folder)) {
+              m = p;
+              break;
+            }
+          }
+        }
+        return m ??
+            ProjectItem(
+              id: '',
+              name: folder,
+              folderUri: sessions.isNotEmpty ? sessions.first.workspacePath : folder,
+              path: sessions.isNotEmpty ? sessions.first.workspacePath : folder,
+            );
+      });
+    }
+
+    projectSessions.forEach((folder, sessions) {
+      if (!hideHeader && folder.isNotEmpty) {
+        entries.add(_SidebarEntry.header(folder, projectFor(folder, sessions)));
+      }
+      if (!collapsedSnapshot.contains(folder)) {
+        if (sessions.isEmpty) {
+          entries.add(_SidebarEntry.empty(folder));
+        } else {
+          final limit = baseLimit + (expansionsSnapshot[folder] ?? 0) * 25;
+          entries.addAll(
+            sessions.take(limit).map((s) => _SidebarEntry.row(s, folder)),
+          );
+          final visible = sessions.length < limit ? sessions.length : limit;
+          final remaining = sessions.length - visible;
+          if (remaining > 0) {
+            entries.add(_SidebarEntry.showMore(folder, remaining));
+          }
+        }
+      }
+      entries.add(const _SidebarEntry.spacer());
+    });
+
+    _flatInput = projectSessions;
+    _flatCollapsed = collapsedSnapshot;
+    _flatExpansions = expansionsSnapshot;
+    _flatGroup = _groupBy;
+    _flatResult = entries;
+    return entries;
+  }
+
+
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final projectSessions = _projectSessionsOf();
-
+    final entries = _entriesOf(projectSessions);
     final projectNames = projectSessions.keys.toList();
 
     return Drawer(
@@ -594,73 +676,134 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                     : ListView.builder(
                         controller: _scrollController,
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                        itemCount: projectNames.length + 1,
+                        itemCount: entries.length + 1,
                         itemBuilder: (ctx, index) {
-                          if (index == projectNames.length) {
+                          if (index == entries.length) {
                             return const SizedBox(height: 16);
                           }
-                          final proj = projectNames[index];
-                          final sessions = projectSessions[proj] ?? const [];
-                          final isCollapsed = _collapsedFolders.contains(proj);
-                          ProjectItem? matchingProj;
-                          if (widget.projects != null) {
-                            for (final p in widget.projects!) {
-                              if (p.name == proj || p.path == proj || p.id == proj || WorkspacePath.isSameWorkspace(p.path, proj)) {
-                                matchingProj = p;
-                                break;
-                              }
-                            }
-                          }
-                          final effectiveProj = matchingProj ?? ProjectItem(
-                            id: '',
-                            name: proj,
-                            folderUri: sessions.isNotEmpty ? sessions.first.workspacePath : proj,
-                            path: sessions.isNotEmpty ? sessions.first.workspacePath : proj,
-                          );
-                          return _WorkspaceFolderSection(
-                            key: ValueKey('folder_$proj'),
-                            folderName: proj,
-                            sessions: sessions,
-                            project: effectiveProj,
-                            isCollapsed: isCollapsed,
-                            showSubtitle: _subtitle == SessionSubtitle.worktree,
-                            hideHeader: _groupBy == SessionGroupBy.none,
-                            activeSessionId: widget.activeSessionId,
-                            onToggleCollapse: () {
-                              setState(() {
-                                if (isCollapsed) {
-                                  _collapsedFolders.remove(proj);
-                                } else {
-                                  _collapsedFolders.add(proj);
+                          final entry = entries[index];
+
+                          // En-tete de dossier (virtualise, memoise)
+                          if (entry.isHeader) {
+                            final folder = entry.folderName;
+                            final isCollapsed = _collapsedFolders.contains(folder);
+                            return _FolderHeader(
+                              key: ValueKey('folder_$folder'),
+                              folderName: folder,
+                              project: entry.project,
+                              onToggleCollapse: () {
+                                setState(() {
+                                  if (isCollapsed) {
+                                    _collapsedFolders.remove(folder);
+                                  } else {
+                                    _collapsedFolders.add(folder);
+                                  }
+                                });
+                                _saveCollapsedFolders();
+                              },
+                              onNewConversation: (ProjectItem? p) {
+                                if (Navigator.of(context).canPop()) {
+                                  Navigator.of(context).pop();
                                 }
-                              });
-                              _saveCollapsedFolders();
-                            },
-                            onSessionTap: (id) {
-                              _markSessionAsRead(id);
-                              if (Navigator.of(context).canPop()) {
+                                _callNewConversation(p ?? entry.project);
+                              },
+                              onOpenSettings: () {
                                 Navigator.of(context).pop();
-                              }
-                              widget.onSessionSelected(id);
-                            },
-                            onNewConversation: (ProjectItem? p) {
-                              if (Navigator.of(context).canPop()) {
-                                Navigator.of(context).pop();
-                              }
-                              _callNewConversation(p ?? effectiveProj);
-                            },
-                            onOpenSettings: () {
-                              Navigator.of(context).pop();
-                              widget.onOpenSettings?.call();
-                            },
-                            onDeleteSession: widget.onDeleteSession,
-                            onArchiveSession: widget.onArchiveSession,
-                            onRenameSession: widget.onRenameSession,
-                            onExportSession: widget.onExportSession,
-                            pinnedIds: _pinnedIds,
-                            onTogglePin: _togglePin,
-                            readIds: _readSessionIds,
-                          );
+                                widget.onOpenSettings?.call();
+                              },
+                            );
+                          }
+
+                          // Dossier vide
+                          if (entry.isEmptyFolder) {
+                            return const Padding(
+                              padding: EdgeInsets.only(left: 28, top: 4, bottom: 8),
+                              child: Text(
+                                'No conversations yet',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontStyle: FontStyle.italic,
+                                  color: Color(0xFF5E606A),
+                                ),
+                              ),
+                            );
+                          }
+
+                          // Ligne de session
+                          final s = entry.session;
+                          if (s != null) {
+                            return _SessionRowItem(
+                              key: ValueKey('session_${s.id}'),
+                              session: s,
+                              isSelected: s.id == widget.activeSessionId,
+                              showSubtitle: _subtitle == SessionSubtitle.worktree,
+                              isUnread: (s.hasUnread || (s.stepCount >= 1 && !s.isRunning)) && !_readSessionIds.contains(s.id) && s.id != widget.activeSessionId,
+                              onTap: () {
+                                _markSessionAsRead(s.id);
+                                if (Navigator.of(context).canPop()) {
+                                  Navigator.of(context).pop();
+                                }
+                                widget.onSessionSelected(s.id);
+                              },
+                              onDelete: widget.onDeleteSession != null
+                                  ? () => widget.onDeleteSession!(s.id)
+                                  : null,
+                              onArchive: widget.onArchiveSession != null
+                                  ? () => widget.onArchiveSession!(s.id)
+                                  : null,
+                              onRename: widget.onRenameSession != null
+                                  ? (newTitle) => widget.onRenameSession!(s.id, newTitle)
+                                  : null,
+                              onExport: widget.onExportSession != null
+                                  ? () => widget.onExportSession!(s)
+                                  : null,
+                              isPinned: _pinnedIds.contains(s.id),
+                              onTogglePin: () => _togglePin(s.id),
+                            );
+                          }
+
+                          // Afficher plus
+                          final remaining = entry.remainingCount;
+                          if (remaining != null) {
+                            final folder = entry.folderName;
+                            final scheme = Theme.of(context).colorScheme;
+                            return Padding(
+                              padding: const EdgeInsets.only(left: 14, top: 3, bottom: 3),
+                              child: Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  onTap: () {
+                                    HapticFeedback.selectionClick();
+                                    setState(() {
+                                      _folderExpansions[folder] =
+                                          (_folderExpansions[folder] ?? 0) + 1;
+                                    });
+                                  },
+                                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.expand_more_rounded, size: 14, color: scheme.primary),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          'Afficher plus ($remaining restantes)',
+                                          style: TextStyle(
+                                            fontSize: 11.5,
+                                            fontWeight: FontWeight.w500,
+                                            color: scheme.primary,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+
+                          return const SizedBox(height: 4);
                         },
                       ),
               ),
@@ -799,6 +942,12 @@ class _SidebarActionItemState extends State<_SidebarActionItem> {
   }
 }
 
+
+
+
+
+
+
 // ── Workspace Folder Section (Grouping & Sessions under a folder)
 class _WorkspaceFolderSection extends StatefulWidget {
   final String folderName;
@@ -866,7 +1015,6 @@ class _WorkspaceFolderSectionState extends State<_WorkspaceFolderSection> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final sessions = widget.sessions;
     final visibleSessions = sessions.take(_visibleLimit).toList();
     final remainingCount = sessions.length - visibleSessions.length;
@@ -874,9 +1022,6 @@ class _WorkspaceFolderSectionState extends State<_WorkspaceFolderSection> {
     final hideHeader = widget.hideHeader;
     final isCollapsed = widget.isCollapsed;
     final onToggleCollapse = widget.onToggleCollapse;
-    final project = widget.project;
-    final onNewConversation = widget.onNewConversation;
-    final onOpenSettings = widget.onOpenSettings;
     final activeSessionId = widget.activeSessionId;
     final showSubtitle = widget.showSubtitle;
     final readIds = widget.readIds;
@@ -910,103 +1055,39 @@ class _WorkspaceFolderSectionState extends State<_WorkspaceFolderSection> {
                     child: Text(
                       folderName,
                       style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w500,
-                        color: scheme.primary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: scheme.onSurfaceVariant,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  // ── Project Options Context Menu (:)
-                  PopupMenuButton<String>(
-                    tooltip: 'Options du projet',
-                    color: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainer,
-                    surfaceTintColor: Colors.transparent,
-                    elevation: 8,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(AppRadius.md),
-                      side: BorderSide(color: isDark ? const Color(0xFF2C2F36) : scheme.outlineVariant, width: 1),
-                    ),
-                    icon: Icon(
-                      Icons.more_vert_rounded,
-                      size: 15,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                    padding: EdgeInsets.zero,
-                    onSelected: (val) {
-                      if (val == 'copy_name') {
-                        Clipboard.setData(ClipboardData(text: folderName));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Nom du projet "$folderName" copié'),
-                            duration: const Duration(seconds: 2),
-                            behavior: SnackBarBehavior.floating,
-                          ),
-                        );
-                      } else if (val == 'settings') {
-                        onOpenSettings?.call();
-                      }
-                    },
-                    itemBuilder: (ctx) {
-                      final itemScheme = Theme.of(ctx).colorScheme;
-                      return [
-                        PopupMenuItem<String>(
-                          value: 'copy_name',
-                          height: 32,
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              Icon(Icons.copy_rounded, size: 14, color: itemScheme.onSurface),
-                              const SizedBox(width: 8),
-                              Text('Copy Project Name', style: TextStyle(fontSize: 12.5, color: itemScheme.onSurface)),
-                            ],
-                          ),
-                        ),
-                        PopupMenuItem<String>(
-                          value: 'settings',
-                          height: 32,
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              Icon(Icons.settings_outlined, size: 14, color: itemScheme.onSurface),
-                              const SizedBox(width: 8),
-                              Text('Project Settings', style: TextStyle(fontSize: 12.5, color: itemScheme.onSurface)),
-                            ],
-                          ),
-                        ),
-                      ];
-                    },
-                  ),
-                  const SizedBox(width: 2),
-                  // ── New Session in Project (+)
-                  Tooltip(
-                    message: 'New Conversation in Project',
-                    child: InkWell(
-                      onTap: () {
-                        HapticFeedback.selectionClick();
-                        onNewConversation?.call(project);
-                      },
-                      borderRadius: BorderRadius.circular(4),
-                      child: const Padding(
-                        padding: EdgeInsets.all(4),
-                        child: Icon(
-                          Icons.add_rounded,
-                          size: 16,
-                          color: Color(0xFF8F909A),
+                  if (sessions.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: Text(
+                        '${sessions.length}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
                         ),
                       ),
                     ),
+                  Icon(
+                    isCollapsed ? Icons.chevron_right : Icons.expand_more,
+                    size: 16,
+                    color: scheme.onSurfaceVariant,
                   ),
                 ],
               ),
             ),
           ),
 
-        // Session list under this workspace
+        // Session list under this workspace folder
         if (!isCollapsed) ...[
           if (sessions.isEmpty)
             const Padding(
-              padding: EdgeInsets.only(left: 28, top: 4, bottom: 8),
+              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 4),
               child: Text(
                 'No conversations yet',
                 style: TextStyle(
@@ -1025,20 +1106,20 @@ class _WorkspaceFolderSectionState extends State<_WorkspaceFolderSection> {
                   isUnread: (s.hasUnread || (s.stepCount >= 1 && !s.isRunning)) && !readIds.contains(s.id) && s.id != activeSessionId,
                   onTap: () => onSessionTap(s.id),
                   onDelete: onDeleteSession != null
-                      ? () => onDeleteSession!(s.id)
+                      ? () => onDeleteSession(s.id)
                       : null,
                   onArchive: onArchiveSession != null
-                      ? () => onArchiveSession!(s.id)
+                      ? () => onArchiveSession(s.id)
                       : null,
                   onRename: onRenameSession != null
-                      ? (newTitle) => onRenameSession!(s.id, newTitle)
+                      ? (newTitle) => onRenameSession(s.id, newTitle)
                       : null,
                   onExport: onExportSession != null
-                      ? () => onExportSession!(s)
+                      ? () => onExportSession(s)
                       : null,
                   isPinned: pinnedIds.contains(s.id),
                   onTogglePin: onTogglePin != null
-                      ? () => onTogglePin!(s.id)
+                      ? () => onTogglePin(s.id)
                       : null,
                 )),
             if (remainingCount > 0)
