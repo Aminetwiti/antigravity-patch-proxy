@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile/core/protocol/daemon_api.dart';
@@ -51,12 +53,21 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
   List<CascadeSession> get _allSessions => _fetchedSessions ?? widget.sessions;
   List<ProjectItem>? get _allProjects => _fetchedProjects ?? widget.projects;
 
+  /// Debounce de la recherche : sans lui, chaque frappe déclenche un setState
+  /// (rebuild de la liste) alors que le pipeline mémoïsé ne change qu'après
+  /// stabilisation de la requête.
+  Timer? _searchDebounce;
+
   @override
   void initState() {
     super.initState();
     _searchController.addListener(() {
-      setState(() {
-        _searchQuery = _searchController.text.trim().toLowerCase();
+      _searchDebounce?.cancel();
+      _searchDebounce = Timer(const Duration(milliseconds: 150), () {
+        if (!mounted) return;
+        setState(() {
+          _searchQuery = _searchController.text.trim().toLowerCase();
+        });
       });
     });
     if (widget.api != null) {
@@ -94,6 +105,7 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
   }

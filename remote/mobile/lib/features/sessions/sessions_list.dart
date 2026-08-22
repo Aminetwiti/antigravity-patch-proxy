@@ -1703,13 +1703,20 @@ class _ConnectionRowState extends State<_ConnectionRow> {
                 ),
               ),
               const SizedBox(width: 10),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w400,
-                  color: color,
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w400,
+                    color: color,
+                  ),
                 ),
+              ),
+              Icon(
+                widget.isConnected ? Icons.power_settings_new_rounded : Icons.link_rounded,
+                size: 15,
+                color: isDark ? AppColors.inkFaint : scheme.onSurfaceVariant,
               ),
             ],
           ),

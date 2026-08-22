@@ -1,6 +1,6 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'messages.dart';
 
 /// Parses the daemon's `list_sessions` response into [CascadeSession] items.
@@ -12,6 +12,15 @@ import 'messages.dart';
 /// Fallback: legacy daemons that still send the raw protobuf field dump
 /// (`{"fields":[...]}`) are parsed heuristically (UUID + readable title).
 class SessionParser {
+  /// Asynchronous parse with background isolate offloading when sessions count > 200.
+  static Future<List<CascadeSession>> parseListSessionsAsync(Map<String, dynamic> data) async {
+    final sessions = data['sessions'] ?? (data['data'] is Map ? data['data']['sessions'] : null);
+    if (sessions is List && sessions.length > 200) {
+      return compute(parseListSessions, data);
+    }
+    return parseListSessions(data);
+  }
+
   static List<CascadeSession> parseListSessions(Map<String, dynamic> data) {
     final sessions = data['sessions'] ?? (data['data'] is Map ? data['data']['sessions'] : null);
     if (sessions is List) {

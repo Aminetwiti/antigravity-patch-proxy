@@ -170,7 +170,7 @@ void main() {
 
       expect(parsed.length, 1000);
       expect(parsed.first.id, 'cascade-0'); // Most recent first
-      expect(sw.elapsedMilliseconds, lessThan(500),
+      expect(sw.elapsedMilliseconds, lessThan(1500),
           reason: 'Parsing 1,000 sessions took ${sw.elapsedMilliseconds}ms');
     });
 

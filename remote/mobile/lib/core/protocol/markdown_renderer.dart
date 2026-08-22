@@ -13,6 +13,7 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../../widgets/artifact_cards.dart';
 
@@ -133,6 +134,14 @@ class MarkdownRenderer {
     var cleaned = text.replaceAll(_systemTagsRe, '').trim();
     cleaned = cleaned.replaceAll(_bgTaskMsgRe, '').trim();
     return cleaned;
+  }
+
+  /// Asynchronous block parsing with background isolate offloading for large text (> 50KB).
+  static Future<List<MarkdownBlock>> blocksOfAsync(String text) async {
+    if (text.length > 50000) {
+      return compute(blocksOf, text);
+    }
+    return blocksOf(text);
   }
 
   /// Splits raw markdown text into display blocks.
@@ -328,6 +337,9 @@ class MarkdownRenderer {
   static final Map<String, bool> _localFileExistsCache = {};
   static const int _maxLocalFileExistsEntries = 500;
 
+  static final Map<String, List<InlineSpan>> _inlineSpansCache = {};
+  static const int _maxInlineCacheEntries = 1000;
+
   // Pattern de surlignage compilé une seule fois par requête de recherche
   // (au lieu d'une RegExp neuve par paragraphe à chaque build).
   static String? _lastSearchQuery;
@@ -344,6 +356,18 @@ class MarkdownRenderer {
     LocalFileTap? onLocalFile,
     String? searchQuery,
   }) {
+    final bool canCache = searchQuery == null && onLocalFile == null;
+    final String cacheKey = canCache
+        ? '${text.hashCode}_${base.fontSize}_${base.color?.value}_${base.fontWeight}_${base.fontStyle}_${scheme.primary.value}'
+        : '';
+    if (canCache) {
+      final cached = _inlineSpansCache.remove(cacheKey);
+      if (cached != null) {
+        _inlineSpansCache[cacheKey] = cached;
+        return cached;
+      }
+    }
+
     final spans = <InlineSpan>[];
 
     void addTextSpans(List<TextSpan> newSpans) {
@@ -718,6 +742,12 @@ class MarkdownRenderer {
       }
       addTextSpans(highlightText(remaining.substring(0, nextIndex), base));
       remaining = remaining.substring(nextIndex);
+    }
+    if (canCache) {
+      while (_inlineSpansCache.length >= _maxInlineCacheEntries) {
+        _inlineSpansCache.remove(_inlineSpansCache.keys.first);
+      }
+      _inlineSpansCache[cacheKey] = List<InlineSpan>.unmodifiable(spans);
     }
     return spans;
   }

@@ -171,6 +171,27 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   static const _stillWorkingDelay = Duration(seconds: 15);
   final Set<String> _pendingApprovalCallIds = {};
   final Set<String> _processedCallIds = {};
+  // Les sets de callIds utilisés pour dédupliquer les approvals poussées
+  // par le daemon croissent sans borne sur une session longue. On les borne
+  // (les callIds très anciens ne reviennent plus : le daemon ne rejoue que
+  // les étapes récentes au sync_catchup).
+  static const int _maxTrackedCallIds = 500;
+
+  void _rememberProcessedCall(String callId) {
+    _processedCallIds.add(callId);
+    if (_processedCallIds.length > _maxTrackedCallIds) {
+      _processedCallIds.remove(_processedCallIds.first);
+    }
+  }
+
+  void _rememberExpiredCall(String callId) {
+    _expiredCallIds.add(callId);
+    if (_expiredCallIds.length > _maxTrackedCallIds) {
+      _expiredCallIds.remove(_expiredCallIds.first);
+    }
+  }
+
+
   Timer? _stillWorkingTimer;
   final List<Timer> _settleTimers = [];
   
@@ -364,6 +385,39 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   final Map<String, String> _taskCommandToId = {};
   final Map<String, String> _taskIdToCommand = {};
   final Map<String, DateTime> _streamStartTimes = {};
+
+  // P3 : borne l'état des tâches d'arrière-plan conservé en mémoire (sortie
+  // cumulée, mappings cmd↔id, statuts). Au-delà, les plus anciennes sont
+  // élaguées — sauf celles encore en cours.
+  static const int _maxTrackedTasks = 40;
+
+  void _closeTaskController(String key) {
+    final c = _taskOutputControllers.remove(key);
+    if (c != null && !c.isClosed) c.close();
+  }
+
+  void _pruneTaskState() {
+    void pruneMap<K, V>(Map<K, V> m) {
+      while (m.length > _maxTrackedTasks) {
+        final oldest = m.keys.first;
+        if (oldest is String && _runningBackgroundTasks.contains(oldest)) {
+          // encore active : on déplace en fin pour ne pas bloquer l'élagage
+          final v = m.remove(oldest);
+          if (v != null) m[oldest] = v;
+          break;
+        }
+        m.remove(oldest);
+      }
+    }
+
+    pruneMap(_taskOutputs);
+    pruneMap(_taskStatuses);
+    pruneMap(_taskCommandToId);
+    pruneMap(_taskIdToCommand);
+    while (_taskOutputControllers.length > _maxTrackedTasks) {
+      _closeTaskController(_taskOutputControllers.keys.first);
+    }
+  }
 
   String _computeWorkedDuration(DateTime? startTime) {
     if (startTime == null) return 'Worked for 1s';
@@ -1066,7 +1120,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       if (callId.isNotEmpty && mounted) {
         // Retire immédiatement la carte si elle est affichée (l'utilisateur
         // a répondu depuis la notification, pas depuis l'app).
-        _processedCallIds.add(callId);
+        _rememberProcessedCall(callId);
         _removeApproval(callId);
       }
       // La réponse du daemon (approval_resolved / stream_delta) nettoiera la
@@ -1252,6 +1306,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       t.cancel();
     }
     _settleTimers.clear();
+    // P3 (leak) : les broadcast controllers de sortie de tâche doivent être
+    // fermés — sinon 2 controllers fuient par tâche d'arrière-plan.
+    for (final c in _taskOutputControllers.values) {
+      if (!c.isClosed) c.close();
+    }
+    _taskOutputControllers.clear();
     _scrollController.dispose();
     _searchController.dispose();
     final client = widget.wsClient;
@@ -1571,6 +1631,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             _taskOutputs.putIfAbsent(cmd, () => StringBuffer());
             _taskOutputs.putIfAbsent(taskId, () => StringBuffer());
           });
+          _pruneTaskState();
         }
         return;
       } else if (type == 'task_output') {
@@ -1608,6 +1669,10 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               (taskId.isNotEmpty && t.contains(taskId)));
           _taskStatuses[cmd] = status;
           _taskStatuses[taskId] = status;
+          // P3 (leak) : tâche terminée → fermer ses controllers (plus aucun
+          // delta n'arrivera ; la vue détail relit le snapshot StringBuffer).
+          _closeTaskController(cmd);
+          _closeTaskController(taskId);
         });
         _refreshRunningTasks();
 
@@ -1998,7 +2063,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             '';
         final cascadeId = (msg['cascadeId'] ?? data['cascadeId']) as String? ?? '';
         if (callId.isNotEmpty && _pendingApprovalCallIds.contains(callId)) {
-          setState(() => _expiredCallIds.add(callId));
+          setState(() => _rememberExpiredCall(callId));
           _pendingApprovalCallIds.remove(callId);
           ApprovalNotifier.instance.cancelApproval(callId);
         } else if (cascadeId.isNotEmpty) {
@@ -2447,7 +2512,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
     // Scénarios Extrêmes (1 & 7) : On marque cet appel comme traité pour ne plus jamais
     // ré-afficher cette carte si le serveur rejoue le message après une perte de connexion.
-    _processedCallIds.add(approval.callId);
+    _rememberProcessedCall(approval.callId);
 
     if (_expiredCallIds.contains(approval.callId)) {
       // La carte affichait déjà l'état expiré : on nettoie juste l'état.
@@ -2482,10 +2547,41 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       _throttleTimer = null;
       if (_needsStateUpdate && mounted) {
         _needsStateUpdate = false;
+        _trimInMemoryMessages();
         setState(() {});
         _scrollToBottom();
       }
     });
+  }
+
+  // P3 (mémoire) : bornes l'historique conservé en RAM. Chaque session
+  // ouverte garde jusqu'à [_maxInMemoryMessages] messages (au-delà de la
+  // fenêtre paginée réellement consultable), et au plus
+  // [_maxInMemorySessions] sessions restent bufferisées — les plus anciennes
+  // (hors session active) sont libérées ; un retour dessus recharge depuis
+  // SessionHistoryCacheStore / le daemon.
+  static const int _maxInMemoryMessages = 1000;
+  static const int _maxInMemorySessions = 20;
+
+  void _trimInMemoryMessages() {
+    if (_sessionMessages.isEmpty) return;
+    for (final entry in _sessionMessages.entries) {
+      final list = entry.value;
+      if (list.length > _maxInMemoryMessages) {
+        list.removeRange(0, list.length - _maxInMemoryMessages);
+        final visible = _visibleCounts[entry.key];
+        if (visible != null && visible > list.length) {
+          _visibleCounts[entry.key] = list.length;
+        }
+      }
+    }
+    while (_sessionMessages.length > _maxInMemorySessions) {
+      final oldest = _sessionMessages.keys
+          .firstWhere((k) => k != widget.activeSessionId, orElse: () => '');
+      if (oldest.isEmpty) break;
+      _sessionMessages.remove(oldest);
+      _visibleCounts.remove(oldest);
+    }
   }
 
   void _scrollToBottom() {

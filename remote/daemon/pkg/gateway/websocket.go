@@ -1209,7 +1209,6 @@ func (s *Server) allowProject(conn *websocket.Conn, uri string) bool {
 }
 
 // requireAdmin est la garde d'accès des opérations d'administration (3.4) :
-// requireAdmin est la garde d'accès des opérations d'administration (3.4) :
 // seul un appareil pairé avec la session Admin=true (premier appairage du
 // device) peut administrer les terminaux distants et révoquer les devices.
 // En mode sans authentification (AuthToken vide / tests), l'accès est permis.
@@ -1384,8 +1383,13 @@ func (s *Server) writeLock(conn *websocket.Conn) *sync.Mutex {
 // releaseWriteLock libère la mémoire du mutex d'écriture d'un client déconnecté.
 func (s *Server) releaseWriteLock(conn *websocket.Conn) {
 	s.mu.Lock()
+	lk := s.writeLocks[conn]
 	delete(s.writeLocks, conn)
 	s.mu.Unlock()
+	if lk != nil {
+		lk.Lock()
+		lk.Unlock()
+	}
 }
 
 // mcpTimeout borne l'appel HTTP vers le proxy MCP desktop (30 s) — aligné sur
@@ -3221,6 +3225,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	})
 
 	defer func() {
+		conn.Close()
 		s.mu.Lock()
 		delete(s.clients, conn)
 		delete(s.clientInFlight, conn)
@@ -3229,11 +3234,10 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 		s.releaseWriteLock(conn)
 		// Nettoyage terminal : on ferme les sessions PTY OUVERTES PAR CE
-		// CLIENT. Multi-surface : un autre t├®l├®phone connect├® garde les
+		// CLIENT. Multi-surface : un autre téléphone connecté garde les
 		// siennes (l'ancien killAll() global les tuait toutes).
 		s.terminals.killAllFor(conn)
 		logJSON.Info("client_disconnected", "remote", conn.RemoteAddr().String(), "clients", clients)
-		conn.Close()
 	}()
 
 	s.mu.Lock()

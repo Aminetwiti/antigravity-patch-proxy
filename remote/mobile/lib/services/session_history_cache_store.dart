@@ -1,6 +1,8 @@
 import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../core/protocol/messages.dart';
 
 /// Instant 0ms offline history cache for Antigravity Remote sessions.
@@ -10,6 +12,19 @@ class SessionHistoryCacheStore {
   static const String _prefix = 'session_history_cache_';
   static const int _maxMessagesPerSession = 80;
   static const int _maxSessionsInMemory = 30;
+  static const int _offloadThresholdChars = 20000;
+
+  static String encodeHistoryJson(List<ChatMessage> messages) =>
+      jsonEncode(messages.map((m) => m.toJson()).toList());
+
+  static List<ChatMessage> decodeHistoryJson(String raw) {
+    final list = jsonDecode(raw);
+    if (list is! List) return const [];
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(ChatMessage.fromJson)
+        .toList();
+  }
 
   SessionHistoryCacheStore._();
   static final SessionHistoryCacheStore instance = SessionHistoryCacheStore._();
@@ -40,13 +55,9 @@ class SessionHistoryCacheStore {
       final raw = prefs.getString('$_prefix$sessionId');
       if (raw == null || raw.isEmpty) return const [];
 
-      final list = jsonDecode(raw) as List?;
-      if (list == null) return const [];
-
-      final parsed = list
-          .whereType<Map<String, dynamic>>()
-          .map((m) => ChatMessage.fromJson(m))
-          .toList();
+      final parsed = raw.length >= _offloadThresholdChars
+          ? await compute(decodeHistoryJson, raw)
+          : decodeHistoryJson(raw);
 
       _touchInMemory(sessionId, parsed);
       return List.unmodifiable(parsed);
@@ -85,8 +96,12 @@ class SessionHistoryCacheStore {
 
     try {
       final prefs = await SharedPreferences.getInstance();
-      final jsonList = toPersist.map((m) => m.toJson()).toList();
-      await prefs.setString('$_prefix$sessionId', jsonEncode(jsonList));
+      final estimated =
+          toPersist.fold<int>(0, (acc, m) => acc + m.text.length + 64);
+      final encoded = estimated >= _offloadThresholdChars
+          ? await compute(encodeHistoryJson, toPersist)
+          : encodeHistoryJson(toPersist);
+      await prefs.setString('$_prefix$sessionId', encoded);
     } catch (e) {
       debugPrint('[SessionHistoryCacheStore] Failed to save cached history for $sessionId: $e');
     }

@@ -577,7 +577,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         _lastStateVersion = version;
       }
 
-      final sessions = SessionParser.parseListSessions(data);
+      final sessions = await SessionParser.parseListSessionsAsync(data);
 
       List<ProjectItem> projects = [];
       if (data['projects'] is List) {
@@ -651,7 +651,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
 
   void _watchSessionEvents() {
     _sessionsSub?.cancel();
-    _sessionsSub = _api?.events.listen((msg) {
+    _sessionsSub = _api?.events.listen((msg) async {
       if (!mounted) return;
       final type = msg['type'] as String?;
       final cascadeId = (msg['cascadeId'] ?? msg['data']?['cascadeId']) as String? ?? '';
@@ -778,7 +778,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                 .toList();
           }
 
-          final parsed = SessionParser.parseListSessions(dataMap);
+          final parsed = await SessionParser.parseListSessionsAsync(dataMap);
 
           setState(() {
             if (projects.isNotEmpty) {
@@ -1074,20 +1074,27 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       onToggleConnection: () {
         if (isConnected) {
           _wsClient.disconnect();
-        } else {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (context) => DiscoveryScreen(
-                onConnect: (host, port, token) async {
-                  final url = _formatWsUrl(host, port);
-                  _wsClient.disconnect();
-                  await _wsClient.connect(customUrl: url, authToken: token);
-                  return _wsClient.statusNotifier.value == ConnectionStatus.connected;
-                },
-              ),
-            ),
-          );
         }
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => DiscoveryScreen(
+              onConnect: (host, port, token) async {
+                final url = _formatWsUrl(host, port);
+                _wsClient.disconnect();
+                await _wsClient.connect(customUrl: url, authToken: token);
+                final ok = _wsClient.statusNotifier.value == ConnectionStatus.connected;
+                if (ok) {
+                  SettingsStore.saveSession(
+                    wsUrl: url,
+                    token: token,
+                    sessionId: _activeSessionId,
+                  );
+                }
+                return ok;
+              },
+            ),
+          ),
+        );
       },
       onSessionSelected: (id) {
         setState(() {
