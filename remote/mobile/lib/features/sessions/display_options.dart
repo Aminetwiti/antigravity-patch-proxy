@@ -237,7 +237,11 @@ List<CascadeSession> sortSessions({
       copy.sort((a, b) => a.id.compareTo(b.id));
       break;
     case SessionSortBy.lastUpdated:
-      // Preserves original dynamic order
+      copy.sort((a, b) {
+        final aTime = a.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final bTime = b.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        return bTime.compareTo(aTime);
+      });
       break;
   }
 

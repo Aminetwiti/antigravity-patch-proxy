@@ -5,6 +5,7 @@ class CascadeSession {
   final String title;
   final String status;
   final String time;
+  final DateTime? updatedAt;
   final String? lastPrompt;
   final String? worktree;
   final String? projectId;
@@ -23,6 +24,7 @@ class CascadeSession {
     required this.title,
     required this.status,
     required this.time,
+    this.updatedAt,
     this.lastPrompt,
     this.worktree,
     this.projectId,
@@ -33,12 +35,22 @@ class CascadeSession {
   });
 
   factory CascadeSession.fromJson(Map<String, dynamic> json, [DateTime? now]) {
+    DateTime? parsedDate;
+    if (json['updatedAt'] is String && (json['updatedAt'] as String).isNotEmpty) {
+      parsedDate = DateTime.tryParse(json['updatedAt']);
+    } else if (json['lastTurnTime'] is String && (json['lastTurnTime'] as String).isNotEmpty) {
+      parsedDate = DateTime.tryParse(json['lastTurnTime']);
+    } else if (json['updatedAt'] is int || json['updatedAt'] is num) {
+      parsedDate = DateTime.fromMillisecondsSinceEpoch((json['updatedAt'] as num).toInt());
+    }
+
     return CascadeSession(
       id: json['cascadeId'] ?? json['id'] ?? '',
       workspacePath: json['workspacePath'] ?? json['workspace'] ?? '',
       title: json['title'] ?? 'Cascade Session',
       status: json['status'] ?? 'CASCADE_STATUS_READY',
-      time: json['time'] ?? _relativeTime(json['updatedAt'], now),
+      time: json['time'] ?? (parsedDate != null ? formatRelativeTime(parsedDate, now) : _relativeTime(json['updatedAt'], now)),
+      updatedAt: parsedDate,
       lastPrompt: json['lastPrompt']?.toString(),
       worktree: json['worktree']?.toString(),
       projectId: json['projectId']?.toString(),

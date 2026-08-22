@@ -52,6 +52,7 @@ class SessionParser {
               title: sMap['title'] ?? 'Cascade Session',
               status: sMap['status'] ?? 'CASCADE_STATUS_READY',
               time: timeStr,
+              updatedAt: updatedParsed,
               lastPrompt: sMap['lastPrompt']?.toString(),
               worktree: sMap['worktree']?.toString(),
               projectId: sMap['projectId']?.toString(),

@@ -497,6 +497,7 @@ func (s *Server) jetboxSyncUpdates(updates map[string]connectrpc.JetboxSummary, 
 	for _, id := range deletes {
 		delete(s.jetboxSummaries, id)
 	}
+	s.sessionsCache = nil
 	// Détecte le changement de session au premier plan (miroir parfait mobile).
 	var focusPayload map[string]interface{}
 	if newFocus := computeFocusedSession(s.jetboxSummaries); newFocus != nil && newFocus.CascadeID != s.focusedCascadeID {
@@ -509,6 +510,17 @@ func (s *Server) jetboxSyncUpdates(updates map[string]connectrpc.JetboxSummary, 
 		}
 	}
 	s.mu.Unlock()
+
+	for _, id := range deletes {
+		s.purgeCascadeState(id)
+		s.broadcast(OutgoingMessage{
+			Type:      "session_deleted",
+			CascadeID: id,
+			Data: map[string]interface{}{
+				"cascadeId": id,
+			},
+		})
+	}
 
 	// Notifie les clients connectés : le mobile rafraîchit sa sidebar.
 	s.broadcast(OutgoingMessage{
@@ -616,6 +628,11 @@ func (s *Server) sessionsFromSummariesLocked(jetbox map[string]connectrpc.Jetbox
 			"isArchived":    false,
 		})
 	}
+	sort.Slice(items, func(i, j int) bool {
+		tI, _ := items[i]["updatedAt"].(time.Time)
+		tJ, _ := items[j]["updatedAt"].(time.Time)
+		return tI.After(tJ)
+	})
 	var v int64 = 0
 	if s != nil {
 		s.stateVersion++

@@ -160,7 +160,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
 
   SessionGroupBy _groupBy = SessionGroupBy.project;
   SessionSortBy _sortBy = SessionSortBy.lastUpdated;
-  SessionSubtitle _subtitle = SessionSubtitle.worktree;
+  SessionSubtitle _subtitle = SessionSubtitle.none;
 
   // P4 : sessions épinglées — synchronisées localement et avec le daemon.
   final Set<String> _pinnedIds = {};
@@ -817,7 +817,7 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                               key: ValueKey('session_${s.id}'),
                               session: s,
                               isSelected: s.id == widget.activeSessionId,
-                              showSubtitle: _subtitle == SessionSubtitle.worktree,
+                              showSubtitle: _subtitle == SessionSubtitle.worktree || (_groupBy == SessionGroupBy.none && s.workspacePath.isNotEmpty),
                               isUnread: (s.hasUnread || (s.stepCount >= 1 && !s.isRunning)) && !_readSessionIds.contains(s.id) && s.id != widget.activeSessionId,
                               onTap: () {
                                 _markSessionAsRead(s.id);

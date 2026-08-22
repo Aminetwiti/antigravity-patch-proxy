@@ -166,87 +166,69 @@ func renameSessionOnDisk(home, cascadeID, title string) error {
 	if title == "" {
 		return fmt.Errorf("title requis")
 	}
-	annoDir := filepath.Join(home, ".gemini", resolveGeminiSubDir(home, cascadeID), "annotations")
-	_ = os.MkdirAll(annoDir, 0o755)
-	annoPath := filepath.Join(annoDir, cascadeID+".pbtxt")
+	for _, subDir := range []string{"antigravity", "antigravity-ide"} {
+		annoDir := filepath.Join(home, ".gemini", subDir, "annotations")
+		_ = os.MkdirAll(annoDir, 0o755)
+		annoPath := filepath.Join(annoDir, cascadeID+".pbtxt")
 
-	nowSec := time.Now().Unix()
-	nowNano := time.Now().Nanosecond()
+		nowSec := time.Now().Unix()
+		nowNano := time.Now().Nanosecond()
 
-	data, err := os.ReadFile(annoPath)
-	if err != nil {
-		content := fmt.Sprintf("custom_title:%q last_user_view_time:{seconds:%d nanos:%d}\n",
-			title, nowSec, nowNano)
-		return os.WriteFile(annoPath, []byte(content), 0o644)
-	}
+		data, err := os.ReadFile(annoPath)
+		if err != nil {
+			content := fmt.Sprintf("custom_title:%q last_user_view_time:{seconds:%d nanos:%d}\n",
+				title, nowSec, nowNano)
+			_ = os.WriteFile(annoPath, []byte(content), 0o644)
+			continue
+		}
 
-	s := string(data)
-	reTitle := regexp.MustCompile(`(?i)custom_title:\s*"[^"]*"`)
-	s = reTitle.ReplaceAllString(s, "")
-	s = strings.TrimSpace(s)
-	s = fmt.Sprintf("custom_title:%q %s\n", title, s)
-	return os.WriteFile(annoPath, []byte(s), 0o644)
-}
-
-// pinSessionOnDisk persiste le statut épinglé dans annotations/<cascadeID>.pbtxt
-// cascadeExistsOnDisk vérifie si une session/cascade existe physiquement sur le disque.
-func cascadeExistsOnDisk(home, cascadeID string) bool {
-	if cascadeID == "" {
-		return false
+		s := string(data)
+		reTitle := regexp.MustCompile(`(?i)custom_title:\s*"[^"]*"`)
+		s = reTitle.ReplaceAllString(s, "")
+		s = strings.TrimSpace(s)
+		s = fmt.Sprintf("custom_title:%q %s\n", title, s)
+		_ = os.WriteFile(annoPath, []byte(s), 0o644)
 	}
-	subDir := resolveGeminiSubDir(home, cascadeID)
-	brainDir := filepath.Join(home, ".gemini", subDir, "brain", cascadeID)
-	if fi, err := os.Stat(brainDir); err == nil && fi.IsDir() {
-		return true
-	}
-	dbPath := filepath.Join(home, ".gemini", subDir, "conversations", cascadeID+".db")
-	if _, err := os.Stat(dbPath); err == nil {
-		return true
-	}
-	convDir := filepath.Join(home, ".gemini", subDir, "conversations", cascadeID)
-	if fi, err := os.Stat(convDir); err == nil && fi.IsDir() {
-		return true
-	}
-	annoPath := filepath.Join(home, ".gemini", subDir, "annotations", cascadeID+".pbtxt")
-	if _, err := os.Stat(annoPath); err == nil {
-		return true
-	}
-	return false
+	return nil
 }
 
 func pinSessionOnDisk(home, cascadeID string, pinned bool) error {
 	if !validCascadeID(cascadeID) {
 		return fmt.Errorf("identifiant de cascade invalide")
 	}
-	annoDir := filepath.Join(home, ".gemini", resolveGeminiSubDir(home, cascadeID), "annotations")
-	_ = os.MkdirAll(annoDir, 0o755)
-	annoPath := filepath.Join(annoDir, cascadeID+".pbtxt")
+	for _, subDir := range []string{"antigravity", "antigravity-ide"} {
+		annoDir := filepath.Join(home, ".gemini", subDir, "annotations")
+		_ = os.MkdirAll(annoDir, 0o755)
+		annoPath := filepath.Join(annoDir, cascadeID+".pbtxt")
 
-	nowSec := time.Now().Unix()
-	nowNano := time.Now().Nanosecond()
+		nowSec := time.Now().Unix()
+		nowNano := time.Now().Nanosecond()
 
-	data, err := os.ReadFile(annoPath)
-	if err != nil {
-		if !pinned {
-			return nil
+		data, err := os.ReadFile(annoPath)
+		if err != nil {
+			if !pinned {
+				continue
+			}
+			content := fmt.Sprintf("pinned:true last_user_view_time:{seconds:%d nanos:%d}\n",
+				nowSec, nowNano)
+			_ = os.WriteFile(annoPath, []byte(content), 0o644)
+			continue
 		}
-		content := fmt.Sprintf("pinned:true last_user_view_time:{seconds:%d nanos:%d}\n",
-			nowSec, nowNano)
-		return os.WriteFile(annoPath, []byte(content), 0o644)
-	}
 
-	s := string(data)
-	rePin := regexp.MustCompile(`(?i)pinned:\s*(true|false)`)
-	s = rePin.ReplaceAllString(s, "")
-	s = strings.TrimSpace(s)
+		s := string(data)
+		rePin := regexp.MustCompile(`(?i)pinned:\s*(true|false)`)
+		s = rePin.ReplaceAllString(s, "")
+		s = strings.TrimSpace(s)
 
-	if pinned {
-		s = fmt.Sprintf("pinned:true %s", s)
-	} else {
-		s = fmt.Sprintf("pinned:false %s", s)
+		if pinned {
+			s = fmt.Sprintf("pinned:true %s", s)
+		} else {
+			s = fmt.Sprintf("pinned:false %s", s)
+		}
+		s = strings.TrimSpace(s) + "\n"
+		_ = os.WriteFile(annoPath, []byte(s), 0o644)
 	}
-	s = strings.TrimSpace(s) + "\n"
-	return os.WriteFile(annoPath, []byte(s), 0o644)
+	return nil
 }
 
 // archiveSessionOnDisk persiste le statut archivé dans annotations/<cascadeID>.pbtxt
@@ -254,35 +236,39 @@ func archiveSessionOnDisk(home, cascadeID string, archived bool) error {
 	if !validCascadeID(cascadeID) {
 		return fmt.Errorf("identifiant de cascade invalide")
 	}
-	annoDir := filepath.Join(home, ".gemini", resolveGeminiSubDir(home, cascadeID), "annotations")
-	_ = os.MkdirAll(annoDir, 0o755)
-	annoPath := filepath.Join(annoDir, cascadeID+".pbtxt")
+	for _, subDir := range []string{"antigravity", "antigravity-ide"} {
+		annoDir := filepath.Join(home, ".gemini", subDir, "annotations")
+		_ = os.MkdirAll(annoDir, 0o755)
+		annoPath := filepath.Join(annoDir, cascadeID+".pbtxt")
 
-	nowSec := time.Now().Unix()
-	nowNano := time.Now().Nanosecond()
+		nowSec := time.Now().Unix()
+		nowNano := time.Now().Nanosecond()
 
-	data, err := os.ReadFile(annoPath)
-	if err != nil {
-		if !archived {
-			return nil
+		data, err := os.ReadFile(annoPath)
+		if err != nil {
+			if !archived {
+				continue
+			}
+			content := fmt.Sprintf("archived:true last_user_view_time:{seconds:%d nanos:%d}\n",
+				nowSec, nowNano)
+			_ = os.WriteFile(annoPath, []byte(content), 0o644)
+			continue
 		}
-		content := fmt.Sprintf("archived:true last_user_view_time:{seconds:%d nanos:%d}\n",
-			nowSec, nowNano)
-		return os.WriteFile(annoPath, []byte(content), 0o644)
-	}
 
-	s := string(data)
-	reArch := regexp.MustCompile(`(?i)archived:\s*(true|false)`)
-	s = reArch.ReplaceAllString(s, "")
-	s = strings.TrimSpace(s)
+		s := string(data)
+		reArch := regexp.MustCompile(`(?i)archived:\s*(true|false)`)
+		s = reArch.ReplaceAllString(s, "")
+		s = strings.TrimSpace(s)
 
-	if archived {
-		s = fmt.Sprintf("archived:true %s", s)
-	} else {
-		s = fmt.Sprintf("archived:false %s", s)
+		if archived {
+			s = fmt.Sprintf("archived:true %s", s)
+		} else {
+			s = fmt.Sprintf("archived:false %s", s)
+		}
+		s = strings.TrimSpace(s) + "\n"
+		_ = os.WriteFile(annoPath, []byte(s), 0o644)
 	}
-	s = strings.TrimSpace(s) + "\n"
-	return os.WriteFile(annoPath, []byte(s), 0o644)
+	return nil
 }
 
 // isSessionPinned vérifie si la session est épinglée dans annotations/<cascadeID>.pbtxt (antigravity ou antigravity-ide)

@@ -1,8 +1,5 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mobile/core/protocol/daemon_api.dart';
 import 'package:mobile/core/protocol/messages.dart';
 import 'package:mobile/features/subagents/models/subagent_item.dart';
 import 'package:mobile/features/subagents/widgets/subagent_tree_card.dart';
@@ -22,7 +19,6 @@ void main() {
     testWidgets('Workflow 1: Interactive Chat Prompt -> Stop Action -> Model Switch to GPT-4o', (WidgetTester tester) async {
       String currentModel = 'claude-3-7-sonnet';
       bool wasStopped = false;
-      String? sentPrompt;
 
       await tester.pumpWidget(
         MaterialApp(
@@ -31,9 +27,7 @@ void main() {
             bottomNavigationBar: ChatInputBar(
               isConnected: true,
               hasActiveStream: true,
-              onSend: (text, {base64Data, fileName, images, media, modelEnum, modelUID, queued = false}) {
-                sentPrompt = text;
-              },
+              onSend: (text, {base64Data, fileName, images, media, modelEnum, modelUID, queued = false}) {},
               onStop: () => wasStopped = true,
               onModelChanged: (m) => currentModel = m,
             ),

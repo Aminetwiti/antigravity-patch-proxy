@@ -766,6 +766,26 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
         return;
       }
 
+      if (type == 'session_deleted') {
+        final deletedId = msg['cascadeId'] as String? ?? (msg['data'] is Map ? msg['data']['cascadeId']?.toString() : null);
+        if (deletedId != null && deletedId.isNotEmpty) {
+          setState(() {
+            _sessions = _sessions.where((s) => s.id != deletedId).toList();
+            if (_activeSessionId == deletedId) {
+              if (_sessions.isNotEmpty) {
+                _activeSessionId = _sessions.first.id;
+                _activeSessionTitle = _sessions.first.title;
+              } else {
+                _activeSessionId = '';
+                _activeSessionTitle = 'Nouvelle conversation';
+              }
+              _refreshContext();
+            }
+          });
+        }
+        return;
+      }
+
       // sessions_updated : push réactif du daemon (flux Jetbox) — payload
       // complet au format list_sessions. Évite le rechargement réseau complet
       // (et la latence GetAllCascades) ; met à jour la sidebar en place
@@ -798,42 +818,31 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
               _projects = projects;
             }
             if (parsed.isNotEmpty) {
+              _sessions = parsed;
               final stillActive = parsed.any((s) => s.id == _activeSessionId);
               if (_activeSessionId.isNotEmpty && stillActive) {
-                _sessions = parsed;
                 final current = parsed.firstWhere((s) => s.id == _activeSessionId);
                 _activeSessionTitle = current.title.isNotEmpty
                     ? current.title
                     : (_activeSessionTitle.isNotEmpty ? _activeSessionTitle : 'Nouvelle conversation');
-              } else if (_activeSessionId.isNotEmpty) {
+              } else if (_activeSessionId.startsWith('temp_') || _activeSessionId.startsWith('pending_')) {
+                // Pending new session locally created before first prompt
                 final existingPending = _sessions.where((s) => s.id == _activeSessionId);
-                final activeItem = existingPending.isNotEmpty
-                    ? existingPending.first
-                    : CascadeSession(
-                        id: _activeSessionId,
-                        workspacePath: _projects.isNotEmpty ? _projects.first.path : '',
-                        title: _activeSessionTitle.isNotEmpty ? _activeSessionTitle : 'Nouvelle conversation',
-                        status: 'CASCADE_STATUS_READY',
-                        time: 'Maintenant',
-                      );
-                _sessions = [activeItem, ...parsed.where((s) => s.id != _activeSessionId)];
+                if (existingPending.isNotEmpty) {
+                  _sessions = [existingPending.first, ...parsed];
+                }
               } else {
-                _sessions = parsed;
+                // Active session was deleted from desktop -> switch to top session
                 _activeSessionId = parsed.first.id;
                 _activeSessionTitle = parsed.first.title;
                 _refreshContext();
               }
-            } else if (_activeSessionId.isNotEmpty) {
-              final existingPending = _sessions.where((s) => s.id == _activeSessionId);
-              if (existingPending.isNotEmpty) {
-                _sessions = [existingPending.first];
-              }
             } else {
               // Liste vide : toutes les sessions ont été supprimées/archivées
               _sessions = const [];
-              if (_activeSessionId.isNotEmpty) {
+              if (_activeSessionId.isNotEmpty && !_activeSessionId.startsWith('temp_')) {
                 _activeSessionId = '';
-                _activeSessionTitle = '';
+                _activeSessionTitle = 'Nouvelle conversation';
                 _contextStats = {};
               }
             }
