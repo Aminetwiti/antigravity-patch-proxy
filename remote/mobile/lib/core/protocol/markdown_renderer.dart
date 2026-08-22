@@ -324,8 +324,8 @@ class MarkdownRenderer {
   static final _attachmentTagRe = RegExp(r'^\[(Images? jointes?|Image|Fichier|File|Pièce jointe|Piece jointe):\s*([^\]]+)\]', caseSensitive: false);
   static final _matchAttachPrefixRe = RegExp(r'\[(Images? jointes?|Image|Fichier|File|Pièce jointe|Piece jointe):\s*[^\]]+\]', caseSensitive: false);
   static final _matchArtifactPrefixRe = RegExp(r'\[ARTIFACT:\s*[^\]]+\]', caseSensitive: false);
-  static final _tableCellRe = RegExp(r'^:?-+:?$');
   static final Map<String, bool> _localFileExistsCache = {};
+  static const int _maxLocalFileExistsEntries = 500;
 
   // Pattern de surlignage compilé une seule fois par requête de recherche
   // (au lieu d'une RegExp neuve par paragraphe à chaque build).
@@ -756,14 +756,22 @@ class MarkdownRenderer {
     if (isLocalFile && filePath.isNotEmpty) {
       // existsSync est un appel système bloquant dans le chemin de build :
       // le résultat est mémoïsé par chemin (les fichiers ne disparaissent
-      // quasiment jamais au sein d'une session de rendu).
-      final fileExists = _localFileExistsCache.putIfAbsent(filePath, () {
+      bool fileExists;
+      final cachedExists = _localFileExistsCache.remove(filePath);
+      if (cachedExists != null) {
+        _localFileExistsCache[filePath] = cachedExists;
+        fileExists = cachedExists;
+      } else {
         try {
-          return File(filePath).existsSync();
+          fileExists = File(filePath).existsSync();
         } catch (_) {
-          return false;
+          fileExists = false;
         }
-      });
+        while (_localFileExistsCache.length >= _maxLocalFileExistsEntries) {
+          _localFileExistsCache.remove(_localFileExistsCache.keys.first);
+        }
+        _localFileExistsCache[filePath] = fileExists;
+      }
       try {
         final file = File(filePath);
         if (fileExists) {

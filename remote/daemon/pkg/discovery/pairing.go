@@ -73,12 +73,12 @@ type PairingManager struct {
 
 func NewPairingManager() *PairingManager {
 	pm := &PairingManager{
-		pinTTL:          60 * time.Second,
-		sessions:        make(map[string]SessionInfo),
-		attempts:        make(map[string]*attemptRecord),
-		maxAttempts:     5,
-		lockoutDuration: 5 * time.Minute,
-		sessionTTL:      30 * 24 * time.Hour, // session 30 jours
+		pinTTL:            60 * time.Second,
+		sessions:          make(map[string]SessionInfo),
+		attempts:          make(map[string]*attemptRecord),
+		maxAttempts:       5,
+		lockoutDuration:   5 * time.Minute,
+		sessionTTL:        30 * 24 * time.Hour, // session 30 jours
 		globalMaxAttempts: 30,
 	}
 	pm.GeneratePIN()
@@ -276,7 +276,6 @@ func (pm *PairingManager) RevokeDevice(deviceID string) bool {
 	}
 	return revoked
 }
-
 
 // hasAdminSessionLocked rapporte si un device possède déjà une session Admin active.
 func (pm *PairingManager) hasAdminSessionLocked(deviceID string) bool {

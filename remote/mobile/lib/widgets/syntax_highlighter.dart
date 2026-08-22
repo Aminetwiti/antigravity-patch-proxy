@@ -116,8 +116,11 @@ class SyntaxHighlighter {
     if (code.isEmpty) return [TextSpan(text: '', style: TextStyle(color: defaultTextColor))];
 
     final cacheKey = Object.hash(code, rawLanguage, defaultTextColor.value);
-    final cached = _highlightCache[cacheKey];
-    if (cached != null) return cached;
+    final cached = _highlightCache.remove(cacheKey);
+    if (cached != null) {
+      _highlightCache[cacheKey] = cached;
+      return cached;
+    }
 
     final lang = _normalizeLang(rawLanguage);
     final keywords = _keywordsByLang[lang] ?? _keywordsByLang['typescript']!;

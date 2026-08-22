@@ -127,8 +127,17 @@ Map<String, List<CascadeSession>> groupSessions({
       }
     }
 
+    // Pre-canonicalize and lower-case parent paths so loop does 0 canonicalization allocations
+    final canonicalParentEntries = parentPathEntries
+        .map((e) {
+          final c = WorkspacePath.canonicalPath(e.key).toLowerCase();
+          return MapEntry(c, e.value);
+        })
+        .where((e) => e.key.isNotEmpty)
+        .toList();
+
     // Sort parent paths by descending length so first match in loop is the most specific
-    parentPathEntries.sort((a, b) => b.key.length.compareTo(a.key.length));
+    canonicalParentEntries.sort((a, b) => b.key.length.compareTo(a.key.length));
 
     for (final s in sessions) {
       ProjectItem? matchedProject;
@@ -138,16 +147,21 @@ Map<String, List<CascadeSession>> groupSessions({
         matchedProject = byId[s.projectId];
       }
 
+      String? canonicalWs;
+      String? cWsLower;
+
       // 2. Priority 2: exact path or URI match
       if (matchedProject == null && s.workspacePath.isNotEmpty) {
-        final canonicalWs = WorkspacePath.canonicalPath(s.workspacePath);
+        canonicalWs = WorkspacePath.canonicalPath(s.workspacePath);
         matchedProject = byPath[canonicalWs];
       }
 
       // 3. Priority 3: most specific parent directory (longest matching prefix)
       if (matchedProject == null && s.workspacePath.isNotEmpty) {
-        for (final entry in parentPathEntries) {
-          if (WorkspacePath.isSubdirOf(s.workspacePath, entry.key)) {
+        cWsLower = (canonicalWs ?? WorkspacePath.canonicalPath(s.workspacePath)).toLowerCase();
+        for (final entry in canonicalParentEntries) {
+          final pPrefix = entry.key;
+          if (cWsLower == pPrefix || cWsLower.startsWith('$pPrefix/')) {
             matchedProject = entry.value;
             break;
           }
@@ -193,14 +207,31 @@ List<CascadeSession> sortSessions({
 
   switch (sortBy) {
     case SessionSortBy.alphabetical:
-      copy.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+      if (copy.length <= 100) {
+        copy.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+      } else {
+        // O(N) pre-key extraction eliminates O(N log N) string allocations during sorting
+        final indexed = List.generate(copy.length, (i) => (copy[i].title.toLowerCase(), copy[i]));
+        indexed.sort((a, b) => a.$1.compareTo(b.$1));
+        for (int i = 0; i < copy.length; i++) {
+          copy[i] = indexed[i].$2;
+        }
+      }
       break;
     case SessionSortBy.lastPrompt:
-      copy.sort((a, b) {
-        final aPrompt = (a.lastPrompt ?? a.title).toLowerCase();
-        final bPrompt = (b.lastPrompt ?? b.title).toLowerCase();
-        return aPrompt.compareTo(bPrompt);
-      });
+      if (copy.length <= 100) {
+        copy.sort((a, b) {
+          final aPrompt = (a.lastPrompt ?? a.title).toLowerCase();
+          final bPrompt = (b.lastPrompt ?? b.title).toLowerCase();
+          return aPrompt.compareTo(bPrompt);
+        });
+      } else {
+        final indexed = List.generate(copy.length, (i) => ((copy[i].lastPrompt ?? copy[i].title).toLowerCase(), copy[i]));
+        indexed.sort((a, b) => a.$1.compareTo(b.$1));
+        for (int i = 0; i < copy.length; i++) {
+          copy[i] = indexed[i].$2;
+        }
+      }
       break;
     case SessionSortBy.dateAdded:
       copy.sort((a, b) => a.id.compareTo(b.id));

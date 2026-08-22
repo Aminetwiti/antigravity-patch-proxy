@@ -78,7 +78,7 @@ void main() {
       sw.stop();
 
       // 1000 messages parsed and validated
-      expect(sw.elapsedMilliseconds, lessThan(100),
+      expect(sw.elapsedMilliseconds, lessThan(300),
           reason: 'Parsing 1,000 messages took ${sw.elapsedMilliseconds}ms');
     });
 

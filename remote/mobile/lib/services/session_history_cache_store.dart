@@ -9,6 +9,7 @@ import '../core/protocol/messages.dart';
 class SessionHistoryCacheStore {
   static const String _prefix = 'session_history_cache_';
   static const int _maxMessagesPerSession = 80;
+  static const int _maxSessionsInMemory = 30;
 
   SessionHistoryCacheStore._();
   static final SessionHistoryCacheStore instance = SessionHistoryCacheStore._();
@@ -16,12 +17,22 @@ class SessionHistoryCacheStore {
   /// In-memory fast cache (0ms instant lookup without waiting for disk)
   final Map<String, List<ChatMessage>> _memCache = {};
 
+  void _touchInMemory(String sessionId, List<ChatMessage> messages) {
+    _memCache.remove(sessionId);
+    while (_memCache.length >= _maxSessionsInMemory) {
+      _memCache.remove(_memCache.keys.first);
+    }
+    _memCache[sessionId] = messages;
+  }
+
   /// Loads cached messages for a session. Returns immediately from memory or SharedPreferences.
   Future<List<ChatMessage>> loadSessionHistory(String sessionId) async {
     if (sessionId.isEmpty) return const [];
 
-    if (_memCache.containsKey(sessionId) && _memCache[sessionId]!.isNotEmpty) {
-      return List.unmodifiable(_memCache[sessionId]!);
+    final inMem = _memCache.remove(sessionId);
+    if (inMem != null && inMem.isNotEmpty) {
+      _memCache[sessionId] = inMem;
+      return List.unmodifiable(inMem);
     }
 
     try {
@@ -37,7 +48,7 @@ class SessionHistoryCacheStore {
           .map((m) => ChatMessage.fromJson(m))
           .toList();
 
-      _memCache[sessionId] = parsed;
+      _touchInMemory(sessionId, parsed);
       return List.unmodifiable(parsed);
     } catch (e) {
       debugPrint('[SessionHistoryCacheStore] Failed to load cached history for $sessionId: $e');
@@ -48,7 +59,12 @@ class SessionHistoryCacheStore {
   /// Synchronously returns currently loaded in-memory cached messages for 0ms frame render.
   List<ChatMessage>? getInMemory(String sessionId) {
     if (sessionId.isEmpty) return null;
-    return _memCache[sessionId];
+    final inMem = _memCache.remove(sessionId);
+    if (inMem != null) {
+      _memCache[sessionId] = inMem;
+      return inMem;
+    }
+    return null;
   }
 
   /// Saves a session's messages into local persistent cache.
@@ -65,7 +81,7 @@ class SessionHistoryCacheStore {
       toPersist.removeRange(0, toPersist.length - _maxMessagesPerSession);
     }
 
-    _memCache[sessionId] = toPersist;
+    _touchInMemory(sessionId, toPersist);
 
     try {
       final prefs = await SharedPreferences.getInstance();

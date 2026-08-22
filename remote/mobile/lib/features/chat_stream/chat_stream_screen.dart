@@ -5302,8 +5302,17 @@ class _MediaThumbnailItem extends StatefulWidget {
 
 class _MediaThumbnailItemState extends State<_MediaThumbnailItem> {
   static final Map<String, Uint8List> _thumbnailMemoryCache = {};
+  static const int _maxThumbnailCacheSize = 50;
   Uint8List? _bytes;
   bool _isLoading = false;
+
+  static void _putThumbnail(String key, Uint8List bytes) {
+    _thumbnailMemoryCache.remove(key);
+    while (_thumbnailMemoryCache.length >= _maxThumbnailCacheSize) {
+      _thumbnailMemoryCache.remove(_thumbnailMemoryCache.keys.first);
+    }
+    _thumbnailMemoryCache[key] = bytes;
+  }
 
   @override
   void initState() {
@@ -5313,8 +5322,10 @@ class _MediaThumbnailItemState extends State<_MediaThumbnailItem> {
 
   void _loadThumbnail() async {
     final cacheKey = widget.item.dataUri ?? widget.item.path;
-    if (_thumbnailMemoryCache.containsKey(cacheKey)) {
-      setState(() => _bytes = _thumbnailMemoryCache[cacheKey]);
+    final cached = _thumbnailMemoryCache.remove(cacheKey);
+    if (cached != null) {
+      _thumbnailMemoryCache[cacheKey] = cached;
+      setState(() => _bytes = cached);
       return;
     }
 
@@ -5323,7 +5334,7 @@ class _MediaThumbnailItemState extends State<_MediaThumbnailItem> {
         final comma = widget.item.dataUri!.indexOf(',');
         if (comma != -1) {
           final b = base64Decode(widget.item.dataUri!.substring(comma + 1));
-          _thumbnailMemoryCache[cacheKey] = b;
+          _putThumbnail(cacheKey, b);
           setState(() {
             _bytes = b;
           });
@@ -5344,7 +5355,7 @@ class _MediaThumbnailItemState extends State<_MediaThumbnailItem> {
       final f = File(p);
       if (f.existsSync()) {
         final b = await f.readAsBytes();
-        _thumbnailMemoryCache[cacheKey] = b;
+        _putThumbnail(cacheKey, b);
         if (mounted) setState(() => _bytes = b);
         return;
       }
@@ -5358,7 +5369,7 @@ class _MediaThumbnailItemState extends State<_MediaThumbnailItem> {
         final b64 = res['base64Data'] as String?;
         if (b64 != null && b64.isNotEmpty && mounted) {
           final b = base64Decode(b64);
-          _thumbnailMemoryCache[cacheKey] = b;
+          _putThumbnail(cacheKey, b);
           setState(() {
             _bytes = b;
             _isLoading = false;

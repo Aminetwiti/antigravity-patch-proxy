@@ -40,12 +40,12 @@ type HistoryMessage struct {
 }
 
 var (
-	wsMappingRe     = regexp.MustCompile(`(?i)([a-zA-Z]:(?:\\\\|/|\\)[^"\r\n\t<>]+?)\s*->`)
-	wsFileURIRe     = regexp.MustCompile(`file:///[^\s"'\r\n]+`)
-	convTitleRe     = regexp.MustCompile(`##\s*Conversation\s+([0-9a-fA-F-]+):\s*([^"\r\n\\]+?)(?:\\[nrt]|\r|\n|"|$)`)
-	userObjectiveRe = regexp.MustCompile(`(?i)###\s*USER Objective:\s*([^"\r\n\\]+?)(?:\\[nrt]|\r|\n|"|$)`)
-	rawWsMappingRe  = regexp.MustCompile(`(?i)(?:\[|\b)([a-zA-Z]:(?:\\\\|[\\/])[^"\r\n\t<>]+?)(?:\]|\b)\s*->`)
-	rawWsToolArgRe  = regexp.MustCompile(`(?i)"(?:filePath|file_path|targetFile|TargetFile|AbsolutePath|DirectoryPath|Cwd)"\s*:\s*"([a-zA-Z]:(?:\\\\|[\\/])[^"\r\n\t<>]+?)"`)
+	wsMappingRe      = regexp.MustCompile(`(?i)([a-zA-Z]:(?:\\\\|/|\\)[^"\r\n\t<>]+?)\s*->`)
+	wsFileURIRe      = regexp.MustCompile(`file:///[^\s"'\r\n]+`)
+	convTitleRe      = regexp.MustCompile(`##\s*Conversation\s+([0-9a-fA-F-]+):\s*([^"\r\n\\]+?)(?:\\[nrt]|\r|\n|"|$)`)
+	userObjectiveRe  = regexp.MustCompile(`(?i)###\s*USER Objective:\s*([^"\r\n\\]+?)(?:\\[nrt]|\r|\n|"|$)`)
+	rawWsMappingRe   = regexp.MustCompile(`(?i)(?:\[|\b)([a-zA-Z]:(?:\\\\|[\\/])[^"\r\n\t<>]+?)(?:\]|\b)\s*->`)
+	rawWsToolArgRe   = regexp.MustCompile(`(?i)"(?:filePath|file_path|targetFile|TargetFile|AbsolutePath|DirectoryPath|Cwd)"\s*:\s*"([a-zA-Z]:(?:\\\\|[\\/])[^"\r\n\t<>]+?)"`)
 	globalConvTitles = make(map[string]string)
 	convTitlesMu     sync.RWMutex
 

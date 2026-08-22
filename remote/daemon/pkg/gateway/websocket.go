@@ -143,7 +143,6 @@ type RPCClient interface {
 	CheckoutWorktree(worktreeDirURI, targetWorkspaceURI string, deleteAfterCheckout bool, mergeStrategy uint64) ([]byte, error)
 }
 
-
 // JetboxStreamer est la portion minimale du client LS n├®cessaire au flux
 // temps r├®el des r├®sum├®s de sessions (JetboxSubscribeToSummaries). Interface
 // ├®troite : les tests injectent un faux sans r├®impl├®menter RPCClient.
@@ -384,23 +383,23 @@ func NewServer(client RPCClient, authToken string) *Server {
 		cascadeDeviceOwners: make(map[string]string),
 		approvals:           make(map[string]*pendingApproval),
 		approvalTimeout:     5 * time.Minute,
-		sessionApprovals: make(map[string]bool),
-		autoAcceptMode:   "readonly",
-		uploadChunks:     make(map[string]*uploadChunkState),
-		adbService:       adb.NewService(nil),
-		activeCascades:   make(map[string]bool),
-		startedAt:        time.Now(),
-		sentRequestIDs:   make(map[string]bool),
-		clientInFlight:   make(map[*websocket.Conn]int),
-		writeLocks:       make(map[*websocket.Conn]*sync.Mutex),
-		streamBuffer:     NewSessionStreamBuffer(200),
-		outbox:           NewDaemonOutbox(),
-		activeCancels:    make(map[string]map[string]context.CancelFunc),
-		activeRequestIDs: make(map[string]string),
-		scheduledTasks:   make(map[string]*ScheduledTask),
-		terminals:        newTerminalPtyManager(),
-		runningTasks:     newRunningTaskManager(),
-		clientSessions:   make(map[*websocket.Conn]discovery.SessionInfo),
+		sessionApprovals:    make(map[string]bool),
+		autoAcceptMode:      "readonly",
+		uploadChunks:        make(map[string]*uploadChunkState),
+		adbService:          adb.NewService(nil),
+		activeCascades:      make(map[string]bool),
+		startedAt:           time.Now(),
+		sentRequestIDs:      make(map[string]bool),
+		clientInFlight:      make(map[*websocket.Conn]int),
+		writeLocks:          make(map[*websocket.Conn]*sync.Mutex),
+		streamBuffer:        NewSessionStreamBuffer(200),
+		outbox:              NewDaemonOutbox(),
+		activeCancels:       make(map[string]map[string]context.CancelFunc),
+		activeRequestIDs:    make(map[string]string),
+		scheduledTasks:      make(map[string]*ScheduledTask),
+		terminals:           newTerminalPtyManager(),
+		runningTasks:        newRunningTaskManager(),
+		clientSessions:      make(map[*websocket.Conn]discovery.SessionInfo),
 	}
 	s.scheduler = NewScheduler(s)
 	s.terminals.onBroadcast = s.broadcast
@@ -435,7 +434,6 @@ func (s *Server) startUploadReaper(interval, maxAge time.Duration) {
 		}
 	}()
 }
-
 
 // sessionsCacheTTL : dur├®e de fra├«cheur du cache list_sessions. Le mobile
 // rafra├«chit la liste ├á chaque reconnexion ; le LS met ~9,5 s ├á r├®pondre.
@@ -785,7 +783,6 @@ func (s *Server) SetAllowRemoteTerminal(allow bool) {
 	defer s.mu.Unlock()
 	s.allowRemoteTerminal = allow
 }
-
 
 // SetAutoAccept active/désactive l'auto-approbation des actions (toggle des
 // réglages mobile, message WS set_auto_accept). Rétro-compatibilité : enabled=true
@@ -1699,7 +1696,6 @@ type IncomingMessage struct {
 	MaxDepth   int    `json:"maxDepth,omitempty"`
 }
 
-
 func (m *IncomingMessage) UnmarshalJSON(data []byte) error {
 	type Alias IncomingMessage
 	var raw struct {
@@ -2272,20 +2268,20 @@ func (s *Server) handleADB(conn *websocket.Conn, msg IncomingMessage) bool {
 			home, _ := os.UserHomeDir()
 			cleanName := filepath.Base(filepath.Clean(rPath))
 			lPath = filepath.Join(home, ".gemini", "antigravity", "downloads", cleanName)
-			} else {
-				wsRoot := homeRoot(msg.WorkspacePath)
-				if wsRoot == "" {
-					if projs := ListOfficialProjects(); len(projs) > 0 && projs[0].Path != "" {
-						wsRoot = projs[0].Path
-					} else if home, errHome := os.UserHomeDir(); errHome == nil {
-						wsRoot = filepath.Join(home, ".gemini", "antigravity", "downloads")
-					}
+		} else {
+			wsRoot := homeRoot(msg.WorkspacePath)
+			if wsRoot == "" {
+				if projs := ListOfficialProjects(); len(projs) > 0 && projs[0].Path != "" {
+					wsRoot = projs[0].Path
+				} else if home, errHome := os.UserHomeDir(); errHome == nil {
+					wsRoot = filepath.Join(home, ".gemini", "antigravity", "downloads")
 				}
-				if wsRoot != "" && !isPathInsideAllowedWorkspaces(wsRoot) {
-					s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: racine workspace non autorisée"})
-					return true
-				}
-				resolved, errRes := resolvePath(wsRoot, lPath)
+			}
+			if wsRoot != "" && !isPathInsideAllowedWorkspaces(wsRoot) {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: racine workspace non autorisée"})
+				return true
+			}
+			resolved, errRes := resolvePath(wsRoot, lPath)
 			if errRes != nil {
 				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé hors du workspace: " + errRes.Error()})
 				return true
@@ -6320,7 +6316,6 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		return
 	}
 
-
 	if err != nil {
 		s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
 		return
@@ -7507,11 +7502,6 @@ func (s *Server) runLiveTurnStreamer(ctx context.Context, cascadeID, requestID s
 	var lastOffset int64
 	if transcriptPath != "" {
 		lastOffset = findLastTurnOffset(transcriptPath)
-		if lastOffset == 0 {
-			if fi, err := os.Stat(transcriptPath); err == nil {
-				lastOffset = fi.Size()
-			}
-		}
 	}
 
 	ticker := time.NewTicker(30 * time.Millisecond)
@@ -7537,11 +7527,6 @@ func (s *Server) runLiveTurnStreamer(ctx context.Context, cascadeID, requestID s
 				nextTranscriptLookup = time.Now().Add(500 * time.Millisecond)
 				if transcriptPath != "" && lastOffset == 0 {
 					lastOffset = findLastTurnOffset(transcriptPath)
-					if lastOffset == 0 {
-						if fi, err := os.Stat(transcriptPath); err == nil {
-							lastOffset = fi.Size()
-						}
-					}
 				}
 			}
 
@@ -8041,4 +8026,3 @@ func isRunningTests() bool {
 		strings.HasSuffix(os.Args[0], ".test.exe") ||
 		strings.Contains(os.Args[0], "__debug_bin")
 }
-
