@@ -324,6 +324,7 @@ class MarkdownRenderer {
   static final _attachmentTagRe = RegExp(r'^\[(Images? jointes?|Image|Fichier|File|Pièce jointe|Piece jointe):\s*([^\]]+)\]', caseSensitive: false);
   static final _matchAttachPrefixRe = RegExp(r'\[(Images? jointes?|Image|Fichier|File|Pièce jointe|Piece jointe):\s*[^\]]+\]', caseSensitive: false);
   static final _matchArtifactPrefixRe = RegExp(r'\[ARTIFACT:\s*[^\]]+\]', caseSensitive: false);
+  static final _tableCellRe = RegExp(r'^:?-+:?$');
   static final Map<String, bool> _localFileExistsCache = {};
   static const int _maxLocalFileExistsEntries = 500;
 

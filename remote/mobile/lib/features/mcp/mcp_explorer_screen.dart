@@ -77,6 +77,7 @@ class _McpExplorerScreenState extends State<McpExplorerScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
+        scrollable: true,
         backgroundColor: scheme.surfaceContainer,
         title: Row(
           children: [

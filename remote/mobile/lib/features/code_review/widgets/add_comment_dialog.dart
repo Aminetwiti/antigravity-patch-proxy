@@ -71,10 +71,11 @@ class _AddCommentDialogState extends State<AddCommentDialog> {
         borderRadius: BorderRadius.circular(AppRadius.lg),
         border: Border.all(color: scheme.outlineVariant),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
           // Header
           Row(
             children: [
@@ -209,7 +210,8 @@ class _AddCommentDialogState extends State<AddCommentDialog> {
           ),
         ],
       ),
-    );
+    ),
+  );
 
     return isDialog
         ? Dialog(

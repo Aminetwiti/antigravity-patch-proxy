@@ -800,7 +800,7 @@ class _SidebarActionItemState extends State<_SidebarActionItem> {
 }
 
 // ── Workspace Folder Section (Grouping & Sessions under a folder)
-class _WorkspaceFolderSection extends StatelessWidget {
+class _WorkspaceFolderSection extends StatefulWidget {
   final String folderName;
   final List<CascadeSession> sessions;
   final ProjectItem? project;
@@ -843,11 +843,50 @@ class _WorkspaceFolderSection extends StatelessWidget {
   });
 
   @override
+  State<_WorkspaceFolderSection> createState() => _WorkspaceFolderSectionState();
+}
+
+class _WorkspaceFolderSectionState extends State<_WorkspaceFolderSection> {
+  int _visibleLimit = 6;
+
+  @override
+  void initState() {
+    super.initState();
+    _visibleLimit = widget.hideHeader ? 30 : 6;
+  }
+
+  @override
+  void didUpdateWidget(covariant _WorkspaceFolderSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.hideHeader != oldWidget.hideHeader) {
+      _visibleLimit = widget.hideHeader ? 30 : 6;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    // Antigravity 2.0 IDE sidebar: jusqu'à 30 sessions en vue non groupée, 6 en vue groupée par projet
-    final visibleSessions = hideHeader ? sessions.take(30).toList() : sessions.take(6).toList();
+    final sessions = widget.sessions;
+    final visibleSessions = sessions.take(_visibleLimit).toList();
+    final remainingCount = sessions.length - visibleSessions.length;
+    final folderName = widget.folderName;
+    final hideHeader = widget.hideHeader;
+    final isCollapsed = widget.isCollapsed;
+    final onToggleCollapse = widget.onToggleCollapse;
+    final project = widget.project;
+    final onNewConversation = widget.onNewConversation;
+    final onOpenSettings = widget.onOpenSettings;
+    final activeSessionId = widget.activeSessionId;
+    final showSubtitle = widget.showSubtitle;
+    final readIds = widget.readIds;
+    final onSessionTap = widget.onSessionTap;
+    final onDeleteSession = widget.onDeleteSession;
+    final onArchiveSession = widget.onArchiveSession;
+    final onRenameSession = widget.onRenameSession;
+    final onExportSession = widget.onExportSession;
+    final pinnedIds = widget.pinnedIds;
+    final onTogglePin = widget.onTogglePin;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1002,6 +1041,40 @@ class _WorkspaceFolderSection extends StatelessWidget {
                       ? () => onTogglePin!(s.id)
                       : null,
                 )),
+            if (remainingCount > 0)
+              Padding(
+                padding: const EdgeInsets.only(left: 14, top: 3, bottom: 3),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      setState(() {
+                        _visibleLimit += 25;
+                      });
+                    },
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.expand_more_rounded, size: 14, color: scheme.primary),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Afficher plus ($remainingCount restantes)',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w500,
+                              color: scheme.primary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
           ],
         ],
         const SizedBox(height: 4),
@@ -1182,6 +1255,7 @@ class _SessionRowItemState extends State<_SessionRowItem> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
+        scrollable: true,
         backgroundColor: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainer,
         title: Text('Renommer la conversation', style: TextStyle(fontSize: 15, color: scheme.onSurface)),
         content: TextField(
@@ -1232,6 +1306,7 @@ class _SessionRowItemState extends State<_SessionRowItem> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
+        scrollable: true,
         backgroundColor: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainer,
         title: Text('Supprimer la conversation ?', style: TextStyle(fontSize: 15, color: scheme.onSurface)),
         content: Text(

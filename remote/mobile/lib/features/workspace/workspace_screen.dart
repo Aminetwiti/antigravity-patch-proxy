@@ -2126,6 +2126,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
+        scrollable: true,
         backgroundColor: scheme.surfaceContainer,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
         title: Row(

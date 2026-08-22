@@ -133,6 +133,7 @@ class _ScheduledTaskDetailScreenState extends State<ScheduledTaskDetailScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
+        scrollable: true,
         backgroundColor: isDark ? AppColors.surfaceRaised : scheme.surfaceContainer,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.md),

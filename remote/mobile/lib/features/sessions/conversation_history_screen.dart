@@ -98,25 +98,41 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    // Filtrer STRICTEMENT les sessions disponibles (non archivées et non supprimées)
-    final available = _allSessions.where((s) => s.isAvailable && s.id.isNotEmpty).toList();
+  List<CascadeSession>? _memoAllSessions;
+  List<ProjectItem>? _memoAllProjects;
+  String? _memoSearchQuery;
+  String? _memoSelectedFilter;
+  SessionGroupBy? _memoGroupBy;
+  SessionSortBy? _memoSortBy;
+  List<String> _memoWorkspaces = const [];
+  List<dynamic> _memoDisplayItems = const [];
 
-    // Extraire tous les workspaces distincts pour le filtre
+  void _computePipeline() {
+    final sessions = _allSessions;
+    final projects = _allProjects;
+    if (_memoDisplayItems.isNotEmpty &&
+        identical(sessions, _memoAllSessions) &&
+        identical(projects, _memoAllProjects) &&
+        _searchQuery == _memoSearchQuery &&
+        _selectedWorkspaceFilter == _memoSelectedFilter &&
+        _groupBy == _memoGroupBy &&
+        _sortBy == _memoSortBy) {
+      return;
+    }
+
+    final available = sessions.where((s) => s.isAvailable && s.id.isNotEmpty).toList();
+
     final Set<String> workspaceSet = {};
     for (final s in available) {
       workspaceSet.add(WorkspacePath.displayName(s.workspacePath));
     }
     final workspaces = workspaceSet.toList()..sort();
 
-    // Appliquer le filtre par workspace
     var filtered = available;
     if (_selectedWorkspaceFilter != null) {
       filtered = filtered.where((s) => WorkspacePath.displayName(s.workspacePath) == _selectedWorkspaceFilter).toList();
     }
 
-    // Appliquer la recherche textuelle
     if (_searchQuery.isNotEmpty) {
       filtered = filtered.where((s) {
         final title = s.title.toLowerCase();
@@ -125,17 +141,14 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
       }).toList();
     }
 
-    // Tri dynamique selon Display Options
     filtered = sortSessions(sessions: filtered, sortBy: _sortBy);
 
-    // Groupement dynamique selon Display Options avec la même liste de projets canonique
     final groupedSessions = groupSessions(
       sessions: filtered,
       groupBy: _groupBy,
-      projects: _allProjects,
+      projects: projects,
     );
 
-    // Flatten for list rendering with headers
     final List<dynamic> displayItems = [];
     if (_groupBy == SessionGroupBy.none) {
       displayItems.addAll(filtered);
@@ -147,6 +160,22 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
         }
       }
     }
+
+    _memoAllSessions = sessions;
+    _memoAllProjects = projects;
+    _memoSearchQuery = _searchQuery;
+    _memoSelectedFilter = _selectedWorkspaceFilter;
+    _memoGroupBy = _groupBy;
+    _memoSortBy = _sortBy;
+    _memoWorkspaces = workspaces;
+    _memoDisplayItems = displayItems;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _computePipeline();
+    final workspaces = _memoWorkspaces;
+    final displayItems = _memoDisplayItems;
 
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -583,6 +612,7 @@ class _ConversationHistoryRow extends StatelessWidget {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
+        scrollable: true,
         backgroundColor: isDark ? const Color(0xFF1B1D22) : scheme.surfaceContainer,
         title: Text('Supprimer la conversation ?', style: TextStyle(fontSize: 15, color: scheme.onSurface)),
         content: Text(

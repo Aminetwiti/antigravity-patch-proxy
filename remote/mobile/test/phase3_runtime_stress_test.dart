@@ -1,20 +1,28 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mobile/core/network/outbox.dart';
 import 'package:mobile/core/protocol/markdown_renderer.dart';
 import 'package:mobile/core/protocol/messages.dart';
+import 'package:mobile/core/protocol/session_parser.dart';
 import 'package:mobile/core/protocol/stream_parser.dart';
 import 'package:mobile/features/sessions/display_options.dart';
+import 'package:mobile/services/session_history_cache_store.dart';
 import 'package:mobile/widgets/syntax_highlighter.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
   group('PHASE 3 — Ultra Deep Performance & Stress Benchmarks (Tests A -> J)', () {
-    test('TEST A & B — 5,000 and 10,000 Sessions Scaling with 50 Projects', () {
+    test('TEST A & B — 5,000 and 10,000 Sessions Scaling with 50 Projects (P95/P99 Latency)', () {
       final projects = List.generate(50, (i) => ProjectItem(
         id: 'proj-$i',
-        name: 'Enterprise Service $i',
+        name: 'Enterprise Microservice $i',
         folderUri: 'file:///c:/Users/dev/workspace/enterprise_proj_$i',
         path: 'c:/Users/dev/workspace/enterprise_proj_$i',
       ));
@@ -50,8 +58,10 @@ void main() {
         expect(sorted.length, count);
         expect(grouped.isNotEmpty, true);
 
-        // Benchmark check: 10,000 sessions grouping must complete in under 200ms
-        expect(swGroup.elapsedMilliseconds, lessThan(350),
+        // Benchmark check: 10,000 sessions sort completes in < 150ms and group completes in < 250ms
+        expect(swSort.elapsedMilliseconds, lessThan(150),
+            reason: 'Sorting $count sessions took ${swSort.elapsedMilliseconds}ms');
+        expect(swGroup.elapsedMilliseconds, lessThan(250),
             reason: 'Grouping $count sessions took ${swGroup.elapsedMilliseconds}ms');
       }
     });
@@ -78,7 +88,7 @@ void main() {
       sw.stop();
 
       // 1000 messages parsed and validated
-      expect(sw.elapsedMilliseconds, lessThan(300),
+      expect(sw.elapsedMilliseconds, lessThan(250),
           reason: 'Parsing 1,000 messages took ${sw.elapsedMilliseconds}ms');
     });
 
@@ -91,70 +101,107 @@ void main() {
       expect(hundredKb.length, greaterThan(80000));
 
       final sw100k = Stopwatch()..start();
-      final blocks = MarkdownRenderer.blocksOf(hundredKb);
+      final blocks100k = MarkdownRenderer.blocksOf(hundredKb);
       sw100k.stop();
 
-      expect(blocks.isNotEmpty, true);
-      expect(sw100k.elapsedMilliseconds, lessThan(150),
+      expect(blocks100k.isNotEmpty, true);
+      expect(sw100k.elapsedMilliseconds, lessThan(120),
           reason: 'Parsing 100KB payload took ${sw100k.elapsedMilliseconds}ms');
+
+      // Build 1 MB payload
+      final oneMb = List.generate(10, (_) => hundredKb).join('\n---\n');
+      final sw1Mb = Stopwatch()..start();
+      final blocks1Mb = MarkdownRenderer.blocksOf(oneMb);
+      sw1Mb.stop();
+
+      expect(blocks1Mb.isNotEmpty, true);
+      expect(sw1Mb.elapsedMilliseconds, lessThan(600),
+          reason: 'Parsing 1MB payload took ${sw1Mb.elapsedMilliseconds}ms');
     });
 
-    test('TEST E & F — 100 Stream Events/s Burst across 10 Simultaneous Agents', () {
-      final agentsCount = 10;
-      final eventsPerAgent = 50; // 500 total events
-      final sessionStreams = <String, List<String>>{};
+    test('TEST E & F — 100 Stream Events/s Burst across 10 and 20 Simultaneous Agents', () {
+      for (final agentsCount in [10, 20]) {
+        final eventsPerAgent = 50; // 500 to 1000 total events
+        final sessionStreams = <String, List<String>>{};
+
+        final sw = Stopwatch()..start();
+        for (int agent = 0; agent < agentsCount; agent++) {
+          final cascadeId = 'cascade-agent-$agent';
+          final buffer = <String>[];
+          for (int e = 0; e < eventsPerAgent; e++) {
+            final rawMsg = {
+              'type': 'stream_delta',
+              'data': {
+                'cascadeId': cascadeId,
+                'events': [
+                  {'kind': 'text', 'delta': ' token_$e'},
+                  {'kind': 'thinking', 'delta': ' thought_$e'},
+                ],
+              },
+            };
+            final text = StreamDeltaParser.textOf(rawMsg);
+            final think = StreamDeltaParser.thinkingOf(rawMsg);
+            buffer.add('$text$think');
+          }
+          sessionStreams[cascadeId] = buffer;
+        }
+        sw.stop();
+
+        expect(sessionStreams.length, agentsCount);
+        expect(sw.elapsedMilliseconds, lessThan(150),
+            reason: 'Processing $agentsCount agents stream events took ${sw.elapsedMilliseconds}ms');
+      }
+    });
+
+    test('TEST G — SessionParser Single-Pass High-Throughput Parsing (1,000 Sessions)', () {
+      final rawSessions = List.generate(1000, (i) => {
+        'cascadeId': 'cascade-$i',
+        'title': 'Feature #$i Implementation',
+        'workspace': 'file:///c:/Users/dev/workspace/app',
+        'status': i % 5 == 0 ? 'CASCADE_STATUS_RUNNING' : 'CASCADE_STATUS_READY',
+        'updatedAt': DateTime.now().subtract(Duration(minutes: i)).toIso8601String(),
+        'stepCount': i % 10,
+      });
+
+      final payload = {'sessions': rawSessions};
 
       final sw = Stopwatch()..start();
-      for (int agent = 0; agent < agentsCount; agent++) {
-        final cascadeId = 'cascade-agent-$agent';
-        final buffer = <String>[];
-        for (int e = 0; e < eventsPerAgent; e++) {
-          final rawMsg = {
-            'type': 'stream_delta',
-            'data': {
-              'cascadeId': cascadeId,
-              'events': [
-                {'kind': 'text', 'delta': ' token_$e'},
-                {'kind': 'thinking', 'delta': ' thought_$e'},
-              ],
-            },
-          };
-          final text = StreamDeltaParser.textOf(rawMsg);
-          final think = StreamDeltaParser.thinkingOf(rawMsg);
-          buffer.add('$text$think');
-        }
-        sessionStreams[cascadeId] = buffer;
-      }
+      final parsed = SessionParser.parseListSessions(payload);
       sw.stop();
 
-      expect(sessionStreams.length, agentsCount);
-      expect(sw.elapsedMilliseconds, lessThan(100),
-          reason: 'Processing 500 stream events took ${sw.elapsedMilliseconds}ms');
+      expect(parsed.length, 1000);
+      expect(parsed.first.id, 'cascade-0'); // Most recent first
+      expect(sw.elapsedMilliseconds, lessThan(80),
+          reason: 'Parsing 1,000 sessions took ${sw.elapsedMilliseconds}ms');
     });
 
-    test('TEST G & H — Open/Close Session Simulation (500x) Zero Resource Leaks', () {
-      final cache = <String, List<ChatMessage>>{};
+    test('TEST H — Open/Close Session Simulation (500x) with Bounded In-Memory Cache', () async {
+      final store = SessionHistoryCacheStore.instance;
+      store.clearMemory();
 
       final sw = Stopwatch()..start();
       for (int i = 0; i < 500; i++) {
-        final sId = 'session-${i % 25}';
-        // Open
-        final msgs = cache.putIfAbsent(sId, () => [
-          ChatMessage(id: 'm1', sender: 'user', text: 'Prompt in $sId', timestamp: '12:00'),
-          ChatMessage(id: 'm2', sender: 'assistant', text: 'Response in $sId', timestamp: '12:01'),
-        ]);
-        expect(msgs.length, 2);
-        // Mutate
-        msgs.add(ChatMessage(id: 'm3-$i', sender: 'user', text: 'Follow up $i', timestamp: '12:02'));
-        // Close (evict if over 20 active sessions in memory)
-        if (cache.length > 20) {
-          cache.remove(cache.keys.first);
-        }
+        final sId = 'session-$i';
+        final messages = [
+          ChatMessage(id: 'm1-$i', sender: 'user', text: 'Prompt in $sId', timestamp: '12:00'),
+          ChatMessage(id: 'm2-$i', sender: 'assistant', text: 'Response in $sId', timestamp: '12:01'),
+        ];
+        await store.saveSessionHistory(sId, messages);
+        final loaded = store.getInMemory(sId);
+        expect(loaded, isNotNull);
+        expect(loaded!.length, 2);
       }
       sw.stop();
 
-      expect(cache.length, lessThanOrEqualTo(20));
-      expect(sw.elapsedMilliseconds, lessThan(50),
+      // Ensure that in-memory cache strictly caps at max 30 sessions (zero memory leaks)
+      int activeInMemory = 0;
+      for (int i = 0; i < 500; i++) {
+        if (store.getInMemory('session-$i') != null) {
+          activeInMemory++;
+        }
+      }
+      expect(activeInMemory, lessThanOrEqualTo(30));
+      expect(sw.elapsedMilliseconds, lessThan(250),
           reason: '500 session open/close cycles took ${sw.elapsedMilliseconds}ms');
     });
 
@@ -180,7 +227,7 @@ void main() {
       expect(outbox.hasPending, false);
     });
 
-    test('TEST J — Syntax Highlighter LRU Cache Hit Rate and Speed', () {
+    test('TEST J — Syntax Highlighter & Markdown LRU Cache Hit Rate and Speed', () {
       const sampleCode = '''
 import 'dart:async';
 class WorkerPool {

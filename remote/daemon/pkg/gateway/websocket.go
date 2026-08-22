@@ -1227,10 +1227,10 @@ func (s *Server) requireProject(conn *websocket.Conn, uri string) bool {
 // canApproveCascade vérifie si la connexion cliente a le droit d'approuver
 // une action sensible pour la cascade spécifiée (paternité ou privilège Admin).
 func (s *Server) canApproveCascade(conn *websocket.Conn, cascadeID string) bool {
-	if s.requireAdmin(conn) {
+	sess := s.sessionFor(conn)
+	if sess.Admin {
 		return true
 	}
-	sess := s.sessionFor(conn)
 	s.mu.Lock()
 	ownerDevID := s.cascadeDeviceOwners[cascadeID]
 	if p, ok := s.approvals[cascadeID]; ok && p.originatingDeviceID != "" {
@@ -3938,9 +3938,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		s.clientInFlight[conn]++
 		s.mu.Unlock()
 
+		devID := s.sessionFor(conn).DeviceID
 		ctx, cancel := context.WithCancel(context.Background())
 		s.mu.Lock()
-		if devID := s.sessionFor(conn).DeviceID; devID != "" {
+		if devID != "" {
 			s.cascadeDeviceOwners[msg.CascadeID] = devID
 		}
 		if s.activeCancels[msg.CascadeID] == nil {

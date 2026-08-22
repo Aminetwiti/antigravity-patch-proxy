@@ -15,15 +15,13 @@ class SessionParser {
   static List<CascadeSession> parseListSessions(Map<String, dynamic> data) {
     final sessions = data['sessions'] ?? (data['data'] is Map ? data['data']['sessions'] : null);
     if (sessions is List) {
-      var out = <CascadeSession>[];
+      final entries = <(CascadeSession, int)>[];
       for (final s in sessions) {
         if (s is Map) {
           final sMap = Map<String, dynamic>.from(s);
           final id = sMap['cascadeId'] ?? sMap['id'];
           if (id is String && id.isNotEmpty) {
             final stepCount = (sMap['stepCount'] as num?)?.toInt() ?? 0;
-            // Point bleu : session avec activité (≥ 1 étape) mais pas en cours
-            // Identique au comportement de l'indicateur Antigravity IDE
             final status = (sMap['status'] as String? ?? '').toUpperCase();
             final isRunning = status.contains('RUNNING') ||
                 status.contains('BUSY') ||
@@ -38,29 +36,17 @@ class SessionParser {
               'hasUnread': hasUnread,
             });
             if (session.isAvailable) {
-              out.add(session);
+              final updatedMs = DateTime.tryParse(sMap['updatedAt'] as String? ?? '')
+                      ?.millisecondsSinceEpoch ??
+                  0;
+              entries.add((session, updatedMs));
             }
           }
         }
       }
-      if (out.isNotEmpty) {
-        // Tri par date de mise à jour décroissante.
-        final byId = <String, DateTime>{};
-        for (final s in sessions) {
-          if (s is Map) {
-            final sMap = Map<String, dynamic>.from(s);
-            final cId = sMap['cascadeId'] ?? sMap['id'];
-            if (cId is String) {
-              byId[cId] =
-                  DateTime.tryParse(sMap['updatedAt'] as String? ?? '') ??
-                      DateTime.fromMillisecondsSinceEpoch(0);
-            }
-          }
-        }
-        out.sort((a, b) =>
-            (byId[b.id] ?? DateTime.fromMillisecondsSinceEpoch(0))
-                .compareTo(byId[a.id] ?? DateTime.fromMillisecondsSinceEpoch(0)));
-        return out;
+      if (entries.isNotEmpty) {
+        entries.sort((a, b) => b.$2.compareTo(a.$2));
+        return entries.map((e) => e.$1).toList();
       }
     }
     return _parseLegacyFieldDump(data);

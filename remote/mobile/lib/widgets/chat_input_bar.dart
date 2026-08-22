@@ -922,6 +922,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
         final nameCtrl = TextEditingController(text: 'data.json');
         final contentCtrl = TextEditingController();
         return AlertDialog(
+          scrollable: true,
           backgroundColor: scheme.surfaceContainer,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadius.lg),
@@ -1017,6 +1018,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
         final mimeCtrl = TextEditingController(text: 'image/png');
         final base64Ctrl = TextEditingController();
         return AlertDialog(
+          scrollable: true,
           backgroundColor: scheme.surfaceContainer,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadius.lg),
