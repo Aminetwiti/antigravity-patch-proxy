@@ -888,6 +888,24 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               ..clear()
               ..addAll(parsed);
             SessionHistoryCacheStore.instance.saveSessionHistory(targetSession, buf);
+            for (final msg in buf.reversed) {
+              if (msg.sender == 'assistant') {
+                final txt = msg.text.toLowerCase();
+                final thought = (msg.thought ?? '').toLowerCase();
+                if (txt.contains('quota') || thought.contains('quota')) {
+                  final banner = BannerClassifier.classifyError(
+                    msg.text.isNotEmpty ? msg.text : (msg.thought ?? ''),
+                    onDismiss: () => _dismissBanner('quota-exceeded'),
+                    onSwitchModel: _showModelSelector,
+                    onSeePlans: _showPlansOrLimitsSheet,
+                  );
+                  if (banner != null) {
+                    _activeBanners[banner.id] = banner;
+                  }
+                  break;
+                }
+              }
+            }
           }
           if (isStreaming) {
             _onStreamStarted(targetSession);
@@ -2272,9 +2290,17 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                         ? localData['message'] as String? ?? 'Erreur'
                         : null)
                     : null);
-            if (error != null) {
+            final currentMsg = buf[idx];
+            final fullText = currentMsg.text;
+            final fullThought = currentMsg.thought ?? '';
+            final candidateError = error ??
+                (fullText.toLowerCase().contains('quota')
+                    ? fullText
+                    : (fullThought.toLowerCase().contains('quota') ? fullThought : null));
+
+            if (candidateError != null) {
               final banner = BannerClassifier.classifyError(
-                error,
+                candidateError,
                 onDismiss: () => _dismissBanner('quota-exceeded'),
                 onSwitchModel: _showModelSelector,
                 onSeePlans: _showPlansOrLimitsSheet,
@@ -2285,12 +2311,13 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               }
               _refreshQuotaSummary();
             }
+            final isQuotaErr = candidateError != null && candidateError.toLowerCase().contains('quota');
             if (error != null && (error.contains('MODEL_CAPACITY_EXHAUSTED') || error.contains('No capacity available') || error.contains('503'))) {
               error = '⚠️ Capacité du modèle saturée sur les serveurs (HTTP 503 / MODEL_CAPACITY_EXHAUSTED).\nVeuillez basculer vers Gemini 3.7 Flash, Claude ou un modèle custom via le sélecteur ci-dessous.';
             }
             buf[idx] = buf[idx].copyWith(
               isStreaming: false,
-              isError: error != null,
+              isError: error != null || isQuotaErr,
               text: error != null
                   ? (buf[idx].text.isEmpty ? error : buf[idx].text)
                   : buf[idx].text,
@@ -3818,6 +3845,248 @@ class _ReminderBanner extends StatelessWidget {
   }
 }
 
+class _UserMessageBubble extends StatefulWidget {
+  final ChatMessage message;
+  final DaemonApi? api;
+  final String workspacePath;
+  final LocalFileTap? onLocalFile;
+  final ValueChanged<String>? onEditPrompt;
+  final ValueChanged<ChatMessage>? onRevertStep;
+
+  const _UserMessageBubble({
+    required this.message,
+    this.api,
+    this.workspacePath = '',
+    this.onLocalFile,
+    this.onEditPrompt,
+    this.onRevertStep,
+  });
+
+  @override
+  State<_UserMessageBubble> createState() => _UserMessageBubbleState();
+}
+
+class _UserMessageBubbleState extends State<_UserMessageBubble> {
+  bool _isExpanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final parsed = _extractMediaAndCleanText(widget.message.text);
+    final hasMedia = parsed.media.isNotEmpty;
+    final cleanText = parsed.cleanText;
+
+    // Détection si le message est long (> 4 sauts de ligne ou texte long > 220 caractères)
+    final lines = cleanText.split('\n');
+    final isLong = lines.length > 4 || cleanText.length > 220;
+
+    return RepaintBoundary(
+      child: GestureDetector(
+        onDoubleTap: widget.onEditPrompt != null ? () => widget.onEditPrompt!(widget.message.text) : null,
+        onLongPress: () {
+          HapticFeedback.lightImpact();
+          Clipboard.setData(ClipboardData(text: widget.message.text));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Prompt copié dans le presse-papiers'),
+              duration: Duration(seconds: 1),
+            ),
+          );
+        },
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerLow,
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(AppRadius.lg),
+              bottomLeft: Radius.circular(AppRadius.lg),
+              bottomRight: Radius.circular(AppRadius.xs),
+              topRight: Radius.circular(AppRadius.lg),
+            ),
+            border: Border(
+              left: BorderSide(
+                color: isDark ? AppColors.accentBlue.withValues(alpha: 0.3) : scheme.primary.withValues(alpha: 0.3),
+                width: 3,
+              ),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (hasMedia) ...[
+                _MediaGalleryRow(
+                  media: parsed.media,
+                  api: widget.api,
+                  workspacePath: widget.workspacePath,
+                  onLocalFile: widget.onLocalFile,
+                ),
+                if (cleanText.isNotEmpty) const SizedBox(height: 10),
+              ],
+              if (cleanText.isNotEmpty) ...[
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 240),
+                  curve: Curves.easeOutCubic,
+                  alignment: Alignment.topCenter,
+                  child: (!isLong || _isExpanded)
+                      ? MarkdownBubble(
+                          text: cleanText,
+                          isStreaming: false,
+                          api: widget.api,
+                          workspacePath: widget.workspacePath,
+                          onLocalFile: widget.onLocalFile,
+                        )
+                      : ShaderMask(
+                          shaderCallback: (rect) {
+                            return const LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [Colors.black, Colors.black, Colors.transparent],
+                              stops: [0.0, 0.65, 1.0],
+                            ).createShader(rect);
+                          },
+                          blendMode: BlendMode.dstIn,
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 102),
+                            child: MarkdownBubble(
+                              text: cleanText,
+                              isStreaming: false,
+                              api: widget.api,
+                              workspacePath: widget.workspacePath,
+                              onLocalFile: widget.onLocalFile,
+                            ),
+                          ),
+                        ),
+                ),
+                if (isLong) ...[
+                  const SizedBox(height: 8),
+                  InkWell(
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      setState(() => _isExpanded = !_isExpanded);
+                    },
+                    borderRadius: BorderRadius.circular(AppRadius.pill),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4.5),
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? const Color(0xFF22242B)
+                            : scheme.surfaceContainerHighest.withValues(alpha: 0.8),
+                        borderRadius: BorderRadius.circular(AppRadius.pill),
+                        border: Border.all(
+                          color: isDark
+                              ? const Color(0xFF323640)
+                              : scheme.outlineVariant.withValues(alpha: 0.6),
+                          width: 0.8,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _isExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+                            size: 15,
+                            color: isDark ? AppColors.accentBlue : scheme.primary,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _isExpanded
+                                ? 'Réduire'
+                                : 'Afficher tout (${lines.length > 4 ? '+${lines.length - 4} lignes' : 'déplier'})',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? AppColors.accentBlue : scheme.primary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+              const SizedBox(height: 6),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  if (widget.message.timestamp.isNotEmpty)
+                    Text(
+                      widget.message.timestamp,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isDark ? AppColors.inkMuted : scheme.outline,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  const SizedBox(width: 8),
+                  // Bouton Copier
+                  Tooltip(
+                    message: 'Copier le message',
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () {
+                          HapticFeedback.lightImpact();
+                          Clipboard.setData(ClipboardData(text: widget.message.text));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Prompt copié dans le presse-papiers'),
+                              duration: Duration(seconds: 1),
+                            ),
+                          );
+                        },
+                        borderRadius: BorderRadius.circular(6),
+                        hoverColor: (isDark ? AppColors.accentBlue : scheme.primary).withValues(alpha: 0.08),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                          child: Icon(
+                            Icons.copy_rounded,
+                            size: 14.5,
+                            color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (widget.onRevertStep != null) ...[
+                    const SizedBox(width: 4),
+                    // Bouton Revert / Undo changes up to this point
+                    Tooltip(
+                      message: 'Undo changes up to this point',
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () {
+                            HapticFeedback.lightImpact();
+                            widget.onRevertStep!(widget.message);
+                          },
+                          borderRadius: BorderRadius.circular(6),
+                          hoverColor: const Color(0xFFD97706).withValues(alpha: 0.1),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                            child: Icon(
+                              Icons.undo_rounded,
+                              size: 15.5,
+                              color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _MessageBubble extends StatelessWidget {
   final ChatMessage message;
 
@@ -3870,137 +4139,13 @@ class _MessageBubble extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     if (isUser) {
-      final parsed = _extractMediaAndCleanText(message.text);
-      final hasMedia = parsed.media.isNotEmpty;
-
-      return RepaintBoundary(
-        child: GestureDetector(
-          onDoubleTap: onEditPrompt != null ? () => onEditPrompt!(message.text) : null,
-          onLongPress: () {
-            HapticFeedback.lightImpact();
-            Clipboard.setData(ClipboardData(text: message.text));
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Prompt copié dans le presse-papiers'),
-                duration: Duration(seconds: 1),
-              ),
-            );
-          },
-          child: Container(
-            margin: const EdgeInsets.only(bottom: 16),
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            decoration: BoxDecoration(
-              color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerLow,
-              borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(AppRadius.lg),
-                bottomLeft: Radius.circular(AppRadius.lg),
-                bottomRight: Radius.circular(AppRadius.xs),
-                topRight: Radius.circular(AppRadius.lg),
-              ),
-              border: Border(
-                left: BorderSide(
-                  color: isDark ? AppColors.accentBlue.withValues(alpha: 0.3) : scheme.primary.withValues(alpha: 0.3),
-                  width: 3,
-                ),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (hasMedia) ...[
-                  _MediaGalleryRow(
-                    media: parsed.media,
-                    api: api,
-                    workspacePath: workspacePath,
-                    onLocalFile: onLocalFile,
-                  ),
-                  if (parsed.cleanText.isNotEmpty) const SizedBox(height: 10),
-                ],
-                if (parsed.cleanText.isNotEmpty)
-                  MarkdownBubble(
-                    text: parsed.cleanText,
-                    isStreaming: false,
-                    api: api,
-                    workspacePath: workspacePath,
-                    onLocalFile: onLocalFile,
-                  ),
-                const SizedBox(height: 6),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    if (message.timestamp.isNotEmpty)
-                      Text(
-                        message.timestamp,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: isDark ? AppColors.inkMuted : scheme.outline,
-                          fontWeight: FontWeight.w400,
-                        ),
-                      ),
-                    const SizedBox(width: 8),
-                    // Bouton Copier
-                    Tooltip(
-                      message: 'Copier le message',
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: () {
-                            HapticFeedback.lightImpact();
-                            Clipboard.setData(ClipboardData(text: message.text));
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Prompt copié dans le presse-papiers'),
-                                duration: Duration(seconds: 1),
-                              ),
-                            );
-                          },
-                          borderRadius: BorderRadius.circular(6),
-                          hoverColor: (isDark ? AppColors.accentBlue : scheme.primary).withValues(alpha: 0.08),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                            child: Icon(
-                              Icons.copy_rounded,
-                              size: 14.5,
-                              color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    if (onRevertStep != null) ...[
-                      const SizedBox(width: 4),
-                      // Bouton Revert / Undo changes up to this point
-                      Tooltip(
-                        message: 'Undo changes up to this point',
-                        child: Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            onTap: () {
-                              HapticFeedback.lightImpact();
-                              onRevertStep!(message);
-                            },
-                            borderRadius: BorderRadius.circular(6),
-                            hoverColor: const Color(0xFFD97706).withValues(alpha: 0.1),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                              child: Icon(
-                                Icons.undo_rounded,
-                                size: 15.5,
-                                color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
+      return _UserMessageBubble(
+        message: message,
+        api: api,
+        workspacePath: workspacePath,
+        onLocalFile: onLocalFile,
+        onEditPrompt: onEditPrompt,
+        onRevertStep: onRevertStep,
       );
     }
 
