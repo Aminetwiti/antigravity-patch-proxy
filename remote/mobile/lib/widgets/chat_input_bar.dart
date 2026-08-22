@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/protocol/daemon_api.dart';
 import '../core/protocol/model_catalog.dart';
@@ -84,6 +85,7 @@ class ChatInputBar extends StatefulWidget {
 
   final DaemonApi? api;
   final String? cascadeId;
+  final String? initialModel;
   final ValueChanged<String>? onModelChanged;
   final VoidCallback? onStop;
 
@@ -110,6 +112,7 @@ class ChatInputBar extends StatefulWidget {
     this.hasActiveStream = false,
     this.api,
     this.cascadeId,
+    this.initialModel,
     this.onModelChanged,
     this.onStop,
     this.initialText = '',
@@ -133,6 +136,33 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
     }
   }
 
+  /// Change programmatiquement le modèle sélectionné pour cette session
+  void setModel(String modelIdOrName, {int? modelEnum, String? effort}) {
+    if (!mounted) return;
+    final matched = ModelCatalog.findModel(modelIdOrName, customModels: _availableModels);
+    final effective = effort != null ? matched.withEffort(effort) : matched;
+    setState(() {
+      _selectedModel = effective.shortName;
+      _selectedModelId = effective.id;
+      _selectedModelEnum = modelEnum ?? effective.modelEnum;
+      if (effort != null) {
+        _reasoningEffort = effort;
+      }
+    });
+    final cascadeId = widget.cascadeId;
+    if (cascadeId != null && cascadeId.isNotEmpty) {
+      SharedPreferences.getInstance().then((prefs) {
+        prefs.setString('session_model_$cascadeId', effective.id);
+      });
+      widget.api?.setSessionModel(
+        cascadeId,
+        effective.id,
+        modelEnum: effective.modelEnum,
+      );
+    }
+    widget.onModelChanged?.call(effective.displayName);
+  }
+
   /// Insère une citation markdown formatée (> texte) dans le champ de saisie
   void insertQuote(String quoteText) {
     if (!mounted) return;
@@ -151,6 +181,16 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
     if (!mounted) return;
     _controller.text = text;
     _controller.selection = TextSelection.collapsed(offset: text.length);
+  }
+
+  String get selectedModel => _selectedModel;
+
+  void setSelectedModel(String modelName) {
+    if (!mounted || modelName.isEmpty) return;
+    setState(() {
+      _selectedModel = modelName;
+      _selectedModelId = modelName.toLowerCase().replaceAll(' ', '-');
+    });
   }
 
   final TextEditingController _controller = TextEditingController();
@@ -222,7 +262,10 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
     }
     _controller.addListener(_onTextChanged);
     widget.onDraftChanged?.call(_controller.text);
-    _loadModelsAndPreferences();
+    if (widget.initialModel != null && widget.initialModel!.isNotEmpty) {
+      setModel(widget.initialModel!);
+    }
+    _loadSessionModelForCascade();
   }
 
   void _onFocusChanged() {
@@ -236,7 +279,8 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
   @override
   void didUpdateWidget(covariant ChatInputBar oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.cascadeId != widget.cascadeId) {
+    if (oldWidget.cascadeId != widget.cascadeId ||
+        (widget.initialModel != null && widget.initialModel != oldWidget.initialModel)) {
       if (widget.initialText != _controller.text) {
         _controller.text = widget.initialText;
         _lastDraftText = widget.initialText;
@@ -244,6 +288,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
           offset: _controller.text.length,
         );
       }
+      _loadSessionModelForCascade();
       // Re-focus the text input when switching conversations via keyboard shortcuts
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _focusNode.canRequestFocus) {
@@ -262,6 +307,25 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
     }
   }
 
+  Future<void> _loadSessionModelForCascade() async {
+    if (widget.initialModel != null && widget.initialModel!.isNotEmpty) {
+      setModel(widget.initialModel!);
+      return;
+    }
+    final cascadeId = widget.cascadeId;
+    if (cascadeId != null && cascadeId.isNotEmpty) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final saved = prefs.getString('session_model_$cascadeId');
+        if (saved != null && saved.isNotEmpty && mounted) {
+          setModel(saved);
+          return;
+        }
+      } catch (_) {}
+    }
+    _loadModelsAndPreferences();
+  }
+
   Future<void> _loadModelsAndPreferences() async {
     List<AntigravityModel> models = _availableModels;
     if (widget.api != null) {
@@ -274,6 +338,35 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
               _availableModels = models;
             });
           }
+        }
+      } catch (_) {}
+    }
+
+    if (widget.initialModel != null && widget.initialModel!.isNotEmpty) {
+      final matched = ModelCatalog.findModel(widget.initialModel!, customModels: models);
+      if (mounted) {
+        setState(() {
+          _selectedModel = matched.shortName;
+          _selectedModelId = matched.id;
+          _selectedModelEnum = matched.modelEnum;
+        });
+      }
+      return;
+    }
+
+    final cascadeId = widget.cascadeId;
+    if (cascadeId != null && cascadeId.isNotEmpty) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final sessionModel = prefs.getString('session_model_$cascadeId');
+        if (sessionModel != null && sessionModel.isNotEmpty && mounted) {
+          final matched = ModelCatalog.findModel(sessionModel, customModels: models);
+          setState(() {
+            _selectedModel = matched.shortName;
+            _selectedModelId = matched.id;
+            _selectedModelEnum = matched.modelEnum;
+          });
+          return;
         }
       } catch (_) {}
     }
@@ -1953,6 +2046,19 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
       }
     });
     CustomDropdownOverlay.hide();
+
+    final cascadeId = widget.cascadeId;
+    if (cascadeId != null && cascadeId.isNotEmpty) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('session_model_$cascadeId', effectiveModel.id);
+      } catch (_) {}
+      widget.api?.setSessionModel(
+        cascadeId,
+        effectiveModel.id,
+        modelEnum: effectiveModel.modelEnum,
+      );
+    }
 
     widget.onModelChanged?.call(effectiveModel.displayName);
 

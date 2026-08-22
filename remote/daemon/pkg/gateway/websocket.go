@@ -1642,6 +1642,8 @@ type IncomingMessage struct {
 	Base64Data      string                 `json:"base64Data,omitempty"`
 	FileName        string                 `json:"fileName,omitempty"`
 	MimeType        string                 `json:"mimeType,omitempty"`
+	Title           string                 `json:"title,omitempty"`
+	NewTitle        string                 `json:"newTitle,omitempty"`
 	Data            map[string]interface{} `json:"data,omitempty"`
 	Images          []string               `json:"images,omitempty"`
 	// ModelUID : identifiant du mod├¿le s├®lectionn├® dans l'app mobile
@@ -3318,7 +3320,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 // (call_mcp_tool, …) et tous les autres appels RPC restent bornés.
 var unaryNoTimeout = map[string]bool{
 	"send_prompt": true, "send_command": true, "cancel_generation": true,
-	"heartbeat": true, "ping": true, "create_cascade": true,
+	"heartbeat": true, "ping": true, "create_cascade": true, "new_conversation": true,
 	"get_pending_approval": true, "list_files": true, "read_file": true,
 	"sync_session": true, "get_quota_summary": true, "system.get_quota_summary": true,
 	"get_user_status": true, "get_model_statuses": true, "get_subagents": true,
@@ -3332,6 +3334,13 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 	uri := msg.WorkspaceURI
 	if uri == "" && msg.WorkspacePath != "" {
 		uri = toWorkspaceURI(msg.WorkspacePath)
+	}
+	if uri == "" && msg.Data != nil {
+		if wp, ok := msg.Data["workspacePath"].(string); ok && wp != "" {
+			uri = toWorkspaceURI(wp)
+		} else if wu, ok := msg.Data["workspaceUri"].(string); ok && wu != "" {
+			uri = toWorkspaceURI(wu)
+		}
 	}
 
 	var raw []byte
@@ -3393,7 +3402,7 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 	case "heartbeat":
 		raw, err = s.RPCClient.Heartbeat()
 
-	case "create_cascade":
+	case "create_cascade", "new_conversation":
 		if uri == "" {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "workspaceUri requis"})
 			return
@@ -5059,6 +5068,14 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			Type: "sessions_updated",
 			Data: s.sessionsFromSummaries(s.snapshotSummaries()),
 		})
+		s.broadcast(OutgoingMessage{
+			Type:      "session_deleted",
+			CascadeID: msg.CascadeID,
+			Data: map[string]interface{}{
+				"cascadeId": msg.CascadeID,
+				"status":    "deleted",
+			},
+		})
 		return
 
 	case "archive_cascade", "archive_session":
@@ -5126,7 +5143,13 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis ou invalide"})
 			return
 		}
-		title := msg.Prompt
+		title := msg.Title
+		if title == "" {
+			title = msg.NewTitle
+		}
+		if title == "" {
+			title = msg.Prompt
+		}
 		if title == "" && msg.Data != nil {
 			if t, ok := msg.Data["title"].(string); ok {
 				title = t
@@ -7950,8 +7973,9 @@ func (s *Server) startExternalTurnStreamer(cascadeID string) {
 			})
 		}()
 
-		// Extrait le prompt utilisateur de la dernière étape USER_INPUT dans le transcript
+		// Extrait le prompt utilisateur et le modèle de la dernière étape USER_INPUT dans le transcript
 		var userPrompt string
+		var extractedModel string
 		tPath := findTranscriptPath(cascadeID)
 		if tPath != "" {
 			if f, err := os.Open(tPath); err == nil {
@@ -7965,6 +7989,9 @@ func (s *Server) startExternalTurnStreamer(cascadeID string) {
 					}
 					if json.Unmarshal(scanner.Bytes(), &entry) == nil && entry.Type == "USER_INPUT" {
 						userPrompt = extractUserRequest(entry.Content)
+						if m := extractModelFromContent(entry.Content); m != "" {
+							extractedModel = m
+						}
 					}
 				}
 				ReleaseHistoryBuffer(hBuf)
@@ -7976,7 +8003,9 @@ func (s *Server) startExternalTurnStreamer(cascadeID string) {
 		startData := map[string]interface{}{
 			"cascadeId": cascadeID,
 			"requestId": reqID,
-			"model":     "Gemini 3.7 Flash",
+		}
+		if extractedModel != "" {
+			startData["model"] = extractedModel
 		}
 		if userPrompt != "" {
 			startData["userPrompt"] = userPrompt

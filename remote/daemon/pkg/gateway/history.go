@@ -2747,6 +2747,26 @@ func extractUserRequest(content string) string {
 	return strings.TrimSpace(userReq)
 }
 
+// extractModelFromContent extrait le nom du modèle s'il a été changé dans les métadonnées <USER_SETTINGS_CHANGE>
+func extractModelFromContent(content string) string {
+	if idx := strings.Index(content, "<USER_SETTINGS_CHANGE>"); idx != -1 {
+		sub := content[idx:]
+		if mIdx := strings.Index(sub, "`Model Selection` from "); mIdx != -1 {
+			target := sub[mIdx+len("`Model Selection` from "):]
+			if toIdx := strings.Index(target, " to "); toIdx != -1 {
+				afterTo := target[toIdx+len(" to "):]
+				if endIdx := strings.Index(afterTo, "."); endIdx != -1 {
+					return strings.TrimSpace(afterTo[:endIdx])
+				}
+				if endIdx := strings.Index(afterTo, "\n"); endIdx != -1 {
+					return strings.TrimSpace(afterTo[:endIdx])
+				}
+			}
+		}
+	}
+	return ""
+}
+
 func cleanPromptTitle(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.ReplaceAll(s, "\r\n", " ")

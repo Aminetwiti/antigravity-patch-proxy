@@ -537,6 +537,18 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     }
   }
 
+  String _resolveModelLabel(dynamic rawModel) {
+    final str = rawModel?.toString()?.trim() ?? '';
+    if (str.isNotEmpty && str != 'Gemini 3.7 Flash') {
+      return str;
+    }
+    final currentSelected = _chatInputKey.currentState?.selectedModel;
+    if (currentSelected != null && currentSelected.isNotEmpty) {
+      return currentSelected;
+    }
+    return str.isNotEmpty ? str : 'Gemini 3.7 Flash';
+  }
+
   void _showModelSelector() {
     _chatInputKey.currentState?.openModelSelector();
   }
@@ -1728,11 +1740,12 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
         final msgId = 'ext-$requestId';
         _streamRequestToMessageId[thKey] = msgId;
+        final resolvedModel = _resolveModelLabel(msg['data']?['model']);
         final existingIdx = buf.indexWhere((m) => m.id == msgId);
         if (existingIdx >= 0) {
           buf[existingIdx] = buf[existingIdx].copyWith(
             isStreaming: true,
-            modelLabel: msg['data']?['model']?.toString() ?? buf[existingIdx].modelLabel,
+            modelLabel: resolvedModel,
           );
         } else if (buf.isNotEmpty && buf.last.isStreaming && buf.last.sender == 'assistant') {
           _streamRequestToMessageId[thKey] = buf.last.id;
@@ -1743,7 +1756,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             text: '',
             timestamp: _timestamp(),
             isStreaming: true,
-            modelLabel: msg['data']?['model']?.toString() ?? 'Gemini 3.7 Flash',
+            modelLabel: resolvedModel,
           ));
         }
         if (isActiveSession && mounted) {
@@ -1853,13 +1866,14 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             _onStreamStarted(targetSessionId);
             final msgId = targetId;
             _streamRequestToMessageId[thKey] = msgId;
+            final resolvedChunkModel = _resolveModelLabel(msg['data']?['model']);
             buf.add(ChatMessage(
               id: msgId,
               sender: 'assistant',
               text: '',
               timestamp: _timestamp(),
               isStreaming: true,
-              modelLabel: msg['data']?['model']?.toString() ?? 'Gemini 3.7 Flash',
+              modelLabel: resolvedChunkModel,
             ));
             idx = buf.length - 1;
           }
@@ -2336,9 +2350,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final targetSession = targetSessionOverride ?? widget.activeSessionId;
     final assistantId = 'a${++_messageCounter}';
     _sessionLastStreamEnds.remove(targetSession);
-    final modelLabel = modelUID != null && modelUID.isNotEmpty
-        ? modelUID
-        : 'Gemini 3.7 Flash';
+    final modelLabel = _resolveModelLabel(modelUID);
 
     final buf = _sessionMessages.putIfAbsent(targetSession, () => []);
     setState(() {

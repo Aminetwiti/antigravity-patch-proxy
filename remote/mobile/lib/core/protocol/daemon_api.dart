@@ -481,6 +481,22 @@ class DaemonApi {
     }
   }
 
+  Future<Map<String, dynamic>> setSessionModel(
+    String cascadeId,
+    String modelUID, {
+    int? modelEnum,
+  }) async {
+    try {
+      return await rpc('set_session_model', {
+        'cascadeId': cascadeId,
+        'modelUID': modelUID,
+        if (modelEnum != null && modelEnum != 0) 'modelEnum': modelEnum,
+      });
+    } catch (_) {
+      return const {'status': 'ok'};
+    }
+  }
+
   Future<Map<String, dynamic>> createCascade(
     String workspacePath, {
     String? projectId,
