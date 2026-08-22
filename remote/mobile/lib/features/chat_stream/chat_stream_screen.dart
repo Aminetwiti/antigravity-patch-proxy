@@ -217,6 +217,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
   set _currentTab(SessionTabType tab) => _sessionTabs[widget.activeSessionId] = tab;
 
   final Map<String, Set<String>> _sessionModifiedFiles = {};
+  final Map<String, Set<String>> _turnModifiedFiles = {};
   final Map<String, List<SessionModifiedFile>> _sessionModifiedFileList = {};
   final Map<String, List<String>> _sessionArtifacts = {};
   final Map<String, int> _sessionSubagentCounts = {};
@@ -1248,6 +1249,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
   void _onStreamStarted(String sessionId) {
     _streamStartTimes[sessionId] = DateTime.now();
+    _turnModifiedFiles[sessionId] = <String>{};
     final wasEmpty = _activeStreamingSessions.isEmpty;
     _activeStreamingSessions.add(sessionId);
     widget.onStreamingSessionChanged?.call(sessionId, true);
@@ -1736,6 +1738,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         final textDelta = StreamDeltaParser.textOf(msg);
         final thoughtDelta = StreamDeltaParser.thinkingOf(msg);
         final approval = StreamDeltaParser.approvalOf(msg);
+        final deltaFiles = StreamDeltaParser.fileChangesOf(msg);
+        if (deltaFiles.isNotEmpty) {
+          final tFiles = _turnModifiedFiles.putIfAbsent(targetSessionId, () => {});
+          tFiles.addAll(deltaFiles);
+        }
 
         final targetId = _streamRequestToMessageId[thKey] ?? 'ext-$requestId';
         var idx = buf.indexWhere((m) => m.id == targetId);
@@ -1847,11 +1854,11 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         final targetId = _streamRequestToMessageId[thKey] ?? 'ext-$requestId';
         final idx = buf.indexWhere((m) => m.id == targetId);
 
-        // Stamp the completed assistant message with the session's file-change summary.
-        final changedFiles = (_sessionModifiedFiles[targetSessionId] ?? {}).toList();
+        // Stamp the completed assistant message with THIS TURN's file changes.
+        final turnFiles = (_turnModifiedFiles[targetSessionId] ?? {}).toList();
         final modFileList = _sessionModifiedFileList[targetSessionId] ?? [];
-        final totalAdded = modFileList.fold(0, (s, f) => s + f.additions);
-        final totalRemoved = modFileList.fold(0, (s, f) => s + f.deletions);
+        final totalAdded = modFileList.where((f) => turnFiles.contains(f.path)).fold(0, (s, f) => s + f.additions);
+        final totalRemoved = modFileList.where((f) => turnFiles.contains(f.path)).fold(0, (s, f) => s + f.deletions);
 
         final workedDurationStr = _computeWorkedDuration(startTime);
         final currentThought = (_externalThoughts[thKey] != null && _externalThoughts[thKey]!.isNotEmpty)
@@ -1897,9 +1904,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
             isStreaming: false,
             thought: finalThought,
             segments: finalizedSegments.isNotEmpty ? finalizedSegments : buf[idx].segments,
-            filesChanged: changedFiles.isNotEmpty ? changedFiles : null,
-            additions: changedFiles.isNotEmpty ? totalAdded : null,
-            deletions: changedFiles.isNotEmpty ? totalRemoved : null,
+            filesChanged: turnFiles.isNotEmpty ? turnFiles : null,
+            additions: turnFiles.isNotEmpty ? totalAdded : null,
+            deletions: turnFiles.isNotEmpty ? totalRemoved : null,
           );
         } else {
           final lastStreamingIdx = buf.lastIndexWhere((m) => m.isStreaming);
@@ -1908,9 +1915,9 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
               isStreaming: false,
               thought: finalThought,
               segments: finalizedSegments.isNotEmpty ? finalizedSegments : buf[lastStreamingIdx].segments,
-              filesChanged: changedFiles.isNotEmpty ? changedFiles : null,
-              additions: changedFiles.isNotEmpty ? totalAdded : null,
-              deletions: changedFiles.isNotEmpty ? totalRemoved : null,
+              filesChanged: turnFiles.isNotEmpty ? turnFiles : null,
+              additions: turnFiles.isNotEmpty ? totalAdded : null,
+              deletions: turnFiles.isNotEmpty ? totalRemoved : null,
             );
           }
         }
@@ -2966,17 +2973,20 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
 
   void _handleStopGeneration() {
     final targetSession = widget.activeSessionId;
+    HapticFeedback.mediumImpact();
     widget.api?.stopGeneration(cascadeId: targetSession);
     setState(() {
       _activeStreamingSessions.remove(targetSession);
+      _runningBackgroundTasks.clear();
       _showStillWorking = false;
       _stillWorkingTimer?.cancel();
       _stillWorkingTimer = null;
       final buf = _sessionMessages[targetSession];
       if (buf != null) {
-        final idx = buf.lastIndexWhere((m) => m.isStreaming);
-        if (idx >= 0) {
-          buf[idx] = buf[idx].copyWith(isStreaming: false);
+        for (int i = 0; i < buf.length; i++) {
+          if (buf[i].isStreaming) {
+            buf[i] = buf[i].copyWith(isStreaming: false);
+          }
         }
       }
     });
@@ -2984,6 +2994,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     if (_activeStreamingSessions.isEmpty) {
       widget.onStreamingStateChanged?.call(false);
     }
+    _refreshRunningTasks();
   }
 
   Widget _buildActiveTabContent(ColorScheme scheme, bool isConnected) {
@@ -3339,21 +3350,6 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       } catch (_) {}
 
       _sessionModifiedFileList[targetSession] = list;
-
-      // Update the last assistant message's filesChanged / additions / deletions
-      final buf = _sessionMessages[targetSession];
-      if (buf != null && buf.isNotEmpty && list.isNotEmpty) {
-        final totalAdded = list.fold(0, (s, f) => s + f.additions);
-        final totalRemoved = list.fold(0, (s, f) => s + f.deletions);
-        final lastAssistantIdx = buf.lastIndexWhere((m) => m.sender != 'user');
-        if (lastAssistantIdx >= 0) {
-          buf[lastAssistantIdx] = buf[lastAssistantIdx].copyWith(
-            filesChanged: list.map((f) => f.path).toList(),
-            additions: totalAdded,
-            deletions: totalRemoved,
-          );
-        }
-      }
 
       if (mounted && targetSession == widget.activeSessionId) {
         setState(() {
@@ -3877,9 +3873,24 @@ class _UserMessageBubbleState extends State<_UserMessageBubble> {
     final hasMedia = parsed.media.isNotEmpty;
     final cleanText = parsed.cleanText;
 
+    final effectiveText = cleanText.isNotEmpty
+        ? cleanText
+        : (hasMedia ? '' : widget.message.text);
+
     // Détection si le message est long (> 4 sauts de ligne ou texte long > 220 caractères)
-    final lines = cleanText.split('\n');
-    final isLong = lines.length > 4 || cleanText.length > 220;
+    final lines = effectiveText.split('\n');
+    final isLong = lines.length > 4 || effectiveText.length > 220;
+
+    final String displayText;
+    if (isLong && !_isExpanded) {
+      if (lines.length > 4) {
+        displayText = lines.take(4).join('\n');
+      } else {
+        displayText = effectiveText.length > 220 ? '${effectiveText.substring(0, 220)}...' : effectiveText;
+      }
+    } else {
+      displayText = effectiveText;
+    }
 
     return RepaintBoundary(
       child: GestureDetector(
@@ -3897,6 +3908,7 @@ class _UserMessageBubbleState extends State<_UserMessageBubble> {
         child: Container(
           margin: const EdgeInsets.only(bottom: 16),
           width: double.infinity,
+          clipBehavior: Clip.antiAlias,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
             color: isDark ? AppColors.surfaceRaised : scheme.surfaceContainerLow,
@@ -3924,42 +3936,21 @@ class _UserMessageBubbleState extends State<_UserMessageBubble> {
                   workspacePath: widget.workspacePath,
                   onLocalFile: widget.onLocalFile,
                 ),
-                if (cleanText.isNotEmpty) const SizedBox(height: 10),
+                if (effectiveText.isNotEmpty) const SizedBox(height: 10),
               ],
-              if (cleanText.isNotEmpty) ...[
+              if (effectiveText.isNotEmpty) ...[
                 AnimatedSize(
                   duration: const Duration(milliseconds: 240),
                   curve: Curves.easeOutCubic,
                   alignment: Alignment.topCenter,
-                  child: (!isLong || _isExpanded)
-                      ? MarkdownBubble(
-                          text: cleanText,
-                          isStreaming: false,
-                          api: widget.api,
-                          workspacePath: widget.workspacePath,
-                          onLocalFile: widget.onLocalFile,
-                        )
-                      : ShaderMask(
-                          shaderCallback: (rect) {
-                            return const LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [Colors.black, Colors.black, Colors.transparent],
-                              stops: [0.0, 0.65, 1.0],
-                            ).createShader(rect);
-                          },
-                          blendMode: BlendMode.dstIn,
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxHeight: 102),
-                            child: MarkdownBubble(
-                              text: cleanText,
-                              isStreaming: false,
-                              api: widget.api,
-                              workspacePath: widget.workspacePath,
-                              onLocalFile: widget.onLocalFile,
-                            ),
-                          ),
-                        ),
+                  child: MarkdownBubble(
+                    key: ValueKey('user-md-${widget.message.id}-$_isExpanded'),
+                    text: displayText,
+                    isStreaming: false,
+                    api: widget.api,
+                    workspacePath: widget.workspacePath,
+                    onLocalFile: widget.onLocalFile,
+                  ),
                 ),
                 if (isLong) ...[
                   const SizedBox(height: 8),

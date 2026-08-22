@@ -24,17 +24,19 @@ type HistorySegment struct {
 	Content string `json:"content"`
 }
 
-// HistoryMessage represents a parsed message to be sent to the mobile app
 type HistoryMessage struct {
-	ID          string           `json:"id"`
-	Sender      string           `json:"sender"`
-	Text        string           `json:"text"`
-	Thought     string           `json:"thought,omitempty"`
-	Segments    []HistorySegment `json:"segments,omitempty"`
-	Timestamp   string           `json:"timestamp"`
-	IsStreaming bool             `json:"isStreaming"`
-	IsError     bool             `json:"isError"`
-	StepIndex   int64            `json:"stepIndex,omitempty"`
+	ID           string           `json:"id"`
+	Sender       string           `json:"sender"`
+	Text         string           `json:"text"`
+	Thought      string           `json:"thought,omitempty"`
+	Segments     []HistorySegment `json:"segments,omitempty"`
+	Timestamp    string           `json:"timestamp"`
+	IsStreaming  bool             `json:"isStreaming"`
+	IsError      bool             `json:"isError"`
+	StepIndex    int64            `json:"stepIndex,omitempty"`
+	FilesChanged []string         `json:"filesChanged,omitempty"`
+	Additions    int              `json:"additions,omitempty"`
+	Deletions    int              `json:"deletions,omitempty"`
 }
 
 var (
@@ -1206,6 +1208,7 @@ func parseTranscriptFullTurns(transcriptPath string) ([]HistoryMessage, error) {
 	var currentTurnLastIdx int
 	var currentTurnHasError bool
 	turnFilesExplored := make(map[string]bool)
+	turnFilesChangedMap := make(map[string]struct{ add, del int })
 	turnSearchesCount := 0
 	lastSearchIdx := -1
 	lastCmdIdx := -1
@@ -1269,14 +1272,26 @@ func parseTranscriptFullTurns(transcriptPath string) ([]HistoryMessage, error) {
 			ts = currentTurnUser.Timestamp
 		}
 
+		var turnFiles []string
+		var totalAdd, totalDel int
+		for fp, diff := range turnFilesChangedMap {
+			turnFiles = append(turnFiles, fp)
+			totalAdd += diff.add
+			totalDel += diff.del
+		}
+		sort.Strings(turnFiles)
+
 		messages = append(messages, HistoryMessage{
-			ID:        msgID,
-			Sender:    "assistant",
-			Text:      strings.TrimSpace(fullText),
-			Thought:   strings.TrimSpace(fullThought),
-			Segments:  currentTurnSegments,
-			Timestamp: ts,
-			IsError:   currentTurnHasError,
+			ID:           msgID,
+			Sender:       "assistant",
+			Text:         strings.TrimSpace(fullText),
+			Thought:      strings.TrimSpace(fullThought),
+			Segments:     currentTurnSegments,
+			Timestamp:    ts,
+			IsError:      currentTurnHasError,
+			FilesChanged: turnFiles,
+			Additions:    totalAdd,
+			Deletions:    totalDel,
 		})
 
 		currentTurnSegments = nil
@@ -1284,6 +1299,7 @@ func parseTranscriptFullTurns(transcriptPath string) ([]HistoryMessage, error) {
 		currentTurnAnswers = nil
 		currentTurnHasError = false
 		turnFilesExplored = make(map[string]bool)
+		turnFilesChangedMap = make(map[string]struct{ add, del int })
 		turnSearchesCount = 0
 		lastSearchIdx = -1
 		lastCmdIdx = -1
@@ -1429,6 +1445,37 @@ func parseTranscriptFullTurns(transcriptPath string) ([]HistoryMessage, error) {
 						for _, k := range []string{"targetFile", "TargetFile", "filePath", "file_path", "AbsolutePath"} {
 							if fv, ok := argMap[k].(string); ok && fv != "" {
 								turnFilesExplored[filepath.Base(fv)] = true
+							}
+						}
+
+						// Détection des fichiers modifiés lors de ce tour spécifique
+						isEditTool := strings.Contains(lower, "write_to_file") ||
+							strings.Contains(lower, "replace_file_content") ||
+							strings.Contains(lower, "multi_replace_file_content") ||
+							strings.Contains(lower, "edit_file") ||
+							strings.Contains(lower, "modify_file") ||
+							strings.Contains(lower, "create_file")
+
+						if isEditTool {
+							for _, k := range []string{"targetFile", "TargetFile", "filePath", "file_path", "AbsolutePath", "path"} {
+								if fv, ok := argMap[k].(string); ok && fv != "" {
+									cleanP := filepath.Clean(fv)
+									cleanP = strings.ReplaceAll(cleanP, `\`, `/`)
+									addCount := 1
+									delCount := 0
+									if repl, ok := argMap["ReplacementContent"].(string); ok && repl != "" {
+										addCount = len(strings.Split(repl, "\n"))
+									}
+									if targ, ok := argMap["TargetContent"].(string); ok && targ != "" {
+										delCount = len(strings.Split(targ, "\n"))
+									}
+									prevDiff := turnFilesChangedMap[cleanP]
+									turnFilesChangedMap[cleanP] = struct{ add, del int }{
+										add: prevDiff.add + addCount,
+										del: prevDiff.del + delCount,
+									}
+									break
+								}
 							}
 						}
 					}

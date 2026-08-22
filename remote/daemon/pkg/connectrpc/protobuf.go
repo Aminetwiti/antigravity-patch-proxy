@@ -85,7 +85,8 @@ func BuildStartCascade(workspaceURI, projectID, modelUID string, modelEnum uint6
 		envW.stringField(1, projectID)
 		envW.bytesField(4, []byte{}) // defaultProjectEnvironment
 		w.bytesField(17, envW.b)
-	} else if workspaceURI != "" {
+	}
+	if workspaceURI != "" {
 		normURI := strings.TrimPrefix(workspaceURI, "file:///")
 		normURI = strings.TrimPrefix(normURI, "file://")
 		normURI = strings.ReplaceAll(normURI, `\`, `/`)

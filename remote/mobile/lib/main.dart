@@ -506,7 +506,6 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           _sessions = [newSession, ..._sessions.where((s) => s.id != newId)];
           _contextStats = {};
         });
-        await _refreshSessions();
         await _refreshContext();
       }
     } catch (e) {
@@ -556,10 +555,28 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
               _activeSessionTitle = cur.title.isNotEmpty
                   ? cur.title
                   : (_activeSessionTitle.isNotEmpty ? _activeSessionTitle : 'Nouvelle conversation');
+            } else if (_activeSessionId.isNotEmpty) {
+              // Préserve la session active en tête de liste si c'est une nouvelle session
+              final existingPending = _sessions.where((s) => s.id == _activeSessionId);
+              final activeItem = existingPending.isNotEmpty
+                  ? existingPending.first
+                  : CascadeSession(
+                      id: _activeSessionId,
+                      workspacePath: _projects.isNotEmpty ? _projects.first.path : '',
+                      title: _activeSessionTitle.isNotEmpty ? _activeSessionTitle : 'Nouvelle conversation',
+                      status: 'CASCADE_STATUS_READY',
+                      time: 'Maintenant',
+                    );
+              _sessions = [activeItem, ...sessions.where((s) => s.id != _activeSessionId)];
             } else {
               _sessions = sessions;
               _activeSessionId = sessions.first.id;
               _activeSessionTitle = sessions.first.title;
+            }
+          } else if (_activeSessionId.isNotEmpty) {
+            final existingPending = _sessions.where((s) => s.id == _activeSessionId);
+            if (existingPending.isNotEmpty) {
+              _sessions = [existingPending.first];
             }
           } else {
             _sessions = const [];
@@ -730,11 +747,28 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                 _activeSessionTitle = current.title.isNotEmpty
                     ? current.title
                     : (_activeSessionTitle.isNotEmpty ? _activeSessionTitle : 'Nouvelle conversation');
+              } else if (_activeSessionId.isNotEmpty) {
+                final existingPending = _sessions.where((s) => s.id == _activeSessionId);
+                final activeItem = existingPending.isNotEmpty
+                    ? existingPending.first
+                    : CascadeSession(
+                        id: _activeSessionId,
+                        workspacePath: _projects.isNotEmpty ? _projects.first.path : '',
+                        title: _activeSessionTitle.isNotEmpty ? _activeSessionTitle : 'Nouvelle conversation',
+                        status: 'CASCADE_STATUS_READY',
+                        time: 'Maintenant',
+                      );
+                _sessions = [activeItem, ...parsed.where((s) => s.id != _activeSessionId)];
               } else {
                 _sessions = parsed;
                 _activeSessionId = parsed.first.id;
                 _activeSessionTitle = parsed.first.title;
                 _refreshContext();
+              }
+            } else if (_activeSessionId.isNotEmpty) {
+              final existingPending = _sessions.where((s) => s.id == _activeSessionId);
+              if (existingPending.isNotEmpty) {
+                _sessions = [existingPending.first];
               }
             } else {
               // Liste vide : toutes les sessions ont été supprimées/archivées

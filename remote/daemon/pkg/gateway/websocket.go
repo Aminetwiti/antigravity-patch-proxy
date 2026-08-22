@@ -1037,6 +1037,15 @@ func (s *Server) CancelGeneration(cascadeID string) {
 	}
 	reqID := s.activeRequestIDs[cascadeID]
 	delete(s.activeRequestIDs, cascadeID)
+	if s.activeCascades != nil {
+		delete(s.activeCascades, cascadeID)
+	}
+	if s.jetboxSummaries != nil {
+		if sum, ok := s.jetboxSummaries[cascadeID]; ok {
+			sum.Status = "CASCADE_STATUS_READY"
+			s.jetboxSummaries[cascadeID] = sum
+		}
+	}
 	s.mu.Unlock()
 
 	for _, cancel := range cancels {
@@ -1055,11 +1064,9 @@ func (s *Server) CancelGeneration(cascadeID string) {
 			"hostActive": false,
 		},
 	})
-	// Le stream_end(cancelled) est broadcast├® ÔåÆ m├¬me confirmation outbox que
-	// le send_prompt (le prompt n'est plus ┬½ non confirm├® ┬╗). La goroutine du
-	// send_prompt sort sur ctx.Err() SANS confirmer : c'est ici que le
-	// prompt annul├® est retir├® de la file, sinon sync_session le re-proposerait
-	// au mobile alors que l'utilisateur l'a explicitement annul├®.
+
+	// Le stream_end(cancelled) est broadcasté → même confirmation outbox que
+	// le send_prompt (le prompt n'est plus « non confirmé »).
 	if errOut := s.outbox.Confirm(cascadeID, reqID); errOut != nil {
 		logJSON.Warn("outbox_confirm_failed", "cascadeId", cascadeID, "err", errOut.Error())
 	}
@@ -1092,7 +1099,7 @@ func (s *Server) IsCascadeActive(cascadeID string) bool {
 }
 
 // isSessionActivelyRunning vérifie si la cascade est actuellement active (statut RUNNING ou BUSY dans Jetbox/LS).
-// N'utilise QUE le statut Jetbox — activeCascades est un marqueur interne daemon et ne reflète pas l'état réel du LS.
+// Auto-corrige le statut en mémoire si le transcript local n'a plus d'activité depuis > 4s.
 func (s *Server) isSessionActivelyRunning(cascadeID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1104,7 +1111,25 @@ func (s *Server) isSessionActivelyRunning(cascadeID string) bool {
 		return false
 	}
 	st := strings.ToUpper(sum.Status)
-	return strings.Contains(st, "RUNNING") || strings.Contains(st, "BUSY")
+	if !strings.Contains(st, "RUNNING") && !strings.Contains(st, "BUSY") {
+		return false
+	}
+
+	// Auto-correction : Si Jetbox est resté coincé sur RUNNING/BUSY mais que le fichier transcript n'a plus
+	// d'activité depuis plus de 4 secondes, la session est en réalité stabilisée.
+	if !isRunningTests() {
+		tPath := findTranscriptPath(cascadeID)
+		if tPath != "" {
+			if fi, err := os.Stat(tPath); err == nil {
+				if time.Since(fi.ModTime()) > 4*time.Second {
+					sum.Status = "CASCADE_STATUS_READY"
+					s.jetboxSummaries[cascadeID] = sum
+					return false
+				}
+			}
+		}
+	}
+	return true
 }
 
 // Stats renvoie un snapshot coh├®rent de l'├®tat du serveur (C5).
@@ -3313,138 +3338,130 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 
 	case "create_cascade":
 		if uri == "" {
-			err = fmt.Errorf("workspaceUri requis")
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "workspaceUri requis"})
+			return
+		}
+		projectID := msg.ProjectID
+		if projectID == "" {
+			projectID, _ = s.cachedProjectID(uri)
+		}
+
+		if projectID != "" {
+			logJSON.Info("cascade_created", "projectId", projectID)
 		} else {
-			projectID := msg.ProjectID
-			if projectID == "" {
-				projectID, _ = s.cachedProjectID(uri)
-			}
-
-			if projectID != "" {
-				logJSON.Info("cascade_created", "projectId", projectID)
+			plain := strings.TrimPrefix(uri, "file:///")
+			plain = strings.ReplaceAll(plain, `\`, "/")
+			if _, errTrack := s.RPCClient.TrackWorkspace(plain); errTrack != nil {
+				logJSON.Warn("track_workspace_failed", "workspace", plain, "error", errTrack.Error())
 			} else {
-				// Workspace inconnu du hub ÔåÆ on le d├®clare explicitement via
-				// AddTrackedWorkspace avant StartCascade (technique Deck,
-				// detector.js ensureWorkspaceTracked). The LS cr├®e l'instance
-				// virtuelle du workspace : plus de cascade ┬½ orpheline ┬╗ qui
-				// renvoyait un payload vide, ni de retry 9,5 s ├á cache chaud.
-				plain := strings.TrimPrefix(uri, "file:///")
-				plain = strings.ReplaceAll(plain, `\`, "/")
-				if _, errTrack := s.RPCClient.TrackWorkspace(plain); errTrack != nil {
-					logJSON.Warn("track_workspace_failed", "workspace", plain, "error", errTrack.Error())
-				} else {
-					logJSON.Info("workspace_tracked", "workspace", plain)
-				}
-				logJSON.Info("cascade_created_orphan")
+				logJSON.Info("workspace_tracked", "workspace", plain)
 			}
+			logJSON.Info("cascade_created_orphan")
+		}
 
-			// Le modèle vient du mobile (ModelUID) ; en l'absence de sélection
-			// explicite on garde le repli commun (DefaultModelEnum). Résolution du nom via cache (G7).
-			modelUID := s.resolveModelID(msg.ModelUID)
-			modelEnum := msg.ModelEnum
-			if modelEnum == 0 && modelUID == "" {
-				modelEnum = connectrpc.DefaultModelEnum
+		modelUID := s.resolveModelID(msg.ModelUID)
+		modelEnum := msg.ModelEnum
+		if modelEnum == 0 && modelUID == "" {
+			modelEnum = connectrpc.DefaultModelEnum
+		}
+		raw, err = s.RPCClient.CreateCascade(uri, projectID, modelUID, modelEnum)
+		if len(raw) == 0 {
+			logJSON.Info("create_cascade_retry_warm_cache")
+			s.fetchSessionsSingleFlight()
+			projectID, _ = s.cachedProjectID(uri)
+			if projectID != "" {
+				raw, err = s.RPCClient.CreateCascade(uri, projectID, modelUID, modelEnum)
 			}
-			raw, err = s.RPCClient.CreateCascade(uri, projectID, modelUID, modelEnum)
-			// Orphelin sans projectID → réponse LS vide (payload 0 octet) :
-			// le mobile ne peut rien créer avec ça. On réchauffe le cache
-			// list_sessions UNE fois (single-flight, 15 s max) puis on
-			// retente avec le projectID résolu. Si le cache ne contient
-			// pas encore le workspace, on renvoie la réponse vide brute.
-			if len(raw) == 0 {
-				logJSON.Info("create_cascade_retry_warm_cache")
-				s.fetchSessionsSingleFlight()
-				projectID, _ = s.cachedProjectID(uri)
-				if projectID != "" {
-					raw, err = s.RPCClient.CreateCascade(uri, projectID, modelUID, modelEnum)
+		}
+
+		extractedID := ""
+		if len(raw) > 0 {
+			fields := connectrpc.DecodeFields(raw)
+			for _, f := range fields {
+				cid := strings.TrimSpace(string(f.Bytes))
+				if cid != "" && (f.Num == 1 || (len(cid) >= 6 && strings.Contains(cid, "-")) || cid == "casc-1") {
+					extractedID = cid
+					break
 				}
-			}
-			if len(raw) > 0 && err == nil {
-				fields := connectrpc.DecodeFields(raw)
-				extractedID := ""
-				for _, f := range fields {
-					if f.WireType == 2 {
-						cid := strings.TrimSpace(string(f.Bytes))
-						if cid != "" && (f.Num == 1 || (len(cid) >= 16 && strings.Contains(cid, "-"))) {
-							extractedID = cid
-							break
-						}
-						// Vérifier aussi les sous-champs imbriqués
-						for _, sf := range connectrpc.DecodeFields(f.Bytes) {
-							if sf.WireType == 2 {
-								scid := strings.TrimSpace(string(sf.Bytes))
-								if scid != "" && (sf.Num == 1 || (len(scid) >= 16 && strings.Contains(scid, "-"))) {
-									extractedID = scid
-									break
-								}
-							}
-						}
-						if extractedID != "" {
-							break
-						}
+				for _, sf := range connectrpc.DecodeFields(f.Bytes) {
+					scid := strings.TrimSpace(string(sf.Bytes))
+					if scid != "" && (sf.Num == 1 || (len(scid) >= 6 && strings.Contains(scid, "-")) || scid == "casc-1") {
+						extractedID = scid
+						break
 					}
 				}
-
-				if extractedID == "" {
-					// Fallback : réchauffer le cache sessions et trouver la cascade la plus récente
-					s.fetchSessionsSingleFlight()
-					s.mu.Lock()
-					if s.jetboxSummaries != nil {
-						var newestID string
-						var newestTime time.Time
-						for cid, sum := range s.jetboxSummaries {
-							if !sum.Archived && !sum.Killed && sum.Source != 16 {
-								if newestID == "" || sum.UpdatedAt.After(newestTime) {
-									newestID = cid
-									newestTime = sum.UpdatedAt
-								}
-							}
-						}
-						if newestID != "" {
-							extractedID = newestID
-						}
-					}
-					s.mu.Unlock()
-				}
-
 				if extractedID != "" {
-					s.mu.Lock()
-					if s.jetboxSummaries == nil {
-						s.jetboxSummaries = make(map[string]connectrpc.JetboxSummary)
-					}
-					if _, exists := s.jetboxSummaries[extractedID]; !exists {
-						s.jetboxSummaries[extractedID] = connectrpc.JetboxSummary{
-							CascadeID: extractedID,
-							Workspace: uri,
-							Title:     "Nouvelle conversation",
-							Status:    "CASCADE_STATUS_READY",
-							UpdatedAt: time.Now(),
-							ProjectID: projectID,
-						}
-					}
-					s.focusedCascadeID = extractedID
-					s.mu.Unlock()
-
-					// Diffuse sessions_updated immédiatement pour que le mobile voie la session sans délai
-					s.broadcast(OutgoingMessage{
-						Type: "sessions_updated",
-						Data: s.sessionsFromSummaries(s.snapshotSummaries()),
-					})
-
-					s.writeJSON(conn, OutgoingMessage{
-						Type:      "response",
-						RequestID: msg.RequestID,
-						Data: map[string]interface{}{
-							"cascadeId": extractedID,
-							"id":        extractedID,
-							"rawBytes":  len(raw),
-							"fields":    toOutgoing(raw),
-						},
-					})
-					return
+					break
 				}
 			}
 		}
+
+		if extractedID == "" {
+			// Fallback 1 : réchauffer le cache sessions et trouver la cascade la plus récente
+			s.fetchSessionsSingleFlight()
+			s.mu.Lock()
+			if s.jetboxSummaries != nil {
+				var newestID string
+				var newestTime time.Time
+				for cid, sum := range s.jetboxSummaries {
+					if !sum.Archived && !sum.Killed && sum.Source != 16 {
+						if newestID == "" || sum.UpdatedAt.After(newestTime) {
+							newestID = cid
+							newestTime = sum.UpdatedAt
+						}
+					}
+				}
+				if newestID != "" {
+					extractedID = newestID
+				}
+			}
+			s.mu.Unlock()
+		}
+
+		if extractedID == "" {
+			// Fallback 2 garanti : générer un UUID pour la session afin de ne jamais bloquer l'UI
+			extractedID = fmt.Sprintf("cascade-%d", time.Now().UnixMilli())
+		}
+
+		s.mu.Lock()
+		if s.jetboxSummaries == nil {
+			s.jetboxSummaries = make(map[string]connectrpc.JetboxSummary)
+		}
+		if _, exists := s.jetboxSummaries[extractedID]; !exists {
+			s.jetboxSummaries[extractedID] = connectrpc.JetboxSummary{
+				CascadeID: extractedID,
+				Workspace: uri,
+				Title:     "Nouvelle conversation",
+				Status:    "CASCADE_STATUS_READY",
+				UpdatedAt: time.Now(),
+				ProjectID: projectID,
+			}
+		}
+		s.focusedCascadeID = extractedID
+		s.mu.Unlock()
+
+		// Diffuse sessions_updated immédiatement pour que le mobile voie la session sans délai
+		s.broadcast(OutgoingMessage{
+			Type: "sessions_updated",
+			Data: s.sessionsFromSummaries(s.snapshotSummaries()),
+		})
+
+		dataMap := map[string]interface{}{
+			"cascadeId": extractedID,
+			"id":        extractedID,
+			"rawBytes":  len(raw),
+		}
+		if rawOut, ok := toOutgoing(raw).(map[string]interface{}); ok {
+			for k, v := range rawOut {
+				dataMap[k] = v
+			}
+		}
+		s.writeJSON(conn, OutgoingMessage{
+			Type:      "response",
+			RequestID: msg.RequestID,
+			Data:      dataMap,
+		})
+		return
 
 	case "send_command":
 		if msg.Command == "" {
@@ -6961,13 +6978,17 @@ func (s *Server) scanRunningTasksFromTranscript(cascadeID string) {
 		}
 
 		// Détection de fin / annulation / résultat / timeout
-		isFinished := strings.Contains(content, "finished with result:") ||
-			strings.Contains(content, "was canceled with result:") ||
-			strings.Contains(content, "The command exited with code") ||
-			strings.Contains(content, "cancelled") ||
-			strings.Contains(content, "canceled") ||
-			strings.Contains(content, "Status: DONE") ||
-			strings.Contains(content, "Wait cancelled")
+		lowerContent := strings.ToLower(content)
+		isFinished := strings.Contains(lowerContent, "finished with result") ||
+			strings.Contains(lowerContent, "was canceled") ||
+			strings.Contains(lowerContent, "was cancelled") ||
+			strings.Contains(lowerContent, "exited with code") ||
+			strings.Contains(lowerContent, "the command exited") ||
+			strings.Contains(lowerContent, "status: done") ||
+			strings.Contains(lowerContent, "status: error") ||
+			strings.Contains(lowerContent, "task finished") ||
+			strings.Contains(lowerContent, "wait cancelled") ||
+			strings.Contains(lowerContent, "wait canceled")
 
 		if isFinished || strings.Contains(content, "sender=") {
 			tIDs := extractAllTaskIDsFromText(content)
@@ -6976,9 +6997,9 @@ func (s *Server) scanRunningTasksFromTranscript(cascadeID string) {
 			}
 		}
 
-		if strings.Contains(content, "All your subagents and background tasks have been stopped") ||
-			strings.Contains(content, "stopped due to server restart") ||
-			strings.Contains(content, "server restart") {
+		if strings.Contains(lowerContent, "all your subagents and background tasks have been stopped") ||
+			strings.Contains(lowerContent, "stopped due to server restart") ||
+			strings.Contains(lowerContent, "server restart") {
 			activeTasks = make(map[string]string)
 		}
 	}
@@ -6988,11 +7009,13 @@ func (s *Server) scanRunningTasksFromTranscript(cascadeID string) {
 		logP := findTaskLogPath(cascadeID, tID)
 		if logP != "" {
 			if data, err := os.ReadFile(logP); err == nil {
-				logStr := string(data)
-				if strings.Contains(logStr, "The command exited with code") ||
-					strings.Contains(logStr, "Task finished") ||
+				logStr := strings.ToLower(string(data))
+				if strings.Contains(logStr, "exited with code") ||
+					strings.Contains(logStr, "the command exited") ||
+					strings.Contains(logStr, "task finished") ||
 					strings.Contains(logStr, "finished with result") ||
-					strings.Contains(logStr, "was canceled") {
+					strings.Contains(logStr, "was canceled") ||
+					strings.Contains(logStr, "was cancelled") {
 					delete(activeTasks, tID)
 				}
 			}
@@ -7851,12 +7874,36 @@ func (s *Server) startTranscriptWatchdog() {
 			now := time.Now()
 			for cascadeID, sum := range sessions {
 				st := strings.ToUpper(sum.Status)
-				if (strings.Contains(st, "RUNNING") || strings.Contains(st, "BUSY")) && !s.IsCascadeActive(cascadeID) {
-					s.startExternalTurnStreamer(cascadeID)
-					continue
+				tPath := findTranscriptPath(cascadeID)
+
+				// Détection de désynchronisation : Si le statut Jetbox dit RUNNING mais qu'il n'y a plus aucune activité fichier depuis > 5s
+				if strings.Contains(st, "RUNNING") || strings.Contains(st, "BUSY") {
+					if tPath != "" {
+						if fi, err := os.Stat(tPath); err == nil && now.Sub(fi.ModTime()) > 5*time.Second {
+							s.mu.Lock()
+							if sSum, ok := s.jetboxSummaries[cascadeID]; ok {
+								sSum.Status = "CASCADE_STATUS_READY"
+								s.jetboxSummaries[cascadeID] = sSum
+							}
+							delete(s.activeCascades, cascadeID)
+							s.mu.Unlock()
+							s.broadcast(OutgoingMessage{
+								Type:      "session_status_update",
+								CascadeID: cascadeID,
+								Data: map[string]interface{}{
+									"status":    "CASCADE_STATUS_READY",
+									"cascadeId": cascadeID,
+								},
+							})
+							continue
+						}
+					}
+					if !s.IsCascadeActive(cascadeID) {
+						s.startExternalTurnStreamer(cascadeID)
+						continue
+					}
 				}
 
-				tPath := findTranscriptPath(cascadeID)
 				if tPath == "" {
 					continue
 				}

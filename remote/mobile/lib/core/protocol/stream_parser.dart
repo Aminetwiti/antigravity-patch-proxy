@@ -42,6 +42,52 @@ class StreamDeltaParser {
     return '';
   }
 
+  /// Extracts modified file paths from tool execution deltas in a stream_delta message.
+  static List<String> fileChangesOf(Map<String, dynamic> message) {
+    final data = message['data'];
+    if (data is! Map) return const [];
+    final events = data['events'];
+    if (events is! List) return const [];
+    final files = <String>[];
+    for (final e in events) {
+      if (e is Map) {
+        final tool = (e['tool'] ?? '').toString().toLowerCase();
+        final isEditTool = tool.contains('write_to_file') ||
+            tool.contains('replace_file_content') ||
+            tool.contains('multi_replace_file_content') ||
+            tool.contains('edit_file') ||
+            tool.contains('modify_file') ||
+            tool.contains('create_file');
+        if (isEditTool) {
+          final detail = (e['detail'] ?? '').toString();
+          if (detail.isNotEmpty) {
+            try {
+              final start = detail.indexOf('{');
+              final end = detail.lastIndexOf('}');
+              if (start >= 0 && end > start) {
+                final jsonMap = json.decode(detail.substring(start, end + 1));
+                if (jsonMap is Map) {
+                  final fp = (jsonMap['targetFile'] ??
+                          jsonMap['TargetFile'] ??
+                          jsonMap['filePath'] ??
+                          jsonMap['file_path'] ??
+                          jsonMap['AbsolutePath'] ??
+                          jsonMap['path'] ??
+                          '')
+                      .toString();
+                  if (fp.isNotEmpty && !files.contains(fp)) {
+                    files.add(fp);
+                  }
+                }
+              }
+            } catch (_) {}
+          }
+        }
+      }
+    }
+    return files;
+  }
+
   /// Extracts thinking and live tool execution deltas from a stream_delta message.
   static String thinkingOf(Map<String, dynamic> message) {
     final data = message['data'];

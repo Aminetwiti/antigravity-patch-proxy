@@ -89,6 +89,9 @@ func main() {
 	fmt.Printf("   CSRF Token: %s...\n", maskToken(token))
 
 	rpcClient := connectrpc.NewClient(info.ConnectRPCPort, token)
+	if info.UseTLS {
+		rpcClient.SetUseTLS(true)
+	}
 
 	// Lancement du Watchdog CSRF
 	watchdog := discovery.NewWatchdog(rpcClient, 10*time.Second)
