@@ -114,14 +114,7 @@ func isSubagentTitle(title string) bool {
 		strings.Contains(lowerTitle, "audit technique architecture navicab") ||
 		strings.Contains(lowerTitle, "analyze flutter taxi app") ||
 		strings.Contains(lowerTitle, "analyze prepayservice") ||
-		strings.Contains(lowerTitle, "debugging chauffeur bank data") ||
-		strings.Contains(lowerTitle, "empty conversation") ||
-		strings.Contains(lowerTitle, "initial conversation setup") ||
-		strings.Contains(lowerTitle, "new conversation start") ||
-		strings.Contains(lowerTitle, "general conversation inquiry") ||
-		strings.Contains(lowerTitle, "general inquiry") ||
-		strings.Contains(lowerTitle, "casual greeting") ||
-		strings.Contains(lowerTitle, "conversation title generation")
+		strings.Contains(lowerTitle, "debugging chauffeur bank data")
 }
 
 // isSessionArchived vérifie si la session est archivée dans ~/.gemini/antigravity/annotations/<cascadeID>.pbtxt ou antigravity-ide
@@ -3017,7 +3010,7 @@ func matchOfficialProject(projID, wsPath, wsName string, projects []ProjectSumma
 		}
 	}
 
-	return "", wsPath, projID
+	return wsName, wsPath, projID
 }
 
 // GetUniqueWorkspaces returns the list of unique workspace names discovered on the machine.

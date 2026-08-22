@@ -214,12 +214,15 @@ func TestSendPrompt_MediaFileAutoRead(t *testing.T) {
 	_ = client.recv(t) // stream_delta
 	_ = client.recv(t) // stream_end
 
-	// Images filtrées du protobuf, prompt propre
+	// Images filtrées du protobuf, métadonnées injectées dans le prompt
 	if len(backend.lastMedia) != 0 {
 		t.Fatalf("expected 0 media attachments (images filtered), got %d", len(backend.lastMedia))
 	}
 	if !strings.Contains(backend.lastPrompt, "analyser mon image") {
 		t.Errorf("expected user text in prompt, got %q", backend.lastPrompt)
+	}
+	if !strings.Contains(backend.lastPrompt, "<ADDITIONAL_METADATA>") || !strings.Contains(backend.lastPrompt, "test_sample.png") {
+		t.Errorf("expected ADDITIONAL_METADATA with test_sample.png in prompt, got %q", backend.lastPrompt)
 	}
 }
 
@@ -285,9 +288,15 @@ func TestWorkflow_UploadThenSendPrompt(t *testing.T) {
 		t.Fatal("expected at least 1 image in target .user_uploaded/, got 0")
 	}
 
-	// Vérifier que le prompt est propre
+	// Vérifier que le prompt contient le texte utilisateur et le bloc ADDITIONAL_METADATA
 	if !strings.Contains(backend.lastPrompt, "analyse cette photo") {
 		t.Errorf("prompt text missing, got %q", backend.lastPrompt)
+	}
+	if !strings.Contains(backend.lastPrompt, "<ADDITIONAL_METADATA>") {
+		t.Errorf("expected ADDITIONAL_METADATA in prompt, got %q", backend.lastPrompt)
+	}
+	if !strings.Contains(backend.lastPrompt, targetCascade+"/.user_uploaded") {
+		t.Errorf("expected target image path in ADDITIONAL_METADATA, got %q", backend.lastPrompt)
 	}
 }
 

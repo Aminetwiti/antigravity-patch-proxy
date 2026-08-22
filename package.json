@@ -32,7 +32,9 @@
     "mitm:start": "powershell -ExecutionPolicy Bypass -File scripts/mitm/start_mitm_443.ps1",
     "mitm:restart": "cmd /c scripts\\\\mitm\\\\restart-mitm.bat",
     "repatch": "cmd /c repatch.bat",
-    "start:mitm": "cmd /c \"Start Antigravity MITM.bat\""
+    "start:mitm": "cmd /c \"Start Antigravity MITM.bat\"",
+    "remote:ui": "npm --prefix remote/antigravity-remote-daemon start",
+    "remote:build": "npm --prefix remote/antigravity-remote-daemon run build"
   },
   "dependencies": {
     "chrome-devtools-mcp": "^0.23.0",

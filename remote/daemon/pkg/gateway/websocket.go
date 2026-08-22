@@ -603,10 +603,14 @@ func (s *Server) sessionsFromSummariesLocked(jetbox map[string]connectrpc.Jetbox
 		}
 		convTitlesMu.RUnlock()
 
-		if (title == "" || title == "Cascade Session") && (sum.UpdatedAt.IsZero() || sum.StepCount == 0) {
-			continue
+		if title == "" {
+			title = "Untitled Conversation"
 		}
 		if isSubagentTitle(title) {
+			continue
+		}
+		// Masquer les sessions vides abandonnées anciennes (sans titre personnalisé, < 2 étapes, créées il y a plus de 24h)
+		if (title == "Untitled Conversation" || title == "Cascade Session") && sum.StepCount <= 1 && !sum.UpdatedAt.IsZero() && time.Since(sum.UpdatedAt) > 24*time.Hour {
 			continue
 		}
 		wsName, wsPath, projID := matchOfficialProject(sum.ProjectID, sum.Workspace, sum.Workspace, projects)
@@ -616,40 +620,38 @@ func (s *Server) sessionsFromSummariesLocked(jetbox map[string]connectrpc.Jetbox
 			isPinned = isSessionPinned(home, sum.CascadeID)
 		}
 
+		st := enrichStatus(sum.CascadeID, sum.Status)
 		items = append(items, map[string]interface{}{
 			"cascadeId":     sum.CascadeID,
 			"title":         title,
 			"workspace":     wsName,
 			"workspacePath": wsPath,
 			"projectId":     projID,
-			"status":        enrichStatus(sum.CascadeID, sum.Status),
+			"status":        st,
 			"updatedAt":     sum.UpdatedAt,
 			"isPinned":      isPinned,
 			"isArchived":    false,
 		})
 	}
-	// Ne garder dans la sidebar que les projets ayant des sessions actives (ou le projet principal)
-	activeProjectNames := make(map[string]bool)
-	for _, it := range items {
-		if ws, ok := it["workspace"].(string); ok && ws != "" {
-			activeProjectNames[strings.ToLower(ws)] = true
-		}
-	}
-	var filteredProjects []ProjectSummary
-	for _, p := range projects {
-		if activeProjectNames[strings.ToLower(p.Name)] || activeProjectNames[strings.ToLower(p.Path)] {
-			filteredProjects = append(filteredProjects, p)
-		}
-	}
-	if len(filteredProjects) == 0 && len(projects) > 0 {
-		filteredProjects = []ProjectSummary{projects[0]}
-	}
-
 	sort.Slice(items, func(i, j int) bool {
 		tI, _ := items[i]["updatedAt"].(time.Time)
 		tJ, _ := items[j]["updatedAt"].(time.Time)
 		return tI.After(tJ)
 	})
+
+	// Limite à 6 sessions récentes par projet comme sur Desktop IDE
+	projectCounts := make(map[string]int)
+	resultSessions := make([]map[string]interface{}, 0, len(items))
+	for _, it := range items {
+		ws, _ := it["workspace"].(string)
+		st, _ := it["status"].(string)
+		isActive := st == "CASCADE_STATUS_RUNNING" || st == "CASCADE_STATUS_WAITING_FOR_USER_ACTION"
+		if isActive || projectCounts[ws] < 6 {
+			resultSessions = append(resultSessions, it)
+			projectCounts[ws]++
+		}
+	}
+
 	var v int64 = 0
 	if s != nil {
 		s.stateVersion++
@@ -657,8 +659,8 @@ func (s *Server) sessionsFromSummariesLocked(jetbox map[string]connectrpc.Jetbox
 	}
 	return map[string]interface{}{
 		"version":   v,
-		"projects":  filteredProjects,
-		"sessions":  items,
+		"projects":  projects,
+		"sessions":  resultSessions,
 		"timestamp": time.Now().UnixMilli(),
 	}
 }
@@ -1418,10 +1420,12 @@ func (s *Server) writeLock(conn *websocket.Conn) *sync.Mutex {
 func (s *Server) releaseWriteLock(conn *websocket.Conn) {
 	s.mu.Lock()
 	lk := s.writeLocks[conn]
-	delete(s.writeLocks, conn)
 	s.mu.Unlock()
 	if lk != nil {
 		lk.Lock()
+		s.mu.Lock()
+		delete(s.writeLocks, conn)
+		s.mu.Unlock()
 		lk.Unlock()
 	}
 }
@@ -3112,10 +3116,14 @@ func (s *Server) sessionsOutWithLimit(raw []byte, limitPerProject int) interface
 		}
 		convTitlesMu.RUnlock()
 
-		if (title == "" || title == "Cascade Session") && sum.UpdatedAt.IsZero() {
-			continue
+		if title == "" {
+			title = "Untitled Conversation"
 		}
 		if isSubagentTitle(title) {
+			continue
+		}
+		// Masquer les sessions vides abandonnées anciennes (sans titre personnalisé, < 2 étapes, créées il y a plus de 24h)
+		if (title == "Untitled Conversation" || title == "Cascade Session") && sum.StepCount <= 1 && !sum.UpdatedAt.IsZero() && time.Since(sum.UpdatedAt) > 24*time.Hour {
 			continue
 		}
 
@@ -3170,23 +3178,6 @@ func (s *Server) sessionsOutWithLimit(raw []byte, limitPerProject int) interface
 		}
 	}
 
-	// Ne garder dans la sidebar que les projets ayant des sessions actives (ou le projet principal)
-	activeProjectNames := make(map[string]bool)
-	for _, it := range items {
-		if ws, ok := it.data["workspace"].(string); ok && ws != "" {
-			activeProjectNames[strings.ToLower(ws)] = true
-		}
-	}
-	var filteredProjects []ProjectSummary
-	for _, p := range projects {
-		if activeProjectNames[strings.ToLower(p.Name)] || activeProjectNames[strings.ToLower(p.Path)] {
-			filteredProjects = append(filteredProjects, p)
-		}
-	}
-	if len(filteredProjects) == 0 && len(projects) > 0 {
-		filteredProjects = []ProjectSummary{projects[0]}
-	}
-
 	// Tri décroissant par date de mise à jour (plus récentes d'abord)
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].updatedAt.After(items[j].updatedAt)
@@ -3215,7 +3206,7 @@ func (s *Server) sessionsOutWithLimit(raw []byte, limitPerProject int) interface
 	}
 	return map[string]interface{}{
 		"version":   v,
-		"projects":  filteredProjects,
+		"projects":  projects,
 		"sessions":  resultSessions,
 		"timestamp": time.Now().UnixMilli(),
 	}

@@ -545,6 +545,11 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           _sessions = [newSession, ..._sessions.where((s) => s.id != newId)];
           _contextStats = {};
         });
+        SettingsStore.saveSession(
+          wsUrl: _wsClient.targetUrl,
+          token: _wsClient.authToken ?? '',
+          sessionId: newId,
+        );
         ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -818,33 +823,44 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
               _projects = projects;
             }
             if (parsed.isNotEmpty) {
-              _sessions = parsed;
               final stillActive = parsed.any((s) => s.id == _activeSessionId);
               if (_activeSessionId.isNotEmpty && stillActive) {
+                _sessions = parsed;
                 final current = parsed.firstWhere((s) => s.id == _activeSessionId);
                 _activeSessionTitle = current.title.isNotEmpty
                     ? current.title
                     : (_activeSessionTitle.isNotEmpty ? _activeSessionTitle : 'Nouvelle conversation');
-              } else if (_activeSessionId.startsWith('temp_') || _activeSessionId.startsWith('pending_')) {
-                // Pending new session locally created before first prompt
+              } else if (_activeSessionId.isNotEmpty) {
+                // Préserve la session active en tête de liste si c'est une nouvelle session
+                // qui n'est pas encore synchronisée dans les résumés distants
                 final existingPending = _sessions.where((s) => s.id == _activeSessionId);
-                if (existingPending.isNotEmpty) {
-                  _sessions = [existingPending.first, ...parsed];
-                }
+                final activeItem = existingPending.isNotEmpty
+                    ? existingPending.first
+                    : CascadeSession(
+                        id: _activeSessionId,
+                        workspacePath: _projects.isNotEmpty ? _projects.first.path : '',
+                        title: _activeSessionTitle.isNotEmpty ? _activeSessionTitle : 'Nouvelle conversation',
+                        status: 'CASCADE_STATUS_READY',
+                        time: 'Maintenant',
+                      );
+                _sessions = [activeItem, ...parsed.where((s) => s.id != _activeSessionId)];
               } else {
-                // Active session was deleted from desktop -> switch to top session
+                _sessions = parsed;
                 _activeSessionId = parsed.first.id;
                 _activeSessionTitle = parsed.first.title;
                 _refreshContext();
               }
+            } else if (_activeSessionId.isNotEmpty) {
+              final existingPending = _sessions.where((s) => s.id == _activeSessionId);
+              if (existingPending.isNotEmpty) {
+                _sessions = [existingPending.first];
+              }
             } else {
               // Liste vide : toutes les sessions ont été supprimées/archivées
               _sessions = const [];
-              if (_activeSessionId.isNotEmpty && !_activeSessionId.startsWith('temp_')) {
-                _activeSessionId = '';
-                _activeSessionTitle = 'Nouvelle conversation';
-                _contextStats = {};
-              }
+              _activeSessionId = '';
+              _activeSessionTitle = 'Nouvelle conversation';
+              _contextStats = {};
             }
             _lastSessionsSyncAt = DateTime.now();
           });

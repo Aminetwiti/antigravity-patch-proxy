@@ -2,20 +2,6 @@
 // Antigravity Remote Daemon — Renderer Logic
 // ─────────────────────────────────────────────────────────────────────────
 
-interface Window {
-  agRemote: {
-    startDaemon: (options: { port: number; tunnel: string; token: string; allowFirstAdmin?: boolean }) => Promise<any>;
-    stopDaemon: () => Promise<{ success: boolean }>;
-    getDaemonStatus: (port?: number, token?: string) => Promise<any>;
-    generateQr: (text: string) => Promise<string>;
-    getLocalIp: () => Promise<string>;
-    openExternal: (url: string) => Promise<void>;
-    onDaemonLog: (callback: (data: string) => void) => () => void;
-  };
-}
-
-declare const window: Window;
-
 // DOM Elements
 const startRemoteBtn = document.getElementById('startRemoteBtn') as HTMLButtonElement | null;
 const remotePort = document.getElementById('remotePort') as HTMLInputElement | null;

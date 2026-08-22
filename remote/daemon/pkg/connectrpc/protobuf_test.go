@@ -338,6 +338,12 @@ func TestBuildCheckoutWorktree(t *testing.T) {
 func TestBuildSendMessageWithMedia(t *testing.T) {
 	media := []MediaAttachment{
 		{
+			URI:         "file:///C:/Users/test/.gemini/antigravity/brain/c1/doc.pdf",
+			MimeType:    "application/pdf",
+			Description: "doc.pdf",
+			Data:        []byte("fake_pdf_bytes"),
+		},
+		{
 			URI:         "file:///C:/Users/test/.gemini/antigravity/brain/c1/.user_uploaded/photo.png",
 			MimeType:    "image/png",
 			Description: "photo.png",
@@ -346,7 +352,7 @@ func TestBuildSendMessageWithMedia(t *testing.T) {
 		},
 	}
 
-	buf := BuildSendMessageWithMedia("c1", "Look at this image", "apikey123", "sess1", "gemini-3.7-flash", 312, media)
+	buf := BuildSendMessageWithMedia("c1", "Look at this document", "apikey123", "sess1", "gemini-3.7-flash", 312, media)
 	if len(buf) == 0 {
 		t.Fatal("BuildSendMessageWithMedia returned empty buffer")
 	}
@@ -354,8 +360,8 @@ func TestBuildSendMessageWithMedia(t *testing.T) {
 	fields := DecodeFields(buf)
 	foundCascadeID := false
 	foundItems := false
-	foundImages := false
-	foundMedia := false
+	foundNonImageMedia := false
+	foundForbiddenImageField := false
 	foundConfig := false
 
 	for _, f := range fields {
@@ -367,39 +373,27 @@ func TestBuildSendMessageWithMedia(t *testing.T) {
 		case 2:
 			itemFields := DecodeFields(f.Bytes)
 			for _, itemField := range itemFields {
-				if itemField.Num == 1 && string(itemField.Bytes) == "Look at this image" {
+				if itemField.Num == 1 && string(itemField.Bytes) == "Look at this document" {
 					foundItems = true
 				}
 			}
 		case 6:
-			imgFields := DecodeFields(f.Bytes)
-			hasURI := false
-			hasB64 := false
-			for _, imgField := range imgFields {
-				if imgField.Num == 4 && string(imgField.Bytes) == "file:///C:/Users/test/.gemini/antigravity/brain/c1/.user_uploaded/photo.png" {
-					hasURI = true
-				}
-				if imgField.Num == 1 && len(imgField.Bytes) > 0 {
-					hasB64 = true
-				}
-			}
-			if hasURI && hasB64 {
-				foundImages = true
-			}
-		case 14:
+			// Field 6 should NOT be emitted for images to prevent LS crash
+			foundForbiddenImageField = true
+		case 13:
 			mFields := DecodeFields(f.Bytes)
 			hasURI := false
 			hasInlineData := false
 			for _, mField := range mFields {
-				if mField.Num == 5 && string(mField.Bytes) == "file:///C:/Users/test/.gemini/antigravity/brain/c1/.user_uploaded/photo.png" {
+				if mField.Num == 5 && string(mField.Bytes) == "file:///C:/Users/test/.gemini/antigravity/brain/c1/doc.pdf" {
 					hasURI = true
 				}
-				if mField.Num == 2 && string(mField.Bytes) == "fake_image_bytes" {
+				if mField.Num == 2 && string(mField.Bytes) == "fake_pdf_bytes" {
 					hasInlineData = true
 				}
 			}
 			if hasURI && hasInlineData {
-				foundMedia = true
+				foundNonImageMedia = true
 			}
 		case 5:
 			foundConfig = true
@@ -412,11 +406,11 @@ func TestBuildSendMessageWithMedia(t *testing.T) {
 	if !foundItems {
 		t.Error("items (field 2) with clean text not found")
 	}
-	if !foundImages {
-		t.Error("images (field 6) with ImageData not found")
+	if foundForbiddenImageField {
+		t.Error("image field 6 should not be present in protobuf to prevent LS unsupported mime type error")
 	}
-	if !foundMedia {
-		t.Error("media (field 14) with Media not found")
+	if !foundNonImageMedia {
+		t.Error("non-image media (field 13) not found")
 	}
 	if !foundConfig {
 		t.Error("cascade_config (field 5) not found")
