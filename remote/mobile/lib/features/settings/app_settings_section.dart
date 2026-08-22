@@ -231,7 +231,13 @@ class _AppSettingsSectionState extends State<AppSettingsSection> {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text('SSL / TLS (WSS)', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                              Expanded(
+                                child: Text(
+                                  'SSL / TLS (WSS)',
+                                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
                               Switch.adaptive(
                                 value: _useSsl,
                                 activeColor: const Color(0xFF007AFF),

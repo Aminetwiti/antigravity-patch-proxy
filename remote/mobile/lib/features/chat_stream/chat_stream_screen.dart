@@ -2078,11 +2078,42 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
     final isStreaming = _activeStreamingSessions.contains(targetSession);
     final isOffline = !widget.isConnected || widget.api == null;
 
+    String displayText = text;
+    if (!displayText.contains('![') && !displayText.contains('[Image:') && !displayText.contains('[Fichier:')) {
+      final imgBuf = StringBuffer();
+      if (base64Data != null && base64Data.isNotEmpty) {
+        final uri = base64Data.startsWith('data:') ? base64Data : 'data:image/png;base64,$base64Data';
+        final name = fileName != null && fileName.isNotEmpty ? fileName : 'image.png';
+        imgBuf.writeln('![$name]($uri)');
+      }
+      if (images != null && images.isNotEmpty) {
+        for (var i = 0; i < images.length; i++) {
+          final img = images[i];
+          final uri = img.startsWith('data:') ? img : 'data:image/png;base64,$img';
+          imgBuf.writeln('![image_$i.png]($uri)');
+        }
+      }
+      if (media != null && media.isNotEmpty) {
+        for (final m in media) {
+          final uri = m['uri'] as String? ?? (m['base64Data'] != null ? 'data:${m['mimeType'] ?? "image/png"};base64,${m['base64Data']}' : '');
+          final name = m['name'] as String? ?? m['description'] as String? ?? 'image.png';
+          if (uri.isNotEmpty) {
+            imgBuf.writeln('![$name]($uri)');
+          }
+        }
+      }
+      if (imgBuf.isNotEmpty) {
+        if (displayText.isNotEmpty) imgBuf.writeln();
+        imgBuf.write(displayText);
+        displayText = imgBuf.toString().trim();
+      }
+    }
+
     if (queued || isStreaming || isOffline) {
       final queue = _sessionMessageQueues.putIfAbsent(targetSession, () => []);
       setState(() {
         queue.add({
-          'text': text,
+          'text': displayText,
           'activeSessionId': targetSession,
           'modelUID': modelUID,
           'modelEnum': modelEnum,
@@ -2102,7 +2133,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
       buf.add(ChatMessage(
         id: 'm${++_messageCounter}',
         sender: 'user',
-        text: text,
+        text: displayText,
         timestamp: _timestamp(),
       ));
     });

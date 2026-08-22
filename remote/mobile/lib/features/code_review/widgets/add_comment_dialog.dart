@@ -168,38 +168,33 @@ class _AddCommentDialogState extends State<AddCommentDialog> {
           const SizedBox(height: 16),
 
           // Actions
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 8,
+            runSpacing: 8,
             children: [
-              if (widget.onDelete != null || (widget.initialComment != null && widget.initialComment!.isNotEmpty))
-                TextButton(
+              if (widget.isEditing && widget.onDelete != null)
+                TextButton.icon(
                   onPressed: () {
-                    widget.onDelete?.call();
-                    if (Navigator.of(context).canPop()) {
-                      Navigator.of(context).pop();
-                    }
+                    widget.onDelete!();
+                    Navigator.of(context).pop();
                   },
-                  child: Text('Supprimer', style: TextStyle(color: scheme.error)),
+                  icon: const Icon(Icons.delete_outline, size: 16, color: AppColors.danger),
+                  label: const Text('Supprimer', style: TextStyle(color: AppColors.danger, fontSize: 12)),
                 ),
-              if (isDialog || Navigator.of(context).canPop())
-                TextButton(
-                  onPressed: () {
-                    if (Navigator.of(context).canPop()) {
-                      Navigator.of(context).pop();
-                    }
-                  },
-                  child: Text('Annuler', style: TextStyle(color: scheme.onSurfaceVariant)),
-                ),
-              const SizedBox(width: 8),
-              FilledButton(
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text('Annuler', style: TextStyle(color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant, fontSize: 12)),
+              ),
+              ElevatedButton(
                 onPressed: _submit,
-                style: FilledButton.styleFrom(
-                  backgroundColor: scheme.primary,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppRadius.md),
-                  ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.accentBlue,
+                  foregroundColor: AppColors.onAccent,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.sm)),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 ),
-                child: const Text('Queue Comment'),
+                child: Text(widget.isEditing ? 'Mettre à jour' : 'Queue Comment', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
               ),
             ],
           ),

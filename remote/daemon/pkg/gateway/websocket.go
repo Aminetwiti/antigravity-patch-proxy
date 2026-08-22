@@ -4069,8 +4069,34 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 					}
 				}
 			}
-			// Nettoyer les tags markdown d'images du texte pour éviter le rendu markdown brut dans l'IDE
-			promptText = strings.TrimSpace(imgTagRe.ReplaceAllString(promptText, ""))
+		}
+
+		// S'assurer que chaque image attachée est représentée sous forme de tag Markdown dans promptText
+		// pour que l'IDE Antigravity et le Language Server l'inscrivent dans transcript.jsonl et l'affichent dans la bulle de chat.
+		for _, m := range mediaAttachments {
+			if strings.HasPrefix(m.MimeType, "image/") || strings.HasPrefix(m.URI, "file:///") {
+				if m.URI != "" {
+					cleanURI := m.URI
+					if !strings.HasPrefix(cleanURI, "file:///") && (strings.HasPrefix(cleanURI, "/") || (len(cleanURI) >= 2 && cleanURI[1] == ':')) {
+						cleanURI = "file:///" + filepath.ToSlash(cleanURI)
+					}
+					if !strings.Contains(promptText, cleanURI) && !strings.Contains(promptText, filepath.Base(cleanURI)) {
+						desc := m.Description
+						if desc == "" {
+							desc = filepath.Base(cleanURI)
+						}
+						if desc == "" || desc == "." {
+							desc = "Image"
+						}
+						imgTag := fmt.Sprintf("![%s](%s)", desc, cleanURI)
+						if promptText == "" {
+							promptText = imgTag
+						} else {
+							promptText = imgTag + "\n\n" + promptText
+						}
+					}
+				}
+			}
 		}
 
 		// Populer Data et Base64Data pour chaque mediaAttachment en lisant le fichier sur disque et en normalisant vers PNG

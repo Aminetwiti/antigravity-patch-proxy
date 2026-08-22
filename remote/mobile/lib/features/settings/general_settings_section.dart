@@ -601,8 +601,9 @@ class _GeneralSettingsSectionState extends State<GeneralSettingsSection> {
         border: Border.all(color: isDark ? const Color(0xFF33363F) : scheme.outlineVariant),
       ),
       padding: const EdgeInsets.all(2),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+      child: Wrap(
+        spacing: 2,
+        runSpacing: 2,
         children: options.map((opt) {
           final isSelected = opt['id'] == selectedId;
           return GestureDetector(

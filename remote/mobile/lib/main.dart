@@ -433,9 +433,36 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
     final api = _api;
     if (api == null) {
       _isCreatingSession = false;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('⚠️ Non connecté au serveur daemon'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
       return;
     }
     try {
+      HapticFeedback.lightImpact();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Row(
+              children: [
+                SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                ),
+                SizedBox(width: 12),
+                Text('Création de la nouvelle conversation...'),
+              ],
+            ),
+            duration: Duration(milliseconds: 1500),
+          ),
+        );
+      }
       var ws = targetProject?.path ?? '';
       if (ws.isEmpty && targetProject != null) {
         ws = targetProject.folderUri.isNotEmpty ? targetProject.folderUri : targetProject.name;
@@ -506,10 +533,28 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
           _sessions = [newSession, ..._sessions.where((s) => s.id != newId)];
           _contextStats = {};
         });
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✨ Nouvelle conversation ouverte ($newId)'),
+            backgroundColor: const Color(0xFF1E88E5),
+            duration: const Duration(seconds: 2),
+          ),
+        );
         await _refreshContext();
       }
     } catch (e) {
       debugPrint('createCascade failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Échec création session: $e'),
+            backgroundColor: Colors.red.shade800,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
     } finally {
       _isCreatingSession = false;
     }

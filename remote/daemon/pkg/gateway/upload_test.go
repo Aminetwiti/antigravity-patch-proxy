@@ -160,17 +160,17 @@ func TestSendPrompt_MediaAttachmentsAndCleanPrompt(t *testing.T) {
 	_ = client.recv(t) // stream_delta
 	_ = client.recv(t) // stream_end
 
-	// Prompt texte intact, pas de refs markdown injectées
-	if backend.lastPrompt != "analyser cette image" {
-		t.Errorf("expected clean prompt 'analyser cette image', got %q", backend.lastPrompt)
+	// Prompt texte contient le tag markdown image pour que l'IDE l'affiche
+	if !strings.Contains(backend.lastPrompt, "analyser cette image") || !strings.Contains(backend.lastPrompt, "photo.png") {
+		t.Errorf("expected prompt containing 'analyser cette image' and image markdown, got %q", backend.lastPrompt)
 	}
 	// Images filtrées du protobuf
 	if len(backend.lastMedia) != 0 {
 		t.Fatalf("expected 0 media attachments (images filtered), got %d", len(backend.lastMedia))
 	}
 
-	// 2. Envoi d'un prompt avec markdown tag legacy ![name](file:///...)
-	// Les refs markdown sont extraites (nettoyées du texte) puis filtrées du protobuf
+	// 2. Envoi d'un prompt avec markdown tag ![name](file:///...)
+	// Les refs markdown sont préservées dans le texte pour affichage dans l'IDE
 	client.sendJSON(t, IncomingMessage{
 		Type:      "send_prompt",
 		RequestID: "req-media-2",
@@ -181,8 +181,8 @@ func TestSendPrompt_MediaAttachmentsAndCleanPrompt(t *testing.T) {
 	_ = client.recv(t) // stream_delta
 	_ = client.recv(t) // stream_end
 
-	if !strings.Contains(backend.lastPrompt, "voici mon texte") {
-		t.Errorf("expected prompt to contain 'voici mon texte', got %q", backend.lastPrompt)
+	if !strings.Contains(backend.lastPrompt, "voici mon texte") || !strings.Contains(backend.lastPrompt, "screenshot.jpg") {
+		t.Errorf("expected prompt to contain 'voici mon texte' and image tag, got %q", backend.lastPrompt)
 	}
 	if len(backend.lastMedia) != 0 {
 		t.Fatalf("expected 0 media attachments (images filtered), got %d", len(backend.lastMedia))
