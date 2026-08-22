@@ -123,12 +123,8 @@ class SavedConnectionsStore {
         if (conn.authToken.isNotEmpty) {
           await SecureCredentials.write(_tokenKey(conn.id), conn.authToken);
         }
-        if (conn.pin.isNotEmpty) {
-          await SecureCredentials.write(_pinKey(conn.id), conn.pin);
-        }
         final token = await SecureCredentials.read(_tokenKey(conn.id)) ?? '';
-        final pin = await SecureCredentials.read(_pinKey(conn.id)) ?? '';
-        conn = conn.copyWith(authToken: token, pin: pin);
+        conn = conn.copyWith(authToken: token, pin: '');
         connections.add(conn);
       }
       connections.sort((a, b) => b.lastConnectedAt.compareTo(a.lastConnectedAt));
@@ -151,22 +147,19 @@ class SavedConnectionsStore {
       if (index >= 0) {
         current[index] = connection.copyWith(
           authToken: connection.authToken.isNotEmpty ? connection.authToken : current[index].authToken,
-          pin: connection.pin.isNotEmpty ? connection.pin : current[index].pin,
+          pin: '',
           wsUrl: connection.wsUrl.isNotEmpty ? connection.wsUrl : current[index].wsUrl,
           label: connection.label.isNotEmpty ? connection.label : current[index].label,
           lastConnectedAt: DateTime.now(),
         );
       } else {
-        current.insert(0, connection);
+        current.insert(0, connection.copyWith(pin: ''));
       }
 
       // Secrets par id dans le coffre (SEC-04) — jamais dans le JSON prefs.
       for (final c in current) {
         if (c.authToken.isNotEmpty) {
           await SecureCredentials.write(_tokenKey(c.id), c.authToken);
-        }
-        if (c.pin.isNotEmpty) {
-          await SecureCredentials.write(_pinKey(c.id), c.pin);
         }
       }
 

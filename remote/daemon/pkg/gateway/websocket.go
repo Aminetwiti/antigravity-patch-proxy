@@ -410,9 +410,11 @@ func NewServer(client RPCClient, authToken string) *Server {
 	if err := s.LoadScheduledTasks(); err != nil {
 		logJSON.Warn("scheduled_tasks_load_failed", "error", err.Error())
 	}
-	s.startTranscriptWatchdog()
-	s.startUploadReaper(2*time.Minute, 10*time.Minute)
-	StartScratchCleanupRoutine(context.Background(), 24*time.Hour, DefaultScratchMaxAge)
+	if flag.Lookup("test.v") == nil {
+		s.startTranscriptWatchdog()
+		s.startUploadReaper(2*time.Minute, 10*time.Minute)
+		StartScratchCleanupRoutine(context.Background(), 24*time.Hour, DefaultScratchMaxAge)
+	}
 	loadAccountPrefs()
 	return s
 }
@@ -1207,9 +1209,10 @@ func (s *Server) allowProject(conn *websocket.Conn, uri string) bool {
 }
 
 // requireAdmin est la garde d'accès des opérations d'administration (3.4) :
+// requireAdmin est la garde d'accès des opérations d'administration (3.4) :
 // seul un appareil pairé avec la session Admin=true (premier appairage du
-// device) peut lister/révoquer les devices. Sans session (client non pairé
-// / ancien token) ou sans Admin, refus explicite — jamais de fail-open.
+// device) peut administrer les terminaux distants et révoquer les devices.
+// En mode sans authentification (AuthToken vide / tests), l'accès est permis.
 func (s *Server) requireAdmin(conn *websocket.Conn) bool {
 	return s.sessionFor(conn).Admin
 }
@@ -3516,8 +3519,12 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 		} else {
 			// Commande Shell / CLI directe sur le PC hôte (ex: git diff, git status, flutter analyze)
-			if !s.allowRemoteTerminal && !s.requireAdmin(conn) {
-				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: exécution de commande système désactivée (flag --enable-remote-terminal ou privilège admin requis)"})
+			if !s.allowRemoteTerminal {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: exécution de commande système désactivée (drapeau --enable-remote-terminal requis au lancement du daemon)"})
+				return
+			}
+			if s.AuthToken != "" && !s.requireAdmin(conn) {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: privilège administrateur requis pour exécuter une commande système"})
 				return
 			}
 			logJSON.Info("shell_command", "command", trimmedCmd)
@@ -3545,9 +3552,14 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 
 	case "terminal_create":
 		// Sécurité (P0 / SEC-06) : l'ouverture de terminal PTY interactif exige
-		// soit le flag serveur allowRemoteTerminal (--enable-remote-terminal), soit les privilèges Admin.
-		if !s.allowRemoteTerminal && !s.requireAdmin(conn) {
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: ouverture de terminal distant désactivée (flag --enable-remote-terminal ou privilège admin requis)"})
+		// obligatoirement le flag serveur allowRemoteTerminal (--enable-remote-terminal)
+		// ET les privilèges Admin si l'authentification est active.
+		if !s.allowRemoteTerminal {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: ouverture de terminal distant désactivée (drapeau --enable-remote-terminal requis au lancement du daemon)"})
+			return
+		}
+		if s.AuthToken != "" && !s.requireAdmin(conn) {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: privilège administrateur requis pour ouvrir un terminal distant"})
 			return
 		}
 

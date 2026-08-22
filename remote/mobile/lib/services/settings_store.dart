@@ -322,6 +322,7 @@ class SettingsStore {
     await prefs.remove(_kLastSsl);
     await prefs.remove(_kSessionSavedAt);
     await SecureCredentials.delete(_kSecToken);
+    await SecureCredentials.delete(_kSecCsrf);
     await SecureCredentials.delete(_kSecPin);
   }
 }
