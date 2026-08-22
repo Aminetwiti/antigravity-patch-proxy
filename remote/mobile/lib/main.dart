@@ -1173,6 +1173,28 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
               initialSettings: _savedSettings,
               onThemeModeChanged: widget.onThemeModeChanged,
               onDaemonSaved: _applyDaemonSettings,
+              onDiscover: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => DiscoveryScreen(
+                      onConnect: (host, port, token) async {
+                        final url = _formatWsUrl(host, port);
+                        _wsClient.disconnect();
+                        await _wsClient.connect(customUrl: url, authToken: token);
+                        final ok = _wsClient.statusNotifier.value == ConnectionStatus.connected;
+                        if (ok) {
+                          SettingsStore.saveSession(
+                            wsUrl: url,
+                            token: token,
+                            sessionId: _activeSessionId,
+                          );
+                        }
+                        return ok;
+                      },
+                    ),
+                  ),
+                );
+              },
               api: _api,
               notifier: ApprovalNotifier.instance,
               workspacePath: s.workspacePath,

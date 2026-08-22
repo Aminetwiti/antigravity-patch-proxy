@@ -34,11 +34,25 @@ class _AgentErrorCardState extends State<AgentErrorCard> {
     if (widget.title != null && widget.title!.isNotEmpty) {
       return widget.title!;
     }
+    final lower = text.toLowerCase();
+    if (lower.contains('individual quota reached')) {
+      final resetMatch = RegExp(r'(?:resets in|refresh on)\s+([0-9a-zA-Z\s/:\-]+?)(?:\.|\n|$)', caseSensitive: false).firstMatch(text);
+      if (resetMatch != null) {
+        return 'Error Individual quota reached (Resets in ${resetMatch.group(1)?.trim()})';
+      }
+      return 'Error Individual quota reached';
+    }
+    if (lower.contains('baseline model quota reached')) {
+      return 'Baseline model quota reached';
+    }
+    if (lower.contains('quota exceeded') || lower.contains('insufficient_quota')) {
+      return 'Error: Quota exceeded';
+    }
     final firstLine = text.trim().split('\n').first;
     if (firstLine.isNotEmpty && firstLine.length < 80) {
       return firstLine;
     }
-    return 'Error Unknown: Agent execution terminated due to error.';
+    return 'Error: Agent execution terminated';
   }
 
   @override

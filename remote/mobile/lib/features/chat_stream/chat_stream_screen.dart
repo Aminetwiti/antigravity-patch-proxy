@@ -4404,14 +4404,66 @@ class _MessageBubble extends StatelessWidget {
                         ),
                         const SizedBox(width: 8),
                         Expanded(
-                          child: SelectableText(
-                            message.text,
-                            style: TextStyle(
-                              fontSize: 12.5,
-                              height: 1.4,
-                              color: isDark ? const Color(0xFFFCA5A5) : scheme.onErrorContainer,
-                              fontWeight: FontWeight.w500,
-                            ),
+                          child: Builder(
+                            builder: (context) {
+                              final rawText = message.text;
+                              final errorIdMatch = RegExp(
+                                r'Error\s*ID:\s*([0-9a-fA-F\-]+)',
+                                caseSensitive: false,
+                              ).firstMatch(rawText);
+                              final errorId = errorIdMatch?.group(1);
+                              final mainText = errorId != null
+                                  ? rawText.replaceAll(RegExp(r'\s*Error\s*ID:\s*[0-9a-fA-F\-]+', caseSensitive: false), '').trim()
+                                  : rawText;
+
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  SelectableText(
+                                    mainText,
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      height: 1.4,
+                                      color: isDark ? const Color(0xFFFCA5A5) : scheme.onErrorContainer,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  if (errorId != null && errorId.isNotEmpty) ...[
+                                    const SizedBox(height: 6),
+                                    InkWell(
+                                      onTap: () {
+                                        Clipboard.setData(ClipboardData(text: errorId));
+                                        HapticFeedback.lightImpact();
+                                      },
+                                      borderRadius: BorderRadius.circular(4),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(vertical: 2),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              Icons.copy_rounded,
+                                              size: 11,
+                                              color: isDark ? const Color(0xFF9E9E9E) : scheme.onSurfaceVariant,
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              'Error ID: $errorId',
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                fontFamily: 'monospace',
+                                                color: isDark ? const Color(0xFF9E9E9E) : scheme.onSurfaceVariant,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              );
+                            },
                           ),
                         ),
                       ],

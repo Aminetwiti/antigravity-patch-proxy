@@ -113,7 +113,7 @@ class BannerClassifier {
         if (onSeePlans != null)
           BannerAction(label: 'See Plans', onPressed: onSeePlans),
         if (onSwitchModel != null)
-          BannerAction(label: 'Change Model', onPressed: onSwitchModel, isPrimary: true),
+          BannerAction(label: 'Enable Overages', onPressed: onSwitchModel, isPrimary: true),
       ];
 
       return BannerNotificationData(

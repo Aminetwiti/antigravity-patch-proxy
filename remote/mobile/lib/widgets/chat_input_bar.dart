@@ -2247,56 +2247,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
                   ),
                 ),
               ),
-            if (_clipboardPreviewText != null && _clipboardPreviewText!.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6, left: 4),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    BouncingTap(
-                      hapticType: BouncingHapticType.selection,
-                      onTap: _pasteClipboard,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: isDark ? AppColors.surfaceInput : scheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(AppRadius.pill),
-                          border: Border.all(
-                            color: AppColors.accentBlue.withValues(alpha: isDark ? 0.4 : 0.3),
-                            width: 0.8,
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.content_paste_rounded, size: 12, color: AppColors.accentBlue),
-                            const SizedBox(width: 5),
-                            Text(
-                              'Coller : ${_clipboardPreviewText!.replaceAll('\n', ' ').length > 24 ? '${_clipboardPreviewText!.replaceAll('\n', ' ').substring(0, 24)}…' : _clipboardPreviewText!.replaceAll('\n', ' ')}',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: scheme.onSurface,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 2),
-                    InkWell(
-                      onTap: () => setState(() => _clipboardPreviewText = null),
-                      borderRadius: BorderRadius.circular(16),
-                      child: Container(
-                        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                        alignment: Alignment.center,
-                        child: Icon(Icons.close_rounded, size: 14, color: isDark ? AppColors.inkMuted : scheme.outline),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            if (!hasKeyboard && !isIdle)
+            if (!hasKeyboard && !isIdle && widget.hasPlan)
               _buildQuickActionPills(scheme, isDark),
             DragTarget<String>(
               onWillAcceptWithDetails: (details) => true,
@@ -2518,12 +2469,13 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
                                 Flexible(
                                   child: ConstrainedBox(
                                     constraints: BoxConstraints(
-                                      maxWidth: MediaQuery.of(context).size.width < 360 ? 70 : 130,
+                                      maxWidth: MediaQuery.of(context).size.width * 0.55,
                                     ),
                                     child: Text(
                                       _displayModelName,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
+                                      softWrap: false,
                                       style: TextStyle(
                                         fontSize: 11.5,
                                         color: isDark ? AppColors.inkPrimary : scheme.onSurface,
@@ -2744,6 +2696,7 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
   }
 
   Widget _buildQuickActionPills(ColorScheme scheme, bool isDark) {
+    if (!widget.hasPlan) return const SizedBox.shrink();
     return Container(
       height: 30,
       margin: const EdgeInsets.only(bottom: 6),
@@ -2751,76 +2704,19 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 2),
         children: [
-          if (widget.hasPlan)
-            _buildActionPill(
-              icon: Icons.play_arrow_rounded,
-              label: 'Proceed ⌘↵',
-              color: AppColors.positive,
-              isDark: isDark,
-              scheme: scheme,
-              onTap: () {
-                HapticFeedback.selectionClick();
-                if (widget.onProceedPlan != null) {
-                  widget.onProceedPlan!();
-                } else {
-                  widget.onSend('proceed');
-                }
-              },
-            ),
           _buildActionPill(
-            icon: Icons.play_circle_outline,
-            label: 'Tests',
-            color: scheme.primary,
+            icon: Icons.play_arrow_rounded,
+            label: 'Proceed ⌘↵',
+            color: AppColors.positive,
             isDark: isDark,
             scheme: scheme,
             onTap: () {
               HapticFeedback.selectionClick();
-              if (widget.onRunTests != null) {
-                widget.onRunTests!();
+              if (widget.onProceedPlan != null) {
+                widget.onProceedPlan!();
               } else {
-                widget.onSend('Exécute les tests unitaires du projet');
+                widget.onSend('proceed');
               }
-            },
-          ),
-          _buildActionPill(
-            icon: Icons.difference_outlined,
-            label: 'Diff Git',
-            color: scheme.secondary,
-            isDark: isDark,
-            scheme: scheme,
-            onTap: () {
-              HapticFeedback.selectionClick();
-              if (widget.onViewDiff != null) {
-                widget.onViewDiff!();
-              } else {
-                widget.onSend('Affiche le diff git des changements récents');
-              }
-            },
-          ),
-          _buildActionPill(
-            icon: Icons.help_outline,
-            label: 'Expliquer',
-            color: isDark ? AppColors.inkSecondary : scheme.onSurfaceVariant,
-            isDark: isDark,
-            scheme: scheme,
-            onTap: () {
-              HapticFeedback.selectionClick();
-              _controller.text = 'Explique le code récent et ce qui a changé';
-              _controller.selection = TextSelection.collapsed(offset: _controller.text.length);
-              widget.onDraftChanged?.call(_controller.text);
-            },
-          ),
-          _buildActionPill(
-            icon: Icons.build_outlined,
-            label: 'Corriger',
-            color: scheme.error,
-            isDark: isDark,
-            scheme: scheme,
-            onTap: () {
-              HapticFeedback.selectionClick();
-              _controller.text = 'Analyse l\'erreur et applique le correctif';
-              _controller.selection = TextSelection.collapsed(offset: _controller.text.length);
-              widget.onDraftChanged?.call(_controller.text);
             },
           ),
         ],
