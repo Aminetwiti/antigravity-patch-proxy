@@ -4410,28 +4410,25 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 
 		// Injecter les références des images uploadées dans le promptText
-		// sous forme de bloc ADDITIONAL_METADATA + [ARTIFACT: ...], comme
-		// le fait l'IDE native. Le LS ne scanne pas .user_uploaded/ — il
-		// découvre les images via ces références dans le texte du prompt.
-		var imageRefs []string
+		// sous forme de bloc ADDITIONAL_METADATA exact pour que le modèle et le Language Server
+		// intègrent l'image dans le contexte de l'agent.
+		var rawImagePaths []string
 		for _, m := range mediaAttachments {
 			if strings.HasPrefix(m.MimeType, "image/") && m.URI != "" {
-				cleanURI := m.URI
-				desc := m.Description
-				if desc == "" {
-					desc = filepath.Base(strings.TrimPrefix(cleanURI, "file:///"))
-				}
-				imageRefs = append(imageRefs, fmt.Sprintf("[ARTIFACT: %s]\nPath: %s", desc, cleanURI))
+				cleanPath := strings.TrimPrefix(m.URI, "file:///")
+				cleanPath = filepath.ToSlash(cleanPath)
+				rawImagePaths = append(rawImagePaths, cleanPath)
 			}
 		}
-		if len(imageRefs) > 0 {
-			metaBlock := "\n<ADDITIONAL_METADATA>\n"
-			metaBlock += fmt.Sprintf("The user has uploaded %d image(s):\n", len(imageRefs))
-			for _, ref := range imageRefs {
-				metaBlock += ref + "\n"
+		if len(rawImagePaths) > 0 && !strings.Contains(promptText, "<ADDITIONAL_METADATA>") {
+			metaBlock := "\n\n<ADDITIONAL_METADATA>\n"
+			metaBlock += fmt.Sprintf("The user has uploaded %d image(s):\n", len(rawImagePaths))
+			for _, p := range rawImagePaths {
+				metaBlock += fmt.Sprintf("- %s\n", p)
 			}
+			metaBlock += "You can embed this image in an artifact if you need the USER to review it.\n"
 			metaBlock += "</ADDITIONAL_METADATA>"
-			promptText = promptText + metaBlock
+			promptText = strings.TrimSpace(promptText) + metaBlock
 		}
 
 		err = s.RPCClient.SendMessageStreamModelWithMedia(msg.CascadeID, promptText, modelUID, modelEnum, nonImageMedia, onFrameHandler, noTools)

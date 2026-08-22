@@ -1,7 +1,8 @@
 {
-  "name": "ag-remote-ui",
+  "name": "antigravity-remote-daemon",
+  "productName": "Antigravity Remote Daemon",
   "version": "1.0.0",
-  "description": "Antigravity Remote Daemon Manager — Dedicated 1-Page Electron App",
+  "description": "Antigravity Remote Daemon — Dedicated 1-Page Controller for Remote Server & Mobile Pairing",
   "main": "dist/main.js",
   "scripts": {
     "build": "node scripts/copy-assets.js && tsc -p tsconfig.json && tsc -p tsconfig.renderer.json && node scripts/strip-module-syntax.js",
@@ -29,8 +30,8 @@
     "typescript": "^5.3.0"
   },
   "build": {
-    "appId": "dev.antigravity.remote-ui",
-    "productName": "Antigravity Remote",
+    "appId": "dev.antigravity.remote-daemon",
+    "productName": "Antigravity Remote Daemon",
     "directories": {
       "output": "release"
     },
@@ -48,7 +49,7 @@
           ]
         }
       ],
-      "artifactName": "ag-remote-${version}-portable.${ext}"
+      "artifactName": "antigravity-remote-daemon-${version}-portable.${ext}"
     }
   }
 }

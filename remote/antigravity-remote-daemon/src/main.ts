@@ -8,24 +8,32 @@ import qrcode from 'qrcode';
 let mainWindow: BrowserWindow | null = null;
 let daemonProcess: ChildProcess | null = null;
 
-function resolveDaemonPath(): string {
-  // Candidate paths (dev mode vs packaged app)
+function resolveDaemonPath(): { exePath: string; isGoRun: boolean } {
+  // Check compiled exe first
   const candidates = [
-    path.join(__dirname, '..', '..', 'remote', 'daemon', 'daemon.exe'),
-    path.join(__dirname, '..', 'remote', 'daemon', 'daemon.exe'),
+    path.join(__dirname, '..', '..', 'daemon', 'daemon.exe'),
+    path.join(__dirname, '..', '..', 'daemon', 'daemon'),
+    path.join(__dirname, '..', 'daemon', 'daemon.exe'),
+    path.join(process.resourcesPath || '', 'daemon', 'daemon.exe'),
     path.join(process.resourcesPath || '', 'remote', 'daemon', 'daemon.exe'),
-    path.join(app.getAppPath(), '..', 'remote', 'daemon', 'daemon.exe'),
-    path.join(__dirname, '..', '..', 'remote', 'daemon', 'daemon'),
   ];
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
-      return candidate;
+      return { exePath: candidate, isGoRun: false };
     }
   }
 
-  // Fallback to relative standard dev location
-  return path.join(__dirname, '..', '..', 'remote', 'daemon', 'daemon.exe');
+  // Check if main.go exists in daemon folder
+  const goMain = path.join(__dirname, '..', '..', 'daemon', 'main.go');
+  if (fs.existsSync(goMain)) {
+    return { exePath: goMain, isGoRun: true };
+  }
+
+  return {
+    exePath: path.join(__dirname, '..', '..', 'daemon', 'daemon.exe'),
+    isGoRun: false,
+  };
 }
 
 function killOrphanDaemonProcesses(): void {
@@ -52,7 +60,7 @@ function createWindow(): void {
     minWidth: 880,
     minHeight: 650,
     backgroundColor: '#09090b',
-    title: 'Antigravity Remote Server',
+    title: 'Antigravity Remote Daemon',
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -168,24 +176,29 @@ ipcMain.handle('remote:startDaemon', async (event, options: { port: number; tunn
 
   killOrphanDaemonProcesses();
 
-  const daemonExePath = resolveDaemonPath();
-  const args = ['--port', port.toString()];
-
-  if (options.tunnel && options.tunnel !== 'none') {
-    args.push('--tunnel', options.tunnel);
-  }
-  args.push('--auth-token', token);
-  if (options.allowFirstAdmin) {
-    args.push('--allow-first-admin');
-  }
-
-  const daemonDir = path.dirname(daemonExePath);
+  const { exePath, isGoRun } = resolveDaemonPath();
+  const daemonDir = isGoRun ? path.dirname(exePath) : path.dirname(exePath);
   const daemonBinDir = path.join(daemonDir, 'bin');
   const envPath = `${daemonDir}${path.delimiter}${daemonBinDir}${path.delimiter}${process.env.PATH || ''}`;
 
-  event.sender.send('remote:daemonLog', `[Lancement du daemon : ${daemonExePath} ${args.join(' ')}]\n`);
+  const cliArgs: string[] = [];
+  if (isGoRun) {
+    cliArgs.push('run', 'main.go');
+  }
 
-  daemonProcess = spawn(daemonExePath, args, {
+  cliArgs.push('--port', port.toString());
+  if (options.tunnel && options.tunnel !== 'none') {
+    cliArgs.push('--tunnel', options.tunnel);
+  }
+  cliArgs.push('--auth-token', token);
+  if (options.allowFirstAdmin) {
+    cliArgs.push('--allow-first-admin');
+  }
+
+  const binaryToRun = isGoRun ? 'go' : exePath;
+  event.sender.send('remote:daemonLog', `[Lancement du daemon : ${binaryToRun} ${cliArgs.join(' ')}]\n`);
+
+  daemonProcess = spawn(binaryToRun, cliArgs, {
     cwd: daemonDir,
     windowsHide: true,
     env: {
