@@ -103,6 +103,11 @@ typedef LocalFileTap = void Function(String filePath);
 class MarkdownRenderer {
   static final Map<String, List<MarkdownBlock>> _blocksCache = {};
   static const int _maxCacheEntries = 500;
+
+  /// P3 : taille du cache LRU — exposée uniquement pour les tests de
+  /// régression (le streaming ne doit pas y écrire ses snapshots).
+  @visibleForTesting
+  static int get debugBlocksCacheSize => _blocksCache.length;
   static final _toolArgRe = RegExp(r'"(command|query|file|path|TargetFile|AbsolutePath)"\s*:\s*"([^"]+)"');
   static final _whitespaceRe = RegExp(r'\s+');
 
@@ -144,14 +149,25 @@ class MarkdownRenderer {
     return blocksOf(text);
   }
 
-  /// Splits raw markdown text into display blocks.
+  /// Parses raw markdown text for live streaming snapshots without LRU caching.
+  static List<MarkdownBlock> blocksOfStreaming(String text) {
+    return _parseBlocks(text, cache: false);
+  }
+
+  /// Splits raw markdown text into display blocks (cached in LRU).
   static List<MarkdownBlock> blocksOf(String text) {
-    final cached = _blocksCache.remove(text);
-    if (cached != null) {
-      // LRU refresh: réinsère en fin pour que l'éviction retire les entrées
-      // les moins récemment utilisées et non les plus anciennes insérées.
-      _blocksCache[text] = cached;
-      return cached;
+    return _parseBlocks(text, cache: true);
+  }
+
+  static List<MarkdownBlock> _parseBlocks(String text, {required bool cache}) {
+    if (cache) {
+      final cached = _blocksCache.remove(text);
+      if (cached != null) {
+        // LRU refresh: réinsère en fin pour que l'éviction retire les entrées
+        // les moins récemment utilisées et non les plus anciennes insérées.
+        _blocksCache[text] = cached;
+        return cached;
+      }
     }
 
     final cleanText = cleanContent(text);
@@ -275,10 +291,12 @@ class MarkdownRenderer {
     }
     flushParagraph();
 
-    while (_blocksCache.length >= _maxCacheEntries) {
-      _blocksCache.remove(_blocksCache.keys.first);
+    if (cache) {
+      while (_blocksCache.length >= _maxCacheEntries) {
+        _blocksCache.remove(_blocksCache.keys.first);
+      }
+      _blocksCache[text] = List<MarkdownBlock>.unmodifiable(blocks);
     }
-    _blocksCache[text] = List<MarkdownBlock>.unmodifiable(blocks);
     return blocks;
   }
 

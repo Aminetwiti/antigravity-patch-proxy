@@ -2682,11 +2682,13 @@ func extractMediaArtifacts(content string) []string {
 		}
 	}
 
-	// 2. Direct paths in .user_uploaded or scratch or tempmediaStorage
+	// 2. Direct paths in .user_uploaded, user_uploaded, scratch, media_ or tempmediaStorage
 	for _, match := range userUploadedRe.FindAllString(content, -1) {
 		p := strings.TrimSpace(match)
 		lower := strings.ToLower(p)
 		if (strings.Contains(lower, ".user_uploaded") ||
+			strings.Contains(lower, "user_uploaded") ||
+			strings.Contains(lower, "media_") ||
 			strings.Contains(lower, "tempmediastorage") ||
 			strings.Contains(lower, "scratch/upload_") ||
 			strings.Contains(lower, "scratch\\upload_")) && !seen[p] {

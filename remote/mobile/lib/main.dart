@@ -132,6 +132,9 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
   // Bug #15 : guard pour éviter le double fetch concurrent de sessions.
   bool _sessionsFetching = false;
   int _lastStateVersion = 0;
+  // P3 : timestamp de la dernière sync sessions réussie (push ou poll) —
+  // permet au timer de polling de se mettre en veille quand le push est actif.
+  DateTime? _lastSessionsSyncAt;
 
   ConnectionStatus _prevStatus = ConnectionStatus.disconnected;
 
@@ -332,6 +335,15 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
       _sessionsPollTimer?.cancel();
       _sessionsPollTimer = Timer.periodic(const Duration(seconds: 15), (_) {
         if (mounted && _wsClient.statusNotifier.value == ConnectionStatus.connected) {
+          // P3 : filet de sécurité, pas une source primaire — le daemon pousse
+          // déjà `sessions_updated`. On saute le poll si une sync (push ou
+          // refresh manuel) a eu lieu il y a moins de 12 s pour éviter le
+          // double-chargement réseau + re-parse de la liste complète.
+          final lastSync = _lastSessionsSyncAt;
+          if (lastSync != null &&
+              DateTime.now().difference(lastSync) < const Duration(seconds: 12)) {
+            return;
+          }
           _refreshSessions();
         }
       });
@@ -628,6 +640,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
             _activeSessionId = '';
             _activeSessionTitle = 'Nouvelle conversation';
           }
+          _lastSessionsSyncAt = DateTime.now();
         });
         if (_activeSessionId.isNotEmpty) {
           SettingsStore.saveSession(
@@ -824,6 +837,7 @@ class _AntigravityMainScreenState extends State<AntigravityMainScreen> {
                 _contextStats = {};
               }
             }
+            _lastSessionsSyncAt = DateTime.now();
           });
           return;
         }

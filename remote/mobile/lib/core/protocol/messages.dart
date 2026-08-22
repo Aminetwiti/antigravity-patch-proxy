@@ -213,6 +213,7 @@ class ProjectItem {
 enum ChatSegmentType {
   thought, // Pensées, outils, diffs, minuteurs
   text,    // Paragraphe de texte émis par l'assistant
+  error,   // Message d'erreur d'exécution de l'agent
 }
 
 /// Segment unitaire dans une bulle de message pour le rendu chronologique séquentiel.
@@ -250,14 +251,18 @@ class ChatSegment {
         if (isRunning) 'isRunning': isRunning,
       };
 
-  factory ChatSegment.fromJson(Map<String, dynamic> json) => ChatSegment(
-        type: json['type'] == 'thought'
-            ? ChatSegmentType.thought
-            : ChatSegmentType.text,
-        content: json['content']?.toString() ?? '',
-        title: json['title']?.toString(),
-        isRunning: json['isRunning'] == true,
-      );
+  factory ChatSegment.fromJson(Map<String, dynamic> json) {
+    final typeStr = json['type']?.toString();
+    final type = typeStr == 'thought'
+        ? ChatSegmentType.thought
+        : (typeStr == 'error' ? ChatSegmentType.error : ChatSegmentType.text);
+    return ChatSegment(
+      type: type,
+      content: json['content']?.toString() ?? '',
+      title: json['title']?.toString(),
+      isRunning: json['isRunning'] == true,
+    );
+  }
 }
 
 class ChatMessage {

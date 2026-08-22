@@ -27,6 +27,7 @@ import '../../widgets/background_task_output_sheet.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/unified_diff_viewer.dart';
 import '../../widgets/artifact_viewer_modal.dart';
+import '../../widgets/agent_error_card.dart';
 import '../../widgets/project_selector_bottom_sheet.dart';
 import '../../widgets/session_breadcrumb.dart';
 import 'widgets/execution_progress_view.dart';
@@ -1712,6 +1713,19 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         _onStreamStarted(targetSessionId);
         if (isActiveSession && _showJumpToBottom) _hiddenNewCount++;
 
+        final userPrompt = msg['data']?['userPrompt']?.toString() ?? '';
+        if (userPrompt.isNotEmpty) {
+          final hasUserMsg = buf.any((m) => m.sender == 'user' && m.text.trim() == userPrompt.trim());
+          if (!hasUserMsg) {
+            buf.add(ChatMessage(
+              id: 'user-ext-$requestId',
+              sender: 'user',
+              text: userPrompt,
+              timestamp: _timestamp(),
+            ));
+          }
+        }
+
         final msgId = 'ext-$requestId';
         _streamRequestToMessageId[thKey] = msgId;
         final existingIdx = buf.indexWhere((m) => m.id == msgId);
@@ -1820,6 +1834,7 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
         }
         final textDelta = StreamDeltaParser.textOf(msg);
         final thoughtDelta = StreamDeltaParser.thinkingOf(msg);
+        final errorDelta = StreamDeltaParser.errorOf(msg);
         final approval = StreamDeltaParser.approvalOf(msg);
         final deltaFiles = StreamDeltaParser.fileChangesOf(msg);
         if (deltaFiles.isNotEmpty) {
@@ -1894,6 +1909,16 @@ class _ChatStreamScreenState extends State<ChatStreamScreen>
                 content: textDelta,
               ));
             }
+          }
+          if (errorDelta.isNotEmpty) {
+            if (updatedSegments.isNotEmpty && updatedSegments.last.type == ChatSegmentType.thought && updatedSegments.last.isRunning) {
+              final last = updatedSegments.last;
+              updatedSegments[updatedSegments.length - 1] = last.copyWith(isRunning: false);
+            }
+            updatedSegments.add(ChatSegment(
+              type: ChatSegmentType.error,
+              content: errorDelta,
+            ));
           }
 
           buf[idx] = current.copyWith(
@@ -4498,6 +4523,13 @@ class _MessageBubble extends StatelessWidget {
                     api: api,
                     workspacePath: workspacePath,
                     onLocalFile: onLocalFile,
+                  ),
+                ] else if (message.segments[segIdx].type == ChatSegmentType.error &&
+                    message.segments[segIdx].content.trim().isNotEmpty) ...[
+                  AgentErrorCard(
+                    errorText: message.segments[segIdx].content,
+                    title: message.segments[segIdx].title,
+                    onRetry: onRetryTask,
                   ),
                 ],
               ],

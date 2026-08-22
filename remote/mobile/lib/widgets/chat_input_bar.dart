@@ -195,7 +195,6 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
   // Feature multi-attachements fichiers et images (Quiet Console)
   final List<_AttachedItem> _attachments = [];
   double? _uploadProgress;
-  String? _clipboardPreviewText;
 
   final GlobalKey _modelButtonKey = GlobalKey();
   final GlobalKey _textFieldKey = GlobalKey();
@@ -224,7 +223,6 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
     _controller.addListener(_onTextChanged);
     widget.onDraftChanged?.call(_controller.text);
     _loadModelsAndPreferences();
-    _checkClipboard();
   }
 
   void _onFocusChanged() {
@@ -233,40 +231,6 @@ class ChatInputBarState extends State<ChatInputBar> with WidgetsBindingObserver 
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _checkClipboard();
-    }
-  }
-
-  Future<void> _checkClipboard() async {
-    try {
-      final data = await Clipboard.getData(Clipboard.kTextPlain);
-      final text = data?.text?.trim();
-      if (text != null &&
-          text.isNotEmpty &&
-          text.length > 2 &&
-          text.length < 3000 &&
-          text != _controller.text.trim()) {
-        if (mounted) {
-          setState(() => _clipboardPreviewText = text);
-        }
-      } else {
-        if (mounted && _clipboardPreviewText != null) {
-          setState(() => _clipboardPreviewText = null);
-        }
-      }
-    } catch (_) {}
-  }
-
-  void _pasteClipboard() {
-    if (_clipboardPreviewText == null) return;
-    HapticFeedback.selectionClick();
-    final current = _controller.text;
-    final newText = current.isEmpty ? _clipboardPreviewText! : '$current\n${_clipboardPreviewText!}';
-    _controller.text = newText;
-    _controller.selection = TextSelection.collapsed(offset: newText.length);
-    widget.onDraftChanged?.call(newText);
-    setState(() => _clipboardPreviewText = null);
   }
 
   @override

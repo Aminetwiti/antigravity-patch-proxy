@@ -254,4 +254,84 @@ class WorkerPool {
           reason: '200 cached syntax highlight lookups took ${sw.elapsedMilliseconds}ms');
     });
   });
+
+  group('PHASE 3 — Régressions des correctifs runtime (P3-01/02/08)', () {
+    test('P3-02 — blocksOfStreaming ne pollue PAS le cache LRU', () {
+      final before = MarkdownRenderer.debugBlocksCacheSize;
+
+      // Simule 200 ticks de streaming sur un message en croissance :
+      // chaque snapshot intermédiaire doit être parsé mais jamais stocké.
+      var text = '# Title\n\n';
+      for (int i = 0; i < 200; i++) {
+        text += 'Line $i with **bold** and `code`.\n\n';
+        final blocks = MarkdownRenderer.blocksOfStreaming(text);
+        expect(blocks, isNotEmpty);
+      }
+
+      expect(MarkdownRenderer.debugBlocksCacheSize, before,
+          reason: 'Le streaming ne doit pas écrire ses snapshots dans le LRU');
+
+      // Le texte final stabilisé passe par blocksOf → entre en cache.
+      MarkdownRenderer.blocksOf(text);
+      expect(MarkdownRenderer.debugBlocksCacheSize, before + 1);
+
+      // Un re-parse du même texte stabilisé est servi par le cache.
+      final again = MarkdownRenderer.blocksOf(text);
+      expect(again, isNotEmpty);
+      expect(MarkdownRenderer.debugBlocksCacheSize, before + 1);
+    });
+
+    test('P3-08 — OutboxQueue : les sets de dedup restent bornés (FIFO)', () {
+      final outbox = OutboxQueue();
+
+      // 1200 requestIds drainés — au-delà du plafond de 1024, les plus
+      // anciens sont évacués.
+      for (int i = 0; i < 1200; i++) {
+        outbox.remove('req-$i');
+      }
+
+      // Les ids récents restent skippables...
+      expect(outbox.shouldSkip('req-1199'), isTrue);
+      expect(outbox.shouldSkip('req-1100'), isTrue);
+      // ...les plus anciens ont été évacués (compromis documenté : la queue
+      // elle-même expire après 5 min, très en-deçà de ce volume).
+      expect(outbox.shouldSkip('req-0'), isFalse);
+
+      // Le comportement nominal (petit volume) est inchangé.
+      final q2 = OutboxQueue();
+      q2.remove('a');
+      expect(q2.shouldSkip('a'), isTrue);
+      expect(q2.shouldSkip('b'), isFalse);
+    });
+
+    test('P3-01a — SessionHistoryCacheStore : encode/decode round-trip hors UI isolate', () async {
+      final store = SessionHistoryCacheStore.instance;
+      store.clearMemory();
+      SharedPreferences.setMockInitialValues({});
+
+      // Charge > seuil de 20 000 caractères → passe par compute().
+      final big = List.generate(
+        80,
+        (i) => ChatMessage(
+          id: 'm$i',
+          sender: i.isEven ? 'user' : 'assistant',
+          text: 'Message $i — ${'x' * 300}',
+          timestamp: '12:0$i',
+        ),
+      );
+      await store.saveSessionHistory('big-session', big);
+      final loaded = await store.loadSessionHistory('big-session');
+      expect(loaded.length, 80);
+      expect(loaded.first.text, big.first.text);
+
+      // Petit payload → chemin inline, même résultat.
+      final small = [
+        ChatMessage(id: 's1', sender: 'user', text: 'hello', timestamp: '12:00'),
+      ];
+      await store.saveSessionHistory('small-session', small);
+      final loadedSmall = await store.loadSessionHistory('small-session');
+      expect(loadedSmall.length, 1);
+      expect(loadedSmall.first.text, 'hello');
+    });
+  });
 }

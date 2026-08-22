@@ -46,6 +46,20 @@ class StreamDeltaParser {
     return '';
   }
 
+  /// Extracts error events from a stream_delta message.
+  static String errorOf(Map<String, dynamic> message) {
+    final data = message['data'];
+    if (data is! Map) return '';
+    final events = data['events'];
+    if (events is! List) return '';
+    for (final e in events) {
+      if (e is Map && (e['kind'] == 'error' || e['status'] == 'ERROR')) {
+        return (e['detail'] ?? e['error'] ?? e['message'] ?? e['text'] ?? '').toString();
+      }
+    }
+    return '';
+  }
+
   /// Extracts modified file paths from tool execution deltas in a stream_delta message.
   static List<String> fileChangesOf(Map<String, dynamic> message) {
     final data = message['data'];

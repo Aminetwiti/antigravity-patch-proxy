@@ -248,14 +248,15 @@ func (pm *PairingManager) ValidateSession(token string) (SessionInfo, bool) {
 	if token == "" {
 		return SessionInfo{}, false
 	}
-	pm.mu.RLock()
-	defer pm.mu.RUnlock()
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
 
 	sess, ok := pm.sessions[token]
 	if !ok {
 		return SessionInfo{}, false
 	}
 	if !time.Now().Before(sess.ExpiresAt) {
+		delete(pm.sessions, token)
 		return SessionInfo{}, false
 	}
 	return sess, true
@@ -293,14 +294,16 @@ func (pm *PairingManager) hasAdminSessionLocked(deviceID string) bool {
 
 // ListSessions retourne la liste des sessions actives (pour /admin/devices).
 func (pm *PairingManager) ListSessions() []SessionInfo {
-	pm.mu.RLock()
-	defer pm.mu.RUnlock()
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
 
 	now := time.Now()
 	out := make([]SessionInfo, 0, len(pm.sessions))
-	for _, sess := range pm.sessions {
+	for token, sess := range pm.sessions {
 		if now.Before(sess.ExpiresAt) {
 			out = append(out, sess)
+		} else {
+			delete(pm.sessions, token)
 		}
 	}
 	return out
@@ -311,14 +314,18 @@ func (pm *PairingManager) ValidateToken(token string) bool {
 	if token == "" {
 		return false
 	}
-	pm.mu.RLock()
-	defer pm.mu.RUnlock()
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
 
 	sess, ok := pm.sessions[token]
 	if !ok {
 		return false
 	}
-	return time.Now().Before(sess.ExpiresAt)
+	if !time.Now().Before(sess.ExpiresAt) {
+		delete(pm.sessions, token)
+		return false
+	}
+	return true
 }
 
 // HTTPHandler expose l'endpoint de pairing pour le client mobile (POST /pair).

@@ -2284,7 +2284,7 @@ func (s *Server) handleADB(conn *websocket.Conn, msg IncomingMessage) bool {
 					wsRoot = filepath.Join(home, ".gemini", "antigravity", "downloads")
 				}
 			}
-			if wsRoot != "" && !isPathInsideAllowedWorkspaces(wsRoot) {
+			if wsRoot != "" && (!isPathInsideAllowedWorkspaces(wsRoot) || !s.requireProject(conn, wsRoot)) {
 				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: racine workspace non autorisée"})
 				return true
 			}
@@ -2326,7 +2326,7 @@ func (s *Server) handleADB(conn *websocket.Conn, msg IncomingMessage) bool {
 				wsRoot = filepath.Join(home, ".gemini", "antigravity")
 			}
 		}
-		if wsRoot != "" && !isPathInsideAllowedWorkspaces(wsRoot) {
+		if wsRoot != "" && (!isPathInsideAllowedWorkspaces(wsRoot) || !s.requireProject(conn, wsRoot)) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: racine workspace non autorisée"})
 			return true
 		}
@@ -3854,6 +3854,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
 			return
 		}
+		// Sécurité (P1 / SEC-11) : vérification de la paternité de la session
+		if !s.canApproveCascade(conn, msg.CascadeID) {
+			s.writeJSON(conn, OutgoingMessage{Type: "error", RequestID: msg.RequestID, Error: "accès refusé: seul le propriétaire de la session ou un administrateur peut répondre à cette question"})
+			return
+		}
 		var responseText string
 		if len(msg.SelectedAnswers) > 0 {
 			responseText = strings.Join(msg.SelectedAnswers, ", ")
@@ -4126,34 +4131,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 					}
 				}
 			}
-		}
-
-		// S'assurer que chaque image attachée est représentée sous forme de tag Markdown dans promptText
-		// pour que l'IDE Antigravity et le Language Server l'inscrivent dans transcript.jsonl et l'affichent dans la bulle de chat.
-		for _, m := range mediaAttachments {
-			if strings.HasPrefix(m.MimeType, "image/") || strings.HasPrefix(m.URI, "file:///") {
-				if m.URI != "" {
-					cleanURI := m.URI
-					if !strings.HasPrefix(cleanURI, "file:///") && (strings.HasPrefix(cleanURI, "/") || (len(cleanURI) >= 2 && cleanURI[1] == ':')) {
-						cleanURI = "file:///" + filepath.ToSlash(cleanURI)
-					}
-					if !strings.Contains(promptText, cleanURI) && !strings.Contains(promptText, filepath.Base(cleanURI)) {
-						desc := m.Description
-						if desc == "" {
-							desc = filepath.Base(cleanURI)
-						}
-						if desc == "" || desc == "." {
-							desc = "Image"
-						}
-						imgTag := fmt.Sprintf("![%s](%s)", desc, cleanURI)
-						if promptText == "" {
-							promptText = imgTag
-						} else {
-							promptText = imgTag + "\n\n" + promptText
-						}
-					}
-				}
-			}
+			// Nettoyer les balises Markdown du promptText pour éviter d'afficher du code Markdown brut dans l'IDE
+			promptText = strings.TrimSpace(imgTagRe.ReplaceAllString(promptText, ""))
 		}
 
 		// Populer Data et Base64Data pour chaque mediaAttachment en lisant le fichier sur disque et en normalisant vers PNG
@@ -7114,9 +7093,11 @@ func (s *Server) scanRunningTasksFromTranscript(cascadeID string) {
 			strings.Contains(lowerContent, "the command exited") ||
 			strings.Contains(lowerContent, "status: done") ||
 			strings.Contains(lowerContent, "status: error") ||
+			strings.Contains(lowerContent, "status: killed") ||
 			strings.Contains(lowerContent, "task finished") ||
 			strings.Contains(lowerContent, "wait cancelled") ||
-			strings.Contains(lowerContent, "wait canceled")
+			strings.Contains(lowerContent, "wait canceled") ||
+			strings.Contains(lowerContent, "tool execution was canceled")
 
 		if isFinished || strings.Contains(content, "sender=") {
 			tIDs := extractAllTaskIDsFromText(content)
@@ -7136,16 +7117,27 @@ func (s *Server) scanRunningTasksFromTranscript(cascadeID string) {
 	for tID := range activeTasks {
 		logP := findTaskLogPath(cascadeID, tID)
 		if logP != "" {
-			if data, err := os.ReadFile(logP); err == nil {
-				logStr := strings.ToLower(string(data))
-				if strings.Contains(logStr, "exited with code") ||
-					strings.Contains(logStr, "the command exited") ||
-					strings.Contains(logStr, "task finished") ||
-					strings.Contains(logStr, "finished with result") ||
-					strings.Contains(logStr, "was canceled") ||
-					strings.Contains(logStr, "was cancelled") {
+			if fi, err := os.Stat(logP); err == nil {
+				// Si le fichier de log n'a pas été modifié depuis plus de 60s et n'est pas un daemon
+				if time.Since(fi.ModTime()) > 60*time.Second {
 					delete(activeTasks, tID)
+					continue
 				}
+				if data, err := os.ReadFile(logP); err == nil {
+					logStr := strings.ToLower(string(data))
+					if strings.Contains(logStr, "exited with code") ||
+						strings.Contains(logStr, "the command exited") ||
+						strings.Contains(logStr, "task finished") ||
+						strings.Contains(logStr, "finished with result") ||
+						strings.Contains(logStr, "was canceled") ||
+						strings.Contains(logStr, "was cancelled") ||
+						strings.Contains(logStr, "status: done") {
+						delete(activeTasks, tID)
+					}
+				}
+			} else {
+				// Le fichier de log n'existe pas ou n'est plus accessible
+				delete(activeTasks, tID)
 			}
 		}
 	}
@@ -7692,7 +7684,17 @@ func (s *Server) runLiveTurnStreamer(ctx context.Context, cascadeID, requestID s
 									}
 								}
 
-								// 2e. Background tasks detection
+								// 2e. Error message handling
+								if (entry.Type == "ERROR_MESSAGE" || entry.Status == "ERROR") && len(entry.Content) > 0 {
+									events = append(events, map[string]interface{}{
+										"kind":   "error",
+										"detail": entry.Content,
+										"status": "ERROR",
+									})
+									turnCompleted = true
+								}
+
+								// 2f. Background tasks detection
 								if len(entry.Content) > 0 {
 									if strings.Contains(entry.Content, "running as a background task") || strings.Contains(entry.Content, "Tool is running as a background task") {
 										tIDs := extractAllTaskIDsFromText(entry.Content)
@@ -7931,11 +7933,36 @@ func (s *Server) startExternalTurnStreamer(cascadeID string) {
 			})
 		}()
 
+		// Extrait le prompt utilisateur de la dernière étape USER_INPUT dans le transcript
+		var userPrompt string
+		tPath := findTranscriptPath(cascadeID)
+		if tPath != "" {
+			if f, err := os.Open(tPath); err == nil {
+				scanner := bufio.NewScanner(f)
+				hBuf := AcquireHistoryBuffer()
+				scanner.Buffer(*hBuf, len(*hBuf))
+				for scanner.Scan() {
+					var entry struct {
+						Type    string `json:"type"`
+						Content string `json:"content"`
+					}
+					if json.Unmarshal(scanner.Bytes(), &entry) == nil && entry.Type == "USER_INPUT" {
+						userPrompt = extractUserRequest(entry.Content)
+					}
+				}
+				ReleaseHistoryBuffer(hBuf)
+				f.Close()
+			}
+		}
+
 		// 1. Démarre le flux visuel sur le mobile
 		startData := map[string]interface{}{
 			"cascadeId": cascadeID,
 			"requestId": reqID,
 			"model":     "Gemini 3.7 Flash",
+		}
+		if userPrompt != "" {
+			startData["userPrompt"] = userPrompt
 		}
 		s.broadcast(OutgoingMessage{
 			Type:      "stream_start",
