@@ -639,19 +639,6 @@ func (s *Server) sessionsFromSummariesLocked(jetbox map[string]connectrpc.Jetbox
 		return tI.After(tJ)
 	})
 
-	// Limite à 6 sessions récentes par projet comme sur Desktop IDE
-	projectCounts := make(map[string]int)
-	resultSessions := make([]map[string]interface{}, 0, len(items))
-	for _, it := range items {
-		ws, _ := it["workspace"].(string)
-		st, _ := it["status"].(string)
-		isActive := st == "CASCADE_STATUS_RUNNING" || st == "CASCADE_STATUS_WAITING_FOR_USER_ACTION"
-		if isActive || projectCounts[ws] < 6 {
-			resultSessions = append(resultSessions, it)
-			projectCounts[ws]++
-		}
-	}
-
 	var v int64 = 0
 	if s != nil {
 		s.stateVersion++
@@ -660,7 +647,7 @@ func (s *Server) sessionsFromSummariesLocked(jetbox map[string]connectrpc.Jetbox
 	return map[string]interface{}{
 		"version":   v,
 		"projects":  projects,
-		"sessions":  resultSessions,
+		"sessions":  items,
 		"timestamp": time.Now().UnixMilli(),
 	}
 }
@@ -3038,7 +3025,7 @@ func sessionsOut(raw []byte) interface{} {
 }
 
 func (s *Server) sessionsOut(raw []byte) interface{} {
-	return s.sessionsOutWithLimit(raw, 6)
+	return s.sessionsOutWithLimit(raw, 0)
 }
 
 func (s *Server) allSessionsOut(raw []byte) interface{} {

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mobile/core/protocol/messages.dart';
 import 'package:mobile/core/protocol/session_parser.dart';
 import 'package:mobile/features/sessions/display_options.dart';
 import 'package:mobile/widgets/agent_error_card.dart';
