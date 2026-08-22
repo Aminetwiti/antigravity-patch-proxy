@@ -104,11 +104,11 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
     final available = _allSessions.where((s) => s.isAvailable && s.id.isNotEmpty).toList();
 
     // Extraire tous les workspaces distincts pour le filtre
-    final workspaces = available
-        .map((s) => WorkspacePath.displayName(s.workspacePath))
-        .toSet()
-        .toList()
-      ..sort();
+    final Set<String> workspaceSet = {};
+    for (final s in available) {
+      workspaceSet.add(WorkspacePath.displayName(s.workspacePath));
+    }
+    final workspaces = workspaceSet.toList()..sort();
 
     // Appliquer le filtre par workspace
     var filtered = available;

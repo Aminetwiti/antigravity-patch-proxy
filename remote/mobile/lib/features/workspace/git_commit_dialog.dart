@@ -99,7 +99,9 @@ class _GitCommitDialogState extends State<GitCommitDialog> {
       ),
       titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
       contentPadding: const EdgeInsets.symmetric(horizontal: 20),
-      actionsPadding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+      actionsPadding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      actionsOverflowButtonSpacing: 8,
+      actionsOverflowDirection: VerticalDirection.down,
       title: Row(
         children: [
           Icon(Icons.commit_outlined, size: 20, color: scheme.primary),

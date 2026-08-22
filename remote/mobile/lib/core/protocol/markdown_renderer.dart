@@ -127,6 +127,9 @@ class MarkdownRenderer {
   /// Nettoie les balises internes et les messages systèmes résiduels
   static String cleanContent(String text) {
     if (text.isEmpty) return text;
+    if (!text.contains('<') && !text.contains('[Message]')) {
+      return text.trim();
+    }
     var cleaned = text.replaceAll(_systemTagsRe, '').trim();
     cleaned = cleaned.replaceAll(_bgTaskMsgRe, '').trim();
     return cleaned;
@@ -307,6 +310,20 @@ class MarkdownRenderer {
   /// [onLocalFile] (P5) est appelé quand l'utilisateur tape un lien markdown
   /// vers un fichier local (file:///...) — le caller ouvre le fichier (ex.
   /// ArtifactViewerModal). Sans callback, le lien reste un simple tooltip.
+  static final _codeRe = RegExp(r'`([^`]+)`');
+  static final _imageRe = RegExp(r'!\[([^\]]*)\]\(([^)\s]+)\)');
+  static final _linkRe = RegExp(r'\[([^\]]+)\]\(([^)\s]+)\)');
+  static final _boldRe = RegExp(r'\*\*([^*]+)\*\*');
+  static final _italicRe = RegExp(r'\*(?=\S)([^*\n]+?)(?<=\S)\*(?!\*)');
+  static final _artifactTagRe = RegExp(r'^\[ARTIFACT:\s*([^\]]+)\](?:\s*\r?\n\s*Path:\s*([^\r\n]+))?', caseSensitive: false);
+  static final _attachmentTagRe = RegExp(r'^\[(Images? jointes?|Image|Fichier|File|Pièce jointe|Piece jointe):\s*([^\]]+)\]', caseSensitive: false);
+  static final _matchAttachPrefixRe = RegExp(r'\[(Images? jointes?|Image|Fichier|File|Pièce jointe|Piece jointe):\s*[^\]]+\]', caseSensitive: false);
+  static final _matchArtifactPrefixRe = RegExp(r'\[ARTIFACT:\s*[^\]]+\]', caseSensitive: false);
+
+  /// Builds inline [TextSpan]s for a paragraph, resolving bold/italic/code.
+  /// [onLocalFile] (P5) est appelé quand l'utilisateur tape un lien markdown
+  /// vers un fichier local (file:///...) — le caller ouvre le fichier (ex.
+  /// ArtifactViewerModal). Sans callback, le lien reste un simple tooltip.
   static List<InlineSpan> inlineSpans(
     String text,
     TextStyle base, {
@@ -315,13 +332,6 @@ class MarkdownRenderer {
     String? searchQuery,
   }) {
     final spans = <InlineSpan>[];
-    final codeRe = RegExp(r'`([^`]+)`');
-    final imageRe = RegExp(r'!\[([^\]]*)\]\(([^)\s]+)\)');
-    final linkRe = RegExp(r'\[([^\]]+)\]\(([^)\s]+)\)');
-    final boldRe = RegExp(r'\*\*([^*]+)\*\*');
-    // CommonMark flanking: opening * must be followed by non-space, closing *
-    // must be preceded by non-space (so `a * b * c` stays literal).
-    final italicRe = RegExp(r'\*(?=\S)([^*\n]+?)(?<=\S)\*(?!\*)');
 
     List<TextSpan> highlightText(String content, TextStyle style) {
       if (searchQuery == null || searchQuery.isEmpty) {
@@ -351,8 +361,28 @@ class MarkdownRenderer {
 
     var remaining = text;
     while (remaining.isNotEmpty) {
+      // Fast path: find earliest trigger character for markdown syntax (` ! [ *)
+      int nextTrigger = -1;
+      for (int i = 0; i < remaining.length; i++) {
+        final c = remaining.codeUnitAt(i);
+        if (c == 0x60 /* ` */ || c == 0x21 /* ! */ || c == 0x5B /* [ */ || c == 0x2A /* * */) {
+          nextTrigger = i;
+          break;
+        }
+      }
+
+      if (nextTrigger == -1) {
+        // No more markdown trigger characters anywhere in the remaining text
+        spans.addAll(highlightText(remaining, base));
+        break;
+      } else if (nextTrigger > 0) {
+        // Emit plain text up to the first trigger character
+        spans.addAll(highlightText(remaining.substring(0, nextTrigger), base));
+        remaining = remaining.substring(nextTrigger);
+      }
+
       // 1. Inline code — highest priority, its content must not be restyled.
-      final codeMatch = codeRe.firstMatch(remaining);
+      final codeMatch = _codeRe.firstMatch(remaining);
       if (codeMatch != null && codeMatch.start == 0) {
         final isDark = scheme.brightness == Brightness.dark;
         spans.add(TextSpan(
@@ -371,7 +401,7 @@ class MarkdownRenderer {
       }
 
       // 2. Markdown Image ![alt](url)
-      final imageMatch = imageRe.firstMatch(remaining);
+      final imageMatch = _imageRe.firstMatch(remaining);
       if (imageMatch != null && imageMatch.start == 0) {
         final alt = imageMatch.group(1) ?? '';
         final url = imageMatch.group(2) ?? '';
@@ -399,8 +429,7 @@ class MarkdownRenderer {
       }
 
       // 3. Artifact Tag [ARTIFACT: name]\nPath: file:///...
-      final artifactRe = RegExp(r'^\[ARTIFACT:\s*([^\]]+)\](?:\s*\r?\n\s*Path:\s*([^\r\n]+))?', caseSensitive: false);
-      final artifactMatch = artifactRe.firstMatch(remaining);
+      final artifactMatch = _artifactTagRe.firstMatch(remaining);
       if (artifactMatch != null) {
         final artName = artifactMatch.group(1)?.trim() ?? 'Artifact';
         final artPath = artifactMatch.group(2)?.trim() ?? artName;
@@ -427,63 +456,62 @@ class MarkdownRenderer {
           spans.add(WidgetSpan(
             alignment: PlaceholderAlignment.middle,
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: _buildImageWidget(
-                url: artPath,
-                alt: artName,
-                filePath: filePath,
-                isLocalFile: isLocalFile,
-                isDataUri: artPath.startsWith('data:image/'),
-                scheme: scheme,
-                onLocalFile: onLocalFile,
-              ),
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: _buildImageWidget(
+              url: artPath,
+              alt: artName,
+              filePath: filePath,
+              isLocalFile: isLocalFile,
+              isDataUri: artPath.startsWith('data:image/'),
+              scheme: scheme,
+              onLocalFile: onLocalFile,
             ),
-          ));
-        } else {
-          final fileName = filePath.split(RegExp(r'[\\/]')).last;
-          spans.add(WidgetSpan(
-            alignment: PlaceholderAlignment.middle,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 3),
-              child: InkWell(
-                onTap: onLocalFile == null ? null : () => onLocalFile(filePath),
-                borderRadius: BorderRadius.circular(8),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: scheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.6)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.insert_drive_file_outlined, size: 16, color: scheme.primary),
-                      const SizedBox(width: 6),
-                      Text(
-                        fileName.isNotEmpty ? fileName : filePath,
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                          color: scheme.onSurface,
-                        ),
+          ),
+        ));
+      } else {
+        final fileName = filePath.split(RegExp(r'[\\/]')).last;
+        spans.add(WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 3),
+            child: InkWell(
+              onTap: onLocalFile == null ? null : () => onLocalFile(filePath),
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.6)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.insert_drive_file_outlined, size: 16, color: scheme.primary),
+                    const SizedBox(width: 6),
+                    Text(
+                      fileName.isNotEmpty ? fileName : filePath,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: scheme.onSurface,
                       ),
-                      const SizedBox(width: 4),
-                      Icon(Icons.open_in_new, size: 13, color: scheme.onSurfaceVariant),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(Icons.open_in_new, size: 13, color: scheme.onSurfaceVariant),
+                  ],
                 ),
               ),
             ),
-          ));
-        }
-        remaining = remaining.substring(artifactMatch.end);
-        continue;
+          ),
+        ));
       }
+      remaining = remaining.substring(artifactMatch.end);
+      continue;
+    }
 
       // 4. Bracketed Attachment Tag [Images jointes: ...], [Image: ...], [Fichier: ...]
-      final attachmentRe = RegExp(r'^\[(Images? jointes?|Image|Fichier|File|Pièce jointe|Piece jointe):\s*([^\]]+)\]', caseSensitive: false);
-      final attachmentMatch = attachmentRe.firstMatch(remaining);
+      final attachmentMatch = _attachmentTagRe.firstMatch(remaining);
       if (attachmentMatch != null) {
         final label = attachmentMatch.group(1) ?? 'Fichier';
         final pathsStr = attachmentMatch.group(2) ?? '';
@@ -559,10 +587,10 @@ class MarkdownRenderer {
         continue;
       }
 
-      // 4. Link with tooltip showing full target path/URL on hover.
+      // 5. Link with tooltip showing full target path/URL on hover.
       // P5 : un lien file:/// devient tappable (ouvre le fichier côté hôte)
       // quand onLocalFile est fourni ; sinon comportement historique.
-      final linkMatch = linkRe.firstMatch(remaining);
+      final linkMatch = _linkRe.firstMatch(remaining);
       if (linkMatch != null && linkMatch.start == 0) {
         final label = linkMatch.group(1) ?? '';
         final url = linkMatch.group(2) ?? '';
@@ -621,8 +649,8 @@ class MarkdownRenderer {
         continue;
       }
 
-      // 5. Bold.
-      final boldMatch = boldRe.firstMatch(remaining);
+      // 6. Bold.
+      final boldMatch = _boldRe.firstMatch(remaining);
       if (boldMatch != null && boldMatch.start == 0) {
         spans.add(TextSpan(
           text: boldMatch.group(1),
@@ -632,8 +660,8 @@ class MarkdownRenderer {
         continue;
       }
 
-      // 6. Italic.
-      final italicMatch = italicRe.firstMatch(remaining);
+      // 7. Italic.
+      final italicMatch = _italicRe.firstMatch(remaining);
       if (italicMatch != null && italicMatch.start == 0) {
         spans.add(TextSpan(
           text: italicMatch.group(1),
@@ -643,11 +671,9 @@ class MarkdownRenderer {
         continue;
       }
 
-      // 7. Plain text up to the next markdown token.
-      final matchAttach = RegExp(r'\[(Images? jointes?|Image|Fichier|File|Pièce jointe|Piece jointe):\s*[^\]]+\]', caseSensitive: false);
-      final matchArtifact = RegExp(r'\[ARTIFACT:\s*[^\]]+\]', caseSensitive: false);
+      // 8. Plain text up to the next markdown token if nothing matched at start 0.
       final nextIndex = <int>[
-        for (final r in [codeRe, imageRe, linkRe, matchArtifact, matchAttach, boldRe, italicRe])
+        for (final r in [_codeRe, _imageRe, _linkRe, _matchArtifactPrefixRe, _matchAttachPrefixRe, _boldRe, _italicRe])
           r.firstMatch(remaining)?.start ?? remaining.length,
       ].reduce((a, b) => a < b ? a : b);
       if (nextIndex == 0) {

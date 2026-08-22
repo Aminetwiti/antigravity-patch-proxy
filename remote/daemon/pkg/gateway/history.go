@@ -147,10 +147,20 @@ func resolveGeminiSubDir(home, cascadeID string) string {
 	return "antigravity"
 }
 
+// cascadeIDRe borne le format des identifiants de cascade acceptés pour toute
+// opération disque : alphanumérique, tiret et underscore, 64 chars max.
+// Bloque les traversées (.., /, \, :) à la source (SEC-02 : delete_cascade et
+// consorts joignaient cascadeID au chemin ~/.gemini sans validation).
+var cascadeIDRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+
+func validCascadeID(id string) bool {
+	return cascadeIDRe.MatchString(id)
+}
+
 // renameSessionOnDisk persiste le titre personnalisé d'une session dans annotations/<cascadeID>.pbtxt
 func renameSessionOnDisk(home, cascadeID, title string) error {
-	if cascadeID == "" {
-		return fmt.Errorf("cascadeId requis")
+	if !validCascadeID(cascadeID) {
+		return fmt.Errorf("identifiant de cascade invalide")
 	}
 	title = strings.TrimSpace(title)
 	if title == "" {
@@ -205,8 +215,8 @@ func cascadeExistsOnDisk(home, cascadeID string) bool {
 }
 
 func pinSessionOnDisk(home, cascadeID string, pinned bool) error {
-	if cascadeID == "" {
-		return fmt.Errorf("cascadeId requis")
+	if !validCascadeID(cascadeID) {
+		return fmt.Errorf("identifiant de cascade invalide")
 	}
 	annoDir := filepath.Join(home, ".gemini", resolveGeminiSubDir(home, cascadeID), "annotations")
 	_ = os.MkdirAll(annoDir, 0o755)
@@ -241,8 +251,8 @@ func pinSessionOnDisk(home, cascadeID string, pinned bool) error {
 
 // archiveSessionOnDisk persiste le statut archivé dans annotations/<cascadeID>.pbtxt
 func archiveSessionOnDisk(home, cascadeID string, archived bool) error {
-	if cascadeID == "" {
-		return fmt.Errorf("cascadeId requis")
+	if !validCascadeID(cascadeID) {
+		return fmt.Errorf("identifiant de cascade invalide")
 	}
 	annoDir := filepath.Join(home, ".gemini", resolveGeminiSubDir(home, cascadeID), "annotations")
 	_ = os.MkdirAll(annoDir, 0o755)
@@ -294,8 +304,12 @@ func isSessionPinned(home, cascadeID string) bool {
 
 // deleteSessionFromDisk supprime les artefacts résiduels d'une session sur disque (.pbtxt, .db, brain/)
 func deleteSessionFromDisk(home, cascadeID string) error {
-	if cascadeID == "" {
-		return nil
+	if !validCascadeID(cascadeID) {
+		// cascadeID vide ou malformé : ne rien supprimer (fail-closed, SEC-02).
+		if cascadeID == "" {
+			return nil
+		}
+		return fmt.Errorf("identifiant de cascade invalide")
 	}
 	for _, sub := range []string{"antigravity", "antigravity-ide"} {
 		annoPath := filepath.Join(home, ".gemini", sub, "annotations", cascadeID+".pbtxt")
@@ -337,7 +351,7 @@ func findTranscriptPath(cascadeID string) string {
 
 // findBrainDir returns the active brain directory for a cascade ID.
 func findBrainDir(cascadeID string) string {
-	if cascadeID == "" {
+	if !validCascadeID(cascadeID) {
 		return ""
 	}
 	home, err := os.UserHomeDir()

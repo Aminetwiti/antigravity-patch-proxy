@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/binary"
@@ -2109,6 +2110,10 @@ func (s *Server) handleUploadChunk(conn *websocket.Conn, msg IncomingMessage) {
 					wsDir = projs[0].Path
 				}
 			}
+			if wsDir != "" && !isPathInsideAllowedWorkspaces(wsDir) {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: racine workspace non autorisée"})
+				return
+			}
 			resolved, errResolve := resolvePath(wsDir, destFile)
 			if errResolve != nil {
 				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé hors du workspace: " + errResolve.Error()})
@@ -2248,16 +2253,20 @@ func (s *Server) handleADB(conn *websocket.Conn, msg IncomingMessage) bool {
 			home, _ := os.UserHomeDir()
 			cleanName := filepath.Base(filepath.Clean(rPath))
 			lPath = filepath.Join(home, ".gemini", "antigravity", "downloads", cleanName)
-		} else {
-			wsRoot := homeRoot(msg.WorkspacePath)
-			if wsRoot == "" {
-				if projs := ListOfficialProjects(); len(projs) > 0 && projs[0].Path != "" {
-					wsRoot = projs[0].Path
-				} else if home, errHome := os.UserHomeDir(); errHome == nil {
-					wsRoot = filepath.Join(home, ".gemini", "antigravity", "downloads")
+			} else {
+				wsRoot := homeRoot(msg.WorkspacePath)
+				if wsRoot == "" {
+					if projs := ListOfficialProjects(); len(projs) > 0 && projs[0].Path != "" {
+						wsRoot = projs[0].Path
+					} else if home, errHome := os.UserHomeDir(); errHome == nil {
+						wsRoot = filepath.Join(home, ".gemini", "antigravity", "downloads")
+					}
 				}
-			}
-			resolved, errRes := resolvePath(wsRoot, lPath)
+				if wsRoot != "" && !isPathInsideAllowedWorkspaces(wsRoot) {
+					s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: racine workspace non autorisée"})
+					return true
+				}
+				resolved, errRes := resolvePath(wsRoot, lPath)
 			if errRes != nil {
 				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé hors du workspace: " + errRes.Error()})
 				return true
@@ -2294,6 +2303,10 @@ func (s *Server) handleADB(conn *websocket.Conn, msg IncomingMessage) bool {
 			} else if home, errHome := os.UserHomeDir(); errHome == nil {
 				wsRoot = filepath.Join(home, ".gemini", "antigravity")
 			}
+		}
+		if wsRoot != "" && !isPathInsideAllowedWorkspaces(wsRoot) {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: racine workspace non autorisée"})
+			return true
 		}
 		resolved, errRes := resolvePath(wsRoot, lPath)
 		if errRes != nil {
@@ -3374,18 +3387,25 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 		}
 
+		s.mu.Lock()
+		existingKeys := make(map[string]bool)
+		for k := range s.jetboxSummaries {
+			existingKeys[k] = true
+		}
+		s.mu.Unlock()
+
 		extractedID := ""
 		if len(raw) > 0 {
 			fields := connectrpc.DecodeFields(raw)
 			for _, f := range fields {
 				cid := strings.TrimSpace(string(f.Bytes))
-				if cid != "" && (f.Num == 1 || (len(cid) >= 6 && strings.Contains(cid, "-")) || cid == "casc-1") {
+				if cid != "" && !existingKeys[cid] && (f.Num == 1 || (len(cid) >= 6 && strings.Contains(cid, "-")) || cid == "casc-1") {
 					extractedID = cid
 					break
 				}
 				for _, sf := range connectrpc.DecodeFields(f.Bytes) {
 					scid := strings.TrimSpace(string(sf.Bytes))
-					if scid != "" && (sf.Num == 1 || (len(scid) >= 6 && strings.Contains(scid, "-")) || scid == "casc-1") {
+					if scid != "" && !existingKeys[scid] && (sf.Num == 1 || (len(scid) >= 6 && strings.Contains(scid, "-")) || scid == "casc-1") {
 						extractedID = scid
 						break
 					}
@@ -3396,31 +3416,13 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 		}
 
-		if extractedID == "" {
-			// Fallback 1 : réchauffer le cache sessions et trouver la cascade la plus récente
-			s.fetchSessionsSingleFlight()
-			s.mu.Lock()
-			if s.jetboxSummaries != nil {
-				var newestID string
-				var newestTime time.Time
-				for cid, sum := range s.jetboxSummaries {
-					if !sum.Archived && !sum.Killed && sum.Source != 16 {
-						if newestID == "" || sum.UpdatedAt.After(newestTime) {
-							newestID = cid
-							newestTime = sum.UpdatedAt
-						}
-					}
-				}
-				if newestID != "" {
-					extractedID = newestID
-				}
-			}
-			s.mu.Unlock()
-		}
-
-		if extractedID == "" {
-			// Fallback 2 garanti : générer un UUID pour la session afin de ne jamais bloquer l'UI
-			extractedID = fmt.Sprintf("cascade-%d", time.Now().UnixMilli())
+		if extractedID == "" || existingKeys[extractedID] {
+			// Générer un véritable identifiant UUID v4 unique pour la nouvelle conversation
+			b := make([]byte, 16)
+			_, _ = rand.Read(b)
+			b[6] = (b[6] & 0x0f) | 0x40
+			b[8] = (b[8] & 0x3f) | 0x80
+			extractedID = fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 		}
 
 		s.mu.Lock()
@@ -3499,7 +3501,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				return
 			}
 			logJSON.Info("shell_command", "command", trimmedCmd)
-			wsDir := homeRoot(msg.WorkspacePath)
+			wsDir, errWs := validatedWorkspaceRoot(msg.WorkspacePath)
+			if errWs != nil {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: " + errWs.Error()})
+				return
+			}
 			out, execErr := executeShellCommand(wsDir, trimmedCmd)
 			if execErr != nil {
 				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: execErr.Error()})
@@ -3528,7 +3534,12 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		// La session appartient à CE client (owner-scoping) : les autres
 		// devices ne peuvent ni écrire ni tuer dedans, et sa déconnexion ne
 		// nettoie que ses sessions.
-		id, errTerm := s.terminals.create(conn, homeRoot(msg.WorkspacePath))
+		termDir, errWs := validatedWorkspaceRoot(msg.WorkspacePath)
+		if errWs != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: " + errWs.Error()})
+			return
+		}
+		id, errTerm := s.terminals.create(conn, termDir)
 		if errTerm != nil {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "terminal_create: " + errTerm.Error()})
 			return
@@ -4550,8 +4561,10 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 				}
 			}
 			if !allowed && msg.WorkspacePath != "" {
-				if _, errRes := resolvePath(homeRoot(msg.WorkspacePath), cleanTarget); errRes == nil {
-					allowed = true
+				if wsRoot, errWs := validatedWorkspaceRoot(msg.WorkspacePath); errWs == nil && wsRoot != "" {
+					if _, errRes := resolvePath(wsRoot, cleanTarget); errRes == nil {
+						allowed = true
+					}
 				}
 			}
 			if !allowed {
@@ -4647,11 +4660,12 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 
 		// 3. Workspace confinement check if workspacePath is provided
 		if msg.WorkspacePath != "" {
-			abs, errRes := resolvePath(homeRoot(msg.WorkspacePath), msg.FilePath)
-			if errRes == nil {
-				if content, errRead := os.ReadFile(abs); errRead == nil {
-					respondWithFileContent(content)
-					return
+			if wsRoot, errWs := validatedWorkspaceRoot(msg.WorkspacePath); errWs == nil && wsRoot != "" {
+				if abs, errRes := resolvePath(wsRoot, msg.FilePath); errRes == nil {
+					if content, errRead := os.ReadFile(abs); errRead == nil {
+						respondWithFileContent(content)
+						return
+					}
 				}
 			}
 		}
@@ -4889,7 +4903,12 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 		// Même résolution que git_state : le mobile envoie des chemins relatifs
 		// (.gemini/...) — sans homeRoot, git s'exécuterait dans le CWD du daemon.
-		branches, errBranches := discovery.ListGitBranches(homeRoot(targetPath))
+		gitDir, errWs := validatedWorkspaceRoot(targetPath)
+		if errWs != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: " + errWs.Error()})
+			return
+		}
+		branches, errBranches := discovery.ListGitBranches(gitDir)
 		if errBranches != nil {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errBranches.Error()})
 			return
@@ -4903,7 +4922,12 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			targetPath = "."
 		}
 		// homeRoot : cohérence avec git_state/list_git_branches.
-		wts, errWts := discovery.ListGitWorktrees(homeRoot(targetPath))
+		gitDir, errWs := validatedWorkspaceRoot(targetPath)
+		if errWs != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: " + errWs.Error()})
+			return
+		}
+		wts, errWts := discovery.ListGitWorktrees(gitDir)
 		if errWts != nil {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: errWts.Error()})
 			return
@@ -4945,8 +4969,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		return
 
 	case "delete_cascade", "delete_session":
-		if msg.CascadeID == "" {
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
+		if !validCascadeID(msg.CascadeID) {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis ou invalide"})
 			return
 		}
 		// Destructif et irréversible : confirmation explicite obligatoire.
@@ -4991,8 +5015,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		return
 
 	case "archive_cascade", "archive_session":
-		if msg.CascadeID == "" {
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
+		if !validCascadeID(msg.CascadeID) {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis ou invalide"})
 			return
 		}
 		home, _ := os.UserHomeDir()
@@ -5021,8 +5045,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		return
 
 	case "unarchive_cascade", "unarchive_session":
-		if msg.CascadeID == "" {
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
+		if !validCascadeID(msg.CascadeID) {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis ou invalide"})
 			return
 		}
 		home, _ := os.UserHomeDir()
@@ -5051,8 +5075,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		return
 
 	case "rename_cascade", "rename_session":
-		if msg.CascadeID == "" {
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
+		if !validCascadeID(msg.CascadeID) {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis ou invalide"})
 			return
 		}
 		title := msg.Prompt
@@ -5094,8 +5118,8 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		return
 
 	case "pin_cascade", "pin_session":
-		if msg.CascadeID == "" {
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis"})
+		if !validCascadeID(msg.CascadeID) {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "cascadeId requis ou invalide"})
 			return
 		}
 		pinned := msg.Confirm
@@ -5132,7 +5156,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "workspacePath requis"})
 			return
 		}
-		resolvedDir := homeRoot(targetWs)
+		resolvedDir, errWs := validatedWorkspaceRoot(targetWs)
+		if errWs != nil || resolvedDir == "" {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: racine workspace non autorisée"})
+			return
+		}
 		raw, err = s.RPCClient.GetVersionControlState(resolvedDir)
 		if err == nil {
 			if st := connectrpc.VcsStateToJSON(raw); st != nil {
@@ -5321,7 +5349,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		// Confinement : comme read_file, le fichier doit être sous la racine d'un workspace valide
 		allowed := false
 		var resolvedPath string
-		wsRoot := homeRoot(msg.WorkspacePath)
+		wsRoot, errWs := validatedWorkspaceRoot(msg.WorkspacePath)
+		if errWs != nil {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: " + errWs.Error()})
+			return
+		}
 		if wsRoot != "" {
 			if abs, errRes := resolvePath(wsRoot, msg.FilePath); errRes == nil {
 				allowed = true
@@ -6371,7 +6403,24 @@ func isPathInsideAllowedWorkspaces(targetPath string) bool {
 	return false
 }
 
-// maxTreeDepth borne la r├®cursion de buildFileTree (anti-boucle symlink).
+// validatedWorkspaceRoot résout une racine workspace fournie par le client et
+// vérifie qu'elle est confinée à une location autorisée (~/.gemini, projet
+// officiel, CWD du daemon). Sans cette validation, le client choisit lui-même
+// sa prison : un workspacePath absolu étranger (ex: C:\) faisait de
+// read_file/write_file/upload_chunk/adb des accès disque illimités (SEC-01).
+// Racine vide → chaîne vide sans erreur (l'appelant gère son fallback).
+func validatedWorkspaceRoot(root string) (string, error) {
+	resolved := homeRoot(root)
+	if resolved == "" {
+		return "", nil
+	}
+	if !isPathInsideAllowedWorkspaces(resolved) {
+		return "", fmt.Errorf("racine workspace non autorisée: %s", resolved)
+	}
+	return resolved, nil
+}
+
+// maxTreeDepth borne la récursion de buildFileTree (anti-boucle symlink).
 const maxTreeDepth = 8
 
 func buildFileTree(root, relativePath string, depth int) ([]map[string]interface{}, error) {

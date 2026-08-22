@@ -173,7 +173,7 @@ class _AddCommentDialogState extends State<AddCommentDialog> {
             spacing: 8,
             runSpacing: 8,
             children: [
-              if (widget.isEditing && widget.onDelete != null)
+              if (widget.initialComment != null && widget.initialComment!.isNotEmpty && widget.onDelete != null)
                 TextButton.icon(
                   onPressed: () {
                     widget.onDelete!();
@@ -184,7 +184,13 @@ class _AddCommentDialogState extends State<AddCommentDialog> {
                 ),
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: Text('Annuler', style: TextStyle(color: isDark ? AppColors.inkMuted : scheme.onSurfaceVariant, fontSize: 12)),
+                child: Text(
+                  'Annuler',
+                  style: TextStyle(
+                    color: Theme.of(context).brightness == Brightness.dark ? AppColors.inkMuted : scheme.onSurfaceVariant,
+                    fontSize: 12,
+                  ),
+                ),
               ),
               ElevatedButton(
                 onPressed: _submit,
@@ -194,7 +200,10 @@ class _AddCommentDialogState extends State<AddCommentDialog> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.sm)),
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 ),
-                child: Text(widget.isEditing ? 'Mettre à jour' : 'Queue Comment', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                child: Text(
+                  widget.initialComment != null && widget.initialComment!.isNotEmpty ? 'Mettre à jour' : 'Queue Comment',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                ),
               ),
             ],
           ),

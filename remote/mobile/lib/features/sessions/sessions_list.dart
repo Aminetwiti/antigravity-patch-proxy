@@ -540,84 +540,92 @@ class _LeftSidebarDrawerState extends State<LeftSidebarDrawer> {
                 thickness: 3,
                 radius: const Radius.circular(2),
                 thumbColor: AppColors.borderStrong.withValues(alpha: 0.6),
-                child: ListView(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                  children: [
-                    if (projectNames.isEmpty)
-                      _EmptyState(
-                        isConnected: widget.isConnected,
-                        onConnect: () {
-                          Navigator.of(context).pop();
-                          widget.onToggleConnection();
-                        },
+                child: projectNames.isEmpty
+                    ? ListView(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                        children: [
+                          _EmptyState(
+                            isConnected: widget.isConnected,
+                            onConnect: () {
+                              Navigator.of(context).pop();
+                              widget.onToggleConnection();
+                            },
+                          ),
+                        ],
                       )
-                    else
-                      ...projectNames.map((proj) {
-                        final sessions = projectSessions[proj] ?? [];
-                        final isCollapsed = _collapsedFolders.contains(proj);
-                        ProjectItem? matchingProj;
-                        if (widget.projects != null) {
-                          for (final p in widget.projects!) {
-                            if (p.name == proj || p.path == proj || p.id == proj || WorkspacePath.isSameWorkspace(p.path, proj)) {
-                              matchingProj = p;
-                              break;
+                    : ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                        itemCount: projectNames.length + 1,
+                        itemBuilder: (ctx, index) {
+                          if (index == projectNames.length) {
+                            return const SizedBox(height: 16);
+                          }
+                          final proj = projectNames[index];
+                          final sessions = projectSessions[proj] ?? const [];
+                          final isCollapsed = _collapsedFolders.contains(proj);
+                          ProjectItem? matchingProj;
+                          if (widget.projects != null) {
+                            for (final p in widget.projects!) {
+                              if (p.name == proj || p.path == proj || p.id == proj || WorkspacePath.isSameWorkspace(p.path, proj)) {
+                                matchingProj = p;
+                                break;
+                              }
                             }
                           }
-                        }
-                        final effectiveProj = matchingProj ?? ProjectItem(
-                          id: '',
-                          name: proj,
-                          folderUri: sessions.isNotEmpty ? sessions.first.workspacePath : proj,
-                          path: sessions.isNotEmpty ? sessions.first.workspacePath : proj,
-                        );
-                        return _WorkspaceFolderSection(
-                          folderName: proj,
-                          sessions: sessions,
-                          project: effectiveProj,
-                          isCollapsed: isCollapsed,
-                          showSubtitle: _subtitle == SessionSubtitle.worktree,
-                          hideHeader: _groupBy == SessionGroupBy.none,
-                          activeSessionId: widget.activeSessionId,
-                          onToggleCollapse: () {
-                            setState(() {
-                              if (isCollapsed) {
-                                _collapsedFolders.remove(proj);
-                              } else {
-                                _collapsedFolders.add(proj);
+                          final effectiveProj = matchingProj ?? ProjectItem(
+                            id: '',
+                            name: proj,
+                            folderUri: sessions.isNotEmpty ? sessions.first.workspacePath : proj,
+                            path: sessions.isNotEmpty ? sessions.first.workspacePath : proj,
+                          );
+                          return _WorkspaceFolderSection(
+                            key: ValueKey('folder_$proj'),
+                            folderName: proj,
+                            sessions: sessions,
+                            project: effectiveProj,
+                            isCollapsed: isCollapsed,
+                            showSubtitle: _subtitle == SessionSubtitle.worktree,
+                            hideHeader: _groupBy == SessionGroupBy.none,
+                            activeSessionId: widget.activeSessionId,
+                            onToggleCollapse: () {
+                              setState(() {
+                                if (isCollapsed) {
+                                  _collapsedFolders.remove(proj);
+                                } else {
+                                  _collapsedFolders.add(proj);
+                                }
+                              });
+                              _saveCollapsedFolders();
+                            },
+                            onSessionTap: (id) {
+                              _markSessionAsRead(id);
+                              if (Navigator.of(context).canPop()) {
+                                Navigator.of(context).pop();
                               }
-                            });
-                            _saveCollapsedFolders();
-                          },
-                          onSessionTap: (id) {
-                            _markSessionAsRead(id);
-                            if (Navigator.of(context).canPop()) {
+                              widget.onSessionSelected(id);
+                            },
+                            onNewConversation: (ProjectItem? p) {
+                              if (Navigator.of(context).canPop()) {
+                                Navigator.of(context).pop();
+                              }
+                              _callNewConversation(p ?? effectiveProj);
+                            },
+                            onOpenSettings: () {
                               Navigator.of(context).pop();
-                            }
-                            widget.onSessionSelected(id);
-                          },
-                          onNewConversation: (ProjectItem? p) {
-                            if (Navigator.of(context).canPop()) {
-                              Navigator.of(context).pop();
-                            }
-                            _callNewConversation(p ?? effectiveProj);
-                          },
-                          onOpenSettings: () {
-                            Navigator.of(context).pop();
-                            widget.onOpenSettings?.call();
-                          },
-                          onDeleteSession: widget.onDeleteSession,
-                          onArchiveSession: widget.onArchiveSession,
-                          onRenameSession: widget.onRenameSession,
-                          onExportSession: widget.onExportSession,
-                          pinnedIds: _pinnedIds,
-                          onTogglePin: _togglePin,
-                          readIds: _readSessionIds,
-                        );
-                      }),
-                    const SizedBox(height: 16),
-                  ],
-                ),
+                              widget.onOpenSettings?.call();
+                            },
+                            onDeleteSession: widget.onDeleteSession,
+                            onArchiveSession: widget.onArchiveSession,
+                            onRenameSession: widget.onRenameSession,
+                            onExportSession: widget.onExportSession,
+                            pinnedIds: _pinnedIds,
+                            onTogglePin: _togglePin,
+                            readIds: _readSessionIds,
+                          );
+                        },
+                      ),
               ),
             ),
 
@@ -776,6 +784,7 @@ class _WorkspaceFolderSection extends StatelessWidget {
   final Set<String> readIds;
 
   const _WorkspaceFolderSection({
+    super.key,
     required this.folderName,
     required this.sessions,
     this.project,
@@ -999,6 +1008,7 @@ class _SessionRowItem extends StatefulWidget {
 
 class _SessionRowItemState extends State<_SessionRowItem> {
   bool _hovered = false;
+  static final RegExp _cleanTitleRe = RegExp(r'\[([^\]]+)\]\([^\)]+\)');
 
   void _showSessionContextMenu(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -1220,7 +1230,7 @@ class _SessionRowItemState extends State<_SessionRowItem> {
         : 'Nouvelle conversation';
     // Point 9 : remplacer [nom](url) par @nom propre
     final displayTitle = rawTitle.replaceAllMapped(
-      RegExp(r'\[([^\]]+)\]\([^\)]+\)'),
+      _cleanTitleRe,
       (m) => '@${m.group(1)}',
     );
     final subtitleText = widget.session.worktree ?? WorkspacePath.displayName(widget.session.workspacePath);

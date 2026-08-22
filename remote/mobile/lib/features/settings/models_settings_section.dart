@@ -370,25 +370,24 @@ class _ModelsSettingsSectionState extends State<ModelsSettingsSection> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Active Model',
-                            style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: scheme.onSurface),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            'Select the primary model used for agent turns.',
-                            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                          ),
-                        ],
-                      ),
-                    ),
-                    _buildDropdown(
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isCompact = constraints.maxWidth < 420;
+                    final textCol = Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Active Model',
+                          style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: scheme.onSurface),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Select the primary model used for agent turns.',
+                          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                        ),
+                      ],
+                    );
+                    final dropdown = _buildDropdown(
                       isDark: isDark,
                       scheme: scheme,
                       value: _selectedModel,
@@ -396,8 +395,28 @@ class _ModelsSettingsSectionState extends State<ModelsSettingsSection> {
                       onChanged: (v) {
                         if (v != null) _onModelSelected(v);
                       },
-                    ),
-                  ],
+                    );
+
+                    if (isCompact) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          textCol,
+                          const SizedBox(height: 10),
+                          dropdown,
+                        ],
+                      );
+                    }
+
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(child: textCol),
+                        const SizedBox(width: 12),
+                        dropdown,
+                      ],
+                    );
+                  },
                 ),
                 const Divider(height: 20, thickness: 0.5),
                 Text(

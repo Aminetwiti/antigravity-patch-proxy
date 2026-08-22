@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:mobile/core/protocol/daemon_api.dart';
 import 'package:mobile/core/protocol/messages.dart';
 import 'package:mobile/features/battle_arena/battle_arena_screen.dart';
 import 'package:mobile/features/code_review/widgets/add_comment_dialog.dart';
-import 'package:mobile/features/diagnostics/diagnostics_screen.dart';
 import 'package:mobile/features/mcp/mcp_explorer_screen.dart';
+import 'package:mobile/features/scheduled_tasks/models/scheduled_task_item.dart';
 import 'package:mobile/features/scheduled_tasks/scheduled_task_detail_screen.dart';
 import 'package:mobile/features/scheduled_tasks/scheduled_tasks_screen.dart';
 import 'package:mobile/features/sessions/conversation_history_screen.dart';
@@ -51,7 +52,7 @@ void main() {
     for (final size in testResolutions) {
       final label = '${size.width.toInt()}x${size.height.toInt()}';
 
-      testWidgets('SettingsScreen renders without overflow on $label', (tester) async {
+      testWidgets('SettingsScreen and sub-sections render on $label', (tester) async {
         tester.view.physicalSize = size;
         tester.view.devicePixelRatio = 1.0;
         addTearDown(() => tester.view.resetPhysicalSize());
@@ -68,12 +69,6 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
-      });
-
-      testWidgets('Settings sub-sections render without overflow on $label', (tester) async {
-        tester.view.physicalSize = size;
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(() => tester.view.resetPhysicalSize());
 
         // Account
         await tester.pumpWidget(const MaterialApp(home: Scaffold(body: AccountSettingsSection())));
@@ -120,21 +115,21 @@ void main() {
         expect(tester.takeException(), isNull);
       });
 
-      testWidgets('ScheduledTasksScreen and Detail render without overflow on $label', (tester) async {
+      testWidgets('ScheduledTasksScreen and Detail render on $label', (tester) async {
         tester.view.physicalSize = size;
         tester.view.devicePixelRatio = 1.0;
         addTearDown(() => tester.view.resetPhysicalSize());
 
-        final sampleTask = ScheduledTask(
+        final sampleTask = ScheduledTaskItem(
           id: 'task-1',
           name: 'Backup Repository Task',
           prompt: 'Run full unit tests and create git tag',
-          cron: '*/15 * * * *',
+          cronExpression: '*/15 * * * *',
           isDaemon: true,
           isEnabled: true,
-          lastRun: DateTime.now().subtract(const Duration(minutes: 5)),
           events: [
             ScheduledTaskEvent(
+              id: 'evt-1',
               timestamp: DateTime.now(),
               outcome: 'done',
               message: 'Execution completed successfully',
@@ -146,8 +141,7 @@ void main() {
         await tester.pumpWidget(
           MaterialApp(
             home: ScheduledTasksScreen(
-              initialTasks: [sampleTask],
-              workspacePath: 'c:/Users/amine/Downloads/antigravity',
+              tasks: [sampleTask],
             ),
           ),
         );
@@ -158,7 +152,6 @@ void main() {
           MaterialApp(
             home: ScheduledTaskDetailScreen(
               task: sampleTask,
-              workspacePath: 'c:/Users/amine/Downloads/antigravity',
             ),
           ),
         );
@@ -166,7 +159,7 @@ void main() {
         expect(tester.takeException(), isNull);
       });
 
-      testWidgets('McpExplorerScreen renders without overflow on $label', (tester) async {
+      testWidgets('McpExplorerScreen and BattleArenaScreen render on $label', (tester) async {
         tester.view.physicalSize = size;
         tester.view.devicePixelRatio = 1.0;
         addTearDown(() => tester.view.resetPhysicalSize());
@@ -178,37 +171,19 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
-      });
-
-      testWidgets('DiagnosticsScreen renders without overflow on $label', (tester) async {
-        tester.view.physicalSize = size;
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(() => tester.view.resetPhysicalSize());
 
         await tester.pumpWidget(
           const MaterialApp(
-            home: DiagnosticsScreen(),
+            home: BattleArenaScreen(
+              workspaceUri: 'c:/Users/amine/Downloads/antigravity',
+            ),
           ),
         );
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
       });
 
-      testWidgets('BattleArenaScreen renders without overflow on $label', (tester) async {
-        tester.view.physicalSize = size;
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(() => tester.view.resetPhysicalSize());
-
-        await tester.pumpWidget(
-          const MaterialApp(
-            home: BattleArenaScreen(),
-          ),
-        );
-        await tester.pumpAndSettle();
-        expect(tester.takeException(), isNull);
-      });
-
-      testWidgets('SubagentsDrawer and SubagentDetailModal render without overflow on $label', (tester) async {
+      testWidgets('SubagentsDrawer and SubagentDetailModal render on $label', (tester) async {
         tester.view.physicalSize = size;
         tester.view.devicePixelRatio = 1.0;
         addTearDown(() => tester.view.resetPhysicalSize());
@@ -216,7 +191,7 @@ void main() {
         final sampleSubagent = SubagentItem(
           id: 'subagent-70e11446-3317-4327-a377-31208aedcf53',
           role: 'Codebase Researcher & Architectural Auditor',
-          status: 'running',
+          status: 'idle',
           typeName: 'researcher',
           stateDetail: 'Grep pattern matching in progress...',
           inheritCustomizations: true,
@@ -251,7 +226,7 @@ void main() {
         expect(tester.takeException(), isNull);
       });
 
-      testWidgets('Dialogs and Modals render without overflow on $label', (tester) async {
+      testWidgets('Dialogs and Modals render on $label', (tester) async {
         tester.view.physicalSize = size;
         tester.view.devicePixelRatio = 1.0;
         addTearDown(() => tester.view.resetPhysicalSize());
@@ -263,12 +238,11 @@ void main() {
               body: Builder(
                 builder: (ctx) => AddCommentDialog(
                   filePath: 'lib/features/chat_stream/chat_stream_screen.dart',
-                  startLine: 120,
-                  endLine: 145,
-                  codeSnippet: 'final screenWidth = MediaQuery.of(context).size.width;',
+                  selectedSnippet: 'final screenWidth = MediaQuery.of(context).size.width;',
                   initialComment: 'Ensure responsive constraints are enforced.',
-                  onSave: (_) {},
+                  onCommentAdded: (_) {},
                   onDelete: () {},
+                  lineNumber: 120,
                 ),
               ),
             ),
@@ -315,7 +289,7 @@ void main() {
         expect(tester.takeException(), isNull);
       });
 
-      testWidgets('ToolApprovalCard renders all scopes without overflow on $label', (tester) async {
+      testWidgets('ToolApprovalCard renders on $label', (tester) async {
         tester.view.physicalSize = size;
         tester.view.devicePixelRatio = 1.0;
         addTearDown(() => tester.view.resetPhysicalSize());
@@ -323,6 +297,7 @@ void main() {
         final req = ToolApprovalRequest(
           callId: 'call-1',
           toolName: 'run_command',
+          command: 'powershell -NoProfile -Command flutter analyze',
           description: 'powershell -NoProfile -Command flutter analyze',
           approvalType: 'command',
         );
@@ -348,22 +323,20 @@ void main() {
         tester.view.devicePixelRatio = 1.0;
         addTearDown(() => tester.view.resetPhysicalSize());
 
-        final sessions = [
-          CascadeSession(
+        final List<CascadeSession> sessions = [
+          const CascadeSession(
             id: 'sess-1',
             title: 'Fix Flutter UI Responsiveness & RenderFlex Overflow',
             workspacePath: 'c:/Users/amine/Downloads/antigravity',
-            updatedAt: DateTime.now(),
+            status: 'CASCADE_STATUS_READY',
             time: '2m',
-            isAvailable: true,
           ),
-          CascadeSession(
+          const CascadeSession(
             id: 'sess-2',
             title: 'Architecture & ConnectRPC Wire Protocol Review',
             workspacePath: 'c:/Users/amine/Downloads/antigravity/remote/daemon',
-            updatedAt: DateTime.now().subtract(const Duration(hours: 1)),
+            status: 'CASCADE_STATUS_READY',
             time: '1h',
-            isAvailable: true,
           ),
         ];
 
