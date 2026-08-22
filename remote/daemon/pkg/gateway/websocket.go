@@ -199,18 +199,19 @@ func checkOrigin(r *http.Request) bool {
 // (callId + cascadeId : le client peut la r├®-ouvrir apr├¿s un tap-notification
 // via get_pending_approval).
 type pendingApproval struct {
-	callID       string
-	cascadeID    string
-	trajectoryID string
-	stepIndex    uint32
-	approvalType string
-	command      string
-	filePath     string
-	timer        *time.Timer
-	// expired : true une fois le timer d'auto-refus parti (auto-deny envoy├®,
-	// broadcast approval_expired ├®mis). L'entr├®e reste en place pour qu'un
-	// submit_approval tardif soit refus├® (garde de fra├«cheur) au lieu de
-	// r├®-autoriser une commande d├®j├á auto-refus├®e.
+	callID              string
+	cascadeID           string
+	trajectoryID        string
+	stepIndex           uint32
+	approvalType        string
+	command             string
+	filePath            string
+	originatingDeviceID string
+	timer               *time.Timer
+	// expired : true une fois le timer d'auto-refus parti (auto-deny envoyé,
+	// broadcast approval_expired émis). L'entrée reste en place pour qu'un
+	// submit_approval tardif soit refusé (garde de fraîcheur) au lieu de
+	// ré-autoriser une commande déjà auto-refusée.
 	expired bool
 }
 
@@ -232,14 +233,9 @@ type Server struct {
 	AuthToken string
 	clients   map[*websocket.Conn]bool
 	mu        sync.Mutex
-	// writeLocks (d├®fini plus bas dans le struct) s├®rialise les ├®critures PAR
-	// connexion : gorilla/websocket n'autorise qu'un seul writer concurrent par
-	// connexion ÔÇö le broadcast, les r├®ponses unary et la goroutine de ping
-	// passent tous par le mutex de LA connexion cibl├®e, jamais par un mutex
-	// global (qui causait des r├®ponses crois├®es entre clients).
-	// approvals : cascadeId ÔåÆ approbation en attente (pos├®e par
-	// MarkApprovalPending quand un ├®v├®nement approval_required est ├®mis,
-	// retir├®e ├á la d├®cision utilisateur ou ├á l'expiration).
+	// cascadeDeviceOwners : cascadeId -> deviceId du créateur/initiateur de la cascade
+	cascadeDeviceOwners map[string]string
+	// approvals : cascadeId -> approbation en attente
 	approvals map[string]*pendingApproval
 	// approvalTimeout : d├®lai avant auto-refus d'une approbation sans r├®ponse
 	// (s├®curit├® : t├®l├®phone perdu). 0 = d├®sactiv├®. D├®faut 5 minutes.
@@ -382,11 +378,12 @@ type Stats struct {
 
 func NewServer(client RPCClient, authToken string) *Server {
 	s := &Server{
-		RPCClient:        client,
-		AuthToken:        authToken,
-		clients:          make(map[*websocket.Conn]bool),
-		approvals:        make(map[string]*pendingApproval),
-		approvalTimeout:  5 * time.Minute,
+		RPCClient:           client,
+		AuthToken:           authToken,
+		clients:             make(map[*websocket.Conn]bool),
+		cascadeDeviceOwners: make(map[string]string),
+		approvals:           make(map[string]*pendingApproval),
+		approvalTimeout:     5 * time.Minute,
 		sessionApprovals: make(map[string]bool),
 		autoAcceptMode:   "readonly",
 		uploadChunks:     make(map[string]*uploadChunkState),
@@ -1222,13 +1219,53 @@ func (s *Server) requireAdmin(conn *websocket.Conn) bool {
 
 // requireProject restreint les actions sensibles au périmètre projet : un
 // device scoped (allowedProjects non vide) ne peut agir que sur SES projets.
-// Les clients non pairés / sans scope gardent le comportement historique
-// (tout autorisé).
+// Pour les sessions Admin, l'accès est autorisé. Pour les connexions non-admin
+// sans scope ou sans DeviceID, l'accès aux projets spécifiques est refusé par défaut.
 func (s *Server) requireProject(conn *websocket.Conn, uri string) bool {
-	if s.sessionFor(conn).DeviceID == "" {
+	sess := s.sessionFor(conn)
+	if sess.Admin {
 		return true
 	}
+	if len(sess.AllowedProjects) > 0 {
+		return s.allowProject(conn, uri)
+	}
+	// Si aucun DeviceID n'est associé (non pairé), l'accès aux projets spécifiques est restreint
+	if sess.DeviceID == "" {
+		if uri == "" {
+			return true
+		}
+		return false
+	}
 	return s.allowProject(conn, uri)
+}
+
+// canApproveCascade vérifie si la connexion cliente a le droit d'approuver
+// une action sensible pour la cascade spécifiée (paternité ou privilège Admin).
+func (s *Server) canApproveCascade(conn *websocket.Conn, cascadeID string) bool {
+	if s.requireAdmin(conn) {
+		return true
+	}
+	sess := s.sessionFor(conn)
+	s.mu.Lock()
+	ownerDevID := s.cascadeDeviceOwners[cascadeID]
+	if p, ok := s.approvals[cascadeID]; ok && p.originatingDeviceID != "" {
+		ownerDevID = p.originatingDeviceID
+	}
+	ws := ""
+	if sum, ok := s.jetboxSummaries[cascadeID]; ok {
+		ws = sum.Workspace
+	}
+	s.mu.Unlock()
+
+	if ownerDevID != "" {
+		return sess.DeviceID != "" && sess.DeviceID == ownerDevID
+	}
+
+	if ws != "" {
+		return s.requireProject(conn, ws)
+	}
+
+	return false
 }
 
 // filterByScope restreint la payload list_sessions (sessions + projects) aux
@@ -1734,14 +1771,16 @@ func (s *Server) MarkApprovalPending(cascadeID string, ev connectrpc.StreamEvent
 	if prev, ok := s.approvals[cascadeID]; ok && prev.timer != nil {
 		prev.timer.Stop() // une nouvelle approbation remplace l'ancienne
 	}
+	devID := s.cascadeDeviceOwners[cascadeID]
 	p := &pendingApproval{
-		callID:       ev.CallID,
-		cascadeID:    cascadeID,
-		trajectoryID: ev.TrajectoryID,
-		stepIndex:    ev.StepIndex,
-		approvalType: ev.Tool,
-		command:      extractCommand(ev.Detail),
-		filePath:     "",
+		callID:              ev.CallID,
+		cascadeID:           cascadeID,
+		trajectoryID:        ev.TrajectoryID,
+		stepIndex:           ev.StepIndex,
+		approvalType:        ev.Tool,
+		command:             extractCommand(ev.Detail),
+		filePath:            "",
+		originatingDeviceID: devID,
 	}
 	s.approvals[cascadeID] = p
 	if s.approvalTimeout > 0 {
@@ -3496,8 +3535,12 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 			}
 		} else {
 			// Commande Shell / CLI directe sur le PC hôte (ex: git diff, git status, flutter analyze)
-			if !s.allowRemoteTerminal && !s.requireAdmin(conn) {
-				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: exécution de commande système désactivée (privilège admin requis)"})
+			if !s.allowRemoteTerminal {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: exécution de commande système désactivée (drapeau --enable-remote-terminal requis au lancement du daemon)"})
+				return
+			}
+			if !s.requireAdmin(conn) {
+				s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: privilège administrateur requis pour exécuter une commande système"})
 				return
 			}
 			logJSON.Info("shell_command", "command", trimmedCmd)
@@ -3524,10 +3567,14 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		}
 
 	case "terminal_create":
-		// Sécurité (VULN-01) : l'ouverture de terminal PTY interactif exige
-		// soit le flag serveur allowRemoteTerminal, soit les privilèges Admin.
-		if !s.allowRemoteTerminal && !s.requireAdmin(conn) {
-			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: ouverture de terminal distant désactivée (flag --enable-remote-terminal ou privilège admin requis)"})
+		// Sécurité (P0 / SEC-06) : l'ouverture de terminal PTY interactif exige
+		// obligatoirement le flag serveur allowRemoteTerminal (--enable-remote-terminal) ET les privilèges Admin.
+		if !s.allowRemoteTerminal {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: ouverture de terminal distant désactivée (drapeau --enable-remote-terminal requis au lancement du daemon)"})
+			return
+		}
+		if !s.requireAdmin(conn) {
+			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: "accès refusé: privilège administrateur requis pour ouvrir un terminal distant"})
 			return
 		}
 
@@ -3875,7 +3922,13 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		return
 
 	case "send_prompt":
-		if msg.CascadeID == "" || msg.Prompt == "" {
+		hasMedia := msg.Base64Data != "" || len(msg.Images) > 0 || len(msg.Media) > 0
+		if msg.Data != nil {
+			if msg.Data["base64Data"] != nil || msg.Data["images"] != nil || msg.Data["media"] != nil {
+				hasMedia = true
+			}
+		}
+		if msg.CascadeID == "" || (msg.Prompt == "" && !hasMedia) {
 			err = fmt.Errorf("cascadeId + prompt requis")
 			s.writeJSON(conn, OutgoingMessage{Type: "response", RequestID: msg.RequestID, Error: err.Error()})
 			return
@@ -3919,6 +3972,9 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		s.mu.Lock()
+		if devID := s.sessionFor(conn).DeviceID; devID != "" {
+			s.cascadeDeviceOwners[msg.CascadeID] = devID
+		}
 		if s.activeCancels[msg.CascadeID] == nil {
 			s.activeCancels[msg.CascadeID] = make(map[string]context.CancelFunc)
 		}
@@ -4371,6 +4427,11 @@ func (s *Server) handleAction(conn *websocket.Conn, msg IncomingMessage) {
 		if msg.TrajectoryID == "" || msg.StepIndex < 0 {
 			err = fmt.Errorf("trajectoryId + stepIndex requis (protocole HandleCascadeUserInteraction)")
 			break
+		}
+		// Sécurité (P0 / SEC-11) : vérification de la paternité de l'approbation
+		if !s.canApproveCascade(conn, msg.CascadeID) {
+			s.writeJSON(conn, OutgoingMessage{Type: "error", RequestID: msg.RequestID, Error: "accès refusé: seul le propriétaire de la session ou un administrateur peut approuver cette action"})
+			return
 		}
 		confirm := true
 		if strings.EqualFold(msg.Decision, "deny") {
@@ -6306,6 +6367,11 @@ func homeRoot(root string) string {
 	root = strings.TrimPrefix(root, "file://")
 	if root == "" || filepath.IsAbs(root) {
 		return root
+	}
+	if root == "." {
+		if wd, err := os.Getwd(); err == nil {
+			return wd
+		}
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		return filepath.Join(home, root)

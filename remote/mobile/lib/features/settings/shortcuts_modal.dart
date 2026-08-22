@@ -51,7 +51,10 @@ class ShortcutsModal extends StatelessWidget {
             children: shortcuts.map((s) {
               return Padding(
                 padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Row(
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -70,12 +73,9 @@ class ShortcutsModal extends StatelessWidget {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        s['desc']!,
-                        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                      ),
+                    Text(
+                      s['desc']!,
+                      style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                     ),
                   ],
                 ),

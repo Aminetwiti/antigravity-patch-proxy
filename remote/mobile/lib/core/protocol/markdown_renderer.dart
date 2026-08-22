@@ -137,8 +137,13 @@ class MarkdownRenderer {
 
   /// Splits raw markdown text into display blocks.
   static List<MarkdownBlock> blocksOf(String text) {
-    final cached = _blocksCache[text];
-    if (cached != null) return cached;
+    final cached = _blocksCache.remove(text);
+    if (cached != null) {
+      // LRU refresh: réinsère en fin pour que l'éviction retire les entrées
+      // les moins récemment utilisées et non les plus anciennes insérées.
+      _blocksCache[text] = cached;
+      return cached;
+    }
 
     final cleanText = cleanContent(text);
     if (cleanText.isEmpty) return const [];
@@ -261,7 +266,7 @@ class MarkdownRenderer {
     }
     flushParagraph();
 
-    if (_blocksCache.length >= _maxCacheEntries) {
+    while (_blocksCache.length >= _maxCacheEntries) {
       _blocksCache.remove(_blocksCache.keys.first);
     }
     _blocksCache[text] = List<MarkdownBlock>.unmodifiable(blocks);
@@ -284,7 +289,7 @@ class MarkdownRenderer {
     if (cells.isEmpty) return false;
     return cells.every((c) {
       final t = c.trim();
-      return RegExp(r'^:?-+:?$').hasMatch(t) && t.replaceAll(':', '').replaceAll('-', '').isEmpty;
+      return _tableCellRe.hasMatch(t) && t.replaceAll(':', '').replaceAll('-', '').isEmpty;
     });
   }
 
@@ -319,6 +324,13 @@ class MarkdownRenderer {
   static final _attachmentTagRe = RegExp(r'^\[(Images? jointes?|Image|Fichier|File|Pièce jointe|Piece jointe):\s*([^\]]+)\]', caseSensitive: false);
   static final _matchAttachPrefixRe = RegExp(r'\[(Images? jointes?|Image|Fichier|File|Pièce jointe|Piece jointe):\s*[^\]]+\]', caseSensitive: false);
   static final _matchArtifactPrefixRe = RegExp(r'\[ARTIFACT:\s*[^\]]+\]', caseSensitive: false);
+  static final _tableCellRe = RegExp(r'^:?-+:?$');
+  static final Map<String, bool> _localFileExistsCache = {};
+
+  // Pattern de surlignage compilé une seule fois par requête de recherche
+  // (au lieu d'une RegExp neuve par paragraphe à chaque build).
+  static String? _lastSearchQuery;
+  static RegExp? _lastSearchPattern;
 
   /// Builds inline [TextSpan]s for a paragraph, resolving bold/italic/code.
   /// [onLocalFile] (P5) est appelé quand l'utilisateur tape un lien markdown
@@ -337,7 +349,11 @@ class MarkdownRenderer {
       if (searchQuery == null || searchQuery.isEmpty) {
         return [TextSpan(text: content, style: style)];
       }
-      final pattern = RegExp(RegExp.escape(searchQuery), caseSensitive: false);
+      if (searchQuery != _lastSearchQuery || _lastSearchPattern == null) {
+        _lastSearchQuery = searchQuery;
+        _lastSearchPattern = RegExp(RegExp.escape(searchQuery), caseSensitive: false);
+      }
+      final pattern = _lastSearchPattern!;
       final res = <TextSpan>[];
       int cursor = 0;
       for (final match in pattern.allMatches(content)) {
@@ -721,9 +737,19 @@ class MarkdownRenderer {
     }
 
     if (isLocalFile && filePath.isNotEmpty) {
+      // existsSync est un appel système bloquant dans le chemin de build :
+      // le résultat est mémoïsé par chemin (les fichiers ne disparaissent
+      // quasiment jamais au sein d'une session de rendu).
+      final fileExists = _localFileExistsCache.putIfAbsent(filePath, () {
+        try {
+          return File(filePath).existsSync();
+        } catch (_) {
+          return false;
+        }
+      });
       try {
         final file = File(filePath);
-        if (file.existsSync()) {
+        if (fileExists) {
           return InkWell(
             onTap: onLocalFile == null ? null : () => onLocalFile(filePath),
             borderRadius: BorderRadius.circular(8),
@@ -731,7 +757,7 @@ class MarkdownRenderer {
               borderRadius: BorderRadius.circular(8),
               child: Image.file(
                 file,
-                key: ValueKey('${file.path}_${file.existsSync() ? file.lastModifiedSync().millisecondsSinceEpoch : 0}'),
+                key: ValueKey('local_img_${file.path}'),
                 fit: BoxFit.contain,
                 errorBuilder: (_, __, ___) => _imageErrorTile(alt.isNotEmpty ? alt : filePath, scheme),
               ),

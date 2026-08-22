@@ -90,8 +90,10 @@ class DaemonApi {
        _sendRaw = sendRaw,
        _timeout = timeout,
        _outbox = outbox {
-    _incoming.listen(_onMessage);
+    _incomingSub = _incoming.listen(_onMessage);
   }
+
+  StreamSubscription<dynamic>? _incomingSub;
 
   String _newRequestId() => 'r${++_nextRequestId}';
 
@@ -250,6 +252,9 @@ class DaemonApi {
 
   void dispose() {
     _reconnectVersion?.removeListener(_reconnectListener!);
+    _incomingSub?.cancel();
+    _incomingSub = null;
+    _pendingMessagesNotifier.dispose();
     _batchTimer?.cancel();
     if (_batch.isNotEmpty) {
       for (final m in List<Map<String, dynamic>>.from(_batch)) {

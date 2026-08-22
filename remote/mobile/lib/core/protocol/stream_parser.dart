@@ -10,6 +10,10 @@ import 'messages.dart';
 /// where each event has a `kind` of `text` | `thinking` | `status_change` |
 /// `approval_required` (see remote/daemon/pkg/connectrpc/event_parser.go).
 class StreamDeltaParser {
+  static final RegExp _filePrefixWinRe = RegExp(r'^file:///[a-zA-Z]:[/\\]?');
+  static final RegExp _winDrivePrefixRe = RegExp(r'^[a-zA-Z]:[/\\]');
+  static final RegExp _taskPrefixRe = RegExp(r'^task-');
+  static final RegExp _pathSplitRe = RegExp(r'[/\\]');
   /// Extracts plain text deltas from a stream_delta message.
   static String textOf(Map<String, dynamic> message) {
     final data = message['data'];
@@ -156,10 +160,10 @@ class StreamDeltaParser {
     }
     if (lowerTool != 'run_command' && lowerTool != 'command' && lowerTool != 'bash' && lowerTool != 'terminal' && lowerTool != 'runner') {
       if (arg.contains('/') || arg.contains('\\')) {
-        arg = arg.replaceAll(RegExp(r'^file:///[a-zA-Z]:[/\\]?'), '');
-        arg = arg.replaceAll(RegExp(r'^[a-zA-Z]:[/\\]'), '');
+        arg = arg.replaceAll(_filePrefixWinRe, '');
+        arg = arg.replaceAll(_winDrivePrefixRe, '');
         if (arg.length > 50) {
-          final segments = arg.split(RegExp(r'[/\\]'));
+          final segments = arg.split(_pathSplitRe);
           final base = segments.lastWhere((s) => s.trim().isNotEmpty, orElse: () => arg);
           if (base.isNotEmpty) {
             arg = base;
@@ -247,7 +251,7 @@ class StreamDeltaParser {
                 final taskId = (jsonMap['TaskId'] ?? jsonMap['taskId'] ?? '').toString();
                 if (taskId.isNotEmpty) {
                   final cleanId = taskId.contains('/') ? taskId.split('/').last : taskId;
-                  final shortId = cleanId.replaceFirst(RegExp(r'^task-'), '');
+                  final shortId = cleanId.replaceFirst(_taskPrefixRe, '');
                   final action = (jsonMap['Action'] ?? jsonMap['action'] ?? '').toString();
                   if (action == 'status' || action == 'list' || action.isEmpty) {
                     return 'Task $shortId finished';
@@ -527,26 +531,30 @@ class ToolApproval {
     this.approvalType = 'approval',
   });
 
+  static final RegExp _cmdTargetRe = RegExp(
+    r'"(command_line|commandline|command)"\s*:\s*"((?:[^"\\]|\\.)*)"',
+    caseSensitive: false,
+  );
+  static final RegExp _urlTargetRe = RegExp(
+    r'"(url|Url|targetUrl|target_url|absolute_path_uri|uri)"\s*:\s*"((?:[^"\\]|\\.)*)"',
+    caseSensitive: false,
+  );
+  static final RegExp _rawUrlTargetRe = RegExp(r'https?://[^\s"<>]+');
+
   /// The command line or URL to echo back on approval (run_command / read_url_content).
   String get command => _extractTarget(detail);
 
   static String _extractTarget(String detail) {
     // Check for command
-    final cmdMatch = RegExp(
-          r'"(command_line|commandline|command)"\s*:\s*"((?:[^"\\]|\\.)*)"',
-          caseSensitive: false,
-        ).firstMatch(detail);
+    final cmdMatch = _cmdTargetRe.firstMatch(detail);
     if (cmdMatch != null) return cmdMatch.group(2)!.replaceAll(r'\n', '\n');
 
     // Check for URL / domain
-    final urlMatch = RegExp(
-          r'"(url|Url|targetUrl|target_url|absolute_path_uri|uri)"\s*:\s*"((?:[^"\\]|\\.)*)"',
-          caseSensitive: false,
-        ).firstMatch(detail);
+    final urlMatch = _urlTargetRe.firstMatch(detail);
     if (urlMatch != null) return urlMatch.group(2)!;
 
     // Direct URL in string
-    final rawUrlMatch = RegExp(r'https?://[^\s"<>]+').firstMatch(detail);
+    final rawUrlMatch = _rawUrlTargetRe.firstMatch(detail);
     if (rawUrlMatch != null) return rawUrlMatch.group(0)!;
 
     // Fallback: first quoted line that looks like a shell command or URL.

@@ -459,12 +459,15 @@ class _CustomizationsSettingsSectionState extends State<CustomizationsSettingsSe
               children: [
                 Row(
                   children: [
-                    Text(
-                      name,
-                      style: TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w600,
-                        color: scheme.onSurface,
+                    Flexible(
+                      child: Text(
+                        name,
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                          color: scheme.onSurface,
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     const SizedBox(width: 8),

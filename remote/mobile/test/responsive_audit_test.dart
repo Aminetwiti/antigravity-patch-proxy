@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:mobile/core/protocol/daemon_api.dart';
 import 'package:mobile/core/protocol/messages.dart';
 import 'package:mobile/features/battle_arena/battle_arena_screen.dart';
 import 'package:mobile/features/code_review/widgets/add_comment_dialog.dart';

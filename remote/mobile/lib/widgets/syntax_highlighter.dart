@@ -108,9 +108,16 @@ class SyntaxHighlighter {
     return l;
   }
 
+  static final Map<int, List<TextSpan>> _highlightCache = {};
+  static const int _maxCacheSize = 256;
+
   /// Parses code into a list of styled [TextSpan] elements based on the language.
   static List<TextSpan> highlight(String code, String rawLanguage, {required Color defaultTextColor}) {
     if (code.isEmpty) return [TextSpan(text: '', style: TextStyle(color: defaultTextColor))];
+
+    final cacheKey = Object.hash(code, rawLanguage, defaultTextColor.value);
+    final cached = _highlightCache[cacheKey];
+    if (cached != null) return cached;
 
     final lang = _normalizeLang(rawLanguage);
     final keywords = _keywordsByLang[lang] ?? _keywordsByLang['typescript']!;
@@ -125,6 +132,11 @@ class SyntaxHighlighter {
         spans.add(const TextSpan(text: '\n'));
       }
     }
+
+    if (_highlightCache.length >= _maxCacheSize) {
+      _highlightCache.remove(_highlightCache.keys.first);
+    }
+    _highlightCache[cacheKey] = spans;
 
     return spans;
   }

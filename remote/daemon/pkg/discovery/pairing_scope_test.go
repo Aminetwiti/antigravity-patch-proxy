@@ -130,7 +130,11 @@ func TestPairingManager_HTTPRevoke(t *testing.T) {
 	json.NewDecoder(rr.Body).Decode(&pairResp)
 	token := pairResp["token"].(string)
 	if !pm.ValidateToken(token) {
-		t.Fatalf("Token doit ├¬tre valide apr├¿s pairing")
+		t.Fatalf("Token doit être valide après pairing")
+	}
+	// SEC-03 : promotion admin explicite côté hôte avant la révocation.
+	if !pm.PromoteAdmin("dev-1") {
+		t.Fatalf("PromoteAdmin doit réussir pour dev-1")
 	}
 
 	reqDel := httptest.NewRequest(http.MethodDelete, "/pair?deviceId=dev-1&token="+token, nil)
